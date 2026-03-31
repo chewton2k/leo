@@ -64,10 +64,16 @@ pub fn record_audio() -> Result<PathBuf> {
 
     let size = std::fs::metadata(&tmp_path)?.len();
     let secs = size / (16000 * 2); // 16kHz, 16-bit mono
+    let mins = secs / 60;
+    let display_time = if mins > 0 {
+        format!("~{}m{}s", mins, secs % 60)
+    } else {
+        format!("~{}s", secs)
+    };
     println!(
-        "  {} (~{}s, {:.1}MB)",
+        "  {} ({}, {:.1}MB)",
         "Recording stopped.".dimmed(),
-        secs,
+        display_time,
         size as f64 / (1024.0 * 1024.0)
     );
 

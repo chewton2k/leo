@@ -2,6 +2,44 @@ use chrono::{DateTime, Utc};
 use colored::Colorize;
 use serde::{Deserialize, Serialize};
 
+/// Wrap URLs in a string with OSC 8 terminal hyperlink escape sequences.
+/// Most modern terminals (iTerm2, Terminal.app, Windows Terminal, etc.)
+/// render these as clickable links.
+fn linkify(text: &str) -> String {
+    let mut result = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(start) = rest.find("http://").or_else(|| rest.find("https://")) {
+        result.push_str(&rest[..start]);
+
+        let url_part = &rest[start..];
+        // URL ends at whitespace or common trailing punctuation
+        let end = url_part
+            .find(|c: char| c.is_whitespace() || "<>\"'`|{}[]()".contains(c))
+            .unwrap_or(url_part.len());
+
+        // Trim trailing punctuation that's likely not part of the URL
+        let mut url = &url_part[..end];
+        while url.ends_with(|c: char| ".,;:!?)".contains(c)) {
+            url = &url[..url.len() - 1];
+        }
+
+        // OSC 8 hyperlink: \x1b]8;;URL\x1b\\TEXT\x1b]8;;\x1b\\
+        result.push_str(&format!(
+            "\x1b]8;;{url}\x1b\\{styled}\x1b]8;;\x1b\\",
+            url = url,
+            styled = url.underline().cyan(),
+        ));
+
+        // Push any trimmed trailing chars back
+        let consumed = url.len();
+        rest = &url_part[consumed..];
+    }
+
+    result.push_str(rest);
+    result
+}
+
 /// A single note.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
@@ -95,7 +133,7 @@ impl Note {
                         "  {} {} {}",
                         format!("[{checkbox_num}]").dimmed(),
                         "☑".green(),
-                        rest.dimmed(),
+                        linkify(rest).dimmed(),
                     )
                 } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
                     checkbox_num += 1;
@@ -103,12 +141,12 @@ impl Note {
                         "  {} {} {}",
                         format!("[{checkbox_num}]").dimmed(),
                         "☐".white(),
-                        rest,
+                        linkify(rest),
                     )
                 } else if let Some(rest) = trimmed.strip_prefix("- ") {
-                    format!("  • {rest}")
+                    format!("  • {}", linkify(rest))
                 } else {
-                    line.to_string()
+                    linkify(line)
                 }
             })
             .collect::<Vec<_>>()

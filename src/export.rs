@@ -171,6 +171,33 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// HTML-escape text, then convert URLs into clickable <a> tags.
+fn html_escape_with_links(s: &str) -> String {
+    let escaped = html_escape(s);
+    let mut result = String::with_capacity(escaped.len());
+    let mut rest = escaped.as_str();
+
+    while let Some(start) = rest.find("http://").or_else(|| rest.find("https://")) {
+        result.push_str(&rest[..start]);
+
+        let url_part = &rest[start..];
+        let end = url_part
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(url_part.len());
+
+        let mut url = &url_part[..end];
+        while url.ends_with(|c: char| ".,;:!?)".contains(c)) {
+            url = &url[..url.len() - 1];
+        }
+
+        result.push_str(&format!("<a href=\"{url}\">{url}</a>"));
+        rest = &url_part[url.len()..];
+    }
+
+    result.push_str(rest);
+    result
+}
+
 fn markdown_to_html(md: &str) -> String {
     let mut html = String::new();
     let mut in_list = false;
@@ -197,20 +224,20 @@ fn markdown_to_html(md: &str) -> String {
             }
             html.push_str(&format!(
                 "<li>&#9745; {}</li>\n",
-                html_escape(&trimmed[6..])
+                html_escape_with_links(&trimmed[6..])
             ));
         } else if let Some(rest) = trimmed.strip_prefix("- [ ] ") {
             if !in_list {
                 html.push_str("<ul>\n");
                 in_list = true;
             }
-            html.push_str(&format!("<li>&#9744; {}</li>\n", html_escape(rest)));
+            html.push_str(&format!("<li>&#9744; {}</li>\n", html_escape_with_links(rest)));
         } else if let Some(rest) = trimmed.strip_prefix("- ") {
             if !in_list {
                 html.push_str("<ul>\n");
                 in_list = true;
             }
-            html.push_str(&format!("<li>{}</li>\n", html_escape(rest)));
+            html.push_str(&format!("<li>{}</li>\n", html_escape_with_links(rest)));
         } else {
             if in_list {
                 html.push_str("</ul>\n");
@@ -219,7 +246,7 @@ fn markdown_to_html(md: &str) -> String {
             if trimmed.is_empty() {
                 html.push('\n');
             } else {
-                html.push_str(&format!("<p>{}</p>\n", html_escape(trimmed)));
+                html.push_str(&format!("<p>{}</p>\n", html_escape_with_links(trimmed)));
             }
         }
     }
