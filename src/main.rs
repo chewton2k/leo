@@ -4,6 +4,7 @@ mod listen;
 mod notes;
 mod repl;
 mod store;
+mod web;
 
 use std::io::IsTerminal;
 
@@ -99,6 +100,13 @@ enum Commands {
         /// Output format
         format: String,
     },
+
+    /// Start a web server to view/edit notes from your phone
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value_t = 3131)]
+        port: u16,
+    },
 }
 
 fn main() -> Result<()> {
@@ -106,6 +114,9 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Some(Commands::Serve { port }) => {
+            tokio::runtime::Runtime::new()?.block_on(web::serve(port))
+        }
         None => {
             if std::io::stdin().is_terminal() {
                 repl::run()
@@ -271,6 +282,8 @@ fn run_command(cmd: Commands) -> Result<()> {
             let path = export::export_note(note, format, &output_dir)?;
             println!("Exported to {}", path.display());
         }
+
+        Commands::Serve { .. } => unreachable!("handled in main()"),
     }
 
     store.save()?;

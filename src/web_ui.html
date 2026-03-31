@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>leo</title>
+<style>
+:root {
+  --bg: #fff; --fg: #1a1a1a; --muted: #888; --border: #e5e5e5;
+  --card: #fff; --card-hover: #fafafa; --accent: #2563eb; --accent-fg: #fff;
+  --tag-bg: #f0f0f0; --tag-fg: #555; --danger: #dc2626; --success: #16a34a;
+  --input-bg: #fff; --input-border: #d1d5db;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111; --fg: #e5e5e5; --muted: #777; --border: #333;
+    --card: #1a1a1a; --card-hover: #222; --accent: #3b82f6; --accent-fg: #fff;
+    --tag-bg: #2a2a2a; --tag-fg: #aaa; --danger: #ef4444; --success: #22c55e;
+    --input-bg: #1a1a1a; --input-border: #444;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--fg);
+  max-width: 600px; margin: 0 auto; padding: 0 16px 100px;
+  -webkit-tap-highlight-color: transparent;
+}
+header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;
+  position: sticky; top: 0; background: var(--bg); z-index: 10;
+}
+header h1 { font-size: 1.4em; font-weight: 700; letter-spacing: -0.02em; }
+header nav { display: flex; gap: 12px; }
+header nav button {
+  background: none; border: none; color: var(--muted); font-size: 1.3em;
+  cursor: pointer; padding: 4px; min-width: 44px; min-height: 44px;
+  display: flex; align-items: center; justify-content: center;
+}
+header nav button:hover { color: var(--fg); }
+
+.search-bar {
+  display: flex; gap: 8px; margin-bottom: 12px;
+}
+.search-bar input {
+  flex: 1; padding: 10px 14px; border-radius: 8px;
+  border: 1px solid var(--input-border); background: var(--input-bg);
+  color: var(--fg); font-size: 16px; outline: none;
+}
+.search-bar input:focus { border-color: var(--accent); }
+
+.tag-bar {
+  display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px;
+}
+.tag-pill {
+  padding: 4px 12px; border-radius: 20px; font-size: 0.82em;
+  background: var(--tag-bg); color: var(--tag-fg); border: none;
+  cursor: pointer; min-height: 32px; display: inline-flex; align-items: center;
+}
+.tag-pill.active { background: var(--accent); color: var(--accent-fg); }
+
+.note-card {
+  padding: 14px 16px; border-bottom: 1px solid var(--border);
+  cursor: pointer; min-height: 56px; display: flex; flex-direction: column;
+  justify-content: center;
+}
+.note-card:active { background: var(--card-hover); }
+.note-card .title { font-weight: 600; font-size: 1em; margin-bottom: 2px; }
+.note-card .meta { font-size: 0.8em; color: var(--muted); }
+.note-card .tags { margin-top: 4px; }
+.note-card .tags span {
+  font-size: 0.75em; background: var(--tag-bg); color: var(--tag-fg);
+  padding: 2px 8px; border-radius: 10px; margin-right: 4px;
+}
+
+.fab {
+  position: fixed; bottom: 24px; right: 24px; width: 56px; height: 56px;
+  border-radius: 50%; background: var(--accent); color: var(--accent-fg);
+  border: none; font-size: 1.8em; cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.25); z-index: 20;
+  display: flex; align-items: center; justify-content: center;
+}
+.fab:active { transform: scale(0.95); }
+
+/* Note view */
+.note-view { padding: 4px 0; }
+.note-view h2 { font-size: 1.3em; margin-bottom: 8px; }
+.note-view .meta { color: var(--muted); font-size: 0.82em; margin-bottom: 12px; }
+.note-view .tags { margin-bottom: 12px; }
+.note-view .tags span {
+  font-size: 0.8em; background: var(--tag-bg); color: var(--tag-fg);
+  padding: 3px 10px; border-radius: 10px; margin-right: 4px;
+}
+.note-view .body { line-height: 1.6; white-space: pre-wrap; word-wrap: break-word; }
+.note-view .body h3 { font-size: 1.1em; margin: 16px 0 6px; color: var(--fg); }
+.note-view .body ul { padding-left: 0; list-style: none; }
+.note-view .body li { padding: 6px 0; min-height: 44px; display: flex; align-items: center; }
+.note-view .body li.checkbox { cursor: pointer; }
+.note-view .body li.checkbox:active { opacity: 0.6; }
+.note-view .body li .cb { font-size: 1.3em; margin-right: 8px; flex-shrink: 0; }
+.note-view .actions {
+  display: flex; gap: 10px; margin-top: 20px; padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* Form */
+.form-page { padding: 4px 0; }
+.form-page h2 { font-size: 1.2em; margin-bottom: 16px; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 0.85em; color: var(--muted); margin-bottom: 4px; }
+.field input, .field textarea {
+  width: 100%; padding: 10px 12px; border-radius: 8px;
+  border: 1px solid var(--input-border); background: var(--input-bg);
+  color: var(--fg); font-size: 16px; font-family: inherit; outline: none;
+}
+.field input:focus, .field textarea:focus { border-color: var(--accent); }
+.field textarea { min-height: 200px; resize: vertical; }
+
+.btn {
+  padding: 10px 20px; border-radius: 8px; border: none; font-size: 0.95em;
+  cursor: pointer; min-height: 44px; font-weight: 500;
+}
+.btn-primary { background: var(--accent); color: var(--accent-fg); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-secondary { background: var(--tag-bg); color: var(--fg); }
+.btn:active { opacity: 0.85; }
+
+.empty { text-align: center; color: var(--muted); padding: 40px 0; }
+
+.back-btn {
+  background: none; border: none; color: var(--accent); font-size: 0.95em;
+  cursor: pointer; padding: 8px 0; margin-bottom: 8px; min-height: 44px;
+}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>leo</h1>
+  <nav>
+    <button onclick="go('search')" title="Search">&#128269;</button>
+    <button onclick="go('tags')" title="Tags">&#127991;</button>
+  </nav>
+</header>
+
+<div id="app"></div>
+<button class="fab" id="fab" onclick="go('new')">+</button>
+
+<script>
+const API = '';
+let notes = [];
+let currentTag = null;
+let searchQuery = '';
+
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Content-Type': 'application/json', ...opts.headers },
+    ...opts,
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(res.statusText);
+  return res.json();
+}
+
+function go(view, id) {
+  if (view === 'list') { location.hash = ''; }
+  else if (id) { location.hash = `#${view}/${id}`; }
+  else { location.hash = `#${view}`; }
+}
+
+function formatDate(iso) {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+// ── Views ─────────────────────────────────────────────────────────────────
+
+async function renderList() {
+  document.getElementById('fab').style.display = '';
+  let url = '/api/notes?limit=100';
+  if (currentTag) url += `&tag=${encodeURIComponent(currentTag)}`;
+  notes = await api(url);
+
+  const app = document.getElementById('app');
+  if (!notes.length) {
+    app.innerHTML = '<div class="empty"><p>No notes yet</p><p style="margin-top:8px;font-size:0.9em">Tap + to create one</p></div>';
+    return;
+  }
+
+  app.innerHTML = notes.map(n => `
+    <div class="note-card" onclick="go('view','${n.id}')">
+      <div class="title">${esc(n.title)}</div>
+      <div class="meta">${formatDate(n.updated_at)}</div>
+      ${n.tags.length ? `<div class="tags">${n.tags.map(t => `<span>#${esc(t)}</span>`).join('')}</div>` : ''}
+    </div>
+  `).join('');
+}
+
+async function renderView(id) {
+  document.getElementById('fab').style.display = 'none';
+  const n = await api(`/api/notes/${id}`);
+  if (!n) { go('list'); return; }
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <button class="back-btn" onclick="history.back()">&larr; Back</button>
+    <div class="note-view">
+      <h2>${esc(n.title)}</h2>
+      <div class="meta">${formatDate(n.created_at)} &middot; Updated ${formatDate(n.updated_at)}</div>
+      ${n.tags.length ? `<div class="tags">${n.tags.map(t => `<span>#${esc(t)}</span>`).join('')}</div>` : ''}
+      <div class="body">${renderBody(n)}</div>
+      <div class="actions">
+        <button class="btn btn-primary" onclick="go('edit','${n.id}')">Edit</button>
+        <button class="btn btn-danger" onclick="confirmDelete('${n.id}')">Delete</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderBody(note) {
+  const lines = note.body.split('\n');
+  let html = '';
+  let inList = false;
+  let cbNum = 0;
+
+  for (const line of lines) {
+    const t = line.trim();
+    if (t.startsWith('## ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${esc(t.slice(3))}</h3>`;
+    } else if (t.startsWith('### ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${esc(t.slice(4))}</h3>`;
+    } else if (t.startsWith('- [x] ') || t.startsWith('- [X] ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      cbNum++;
+      html += `<li class="checkbox" data-id="${note.id}" data-cb="${cbNum}"><span class="cb" style="color:var(--success)">&#9745;</span><span style="color:var(--muted)">${esc(t.slice(6))}</span></li>`;
+    } else if (t.startsWith('- [ ] ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      cbNum++;
+      html += `<li class="checkbox" data-id="${note.id}" data-cb="${cbNum}"><span class="cb">&#9744;</span><span>${esc(t.slice(6))}</span></li>`;
+    } else if (t.startsWith('- ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li><span class="cb">&bull;</span><span>${esc(t.slice(2))}</span></li>`;
+    } else {
+      if (inList) { html += '</ul>'; inList = false; }
+      if (t === '') html += '<br>';
+      else html += `<p>${esc(t)}</p>`;
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+document.getElementById('app').addEventListener('click', async (e) => {
+  const li = e.target.closest('li.checkbox');
+  if (!li) return;
+  const id = li.dataset.id;
+  const cb = li.dataset.cb;
+  li.style.opacity = '0.4';
+  await api(`/api/notes/${id}/toggle?checkbox=${cb}`, { method: 'POST' });
+  renderView(id);
+});
+
+async function renderNew() {
+  document.getElementById('fab').style.display = 'none';
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <button class="back-btn" onclick="history.back()">&larr; Back</button>
+    <div class="form-page">
+      <h2>New Note</h2>
+      <div class="field"><label>Title</label><input id="f-title" placeholder="Note title"></div>
+      <div class="field"><label>Tags (comma-separated)</label><input id="f-tags" placeholder="e.g. work, ideas"></div>
+      <div class="field"><label>Body</label><textarea id="f-body" placeholder="Write in Markdown..."></textarea></div>
+      <button class="btn btn-primary" onclick="submitNew()">Create</button>
+    </div>
+  `;
+  setTimeout(() => document.getElementById('f-title').focus(), 100);
+}
+
+async function submitNew() {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) return;
+  const tags = document.getElementById('f-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const body = document.getElementById('f-body').value;
+  const n = await api('/api/notes', {
+    method: 'POST',
+    body: JSON.stringify({ title, body, tags }),
+  });
+  go('view', n.id);
+}
+
+async function renderEdit(id) {
+  document.getElementById('fab').style.display = 'none';
+  const n = await api(`/api/notes/${id}`);
+  if (!n) { go('list'); return; }
+
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <button class="back-btn" onclick="history.back()">&larr; Back</button>
+    <div class="form-page">
+      <h2>Edit Note</h2>
+      <div class="field"><label>Title</label><input id="f-title" value="${esc(n.title)}"></div>
+      <div class="field"><label>Tags</label><input id="f-tags" value="${esc(n.tags.join(', '))}"></div>
+      <div class="field"><label>Body</label><textarea id="f-body">${esc(n.body)}</textarea></div>
+      <button class="btn btn-primary" onclick="submitEdit('${n.id}')">Save</button>
+      <button class="btn btn-secondary" onclick="history.back()" style="margin-left:8px">Cancel</button>
+    </div>
+  `;
+}
+
+async function submitEdit(id) {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) return;
+  const tags = document.getElementById('f-tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const body = document.getElementById('f-body').value;
+  await api(`/api/notes/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title, body, tags }),
+  });
+  go('view', id);
+}
+
+async function confirmDelete(id) {
+  if (!confirm('Delete this note?')) return;
+  await api(`/api/notes/${id}`, { method: 'DELETE' });
+  go('list');
+}
+
+async function renderSearch() {
+  document.getElementById('fab').style.display = 'none';
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <button class="back-btn" onclick="go('list')">&larr; Back</button>
+    <div class="search-bar">
+      <input id="search-input" type="search" placeholder="Search notes..." oninput="doSearch(this.value)">
+    </div>
+    <div id="search-results"></div>
+  `;
+  setTimeout(() => document.getElementById('search-input').focus(), 100);
+}
+
+async function doSearch(q) {
+  const el = document.getElementById('search-results');
+  if (!q.trim()) { el.innerHTML = ''; return; }
+  const results = await api(`/api/search?q=${encodeURIComponent(q)}&full_text=true`);
+  if (!results.length) {
+    el.innerHTML = '<div class="empty">No results</div>';
+    return;
+  }
+  el.innerHTML = results.map(n => `
+    <div class="note-card" onclick="go('view','${n.id}')">
+      <div class="title">${esc(n.title)}</div>
+      <div class="meta">${formatDate(n.updated_at)}</div>
+    </div>
+  `).join('');
+}
+
+async function renderTags() {
+  document.getElementById('fab').style.display = 'none';
+  const tags = await api('/api/tags');
+  const app = document.getElementById('app');
+
+  if (!tags.length) {
+    app.innerHTML = '<button class="back-btn" onclick="go(\'list\')">&larr; Back</button><div class="empty">No tags yet</div>';
+    return;
+  }
+
+  app.innerHTML = `
+    <button class="back-btn" onclick="go('list')">&larr; Back</button>
+    <h2 style="margin-bottom:12px">Tags</h2>
+    <div class="tag-bar">
+      ${tags.map(t => `<button class="tag-pill" onclick="filterTag('${esc(t.tag)}')">#${esc(t.tag)} <span style="margin-left:4px;opacity:0.6">${t.count}</span></button>`).join('')}
+    </div>
+  `;
+}
+
+function filterTag(tag) {
+  currentTag = tag;
+  go('list');
+}
+
+// ── Router ────────────────────────────────────────────────────────────────
+
+async function route() {
+  const hash = location.hash.slice(1);
+  const [view, id] = hash.split('/');
+
+  currentTag = (view === '' && currentTag) ? currentTag : (view === '' ? null : currentTag);
+  if (view === '' || !view) { currentTag = currentTag; await renderList(); }
+  else if (view === 'view' && id) await renderView(id);
+  else if (view === 'new') await renderNew();
+  else if (view === 'edit' && id) await renderEdit(id);
+  else if (view === 'search') await renderSearch();
+  else if (view === 'tags') await renderTags();
+  else await renderList();
+}
+
+window.addEventListener('hashchange', route);
+route();
+</script>
+
+</body>
+</html>
