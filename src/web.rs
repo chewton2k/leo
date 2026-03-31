@@ -39,14 +39,28 @@ pub async fn serve(port: u16) -> Result<()> {
         .map(|ip| ip.to_string())
         .unwrap_or_else(|_| "unknown".to_string());
 
+    let network_url = format!("http://{local_ip}:{port}");
+
     println!(
         "\n  {} {}\n  {} {}\n",
         "Local:".bold(),
         format!("http://localhost:{port}").cyan().underline(),
         "Network:".bold(),
-        format!("http://{local_ip}:{port}").cyan().underline(),
+        network_url.cyan().underline(),
     );
-    println!("  {}", "Open the Network URL on your phone".dimmed());
+
+    // Print QR code for easy phone scanning
+    if let Ok(code) = qrcode::QrCode::new(&network_url) {
+        use qrcode::render::unicode::Dense1x2;
+        let qr = code
+            .render::<Dense1x2>()
+            .dark_color(Dense1x2::Light)
+            .light_color(Dense1x2::Dark)
+            .build();
+        println!("{qr}\n");
+    }
+
+    println!("  {}", "Scan the QR code or open the URL on your phone".dimmed());
     println!("  {}\n", "Press Ctrl+C to stop".dimmed());
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
