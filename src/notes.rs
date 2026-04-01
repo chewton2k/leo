@@ -60,11 +60,20 @@ pub struct Note {
 
     /// Free-form tags for organisation
     pub tags: Vec<String>,
+
+    /// Directory path (empty string = root)
+    #[serde(default)]
+    pub directory: String,
 }
 
 impl Note {
     /// Create a new note with generated id and current timestamps.
-    pub fn new(title: impl Into<String>, body: impl Into<String>, tags: Vec<String>) -> Self {
+    pub fn new(
+        title: impl Into<String>,
+        body: impl Into<String>,
+        tags: Vec<String>,
+        directory: impl Into<String>,
+    ) -> Self {
         let now = Utc::now();
         Note {
             id: uuid::Uuid::new_v4().to_string(),
@@ -73,6 +82,7 @@ impl Note {
             created_at: now,
             updated_at: now,
             tags,
+            directory: directory.into(),
         }
     }
 
@@ -107,6 +117,9 @@ impl Note {
         println!("{}", "─".repeat(60).dimmed());
         println!("{} {}", "Title:".bold(), self.title);
         println!("{} {}", "ID:   ".bold(), self.id.dimmed());
+        if !self.directory.is_empty() {
+            println!("{} {}", "Dir:  ".bold(), self.directory.cyan());
+        }
         println!("{} {}", "Tags: ".bold(), self.tags.join(", "));
         println!("{} {}", "Created:".bold(), created.to_string().dimmed());
         println!("{} {}", "Updated:".bold(), updated.to_string().dimmed());

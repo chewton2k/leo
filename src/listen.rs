@@ -1,6 +1,9 @@
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
@@ -29,12 +32,6 @@ pub fn record_audio() -> Result<PathBuf> {
     // Remove stale recording if it exists
     let _ = std::fs::remove_file(&tmp_path);
 
-    println!(
-        "  {} {}",
-        "Recording...".cyan().bold(),
-        "press Enter to stop".dimmed()
-    );
-
     // Start recording in background: 16kHz mono WAV (optimal for speech recognition)
     let mut child = Command::new("rec")
         .args([
@@ -49,10 +46,35 @@ pub fn record_audio() -> Result<PathBuf> {
         .spawn()
         .context("Failed to start recording")?;
 
+    // Live stopwatch display
+    let running = Arc::new(AtomicBool::new(true));
+    let running_clone = Arc::clone(&running);
+    let start = Instant::now();
+
+    let stopwatch = std::thread::spawn(move || {
+        while running_clone.load(Ordering::Relaxed) {
+            let elapsed = start.elapsed().as_secs();
+            let mins = elapsed / 60;
+            let secs = elapsed % 60;
+            print!(
+                "\r  {} {} {}",
+                "Recording".cyan().bold(),
+                format!("{:02}:{:02}", mins, secs).cyan().bold(),
+                "press Enter to stop".dimmed()
+            );
+            io::stdout().flush().ok();
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+    });
+
     // Wait for user to press Enter
     let mut buf = String::new();
-    io::stdout().flush()?;
     io::stdin().read_line(&mut buf)?;
+
+    // Stop stopwatch and capture final elapsed time
+    running.store(false, Ordering::Relaxed);
+    let elapsed = start.elapsed().as_secs();
+    stopwatch.join().ok();
 
     // Stop recording
     child.kill().ok();
@@ -63,17 +85,23 @@ pub fn record_audio() -> Result<PathBuf> {
     }
 
     let size = std::fs::metadata(&tmp_path)?.len();
-    let secs = size / (16000 * 2); // 16kHz, 16-bit mono
-    let mins = secs / 60;
-    let display_time = if mins > 0 {
-        format!("~{}m{}s", mins, secs % 60)
+    let file_secs = size / (16000 * 2); // 16kHz, 16-bit mono
+    let file_mins = file_secs / 60;
+    let duration = if file_mins > 0 {
+        format!("~{}m{}s", file_mins, file_secs % 60)
     } else {
-        format!("~{}s", secs)
+        format!("~{}s", file_secs)
     };
+
+    // Overwrite stopwatch line with final summary
+    let e_mins = elapsed / 60;
+    let e_secs = elapsed % 60;
+    print!("\r\x1b[2K\x1b[1A\x1b[2K");
     println!(
-        "  {} ({}, {:.1}MB)",
-        "Recording stopped.".dimmed(),
-        display_time,
+        "  {} {} ({}, {:.1}MB)",
+        "Recorded".green(),
+        format!("{:02}:{:02}", e_mins, e_secs).dimmed(),
+        duration,
         size as f64 / (1024.0 * 1024.0)
     );
 

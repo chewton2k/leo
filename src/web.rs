@@ -169,7 +169,7 @@ async fn create_note(
     let mut store = state.lock().unwrap();
     let tags = body.tags.unwrap_or_default();
     let note_body = body.body.unwrap_or_default();
-    match store.create_note(body.title, note_body, tags) {
+    match store.create_note(body.title, note_body, tags, "") {
         Ok(n) => {
             let resp = NoteResponse::from_note(n);
             let _ = store.save();

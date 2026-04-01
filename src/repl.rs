@@ -11,6 +11,7 @@ pub fn run() -> Result<()> {
     let mut store = Store::load()?;
     let mut rl = DefaultEditor::new()?;
     let mut last_results: Vec<String> = Vec::new();
+    let mut current_dir = String::new(); // "" = root
 
     let hist = history_path();
     let _ = rl.load_history(&hist);
@@ -18,12 +19,16 @@ pub fn run() -> Result<()> {
     print_welcome(&store);
 
     // Pre-populate last_results so numeric IDs work immediately
-    for note in store.list_notes(None, 20) {
+    for note in store.list_notes_in_dir("", None, 20) {
         last_results.push(note.id.clone());
     }
 
     loop {
-        let prompt = format!("{} ", "leo>".bold());
+        let prompt = if current_dir.is_empty() {
+            format!("{} ", "leo>".bold())
+        } else {
+            format!("{} ", format!("leo {}>", current_dir).bold())
+        };
         match rl.readline(&prompt) {
             Ok(line) => {
                 let line = line.trim().to_string();
@@ -53,10 +58,15 @@ pub fn run() -> Result<()> {
                 let cmd = tokens[0].to_lowercase();
                 let args = &tokens[1..];
 
+                let mut refresh = false;
                 let result: Result<()> = match cmd.as_str() {
-                    "new" | "n" => cmd_new(&mut store, args),
+                    "new" | "n" => {
+                        let r = cmd_new(&mut store, args, &current_dir);
+                        refresh = true;
+                        r
+                    }
                     "list" | "ls" | "l" => {
-                        cmd_list(&store, args, &mut last_results);
+                        cmd_list(&store, args, &mut last_results, &current_dir);
                         Ok(())
                     }
                     "view" | "v" => {
@@ -65,20 +75,55 @@ pub fn run() -> Result<()> {
                     }
                     "edit" | "e" => cmd_edit(&mut store, args, &last_results),
                     "delete" | "rm" | "del" | "d" => {
-                        cmd_delete(&mut store, args, &last_results)
+                        let r = cmd_delete(&mut store, args, &last_results);
+                        refresh = true;
+                        r
                     }
                     "check" | "uncheck" | "x" => cmd_check(&mut store, args, &last_results),
                     "search" | "find" => {
                         cmd_search(&store, args, &mut last_results);
                         Ok(())
                     }
-                    "remind" | "rem" => cmd_remind(&mut store, args),
-                    "listen" | "rec" => cmd_listen(&mut store, args),
+                    "remind" | "rem" => {
+                        let r = cmd_remind(&mut store, args);
+                        refresh = true;
+                        r
+                    }
+                    "listen" | "rec" => {
+                        let r = cmd_listen(&mut store, args, &current_dir);
+                        refresh = true;
+                        r
+                    }
                     "export" | "exp" => cmd_export(&store, args, &last_results),
                     "tags" => {
                         cmd_tags(&store);
                         Ok(())
                     }
+                    "mkdir" => cmd_mkdir(&mut store, args, &current_dir),
+                    "cd" => {
+                        match resolve_cd(args, &store, &current_dir) {
+                            Ok(new_dir) => {
+                                current_dir = new_dir;
+                                refresh = true;
+                            }
+                            Err(msg) => println!("  {}", msg.red()),
+                        }
+                        Ok(())
+                    }
+                    "pwd" => {
+                        if current_dir.is_empty() {
+                            println!("  /");
+                        } else {
+                            println!("  /{}", current_dir);
+                        }
+                        Ok(())
+                    }
+                    "mv" | "move" => {
+                        let r = cmd_mv(&mut store, args, &last_results);
+                        refresh = true;
+                        r
+                    }
+                    "rmdir" => cmd_rmdir(&mut store, args, &current_dir),
                     "clear" => {
                         print!("\x1b[2J\x1b[H");
                         io::stdout().flush().ok();
@@ -101,6 +146,13 @@ pub fn run() -> Result<()> {
 
                 if let Err(e) = result {
                     eprintln!("  {}: {e}", "error".red());
+                }
+
+                if refresh {
+                    last_results.clear();
+                    for note in store.list_notes_in_dir(&current_dir, None, 20) {
+                        last_results.push(note.id.clone());
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) => continue,
@@ -169,7 +221,7 @@ fn print_help() {
         "new [title]".cyan()
     );
     println!(
-        "    {:<24} List recent notes",
+        "    {:<24} List notes in current dir",
         "list [#tag] [N]".cyan()
     );
     println!(
@@ -201,6 +253,28 @@ fn print_help() {
         "tags".cyan()
     );
     println!();
+    println!("  {}", "Directories:".bold());
+    println!(
+        "    {:<24} Create a directory",
+        "mkdir <name>".cyan()
+    );
+    println!(
+        "    {:<24} Change directory",
+        "cd <dir>".cyan()
+    );
+    println!(
+        "    {:<24} Show current directory",
+        "pwd".cyan()
+    );
+    println!(
+        "    {:<24} Move notes to a directory",
+        "mv <note>... <dir>".cyan()
+    );
+    println!(
+        "    {:<24} Remove empty directory",
+        "rmdir <name>".cyan()
+    );
+    println!();
     println!("  {}", "AI Features:".bold());
     println!(
         "    {:<24} Add a reminder",
@@ -209,6 +283,10 @@ fn print_help() {
     println!(
         "    {:<24} Record & transcribe notes",
         "listen [title]".cyan()
+    );
+    println!(
+        "    {:<24} Record & add to existing note",
+        "listen add <note>".cyan()
     );
     println!(
         "    {:<24} Export note to file",
@@ -251,7 +329,7 @@ fn print_help() {
 
 // ── Commands ────────────────────────────────────────────────────────────────
 
-fn cmd_new(store: &mut Store, args: &[String]) -> Result<()> {
+fn cmd_new(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> {
     let title = if args.is_empty() {
         print!("  {}: ", "Title".bold());
         io::stdout().flush()?;
@@ -296,14 +374,14 @@ fn cmd_new(store: &mut Store, args: &[String]) -> Result<()> {
     }
     let body = body_lines.join("\n");
 
-    let note = store.create_note(title, body, tags)?;
+    let note = store.create_note(title, body, tags, current_dir)?;
     let short = note.id[..8].to_string();
     store.save()?;
     println!("  {} {}", "Created".green(), short.dimmed());
     Ok(())
 }
 
-fn cmd_list(store: &Store, args: &[String], last_results: &mut Vec<String>) {
+fn cmd_list(store: &Store, args: &[String], last_results: &mut Vec<String>, current_dir: &str) {
     let mut tag: Option<String> = None;
     let mut limit: usize = 20;
 
@@ -315,10 +393,12 @@ fn cmd_list(store: &Store, args: &[String], last_results: &mut Vec<String>) {
         }
     }
 
-    let notes = store.list_notes(tag.as_deref(), limit);
+    // Show subdirectories first
+    let subdirs = store.subdirs(current_dir);
+    let notes = store.list_notes_in_dir(current_dir, tag.as_deref(), limit);
     last_results.clear();
 
-    if notes.is_empty() {
+    if subdirs.is_empty() && notes.is_empty() {
         if tag.is_some() {
             println!("  {}", "No notes with that tag.".dimmed());
         } else {
@@ -326,6 +406,12 @@ fn cmd_list(store: &Store, args: &[String], last_results: &mut Vec<String>) {
         }
     } else {
         println!();
+        for name in &subdirs {
+            println!("    {}", format!("{name}/").cyan().bold());
+        }
+        if !subdirs.is_empty() && !notes.is_empty() {
+            println!();
+        }
         for (i, note) in notes.iter().enumerate() {
             last_results.push(note.id.clone());
             println!(
@@ -494,10 +580,16 @@ fn cmd_search(store: &Store, args: &[String], last_results: &mut Vec<String>) {
         println!();
         for (i, note) in results.iter().enumerate() {
             last_results.push(note.id.clone());
+            let dir_info = if note.directory.is_empty() {
+                String::new()
+            } else {
+                format!("  {}", format!("{}/", note.directory).dimmed())
+            };
             println!(
-                "  {} {}",
+                "  {} {}{}",
                 format!("{:>3}", i + 1).yellow(),
-                note.format_summary()
+                note.format_summary(),
+                dir_info
             );
         }
         println!();
@@ -522,6 +614,7 @@ fn cmd_remind(store: &mut Store, args: &[String]) -> Result<()> {
     let item = format!("- [ ] {text}");
 
     // Look for existing reminder note, append or create
+    // Reminders always live at root
     if let Some(note) = store.find_by_tag_mut("reminder") {
         note.body.push('\n');
         note.body.push_str(&item);
@@ -529,7 +622,7 @@ fn cmd_remind(store: &mut Store, args: &[String]) -> Result<()> {
         store.save()?;
         println!("  {} {}", "Added".green(), text);
     } else {
-        store.create_note("Reminders", &item, vec!["reminder".to_string()])?;
+        store.create_note("Reminders", &item, vec!["reminder".to_string()], "")?;
         store.save()?;
         println!(
             "  {} {}",
@@ -541,7 +634,24 @@ fn cmd_remind(store: &mut Store, args: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn cmd_listen(store: &mut Store, args: &[String]) -> Result<()> {
+fn cmd_listen(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> {
+    // Check for "add <note>" subcommand
+    let append_to = if !args.is_empty() && args[0].eq_ignore_ascii_case("add") {
+        if args.len() < 2 {
+            println!("  Usage: listen add <note>");
+            return Ok(());
+        }
+        let target = &args[1];
+        // Validate the note exists before recording
+        if store.find_by_index_or_prefix(target).is_none() {
+            println!("  {} No note found: {}", "Error:".red(), target);
+            return Ok(());
+        }
+        Some(target.clone())
+    } else {
+        None
+    };
+
     // Record audio
     let audio_path = crate::listen::record_audio()?;
 
@@ -555,31 +665,52 @@ fn cmd_listen(store: &mut Store, args: &[String]) -> Result<()> {
         return Ok(());
     }
 
-    // Determine title and body
-    let custom_title = if args.is_empty() {
-        None
-    } else {
-        Some(args.join(" "))
-    };
-
     println!("  {}", "Structuring notes...".cyan());
-    let (ai_title, body) = crate::ai::structure_notes(&transcript)?;
-    let title = custom_title.unwrap_or(ai_title);
 
-    let note = store.create_note(&title, &body, vec!["listen".to_string()])?;
-    let short = note.id[..8].to_string();
-    store.save()?;
+    if let Some(target) = append_to {
+        // Append to existing note
+        let existing_body = store.find_by_index_or_prefix(&target).unwrap().body.clone();
+        let new_content = crate::ai::structure_notes_append(&transcript, &existing_body)?;
 
-    println!(
-        "  {} \"{}\" {}",
-        "Created".green(),
-        title.bold(),
-        short.dimmed()
-    );
-    println!(
-        "  {}",
-        "Use 'export <note> <format>' to export this note.".dimmed()
-    );
+        let note = store.find_by_index_or_prefix_mut(&target).unwrap();
+        note.body = format!("{}\n\n{}", note.body, new_content);
+        note.updated_at = chrono::Utc::now();
+        let title = note.title.clone();
+        let short = note.id[..8].to_string();
+        store.save()?;
+
+        println!(
+            "  {} \"{}\" {}",
+            "Updated".green(),
+            title.bold(),
+            short.dimmed()
+        );
+    } else {
+        // Create new note in current directory
+        let custom_title = if args.is_empty() {
+            None
+        } else {
+            Some(args.join(" "))
+        };
+
+        let (ai_title, body) = crate::ai::structure_notes(&transcript)?;
+        let title = custom_title.unwrap_or(ai_title);
+
+        let note = store.create_note(&title, &body, vec!["listen".to_string()], current_dir)?;
+        let short = note.id[..8].to_string();
+        store.save()?;
+
+        println!(
+            "  {} \"{}\" {}",
+            "Created".green(),
+            title.bold(),
+            short.dimmed()
+        );
+        println!(
+            "  {}",
+            "Use 'export <note> <format>' to export this note.".dimmed()
+        );
+    }
 
     Ok(())
 }
@@ -629,6 +760,170 @@ fn cmd_tags(store: &Store) {
         }
         println!();
     }
+}
+
+// ── Directory commands ─────────────────────────────────────────────────────
+
+fn cmd_mkdir(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> {
+    if args.is_empty() {
+        println!("  Usage: mkdir <name>");
+        return Ok(());
+    }
+
+    let name = args.join(" ").trim().to_string();
+    if name.is_empty() {
+        println!("  Usage: mkdir <name>");
+        return Ok(());
+    }
+
+    // Resolve relative to current directory
+    let full_path = if current_dir.is_empty() {
+        name.trim_matches('/').to_string()
+    } else {
+        format!("{}/{}", current_dir, name.trim_matches('/'))
+    };
+
+    if store.dir_exists(&full_path) {
+        println!("  {}", format!("Directory already exists: {full_path}/").dimmed());
+        return Ok(());
+    }
+
+    store.create_dir(&full_path);
+    store.save()?;
+    println!("  {} {}", "Created".green(), format!("{full_path}/").cyan());
+    Ok(())
+}
+
+fn resolve_cd(args: &[String], store: &Store, current_dir: &str) -> std::result::Result<String, String> {
+    if args.is_empty() {
+        // cd with no args goes to root
+        return Ok(String::new());
+    }
+
+    let target = args.join(" ");
+    let target = target.trim();
+
+    if target == "/" || target == "~" {
+        return Ok(String::new());
+    }
+
+    if target == ".." {
+        // Go up one level
+        return if current_dir.is_empty() {
+            Ok(String::new()) // already at root
+        } else if let Some(pos) = current_dir.rfind('/') {
+            Ok(current_dir[..pos].to_string())
+        } else {
+            Ok(String::new()) // one level deep, go to root
+        };
+    }
+
+    // Support "../sibling" style paths
+    let mut base = current_dir.to_string();
+    let mut remaining = target;
+
+    while let Some(rest) = remaining.strip_prefix("../") {
+        base = if let Some(pos) = base.rfind('/') {
+            base[..pos].to_string()
+        } else {
+            String::new()
+        };
+        remaining = rest;
+    }
+    if remaining == ".." {
+        base = if let Some(pos) = base.rfind('/') {
+            base[..pos].to_string()
+        } else {
+            String::new()
+        };
+        remaining = "";
+    }
+
+    let full_path = if remaining.is_empty() {
+        base
+    } else if remaining.starts_with('/') {
+        // Absolute path
+        remaining.trim_matches('/').to_string()
+    } else if base.is_empty() {
+        remaining.trim_matches('/').to_string()
+    } else {
+        format!("{}/{}", base, remaining.trim_matches('/'))
+    };
+
+    if full_path.is_empty() || store.dir_exists(&full_path) {
+        Ok(full_path)
+    } else {
+        Err(format!("No such directory: {full_path}/"))
+    }
+}
+
+fn cmd_mv(store: &mut Store, args: &[String], last_results: &[String]) -> Result<()> {
+    if args.len() < 2 {
+        println!("  Usage: mv <note>... <directory>");
+        println!("  Examples: mv 1 cs130    mv 1 2 3 cs130    mv 1 /");
+        return Ok(());
+    }
+
+    // Last arg is the target directory, everything before is notes
+    let target_dir = args.last().unwrap().trim_matches('/');
+    if !target_dir.is_empty() && !store.dir_exists(target_dir) {
+        println!("  {}", format!("No such directory: {target_dir}/").red());
+        return Ok(());
+    }
+
+    let note_args = &args[..args.len() - 1];
+    let mut moved = 0;
+
+    for arg in note_args {
+        let id = match resolve_id(arg, store, last_results) {
+            Some(id) => id,
+            None => {
+                println!("  {}", format!("No note found: {arg}").red());
+                continue;
+            }
+        };
+
+        match store.move_note(&id, target_dir) {
+            Some(title) => {
+                let dest = if target_dir.is_empty() { "/" } else { target_dir };
+                println!("  {} \"{}\" to {}", "Moved".green(), title, dest.cyan());
+                moved += 1;
+            }
+            None => println!("  {}", format!("Failed to move note: {arg}").red()),
+        }
+    }
+
+    if moved > 0 {
+        store.save()?;
+    }
+    Ok(())
+}
+
+fn cmd_rmdir(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> {
+    if args.is_empty() {
+        println!("  Usage: rmdir <name>");
+        return Ok(());
+    }
+
+    let name = args.join(" ").trim().to_string();
+    let full_path = if current_dir.is_empty() {
+        name.trim_matches('/').to_string()
+    } else {
+        format!("{}/{}", current_dir, name.trim_matches('/'))
+    };
+
+    if !store.dir_exists(&full_path) {
+        println!("  {}", format!("No such directory: {full_path}/").red());
+        return Ok(());
+    }
+
+    if store.delete_dir(&full_path) {
+        store.save()?;
+        println!("  {} {}", "Removed".green(), format!("{full_path}/").dimmed());
+    } else {
+        println!("  {}", "Directory is not empty.".red());
+    }
+    Ok(())
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

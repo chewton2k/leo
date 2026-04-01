@@ -90,6 +90,10 @@ enum Commands {
         /// Optional title (AI generates one if omitted)
         #[arg(short, long)]
         title: Option<String>,
+
+        /// Append to an existing note instead of creating a new one
+        #[arg(short, long)]
+        add: Option<String>,
     },
 
     /// Export a note to a file (txt, md, html, docx, pdf, rtf, odt)
@@ -135,7 +139,7 @@ fn run_command(cmd: Commands) -> Result<()> {
     match cmd {
         Commands::New { title, body, tags } => {
             let body = body.unwrap_or_default();
-            let note = store.create_note(title, body, tags)?;
+            let note = store.create_note(title, body, tags, "")?;
             println!("Created note {}", &note.id[..8]);
         }
 
@@ -242,12 +246,12 @@ fn run_command(cmd: Commands) -> Result<()> {
                 note.updated_at = chrono::Utc::now();
                 println!("Added: {text}");
             } else {
-                store.create_note("Reminders", &item, vec!["reminder".to_string()])?;
+                store.create_note("Reminders", &item, vec!["reminder".to_string()], "")?;
                 println!("Created Reminders + {text}");
             }
         }
 
-        Commands::Listen { title } => {
+        Commands::Listen { title, add } => {
             let audio_path = listen::record_audio()?;
 
             println!("Transcribing...");
@@ -260,11 +264,26 @@ fn run_command(cmd: Commands) -> Result<()> {
             }
 
             println!("Structuring notes...");
-            let (ai_title, body) = ai::structure_notes(&transcript)?;
-            let title = title.unwrap_or(ai_title);
 
-            let note = store.create_note(&title, &body, vec!["listen".to_string()])?;
-            println!("Created \"{}\" {}", title, &note.id[..8]);
+            if let Some(target) = add {
+                let existing_body = match store.find_by_index_or_prefix(&target) {
+                    Some(n) => n.body.clone(),
+                    None => {
+                        eprintln!("No note found: {target}");
+                        return Ok(());
+                    }
+                };
+                let new_content = ai::structure_notes_append(&transcript, &existing_body)?;
+                let note = store.find_by_index_or_prefix_mut(&target).unwrap();
+                note.body = format!("{}\n\n{}", note.body, new_content);
+                note.updated_at = chrono::Utc::now();
+                println!("Updated \"{}\" {}", note.title, &note.id[..8]);
+            } else {
+                let (ai_title, body) = ai::structure_notes(&transcript)?;
+                let title = title.unwrap_or(ai_title);
+                let note = store.create_note(&title, &body, vec!["listen".to_string()], "")?;
+                println!("Created \"{}\" {}", title, &note.id[..8]);
+            }
         }
 
         Commands::Export { id, format } => {

@@ -5,11 +5,9 @@ use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
 const OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1";
-const GROQ_TRANSCRIPTION_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const HF_WHISPER_URL: &str =
     "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo";
 const DEFAULT_CHAT_MODEL: &str = "google/gemini-2.5-flash";
-const DEFAULT_TRANSCRIPTION_MODEL: &str = "whisper-large-v3-turbo";
 
 /// Max file size per chunk for transcription APIs (~20MB, with headroom).
 const MAX_CHUNK_BYTES: u64 = 20 * 1024 * 1024;
@@ -26,11 +24,6 @@ fn chat_model() -> String {
     std::env::var("OPENROUTER_CHAT_MODEL").unwrap_or_else(|_| DEFAULT_CHAT_MODEL.to_string())
 }
 
-fn transcription_model() -> String {
-    std::env::var("GROQ_TRANSCRIPTION_MODEL")
-        .unwrap_or_else(|_| DEFAULT_TRANSCRIPTION_MODEL.to_string())
-}
-
 // ── Public API ─────────────────────────────────────────────────────────────
 
 /// Transcribe an audio file of any length. Automatically chunks long recordings.
@@ -41,9 +34,8 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
         return transcribe_single(audio_path);
     }
 
-    // Split into chunks and transcribe each
-    // WAV 16kHz mono 16-bit ≈ 32000 bytes/sec
-    let approx_duration = file_size / 32000;
+    // WAV 16kHz mono 16-bit ≈ 32000 bytes/sec (44-byte header)
+    let approx_duration = (file_size.saturating_sub(44)) / 32000;
     let num_chunks = (approx_duration / CHUNK_SECONDS) + 1;
 
     eprintln!(
@@ -57,10 +49,14 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
     );
 
     let mut full_transcript = String::new();
-    let mut groq_failed = false;
 
     for i in 0..num_chunks {
         let start = i * CHUNK_SECONDS;
+        let remaining = approx_duration.saturating_sub(start);
+        if remaining == 0 {
+            break;
+        }
+        let duration = remaining.min(CHUNK_SECONDS);
         let chunk_path = std::env::temp_dir().join(format!("leo-chunk-{i}.wav"));
 
         let status = Command::new("sox")
@@ -69,18 +65,23 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
                 chunk_path.to_str().unwrap(),
                 "trim",
                 &start.to_string(),
-                &CHUNK_SECONDS.to_string(),
+                &duration.to_string(),
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
 
-        if status.is_err() || !chunk_path.exists() {
+        let ok = match &status {
+            Ok(s) => s.success() && chunk_path.exists(),
+            Err(_) => false,
+        };
+        if !ok {
             break;
         }
 
-        // Skip empty/tiny chunks (end of file)
-        if std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0) < 1000 {
+        // Skip empty chunks (WAV header alone is 44 bytes)
+        let chunk_size = std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0);
+        if chunk_size < 100 {
             let _ = std::fs::remove_file(&chunk_path);
             break;
         }
@@ -90,29 +91,7 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
             format!("Transcribing chunk {}/{}...", i + 1, num_chunks).cyan()
         );
 
-        let result = if groq_failed {
-            // Skip Groq if it already failed (rate limit is per-day)
-            transcribe_single_hf(&chunk_path)
-        } else {
-            match transcribe_single_groq(&chunk_path) {
-                Ok(text) => Ok(text),
-                Err(e) => {
-                    let msg = format!("{e}");
-                    if msg.contains("413") || msg.contains("429") || msg.contains("rate_limit") {
-                        eprintln!(
-                            "  {}",
-                            "Groq rate-limited, using Hugging Face for remaining chunks..."
-                                .yellow()
-                        );
-                        groq_failed = true;
-                        transcribe_single_hf(&chunk_path)
-                    } else {
-                        Err(e)
-                    }
-                }
-            }
-        };
-
+        let result = transcribe_huggingface(&chunk_path);
         let _ = std::fs::remove_file(&chunk_path);
 
         match result {
@@ -150,7 +129,9 @@ pub fn structure_notes(transcript: &str) -> Result<(String, String)> {
          - Follow it with a blank line, then the structured body\n\
          - Use bullet points (- ) for key points\n\
          - Use checkboxes (- [ ] ) for action items or to-dos mentioned\n\
+         - Make diagrams or charts when appropriate\n\
          - Group related points under ## headings\n\
+         - There will sometimes be noise in the transcription so make sure to filter out any extraneous information \n\
          - Keep it concise but don't lose important details\n\n\
          Transcript:\n{transcript}"
     );
@@ -201,79 +182,71 @@ pub fn structure_notes(transcript: &str) -> Result<(String, String)> {
     Ok((title, body))
 }
 
-// ── Single-file transcription with fallback ────────────────────────────────
+/// Structure a new transcript as an addition to an existing note.
+/// Returns only the new body content to append.
+pub fn structure_notes_append(transcript: &str, existing_body: &str) -> Result<String> {
+    let key = openrouter_key()?;
 
-/// Transcribe a single file (must be under MAX_CHUNK_BYTES).
-fn transcribe_single(audio_path: &Path) -> Result<String> {
-    // Try Groq first if key is set
-    if let Ok(key) = std::env::var("GROQ_API_KEY") {
-        if !key.is_empty() && key != "your-groq-key-here" {
-            match transcribe_groq(audio_path, &key) {
-                Ok(text) => return Ok(text),
-                Err(e) => {
-                    let msg = format!("{e}");
-                    if msg.contains("413") || msg.contains("429") || msg.contains("rate_limit") {
-                        eprintln!(
-                            "  {}",
-                            "Groq rate-limited, falling back to Hugging Face...".yellow(),
-                        );
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-    }
-
-    transcribe_huggingface(audio_path)
-}
-
-fn transcribe_single_groq(audio_path: &Path) -> Result<String> {
-    let key = std::env::var("GROQ_API_KEY").context("GROQ_API_KEY not set")?;
-    transcribe_groq(audio_path, &key)
-}
-
-fn transcribe_single_hf(audio_path: &Path) -> Result<String> {
-    transcribe_huggingface(audio_path)
-}
-
-// ── Provider implementations ───────────────────────────────────────────────
-
-fn transcribe_groq(audio_path: &Path, key: &str) -> Result<String> {
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
+        .timeout(std::time::Duration::from_secs(60))
         .build()?;
 
-    let file_bytes = std::fs::read(audio_path)?;
-    let file_name = file_name_str(audio_path);
+    let prompt = format!(
+        "You are a note-taking assistant. You are adding to an EXISTING note. \
+         Given the existing notes and a new transcript, create well-structured notes \
+         for ONLY the new content in Markdown format.\n\n\
+         Rules:\n\
+         - Do NOT include a title — this will be appended to an existing note\n\
+         - Use bullet points (- ) for key points\n\
+         - Use checkboxes (- [ ] ) for action items or to-dos mentioned\n\
+         - Group related points under ## headings\n\
+         - Filter out noise from transcription\n\
+         - Keep it concise but don't lose important details\n\
+         - Avoid duplicating information already in the existing notes\n\
+         - Use the same style and structure as the existing notes\n\n\
+         Existing notes:\n{existing_body}\n\n\
+         New transcript:\n{transcript}"
+    );
 
-    let form = reqwest::blocking::multipart::Form::new()
-        .text("model", transcription_model())
-        .part(
-            "file",
-            reqwest::blocking::multipart::Part::bytes(file_bytes)
-                .file_name(file_name)
-                .mime_str("audio/wav")?,
-        );
+    let body = serde_json::json!({
+        "model": chat_model(),
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 10000
+    });
+
+    let url = format!("{OPENROUTER_BASE}/chat/completions");
 
     let resp = client
-        .post(GROQ_TRANSCRIPTION_URL)
+        .post(&url)
         .header("Authorization", format!("Bearer {key}"))
-        .multipart(form)
+        .header("HTTP-Referer", "https://github.com/leo-cli")
+        .header("X-Title", "leo")
+        .header("Content-Type", "application/json")
+        .json(&body)
         .send()
-        .context("Failed to reach Groq API")?;
+        .context("Failed to reach OpenRouter API")?;
 
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
-        bail!("Groq transcription error ({status}): {body}");
+        bail!("OpenRouter API error ({status}): {body}");
     }
 
     let json: serde_json::Value = resp.json()?;
-    json["text"]
+    let content = json["choices"][0]["message"]["content"]
         .as_str()
-        .map(|s| s.to_string())
-        .context("Unexpected Groq API response format")
+        .context("Unexpected API response format")?;
+
+    Ok(content.trim().to_string())
+}
+
+// ── Transcription ─────────────────────────────────────────────────────────
+
+fn transcribe_single(audio_path: &Path) -> Result<String> {
+    transcribe_huggingface(audio_path)
 }
 
 fn transcribe_huggingface(audio_path: &Path) -> Result<String> {
@@ -308,9 +281,3 @@ fn transcribe_huggingface(audio_path: &Path) -> Result<String> {
         .context("Unexpected Hugging Face API response format")
 }
 
-fn file_name_str(path: &Path) -> String {
-    path.file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string()
-}
