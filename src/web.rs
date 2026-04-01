@@ -2,9 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
-    response::{Html, IntoResponse},
+    extract::{Path, Query, Request, State},
+    http::{header, StatusCode},
+    middleware::Next,
+    response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
@@ -14,13 +15,29 @@ use tower_http::cors::CorsLayer;
 
 use crate::store::Store;
 
-type AppState = Arc<Mutex<Store>>;
+#[derive(Clone)]
+struct AppState {
+    store: Arc<Mutex<Store>>,
+    token: String,
+}
 
 const HTML: &str = include_str!("web_ui.html");
 
 pub async fn serve(port: u16) -> Result<()> {
     let store = Store::load()?;
-    let state: AppState = Arc::new(Mutex::new(store));
+
+    // Generate a random auth token
+    let token = uuid::Uuid::new_v4().simple().to_string();
+
+    // Determine local IP
+    let local_ip = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|_| "127.0.0.1".to_string());
+
+    let state = AppState {
+        store: Arc::new(Mutex::new(store)),
+        token: token.clone(),
+    };
 
     let app = Router::new()
         .route("/", get(index))
@@ -34,22 +51,18 @@ pub async fn serve(port: u16) -> Result<()> {
         .route("/api/search", get(search_notes))
         .route("/api/tags", get(list_tags))
         .route("/api/dirs", get(list_dirs).post(create_dir))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let local_ip = local_ip_address::local_ip()
-        .map(|ip| ip.to_string())
-        .unwrap_or_else(|_| "unknown".to_string());
+    let network_url = format!("http://{local_ip}:{port}/?token={token}");
+    let local_url = format!("http://localhost:{port}/?token={token}");
 
-    let network_url = format!("http://{local_ip}:{port}");
-
-    println!(
-        "\n  {} {}\n  {} {}\n",
-        "Local:".bold(),
-        format!("http://localhost:{port}").cyan().underline(),
-        "Network:".bold(),
-        network_url.cyan().underline(),
-    );
+    println!("\n  {} {}", "Local:".bold(), local_url.cyan().underline());
+    println!("  {} {}\n", "Network:".bold(), network_url.cyan().underline());
 
     // Print QR code for easy phone scanning
     if let Ok(code) = qrcode::QrCode::new(&network_url) {
@@ -63,12 +76,17 @@ pub async fn serve(port: u16) -> Result<()> {
     }
 
     println!(
-        "  {}",
-        "Scan the QR code or open the URL on your phone".dimmed()
+        "  {} If Safari blocks HTTP, go to {} and turn off {}",
+        "iPhone:".bold(),
+        "Settings > Apps > Safari".bold(),
+        "HTTPS Upgrade".bold()
     );
+    println!("  {}", "The token in the URL prevents unauthorized access.".dimmed());
+    println!();
     println!("  {}\n", "Press Ctrl+C to stop".dimmed());
 
-    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
+    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -76,6 +94,57 @@ pub async fn serve(port: u16) -> Result<()> {
 
 async fn index() -> Html<&'static str> {
     Html(HTML)
+}
+
+// ── Auth middleware ───────────────────────────────────────────────────────
+
+async fn auth_middleware(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    // Check ?token= query param
+    let query = request.uri().query().unwrap_or("");
+    if let Some(t) = query_param(query, "token") {
+        if t == state.token {
+            let mut response = next.run(request).await;
+            // Set cookie so subsequent requests don't need ?token=
+            let cookie = format!(
+                "leo_token={}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400",
+                state.token
+            );
+            response
+                .headers_mut()
+                .insert(header::SET_COOKIE, cookie.parse().unwrap());
+            return Ok(response);
+        }
+    }
+
+    // Check cookie
+    if let Some(cookie_header) = request.headers().get(header::COOKIE) {
+        if let Ok(cookies) = cookie_header.to_str() {
+            for part in cookies.split(';') {
+                if let Some(val) = part.trim().strip_prefix("leo_token=") {
+                    if val == state.token {
+                        return Ok(next.run(request).await);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+fn query_param<'a>(query: &'a str, key: &str) -> Option<&'a str> {
+    for pair in query.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == key {
+                return Some(v);
+            }
+        }
+    }
+    None
 }
 
 // ── Query params ──────────────────────────────────────────────────────────
@@ -169,7 +238,7 @@ async fn list_notes(
     State(state): State<AppState>,
     Query(params): Query<ListParams>,
 ) -> Json<Vec<NoteResponse>> {
-    let store = state.lock().unwrap();
+    let store = state.store.lock().unwrap();
     let limit = params.limit.unwrap_or(100);
     let notes = if let Some(ref dir) = params.dir {
         store.list_notes_in_dir(dir, params.tag.as_deref(), limit)
@@ -183,7 +252,7 @@ async fn get_note(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<Json<NoteResponse>, StatusCode> {
-    let store = state.lock().unwrap();
+    let store = state.store.lock().unwrap();
     match store.find_note(&id) {
         Some(n) => Ok(Json(NoteResponse::from_note(n))),
         None => Err(StatusCode::NOT_FOUND),
@@ -194,7 +263,7 @@ async fn create_note(
     State(state): State<AppState>,
     Json(body): Json<CreateBody>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     let tags = body.tags.unwrap_or_default();
     let note_body = body.body.unwrap_or_default();
     let dir = body.directory.unwrap_or_default();
@@ -213,7 +282,7 @@ async fn update_note(
     Path(id): Path<String>,
     Json(body): Json<UpdateBody>,
 ) -> Result<Json<NoteResponse>, StatusCode> {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     let note = store.find_note_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
 
     if let Some(title) = body.title {
@@ -236,7 +305,7 @@ async fn delete_note(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> StatusCode {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     if store.delete_note(&id) {
         let _ = store.save();
         StatusCode::NO_CONTENT
@@ -250,7 +319,7 @@ async fn toggle_checkbox(
     Path(id): Path<String>,
     Query(params): Query<ToggleParams>,
 ) -> Result<Json<NoteResponse>, StatusCode> {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     store
         .toggle_checkbox(&id, params.checkbox)
         .ok_or(StatusCode::NOT_FOUND)?;
@@ -265,11 +334,9 @@ async fn move_note(
     Path(id): Path<String>,
     Json(body): Json<MoveBody>,
 ) -> Result<Json<NoteResponse>, StatusCode> {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     let dir = body.directory.trim_matches('/');
-    store
-        .move_note(&id, dir)
-        .ok_or(StatusCode::NOT_FOUND)?;
+    store.move_note(&id, dir).ok_or(StatusCode::NOT_FOUND)?;
     let note = store.find_note(&id).ok_or(StatusCode::NOT_FOUND)?;
     let resp = NoteResponse::from_note(note);
     let _ = store.save();
@@ -280,7 +347,7 @@ async fn search_notes(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
 ) -> Json<Vec<NoteResponse>> {
-    let store = state.lock().unwrap();
+    let store = state.store.lock().unwrap();
     let q = params.q.unwrap_or_default();
     if q.is_empty() {
         return Json(vec![]);
@@ -291,7 +358,7 @@ async fn search_notes(
 }
 
 async fn list_tags(State(state): State<AppState>) -> Json<Vec<TagResponse>> {
-    let store = state.lock().unwrap();
+    let store = state.store.lock().unwrap();
     Json(
         store
             .tags()
@@ -305,7 +372,7 @@ async fn list_dirs(
     State(state): State<AppState>,
     Query(params): Query<DirParams>,
 ) -> Json<Vec<String>> {
-    let store = state.lock().unwrap();
+    let store = state.store.lock().unwrap();
     let parent = params.parent.unwrap_or_default();
     Json(store.subdirs(&parent))
 }
@@ -314,7 +381,7 @@ async fn create_dir(
     State(state): State<AppState>,
     Json(body): Json<CreateDirBody>,
 ) -> StatusCode {
-    let mut store = state.lock().unwrap();
+    let mut store = state.store.lock().unwrap();
     if store.create_dir(&body.path) {
         let _ = store.save();
         StatusCode::CREATED
