@@ -449,9 +449,9 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
         }
     };
 
-    let (title, current_body) = {
+    let (old_title, old_tags, old_body) = {
         let note = store.find_note(&id).unwrap();
-        (note.title.clone(), note.body.clone())
+        (note.title.clone(), note.tags.clone(), note.body.clone())
     };
 
     let editor = std::env::var("EDITOR")
@@ -462,7 +462,15 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
         "leo-{}.md",
         &id[..std::cmp::min(8, id.len())]
     ));
-    std::fs::write(&tmp_path, &current_body)?;
+
+    // Write frontmatter + body so user can edit title, tags, and body
+    let file_content = format!(
+        "---\ntitle: {}\ntags: {}\n---\n{}",
+        old_title,
+        old_tags.join(", "),
+        old_body
+    );
+    std::fs::write(&tmp_path, &file_content)?;
 
     let status = std::process::Command::new(&editor)
         .arg(&tmp_path)
@@ -474,19 +482,72 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
         return Ok(());
     }
 
-    let new_body = std::fs::read_to_string(&tmp_path)?;
+    let raw = std::fs::read_to_string(&tmp_path)?;
     let _ = std::fs::remove_file(&tmp_path);
 
-    if new_body.trim() == current_body.trim() {
+    let (new_title, new_tags, new_body) = parse_frontmatter(&raw);
+
+    if new_title == old_title && new_tags == old_tags && new_body.trim() == old_body.trim() {
         println!("  {}", "No changes.".dimmed());
         return Ok(());
     }
 
-    if store.update_body(&id, new_body) {
-        store.save()?;
-        println!("  {} {}", "Updated".green(), title);
-    }
+    let note = store.find_note_mut(&id).unwrap();
+    note.title = new_title;
+    note.tags = new_tags;
+    note.body = new_body;
+    note.updated_at = chrono::Utc::now();
+    let title = note.title.clone();
+    store.save()?;
+    println!("  {} {}", "Updated".green(), title);
     Ok(())
+}
+
+/// Parse a frontmatter block from editor content.
+/// Expected format:
+///   ---
+///   title: My Title
+///   tags: tag1, tag2
+///   ---
+///   Body content...
+pub fn parse_frontmatter(raw: &str) -> (String, Vec<String>, String) {
+    let trimmed = raw.trim_start();
+    if !trimmed.starts_with("---") {
+        // No frontmatter — treat entire content as body, no title/tag changes
+        return (String::new(), Vec::new(), raw.to_string());
+    }
+
+    // Find the closing ---
+    let after_open = &trimmed[3..].trim_start_matches(|c: char| c == '-');
+    let after_open = after_open.strip_prefix('\n').unwrap_or(after_open);
+
+    if let Some(close_pos) = after_open.find("\n---") {
+        let front = &after_open[..close_pos];
+        let body_start = close_pos + 4; // skip "\n---"
+        let body = after_open[body_start..]
+            .strip_prefix('\n')
+            .unwrap_or(&after_open[body_start..]);
+
+        let mut title = String::new();
+        let mut tags = Vec::new();
+
+        for line in front.lines() {
+            if let Some(val) = line.strip_prefix("title:") {
+                title = val.trim().to_string();
+            } else if let Some(val) = line.strip_prefix("tags:") {
+                tags = val
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+            }
+        }
+
+        (title, tags, body.to_string())
+    } else {
+        // Malformed frontmatter — return raw as body
+        (String::new(), Vec::new(), raw.to_string())
+    }
 }
 
 fn cmd_delete(store: &mut Store, args: &[String], last_results: &[String]) -> Result<()> {

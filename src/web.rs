@@ -30,8 +30,10 @@ pub async fn serve(port: u16) -> Result<()> {
             get(get_note).patch(update_note).delete(delete_note),
         )
         .route("/api/notes/{id}/toggle", post(toggle_checkbox))
+        .route("/api/notes/{id}/move", post(move_note))
         .route("/api/search", get(search_notes))
         .route("/api/tags", get(list_tags))
+        .route("/api/dirs", get(list_dirs).post(create_dir))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -60,7 +62,10 @@ pub async fn serve(port: u16) -> Result<()> {
         println!("{qr}\n");
     }
 
-    println!("  {}", "Scan the QR code or open the URL on your phone".dimmed());
+    println!(
+        "  {}",
+        "Scan the QR code or open the URL on your phone".dimmed()
+    );
     println!("  {}\n", "Press Ctrl+C to stop".dimmed());
 
     let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{port}")).await?;
@@ -79,6 +84,7 @@ async fn index() -> Html<&'static str> {
 struct ListParams {
     tag: Option<String>,
     limit: Option<usize>,
+    dir: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +98,11 @@ struct ToggleParams {
     checkbox: usize,
 }
 
+#[derive(Deserialize)]
+struct DirParams {
+    parent: Option<String>,
+}
+
 // ── Request bodies ────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
@@ -99,6 +110,7 @@ struct CreateBody {
     title: String,
     body: Option<String>,
     tags: Option<Vec<String>>,
+    directory: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -106,6 +118,16 @@ struct UpdateBody {
     title: Option<String>,
     body: Option<String>,
     tags: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct CreateDirBody {
+    path: String,
+}
+
+#[derive(Deserialize)]
+struct MoveBody {
+    directory: String,
 }
 
 // ── Response types ────────────────────────────────────────────────────────
@@ -118,6 +140,7 @@ struct NoteResponse {
     created_at: String,
     updated_at: String,
     tags: Vec<String>,
+    directory: String,
 }
 
 impl NoteResponse {
@@ -129,6 +152,7 @@ impl NoteResponse {
             created_at: n.created_at.to_rfc3339(),
             updated_at: n.updated_at.to_rfc3339(),
             tags: n.tags.clone(),
+            directory: n.directory.clone(),
         }
     }
 }
@@ -147,7 +171,11 @@ async fn list_notes(
 ) -> Json<Vec<NoteResponse>> {
     let store = state.lock().unwrap();
     let limit = params.limit.unwrap_or(100);
-    let notes = store.list_notes(params.tag.as_deref(), limit);
+    let notes = if let Some(ref dir) = params.dir {
+        store.list_notes_in_dir(dir, params.tag.as_deref(), limit)
+    } else {
+        store.list_notes(params.tag.as_deref(), limit)
+    };
     Json(notes.iter().map(|n| NoteResponse::from_note(n)).collect())
 }
 
@@ -169,7 +197,8 @@ async fn create_note(
     let mut store = state.lock().unwrap();
     let tags = body.tags.unwrap_or_default();
     let note_body = body.body.unwrap_or_default();
-    match store.create_note(body.title, note_body, tags, "") {
+    let dir = body.directory.unwrap_or_default();
+    match store.create_note(body.title, note_body, tags, &dir) {
         Ok(n) => {
             let resp = NoteResponse::from_note(n);
             let _ = store.save();
@@ -231,6 +260,22 @@ async fn toggle_checkbox(
     Ok(Json(resp))
 }
 
+async fn move_note(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<MoveBody>,
+) -> Result<Json<NoteResponse>, StatusCode> {
+    let mut store = state.lock().unwrap();
+    let dir = body.directory.trim_matches('/');
+    store
+        .move_note(&id, dir)
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let note = store.find_note(&id).ok_or(StatusCode::NOT_FOUND)?;
+    let resp = NoteResponse::from_note(note);
+    let _ = store.save();
+    Ok(Json(resp))
+}
+
 async fn search_notes(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
@@ -254,4 +299,26 @@ async fn list_tags(State(state): State<AppState>) -> Json<Vec<TagResponse>> {
             .map(|(tag, count)| TagResponse { tag, count })
             .collect(),
     )
+}
+
+async fn list_dirs(
+    State(state): State<AppState>,
+    Query(params): Query<DirParams>,
+) -> Json<Vec<String>> {
+    let store = state.lock().unwrap();
+    let parent = params.parent.unwrap_or_default();
+    Json(store.subdirs(&parent))
+}
+
+async fn create_dir(
+    State(state): State<AppState>,
+    Json(body): Json<CreateDirBody>,
+) -> StatusCode {
+    let mut store = state.lock().unwrap();
+    if store.create_dir(&body.path) {
+        let _ = store.save();
+        StatusCode::CREATED
+    } else {
+        StatusCode::CONFLICT
+    }
 }

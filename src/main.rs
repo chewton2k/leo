@@ -160,13 +160,19 @@ fn run_command(cmd: Commands) -> Result<()> {
         },
 
         Commands::Edit { id } => {
-            let (current_body, title, resolved_id) = match store.find_by_index_or_prefix(&id) {
-                Some(n) => (n.body.clone(), n.title.clone(), n.id.clone()),
-                None => {
-                    eprintln!("No note found: {id}");
-                    return Ok(());
-                }
-            };
+            let (old_title, old_tags, old_body, resolved_id) =
+                match store.find_by_index_or_prefix(&id) {
+                    Some(n) => (
+                        n.title.clone(),
+                        n.tags.clone(),
+                        n.body.clone(),
+                        n.id.clone(),
+                    ),
+                    None => {
+                        eprintln!("No note found: {id}");
+                        return Ok(());
+                    }
+                };
             let id = resolved_id;
 
             let editor = std::env::var("EDITOR")
@@ -174,17 +180,33 @@ fn run_command(cmd: Commands) -> Result<()> {
                 .unwrap_or_else(|_| "vim".to_string());
 
             let tmp = std::env::temp_dir().join(format!("leo-{}.md", &id));
-            std::fs::write(&tmp, &current_body)?;
+            let file_content = format!(
+                "---\ntitle: {}\ntags: {}\n---\n{}",
+                old_title,
+                old_tags.join(", "),
+                old_body
+            );
+            std::fs::write(&tmp, &file_content)?;
 
             let status = std::process::Command::new(&editor).arg(&tmp).status()?;
 
             if status.success() {
-                let new_body = std::fs::read_to_string(&tmp)?;
+                let raw = std::fs::read_to_string(&tmp)?;
                 let _ = std::fs::remove_file(&tmp);
-                if new_body.trim() != current_body.trim() && store.update_body(&id, new_body) {
-                    println!("Updated {title}.");
-                } else {
+                let (new_title, new_tags, new_body) = repl::parse_frontmatter(&raw);
+
+                if new_title == old_title
+                    && new_tags == old_tags
+                    && new_body.trim() == old_body.trim()
+                {
                     println!("No changes.");
+                } else {
+                    let note = store.find_note_mut(&id).unwrap();
+                    note.title = new_title;
+                    note.tags = new_tags;
+                    note.body = new_body;
+                    note.updated_at = chrono::Utc::now();
+                    println!("Updated \"{}\".", note.title);
                 }
             } else {
                 let _ = std::fs::remove_file(&tmp);

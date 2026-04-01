@@ -10,6 +10,7 @@
   --card: #fff; --card-hover: #fafafa; --accent: #2563eb; --accent-fg: #fff;
   --tag-bg: #f0f0f0; --tag-fg: #555; --danger: #dc2626; --success: #16a34a;
   --input-bg: #fff; --input-border: #d1d5db;
+  --dir-bg: #f5f8ff; --dir-fg: #2563eb;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -17,6 +18,7 @@
     --card: #1a1a1a; --card-hover: #222; --accent: #3b82f6; --accent-fg: #fff;
     --tag-bg: #2a2a2a; --tag-fg: #aaa; --danger: #ef4444; --success: #22c55e;
     --input-bg: #1a1a1a; --input-border: #444;
+    --dir-bg: #1a2233; --dir-fg: #60a5fa;
   }
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -31,8 +33,18 @@ header {
   padding: 16px 0; border-bottom: 1px solid var(--border); margin-bottom: 12px;
   position: sticky; top: 0; background: var(--bg); z-index: 10;
 }
-header h1 { font-size: 1.4em; font-weight: 700; letter-spacing: -0.02em; }
-header nav { display: flex; gap: 12px; }
+.header-title {
+  font-size: 1.4em; font-weight: 700; letter-spacing: -0.02em;
+  display: flex; align-items: center; gap: 2px;
+  overflow: hidden; white-space: nowrap;
+}
+.header-title a, .header-title .crumb {
+  cursor: pointer; text-decoration: none; color: var(--fg);
+}
+.header-title a:hover { color: var(--accent); }
+.header-title .sep { color: var(--muted); margin: 0 4px; font-weight: 400; }
+.header-title .current { color: var(--muted); font-weight: 600; }
+header nav { display: flex; gap: 8px; flex-shrink: 0; }
 header nav button {
   background: none; border: none; color: var(--muted); font-size: 1.3em;
   cursor: pointer; padding: 4px; min-width: 44px; min-height: 44px;
@@ -60,6 +72,19 @@ header nav button:hover { color: var(--fg); }
 }
 .tag-pill.active { background: var(--accent); color: var(--accent-fg); }
 
+.dir-list {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px;
+}
+.dir-card {
+  padding: 10px 16px; border-radius: 8px;
+  background: var(--dir-bg); color: var(--dir-fg);
+  cursor: pointer; font-weight: 600; font-size: 0.95em;
+  display: flex; align-items: center; gap: 6px;
+  border: 1px solid transparent;
+}
+.dir-card:active { opacity: 0.7; }
+.dir-card .dir-icon { font-size: 1.1em; opacity: 0.7; }
+
 .note-card {
   padding: 14px 16px; border-bottom: 1px solid var(--border);
   cursor: pointer; min-height: 56px; display: flex; flex-direction: column;
@@ -68,6 +93,9 @@ header nav button:hover { color: var(--fg); }
 .note-card:active { background: var(--card-hover); }
 .note-card .title { font-weight: 600; font-size: 1em; margin-bottom: 2px; }
 .note-card .meta { font-size: 0.8em; color: var(--muted); }
+.note-card .meta .dir-badge {
+  color: var(--dir-fg); font-weight: 500;
+}
 .note-card .tags { margin-top: 4px; }
 .note-card .tags span {
   font-size: 0.75em; background: var(--tag-bg); color: var(--tag-fg);
@@ -87,6 +115,7 @@ header nav button:hover { color: var(--fg); }
 .note-view { padding: 4px 0; }
 .note-view h2 { font-size: 1.3em; margin-bottom: 8px; }
 .note-view .meta { color: var(--muted); font-size: 0.82em; margin-bottom: 12px; }
+.note-view .meta .dir-badge { color: var(--dir-fg); font-weight: 500; cursor: pointer; }
 .note-view .tags { margin-bottom: 12px; }
 .note-view .tags span {
   font-size: 0.8em; background: var(--tag-bg); color: var(--tag-fg);
@@ -101,7 +130,7 @@ header nav button:hover { color: var(--fg); }
 .note-view .body li .cb { font-size: 1.3em; margin-right: 8px; flex-shrink: 0; }
 .note-view .actions {
   display: flex; gap: 10px; margin-top: 20px; padding-top: 16px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--border); flex-wrap: wrap;
 }
 
 /* Form */
@@ -137,8 +166,11 @@ header nav button:hover { color: var(--fg); }
 <body>
 
 <header>
-  <h1>leo</h1>
+  <div class="header-title" id="header-title">
+    <a onclick="goDir('')">leo</a>
+  </div>
   <nav>
+    <button onclick="promptMkdir()" title="New Folder">&#128193;</button>
     <button onclick="go('search')" title="Search">&#128269;</button>
     <button onclick="go('tags')" title="Tags">&#127991;</button>
   </nav>
@@ -150,8 +182,8 @@ header nav button:hover { color: var(--fg); }
 <script>
 const API = '';
 let notes = [];
+let currentDir = '';
 let currentTag = null;
-let searchQuery = '';
 
 async function api(path, opts = {}) {
   const res = await fetch(API + path, {
@@ -169,6 +201,15 @@ function go(view, id) {
   else { location.hash = `#${view}`; }
 }
 
+function goDir(dir) {
+  currentTag = null;
+  if (dir === '') {
+    location.hash = '';
+  } else {
+    location.hash = `#cd/${dir}`;
+  }
+}
+
 function formatDate(iso) {
   const d = new Date(iso);
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
@@ -181,44 +222,92 @@ function esc(s) {
   return d.innerHTML;
 }
 
+function updateBreadcrumb() {
+  const el = document.getElementById('header-title');
+  if (!currentDir) {
+    el.innerHTML = '<a onclick="goDir(\'\')">leo</a>';
+    return;
+  }
+  const parts = currentDir.split('/');
+  let html = '<a onclick="goDir(\'\')">leo</a>';
+  let path = '';
+  for (let i = 0; i < parts.length; i++) {
+    path += (i > 0 ? '/' : '') + parts[i];
+    html += '<span class="sep">/</span>';
+    if (i === parts.length - 1) {
+      html += `<span class="current">${esc(parts[i])}</span>`;
+    } else {
+      const p = path;
+      html += `<a onclick="goDir('${esc(p)}')">${esc(parts[i])}</a>`;
+    }
+  }
+  el.innerHTML = html;
+}
+
 // ── Views ─────────────────────────────────────────────────────────────────
 
 async function renderList() {
   document.getElementById('fab').style.display = '';
-  let url = '/api/notes?limit=100';
-  if (currentTag) url += `&tag=${encodeURIComponent(currentTag)}`;
-  notes = await api(url);
+  updateBreadcrumb();
+
+  const [dirs, notesList] = await Promise.all([
+    api(`/api/dirs?parent=${encodeURIComponent(currentDir)}`),
+    api(`/api/notes?dir=${encodeURIComponent(currentDir)}&limit=100${currentTag ? '&tag=' + encodeURIComponent(currentTag) : ''}`),
+  ]);
+  notes = notesList;
 
   const app = document.getElementById('app');
-  if (!notes.length) {
+
+  if (!dirs.length && !notes.length) {
     app.innerHTML = '<div class="empty"><p>No notes yet</p><p style="margin-top:8px;font-size:0.9em">Tap + to create one</p></div>';
     return;
   }
 
-  app.innerHTML = notes.map(n => `
-    <div class="note-card" onclick="go('view','${n.id}')">
-      <div class="title">${esc(n.title)}</div>
-      <div class="meta">${formatDate(n.updated_at)}</div>
-      ${n.tags.length ? `<div class="tags">${n.tags.map(t => `<span>#${esc(t)}</span>`).join('')}</div>` : ''}
-    </div>
-  `).join('');
+  let html = '';
+
+  if (dirs.length) {
+    html += '<div class="dir-list">';
+    for (const name of dirs) {
+      const full = currentDir ? `${currentDir}/${name}` : name;
+      html += `<div class="dir-card" onclick="goDir('${esc(full)}')"><span class="dir-icon">&#128193;</span> ${esc(name)}/</div>`;
+    }
+    html += '</div>';
+  }
+
+  if (notes.length) {
+    html += notes.map(n => `
+      <div class="note-card" onclick="go('view','${n.id}')">
+        <div class="title">${esc(n.title)}</div>
+        <div class="meta">${formatDate(n.updated_at)}</div>
+        ${n.tags.length ? `<div class="tags">${n.tags.map(t => `<span>#${esc(t)}</span>`).join('')}</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  app.innerHTML = html;
 }
 
 async function renderView(id) {
   document.getElementById('fab').style.display = 'none';
+  updateBreadcrumb();
   const n = await api(`/api/notes/${id}`);
   if (!n) { go('list'); return; }
+
+  const dirInfo = n.directory
+    ? `<span class="dir-badge" onclick="goDir('${esc(n.directory)}')">${esc(n.directory)}/</span> &middot; `
+    : '';
 
   const app = document.getElementById('app');
   app.innerHTML = `
     <button class="back-btn" onclick="history.back()">&larr; Back</button>
     <div class="note-view">
       <h2>${esc(n.title)}</h2>
-      <div class="meta">${formatDate(n.created_at)} &middot; Updated ${formatDate(n.updated_at)}</div>
+      <div class="meta">${dirInfo}${formatDate(n.created_at)} &middot; Updated ${formatDate(n.updated_at)}</div>
       ${n.tags.length ? `<div class="tags">${n.tags.map(t => `<span>#${esc(t)}</span>`).join('')}</div>` : ''}
       <div class="body">${renderBody(n)}</div>
       <div class="actions">
         <button class="btn btn-primary" onclick="go('edit','${n.id}')">Edit</button>
+        <button class="btn btn-secondary" onclick="promptMove('${n.id}')">Move</button>
         <button class="btn btn-danger" onclick="confirmDelete('${n.id}')">Delete</button>
       </div>
     </div>
@@ -272,11 +361,14 @@ document.getElementById('app').addEventListener('click', async (e) => {
 
 async function renderNew() {
   document.getElementById('fab').style.display = 'none';
+  updateBreadcrumb();
+  const dirLabel = currentDir ? `Creating in <strong>${esc(currentDir)}/</strong>` : '';
   const app = document.getElementById('app');
   app.innerHTML = `
     <button class="back-btn" onclick="history.back()">&larr; Back</button>
     <div class="form-page">
       <h2>New Note</h2>
+      ${dirLabel ? `<p style="font-size:0.85em;color:var(--muted);margin-bottom:12px">${dirLabel}</p>` : ''}
       <div class="field"><label>Title</label><input id="f-title" placeholder="Note title"></div>
       <div class="field"><label>Tags (comma-separated)</label><input id="f-tags" placeholder="e.g. work, ideas"></div>
       <div class="field"><label>Body</label><textarea id="f-body" placeholder="Write in Markdown..."></textarea></div>
@@ -293,13 +385,14 @@ async function submitNew() {
   const body = document.getElementById('f-body').value;
   const n = await api('/api/notes', {
     method: 'POST',
-    body: JSON.stringify({ title, body, tags }),
+    body: JSON.stringify({ title, body, tags, directory: currentDir }),
   });
   go('view', n.id);
 }
 
 async function renderEdit(id) {
   document.getElementById('fab').style.display = 'none';
+  updateBreadcrumb();
   const n = await api(`/api/notes/${id}`);
   if (!n) { go('list'); return; }
 
@@ -332,14 +425,54 @@ async function submitEdit(id) {
 async function confirmDelete(id) {
   if (!confirm('Delete this note?')) return;
   await api(`/api/notes/${id}`, { method: 'DELETE' });
-  go('list');
+  goDir(currentDir);
+}
+
+async function promptMove(id) {
+  const dirs = await api('/api/dirs?parent=');
+  const allDirs = await getAllDirs();
+  let msg = 'Move to directory:\n\nAvailable directories:\n  / (root)';
+  for (const d of allDirs) {
+    msg += '\n  ' + d + '/';
+  }
+  msg += '\n\nEnter directory path (or / for root):';
+  const input = prompt(msg);
+  if (input === null) return;
+  const target = input.trim().replace(/^\/+|\/+$/g, '');
+  await api(`/api/notes/${id}/move`, {
+    method: 'POST',
+    body: JSON.stringify({ directory: target }),
+  });
+  renderView(id);
+}
+
+async function getAllDirs(parent = '', result = []) {
+  const dirs = await api(`/api/dirs?parent=${encodeURIComponent(parent)}`);
+  for (const name of dirs) {
+    const full = parent ? `${parent}/${name}` : name;
+    result.push(full);
+    await getAllDirs(full, result);
+  }
+  return result;
+}
+
+async function promptMkdir() {
+  const name = prompt('New folder name:');
+  if (!name || !name.trim()) return;
+  const path = currentDir ? `${currentDir}/${name.trim()}` : name.trim();
+  await api('/api/dirs', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+  goDir(currentDir);
 }
 
 async function renderSearch() {
   document.getElementById('fab').style.display = 'none';
+  updateBreadcrumb();
   const app = document.getElementById('app');
   app.innerHTML = `
-    <button class="back-btn" onclick="go('list')">&larr; Back</button>
+    <button class="back-btn" onclick="history.back()">&larr; Back</button>
     <div class="search-bar">
       <input id="search-input" type="search" placeholder="Search notes..." oninput="doSearch(this.value)">
     </div>
@@ -359,13 +492,14 @@ async function doSearch(q) {
   el.innerHTML = results.map(n => `
     <div class="note-card" onclick="go('view','${n.id}')">
       <div class="title">${esc(n.title)}</div>
-      <div class="meta">${formatDate(n.updated_at)}</div>
+      <div class="meta">${n.directory ? '<span class="dir-badge">' + esc(n.directory) + '/</span> &middot; ' : ''}${formatDate(n.updated_at)}</div>
     </div>
   `).join('');
 }
 
 async function renderTags() {
   document.getElementById('fab').style.display = 'none';
+  updateBreadcrumb();
   const tags = await api('/api/tags');
   const app = document.getElementById('app');
 
@@ -385,23 +519,39 @@ async function renderTags() {
 
 function filterTag(tag) {
   currentTag = tag;
-  go('list');
+  goDir(currentDir);
 }
 
 // ── Router ────────────────────────────────────────────────────────────────
 
 async function route() {
   const hash = location.hash.slice(1);
-  const [view, id] = hash.split('/');
 
-  currentTag = (view === '' && currentTag) ? currentTag : (view === '' ? null : currentTag);
-  if (view === '' || !view) { currentTag = currentTag; await renderList(); }
-  else if (view === 'view' && id) await renderView(id);
-  else if (view === 'new') await renderNew();
-  else if (view === 'edit' && id) await renderEdit(id);
-  else if (view === 'search') await renderSearch();
-  else if (view === 'tags') await renderTags();
-  else await renderList();
+  if (!hash || hash === 'list') {
+    currentDir = '';
+    currentTag = null;
+    await renderList();
+  } else if (hash === 'cd') {
+    currentDir = '';
+    currentTag = null;
+    await renderList();
+  } else if (hash.startsWith('cd/')) {
+    currentDir = decodeURIComponent(hash.slice(3));
+    currentTag = null;
+    await renderList();
+  } else if (hash.startsWith('view/')) {
+    await renderView(hash.slice(5));
+  } else if (hash === 'new') {
+    await renderNew();
+  } else if (hash.startsWith('edit/')) {
+    await renderEdit(hash.slice(5));
+  } else if (hash === 'search') {
+    await renderSearch();
+  } else if (hash === 'tags') {
+    await renderTags();
+  } else {
+    await renderList();
+  }
 }
 
 window.addEventListener('hashchange', route);

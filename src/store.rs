@@ -218,18 +218,6 @@ impl Store {
         note.toggle_checkbox(n)
     }
 
-    /// Update a note's body and bump its updated_at timestamp.
-    pub fn update_body(&mut self, id_prefix: &str, new_body: String) -> bool {
-        match self.find_note_mut(id_prefix) {
-            Some(note) => {
-                note.body = new_body;
-                note.updated_at = Utc::now();
-                true
-            }
-            None => false,
-        }
-    }
-
     // ── Directory operations ───────────────────────────────────────────────
 
     /// Create a directory and all parent directories. Returns true if any were created.
