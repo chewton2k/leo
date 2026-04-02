@@ -110,7 +110,7 @@ impl Store {
         notes
     }
 
-    /// Find a note by numeric index (1-based into the default list), full id, or unique prefix.
+    /// Find a note by numeric index (1-based into the default list), full id, unique prefix, or title.
     pub fn find_by_index_or_prefix(&self, input: &str) -> Option<&Note> {
         // Try as 1-based numeric index into the default sorted list
         if let Ok(n) = input.parse::<usize>() {
@@ -119,22 +119,35 @@ impl Store {
                 return Some(list[n - 1]);
             }
         }
-        // Fall back to ID prefix
-        self.find_note(input)
+        // Try ID prefix
+        if let Some(note) = self.find_note(input) {
+            return Some(note);
+        }
+        // Try title match (only if exactly one match)
+        let title_matches = self.find_by_title(input);
+        if title_matches.len() == 1 {
+            return Some(title_matches[0]);
+        }
+        None
     }
 
     /// Mutable version of find_by_index_or_prefix.
     pub fn find_by_index_or_prefix_mut(&mut self, input: &str) -> Option<&mut Note> {
-        // Try as 1-based numeric index into the default sorted list
-        if let Ok(n) = input.parse::<usize>() {
-            let list = self.list_notes(None, 20);
-            if n >= 1 && n <= list.len() {
-                let id = list[n - 1].id.clone();
-                return self.notes.iter_mut().find(|note| note.id == id);
-            }
-        }
-        // Fall back to ID prefix
-        self.find_note_mut(input)
+        // Resolve to an ID using the immutable path, then do a single mutable lookup
+        let id = self.find_by_index_or_prefix(input)?.id.clone();
+        self.notes.iter_mut().find(|note| note.id == id)
+    }
+
+    /// Find notes whose title contains the query (case-insensitive), sorted newest first.
+    pub fn find_by_title(&self, query: &str) -> Vec<&Note> {
+        let q = query.to_lowercase();
+        let mut matches: Vec<&Note> = self
+            .notes
+            .iter()
+            .filter(|n| n.title.to_lowercase().contains(&q))
+            .collect();
+        matches.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        matches
     }
 
     /// Find a note by full id or unique prefix.

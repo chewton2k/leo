@@ -14,6 +14,16 @@ const MAX_CHUNK_BYTES: u64 = 20 * 1024 * 1024;
 /// Chunk duration in seconds (~10 min of 16kHz mono 16-bit WAV ≈ 19MB).
 const CHUNK_SECONDS: u64 = 600;
 
+/// Get the actual duration of a WAV file in seconds using sox.
+fn wav_duration_secs(path: &Path) -> Option<u64> {
+    let output = Command::new("sox")
+        .args(["--i", "-D", path.to_str()?])
+        .output()
+        .ok()?;
+    let s = String::from_utf8_lossy(&output.stdout);
+    s.trim().parse::<f64>().ok().map(|d| d as u64)
+}
+
 fn openrouter_key() -> Result<String> {
     std::env::var("OPENROUTER_API_KEY").context(
         "OPENROUTER_API_KEY not set. Add it to your .env file:\n  OPENROUTER_API_KEY=sk-or-...",
@@ -34,8 +44,9 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
         return transcribe_single(audio_path);
     }
 
-    // WAV 16kHz mono 16-bit ≈ 32000 bytes/sec (44-byte header)
-    let approx_duration = (file_size.saturating_sub(44)) / 32000;
+    // Get actual duration from WAV header; fall back to byte-rate estimate
+    let approx_duration = wav_duration_secs(audio_path)
+        .unwrap_or_else(|| (file_size.saturating_sub(44)) / 32000);
     let num_chunks = (approx_duration / CHUNK_SECONDS) + 1;
 
     eprintln!(
@@ -76,6 +87,11 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
             Err(_) => false,
         };
         if !ok {
+            eprintln!(
+                "  {}",
+                format!("Chunk {}/{} — sox trim failed, stopping.", i + 1, num_chunks)
+                    .yellow()
+            );
             break;
         }
 
@@ -83,6 +99,16 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
         let chunk_size = std::fs::metadata(&chunk_path).map(|m| m.len()).unwrap_or(0);
         if chunk_size < 100 {
             let _ = std::fs::remove_file(&chunk_path);
+            eprintln!(
+                "  {}",
+                format!(
+                    "Chunk {}/{} — empty ({}B), no more audio. Stopping.",
+                    i + 1,
+                    num_chunks,
+                    chunk_size
+                )
+                .yellow()
+            );
             break;
         }
 
@@ -129,10 +155,11 @@ pub fn structure_notes(transcript: &str) -> Result<(String, String)> {
          - Follow it with a blank line, then the structured body\n\
          - Use bullet points (- ) for key points\n\
          - Use checkboxes (- [ ] ) for action items or to-dos mentioned\n\
-         - Make diagrams or charts when appropriate\n\
+         - Make tables when grouping like ideas\n\
          - Group related points under ## headings\n\
-         - There will sometimes be noise in the transcription so make sure to filter out any extraneous information \n\
-         - Keep it concise but don't lose important details\n\n\
+         - There will sometimes be noise in the transcription so make sure to filter out any extraneous information not related to the main topic \n\
+         - Interweave your own notes with the structured output where you deem helpful \n\
+         - Don't lose important details and capture notes that are meaningful\n\n\
          Transcript:\n{transcript}"
     );
 

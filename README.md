@@ -12,17 +12,13 @@ cd leo
 cargo install --path .
 ```
 
-## Reinstall & uninstall
-
 ```sh
-# Reinstall after making changes (overwrites the existing binary)
+# Reinstall after changes
 cargo install --path . --force
 
-# Uninstall
+# Uninstall (won't delete your notes)
 cargo uninstall leo
 ```
-
-The binary lives at `~/.cargo/bin/leo` — there's only ever one copy. Uninstalling won't delete your notes.
 
 ## Setup
 
@@ -33,11 +29,7 @@ cp .env.example .env
 # Then edit .env with your key
 ```
 
-```
-OPENROUTER_API_KEY=sk-or-your-key-here
-```
-
-The API key is required for the `listen` command (audio transcription + note structuring). All other commands work without it.
+The API key is required for `listen` (audio transcription + note structuring). All other commands work without it.
 
 ### Optional dependencies
 
@@ -52,161 +44,150 @@ The API key is required for the `listen` command (audio transcription + note str
 leo
 ```
 
-That drops you into an interactive session:
+This drops you into an interactive session:
 
 ```
   leo — notes for programmers
   0 notes · Type help to get started
 
-leo> new
-  Title: Rust ownership notes
-  Tags (comma-separated, enter to skip): rust, learning
-  Body (empty line to finish):
-  | Each value has exactly one owner.
-  | When the owner goes out of scope, the value is dropped.
-  |
+leo> new Rust ownership notes
+  (opens $EDITOR with a template — write your note, save, and quit)
   Created 3f2a1b4c
 
 leo> list
     1  3f2a1b4c  2024-03-30 10:30  Rust ownership notes  [rust, learning]
 
 leo> view 1
-────────────────────────────────────────────────────────────
-Title: Rust ownership notes
-ID:    3f2a1b4c-...
-Tags:  rust, learning
-...
-
+leo> edit 1
 leo> quit
-Goodbye!
 ```
 
 After `list` or `search`, notes are numbered — use `view 1`, `edit 2`, `delete 3` instead of typing IDs.
 
 ## Commands
 
+### Notes
+
 | Command | What it does | Shortcut |
 |---------|-------------|----------|
-| `new [title]` | Create a new note | `n` |
-| `list [#tag] [N]` | List recent notes, filter by tag, limit count | `ls`, `l` |
-| `view <note>` | View a note's full content | `v` |
-| `edit <note>` | Edit note body in `$EDITOR` | `e` |
-| `delete <note>` | Delete a note (with confirmation) | `rm`, `del`, `d` |
-| `check <note> <N>` | Toggle checkbox N in a note | `x` |
+| `new [title]` | Create a note (opens `$EDITOR`) | `n` |
+| `list [#tag] [N]` | List notes, optionally filter by tag or limit count | `ls`, `l` |
+| `view <note>` | View a note | `v` |
+| `edit <note>` | Edit a note in `$EDITOR` | `e` |
+| `delete <note>` | Delete a note | `rm`, `del`, `d` |
+| `check <note> <N>` | Toggle checkbox N | `x` |
 | `search <query>` | Search note titles | `find` |
 | `search -f <query>` | Full-text search (titles + bodies) | |
-| `tags` | Show all tags and their counts | |
-| `clear` | Clear the screen | |
-| `help` | Show all commands | `h`, `?` |
-| `exit` | Exit | `q`, `quit` |
+| `tags` | Show all tags with counts | |
 
 `<note>` can be a list number (`view 1`) or an ID prefix (`view 3f2a`).
 
-## AI Features
+### Directories
 
-### Reminders
-
-Add reminders naturally — leo keeps them all in a single "Reminders" note with checkboxes you can toggle:
+Organize notes into directories:
 
 ```
-leo> remind me to buy groceries
-  Added buy groceries
-
-leo> hey leo remind me to call mom
-  Added call mom
-
-leo> remind submit homework by friday
-  Added submit homework by friday
+leo> mkdir cs130
+leo> cd cs130
+leo cs130> new Lecture 1
+leo cs130> cd ..
+leo> mv 1 cs130
 ```
 
-All reminders are stored as checkboxes (`- [ ] ...`) in a note tagged `#reminder`. Use `check` to mark them done.
+| Command | What it does |
+|---------|-------------|
+| `mkdir <name>` | Create a directory |
+| `cd <dir>` | Change directory (`..`, `/` supported) |
+| `pwd` | Show current directory |
+| `mv <note>... <dir>` | Move notes to a directory |
+| `rmdir <name>` | Remove an empty directory |
 
-You can also say `hey leo remind me to ...` for a more natural feel — the `hey leo` prefix is recognized automatically.
+### Creating notes
 
-### Listen (AI-powered class/meeting notes)
+`new` opens your `$EDITOR` with a frontmatter template:
 
-Record audio from your microphone and let AI transcribe and structure it into organized notes:
+```markdown
+---
+title: My Note
+tags: rust, learning
+---
+Write your note here. Full markdown supported.
 
-```
-leo> listen
-  Recording... press Enter to stop
-
-  Recording stopped. (~45s, 1.4MB)
-  Transcribing...
-  Structuring notes...
-  Created "Intro to Machine Learning — Lecture 3" a1b2c3d4
-  Use 'export <note> <format>' to export this note.
-```
-
-Provide a custom title if you want:
-
-```
-leo> listen CS 101 Lecture
+- [ ] Checkboxes work
+- [ ] Like this
 ```
 
-Notes created by `listen` are tagged `#listen` and contain AI-structured content with headings, bullet points, and action items extracted from the transcript.
+Save and quit to create the note. Empty body cancels.
 
-**Requirements:** `OPENROUTER_API_KEY` in `.env` + SoX installed (`brew install sox`).
+### Checklists
 
-### Export
-
-Export any note to a file on your Desktop:
+Notes support markdown checkboxes and bullets:
 
 ```
-leo> export 1 md
-  Exported /Users/you/Desktop/My-Note.md
-
-leo> export 1 txt
-  Exported /Users/you/Desktop/My-Note.txt
-
-leo> export 1 html
-  Exported /Users/you/Desktop/My-Note.html
-
-leo> export 1 docx
-  Exported /Users/you/Desktop/My-Note.docx
-```
-
-| Format | How |
-|--------|-----|
-| `txt` | Plain text with metadata |
-| `md` | Markdown (native) |
-| `html` | Standalone HTML with styling |
-| `docx`, `pdf`, `rtf`, `odt` | Via Pandoc (`brew install pandoc`) |
-
-## Checklists
-
-Notes support markdown-style checkboxes and bullet lists:
-
-```
-leo> new Todo
-  Tags: work
-  Body (empty line to finish):
-  | - [ ] Write tests
-  | - [ ] Update docs
-  | - [x] Fix login bug
-  | - Remember to deploy
-  |
-  Created a1b2c3d4
-
 leo> view 1
-  ...
   [1] ☐ Write tests
-  [2] ☐ Update docs
-  [3] ☑ Fix login bug
+  [2] ☑ Fix login bug
   • Remember to deploy
 
 leo> check 1 1
   ☑ Write tests
 ```
 
-Checkboxes are numbered in `view` so you can toggle them with `check <note> <N>`.
+## AI features
+
+### Reminders
+
+```
+leo> remind me to buy groceries
+leo> hey leo remind me to call mom
+```
+
+Reminders are stored as checkboxes in a `#reminder` note. Toggle with `check`.
+
+### Listen (speech-to-notes)
+
+Record audio and get AI-structured notes:
+
+```
+leo> listen
+  Recording... press Enter to stop
+  Transcribing...
+  Created "Intro to ML — Lecture 3" a1b2c3d4
+
+leo> listen CS 101 Lecture       # custom title
+leo> listen add 1                # append to existing note
+```
+
+**Requires:** `OPENROUTER_API_KEY` + SoX (`brew install sox`).
+
+### Export
+
+```
+leo> export 1 md
+  Exported /Users/you/Desktop/My-Note.md
+```
+
+Formats: `txt`, `md`, `html`, `docx`, `pdf`, `rtf`, `odt` (last four need Pandoc).
+
+### Serve
+
+Access your notes from your phone or browser:
+
+```
+leo> serve
+# or from the CLI:
+leo serve --port 3131
+```
+
+Opens a web UI with a QR code for easy phone access on your local network.
 
 ## Scripting
 
-For scripts and one-liners, subcommands still work:
+All commands work as CLI subcommands for scripts and one-liners:
 
 ```sh
 leo new "Quick thought" --body "Remember to refactor auth" --tags todo
+leo new "Meeting notes"          # opens $EDITOR when --body is omitted
 leo list --tag todo
 leo search "refactor" --full-text
 leo delete 3f2a --force
@@ -224,8 +205,6 @@ Notes are stored as a single JSON file:
 | macOS | `~/Library/Application Support/leo/notes.json` |
 | Linux | `~/.local/share/leo/notes.json` |
 | Windows | `%APPDATA%\leo\notes.json` |
-
-Command history is saved alongside at `history.txt`.
 
 ## License
 

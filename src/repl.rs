@@ -174,7 +174,9 @@ pub fn run() -> Result<()> {
 
 // ── ID resolution ───────────────────────────────────────────────────────────
 
-/// Resolve user input to a note ID. Tries list number first, then ID prefix.
+/// Resolve user input to a note ID.
+/// Tries: list number → ID prefix → title match.
+/// Prints its own error/disambiguation messages and returns None on failure.
 fn resolve_id(input: &str, store: &Store, last_results: &[String]) -> Option<String> {
     // Try as 1-based index into last list/search results
     if let Ok(n) = input.parse::<usize>() {
@@ -185,12 +187,42 @@ fn resolve_id(input: &str, store: &Store, last_results: &[String]) -> Option<Str
             }
         }
     }
-    // Fall back to ID prefix
+    // Try ID prefix
     if store.find_note(input).is_some() {
-        Some(input.to_string())
-    } else {
-        None
+        return Some(input.to_string());
     }
+    // Try title match (case-insensitive substring)
+    let matches = store.find_by_title(input);
+    if matches.len() == 1 {
+        return Some(matches[0].id.clone());
+    }
+    if matches.len() > 1 {
+        println!(
+            "  {}",
+            format!("Multiple notes match \"{input}\":").yellow()
+        );
+        for note in &matches {
+            let pos = last_results.iter().position(|id| id == &note.id);
+            let pos_str = match pos {
+                Some(p) => format!("{:>3}", p + 1),
+                None => "   ".to_string(),
+            };
+            println!(
+                "  {} {} {}",
+                pos_str.yellow(),
+                note.id[..8].dimmed(),
+                note.title.bold(),
+            );
+        }
+        println!(
+            "  {}",
+            "Use a number or ID prefix to pick one.".dimmed()
+        );
+        return None;
+    }
+    // Not found
+    println!("  {}", format!("No note found: {input}").red());
+    None
 }
 
 // ── Welcome & help ──────────────────────────────────────────────────────────
@@ -345,34 +377,37 @@ fn cmd_new(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> 
         args.join(" ")
     };
 
-    print!("  {}: ", "Tags (comma-separated, enter to skip)".dimmed());
-    io::stdout().flush()?;
-    let mut tags_buf = String::new();
-    io::stdin().read_line(&mut tags_buf)?;
-    let tags: Vec<String> = tags_buf
-        .trim()
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| "vim".to_string());
 
-    println!(
-        "  {} {}",
-        "Body".dimmed(),
-        "(empty line to finish):".dimmed()
+    let tmp_path = std::env::temp_dir().join(format!("leo-new-{}.md", uuid::Uuid::new_v4()));
+    let file_content = format!(
+        "---\ntitle: {}\ntags: \n---\n",
+        title,
     );
-    let mut body_lines = Vec::new();
-    loop {
-        print!("  {} ", "|".dimmed());
-        io::stdout().flush()?;
-        let mut line = String::new();
-        io::stdin().read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-        body_lines.push(line.trim_end().to_string());
+    std::fs::write(&tmp_path, &file_content)?;
+
+    let status = std::process::Command::new(&editor)
+        .arg(&tmp_path)
+        .status()?;
+
+    if !status.success() {
+        println!("  {}", "Editor exited with an error.".red());
+        let _ = std::fs::remove_file(&tmp_path);
+        return Ok(());
     }
-    let body = body_lines.join("\n");
+
+    let raw = std::fs::read_to_string(&tmp_path)?;
+    let _ = std::fs::remove_file(&tmp_path);
+
+    let (new_title, tags, body) = parse_frontmatter(&raw);
+    let title = if new_title.is_empty() { title } else { new_title };
+
+    if body.trim().is_empty() {
+        println!("  {}", "Empty note, cancelled.".dimmed());
+        return Ok(());
+    }
 
     let note = store.create_note(title, body, tags, current_dir)?;
     let short = note.id[..8].to_string();
@@ -429,9 +464,9 @@ fn cmd_view(store: &Store, args: &[String], last_results: &[String]) {
         println!("  Usage: view <note>");
         return;
     }
-    match resolve_id(&args[0], store, last_results) {
-        Some(id) => store.find_note(&id).unwrap().print_full(),
-        None => println!("  {}", format!("No note found: {}", args[0]).red()),
+    let input = args.join(" ");
+    if let Some(id) = resolve_id(&input, store, last_results) {
+        store.find_note(&id).unwrap().print_full();
     }
 }
 
@@ -441,12 +476,10 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
         return Ok(());
     }
 
-    let id = match resolve_id(&args[0], store, last_results) {
+    let input = args.join(" ");
+    let id = match resolve_id(&input, store, last_results) {
         Some(id) => id,
-        None => {
-            println!("  {}", format!("No note found: {}", args[0]).red());
-            return Ok(());
-        }
+        None => return Ok(()),
     };
 
     let (old_title, old_tags, old_body) = {
@@ -556,12 +589,10 @@ fn cmd_delete(store: &mut Store, args: &[String], last_results: &[String]) -> Re
         return Ok(());
     }
 
-    let id = match resolve_id(&args[0], store, last_results) {
+    let input = args.join(" ");
+    let id = match resolve_id(&input, store, last_results) {
         Some(id) => id,
-        None => {
-            println!("  {}", format!("No note found: {}", args[0]).red());
-            return Ok(());
-        }
+        None => return Ok(()),
     };
 
     let title = store.find_note(&id).unwrap().title.clone();
@@ -589,15 +620,14 @@ fn cmd_check(store: &mut Store, args: &[String], last_results: &[String]) -> Res
         return Ok(());
     }
 
-    let id = match resolve_id(&args[0], store, last_results) {
+    // Last arg is the checkbox number, everything before is the note reference
+    let note_input = args[..args.len() - 1].join(" ");
+    let id = match resolve_id(&note_input, store, last_results) {
         Some(id) => id,
-        None => {
-            println!("  {}", format!("No note found: {}", args[0]).red());
-            return Ok(());
-        }
+        None => return Ok(()),
     };
 
-    let n: usize = match args[1].parse() {
+    let n: usize = match args.last().unwrap().parse() {
         Ok(n) if n >= 1 => n,
         _ => {
             println!("  {}", "Checkbox number must be a positive integer.".red());
@@ -702,13 +732,13 @@ fn cmd_listen(store: &mut Store, args: &[String], current_dir: &str) -> Result<(
             println!("  Usage: listen add <note>");
             return Ok(());
         }
-        let target = &args[1];
+        let target = args[1..].join(" ");
         // Validate the note exists before recording
-        if store.find_by_index_or_prefix(target).is_none() {
+        if store.find_by_index_or_prefix(&target).is_none() {
             println!("  {} No note found: {}", "Error:".red(), target);
             return Ok(());
         }
-        Some(target.clone())
+        Some(target)
     } else {
         None
     };
@@ -783,16 +813,15 @@ fn cmd_export(store: &Store, args: &[String], last_results: &[String]) -> Result
         return Ok(());
     }
 
-    let id = match resolve_id(&args[0], store, last_results) {
+    // Last arg is the format, everything before is the note reference
+    let format = args.last().unwrap().to_lowercase();
+    let note_input = args[..args.len() - 1].join(" ");
+    let id = match resolve_id(&note_input, store, last_results) {
         Some(id) => id,
-        None => {
-            println!("  {}", format!("No note found: {}", args[0]).red());
-            return Ok(());
-        }
+        None => return Ok(()),
     };
 
     let note = store.find_note(&id).unwrap();
-    let format = args[1].to_lowercase();
     let format = format.trim_start_matches('.');
 
     // Export to Desktop > Home > current dir
@@ -938,10 +967,7 @@ fn cmd_mv(store: &mut Store, args: &[String], last_results: &[String]) -> Result
     for arg in note_args {
         let id = match resolve_id(arg, store, last_results) {
             Some(id) => id,
-            None => {
-                println!("  {}", format!("No note found: {arg}").red());
-                continue;
-            }
+            None => continue,
         };
 
         match store.move_note(&id, target_dir) {

@@ -138,9 +138,43 @@ fn run_command(cmd: Commands) -> Result<()> {
 
     match cmd {
         Commands::New { title, body, tags } => {
-            let body = body.unwrap_or_default();
-            let note = store.create_note(title, body, tags, "")?;
-            println!("Created note {}", &note.id[..8]);
+            if let Some(body) = body {
+                let note = store.create_note(title, body, tags, "")?;
+                println!("Created note {}", &note.id[..8]);
+            } else {
+                // Open $EDITOR for the body
+                let editor = std::env::var("EDITOR")
+                    .or_else(|_| std::env::var("VISUAL"))
+                    .unwrap_or_else(|_| "vim".to_string());
+
+                let tmp = std::env::temp_dir().join(format!("leo-new-{}.md", uuid::Uuid::new_v4()));
+                let file_content = format!(
+                    "---\ntitle: {}\ntags: {}\n---\n",
+                    title,
+                    tags.join(", "),
+                );
+                std::fs::write(&tmp, &file_content)?;
+
+                let status = std::process::Command::new(&editor).arg(&tmp).status()?;
+
+                if status.success() {
+                    let raw = std::fs::read_to_string(&tmp)?;
+                    let _ = std::fs::remove_file(&tmp);
+                    let (new_title, new_tags, body) = repl::parse_frontmatter(&raw);
+                    let title = if new_title.is_empty() { title } else { new_title };
+                    let tags = if new_tags.is_empty() { tags } else { new_tags };
+
+                    if body.trim().is_empty() {
+                        println!("Empty note, cancelled.");
+                    } else {
+                        let note = store.create_note(title, body, tags, "")?;
+                        println!("Created note {}", &note.id[..8]);
+                    }
+                } else {
+                    let _ = std::fs::remove_file(&tmp);
+                    eprintln!("Editor exited with error.");
+                }
+            }
         }
 
         Commands::List { tag, limit } => {

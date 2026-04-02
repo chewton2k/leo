@@ -85,7 +85,14 @@ pub fn record_audio() -> Result<PathBuf> {
     }
 
     let size = std::fs::metadata(&tmp_path)?.len();
-    let file_secs = size / (16000 * 2); // 16kHz, 16-bit mono
+    // Get actual duration from WAV header via sox; fall back to byte-rate estimate
+    let file_secs = Command::new("sox")
+        .args(["--i", "-D", tmp_path.to_str().unwrap()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok())
+        .map(|d| d as u64)
+        .unwrap_or_else(|| size / (16000 * 2));
     let file_mins = file_secs / 60;
     let duration = if file_mins > 0 {
         format!("~{}m{}s", file_mins, file_secs % 60)
