@@ -124,6 +124,12 @@ pub fn run() -> Result<()> {
                         r
                     }
                     "rmdir" => cmd_rmdir(&mut store, args, &current_dir),
+                    "env" => {
+                        if let Err(e) = crate::open_env_file() {
+                            eprintln!("  {}: {e}", "error".red());
+                        }
+                        Ok(())
+                    }
                     "clear" => {
                         print!("\x1b[2J\x1b[H");
                         io::stdout().flush().ok();
@@ -326,6 +332,10 @@ fn print_help() {
     );
     println!();
     println!("  {}", "Other:".bold());
+    println!(
+        "    {:<24} Edit API keys",
+        "env".cyan()
+    );
     println!(
         "    {:<24} Clear the screen",
         "clear".cyan()

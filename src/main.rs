@@ -8,7 +8,7 @@ mod web;
 
 use std::io::IsTerminal;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 /// leo — notes for programmers.
@@ -111,9 +111,17 @@ enum Commands {
         #[arg(short, long, default_value_t = 3131)]
         port: u16,
     },
+
+    /// Open the .env config file to set API keys
+    Env,
 }
 
 fn main() -> Result<()> {
+    // Load .env from the leo data directory so the installed binary finds it
+    // regardless of working directory. Also try current directory for development.
+    if let Some(data_dir) = dirs::data_dir() {
+        dotenvy::from_path(data_dir.join("leo").join(".env")).ok();
+    }
     dotenvy::dotenv().ok();
     let cli = Cli::parse();
 
@@ -121,6 +129,7 @@ fn main() -> Result<()> {
         Some(Commands::Serve { port }) => {
             tokio::runtime::Runtime::new()?.block_on(web::serve(port))
         }
+        Some(Commands::Env) => open_env_file(),
         None => {
             if std::io::stdin().is_terminal() {
                 repl::run()
@@ -358,9 +367,42 @@ fn run_command(cmd: Commands) -> Result<()> {
             println!("Exported to {}", path.display());
         }
 
-        Commands::Serve { .. } => unreachable!("handled in main()"),
+        Commands::Serve { .. } | Commands::Env => unreachable!("handled in main()"),
     }
 
     store.save()?;
+    Ok(())
+}
+
+pub fn open_env_file() -> Result<()> {
+    let env_path = dirs::data_dir()
+        .context("Could not determine user data directory")?
+        .join("leo")
+        .join(".env");
+
+    if let Some(parent) = env_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    if !env_path.exists() {
+        std::fs::write(
+            &env_path,
+            "# leo API keys\n\
+             # Get your OpenRouter key at https://openrouter.ai/keys\n\
+             OPENROUTER_API_KEY=\n\
+             \n\
+             # Get your Hugging Face key at https://huggingface.co/settings/tokens\n\
+             HF_API_KEY=\n",
+        )?;
+    }
+
+    let editor = std::env::var("EDITOR")
+        .or_else(|_| std::env::var("VISUAL"))
+        .unwrap_or_else(|_| "vim".to_string());
+
+    std::process::Command::new(&editor)
+        .arg(&env_path)
+        .status()?;
+
     Ok(())
 }

@@ -1,6 +1,8 @@
 .claude*
 .env
-target*
-.DS_Store
-todo.md
 .agents
+.DS_Store
+
+target*
+todo.md
+CLAUDE.md
