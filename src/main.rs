@@ -105,6 +105,12 @@ enum Commands {
         format: String,
     },
 
+    /// Expand all @leo prompts in a note using AI
+    Ask {
+        /// Note ID (or unique prefix)
+        id: String,
+    },
+
     /// Start a web server to view/edit notes from your phone
     Serve {
         /// Port to listen on
@@ -232,28 +238,38 @@ fn run_command(cmd: Commands) -> Result<()> {
             std::fs::write(&tmp, &file_content)?;
 
             let status = std::process::Command::new(&editor).arg(&tmp).status()?;
-
-            if status.success() {
-                let raw = std::fs::read_to_string(&tmp)?;
-                let _ = std::fs::remove_file(&tmp);
-                let (new_title, new_tags, new_body) = repl::parse_frontmatter(&raw);
-
-                if new_title == old_title
-                    && new_tags == old_tags
-                    && new_body.trim() == old_body.trim()
-                {
-                    println!("No changes.");
-                } else {
-                    let note = store.find_note_mut(&id).unwrap();
-                    note.title = new_title;
-                    note.tags = new_tags;
-                    note.body = new_body;
-                    note.updated_at = chrono::Utc::now();
-                    println!("Updated \"{}\".", note.title);
-                }
-            } else {
+            if !status.success() {
                 let _ = std::fs::remove_file(&tmp);
                 eprintln!("Editor exited with error.");
+                return Ok(());
+            }
+
+            let raw = std::fs::read_to_string(&tmp)?;
+            let _ = std::fs::remove_file(&tmp);
+            let (parsed_title, tags, mut body) = repl::parse_frontmatter(&raw);
+            let title = if parsed_title.is_empty() { old_title.clone() } else { parsed_title };
+
+            // Expand any @leo prompts in one pass, then save
+            let leo_count = body.lines().filter(|l| repl::is_leo_prompt(l).is_some()).count();
+            if leo_count > 0 {
+                println!(
+                    "Expanding {} prompt{}...",
+                    leo_count,
+                    if leo_count == 1 { "" } else { "s" }
+                );
+                let (expanded, _) = repl::expand_leo_prompts(&body, &title)?;
+                body = expanded;
+            }
+
+            if title != old_title || tags != old_tags || body.trim() != old_body.trim() {
+                let note = store.find_note_mut(&id).unwrap();
+                note.title = title.clone();
+                note.tags = tags;
+                note.body = body;
+                note.updated_at = chrono::Utc::now();
+                println!("Updated \"{}\".", title);
+            } else {
+                println!("No changes.");
             }
         }
 
@@ -367,6 +383,34 @@ fn run_command(cmd: Commands) -> Result<()> {
             println!("Exported to {}", path.display());
         }
 
+        Commands::Ask { id } => {
+            let (note_id, title, body) = match store.find_by_index_or_prefix(&id) {
+                Some(n) => (n.id.clone(), n.title.clone(), n.body.clone()),
+                None => {
+                    eprintln!("No note found: {id}");
+                    return Ok(());
+                }
+            };
+
+            let leo_count = body.lines().filter(|l| repl::is_leo_prompt(l).is_some()).count();
+            if leo_count == 0 {
+                println!("No @leo prompts found in this note.");
+                return Ok(());
+            }
+
+            println!(
+                "Expanding {} prompt{}...",
+                leo_count,
+                if leo_count == 1 { "" } else { "s" }
+            );
+            let (expanded_body, _) = repl::expand_leo_prompts(&body, &title)?;
+
+            let note = store.find_note_mut(&note_id).unwrap();
+            note.body = expanded_body;
+            note.updated_at = chrono::Utc::now();
+            println!("Updated \"{}\" {}", note.title, &note.id[..8]);
+        }
+
         Commands::Serve { .. } | Commands::Env => unreachable!("handled in main()"),
     }
 
@@ -392,7 +436,10 @@ pub fn open_env_file() -> Result<()> {
              OPENROUTER_API_KEY=\n\
              \n\
              # Get your Hugging Face key at https://huggingface.co/settings/tokens\n\
-             HF_API_KEY=\n",
+             HF_API_KEY=\n\
+             \n\
+             # Get your Groq key at https://console.groq.com/keys (fallback transcription)\n\
+             GROQ_API_KEY=\n",
         )?;
     }
 

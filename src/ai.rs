@@ -7,6 +7,7 @@ use colored::Colorize;
 const OPENROUTER_BASE: &str = "https://openrouter.ai/api/v1";
 const HF_WHISPER_URL: &str =
     "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3-turbo";
+const GROQ_WHISPER_URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 const DEFAULT_CHAT_MODEL: &str = "google/gemini-2.5-flash";
 
 /// Max file size per chunk for transcription APIs (~20MB, with headroom).
@@ -122,7 +123,7 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
             format!("Transcribing chunk {}/{}...", i + 1, num_chunks).cyan()
         );
 
-        let result = transcribe_huggingface(&chunk_path);
+        let result = transcribe_with_fallback(&chunk_path);
         let _ = std::fs::remove_file(&chunk_path);
 
         match result {
@@ -277,8 +278,23 @@ pub fn structure_notes_append(transcript: &str, existing_body: &str) -> Result<S
 
 // ── Transcription ─────────────────────────────────────────────────────────
 
+/// Try HF first; on 402 (credits exhausted) fall back to Groq automatically.
+fn transcribe_with_fallback(audio_path: &Path) -> Result<String> {
+    match transcribe_huggingface(audio_path) {
+        Ok(text) => Ok(text),
+        Err(e) if e.to_string().contains("402") => {
+            eprintln!(
+                "  {}",
+                "HF credits exhausted, switching to Groq...".yellow()
+            );
+            transcribe_groq(audio_path)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 fn transcribe_single(audio_path: &Path) -> Result<String> {
-    transcribe_huggingface(audio_path)
+    transcribe_with_fallback(audio_path)
 }
 
 fn transcribe_huggingface(audio_path: &Path) -> Result<String> {
@@ -311,5 +327,123 @@ fn transcribe_huggingface(audio_path: &Path) -> Result<String> {
         .as_str()
         .map(|s| s.trim().to_string())
         .context("Unexpected Hugging Face API response format")
+}
+
+fn transcribe_groq(audio_path: &Path) -> Result<String> {
+    let token = std::env::var("GROQ_API_KEY").context(
+        "GROQ_API_KEY not set. Add it to your .env file:\n  GROQ_API_KEY=gsk_...",
+    )?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(180))
+        .build()?;
+
+    let file_name = audio_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("audio.wav")
+        .to_string();
+    let file_bytes = std::fs::read(audio_path)?;
+
+    let form = reqwest::blocking::multipart::Form::new()
+        .text("model", "whisper-large-v3-turbo")
+        .part(
+            "file",
+            reqwest::blocking::multipart::Part::bytes(file_bytes)
+                .file_name(file_name)
+                .mime_str("audio/wav")?,
+        );
+
+    let resp = client
+        .post(GROQ_WHISPER_URL)
+        .header("Authorization", format!("Bearer {token}"))
+        .multipart(form)
+        .send()
+        .context("Failed to reach Groq API")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!("Groq transcription error ({status}): {body}");
+    }
+
+    let json: serde_json::Value = resp.json()?;
+    json["text"]
+        .as_str()
+        .map(|s| s.trim().to_string())
+        .context("Unexpected Groq API response format")
+}
+
+/// Expand a single `@leo` prompt in-place, using the full note as background context
+/// and nearby lines as local context.
+pub fn expand_prompt(
+    question: &str,
+    local_context: &str,
+    note_title: &str,
+    full_body: &str,
+) -> Result<String> {
+    let key = openrouter_key()?;
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?;
+
+    let prompt = format!(
+        "You are a note-taking assistant helping expand a specific section of lecture notes.\n\n\
+         Topic: {note_title}\n\n\
+         Full lecture notes (for background):\n{full_body}\n\n\
+         Local context around the question:\n{local_context}\n\n\
+         Question to expand on:\n{question}\n\n\
+         Rules:\n\
+         - Answer concisely in markdown (bullet points, short paragraphs)\n\
+         - Tie your answer back to the lecture context where relevant\n\
+         - Do not repeat what's already in the notes\n\
+         - Return only the expanded content, no preamble"
+    );
+
+    let body = serde_json::json!({
+        "model": chat_model(),
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 2000
+    });
+
+    let url = format!("{OPENROUTER_BASE}/chat/completions");
+
+    let resp = client
+        .post(&url)
+        .header("Authorization", format!("Bearer {key}"))
+        .header("HTTP-Referer", "https://github.com/leo-cli")
+        .header("X-Title", "leo")
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .context("Failed to reach OpenRouter API")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!("OpenRouter API error ({status}): {body}");
+    }
+
+    let json: serde_json::Value = resp.json()?;
+    let content = json["choices"][0]["message"]["content"]
+        .as_str()
+        .context("Unexpected API response format")?;
+
+    Ok(content.trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Smoke-test: function exists and accepts the right types.
+    // Full integration test requires a live API key — run manually with `cargo run`.
+    #[test]
+    fn expand_prompt_signature_compiles() {
+        // If this compiles, the function signature is correct.
+        let _f: fn(&str, &str, &str, &str) -> anyhow::Result<String> = expand_prompt;
+    }
 }
 

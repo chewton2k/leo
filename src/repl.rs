@@ -95,6 +95,11 @@ pub fn run() -> Result<()> {
                         r
                     }
                     "export" | "exp" => cmd_export(&store, args, &last_results),
+                    "ask" | "expand" => {
+                        let r = cmd_ask(&mut store, args, &last_results);
+                        refresh = true;
+                        r
+                    }
                     "tags" => {
                         cmd_tags(&store);
                         Ok(())
@@ -327,6 +332,10 @@ fn print_help() {
         "listen add <note>".cyan()
     );
     println!(
+        "    {:<24} Expand @leo prompts in a note",
+        "ask <note>".cyan()
+    );
+    println!(
         "    {:<24} Export note to file",
         "export <note> <fmt>".cyan()
     );
@@ -506,7 +515,6 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
         &id[..std::cmp::min(8, id.len())]
     ));
 
-    // Write frontmatter + body so user can edit title, tags, and body
     let file_content = format!(
         "---\ntitle: {}\ntags: {}\n---\n{}",
         old_title,
@@ -527,20 +535,35 @@ fn cmd_edit(store: &mut Store, args: &[String], last_results: &[String]) -> Resu
 
     let raw = std::fs::read_to_string(&tmp_path)?;
     let _ = std::fs::remove_file(&tmp_path);
+    let (parsed_title, tags, mut body) = parse_frontmatter(&raw);
+    let title = if parsed_title.is_empty() { old_title.clone() } else { parsed_title };
 
-    let (new_title, new_tags, new_body) = parse_frontmatter(&raw);
+    // Expand any @leo prompts in one pass, then save
+    let leo_count = body.lines().filter(|l| is_leo_prompt(l).is_some()).count();
+    if leo_count > 0 {
+        eprintln!(
+            "  {}",
+            format!(
+                "Expanding {} prompt{}...",
+                leo_count,
+                if leo_count == 1 { "" } else { "s" }
+            )
+            .cyan()
+        );
+        let (expanded, _) = expand_leo_prompts(&body, &title)?;
+        body = expanded;
+    }
 
-    if new_title == old_title && new_tags == old_tags && new_body.trim() == old_body.trim() {
+    if title == old_title && tags == old_tags && body.trim() == old_body.trim() {
         println!("  {}", "No changes.".dimmed());
         return Ok(());
     }
 
     let note = store.find_note_mut(&id).unwrap();
-    note.title = new_title;
-    note.tags = new_tags;
-    note.body = new_body;
+    note.title = title.clone();
+    note.tags = tags;
+    note.body = body;
     note.updated_at = chrono::Utc::now();
-    let title = note.title.clone();
     store.save()?;
     println!("  {} {}", "Updated".green(), title);
     Ok(())
@@ -816,6 +839,57 @@ fn cmd_listen(store: &mut Store, args: &[String], current_dir: &str) -> Result<(
     Ok(())
 }
 
+fn cmd_ask(store: &mut Store, args: &[String], last_results: &[String]) -> Result<()> {
+    if args.is_empty() {
+        println!("  Usage: ask <note>");
+        return Ok(());
+    }
+
+    let input = args.join(" ");
+    let id = match resolve_id(&input, store, last_results) {
+        Some(id) => id,
+        None => return Ok(()),
+    };
+
+    let (title, body) = {
+        let note = store.find_note(&id).unwrap();
+        (note.title.clone(), note.body.clone())
+    };
+
+    let leo_count = body.lines().filter(|l| is_leo_prompt(l).is_some()).count();
+    if leo_count == 0 {
+        println!("  {}", "No @leo prompts found in this note.".dimmed());
+        return Ok(());
+    }
+
+    eprintln!(
+        "  {}",
+        format!(
+            "Expanding {} prompt{}...",
+            leo_count,
+            if leo_count == 1 { "" } else { "s" }
+        )
+        .cyan()
+    );
+
+    let (expanded_body, _) = expand_leo_prompts(&body, &title)?;
+
+    let note = store.find_note_mut(&id).unwrap();
+    note.body = expanded_body;
+    note.updated_at = chrono::Utc::now();
+    let short = note.id[..8].to_string();
+    let title = note.title.clone();
+    store.save()?;
+
+    println!(
+        "  {} \"{}\" {}",
+        "Updated".green(),
+        title.bold(),
+        short.dimmed()
+    );
+    Ok(())
+}
+
 fn cmd_export(store: &Store, args: &[String], last_results: &[String]) -> Result<()> {
     if args.len() < 2 {
         println!("  Usage: export <note> <format>");
@@ -1023,6 +1097,65 @@ fn cmd_rmdir(store: &mut Store, args: &[String], current_dir: &str) -> Result<()
     Ok(())
 }
 
+// ── Inline AI prompt expansion ───────────────────────────────────────────────
+
+/// If `line` starts with `@leo <question>` (case-insensitive, leading-whitespace-tolerant),
+/// returns the trimmed question text. Returns `None` for bare `@leo` or unrelated lines.
+pub fn is_leo_prompt(line: &str) -> Option<&str> {
+    let trimmed = line.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("@leo ") {
+        let q = trimmed[5..].trim();
+        if q.is_empty() { None } else { Some(q) }
+    } else {
+        None
+    }
+}
+
+/// Process all `@leo` lines in `body`. For each one:
+///   - extracts up to 5 lines of context before and after it
+///   - calls `ai::expand_prompt`
+///   - replaces the line with the AI expansion
+///   - on AI failure, leaves the line untouched and prints a warning
+///
+/// Returns `(updated_body, count_of_prompts_processed)`.
+pub fn expand_leo_prompts(body: &str, title: &str) -> anyhow::Result<(String, usize)> {
+    let lines: Vec<&str> = body.lines().collect();
+    let mut result: Vec<String> = Vec::with_capacity(lines.len());
+    let mut count = 0;
+
+    for (i, &line) in lines.iter().enumerate() {
+        if let Some(question) = is_leo_prompt(line) {
+            let before_start = i.saturating_sub(5);
+            let before = lines[before_start..i].join("\n");
+            let after_end = (i + 6).min(lines.len());
+            let after = lines[(i + 1)..after_end].join("\n");
+            let local_context = format!("{before}\n{after}");
+
+            eprintln!("    {}", format!("→ {question}").dimmed());
+
+            match crate::ai::expand_prompt(question, &local_context, title, body) {
+                Ok(expansion) if !expansion.is_empty() => {
+                    result.push(expansion);
+                    count += 1;
+                }
+                Ok(_) => {
+                    eprintln!("  {}", "Warning: empty AI response, keeping prompt.".yellow());
+                    result.push(line.to_string());
+                }
+                Err(e) => {
+                    eprintln!("  {}: {e}", "Warning".yellow());
+                    result.push(line.to_string());
+                }
+            }
+        } else {
+            result.push(line.to_string());
+        }
+    }
+
+    Ok((result.join("\n"), count))
+}
+
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Split input on whitespace, keeping quoted strings together.
@@ -1069,4 +1202,46 @@ fn history_path() -> String {
         .unwrap_or_else(|| std::path::PathBuf::from(".leo_history"))
         .to_string_lossy()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_is_leo_prompt_basic() {
+        assert_eq!(is_leo_prompt("@leo how does TLB work?"), Some("how does TLB work?"));
+    }
+
+    #[test]
+    fn test_is_leo_prompt_case_insensitive() {
+        assert_eq!(is_leo_prompt("@Leo expand on this"), Some("expand on this"));
+        assert_eq!(is_leo_prompt("@LEO what is X?"), Some("what is X?"));
+    }
+
+    #[test]
+    fn test_is_leo_prompt_bare_returns_none() {
+        assert!(is_leo_prompt("@leo").is_none());
+        assert!(is_leo_prompt("@leo ").is_none());
+    }
+
+    #[test]
+    fn test_is_leo_prompt_non_prompt_returns_none() {
+        assert!(is_leo_prompt("## Heading").is_none());
+        assert!(is_leo_prompt("- bullet point").is_none());
+        assert!(is_leo_prompt("").is_none());
+    }
+
+    #[test]
+    fn test_is_leo_prompt_leading_whitespace() {
+        assert_eq!(is_leo_prompt("  @leo what is a semaphore?"), Some("what is a semaphore?"));
+    }
+
+    #[test]
+    fn test_expand_leo_prompts_no_prompts_unchanged() {
+        let body = "## Virtual Memory\n\nPage tables map virtual to physical.";
+        let (result, count) = expand_leo_prompts(body, "OS Notes").unwrap();
+        assert_eq!(result, body);
+        assert_eq!(count, 0);
+    }
 }
