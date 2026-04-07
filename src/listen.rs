@@ -80,6 +80,24 @@ pub fn record_audio() -> Result<PathBuf> {
     child.kill().ok();
     child.wait().ok();
 
+    // Repair WAV header: `rec` is killed before it can write the final DataSize field,
+    // leaving it as 0. sox --ignore-length reads to EOF and writes a correct header.
+    let fixed = std::env::temp_dir().join("leo-recording-fixed.wav");
+    let repaired = Command::new("sox")
+        .args([
+            "--ignore-length",
+            tmp_path.to_str().unwrap(),
+            fixed.to_str().unwrap(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success() && fixed.exists())
+        .unwrap_or(false);
+    if repaired {
+        let _ = std::fs::rename(&fixed, &tmp_path);
+    }
+
     if !tmp_path.exists() || std::fs::metadata(&tmp_path)?.len() == 0 {
         bail!("Recording failed — no audio captured.");
     }

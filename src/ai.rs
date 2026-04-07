@@ -11,8 +11,6 @@ const DEFAULT_CHAT_MODEL: &str = "google/gemini-2.5-flash";
 
 /// Max file size per chunk for transcription APIs (~20MB, with headroom).
 const MAX_CHUNK_BYTES: u64 = 20 * 1024 * 1024;
-/// Chunk duration in seconds (~10 min of 16kHz mono 16-bit WAV ≈ 19MB).
-const CHUNK_SECONDS: u64 = 600;
 
 /// Get the actual duration of a WAV file in seconds using sox.
 fn wav_duration_secs(path: &Path) -> Option<u64> {
@@ -44,10 +42,17 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
         return transcribe_single(audio_path);
     }
 
-    // Get actual duration from WAV header; fall back to byte-rate estimate
+    // Get actual duration from WAV header; fall back to byte-rate estimate.
+    // Filter out 0: sox reports 0 when the WAV header DataSize field wasn't finalized.
     let approx_duration = wav_duration_secs(audio_path)
+        .filter(|&d| d > 0)
         .unwrap_or_else(|| (file_size.saturating_sub(44)) / 32000);
-    let num_chunks = (approx_duration / CHUNK_SECONDS) + 1;
+
+    // Derive chunk duration from actual byte rate so it works for both 16-bit and
+    // 32-bit audio (rec on macOS defaults to 32-bit float = 64000 bytes/sec).
+    let byte_rate = file_size / approx_duration.max(1);
+    let chunk_secs = (MAX_CHUNK_BYTES / byte_rate.max(1)).max(30);
+    let num_chunks = (approx_duration / chunk_secs) + 1;
 
     eprintln!(
         "  {}",
@@ -62,12 +67,12 @@ pub fn transcribe(audio_path: &Path) -> Result<String> {
     let mut full_transcript = String::new();
 
     for i in 0..num_chunks {
-        let start = i * CHUNK_SECONDS;
+        let start = i * chunk_secs;
         let remaining = approx_duration.saturating_sub(start);
         if remaining == 0 {
             break;
         }
-        let duration = remaining.min(CHUNK_SECONDS);
+        let duration = remaining.min(chunk_secs);
         let chunk_path = std::env::temp_dir().join(format!("leo-chunk-{i}.wav"));
 
         let status = Command::new("sox")
