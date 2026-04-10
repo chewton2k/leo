@@ -4,6 +4,7 @@ mod listen;
 mod notes;
 mod repl;
 mod store;
+mod sync;
 mod web;
 
 use std::io::IsTerminal;
@@ -120,6 +121,30 @@ enum Commands {
 
     /// Open the .env config file to set API keys
     Env,
+
+    /// Sync notes via git / GitHub
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SyncCommands {
+    /// Initialize a git repo for your notes (run this first)
+    Init,
+    /// Connect the notes repo to a GitHub remote
+    Connect {
+        /// Remote URL, e.g. https://github.com/user/leo-notes.git
+        /// or git@github.com:user/leo-notes.git (SSH)
+        url: String,
+    },
+    /// Push notes to the remote
+    Push,
+    /// Pull notes from the remote
+    Pull,
+    /// Show git status of the notes repo
+    Status,
 }
 
 fn main() -> Result<()> {
@@ -136,6 +161,7 @@ fn main() -> Result<()> {
             tokio::runtime::Runtime::new()?.block_on(web::serve(port))
         }
         Some(Commands::Env) => open_env_file(),
+        Some(Commands::Sync { command }) => run_sync(command),
         None => {
             if std::io::stdin().is_terminal() {
                 repl::run()
@@ -411,11 +437,24 @@ fn run_command(cmd: Commands) -> Result<()> {
             println!("Updated \"{}\" {}", note.title, &note.id[..8]);
         }
 
-        Commands::Serve { .. } | Commands::Env => unreachable!("handled in main()"),
+        Commands::Serve { .. } | Commands::Env | Commands::Sync { .. } => {
+            unreachable!("handled in main()")
+        }
     }
 
     store.save()?;
     Ok(())
+}
+
+fn run_sync(command: SyncCommands) -> Result<()> {
+    let store = store::Store::load()?;
+    match command {
+        SyncCommands::Init => sync::init(&store.notes_dir),
+        SyncCommands::Connect { url } => sync::connect(&store.notes_dir, &url),
+        SyncCommands::Push => sync::push(&store.notes_dir),
+        SyncCommands::Pull => sync::pull(&store.notes_dir),
+        SyncCommands::Status => sync::status(&store.notes_dir),
+    }
 }
 
 pub fn open_env_file() -> Result<()> {
