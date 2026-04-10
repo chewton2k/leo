@@ -144,6 +144,28 @@ pub fn run() -> Result<()> {
                         print_help();
                         Ok(())
                     }
+                    "sync" => {
+                        let notes_dir = store.notes_dir.clone();
+                        let subcmd = args.first().map(|s| s.as_str()).unwrap_or("");
+                        match subcmd {
+                            "init" => crate::sync::init(&notes_dir)?,
+                            "connect" => match args.get(1) {
+                                Some(url) => crate::sync::connect(&notes_dir, url)?,
+                                None => println!("  Usage: sync connect <url>"),
+                            },
+                            "push" => crate::sync::push(&notes_dir)?,
+                            "pull" => {
+                                crate::sync::pull(&notes_dir)?;
+                                store = Store::load_from(&notes_dir)?;
+                                refresh = true;
+                            }
+                            "status" => crate::sync::status(&notes_dir)?,
+                            _ => println!(
+                                "  Usage: sync <init | connect <url> | push | pull | status>"
+                            ),
+                        }
+                        Ok(())
+                    }
                     "quit" | "exit" | "q" => break,
                     _ => {
                         println!(
@@ -338,6 +360,28 @@ fn print_help() {
     println!(
         "    {:<24} Export note to file",
         "export <note> <fmt>".cyan()
+    );
+    println!();
+    println!("  {}", "Sync:".bold());
+    println!(
+        "    {:<24} Initialize git repo for notes",
+        "sync init".cyan()
+    );
+    println!(
+        "    {:<24} Connect to a GitHub remote",
+        "sync connect <url>".cyan()
+    );
+    println!(
+        "    {:<24} Push notes to remote",
+        "sync push".cyan()
+    );
+    println!(
+        "    {:<24} Pull notes from remote",
+        "sync pull".cyan()
+    );
+    println!(
+        "    {:<24} Show git status",
+        "sync status".cyan()
     );
     println!();
     println!("  {}", "Other:".bold());
