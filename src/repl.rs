@@ -346,12 +346,12 @@ fn print_help() {
         "remind <text>".cyan()
     );
     println!(
-        "    {:<24} Record & transcribe notes",
-        "listen [title]".cyan()
+        "    {:<32} Record & transcribe notes",
+        "listen [--screen] [title]".cyan()
     );
     println!(
-        "    {:<24} Record & add to existing note",
-        "listen add <note>".cyan()
+        "    {:<32} Record & add to existing note",
+        "listen [--screen] add <note>".cyan()
     );
     println!(
         "    {:<24} Expand @leo prompts in a note",
@@ -802,7 +802,22 @@ fn cmd_remind(store: &mut Store, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// Strip `--screen` from raw REPL args. Returns `(screen_mode, remaining_args)`.
+fn parse_screen_flag(args: &[String]) -> (bool, Vec<String>) {
+    let screen = args.iter().any(|a| a == "--screen");
+    let remaining = args
+        .iter()
+        .filter(|a| a.as_str() != "--screen")
+        .cloned()
+        .collect();
+    (screen, remaining)
+}
+
 fn cmd_listen(store: &mut Store, args: &[String], current_dir: &str) -> Result<()> {
+    // Parse --screen flag; strip it so the rest of the logic sees clean args
+    let (screen, remaining) = parse_screen_flag(args);
+    let args = remaining.as_slice();
+
     // Check for "add <note>" subcommand
     let append_to = if !args.is_empty() && args[0].eq_ignore_ascii_case("add") {
         if args.len() < 2 {
@@ -821,7 +836,7 @@ fn cmd_listen(store: &mut Store, args: &[String], current_dir: &str) -> Result<(
     };
 
     // Record audio
-    let audio_path = crate::listen::record_audio()?;
+    let audio_path = crate::listen::record_audio(screen)?;
 
     // Transcribe
     println!("  {}", "Transcribing...".cyan());
@@ -1251,6 +1266,46 @@ fn history_path() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_screen_flag_present() {
+        let args = vec![
+            "--screen".to_string(),
+            "add".to_string(),
+            "mynote".to_string(),
+        ];
+        let (screen, remaining) = parse_screen_flag(&args);
+        assert!(screen);
+        assert_eq!(remaining, vec!["add".to_string(), "mynote".to_string()]);
+    }
+
+    #[test]
+    fn parse_screen_flag_absent() {
+        let args = vec!["add".to_string(), "mynote".to_string()];
+        let (screen, remaining) = parse_screen_flag(&args);
+        assert!(!screen);
+        assert_eq!(remaining, vec!["add".to_string(), "mynote".to_string()]);
+    }
+
+    #[test]
+    fn parse_screen_flag_only() {
+        let args = vec!["--screen".to_string()];
+        let (screen, remaining) = parse_screen_flag(&args);
+        assert!(screen);
+        assert!(remaining.is_empty());
+    }
+
+    #[test]
+    fn parse_screen_flag_mid_position() {
+        let args = vec![
+            "add".to_string(),
+            "--screen".to_string(),
+            "mynote".to_string(),
+        ];
+        let (screen, remaining) = parse_screen_flag(&args);
+        assert!(screen);
+        assert_eq!(remaining, vec!["add".to_string(), "mynote".to_string()]);
+    }
 
     #[test]
     fn test_is_leo_prompt_basic() {

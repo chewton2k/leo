@@ -175,7 +175,7 @@ pub fn structure_notes(transcript: &str) -> Result<(String, String)> {
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.3,
-        "max_tokens": 10000
+        "max_tokens": 4096
     });
 
     let url = format!("{OPENROUTER_BASE}/chat/completions");
@@ -247,7 +247,7 @@ pub fn structure_notes_append(transcript: &str, existing_body: &str) -> Result<S
             {"role": "user", "content": prompt}
         ],
         "temperature": 0.3,
-        "max_tokens": 10000
+        "max_tokens": 4096
     });
 
     let url = format!("{OPENROUTER_BASE}/chat/completions");

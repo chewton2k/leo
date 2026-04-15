@@ -8,9 +8,11 @@ use std::time::Instant;
 use anyhow::{bail, Context, Result};
 use colored::Colorize;
 
-/// Record audio from microphone. Returns path to the recorded WAV file.
+/// Record audio from microphone or system audio device.
+/// Returns path to the recorded WAV file.
 /// Requires `sox` to be installed (provides the `rec` command).
-pub fn record_audio() -> Result<PathBuf> {
+/// For screen audio, also requires BlackHole: `brew install blackhole-2ch`.
+pub fn record_audio(screen: bool) -> Result<PathBuf> {
     // Check if sox/rec is available
     if Command::new("rec")
         .arg("--version")
@@ -32,21 +34,49 @@ pub fn record_audio() -> Result<PathBuf> {
     // Remove stale recording if it exists
     let _ = std::fs::remove_file(&tmp_path);
 
-    // Start recording in background: 16kHz mono WAV (optimal for speech recognition)
-    let mut child = Command::new("rec")
-        .args([
-            tmp_path.to_str().unwrap(),
-            "rate",
-            "16000",
-            "channels",
-            "1",
-        ])
+    // Resolve audio device for screen mode
+    let device = if screen {
+        Some(
+            std::env::var("LEO_SCREEN_DEVICE")
+                .unwrap_or_else(|_| "BlackHole 2ch".to_string()),
+        )
+    } else {
+        None
+    };
+
+    let path_str = tmp_path.to_str().context("temp path is not valid UTF-8")?;
+
+    // Build rec args: <output> rate 16000 channels 1
+    // Device selection uses AUDIODEV env var (not -d flag, which means --default-device on macOS)
+    let rec_args = [path_str, "rate", "16000", "channels", "1"];
+
+    // Start recording in background
+    let mut cmd = Command::new("rec");
+    if let Some(ref dev) = device {
+        cmd.env("AUDIODEV", dev);
+    }
+    let mut child = cmd
+        .args(rec_args)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .context("Failed to start recording")?;
+        .with_context(|| {
+            if let Some(ref dev) = device {
+                format!(
+                    "Failed to start recording from screen audio device '{dev}'.\n  \
+                     Set up system audio capture:\n  \
+                     1. brew install blackhole-2ch\n  \
+                     2. Open Audio MIDI Setup → New Multi-Output Device (Speakers + BlackHole 2ch)\n  \
+                     3. Set that Multi-Output Device as System Output in Sound Settings\n  \
+                     To use a different device: add LEO_SCREEN_DEVICE=<name> to your .env"
+                )
+            } else {
+                "Failed to start recording".to_string()
+            }
+        })?;
 
     // Live stopwatch display
+    let label = if screen { "Recording screen" } else { "Recording" };
     let running = Arc::new(AtomicBool::new(true));
     let running_clone = Arc::clone(&running);
     let start = Instant::now();
@@ -58,7 +88,7 @@ pub fn record_audio() -> Result<PathBuf> {
             let secs = elapsed % 60;
             print!(
                 "\r  {} {} {}",
-                "Recording".cyan().bold(),
+                label.cyan().bold(),
                 format!("{:02}:{:02}", mins, secs).cyan().bold(),
                 "press Enter to stop".dimmed()
             );
@@ -99,6 +129,16 @@ pub fn record_audio() -> Result<PathBuf> {
     }
 
     if !tmp_path.exists() || std::fs::metadata(&tmp_path)?.len() == 0 {
+        if let Some(ref dev) = device {
+            bail!(
+                "Recording failed — no audio captured from screen audio device '{dev}'.\n  \
+                 Check your setup:\n  \
+                 1. brew install blackhole-2ch\n  \
+                 2. Open Audio MIDI Setup → New Multi-Output Device (Speakers + BlackHole 2ch)\n  \
+                 3. Set that Multi-Output Device as System Output in Sound Settings\n  \
+                 To use a different device: add LEO_SCREEN_DEVICE=<name> to your .env"
+            );
+        }
         bail!("Recording failed — no audio captured.");
     }
 
@@ -131,4 +171,15 @@ pub fn record_audio() -> Result<PathBuf> {
     );
 
     Ok(tmp_path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_audio_accepts_screen_bool() {
+        // Compile-time proof the signature is correct.
+        let _f: fn(bool) -> anyhow::Result<std::path::PathBuf> = record_audio;
+    }
 }

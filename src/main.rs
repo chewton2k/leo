@@ -95,6 +95,10 @@ enum Commands {
         /// Append to an existing note instead of creating a new one
         #[arg(short, long)]
         add: Option<String>,
+
+        /// Capture system audio instead of microphone (requires BlackHole: brew install blackhole-2ch)
+        #[arg(long)]
+        screen: bool,
     },
 
     /// Export a note to a file (txt, md, html, docx, pdf, rtf, odt)
@@ -358,8 +362,8 @@ fn run_command(cmd: Commands) -> Result<()> {
             }
         }
 
-        Commands::Listen { title, add } => {
-            let audio_path = listen::record_audio()?;
+        Commands::Listen { title, add, screen } => {
+            let audio_path = listen::record_audio(screen)?;
 
             println!("Transcribing...");
             let transcript = ai::transcribe(&audio_path)?;
