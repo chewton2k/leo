@@ -12,6 +12,22 @@ cd leo
 cargo install --path .
 ```
 
+
+### Troubleshooting Installation
+If this doesn't work, you can run a check for 
+```sh
+~/.cargo/bin/leo 
+```
+
+If that works you just need to add it to your ~/.zshrc or ~/.bashrc through: 
+```sh
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+
+
+## Installation after modifications
+
 ```sh
 # Reinstall after changes
 cargo install --path . --force
