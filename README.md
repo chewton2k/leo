@@ -4,13 +4,29 @@
 
 `leo` is a lightweight note manager that lives entirely in your terminal. No Electron app, no subscription. Just run `leo` and start typing. With built-in AI features, leo can record lectures, transcribe speech into structured notes, answer inline questions, and sync your notes to GitHub.
 
-## Install
+## Install and Setup
 
 ```sh
 git clone https://github.com/you/leo
 cd leo
 cargo install --path .
 ```
+
+Run `leo env` to open the config file and add your API keys:
+
+```sh
+leo env
+```
+
+```
+### this should be the output 
+OPENROUTER_API_KEY= 
+HF_API_KEY= ## Check (Make calls to Inference Providers), (Make calls to your Inference Endpoints)
+GROQ_API_KEY=
+```
+
+
+API keys are only required for AI features (`listen`, `ask`). All other commands work without them.
 
 
 ### Troubleshooting Installation
@@ -35,16 +51,6 @@ cargo install --path . --force
 # Uninstall (won't delete your notes)
 cargo uninstall leo
 ```
-
-## Setup
-
-Run `leo env` to open the config file and add your API keys:
-
-```sh
-leo env
-```
-
-API keys are only required for AI features (`listen`, `ask`). All other commands work without them.
 
 ### Optional dependencies
 
