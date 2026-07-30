@@ -32,6 +32,7 @@ keyring = "4"
 zeroize = "1"
 rpassword = "7"
 ratatui = "0.30"
+nucleo = "0.5"
 
 [profile.release]
 strip = true

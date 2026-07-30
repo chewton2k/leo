@@ -6,6 +6,7 @@
 //! independently testable.
 
 pub mod cmdline;
+pub mod complete;
 pub mod keys;
 pub mod task;
 pub mod view;
@@ -18,7 +19,8 @@ use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use ratatui::{DefaultTerminal, Frame};
+use ratatui::backend::Backend;
+use ratatui::{Frame, Terminal};
 
 use crate::action::{
     self, Action, ConfirmedAction, Ctx, Effect, Kind, Line, ListenRequest, Outcome, Parsed,
@@ -26,11 +28,22 @@ use crate::action::{
 };
 use crate::store::Store;
 use cmdline::{CmdLine, CmdOutcome};
+use complete::{Completion, NoteChoice, Sources};
 use task::{Job, TaskEvent};
+use view::overlay::{Choice, Finder};
 use keys::{Intent, Pane};
 use view::dirs::DirRow;
 use view::notes::NoteRow;
 use view::preview::Preview;
+
+/// The backend bound every terminal-taking method needs. `Backend` alone is not
+/// enough: `?` on a draw has to convert the backend's error into `anyhow::Error`,
+/// which requires it to be a `Send + Sync` std error. Both `CrosstermBackend`
+/// and `TestBackend` satisfy this, so the App can be driven by either — which is
+/// what makes the event handling testable without a real terminal.
+trait TuiBackend: Backend<Error: std::error::Error + Send + Sync + 'static> {}
+
+impl<B> TuiBackend for B where B: Backend, B::Error: std::error::Error + Send + Sync + 'static {}
 
 /// How long a status message stays before the status line goes quiet again.
 const MESSAGE_TTL: Duration = Duration::from_secs(6);
@@ -45,6 +58,7 @@ enum Mode {
     Command,
     Help,
     Confirm { prompt: String, on_yes: ConfirmedAction },
+    Find,
 }
 
 pub struct App {
@@ -65,7 +79,20 @@ pub struct App {
     pinned: Option<(String, Vec<Line>)>,
     /// The running recording, if any.
     recording: Option<Recording>,
+    /// Tab-completion state, live only while cycling.
+    completing: Option<Cycle>,
+    finder: Option<Finder>,
     quit: bool,
+}
+
+/// Tab cycling: the candidates for one token and how far through them the user
+/// has walked. Dropped as soon as the line changes any other way, so Tab never
+/// replays a stale candidate list.
+struct Cycle {
+    completion: Completion,
+    /// What the token was before the first Tab, so cycling back is possible.
+    typed: String,
+    index: usize,
 }
 
 /// A recording in progress and everything it has produced so far.
@@ -100,6 +127,8 @@ impl App {
             message: None,
             pinned: None,
             recording: None,
+            completing: None,
+            finder: None,
             quit: false,
         }
     }
@@ -151,7 +180,7 @@ impl App {
 
     // ── input ───────────────────────────────────────────────────────────────
 
-    fn on_key(&mut self, key: event::KeyEvent, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn on_key<B: TuiBackend>(&mut self, key: event::KeyEvent, terminal: &mut Terminal<B>) -> Result<()> {
         match std::mem::replace(&mut self.mode, Mode::Normal) {
             Mode::Confirm { prompt, on_yes } => {
                 let yes = matches!(key.code, event::KeyCode::Char('y' | 'Y'));
@@ -172,16 +201,26 @@ impl App {
                 Ok(())
             }
 
+            Mode::Find => {
+                self.mode = Mode::Find;
+                self.on_find_key(key)
+            }
+
             Mode::Command => {
                 self.mode = Mode::Command;
-                match self.cmd.key(key) {
+                let outcome = self.cmd.key(key);
+                // Any key other than Tab invalidates the candidate list.
+                if outcome != CmdOutcome::Complete {
+                    self.completing = None;
+                }
+                match outcome {
                     CmdOutcome::Editing => Ok(()),
                     CmdOutcome::Cancel => {
                         self.mode = Mode::Normal;
                         Ok(())
                     }
                     CmdOutcome::Complete => {
-                        // Completion arrives in a later stage; for now Tab is inert.
+                        self.cycle_completion();
                         Ok(())
                     }
                     CmdOutcome::Submit(line) => {
@@ -220,7 +259,7 @@ impl App {
         }
     }
 
-    fn on_intent(&mut self, intent: Intent, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn on_intent<B: TuiBackend>(&mut self, intent: Intent, terminal: &mut Terminal<B>) -> Result<()> {
         match intent {
             Intent::Nothing => Ok(()),
             Intent::Quit => {
@@ -283,9 +322,9 @@ impl App {
                 Ok(())
             }
 
-            // The finder arrives in a later stage.
             Intent::OpenFinder => {
-                self.say(Kind::Dim, "Fuzzy find is not wired up yet — use : search");
+                self.finder = Some(Finder::open(self.all_note_choices()));
+                self.mode = Mode::Find;
                 Ok(())
             }
 
@@ -333,7 +372,7 @@ impl App {
     }
 
     /// Enter: open the selected directory, or move focus onto the body.
-    fn open(&mut self, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn open<B: TuiBackend>(&mut self, terminal: &mut Terminal<B>) -> Result<()> {
         match self.focus {
             Pane::Dirs => {
                 let rows = self.dir_rows();
@@ -353,7 +392,7 @@ impl App {
 
     // ── running actions ─────────────────────────────────────────────────────
 
-    fn run_line(&mut self, line: &str, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn run_line<B: TuiBackend>(&mut self, line: &str, terminal: &mut Terminal<B>) -> Result<()> {
         match action::parse(line) {
             Parsed::Empty => Ok(()),
             Parsed::Usage(usage) => {
@@ -368,7 +407,7 @@ impl App {
         }
     }
 
-    fn run_action(&mut self, action: Action, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn run_action<B: TuiBackend>(&mut self, action: Action, terminal: &mut Terminal<B>) -> Result<()> {
         let outcome = match action::apply(
             action,
             &mut self.store,
@@ -386,7 +425,7 @@ impl App {
     }
 
     /// Apply an outcome's state changes, show its lines, and perform its effect.
-    fn absorb(&mut self, outcome: Outcome, terminal: &mut DefaultTerminal) -> Result<()> {
+    fn absorb<B: TuiBackend>(&mut self, outcome: Outcome, terminal: &mut Terminal<B>) -> Result<()> {
         if let Some(dir) = outcome.new_dir {
             self.current_dir = dir;
             self.note_sel = 0;
@@ -533,7 +572,7 @@ impl App {
     /// Leave the alternate screen, run `f` on the real terminal, then come
     /// back. Everything that writes to stdout or reads stdin — `$EDITOR`, git,
     /// the no-echo key prompt, the recorder — goes through here.
-    fn outside<T>(&mut self, terminal: &mut DefaultTerminal, f: impl FnOnce() -> T) -> Result<T> {
+    fn outside<B: TuiBackend, T>(&mut self, terminal: &mut Terminal<B>, f: impl FnOnce() -> T) -> Result<T> {
         suspend(terminal)?;
         let result = f();
         resume(terminal)?;
@@ -543,9 +582,9 @@ impl App {
     /// Run a store-mutating job outside the TUI, then absorb its outcome.
     /// `self.store` is borrowed for the call, so this cannot go through
     /// [`Self::outside`]'s closure.
-    fn suspend_with_store(
+    fn suspend_with_store<B: TuiBackend>(
         &mut self,
-        terminal: &mut DefaultTerminal,
+        terminal: &mut Terminal<B>,
         job: impl FnOnce(&mut Store) -> Result<Outcome>,
     ) -> Result<()> {
         suspend(terminal)?;
@@ -562,9 +601,182 @@ impl App {
         }
     }
 
+    // ── completion ──────────────────────────────────────────────────────────
+
+    /// Candidate sources drawn from the store and config.
+    fn sources(&self) -> Sources {
+        Sources {
+            dirs: self.store.subdirs(&self.current_dir),
+            notes: self
+                .numbering
+                .iter()
+                .enumerate()
+                .filter_map(|(i, id)| {
+                    self.store
+                        .find_note(id)
+                        .map(|n| NoteChoice { number: i + 1, title: n.title.clone() })
+                })
+                .collect(),
+            tags: self.store.tags().into_iter().map(|(t, _)| t).collect(),
+            providers: crate::config::Config::load()
+                .providers
+                .keys()
+                .cloned()
+                .collect(),
+        }
+    }
+
+    /// Tab: complete the token, or step to the next candidate if already
+    /// cycling. With one match this completes and stops; with several, each Tab
+    /// advances and wraps around to what was typed.
+    fn cycle_completion(&mut self) {
+        if let Some(cycle) = self.completing.take() {
+            let count = cycle.completion.matches.len();
+            if count == 0 {
+                return;
+            }
+            // One past the end restores the original text, so cycling is
+            // never a trap.
+            let next = (cycle.index + 1) % (count + 1);
+            let (line, cursor) = if next == count {
+                complete::apply(self.cmd.text(), &cycle.completion, &cycle.typed)
+            } else {
+                complete::apply(
+                    self.cmd.text(),
+                    &cycle.completion,
+                    &cycle.completion.matches[next],
+                )
+            };
+            self.cmd.set_with_cursor(&line, cursor);
+            // The span to replace moved with the new text.
+            let completion = Completion {
+                start: cycle.completion.start,
+                end: cursor,
+                matches: cycle.completion.matches,
+            };
+            self.completing = Some(Cycle { completion, typed: cycle.typed, index: next });
+            return;
+        }
+
+        let sources = self.sources();
+        let completion = complete::complete(self.cmd.text(), self.cmd.cursor(), &sources);
+        if completion.matches.is_empty() {
+            return;
+        }
+        let typed: String = self
+            .cmd
+            .text()
+            .chars()
+            .skip(completion.start)
+            .take(completion.end.saturating_sub(completion.start))
+            .collect();
+
+        let (line, cursor) = complete::apply(self.cmd.text(), &completion, &completion.matches[0]);
+        self.cmd.set_with_cursor(&line, cursor);
+        let completion = Completion { start: completion.start, end: cursor, matches: completion.matches };
+        self.completing = Some(Cycle { completion, typed, index: 0 });
+    }
+
+    /// The ghost hint: what the top candidate would add, shown ahead of the
+    /// cursor. Only computed while the `:` line is open and idle.
+    fn ghost(&self) -> Option<String> {
+        if self.mode != Mode::Command || self.completing.is_some() {
+            return None;
+        }
+        let text = self.cmd.text();
+        if text.is_empty() {
+            return None;
+        }
+        let completion = complete::complete(text, self.cmd.cursor(), &self.sources());
+        let typed: String = text
+            .chars()
+            .skip(completion.start)
+            .take(completion.end.saturating_sub(completion.start))
+            .collect();
+        completion.ghost(&typed)
+    }
+
+    // ── finder ──────────────────────────────────────────────────────────────
+
+    /// Every note in every directory, labelled with its directory so two notes
+    /// sharing a title stay distinguishable.
+    fn all_note_choices(&self) -> Vec<Choice> {
+        self.store
+            .list_notes(None, usize::MAX)
+            .iter()
+            .map(|n| Choice {
+                id: n.id.clone(),
+                label: if n.directory.is_empty() {
+                    n.title.clone()
+                } else {
+                    format!("{}/{}", n.directory, n.title)
+                },
+            })
+            .collect()
+    }
+
+    fn on_find_key(&mut self, key: event::KeyEvent) -> Result<()> {
+        let Some(finder) = self.finder.as_mut() else {
+            self.mode = Mode::Normal;
+            return Ok(());
+        };
+
+        match key.code {
+            event::KeyCode::Esc => {
+                self.finder = None;
+                self.mode = Mode::Normal;
+            }
+            event::KeyCode::Enter => {
+                let chosen = finder.selected().cloned();
+                self.finder = None;
+                self.mode = Mode::Normal;
+                if let Some(choice) = chosen {
+                    self.jump_to(&choice.id);
+                }
+            }
+            event::KeyCode::Down => finder.down(),
+            event::KeyCode::Up => finder.up(),
+            event::KeyCode::Backspace => finder.backspace(),
+            event::KeyCode::Char(c) if key.modifiers.contains(event::KeyModifiers::CONTROL) => {
+                match c {
+                    'n' => finder.down(),
+                    'p' => finder.up(),
+                    'c' => {
+                        self.finder = None;
+                        self.mode = Mode::Normal;
+                    }
+                    _ => {}
+                }
+            }
+            event::KeyCode::Char(c) => finder.push(c),
+            _ => {}
+        }
+        Ok(())
+    }
+
+    /// Select a note by id, following it into its directory when it is not in
+    /// the current listing — otherwise Enter in the finder would appear to do
+    /// nothing for a note stored elsewhere.
+    fn jump_to(&mut self, id: &str) {
+        let Some(dir) = self.store.find_note(id).map(|n| n.directory.clone()) else {
+            return;
+        };
+        if dir != self.current_dir {
+            self.current_dir = dir;
+            self.dir_sel = 0;
+            self.numbering = action::numbering_for(&self.store, &self.current_dir);
+        }
+        if let Some(pos) = self.numbering.iter().position(|n| n == id) {
+            self.note_sel = pos;
+        }
+        self.pinned = None;
+        self.preview_scroll = 0;
+        self.focus = Pane::Notes;
+    }
+
     /// Absorb whatever the worker has sent since the last tick. Returns true
     /// when something changed and a redraw is warranted.
-    fn pump_tasks(&mut self, terminal: &mut DefaultTerminal) -> Result<bool> {
+    fn pump_tasks<B: TuiBackend>(&mut self, terminal: &mut Terminal<B>) -> Result<bool> {
         let Some(rec) = self.recording.as_mut() else {
             return Ok(false);
         };
@@ -666,13 +878,14 @@ impl App {
             self.focus == Pane::Preview,
         );
 
+        let ghost = self.ghost();
         view::status::render_command(
             frame,
             f.command,
             self.mode == Mode::Command,
             self.cmd.text(),
             self.cmd.cursor(),
-            None,
+            ghost.as_deref(),
         );
         view::status::render_status(
             frame,
@@ -686,6 +899,11 @@ impl App {
             Mode::Help => view::help::render_help(frame, frame.area()),
             Mode::Confirm { prompt, .. } => {
                 view::help::render_confirm(frame, frame.area(), prompt)
+            }
+            Mode::Find => {
+                if let Some(finder) = &self.finder {
+                    view::overlay::render(frame, frame.area(), finder);
+                }
             }
             _ => {}
         }
@@ -703,7 +921,7 @@ impl App {
 /// screen, but keep the same `Terminal` instance. Calling `ratatui::init()`
 /// again instead would stack a second panic hook and build a second terminal
 /// over the live one.
-fn suspend(terminal: &mut DefaultTerminal) -> Result<()> {
+fn suspend<B: TuiBackend>(terminal: &mut Terminal<B>) -> Result<()> {
     disable_raw_mode()?;
     execute!(std::io::stdout(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
@@ -719,7 +937,7 @@ fn suspend(terminal: &mut DefaultTerminal) -> Result<()> {
 /// a dumb pipe, a terminal that swallowed the query while we were suspended —
 /// hangs or errors the app out on resume. Resetting the buffers needs no
 /// round trip.
-fn resume(terminal: &mut DefaultTerminal) -> Result<()> {
+fn resume<B: TuiBackend>(terminal: &mut Terminal<B>) -> Result<()> {
     enable_raw_mode()?;
     execute!(std::io::stdout(), EnterAlternateScreen, Clear(ClearType::All))?;
     // Two swaps reset both buffers, so the next diff has nothing to compare
@@ -770,7 +988,7 @@ pub fn run() -> Result<()> {
     result
 }
 
-fn event_loop(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
+fn event_loop<B: TuiBackend>(terminal: &mut Terminal<B>, mut app: App) -> Result<()> {
     while !app.quit {
         terminal.draw(|frame| app.draw(frame))?;
 
@@ -794,6 +1012,211 @@ fn event_loop(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn temp_app() -> (App, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        store.create_dir("cs130");
+        store
+            .create_note("Rust ownership", "- [ ] read\n- [x] done", vec!["rust".to_string()], "")
+            .unwrap();
+        store.create_note("Graph traversals", "- BFS", vec![], "").unwrap();
+        store.create_note("Nested note", "body", vec![], "cs130").unwrap();
+        store.save().unwrap();
+        let store = Store::load_from(&dir.path().join("notes")).unwrap();
+        (App::new(store), dir)
+    }
+
+    /// Notes are sorted newest-first, so find one by title rather than index.
+    fn select_titled(app: &mut App, title: &str) {
+        let pos = app
+            .numbering
+            .iter()
+            .position(|id| {
+                app.store.find_note(id).map(|n| n.title == title).unwrap_or(false)
+            })
+            .expect("note is in the current listing");
+        app.note_sel = pos;
+    }
+
+    #[test]
+    fn tab_completes_a_verb_on_the_command_line() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("vie");
+
+        app.cycle_completion();
+        assert_eq!(app.cmd.text(), "view");
+        assert_eq!(app.cmd.cursor(), 4);
+    }
+
+    #[test]
+    fn tab_completes_a_note_reference_to_its_number() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("view owner");
+
+        // Notes list newest-first, so derive the expected number rather than
+        // assuming creation order.
+        let expected = app
+            .numbering
+            .iter()
+            .position(|id| {
+                app.store.find_note(id).map(|n| n.title == "Rust ownership").unwrap_or(false)
+            })
+            .map(|i| i + 1)
+            .unwrap();
+
+        app.cycle_completion();
+        // Only the number is a valid argument; the title was just for matching.
+        assert_eq!(app.cmd.text(), format!("view {expected}"));
+    }
+
+    #[test]
+    fn tab_cycles_through_candidates_and_back_to_what_was_typed() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("s");
+
+        app.cycle_completion();
+        let first = app.cmd.text().to_string();
+        app.cycle_completion();
+        let second = app.cmd.text().to_string();
+        assert_ne!(first, second, "a second Tab must advance");
+
+        // Walking off the end restores the original text rather than trapping
+        // the user in the candidate list.
+        let mut guard = 0;
+        while app.cmd.text() != "s" && guard < 50 {
+            app.cycle_completion();
+            guard += 1;
+        }
+        assert_eq!(app.cmd.text(), "s");
+    }
+
+    #[test]
+    fn a_keystroke_after_tab_abandons_the_candidate_list() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("vie");
+        app.cycle_completion();
+        assert!(app.completing.is_some());
+
+        // Feeding any non-Tab key through the command-mode path clears the
+        // cycle, so a later Tab re-derives candidates from the new text.
+        let key = event::KeyEvent::new(event::KeyCode::Char('x'), event::KeyModifiers::NONE);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        app.mode = Mode::Command;
+        app.on_key(key, &mut terminal).unwrap();
+        assert!(app.completing.is_none());
+        assert_eq!(app.cmd.text(), "viewx");
+    }
+
+    #[test]
+    fn the_ghost_hint_shows_the_rest_of_the_top_match() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("vie");
+        assert_eq!(app.ghost().as_deref(), Some("w"));
+
+        // Not shown once cycling has started: the line already holds the match.
+        app.cycle_completion();
+        assert_eq!(app.ghost(), None);
+    }
+
+    #[test]
+    fn no_ghost_hint_outside_the_command_line() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Normal;
+        app.cmd.open("vie");
+        assert_eq!(app.ghost(), None);
+    }
+
+    #[test]
+    fn the_frame_renders_the_completed_command_with_its_hint() {
+        let (mut app, _d) = temp_app();
+        app.mode = Mode::Command;
+        app.cmd.open("vie");
+
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(90, 20)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let out = terminal.backend().to_string();
+        assert!(out.contains(":view"), "ghost hint is not rendered:\n{out}");
+    }
+
+    #[test]
+    fn the_finder_lists_notes_from_every_directory() {
+        let (app, _d) = temp_app();
+        let choices = app.all_note_choices();
+        let labels: Vec<&str> = choices.iter().map(|c| c.label.as_str()).collect();
+        assert!(labels.contains(&"Rust ownership"), "{labels:?}");
+        // A note outside the current directory is labelled with its path.
+        assert!(labels.contains(&"cs130/Nested note"), "{labels:?}");
+    }
+
+    #[test]
+    fn jumping_to_a_note_follows_it_into_its_directory() {
+        let (mut app, _d) = temp_app();
+        let nested = app
+            .store
+            .list_notes(None, 100)
+            .iter()
+            .find(|n| n.title == "Nested note")
+            .map(|n| n.id.clone())
+            .unwrap();
+
+        assert_eq!(app.current_dir, "");
+        app.jump_to(&nested);
+
+        assert_eq!(app.current_dir, "cs130");
+        assert_eq!(app.selected_id(), Some(&nested), "the note is selected");
+        assert_eq!(app.focus, Pane::Notes);
+    }
+
+    #[test]
+    fn jumping_to_a_note_in_the_current_directory_only_moves_the_selection() {
+        let (mut app, _d) = temp_app();
+        let id = app
+            .store
+            .list_notes(None, 100)
+            .iter()
+            .find(|n| n.title == "Rust ownership")
+            .map(|n| n.id.clone())
+            .unwrap();
+        app.jump_to(&id);
+        assert_eq!(app.current_dir, "");
+        assert_eq!(app.selected_id(), Some(&id));
+    }
+
+    #[test]
+    fn completion_sources_come_from_the_current_directory_and_store() {
+        let (app, _d) = temp_app();
+        let s = app.sources();
+        assert!(s.dirs.contains(&"cs130".to_string()));
+        assert!(s.tags.contains(&"rust".to_string()));
+        // Only notes in the current listing are numbered.
+        assert_eq!(s.notes.len(), 2);
+        assert!(s.notes.iter().any(|n| n.title == "Rust ownership"));
+    }
+
+    #[test]
+    fn x_toggles_the_first_open_checkbox_of_the_selected_note() {
+        let (mut app, _d) = temp_app();
+        select_titled(&mut app, "Rust ownership");
+        let id = app.selected_id().cloned().unwrap();
+
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
+        app.on_intent(Intent::ToggleCheckbox, &mut terminal).unwrap();
+
+        assert!(
+            app.store.find_note(&id).unwrap().body.contains("- [x] read"),
+            "body: {}",
+            app.store.find_note(&id).unwrap().body
+        );
+    }
 
     #[test]
     fn stepping_saturates_instead_of_wrapping() {

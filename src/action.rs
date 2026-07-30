@@ -389,7 +389,6 @@ macro_rules! resolve_or_return {
 
 /// All verbs and their aliases, in help order. The completion engine reads
 /// this too, so a new verb becomes completable for free.
-#[allow(dead_code)] // consumed by the completion engine in a later stage
 pub const VERBS: &[(&str, &[&str])] = &[
     ("new", &["n"]),
     ("list", &["ls", "l"]),
@@ -418,7 +417,6 @@ pub const VERBS: &[(&str, &[&str])] = &[
 ];
 
 /// Every word that can start a command, canonical names and aliases alike.
-#[allow(dead_code)] // consumed by the completion engine in a later stage
 pub fn all_verb_words() -> Vec<&'static str> {
     let mut out = Vec::new();
     for (canon, aliases) in VERBS {

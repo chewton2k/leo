@@ -8,6 +8,7 @@ pub mod dirs;
 pub mod help;
 pub mod line;
 pub mod notes;
+pub mod overlay;
 pub mod preview;
 pub mod status;
 

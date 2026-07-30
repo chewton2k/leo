@@ -69,11 +69,18 @@ impl CmdLine {
         self.history_pos = None;
     }
 
-    /// Replace the whole line, putting the cursor at the end. Used when a
-    /// completion is accepted.
+    /// Replace the whole line, putting the cursor at the end.
     pub fn set(&mut self, text: &str) {
         self.text = text.to_string();
         self.cursor = self.len_chars();
+    }
+
+    /// Replace the whole line and place the cursor, which is what accepting a
+    /// completion mid-line needs — the cursor belongs after the inserted token,
+    /// not at the end of the line.
+    pub fn set_with_cursor(&mut self, text: &str, cursor: usize) {
+        self.text = text.to_string();
+        self.cursor = cursor.min(self.len_chars());
     }
 
     pub fn insert(&mut self, c: char) {
@@ -273,6 +280,17 @@ mod tests {
         let c = typed("list");
         assert_eq!(c.text(), "list");
         assert_eq!(c.cursor(), 4);
+    }
+
+    #[test]
+    fn setting_with_a_cursor_places_it_and_clamps_it() {
+        let mut c = CmdLine::default();
+        c.set_with_cursor("export 1 md", 8);
+        assert_eq!(c.text(), "export 1 md");
+        assert_eq!(c.cursor(), 8);
+        // A cursor past the end is clamped rather than panicking later.
+        c.set_with_cursor("ab", 99);
+        assert_eq!(c.cursor(), 2);
     }
 
     #[test]
