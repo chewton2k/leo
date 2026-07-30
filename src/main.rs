@@ -1,3 +1,4 @@
+mod action;
 mod ai;
 mod config;
 mod export;
@@ -179,6 +180,28 @@ enum ConfigCommands {
     Path,
 }
 
+/// The clap surface and the TUI's `:` line both funnel into one vocabulary, so
+/// `leo model login x` and `:model login x` cannot drift apart.
+impl From<ModelCommands> for action::ModelAction {
+    fn from(c: ModelCommands) -> Self {
+        match c {
+            ModelCommands::List => action::ModelAction::List,
+            ModelCommands::Test { name } => action::ModelAction::Test { name },
+            ModelCommands::Login { name } => action::ModelAction::Login { name },
+            ModelCommands::Logout { name } => action::ModelAction::Logout { name },
+        }
+    }
+}
+
+impl From<ConfigCommands> for action::ConfigAction {
+    fn from(c: ConfigCommands) -> Self {
+        match c {
+            ConfigCommands::Edit => action::ConfigAction::Edit,
+            ConfigCommands::Path => action::ConfigAction::Path,
+        }
+    }
+}
+
 #[derive(Subcommand)]
 enum SyncCommands {
     /// Initialize a git repo for your notes (run this first)
@@ -212,8 +235,8 @@ fn main() -> Result<()> {
         }
         Some(Commands::Env) => open_env_file(),
         Some(Commands::Sync { command }) => run_sync(command),
-        Some(Commands::Model { command }) => run_model(command),
-        Some(Commands::Config { command }) => run_config(command),
+        Some(Commands::Model { command }) => run_model(command.into()),
+        Some(Commands::Config { command }) => run_config(command.into()),
         None => {
             if std::io::stdin().is_terminal() {
                 repl::run()
@@ -558,12 +581,12 @@ fn build_one_transcriber(
     }
 }
 
-fn run_model(command: ModelCommands) -> Result<()> {
+pub fn run_model(command: action::ModelAction) -> Result<()> {
     let cfg = Config::load();
     let store = KeyringStore;
 
     match command {
-        ModelCommands::List => {
+        action::ModelAction::List => {
             if !store.available() {
                 println!(
                     "  {}",
@@ -606,7 +629,7 @@ fn run_model(command: ModelCommands) -> Result<()> {
             Ok(())
         }
 
-        ModelCommands::Test { name } => {
+        action::ModelAction::Test { name } => {
             let Some(pc) = cfg.provider(&name) else {
                 anyhow::bail!("no provider named '{name}' in your config");
             };
@@ -656,7 +679,7 @@ fn run_model(command: ModelCommands) -> Result<()> {
             }
         }
 
-        ModelCommands::Login { name } => {
+        action::ModelAction::Login { name } => {
             if cfg.provider(&name).is_none() {
                 println!(
                     "  {} no [providers.{name}] block in your config — storing the key anyway.",
@@ -700,7 +723,7 @@ fn run_model(command: ModelCommands) -> Result<()> {
             Ok(())
         }
 
-        ModelCommands::Logout { name } => {
+        action::ModelAction::Logout { name } => {
             store.delete(&name)?;
             println!("  {} removed key for {name}.", "ok".green());
             Ok(())
@@ -708,13 +731,13 @@ fn run_model(command: ModelCommands) -> Result<()> {
     }
 }
 
-fn run_config(command: ConfigCommands) -> Result<()> {
+pub fn run_config(command: action::ConfigAction) -> Result<()> {
     match command {
-        ConfigCommands::Path => {
+        action::ConfigAction::Path => {
             println!("{}", Config::config_path()?.display());
             Ok(())
         }
-        ConfigCommands::Edit => {
+        action::ConfigAction::Edit => {
             let (path, created) = Config::ensure_exists()?;
             if created {
                 println!("  Created {}", path.display());
