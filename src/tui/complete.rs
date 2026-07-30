@@ -439,6 +439,14 @@ mod tests {
 
     // ── tags ────────────────────────────────────────────────────────────────
 
+    /// The other half of the `list` row: a bare number is a count limit, and
+    /// there is nothing sensible to complete for it.
+    #[test]
+    fn list_offers_nothing_for_a_bare_limit() {
+        assert!(matches("list 1").is_empty());
+        assert!(matches("list ").is_empty());
+    }
+
     #[test]
     fn a_hash_completes_tags_anywhere_in_the_line() {
         let m = matches("list #ru");

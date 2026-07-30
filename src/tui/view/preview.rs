@@ -14,8 +14,7 @@ use crate::notes::Note;
 pub enum Preview<'a> {
     Empty,
     Note(&'a Note),
-    /// Free text, used by the live transcription stream in a later stage.
-    #[allow(dead_code)]
+    /// Free text, used by the live transcription stream.
     Text { title: String, body: String },
     /// Handler output, keeping each line's `Kind` styling.
     Lines { title: String, lines: &'a [crate::action::Line] },
