@@ -923,9 +923,15 @@ fn export(store: &Store, note: &str, format: &str, numbering: &[String]) -> Resu
     let id = resolve_or_return!(note, store, numbering);
     let n = store.find_note(&id).expect("resolve returned a live id");
     // Desktop, then home, then the working directory. `export` takes no path
-    // argument, so nothing here needs filesystem completion.
-    let output_dir = dirs::desktop_dir()
-        .or_else(dirs::home_dir)
+    // argument, so nothing here needs filesystem completion. Each candidate is
+    // checked for existence rather than trusted: `dirs::desktop_dir()` reports
+    // `$HOME/Desktop` on macOS whether or not that directory was ever created,
+    // and writing into a missing directory fails with a bare "No such file or
+    // directory" that names neither the note nor the path.
+    let output_dir = [dirs::desktop_dir(), dirs::home_dir()]
+        .into_iter()
+        .flatten()
+        .find(|d| d.is_dir())
         .unwrap_or_else(|| std::path::PathBuf::from("."));
     let path = crate::export::export_note(n, format.trim_start_matches('.'), &output_dir)?;
     Ok(Outcome::line(Line::good(format!("Exported {}", path.display()))))
@@ -1023,9 +1029,8 @@ pub fn resolve_cd(path: &str, store: &Store, current_dir: &str) -> std::result::
 
     let full = if remaining.is_empty() {
         base
-    } else if remaining.starts_with('/') {
-        remaining.trim_matches('/').to_string()
-    } else if base.is_empty() {
+    } else if remaining.starts_with('/') || base.is_empty() {
+        // An absolute path ignores the base; an empty base has nothing to join.
         remaining.trim_matches('/').to_string()
     } else {
         format!("{}/{}", base, remaining.trim_matches('/'))
@@ -1809,7 +1814,7 @@ mod handler_tests {
         let out = apply(
             Action::View { note: "1".to_string() },
             &mut store,
-            ctx("", &[id.clone()]),
+            ctx("", std::slice::from_ref(&id)),
             &FakeAi::default(),
         )
         .unwrap();
@@ -1861,7 +1866,7 @@ mod handler_tests {
         let out = apply(
             Action::Check { note: "1".to_string(), index: 1 },
             &mut store,
-            ctx("", &[id.clone()]),
+            ctx("", std::slice::from_ref(&id)),
             &FakeAi::default(),
         )
         .unwrap();
@@ -1995,7 +2000,7 @@ mod handler_tests {
         let out = apply(
             Action::Mv { notes: vec!["1".to_string()], dir: "ghost".to_string() },
             &mut store,
-            ctx("", &[a.clone()]),
+            ctx("", std::slice::from_ref(&a)),
             &FakeAi::default(),
         )
         .unwrap();
@@ -2015,7 +2020,7 @@ mod handler_tests {
                 dir: "cs130".to_string(),
             },
             &mut store,
-            ctx("", &[a.clone()]),
+            ctx("", std::slice::from_ref(&a)),
             &FakeAi::default(),
         )
         .unwrap();
@@ -2233,7 +2238,7 @@ mod handler_tests {
         let out = apply(
             Action::Delete { note: "1".to_string() },
             &mut store,
-            ctx("", &[id.clone()]),
+            ctx("", std::slice::from_ref(&id)),
             &FakeAi::default(),
         )
         .unwrap();
@@ -2404,7 +2409,7 @@ mod handler_tests {
         let out = apply(
             Action::Ask { note: "1".to_string() },
             &mut store,
-            ctx("", &[id.clone()]),
+            ctx("", std::slice::from_ref(&id)),
             &ai,
         )
         .unwrap();

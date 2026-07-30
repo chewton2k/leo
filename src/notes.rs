@@ -104,11 +104,6 @@ impl Note {
         )
     }
 
-    /// Print compact one-line summary (used by CLI subcommands).
-    pub fn print_summary(&self) {
-        println!("{}", self.format_summary());
-    }
-
     /// Full view including body with rendered checkboxes and lists.
     pub fn print_full(&self) {
         let created = self.created_at.format("%Y-%m-%d %H:%M UTC");

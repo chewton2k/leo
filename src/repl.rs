@@ -14,15 +14,9 @@ use colored::Colorize;
 use rustyline::error::ReadlineError;
 use rustyline::DefaultEditor;
 
-use crate::action::{
-    self, Action, ConfirmedAction, Ctx, Effect, EditRequest, EditTarget, Kind, Line, ListenRequest,
-    Outcome, Parsed, RealAi,
-};
+use crate::action::{self, Action, Ctx, Effect, Outcome, Parsed, RealAi};
+use crate::shell;
 use crate::store::Store;
-
-/// Re-exported for `main.rs`, which shares the frontmatter format for its own
-/// `new`/`edit` subcommands.
-pub use crate::action::{expand_leo_prompts, is_leo_prompt, parse_frontmatter};
 
 pub fn run() -> Result<()> {
     let mut store = Store::load()?;
@@ -125,7 +119,7 @@ fn absorb(
     numbering: &mut Vec<String>,
     ai: &RealAi,
 ) -> Result<bool> {
-    render(&outcome.lines);
+    shell::render(&outcome.lines);
 
     if let Some(dir) = outcome.new_dir {
         *current_dir = dir;
@@ -161,17 +155,17 @@ fn absorb(
         }
 
         Effect::Edit(req) => {
-            let next = run_editor(store, req, ai)?;
+            let next = shell::run_editor(store, req, ai)?;
             absorb(next, store, current_dir, numbering, ai)
         }
 
         Effect::Confirm { prompt, on_yes } => {
-            let next = confirm(store, &prompt, on_yes)?;
+            let next = shell::confirm(store, &prompt, on_yes, false)?;
             absorb(next, store, current_dir, numbering, ai)
         }
 
         Effect::Listen(req) => {
-            let next = record_and_apply(store, req, ai)?;
+            let next = shell::record_and_apply(store, req, ai)?;
             absorb(next, store, current_dir, numbering, ai)
         }
 
@@ -208,84 +202,6 @@ fn absorb(
             Ok(false)
         }
     }
-}
-
-/// Style one output line. The only place `Kind` becomes color.
-fn render(lines: &[Line]) {
-    for line in lines {
-        match line.kind {
-            Kind::Blank => println!(),
-            Kind::Plain => println!("  {}", line.text),
-            Kind::Dim => println!("  {}", line.text.dimmed()),
-            Kind::Good => println!("  {}", line.text.green()),
-            Kind::Warn => println!("  {}", line.text.yellow()),
-            Kind::Bad => println!("  {}", line.text.red()),
-            Kind::Dir => println!("    {}", line.text.cyan().bold()),
-        }
-    }
-}
-
-/// Spawn `$EDITOR` on the request's temp file and feed the result back.
-fn run_editor(store: &mut Store, req: EditRequest, ai: &RealAi) -> Result<Outcome> {
-    std::fs::write(&req.path, &req.seed)?;
-
-    let editor = std::env::var("EDITOR")
-        .or_else(|_| std::env::var("VISUAL"))
-        .unwrap_or_else(|_| "vim".to_string());
-    let status = std::process::Command::new(&editor).arg(&req.path).status()?;
-
-    if !status.success() {
-        let _ = std::fs::remove_file(&req.path);
-        return Ok(Outcome::line(Line::bad("Editor exited with an error.")));
-    }
-
-    let raw = std::fs::read_to_string(&req.path)?;
-    let _ = std::fs::remove_file(&req.path);
-
-    // Expanding prompts can take a while; say so before blocking.
-    if matches!(req.target, EditTarget::Existing { .. }) {
-        let count = crate::action::parse_frontmatter(&raw)
-            .2
-            .lines()
-            .filter(|l| is_leo_prompt(l).is_some())
-            .count();
-        if count > 0 {
-            println!(
-                "  {}",
-                format!("Expanding {count} prompt{}...", if count == 1 { "" } else { "s" }).cyan()
-            );
-        }
-    }
-
-    action::apply_edit(store, &req.target, &raw, ai)
-}
-
-fn confirm(store: &mut Store, prompt: &str, on_yes: ConfirmedAction) -> Result<Outcome> {
-    print!("  {} (y/n): ", prompt.bold());
-    io::stdout().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-
-    if input.trim().eq_ignore_ascii_case("y") {
-        action::apply_confirmed(store, &on_yes)
-    } else {
-        Ok(Outcome::line(Line::dim("Cancelled.")))
-    }
-}
-
-/// Record, transcribe, and structure. Stage 4 moves this onto a worker thread
-/// with live preview; the handler seam it calls stays the same.
-fn record_and_apply(store: &mut Store, req: ListenRequest, ai: &RealAi) -> Result<Outcome> {
-    let audio_path = crate::listen::record_audio(req.screen)?;
-
-    println!("  {}", "Transcribing...".cyan());
-    let transcript = crate::ai::transcribe(&audio_path)?;
-    let _ = std::fs::remove_file(&audio_path);
-
-    if !transcript.trim().is_empty() {
-        println!("  {}", "Structuring notes...".cyan());
-    }
-    action::apply_transcript(store, &req, &transcript, ai)
 }
 
 fn history_path() -> String {

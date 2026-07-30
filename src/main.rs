@@ -5,6 +5,7 @@ mod export;
 mod listen;
 mod notes;
 mod repl;
+mod shell;
 mod store;
 mod sync;
 mod web;
@@ -249,279 +250,107 @@ fn main() -> Result<()> {
     }
 }
 
+/// Turn a CLI subcommand into an [`action::Action`], so scripting and the
+/// interactive shell share one implementation. The few CLI-only affordances —
+/// `new --body` skipping the editor and `delete --force` skipping the
+/// confirmation — are handled here rather than in the vocabulary.
 fn run_command(cmd: Commands) -> Result<()> {
     let mut store = store::Store::load()?;
+    let ai = action::RealAi;
+    // Scripting has no "last list", so references resolve against the default
+    // sorted list — the same numbering `leo list` prints.
+    let numbering = action::numbering_for(&store, "");
 
-    match cmd {
-        Commands::New { title, body, tags } => {
-            if let Some(body) = body {
-                let note = store.create_note(title, body, tags, "")?;
-                println!("Created note {}", &note.id[..8]);
-            } else {
-                // Open $EDITOR for the body
-                let editor = std::env::var("EDITOR")
-                    .or_else(|_| std::env::var("VISUAL"))
-                    .unwrap_or_else(|_| "vim".to_string());
+    // `new --body` is a non-interactive create, with no editor round trip.
+    if let Commands::New { title, body: Some(body), tags } = cmd {
+        let note = store.create_note(title, body, tags, "")?;
+        let short = note.id[..8].to_string();
+        store.save()?;
+        println!("Created note {short}");
+        return Ok(());
+    }
 
-                let tmp = std::env::temp_dir().join(format!("leo-new-{}.md", uuid::Uuid::new_v4()));
-                let file_content = format!(
-                    "---\ntitle: {}\ntags: {}\n---\n",
-                    title,
-                    tags.join(", "),
-                );
-                std::fs::write(&tmp, &file_content)?;
+    let force_delete = matches!(cmd, Commands::Delete { force: true, .. });
 
-                let status = std::process::Command::new(&editor).arg(&tmp).status()?;
-
-                if status.success() {
-                    let raw = std::fs::read_to_string(&tmp)?;
-                    let _ = std::fs::remove_file(&tmp);
-                    let (new_title, new_tags, body) = repl::parse_frontmatter(&raw);
-                    let title = if new_title.is_empty() { title } else { new_title };
-                    let tags = if new_tags.is_empty() { tags } else { new_tags };
-
-                    if body.trim().is_empty() {
-                        println!("Empty note, cancelled.");
-                    } else {
-                        let note = store.create_note(title, body, tags, "")?;
-                        println!("Created note {}", &note.id[..8]);
-                    }
-                } else {
-                    let _ = std::fs::remove_file(&tmp);
-                    eprintln!("Editor exited with error.");
-                }
-            }
-        }
-
-        Commands::List { tag, limit } => {
-            let notes = store.list_notes(tag.as_deref(), limit);
-            if notes.is_empty() {
-                println!("No notes yet. Run `leo` to get started.");
-            } else {
-                for note in notes {
-                    note.print_summary();
-                }
-            }
-        }
-
-        Commands::View { id } => match store.find_by_index_or_prefix(&id) {
-            Some(note) => note.print_full(),
-            None => eprintln!("No note found: {id}"),
-        },
-
-        Commands::Edit { id } => {
-            let (old_title, old_tags, old_body, resolved_id) =
-                match store.find_by_index_or_prefix(&id) {
-                    Some(n) => (
-                        n.title.clone(),
-                        n.tags.clone(),
-                        n.body.clone(),
-                        n.id.clone(),
-                    ),
-                    None => {
-                        eprintln!("No note found: {id}");
-                        return Ok(());
-                    }
-                };
-            let id = resolved_id;
-
-            let editor = std::env::var("EDITOR")
-                .or_else(|_| std::env::var("VISUAL"))
-                .unwrap_or_else(|_| "vim".to_string());
-
-            let tmp = std::env::temp_dir().join(format!("leo-{}.md", &id));
-            let file_content = format!(
-                "---\ntitle: {}\ntags: {}\n---\n{}",
-                old_title,
-                old_tags.join(", "),
-                old_body
-            );
-            std::fs::write(&tmp, &file_content)?;
-
-            let status = std::process::Command::new(&editor).arg(&tmp).status()?;
-            if !status.success() {
-                let _ = std::fs::remove_file(&tmp);
-                eprintln!("Editor exited with error.");
-                return Ok(());
-            }
-
-            let raw = std::fs::read_to_string(&tmp)?;
-            let _ = std::fs::remove_file(&tmp);
-            let (parsed_title, tags, mut body) = repl::parse_frontmatter(&raw);
-            let title = if parsed_title.is_empty() { old_title.clone() } else { parsed_title };
-
-            // Expand any @leo prompts in one pass, then save
-            let leo_count = body.lines().filter(|l| repl::is_leo_prompt(l).is_some()).count();
-            if leo_count > 0 {
-                println!(
-                    "Expanding {} prompt{}...",
-                    leo_count,
-                    if leo_count == 1 { "" } else { "s" }
-                );
-                let (expanded, _) = repl::expand_leo_prompts(&body, &title)?;
-                body = expanded;
-            }
-
-            if title != old_title || tags != old_tags || body.trim() != old_body.trim() {
-                let note = store.find_note_mut(&id).unwrap();
-                note.title = title.clone();
-                note.tags = tags;
-                note.body = body;
-                note.updated_at = chrono::Utc::now();
-                println!("Updated \"{}\".", title);
-            } else {
-                println!("No changes.");
-            }
-        }
-
-        Commands::Delete { id, force } => {
-            let resolved_id = match store.find_by_index_or_prefix(&id) {
-                Some(n) => n.id.clone(),
-                None => {
-                    eprintln!("No note found: {id}");
-                    return Ok(());
-                }
-            };
-            let id = resolved_id;
-            if !force {
-                if let Some(note) = store.find_note(&id) {
-                    print!("Delete \"{}\"? [y/N] ", note.title);
-                    std::io::Write::flush(&mut std::io::stdout())?;
-                }
-                let mut input = String::new();
-                std::io::stdin().read_line(&mut input)?;
-                if !input.trim().eq_ignore_ascii_case("y") {
-                    println!("Aborted.");
-                    return Ok(());
-                }
-            }
-            if store.delete_note(&id) {
-                println!("Deleted.");
-            } else {
-                eprintln!("No note found: {id}");
-            }
-        }
-
-        Commands::Search { query, full_text } => {
-            let results = store.search(&query, full_text);
-            if results.is_empty() {
-                println!("No notes match '{query}'.");
-            } else {
-                for note in results {
-                    note.print_summary();
-                }
-            }
-        }
-
+    let action = match cmd {
+        Commands::New { title, .. } => action::Action::New { title: Some(title) },
+        Commands::List { tag, limit } => action::Action::List { tag, limit },
+        Commands::View { id } => action::Action::View { note: id },
+        Commands::Edit { id } => action::Action::Edit { note: id },
+        Commands::Delete { id, .. } => action::Action::Delete { note: id },
+        Commands::Search { query, full_text } => action::Action::Search { query, full_text },
         Commands::Remind { text } => {
-            let text = text.join(" ");
-            let text = text
-                .strip_prefix("me to ")
-                .or_else(|| text.strip_prefix("me "))
-                .unwrap_or(&text)
-                .trim();
-            let item = format!("- [ ] {text}");
-
-            if let Some(note) = store.find_by_tag_mut("reminder") {
-                note.body.push('\n');
-                note.body.push_str(&item);
-                note.updated_at = chrono::Utc::now();
-                println!("Added: {text}");
-            } else {
-                store.create_note("Reminders", &item, vec!["reminder".to_string()], "")?;
-                println!("Created Reminders + {text}");
-            }
-        }
-
-        Commands::Listen { title, add, screen } => {
-            let audio_path = listen::record_audio(screen)?;
-
-            println!("Transcribing...");
-            let transcript = ai::transcribe(&audio_path)?;
-            let _ = std::fs::remove_file(&audio_path);
-
-            if transcript.trim().is_empty() {
-                println!("No speech detected.");
-                return Ok(());
-            }
-
-            println!("Structuring notes...");
-
-            if let Some(target) = add {
-                let existing_body = match store.find_by_index_or_prefix(&target) {
-                    Some(n) => n.body.clone(),
-                    None => {
-                        eprintln!("No note found: {target}");
-                        return Ok(());
-                    }
-                };
-                let new_content = ai::structure_notes_append(&transcript, &existing_body)?;
-                let note = store.find_by_index_or_prefix_mut(&target).unwrap();
-                note.body = format!("{}\n\n{}", note.body, new_content);
-                note.updated_at = chrono::Utc::now();
-                println!("Updated \"{}\" {}", note.title, &note.id[..8]);
-            } else {
-                let (ai_title, body) = ai::structure_notes(&transcript)?;
-                let title = title.unwrap_or(ai_title);
-                let note = store.create_note(&title, &body, vec!["listen".to_string()], "")?;
-                println!("Created \"{}\" {}", title, &note.id[..8]);
-            }
-        }
-
-        Commands::Export { id, format } => {
-            let note = match store.find_by_index_or_prefix(&id) {
-                Some(n) => n,
-                None => {
-                    eprintln!("No note found: {id}");
+            // The subcommand takes the words as a Vec; parse the joined form so
+            // `leo remind me to X` strips the same phrasing the shell does.
+            match action::parse(&format!("remind {}", text.join(" "))) {
+                action::Parsed::Action(a) => a,
+                _ => {
+                    eprintln!("Usage: leo remind <what to remember>");
                     return Ok(());
                 }
-            };
-            let format = format.trim_start_matches('.');
-            let output_dir = dirs::desktop_dir()
-                .or_else(dirs::home_dir)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let path = export::export_note(note, format, &output_dir)?;
-            println!("Exported to {}", path.display());
-        }
-
-        Commands::Ask { id } => {
-            let (note_id, title, body) = match store.find_by_index_or_prefix(&id) {
-                Some(n) => (n.id.clone(), n.title.clone(), n.body.clone()),
-                None => {
-                    eprintln!("No note found: {id}");
-                    return Ok(());
-                }
-            };
-
-            let leo_count = body.lines().filter(|l| repl::is_leo_prompt(l).is_some()).count();
-            if leo_count == 0 {
-                println!("No @leo prompts found in this note.");
-                return Ok(());
             }
-
-            println!(
-                "Expanding {} prompt{}...",
-                leo_count,
-                if leo_count == 1 { "" } else { "s" }
-            );
-            let (expanded_body, _) = repl::expand_leo_prompts(&body, &title)?;
-
-            let note = store.find_note_mut(&note_id).unwrap();
-            note.body = expanded_body;
-            note.updated_at = chrono::Utc::now();
-            println!("Updated \"{}\" {}", note.title, &note.id[..8]);
         }
+        Commands::Listen { title, add, screen } => action::Action::Listen {
+            title,
+            append_to: add,
+            screen,
+        },
+        Commands::Export { id, format } => action::Action::Export { note: id, format },
+        Commands::Ask { id } => action::Action::Ask { note: id },
 
         Commands::Serve { .. }
         | Commands::Env
         | Commands::Sync { .. }
         | Commands::Model { .. }
-        | Commands::Config { .. } => {
-            unreachable!("handled in main()")
-        }
-    }
+        | Commands::Config { .. } => unreachable!("handled in main()"),
+    };
 
-    store.save()?;
+    let outcome = action::apply(
+        action,
+        &mut store,
+        action::Ctx { current_dir: "", numbering: &numbering },
+        &ai,
+    )?;
+    absorb_cli(outcome, &mut store, &ai, force_delete)
+}
+
+/// Perform a CLI outcome's effect. Unlike the interactive shell there is no
+/// screen to clear, no help pane, and nothing to quit.
+fn absorb_cli(
+    outcome: action::Outcome,
+    store: &mut store::Store,
+    ai: &action::RealAi,
+    force_delete: bool,
+) -> Result<()> {
+    shell::render(&outcome.lines);
+
+    let next = match outcome.effect {
+        action::Effect::None => return Ok(()),
+
+        action::Effect::ShowNote { id } => {
+            if let Some(note) = store.find_note(&id) {
+                note.print_full();
+            }
+            return Ok(());
+        }
+
+        action::Effect::Edit(req) => shell::run_editor(store, req, ai)?,
+        action::Effect::Confirm { prompt, on_yes } => {
+            shell::confirm(store, &prompt, on_yes, force_delete)?
+        }
+        action::Effect::Listen(req) => shell::record_and_apply(store, req, ai)?,
+
+        // Reachable only through the interactive shell.
+        action::Effect::ShowHelp
+        | action::Effect::ClearScreen
+        | action::Effect::Quit
+        | action::Effect::Sync(_)
+        | action::Effect::Model(_)
+        | action::Effect::Config(_)
+        | action::Effect::Env => return Ok(()),
+    };
+
+    shell::render(&next.lines);
     Ok(())
 }
 
