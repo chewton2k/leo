@@ -1,0 +1,284 @@
+use std::path::Path;
+
+use anyhow::{bail, Result};
+
+use crate::ai_next::error::ProviderError;
+use crate::ai_next::provider::{ChatProvider, ChatRequest, TranscribeProvider};
+
+/// One degradation step, surfaced to the UI so a silent downgrade is visible.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fallback {
+    pub from: String,
+    pub to: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChainOutcome<T> {
+    pub value: T,
+    /// Which provider actually served the request.
+    pub provider: String,
+    pub fallbacks: Vec<Fallback>,
+}
+
+/// Walk providers in order:
+/// - unavailable  -> skip silently, record the reason for the exhaustion error
+/// - retryable    -> record a fallback, try the next
+/// - fatal        -> stop and surface the real cause
+pub fn run_chat_chain(
+    providers: Vec<Box<dyn ChatProvider>>,
+    req: &ChatRequest,
+) -> Result<ChainOutcome<String>> {
+    if providers.is_empty() {
+        bail!("no chat providers configured — check the [chat] chain in your leo config");
+    }
+
+    let mut skipped: Vec<String> = Vec::new();
+    let mut fallbacks: Vec<Fallback> = Vec::new();
+    let mut pending: Option<(String, String)> = None; // (from, reason)
+    let mut last_error: Option<String> = None;
+
+    for p in &providers {
+        if !p.available() {
+            skipped.push(p.unavailable_reason());
+            continue;
+        }
+
+        if let Some((from, reason)) = pending.take() {
+            fallbacks.push(Fallback {
+                from,
+                to: p.name().to_string(),
+                reason,
+            });
+        }
+
+        match p.complete(req) {
+            Ok(value) => {
+                return Ok(ChainOutcome {
+                    value,
+                    provider: p.name().to_string(),
+                    fallbacks,
+                })
+            }
+            Err(ProviderError::Fatal(msg)) => bail!("{msg}"),
+            Err(ProviderError::Retryable(msg)) => {
+                pending = Some((p.name().to_string(), msg.clone()));
+                last_error = Some(msg);
+            }
+        }
+    }
+
+    match last_error {
+        Some(msg) => bail!("every chat provider failed. Last error: {msg}"),
+        None => bail!(
+            "no chat provider is available:\n  {}",
+            skipped.join("\n  ")
+        ),
+    }
+}
+
+/// Same policy as `run_chat_chain`, for transcription.
+pub fn run_transcribe_chain(
+    providers: Vec<Box<dyn TranscribeProvider>>,
+    audio_path: &Path,
+    transcribe_with: impl Fn(&dyn TranscribeProvider, &Path) -> Result<String, ProviderError>,
+) -> Result<ChainOutcome<String>> {
+    if providers.is_empty() {
+        bail!("no transcription providers configured — check the [transcribe] chain in your leo config");
+    }
+
+    let mut skipped: Vec<String> = Vec::new();
+    let mut fallbacks: Vec<Fallback> = Vec::new();
+    let mut pending: Option<(String, String)> = None;
+    let mut last_error: Option<String> = None;
+
+    for p in &providers {
+        if !p.available() {
+            skipped.push(p.unavailable_reason());
+            continue;
+        }
+
+        if let Some((from, reason)) = pending.take() {
+            fallbacks.push(Fallback {
+                from,
+                to: p.name().to_string(),
+                reason,
+            });
+        }
+
+        match transcribe_with(p.as_ref(), audio_path) {
+            Ok(value) => {
+                return Ok(ChainOutcome {
+                    value,
+                    provider: p.name().to_string(),
+                    fallbacks,
+                })
+            }
+            Err(ProviderError::Fatal(msg)) => bail!("{msg}"),
+            Err(ProviderError::Retryable(msg)) => {
+                pending = Some((p.name().to_string(), msg.clone()));
+                last_error = Some(msg);
+            }
+        }
+    }
+
+    match last_error {
+        Some(msg) => bail!("every transcription provider failed. Last error: {msg}"),
+        None => bail!(
+            "no transcription provider is available:\n  {}",
+            skipped.join("\n  ")
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FakeChat {
+        name: &'static str,
+        available: bool,
+        result: Option<Result<String, ProviderError>>,
+    }
+
+    impl FakeChat {
+        fn ok(name: &'static str, out: &str) -> Box<dyn ChatProvider> {
+            Box::new(FakeChat {
+                name,
+                available: true,
+                result: Some(Ok(out.to_string())),
+            })
+        }
+        fn retryable(name: &'static str) -> Box<dyn ChatProvider> {
+            Box::new(FakeChat {
+                name,
+                available: true,
+                result: Some(Err(ProviderError::Retryable(format!("{name} 429")))),
+            })
+        }
+        fn fatal(name: &'static str) -> Box<dyn ChatProvider> {
+            Box::new(FakeChat {
+                name,
+                available: true,
+                result: Some(Err(ProviderError::Fatal(format!("{name} 400")))),
+            })
+        }
+        fn unavailable(name: &'static str) -> Box<dyn ChatProvider> {
+            Box::new(FakeChat {
+                name,
+                available: false,
+                result: None,
+            })
+        }
+    }
+
+    impl ChatProvider for FakeChat {
+        fn complete(&self, _req: &ChatRequest) -> Result<String, ProviderError> {
+            self.result
+                .clone()
+                .expect("complete called on an unavailable provider")
+        }
+        fn available(&self) -> bool {
+            self.available
+        }
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn unavailable_reason(&self) -> String {
+            format!("{} has no key", self.name)
+        }
+    }
+
+    fn req() -> ChatRequest {
+        ChatRequest {
+            prompt: "hi".to_string(),
+            temperature: 0.3,
+            max_tokens: 100,
+        }
+    }
+
+    #[test]
+    fn first_available_provider_serves_the_request() {
+        let out = run_chat_chain(vec![FakeChat::ok("ollama", "answer")], &req()).unwrap();
+        assert_eq!(out.value, "answer");
+        assert_eq!(out.provider, "ollama");
+        assert!(out.fallbacks.is_empty());
+    }
+
+    #[test]
+    fn unavailable_providers_are_skipped_silently() {
+        let out = run_chat_chain(
+            vec![
+                FakeChat::unavailable("ollama"),
+                FakeChat::ok("openrouter", "answer"),
+            ],
+            &req(),
+        )
+        .unwrap();
+        assert_eq!(out.provider, "openrouter");
+        // Skipping an unconfigured provider is not a degradation worth
+        // reporting — only an actual failure is.
+        assert!(out.fallbacks.is_empty());
+    }
+
+    #[test]
+    fn retryable_error_advances_and_records_the_fallback() {
+        let out = run_chat_chain(
+            vec![
+                FakeChat::retryable("ollama"),
+                FakeChat::ok("openrouter", "answer"),
+            ],
+            &req(),
+        )
+        .unwrap();
+        assert_eq!(out.provider, "openrouter");
+        assert_eq!(out.fallbacks.len(), 1);
+        assert_eq!(out.fallbacks[0].from, "ollama");
+        assert_eq!(out.fallbacks[0].to, "openrouter");
+        assert!(out.fallbacks[0].reason.contains("429"));
+    }
+
+    #[test]
+    fn fatal_error_aborts_without_trying_the_next_provider() {
+        let err = run_chat_chain(
+            vec![
+                FakeChat::fatal("openrouter"),
+                FakeChat::ok("ollama", "should never run"),
+            ],
+            &req(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("400"), "got: {err}");
+    }
+
+    #[test]
+    fn exhausted_chain_names_every_provider_and_its_reason() {
+        let err = run_chat_chain(
+            vec![
+                FakeChat::unavailable("ollama"),
+                FakeChat::unavailable("openrouter"),
+            ],
+            &req(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("ollama has no key"), "got: {msg}");
+        assert!(msg.contains("openrouter has no key"), "got: {msg}");
+    }
+
+    #[test]
+    fn empty_chain_is_an_error_not_a_panic() {
+        assert!(run_chat_chain(vec![], &req()).is_err());
+    }
+
+    #[test]
+    fn all_retryable_reports_the_last_failure() {
+        let err = run_chat_chain(
+            vec![FakeChat::retryable("a"), FakeChat::retryable("b")],
+            &req(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("b 429"), "got: {msg}");
+    }
+}
