@@ -71,13 +71,45 @@ fn wav_duration_secs(path: &Path) -> Option<u64> {
         .filter(|&d| d > 0)
 }
 
+/// Parse a canonical WAV header's byte rate directly, needing no external
+/// process. Used only as a fallback for when sox is absent or cannot report
+/// a duration (an interrupted recording leaves DataSize unfinalized) — sox
+/// remains the primary source since it also handles non-canonical layouts
+/// where the fmt chunk isn't at this fixed offset.
+///
+/// Field offsets in the first 44 bytes of a canonical WAV:
+///   22-23 (u16 LE): channels
+///   24-27 (u32 LE): sample rate
+///   34-35 (u16 LE): bits per sample
+/// byte rate = sample_rate * channels * (bits_per_sample / 8)
+fn wav_byte_rate(path: &Path) -> Option<u64> {
+    let bytes = std::fs::read(path).ok()?;
+    if bytes.len() < 44 {
+        return None;
+    }
+    if &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+        return None;
+    }
+    let channels = u16::from_le_bytes([bytes[22], bytes[23]]) as u64;
+    let sample_rate = u32::from_le_bytes([bytes[24], bytes[25], bytes[26], bytes[27]]) as u64;
+    let bits_per_sample = u16::from_le_bytes([bytes[34], bytes[35]]) as u64;
+
+    if channels == 0 || sample_rate == 0 || bits_per_sample == 0 {
+        return None;
+    }
+    Some(sample_rate * channels * (bits_per_sample / 8).max(1))
+}
+
 /// Cut one slice out of a WAV with sox. Returns the temp file's path.
 fn cut_chunk(
     source: &Path,
     spec: &ChunkSpec,
     index: usize,
 ) -> Result<std::path::PathBuf, ProviderError> {
-    let out = std::env::temp_dir().join(format!("leo-chunk-{index}.wav"));
+    // Include the process id so two concurrent `leo` sessions transcribing
+    // long recordings don't overwrite each other's chunks mid-flight.
+    let pid = std::process::id();
+    let out = std::env::temp_dir().join(format!("leo-chunk-{pid}-{index}.wav"));
     let status = Command::new("sox")
         .arg(source)
         .arg(&out)
@@ -90,6 +122,8 @@ fn cut_chunk(
         .map_err(|e| ProviderError::Fatal(format!("sox not available: {e}")))?;
 
     if !status.success() || !out.exists() {
+        // sox may have partially written `out` before failing — don't leak it.
+        let _ = std::fs::remove_file(&out);
         return Err(ProviderError::Fatal(format!(
             "sox trim failed at {}s",
             spec.start_secs
@@ -108,9 +142,24 @@ fn transcribe_with(
         .map_err(|e| ProviderError::Fatal(format!("cannot stat audio: {e}")))?
         .len();
 
-    // Fall back to a byte-rate estimate if sox cannot read the header.
-    let duration = wav_duration_secs(audio_path)
-        .unwrap_or_else(|| file_size.saturating_sub(44) / 32000);
+    // sox is the primary duration source — it handles non-canonical WAV
+    // layouts too. Fall back to parsing the header's byte rate directly only
+    // when sox is absent or cannot report a duration (e.g. an interrupted
+    // recording left DataSize unfinalized). If both fail, don't guess: a
+    // wrong guess here is what caused a prior chunk-sizing bug (see fix
+    // round 1, C2) — surface a clear error naming the file instead.
+    let duration = match wav_duration_secs(audio_path) {
+        Some(d) => d,
+        None => {
+            let byte_rate = wav_byte_rate(audio_path).ok_or_else(|| {
+                ProviderError::Fatal(format!(
+                    "cannot determine duration of {}: sox unavailable and WAV header unreadable",
+                    audio_path.display()
+                ))
+            })?;
+            file_size.saturating_sub(44) / byte_rate
+        }
+    };
 
     let chunks = plan_chunks(file_size, duration, provider.max_bytes());
 
@@ -147,8 +196,13 @@ fn transcribe_with(
                 }
                 full.push_str(&text);
             }
-            // Surface the failure so the chain can move to the next provider
-            // rather than returning a half-finished transcript.
+            // Discard everything transcribed so far and surface the failure
+            // so the chain can move to the next provider. This is deliberate:
+            // the provider contract is one text per file, and returning a
+            // transcript silently missing its back half would be worse than
+            // a clear failure. The cost is that the next provider in the
+            // chain re-transcribes the whole file from chunk 0, not just the
+            // failed chunk onward.
             Err(e) => return Err(e),
         }
     }
@@ -269,5 +323,55 @@ mod tests {
     fn an_empty_file_yields_one_chunk_not_a_panic() {
         let chunks = plan_chunks(0, 0, Some(20 * MB));
         assert_eq!(chunks.len(), 1);
+    }
+
+    /// Build a synthetic 44-byte canonical WAV header with the given
+    /// sample rate, channel count, and bits per sample.
+    fn synthetic_wav_header(sample_rate: u32, channels: u16, bits_per_sample: u16) -> Vec<u8> {
+        let mut h = vec![0u8; 44];
+        h[0..4].copy_from_slice(b"RIFF");
+        h[8..12].copy_from_slice(b"WAVE");
+        h[22..24].copy_from_slice(&channels.to_le_bytes());
+        h[24..28].copy_from_slice(&sample_rate.to_le_bytes());
+        h[34..36].copy_from_slice(&bits_per_sample.to_le_bytes());
+        h
+    }
+
+    fn write_temp_wav(bytes: &[u8]) -> tempfile::NamedTempFile {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        f.write_all(bytes).unwrap();
+        f.flush().unwrap();
+        f
+    }
+
+    #[test]
+    fn wav_byte_rate_reads_16khz_mono_16bit() {
+        let f = write_temp_wav(&synthetic_wav_header(16000, 1, 16));
+        assert_eq!(wav_byte_rate(f.path()), Some(32000));
+    }
+
+    #[test]
+    fn wav_byte_rate_reads_16khz_mono_32bit_float() {
+        let f = write_temp_wav(&synthetic_wav_header(16000, 1, 32));
+        assert_eq!(wav_byte_rate(f.path()), Some(64000));
+    }
+
+    #[test]
+    fn wav_byte_rate_reads_44100hz_stereo_16bit() {
+        let f = write_temp_wav(&synthetic_wav_header(44100, 2, 16));
+        assert_eq!(wav_byte_rate(f.path()), Some(176400));
+    }
+
+    #[test]
+    fn wav_byte_rate_returns_none_for_a_truncated_file() {
+        let f = write_temp_wav(&synthetic_wav_header(16000, 1, 16)[..30]);
+        assert_eq!(wav_byte_rate(f.path()), None);
+    }
+
+    #[test]
+    fn wav_byte_rate_returns_none_for_zero_sample_rate_not_a_panic() {
+        let f = write_temp_wav(&synthetic_wav_header(0, 1, 16));
+        assert_eq!(wav_byte_rate(f.path()), None);
     }
 }
