@@ -83,29 +83,50 @@ cargo uninstall leo
 leo
 ```
 
-This drops you into an interactive session:
+That opens the full-screen interface: directories on the left, your notes in the
+middle, the selected note on the right.
 
 ```
-  leo — notes for programmers
-  0 notes · Type help to get started
-
-leo> new Rust ownership notes
-  (opens $EDITOR with a template — write your note, save, and quit)
-  Created 3f2a1b4c
-
-leo> list
-    1  3f2a1b4c  2024-03-30 10:30  Rust ownership notes  [rust, learning]
-
-leo> view 1
-leo> edit 1
-leo> quit
+┌ dirs ────────┬ notes (3) ──────────────┬ Rust ownership ──────────┐
+│ cs130/       │   1 Graph traversals    │ ## Ownership             │
+│ cs162/       │   2 Rust ownership      │ - [ ] read the book      │
+│              │   3 Midterm plan        │ - [x] write notes        │
+└──────────────┴─────────────────────────┴──────────────────────────┘
+  :  command    ?  help    Ctrl-P  find    q  quit
+ /cs130   Created a1b2c3d4
 ```
 
-After `list` or `search`, notes are numbered — use `view 1`, `edit 2`, `delete 3` instead of typing IDs.
+Move with `j`/`k`, switch panes with `h`/`l`, and press `?` for help at any
+time. Anything that takes an argument goes on the `:` line, where Tab completes
+note titles, directories, tags, and formats.
+
+| Key | What it does |
+|-----|-------------|
+| `j` / `k` | Move down / up |
+| `g` / `G` | First / last |
+| `h` / `l` | Switch pane |
+| `Enter` | Open a directory, or focus the note body |
+| `x` | Toggle the first open checkbox |
+| `e` | Edit the note in `$EDITOR` |
+| `D` | Delete the note (asks first) |
+| `:` | Command line |
+| `/` | Search |
+| `Tab` | Complete on the `:` line |
+| `Ctrl-P` | Fuzzy find a note across all directories |
+| `Ctrl-D` / `Ctrl-U` | Scroll the preview |
+| `Ctrl-R` | Reload from disk |
+| `?` | Help |
+| `q` | Quit |
+
+Notes are numbered in the pane, so `:view 2`, `:edit 2`, and `:delete 2` all
+refer to what you can see. Tab completion accepts a title and fills in the
+number for you: type `:view owner` and press Tab.
 
 ## Commands
 
 ### Notes
+
+Type these on the `:` line, or use them as CLI subcommands.
 
 | Command | What it does | Shortcut |
 |---------|-------------|----------|
@@ -119,18 +140,18 @@ After `list` or `search`, notes are numbered — use `view 1`, `edit 2`, `delete
 | `search -f <query>` | Full-text search (titles + bodies) | |
 | `tags` | Show all tags with counts | |
 
-`<note>` can be a list number (`view 1`) or an ID prefix (`view 3f2a`).
+`<note>` can be a pane number (`view 1`), an ID prefix (`view 3f2a`), or a unique part of the title (`view ownership`).
 
 ### Directories
 
 Organize notes into directories:
 
 ```
-leo> mkdir cs130
-leo> cd cs130
-leo cs130> new Lecture 1
-leo cs130> cd ..
-leo> mv 1 cs130
+:mkdir cs130
+:cd cs130          (or select it in the dirs pane and press Enter)
+:new Lecture 1
+:cd ..
+:mv 1 cs130
 ```
 
 | Command | What it does |
@@ -163,12 +184,12 @@ Save and quit to create the note. Empty body cancels.
 Notes support markdown checkboxes and bullets:
 
 ```
-leo> view 1
+:view 1
   [1] ☐ Write tests
   [2] ☑ Fix login bug
   • Remember to deploy
 
-leo> check 1 1
+:check 1 1
   ☑ Write tests
 ```
 
@@ -177,25 +198,42 @@ leo> check 1 1
 ### Reminders
 
 ```
-leo> remind me to buy groceries
-leo> hey leo remind me to call mom
+:remind me to buy groceries
+:hey leo remind me to call mom
 ```
 
 Reminders are stored as checkboxes in a `#reminder` note. Toggle with `check`.
 
 ### Listen (speech-to-notes)
 
-Record audio and get AI-structured notes:
+Record audio and get AI-structured notes. Recording does not block the
+interface — the preview pane fills in with notes as you talk:
 
 ```
-leo> listen
-  Recording... press Enter to stop
-  Transcribing...
-  Created "Intro to ML — Lecture 3" a1b2c3d4
-
-leo> listen CS 101 Lecture       # custom title
-leo> listen add 1                # append to existing note
+:listen
+┌ dirs ────────┬ notes (3) ──────────────┬ live notes (t for raw text) ─┐
+│ cs130/       │   1 Graph traversals    │ - BFS explores a graph level │
+│              │   2 Rust ownership      │   by level using a queue     │
+│              │                         │ - DFS uses a stack instead   │
+└──────────────┴─────────────────────────┴──────────────────────────────┘
+ /   • Recording 01:23
 ```
+
+Press `t` to switch between the condensed bullets and the raw transcript, and
+`Enter` to stop. Stopping is not cancelling: the finished recording is
+transcribed in one pass and saved as a note, so the result is the same quality
+you would get without the live view.
+
+```
+:listen CS 101 Lecture       # custom title
+:listen add 1                # append to an existing note
+:listen --screen             # capture system audio instead of the microphone
+```
+
+Under the hood a background thread transcribes the last 15 seconds every 15
+seconds and asks the chat model for a few bullets every minute, so the live view
+costs a handful of small requests. Putting a local Ollama first in the chat chain
+makes that part free.
 
 **Requires:** SoX (`brew install sox`), plus at least one working provider in
 each chain — either local (`ollama` + `whisper-cpp`) or a key for one cloud
@@ -212,12 +250,12 @@ Write `@leo` questions directly in a note and expand them with `ask`:
 ```
 
 ```
-leo> ask 1
+:ask 1
   Expanding 1 prompt...
   Updated "Rust ownership notes" 3f2a1b4c
 ```
 
-The `@leo` line is replaced with the AI's answer inline. Works in both the REPL and as a CLI subcommand (`leo ask <id>`). Also triggers automatically when saving a note in `edit` if any `@leo` lines are present.
+The `@leo` line is replaced with the AI's answer inline. Works on the `:` line and as a CLI subcommand (`leo ask <id>`). Also triggers automatically when saving a note in `edit` if any `@leo` lines are present.
 
 **Requires:** one working chat provider — a running `ollama`, or
 `leo model login openrouter`.
@@ -225,7 +263,7 @@ The `@leo` line is replaced with the AI's answer inline. Works in both the REPL 
 ### Export
 
 ```
-leo> export 1 md
+:export 1 md
   Exported /Users/you/Desktop/My-Note.md
 ```
 
@@ -266,24 +304,26 @@ Keys never go in this file — they live in your OS keychain, or in env vars
 
 Access your notes from your phone or browser:
 
-```
-leo> serve
-# or from the CLI:
+```sh
 leo serve --port 3131
 ```
 
-Opens a web UI with a QR code for easy phone access on your local network.
+Opens a web UI with a QR code for easy phone access on your local network. This
+one is CLI-only — it runs its own async server, so it is not a `:` line command.
+
+Note that the server has no authentication: anyone who can reach that port on
+your network can read and edit your notes. Run it on trusted networks only.
 
 ## Sync (GitHub backup)
 
 Back up and sync your notes via git. Notes are stored as plain `.md` files, so your repo is readable on GitHub as-is.
 
 ```
-leo> sync init               # initialize a git repo in your notes directory
-leo> sync connect <url>      # connect to a GitHub remote
-leo> sync push               # push notes to GitHub
-leo> sync pull               # pull notes from GitHub (reloads store)
-leo> sync status             # show git status
+:sync init               # initialize a git repo in your notes directory
+:sync connect <url>      # connect to a GitHub remote
+:sync push               # push notes to GitHub
+:sync pull               # pull notes from GitHub (reloads store)
+:sync status             # show git status
 ```
 
 Or as CLI subcommands:
