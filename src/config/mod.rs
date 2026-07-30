@@ -86,6 +86,90 @@ key_env = "HF_API_KEY"
             transcribe = quoted_list(&DEFAULT_TRANSCRIBE_CHAIN),
         )
     }
+
+    /// `~/.config/leo/config.toml`. Deliberately not beside the notes
+    /// directory: notes are git-synced by sync.rs, and this file holds
+    /// machine-local values (ports, model paths).
+    pub fn config_path() -> Result<std::path::PathBuf> {
+        let dir = dirs::config_dir()
+            .context("could not determine a config directory for this platform")?;
+        Ok(dir.join("leo").join("config.toml"))
+    }
+
+    /// Load from the standard path. Never fails: a missing or malformed file
+    /// falls back to built-in defaults so the app always starts.
+    pub fn load() -> Config {
+        match Config::config_path() {
+            Ok(path) => Config::load_from(&path),
+            Err(e) => {
+                eprintln!("  config: {e}; using defaults");
+                let mut cfg = Config::default();
+                cfg.apply_env_overrides();
+                cfg
+            }
+        }
+    }
+
+    pub fn load_from(path: &std::path::Path) -> Config {
+        let mut cfg = match std::fs::read_to_string(path) {
+            Ok(text) => match Config::parse(&text) {
+                Ok(cfg) => cfg,
+                Err(e) => {
+                    eprintln!("  config: {} is invalid ({e}); using defaults", path.display());
+                    Config::default()
+                }
+            },
+            Err(_) => Config::default(),
+        };
+        cfg.apply_env_overrides();
+        cfg
+    }
+
+    /// Write the commented default config if none exists yet. Returns the path
+    /// and whether it was newly created.
+    pub fn ensure_exists() -> Result<(std::path::PathBuf, bool)> {
+        let path = Config::config_path()?;
+        if path.exists() {
+            return Ok((path, false));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("could not create {}", parent.display()))?;
+        }
+        std::fs::write(&path, Config::default_toml())
+            .with_context(|| format!("could not write {}", path.display()))?;
+        Ok((path, true))
+    }
+
+    /// Env vars win over the file, so a one-off override needs no file edit.
+    pub fn apply_env_overrides(&mut self) {
+        if let Ok(name) = std::env::var("LEO_CHAT_PROVIDER") {
+            if !name.trim().is_empty() {
+                self.chat.chain = vec![name.trim().to_string()];
+            }
+        }
+        if let Ok(name) = std::env::var("LEO_TRANSCRIBE_PROVIDER") {
+            if !name.trim().is_empty() {
+                self.transcribe.chain = vec![name.trim().to_string()];
+            }
+        }
+        if let Ok(model) = std::env::var("LEO_CHAT_MODEL") {
+            if let Some(first) = self.chat.chain.first().cloned() {
+                self.providers.entry(first).or_default().model = Some(model);
+            }
+        }
+        // Deprecated: honored for one release so existing .env files keep working.
+        if let Ok(model) = std::env::var("OPENROUTER_CHAT_MODEL") {
+            self.providers
+                .entry("openrouter".to_string())
+                .or_default()
+                .model = Some(model);
+        }
+    }
+
+    pub fn provider(&self, name: &str) -> Option<&ProviderConfig> {
+        self.providers.get(name)
+    }
 }
 
 fn quoted_list(items: &[&str]) -> String {
@@ -187,6 +271,80 @@ kind = "telepathy"
         assert_eq!(
             parsed.providers["openrouter"].model,
             Config::default().providers["openrouter"].model
+        );
+    }
+
+    use std::sync::Mutex;
+
+    /// Env vars are process-global; serialize the tests that mutate them.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn load_from_missing_path_returns_defaults() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::load_from(&dir.path().join("nope.toml"));
+        assert_eq!(cfg.chat.chain, Config::default().chat.chain);
+    }
+
+    #[test]
+    fn load_from_malformed_file_falls_back_to_defaults() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[chat\nbroken").unwrap();
+        // Must not panic and must not refuse to start.
+        let cfg = Config::load_from(&path);
+        assert_eq!(cfg.chat.chain, Config::default().chat.chain);
+    }
+
+    #[test]
+    fn file_values_override_defaults() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, "[chat]\nchain = [\"only_this\"]\n").unwrap();
+        let cfg = Config::load_from(&path);
+        assert_eq!(cfg.chat.chain, vec!["only_this"]);
+    }
+
+    #[test]
+    fn leo_chat_model_overrides_first_chain_provider() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LEO_CHAT_MODEL", "some/other-model");
+        let mut cfg = Config::default();
+        cfg.apply_env_overrides();
+        std::env::remove_var("LEO_CHAT_MODEL");
+
+        let first = &cfg.chat.chain[0];
+        assert_eq!(
+            cfg.providers[first].model.as_deref(),
+            Some("some/other-model")
+        );
+    }
+
+    #[test]
+    fn leo_chat_provider_replaces_the_chain() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LEO_CHAT_PROVIDER", "openrouter");
+        let mut cfg = Config::default();
+        cfg.apply_env_overrides();
+        std::env::remove_var("LEO_CHAT_PROVIDER");
+
+        assert_eq!(cfg.chat.chain, vec!["openrouter"]);
+    }
+
+    #[test]
+    fn deprecated_openrouter_chat_model_still_works() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("OPENROUTER_CHAT_MODEL", "legacy/model");
+        let mut cfg = Config::default();
+        cfg.apply_env_overrides();
+        std::env::remove_var("OPENROUTER_CHAT_MODEL");
+
+        assert_eq!(
+            cfg.providers["openrouter"].model.as_deref(),
+            Some("legacy/model")
         );
     }
 }
