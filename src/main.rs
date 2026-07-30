@@ -4,10 +4,10 @@ mod config;
 mod export;
 mod listen;
 mod notes;
-mod repl;
 mod shell;
 mod store;
 mod sync;
+mod tui;
 mod web;
 
 use std::io::IsTerminal;
@@ -240,7 +240,7 @@ fn main() -> Result<()> {
         Some(Commands::Config { command }) => run_config(command.into()),
         None => {
             if std::io::stdin().is_terminal() {
-                repl::run()
+                tui::run()
             } else {
                 eprintln!("leo: interactive mode requires a terminal. Use subcommands for scripting.");
                 std::process::exit(1);
