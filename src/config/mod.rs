@@ -1,4 +1,5 @@
 pub mod provider;
+pub mod secret;
 
 use std::collections::BTreeMap;
 
