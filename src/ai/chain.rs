@@ -2,8 +2,8 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 
-use crate::ai_next::error::ProviderError;
-use crate::ai_next::provider::{ChatProvider, ChatRequest, TranscribeProvider};
+use crate::ai::error::ProviderError;
+use crate::ai::provider::{ChatProvider, ChatRequest, TranscribeProvider};
 
 /// One degradation step, surfaced to the UI so a silent downgrade is visible.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::ai_next::error::ProviderResult;
+use crate::ai::error::ProviderResult;
 
 /// One chat completion request, provider-independent.
 #[derive(Debug, Clone)]

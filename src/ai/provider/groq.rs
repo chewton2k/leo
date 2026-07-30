@@ -1,35 +1,35 @@
 use std::path::Path;
 
-use crate::ai_next::error::{
+use crate::ai::error::{
     classify_reqwest, classify_status, scrub_secret, ProviderError, ProviderResult,
 };
-use crate::ai_next::provider::TranscribeProvider;
+use crate::ai::provider::TranscribeProvider;
 use crate::config::provider::ProviderConfig;
 use crate::config::secret::Secret;
 
-/// Per-request size cap, with headroom under the API's real limit.
 const MAX_BYTES: u64 = 20 * 1024 * 1024;
+const URL: &str = "https://api.groq.com/openai/v1/audio/transcriptions";
 
-pub struct HfTranscribe {
+pub struct GroqTranscribe {
     name: String,
     model: String,
     key: Option<Secret>,
 }
 
-impl HfTranscribe {
+impl GroqTranscribe {
     pub fn new(name: String, cfg: &ProviderConfig, key: Option<Secret>) -> Self {
-        HfTranscribe {
+        GroqTranscribe {
             name,
             model: cfg
                 .model
                 .clone()
-                .unwrap_or_else(|| "openai/whisper-large-v3-turbo".to_string()),
+                .unwrap_or_else(|| "whisper-large-v3-turbo".to_string()),
             key,
         }
     }
 }
 
-impl TranscribeProvider for HfTranscribe {
+impl TranscribeProvider for GroqTranscribe {
     fn transcribe(&self, audio_path: &Path) -> ProviderResult<String> {
         let key = self
             .key
@@ -41,19 +41,27 @@ impl TranscribeProvider for HfTranscribe {
             .build()
             .map_err(|e| ProviderError::Fatal(format!("{}: {e}", self.name)))?;
 
+        let file_name = audio_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("audio.wav")
+            .to_string();
         let bytes = std::fs::read(audio_path)
             .map_err(|e| ProviderError::Fatal(format!("{}: cannot read audio: {e}", self.name)))?;
 
-        let url = format!(
-            "https://router.huggingface.co/hf-inference/models/{}",
-            self.model
-        );
+        let part = reqwest::blocking::multipart::Part::bytes(bytes)
+            .file_name(file_name)
+            .mime_str("audio/wav")
+            .map_err(|e| ProviderError::Fatal(format!("{}: {e}", self.name)))?;
+
+        let form = reqwest::blocking::multipart::Form::new()
+            .text("model", self.model.clone())
+            .part("file", part);
 
         let resp = client
-            .post(&url)
-            .header("Content-Type", "audio/wav")
+            .post(URL)
             .header("Authorization", format!("Bearer {}", key.as_str()))
-            .body(bytes)
+            .multipart(form)
             .send()
             .map_err(|e| classify_reqwest(&self.name, &e))?;
 
@@ -101,28 +109,28 @@ mod tests {
     #[test]
     fn max_bytes_is_twenty_megabytes() {
         let cfg = ProviderConfig::default();
-        let provider = HfTranscribe::new("hf".to_string(), &cfg, None);
+        let provider = GroqTranscribe::new("groq".to_string(), &cfg, None);
         assert_eq!(provider.max_bytes(), Some(20 * 1024 * 1024));
     }
 
     #[test]
     fn available_requires_a_key() {
         let cfg = ProviderConfig::default();
-        assert!(!HfTranscribe::new("hf".to_string(), &cfg, None).available());
+        assert!(!GroqTranscribe::new("groq".to_string(), &cfg, None).available());
 
         let store = MemoryStore::default();
-        store.set("hf", "a-key").unwrap();
-        let key = resolve("hf", None, &store);
-        assert!(HfTranscribe::new("hf".to_string(), &cfg, key).available());
+        store.set("groq", "a-key").unwrap();
+        let key = resolve("groq", None, &store);
+        assert!(GroqTranscribe::new("groq".to_string(), &cfg, key).available());
     }
 
     #[test]
     fn unavailable_reason_never_contains_the_key_value() {
         let store = MemoryStore::default();
-        store.set("hf", "sk-super-secret-value").unwrap();
-        let key = resolve("hf", None, &store);
+        store.set("groq", "sk-super-secret-value").unwrap();
+        let key = resolve("groq", None, &store);
         let cfg = ProviderConfig::default();
-        let provider = HfTranscribe::new("hf".to_string(), &cfg, key);
+        let provider = GroqTranscribe::new("groq".to_string(), &cfg, key);
         assert!(!provider
             .unavailable_reason()
             .contains("sk-super-secret-value"));

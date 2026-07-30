@@ -3,9 +3,9 @@ use std::process::{Command, Stdio};
 
 use anyhow::Result;
 
-use crate::ai_next::chain::{run_transcribe_chain, ChainOutcome};
-use crate::ai_next::error::ProviderError;
-use crate::ai_next::provider::{build_transcribe_chain, TranscribeProvider};
+use crate::ai::chain::{run_transcribe_chain, ChainOutcome};
+use crate::ai::error::ProviderError;
+use crate::ai::provider::{build_transcribe_chain, TranscribeProvider};
 use crate::config::secret::SecretStore;
 use crate::config::Config;
 

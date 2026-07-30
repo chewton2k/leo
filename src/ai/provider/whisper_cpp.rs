@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use crate::ai_next::error::{ProviderError, ProviderResult};
-use crate::ai_next::provider::TranscribeProvider;
+use crate::ai::error::{ProviderError, ProviderResult};
+use crate::ai::provider::TranscribeProvider;
 use crate::config::provider::ProviderConfig;
 
 /// Local whisper.cpp. Free, offline, and — because it reads the file directly

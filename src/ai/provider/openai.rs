@@ -1,7 +1,7 @@
-use crate::ai_next::error::{
+use crate::ai::error::{
     classify_reqwest, classify_status, scrub_secret, ProviderError, ProviderResult,
 };
-use crate::ai_next::provider::{ChatProvider, ChatRequest};
+use crate::ai::provider::{ChatProvider, ChatRequest};
 use crate::config::provider::ProviderConfig;
 use crate::config::secret::Secret;
 
@@ -122,7 +122,7 @@ impl ChatProvider for OpenAiChat {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_next::provider::ChatProvider;
+    use crate::ai::provider::ChatProvider;
     use crate::config::secret::{resolve, MemoryStore, SecretStore};
 
     #[test]
