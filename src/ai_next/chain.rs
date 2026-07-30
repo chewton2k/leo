@@ -69,7 +69,11 @@ pub fn run_chat_chain(
     }
 
     match last_error {
-        Some(msg) => bail!("every chat provider failed. Last error: {msg}"),
+        Some(msg) if skipped.is_empty() => bail!("every chat provider failed. Last error: {msg}"),
+        Some(msg) => bail!(
+            "chat chain exhausted — some providers were unavailable and the rest failed:\n  {}\nLast error: {msg}",
+            skipped.join("\n  ")
+        ),
         None => bail!(
             "no chat provider is available:\n  {}",
             skipped.join("\n  ")
@@ -123,7 +127,13 @@ pub fn run_transcribe_chain(
     }
 
     match last_error {
-        Some(msg) => bail!("every transcription provider failed. Last error: {msg}"),
+        Some(msg) if skipped.is_empty() => {
+            bail!("every transcription provider failed. Last error: {msg}")
+        }
+        Some(msg) => bail!(
+            "transcription chain exhausted — some providers were unavailable and the rest failed:\n  {}\nLast error: {msg}",
+            skipped.join("\n  ")
+        ),
         None => bail!(
             "no transcription provider is available:\n  {}",
             skipped.join("\n  ")
@@ -280,5 +290,144 @@ mod tests {
         .unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("b 429"), "got: {msg}");
+    }
+
+    #[test]
+    fn mixed_chain_reports_both_skipped_and_failed() {
+        let err = run_chat_chain(
+            vec![FakeChat::unavailable("ollama"), FakeChat::retryable("openrouter")],
+            &req(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("ollama has no key"), "got: {msg}");
+        assert!(msg.contains("openrouter 429"), "got: {msg}");
+    }
+
+    #[test]
+    fn mixed_chain_reports_every_skipped_provider_not_just_the_first() {
+        let err = run_chat_chain(
+            vec![
+                FakeChat::unavailable("ollama"),
+                FakeChat::retryable("openrouter"),
+                FakeChat::unavailable("claude"),
+            ],
+            &req(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("ollama has no key"), "got: {msg}");
+        assert!(msg.contains("claude has no key"), "got: {msg}");
+        assert!(msg.contains("openrouter 429"), "got: {msg}");
+    }
+
+    #[test]
+    fn mixed_chain_does_not_claim_every_provider_failed() {
+        let err = run_chat_chain(
+            vec![FakeChat::unavailable("ollama"), FakeChat::retryable("openrouter")],
+            &req(),
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(!msg.contains("every chat provider failed"), "got: {msg}");
+    }
+
+    struct FakeTranscribe {
+        name: &'static str,
+        available: bool,
+        result: Option<Result<String, ProviderError>>,
+    }
+
+    impl FakeTranscribe {
+        fn retryable(name: &'static str) -> Box<dyn TranscribeProvider> {
+            Box::new(FakeTranscribe {
+                name,
+                available: true,
+                result: Some(Err(ProviderError::Retryable(format!("{name} 429")))),
+            })
+        }
+        fn unavailable(name: &'static str) -> Box<dyn TranscribeProvider> {
+            Box::new(FakeTranscribe {
+                name,
+                available: false,
+                result: None,
+            })
+        }
+    }
+
+    impl TranscribeProvider for FakeTranscribe {
+        fn transcribe(&self, _audio_path: &Path) -> Result<String, ProviderError> {
+            self.result
+                .clone()
+                .expect("transcribe called on an unavailable provider")
+        }
+        fn max_bytes(&self) -> Option<u64> {
+            None
+        }
+        fn available(&self) -> bool {
+            self.available
+        }
+        fn name(&self) -> &str {
+            self.name
+        }
+        fn unavailable_reason(&self) -> String {
+            format!("{} has no key", self.name)
+        }
+    }
+
+    fn transcribe_with(p: &dyn TranscribeProvider, path: &Path) -> Result<String, ProviderError> {
+        p.transcribe(path)
+    }
+
+    #[test]
+    fn transcribe_mixed_chain_reports_both_skipped_and_failed() {
+        let err = run_transcribe_chain(
+            vec![
+                FakeTranscribe::unavailable("whisper-local"),
+                FakeTranscribe::retryable("hf-whisper"),
+            ],
+            Path::new("/tmp/does-not-matter.wav"),
+            transcribe_with,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("whisper-local has no key"), "got: {msg}");
+        assert!(msg.contains("hf-whisper 429"), "got: {msg}");
+    }
+
+    #[test]
+    fn transcribe_mixed_chain_reports_every_skipped_provider_not_just_the_first() {
+        let err = run_transcribe_chain(
+            vec![
+                FakeTranscribe::unavailable("whisper-local"),
+                FakeTranscribe::retryable("hf-whisper"),
+                FakeTranscribe::unavailable("openai-whisper"),
+            ],
+            Path::new("/tmp/does-not-matter.wav"),
+            transcribe_with,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("whisper-local has no key"), "got: {msg}");
+        assert!(msg.contains("openai-whisper has no key"), "got: {msg}");
+        assert!(msg.contains("hf-whisper 429"), "got: {msg}");
+    }
+
+    #[test]
+    fn transcribe_mixed_chain_does_not_claim_every_provider_failed() {
+        let err = run_transcribe_chain(
+            vec![
+                FakeTranscribe::unavailable("whisper-local"),
+                FakeTranscribe::retryable("hf-whisper"),
+            ],
+            Path::new("/tmp/does-not-matter.wav"),
+            transcribe_with,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains("every transcription provider failed"),
+            "got: {msg}"
+        );
     }
 }
