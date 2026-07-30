@@ -1,4 +1,6 @@
-use crate::ai_next::error::{classify_reqwest, classify_status, ProviderError, ProviderResult};
+use crate::ai_next::error::{
+    classify_reqwest, classify_status, scrub_secret, ProviderError, ProviderResult,
+};
 use crate::ai_next::provider::{ChatProvider, ChatRequest};
 use crate::config::provider::ProviderConfig;
 use crate::config::secret::Secret;
@@ -77,8 +79,11 @@ impl ChatProvider for OpenAiChat {
         let status = resp.status().as_u16();
         if !resp.status().is_success() {
             // Only the response body is quoted — never our request headers,
-            // so the Authorization value cannot leak into an error.
+            // so our own Authorization header cannot leak this way. Scrub
+            // defensively in case a misbehaving gateway reflects the key
+            // back inside the body itself.
             let text = resp.text().unwrap_or_default();
+            let text = scrub_secret(&text, self.key.as_ref().map(Secret::as_str));
             return Err(classify_status(status, &self.name, &text));
         }
 
@@ -107,5 +112,41 @@ impl ChatProvider for OpenAiChat {
             "{}: no API key (run `leo model login {}`)",
             self.name, self.name
         )
+    }
+
+    fn max_tokens(&self) -> Option<u32> {
+        Some(self.max_tokens)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ai_next::provider::ChatProvider;
+    use crate::config::secret::{resolve, MemoryStore, SecretStore};
+
+    #[test]
+    fn max_bytes_is_not_applicable_but_max_tokens_reflects_config() {
+        let cfg = ProviderConfig {
+            max_tokens: Some(777),
+            ..Default::default()
+        };
+        let provider = OpenAiChat::new("ollama".to_string(), &cfg, None);
+        assert_eq!(ChatProvider::max_tokens(&provider), Some(777));
+    }
+
+    #[test]
+    fn unavailable_reason_never_contains_the_key_value() {
+        let store = MemoryStore::default();
+        store.set("openrouter", "sk-super-secret-value").unwrap();
+        let key = resolve("openrouter", None, &store);
+        let cfg = ProviderConfig {
+            key_env: Some("LEO_TEST_UNUSED_KEY_ENV".to_string()),
+            ..Default::default()
+        };
+        let provider = OpenAiChat::new("openrouter".to_string(), &cfg, key);
+        assert!(!provider
+            .unavailable_reason()
+            .contains("sk-super-secret-value"));
     }
 }

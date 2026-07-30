@@ -21,6 +21,15 @@ pub trait ChatProvider {
     fn unavailable_reason(&self) -> String {
         format!("{} is not configured", self.name())
     }
+    /// This provider's own configured token cap, if it has an opinion.
+    /// `None` means "no opinion — use the caller's request value unchanged".
+    /// When `Some`, provider config wins: the chain runner overrides the
+    /// request's `max_tokens` with this value before calling `complete`, so
+    /// e.g. `[providers.ollama] max_tokens = 4096` in leo's config actually
+    /// takes effect instead of being silently ignored.
+    fn max_tokens(&self) -> Option<u32> {
+        None
+    }
 }
 
 pub trait TranscribeProvider {

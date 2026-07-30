@@ -52,7 +52,16 @@ pub fn run_chat_chain(
             });
         }
 
-        match p.complete(req) {
+        // Provider config wins over the caller's request: when a provider
+        // has its own configured `max_tokens`, build a per-provider request
+        // rather than mutating the caller's, since different providers in
+        // the same chain may disagree.
+        let mut effective_req = req.clone();
+        if let Some(max_tokens) = p.max_tokens() {
+            effective_req.max_tokens = max_tokens;
+        }
+
+        match p.complete(&effective_req) {
             Ok(value) => {
                 return Ok(ChainOutcome {
                     value,
@@ -149,6 +158,10 @@ mod tests {
         name: &'static str,
         available: bool,
         result: Option<Result<String, ProviderError>>,
+        max_tokens: Option<u32>,
+        /// Captures the `max_tokens` the runner actually passed to
+        /// `complete`, so tests can assert on the override behavior.
+        observed_max_tokens: std::rc::Rc<std::cell::RefCell<Option<u32>>>,
     }
 
     impl FakeChat {
@@ -157,6 +170,8 @@ mod tests {
                 name,
                 available: true,
                 result: Some(Ok(out.to_string())),
+                max_tokens: None,
+                observed_max_tokens: Default::default(),
             })
         }
         fn retryable(name: &'static str) -> Box<dyn ChatProvider> {
@@ -164,6 +179,8 @@ mod tests {
                 name,
                 available: true,
                 result: Some(Err(ProviderError::Retryable(format!("{name} 429")))),
+                max_tokens: None,
+                observed_max_tokens: Default::default(),
             })
         }
         fn fatal(name: &'static str) -> Box<dyn ChatProvider> {
@@ -171,6 +188,8 @@ mod tests {
                 name,
                 available: true,
                 result: Some(Err(ProviderError::Fatal(format!("{name} 400")))),
+                max_tokens: None,
+                observed_max_tokens: Default::default(),
             })
         }
         fn unavailable(name: &'static str) -> Box<dyn ChatProvider> {
@@ -178,12 +197,35 @@ mod tests {
                 name,
                 available: false,
                 result: None,
+                max_tokens: None,
+                observed_max_tokens: Default::default(),
             })
+        }
+        /// A provider that records the `max_tokens` it actually observed in
+        /// `complete`, with or without an opinion of its own. Returns the box
+        /// plus a shared handle to the observed value, since the runner
+        /// consumes the `Vec<Box<dyn ChatProvider>>` and the box isn't
+        /// reachable again after `run_chat_chain` returns.
+        fn capturing(
+            name: &'static str,
+            max_tokens: Option<u32>,
+            out: &str,
+        ) -> (Box<dyn ChatProvider>, std::rc::Rc<std::cell::RefCell<Option<u32>>>) {
+            let observed: std::rc::Rc<std::cell::RefCell<Option<u32>>> = Default::default();
+            let provider = Box::new(FakeChat {
+                name,
+                available: true,
+                result: Some(Ok(out.to_string())),
+                max_tokens,
+                observed_max_tokens: observed.clone(),
+            });
+            (provider, observed)
         }
     }
 
     impl ChatProvider for FakeChat {
-        fn complete(&self, _req: &ChatRequest) -> Result<String, ProviderError> {
+        fn complete(&self, req: &ChatRequest) -> Result<String, ProviderError> {
+            *self.observed_max_tokens.borrow_mut() = Some(req.max_tokens);
             self.result
                 .clone()
                 .expect("complete called on an unavailable provider")
@@ -196,6 +238,9 @@ mod tests {
         }
         fn unavailable_reason(&self) -> String {
             format!("{} has no key", self.name)
+        }
+        fn max_tokens(&self) -> Option<u32> {
+            self.max_tokens
         }
     }
 
@@ -213,6 +258,23 @@ mod tests {
         assert_eq!(out.value, "answer");
         assert_eq!(out.provider, "ollama");
         assert!(out.fallbacks.is_empty());
+    }
+
+    #[test]
+    fn provider_max_tokens_overrides_the_callers_request_value() {
+        let (provider, observed) = FakeChat::capturing("ollama", Some(55), "answer");
+        let out = run_chat_chain(vec![provider], &req()).unwrap();
+        assert_eq!(out.value, "answer");
+        assert_eq!(*observed.borrow(), Some(55));
+    }
+
+    #[test]
+    fn provider_with_no_max_tokens_opinion_receives_the_callers_value_unchanged() {
+        let (provider, observed) = FakeChat::capturing("ollama", None, "answer");
+        let out = run_chat_chain(vec![provider], &req()).unwrap();
+        assert_eq!(out.value, "answer");
+        // req().max_tokens == 100 — see the `req()` helper above.
+        assert_eq!(*observed.borrow(), Some(100));
     }
 
     #[test]
