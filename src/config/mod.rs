@@ -142,28 +142,56 @@ key_env = "HF_API_KEY"
     }
 
     /// Env vars win over the file, so a one-off override needs no file edit.
+    ///
+    /// An override that names a provider with no `[providers]` block is left
+    /// unapplied (with a warning) rather than fabricating a bare, kind-less
+    /// entry: such an entry is unconstructable and gets silently skipped
+    /// downstream, turning a typo into a silent no-op instead of a visible one.
     pub fn apply_env_overrides(&mut self) {
         if let Ok(name) = std::env::var("LEO_CHAT_PROVIDER") {
-            if !name.trim().is_empty() {
-                self.chat.chain = vec![name.trim().to_string()];
+            let name = name.trim();
+            if !name.is_empty() {
+                if self.providers.contains_key(name) {
+                    self.chat.chain = vec![name.to_string()];
+                } else {
+                    eprintln!(
+                        "  config: LEO_CHAT_PROVIDER names unknown provider \"{name}\"; ignoring"
+                    );
+                }
             }
         }
         if let Ok(name) = std::env::var("LEO_TRANSCRIBE_PROVIDER") {
-            if !name.trim().is_empty() {
-                self.transcribe.chain = vec![name.trim().to_string()];
+            let name = name.trim();
+            if !name.is_empty() {
+                if self.providers.contains_key(name) {
+                    self.transcribe.chain = vec![name.to_string()];
+                } else {
+                    eprintln!(
+                        "  config: LEO_TRANSCRIBE_PROVIDER names unknown provider \"{name}\"; ignoring"
+                    );
+                }
             }
         }
         if let Ok(model) = std::env::var("LEO_CHAT_MODEL") {
             if let Some(first) = self.chat.chain.first().cloned() {
-                self.providers.entry(first).or_default().model = Some(model);
+                if let Some(provider) = self.providers.get_mut(&first) {
+                    provider.model = Some(model);
+                } else {
+                    eprintln!(
+                        "  config: LEO_CHAT_MODEL set but chat provider \"{first}\" has no [providers] block; ignoring"
+                    );
+                }
             }
         }
         // Deprecated: honored for one release so existing .env files keep working.
         if let Ok(model) = std::env::var("OPENROUTER_CHAT_MODEL") {
-            self.providers
-                .entry("openrouter".to_string())
-                .or_default()
-                .model = Some(model);
+            if let Some(provider) = self.providers.get_mut("openrouter") {
+                provider.model = Some(model);
+            } else {
+                eprintln!(
+                    "  config: OPENROUTER_CHAT_MODEL set but there is no \"openrouter\" [providers] block; ignoring"
+                );
+            }
         }
     }
 
@@ -346,5 +374,30 @@ kind = "telepathy"
             cfg.providers["openrouter"].model.as_deref(),
             Some("legacy/model")
         );
+    }
+
+    #[test]
+    fn leo_chat_provider_naming_unknown_provider_is_ignored() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LEO_CHAT_PROVIDER", "typo_provider");
+        let mut cfg = Config::default();
+        let original_chain = cfg.chat.chain.clone();
+        cfg.apply_env_overrides();
+        std::env::remove_var("LEO_CHAT_PROVIDER");
+
+        assert_eq!(cfg.chat.chain, original_chain);
+        assert!(!cfg.providers.contains_key("typo_provider"));
+    }
+
+    #[test]
+    fn leo_chat_model_for_provider_without_block_is_ignored() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let mut cfg = Config::default();
+        cfg.chat.chain = vec!["no_such_provider".to_string()];
+        std::env::set_var("LEO_CHAT_MODEL", "some/other-model");
+        cfg.apply_env_overrides();
+        std::env::remove_var("LEO_CHAT_MODEL");
+
+        assert!(!cfg.providers.contains_key("no_such_provider"));
     }
 }
