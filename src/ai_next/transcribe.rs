@@ -16,15 +16,16 @@ pub struct ChunkSpec {
     pub duration_secs: u64,
 }
 
-/// Never produce a chunk shorter than this — a cap so small it would generate
-/// thousands of requests means something is wrong with the size estimate.
-const MIN_CHUNK_SECS: u64 = 30;
-
 /// Split a recording into slices that each fit under a provider's request cap.
 ///
 /// Chunk length is derived from the file's actual byte rate rather than a
 /// hardcoded constant, so it is correct for both 16-bit and 32-bit float WAVs
-/// (`rec` on macOS writes 32-bit float, at double the byte rate).
+/// (`rec` on macOS writes 32-bit float, at double the byte rate). The size cap
+/// always wins over chunk count: there is deliberately no floor on chunk
+/// length, since a high enough byte rate (multi-channel, high sample rate)
+/// would otherwise push chunks back over `max_bytes`. A pathological file
+/// just yields many small chunks — slow but correct, and the per-chunk
+/// progress output makes that visible.
 pub fn plan_chunks(file_size: u64, duration_secs: u64, max_bytes: Option<u64>) -> Vec<ChunkSpec> {
     let whole = vec![ChunkSpec {
         start_secs: 0,
@@ -39,7 +40,7 @@ pub fn plan_chunks(file_size: u64, duration_secs: u64, max_bytes: Option<u64>) -
     }
 
     let byte_rate = (file_size / duration_secs).max(1);
-    let chunk_secs = (max_bytes / byte_rate).max(MIN_CHUNK_SECS);
+    let chunk_secs = (max_bytes / byte_rate).max(1);
 
     let mut chunks = Vec::new();
     let mut start = 0;
@@ -239,6 +240,23 @@ mod tests {
             wide[0].duration_secs,
             narrow[0].duration_secs
         );
+    }
+
+    #[test]
+    fn a_high_byte_rate_never_exceeds_the_cap_even_for_short_chunks() {
+        // 96kHz stereo 32-bit float = 768,000 B/s. A floor on chunk length
+        // (e.g. "never under 30s") would push chunks over a 20MB cap here;
+        // the cap must always win over chunk count.
+        let byte_rate = 768_000;
+        let duration = 3600;
+        let size = duration * byte_rate;
+        let chunks = plan_chunks(size, duration, Some(20 * MB));
+        for c in &chunks {
+            assert!(
+                c.duration_secs * byte_rate <= 20 * MB,
+                "chunk too big: {c:?} at {byte_rate} B/s"
+            );
+        }
     }
 
     #[test]
