@@ -72,6 +72,13 @@ pub fn build_chat_chain(cfg: &Config, store: &dyn SecretStore) -> Vec<Box<dyn Ch
 }
 
 /// Build the transcription chain in config order, same dropping policy.
+///
+/// `resolve` (a keychain read) is called only inside the arms that actually
+/// need a credential (`Hf`, `Groq`) — never for `WhisperCpp` or an
+/// unrecognized kind. Calling it unconditionally before this match would
+/// perform a discarded keychain read for every local/unknown entry, which
+/// with a broken backend prints one warning per entry per invocation for no
+/// reason (the default transcribe chain alone would print up to three).
 pub fn build_transcribe_chain(
     cfg: &Config,
     store: &dyn SecretStore,
@@ -81,12 +88,13 @@ pub fn build_transcribe_chain(
         let Some(pc) = cfg.provider(name) else {
             continue;
         };
-        let key = resolve(name, pc.key_env.as_deref(), store);
         match pc.kind {
             Some(ProviderKind::Hf) => {
+                let key = resolve(name, pc.key_env.as_deref(), store);
                 out.push(Box::new(hf::HfTranscribe::new(name.clone(), pc, key)))
             }
             Some(ProviderKind::Groq) => {
+                let key = resolve(name, pc.key_env.as_deref(), store);
                 out.push(Box::new(groq::GroqTranscribe::new(name.clone(), pc, key)))
             }
             Some(ProviderKind::WhisperCpp) => out.push(Box::new(
@@ -101,15 +109,62 @@ pub fn build_transcribe_chain(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::secret::MemoryStore;
+    use crate::config::secret::{MemoryStore, Secret};
+    use std::sync::Mutex;
+
+    /// Env vars are process-global; serialize the tests that mutate them, the
+    /// same pattern `config::secret`'s own tests use.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    /// A `SecretStore` double that counts `get` calls, to prove a provider
+    /// that needs no credential never triggers a keychain read.
+    #[derive(Default)]
+    struct CountingStore {
+        gets: std::cell::Cell<u32>,
+    }
+
+    impl SecretStore for CountingStore {
+        fn get(&self, _account: &str) -> anyhow::Result<Option<Secret>> {
+            self.gets.set(self.gets.get() + 1);
+            Ok(None)
+        }
+        fn set(&self, _account: &str, _secret: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _account: &str) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn available(&self) -> bool {
+            true
+        }
+    }
 
     #[test]
     fn chat_chain_is_built_in_config_order() {
-        let cfg = Config::default();
+        // A chain order that disagrees with alphabetical order, so this test
+        // actually exercises "config order" rather than incidentally passing
+        // because it happens to match `BTreeMap`'s key order too.
+        let cfg = Config::parse(
+            r#"
+[chat]
+chain = ["zzz_provider", "aaa_provider"]
+
+[providers.zzz_provider]
+kind = "openai"
+base_url = "http://localhost:1/v1"
+model = "m"
+
+[providers.aaa_provider]
+kind = "openai"
+base_url = "http://localhost:2/v1"
+model = "m"
+"#,
+        )
+        .unwrap();
         let store = MemoryStore::default();
         let chain = build_chat_chain(&cfg, &store);
         let names: Vec<_> = chain.iter().map(|p| p.name().to_string()).collect();
-        assert_eq!(names, vec!["ollama", "openrouter"]);
+        assert_eq!(names, vec!["zzz_provider", "aaa_provider"]);
     }
 
     #[test]
@@ -193,6 +248,7 @@ key_env = "LEO_TEST_ABSENT_KEY"
 "#,
         )
         .unwrap();
+        let _guard = ENV_LOCK.lock().unwrap();
         std::env::remove_var("LEO_TEST_ABSENT_KEY");
 
         let empty = MemoryStore::default();
@@ -220,5 +276,29 @@ model_path = "/nonexistent/model.bin"
         let store = MemoryStore::default();
         let chain = build_transcribe_chain(&cfg, &store);
         assert_eq!(chain[0].max_bytes(), None);
+    }
+
+    #[test]
+    fn whisper_cpp_only_chain_never_touches_the_secret_store() {
+        let cfg = Config::parse(
+            r#"
+[transcribe]
+chain = ["whisper_cpp"]
+
+[providers.whisper_cpp]
+kind = "whisper_cpp"
+bin = "whisper-cli"
+model_path = "/nonexistent/model.bin"
+"#,
+        )
+        .unwrap();
+        let store = CountingStore::default();
+        let chain = build_transcribe_chain(&cfg, &store);
+        assert_eq!(chain.len(), 1);
+        assert_eq!(
+            store.gets.get(),
+            0,
+            "a provider needing no credential must never read the secret store"
+        );
     }
 }
