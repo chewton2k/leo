@@ -1,4 +1,5 @@
 mod ai;
+mod config;
 mod export;
 mod listen;
 mod notes;
