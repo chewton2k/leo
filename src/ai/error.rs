@@ -24,10 +24,15 @@ impl fmt::Display for ProviderError {
 impl std::error::Error for ProviderError {}
 
 impl ProviderError {
+    /// Used by this module's tests and by the chain-status UI in the follow-on
+    /// TUI plan; the chain runner itself matches on the variants directly, so
+    /// these accessors are not called in the current binary.
+    #[allow(dead_code)]
     pub fn is_retryable(&self) -> bool {
         matches!(self, ProviderError::Retryable(_))
     }
 
+    #[allow(dead_code)]
     pub fn message(&self) -> &str {
         match self {
             ProviderError::Retryable(m) | ProviderError::Fatal(m) => m,

@@ -12,6 +12,10 @@ use std::io::IsTerminal;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use colored::Colorize;
+
+use config::secret::{redact, resolve, KeyringStore, SecretStore};
+use config::Config;
 
 /// leo — notes for programmers.
 /// Run with no arguments to enter the interactive terminal.
@@ -132,6 +136,47 @@ enum Commands {
         #[command(subcommand)]
         command: SyncCommands,
     },
+
+    /// Inspect, test, and authenticate AI model providers
+    Model {
+        #[command(subcommand)]
+        command: ModelCommands,
+    },
+
+    /// Open or show the leo model config file
+    Config {
+        #[command(subcommand)]
+        command: ConfigCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModelCommands {
+    /// Show configured chains, reachability, and credential status
+    List,
+    /// Send one minimal request to a provider to check it works
+    Test {
+        /// Provider name from your config
+        name: String,
+    },
+    /// Store a provider's API key in your OS keychain
+    Login {
+        /// Provider name from your config
+        name: String,
+    },
+    /// Remove a provider's API key from your OS keychain
+    Logout {
+        /// Provider name from your config
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigCommands {
+    /// Open config.toml in $EDITOR, creating it if absent
+    Edit,
+    /// Print the path to config.toml
+    Path,
 }
 
 #[derive(Subcommand)]
@@ -167,6 +212,8 @@ fn main() -> Result<()> {
         }
         Some(Commands::Env) => open_env_file(),
         Some(Commands::Sync { command }) => run_sync(command),
+        Some(Commands::Model { command }) => run_model(command),
+        Some(Commands::Config { command }) => run_config(command),
         None => {
             if std::io::stdin().is_terminal() {
                 repl::run()
@@ -442,7 +489,11 @@ fn run_command(cmd: Commands) -> Result<()> {
             println!("Updated \"{}\" {}", note.title, &note.id[..8]);
         }
 
-        Commands::Serve { .. } | Commands::Env | Commands::Sync { .. } => {
+        Commands::Serve { .. }
+        | Commands::Env
+        | Commands::Sync { .. }
+        | Commands::Model { .. }
+        | Commands::Config { .. } => {
             unreachable!("handled in main()")
         }
     }
@@ -459,6 +510,221 @@ fn run_sync(command: SyncCommands) -> Result<()> {
         SyncCommands::Push => sync::push(&store.notes_dir),
         SyncCommands::Pull => sync::pull(&store.notes_dir),
         SyncCommands::Status => sync::status(&store.notes_dir),
+    }
+}
+
+/// Describe where a provider's credential comes from — never what it is.
+fn describe_credential(provider: &str, key_env: Option<&str>, store: &dyn SecretStore) -> String {
+    let Some(var) = key_env else {
+        return "no key needed".to_string();
+    };
+    if let Ok(v) = std::env::var(var) {
+        if !v.trim().is_empty() {
+            return format!("key from env {var} ({})", redact(&v));
+        }
+    }
+    // `None` for key_env here on purpose: the env var was just checked above,
+    // so this call is only asking the keychain.
+    match resolve(provider, None, store) {
+        Some(secret) => format!("key in keychain ({})", redact(secret.as_str())),
+        None => format!("no key (run `leo model login {provider}`)"),
+    }
+}
+
+/// Build the single transcription provider named by `name`, regardless of
+/// whether it appears in the `[transcribe]` chain — `leo model test <name>`
+/// must work for a provider a user is still setting up.
+fn build_one_transcriber(
+    name: &str,
+    pc: &config::provider::ProviderConfig,
+    store: &dyn SecretStore,
+) -> Option<Box<dyn ai::provider::TranscribeProvider>> {
+    use config::provider::ProviderKind;
+    match pc.kind {
+        Some(ProviderKind::Hf) => Some(Box::new(ai::provider::hf::HfTranscribe::new(
+            name.to_string(),
+            pc,
+            resolve(name, pc.key_env.as_deref(), store),
+        ))),
+        Some(ProviderKind::Groq) => Some(Box::new(ai::provider::groq::GroqTranscribe::new(
+            name.to_string(),
+            pc,
+            resolve(name, pc.key_env.as_deref(), store),
+        ))),
+        Some(ProviderKind::WhisperCpp) => Some(Box::new(
+            ai::provider::whisper_cpp::WhisperCppTranscribe::new(name.to_string(), pc),
+        )),
+        _ => None,
+    }
+}
+
+fn run_model(command: ModelCommands) -> Result<()> {
+    let cfg = Config::load();
+    let store = KeyringStore;
+
+    match command {
+        ModelCommands::List => {
+            if !store.available() {
+                println!(
+                    "  {}",
+                    "keychain unavailable on this system — keys must come from env vars".yellow()
+                );
+            }
+
+            for (task, chain) in [
+                ("chat", &cfg.chat.chain),
+                ("transcribe", &cfg.transcribe.chain),
+            ] {
+                println!("\n  {} chain:", task.bold());
+                if chain.is_empty() {
+                    println!("    {}", "(empty)".dimmed());
+                }
+                for (i, name) in chain.iter().enumerate() {
+                    let Some(pc) = cfg.provider(name) else {
+                        println!(
+                            "    {}. {} {}",
+                            i + 1,
+                            name.red(),
+                            "— no [providers] block with this name".dimmed()
+                        );
+                        continue;
+                    };
+                    let cred = describe_credential(name, pc.key_env.as_deref(), &store);
+                    let model = pc.model.as_deref().unwrap_or("(default)");
+                    println!("    {}. {} — {} — {}", i + 1, name.bold(), model, cred);
+                }
+            }
+
+            let chat = ai::provider::build_chat_chain(&cfg, &store);
+            let trans = ai::provider::build_transcribe_chain(&cfg, &store);
+            println!(
+                "\n  ready now: chat {} / transcribe {}",
+                chat.iter().filter(|p| p.available()).count(),
+                trans.iter().filter(|p| p.available()).count()
+            );
+            println!();
+            Ok(())
+        }
+
+        ModelCommands::Test { name } => {
+            let Some(pc) = cfg.provider(&name) else {
+                anyhow::bail!("no provider named '{name}' in your config");
+            };
+
+            let started = std::time::Instant::now();
+            let result = match pc.kind {
+                Some(config::provider::ProviderKind::Openai) => {
+                    let key = resolve(&name, pc.key_env.as_deref(), &store);
+                    let p = ai::provider::openai::OpenAiChat::new(name.clone(), pc, key);
+                    if !p.available() {
+                        anyhow::bail!("{}", p.unavailable_reason());
+                    }
+                    use ai::provider::ChatProvider;
+                    p.complete(&ai::provider::ChatRequest {
+                        prompt: "Reply with the single word: ok".to_string(),
+                        temperature: 0.0,
+                        max_tokens: 16,
+                    })
+                    .map(|s| s.trim().to_string())
+                    .map_err(|e| anyhow::anyhow!("{e}"))
+                }
+                Some(_) => {
+                    // Transcription providers need audio; check reachability
+                    // only, so testing one costs nothing and needs no mic.
+                    match build_one_transcriber(&name, pc, &store) {
+                        Some(p) if p.available() => Ok("available".to_string()),
+                        Some(p) => anyhow::bail!("{}", p.unavailable_reason()),
+                        None => anyhow::bail!("provider '{name}' could not be built"),
+                    }
+                }
+                None => anyhow::bail!("provider '{name}' has no `kind`"),
+            };
+
+            match result {
+                Ok(reply) => {
+                    println!(
+                        "  {} {name} responded in {:?}: {reply}",
+                        "ok".green(),
+                        started.elapsed()
+                    );
+                    Ok(())
+                }
+                Err(e) => {
+                    println!("  {} {name}: {e}", "failed".red());
+                    Ok(())
+                }
+            }
+        }
+
+        ModelCommands::Login { name } => {
+            if cfg.provider(&name).is_none() {
+                println!(
+                    "  {} no [providers.{name}] block in your config — storing the key anyway.",
+                    "note".yellow()
+                );
+                println!("  Run `leo config edit` to add it, or check `leo model list`.");
+            }
+            let key_env = cfg.provider(&name).and_then(|p| p.key_env.clone());
+
+            // Offer to import an existing .env value rather than making the
+            // user paste it again.
+            if let Some(var) = key_env.as_deref() {
+                if let Ok(existing) = std::env::var(var) {
+                    if !existing.trim().is_empty() {
+                        println!("  Found {var} in your environment ({}).", redact(&existing));
+                        print!("  Import it into the keychain? [Y/n] ");
+                        use std::io::Write;
+                        std::io::stdout().flush().ok();
+                        let mut answer = String::new();
+                        std::io::stdin().read_line(&mut answer)?;
+                        if !answer.trim().eq_ignore_ascii_case("n") {
+                            store.set(&name, existing.trim())?;
+                            println!("  {} stored for {name}.", "ok".green());
+                            println!(
+                                "  You can now remove this line from your .env:\n    {var}=..."
+                            );
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // Read with echo disabled: never on screen, never in shell history,
+            // never an argv value visible to other processes.
+            let secret = rpassword::prompt_password(format!("  API key for {name}: "))?;
+            if secret.trim().is_empty() {
+                anyhow::bail!("no key entered");
+            }
+            store.set(&name, secret.trim())?;
+            println!("  {} stored for {name}.", "ok".green());
+            Ok(())
+        }
+
+        ModelCommands::Logout { name } => {
+            store.delete(&name)?;
+            println!("  {} removed key for {name}.", "ok".green());
+            Ok(())
+        }
+    }
+}
+
+fn run_config(command: ConfigCommands) -> Result<()> {
+    match command {
+        ConfigCommands::Path => {
+            println!("{}", Config::config_path()?.display());
+            Ok(())
+        }
+        ConfigCommands::Edit => {
+            let (path, created) = Config::ensure_exists()?;
+            if created {
+                println!("  Created {}", path.display());
+            }
+            let editor = std::env::var("EDITOR")
+                .or_else(|_| std::env::var("VISUAL"))
+                .unwrap_or_else(|_| "vim".to_string());
+            std::process::Command::new(editor).arg(&path).status()?;
+            Ok(())
+        }
     }
 }
 
@@ -496,4 +762,70 @@ pub fn open_env_file() -> Result<()> {
         .status()?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::*;
+    use config::secret::MemoryStore;
+    use std::sync::Mutex;
+
+    /// Env vars are process-global; serialize the tests that mutate them.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn describes_a_missing_credential() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LEO_TEST_DESC_A");
+        let store = MemoryStore::default();
+        let s = describe_credential("openrouter", Some("LEO_TEST_DESC_A"), &store);
+        assert!(s.contains("no key"), "got: {s}");
+    }
+
+    #[test]
+    fn describes_a_stored_credential_without_revealing_it() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LEO_TEST_DESC_B");
+        let store = MemoryStore::default();
+        store.set("openrouter", "sk-or-v1-supersecret9999").unwrap();
+
+        let s = describe_credential("openrouter", Some("LEO_TEST_DESC_B"), &store);
+        assert!(s.contains("keychain"), "got: {s}");
+        assert!(s.contains("9999"), "should show last four: {s}");
+        assert!(!s.contains("supersecret"), "LEAKED THE KEY: {s}");
+    }
+
+    #[test]
+    fn describes_an_env_credential_as_coming_from_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LEO_TEST_DESC_C", "env-key-8888");
+        let store = MemoryStore::default();
+        let s = describe_credential("openrouter", Some("LEO_TEST_DESC_C"), &store);
+        std::env::remove_var("LEO_TEST_DESC_C");
+
+        assert!(s.contains("env"), "got: {s}");
+        assert!(!s.contains("env-key-8888"), "LEAKED THE KEY: {s}");
+    }
+
+    /// An env var set for one provider must not be reported as the credential
+    /// of a provider that names a different (unset) var.
+    #[test]
+    fn env_of_another_provider_is_not_reported() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("LEO_TEST_DESC_OTHER", "not-mine-7777");
+        std::env::remove_var("LEO_TEST_DESC_MINE");
+        let store = MemoryStore::default();
+        let s = describe_credential("groq", Some("LEO_TEST_DESC_MINE"), &store);
+        std::env::remove_var("LEO_TEST_DESC_OTHER");
+
+        assert!(s.contains("no key"), "got: {s}");
+        assert!(!s.contains("7777"), "reported another provider's key: {s}");
+    }
+
+    #[test]
+    fn a_keyless_provider_is_described_as_needing_none() {
+        let store = MemoryStore::default();
+        let s = describe_credential("ollama", None, &store);
+        assert!(s.contains("no key needed"), "got: {s}");
+    }
 }

@@ -189,22 +189,18 @@ fn transcribe_with(
         let result = provider.transcribe(&path);
         let _ = std::fs::remove_file(&path);
 
-        match result {
-            Ok(text) => {
-                if !full.is_empty() {
-                    full.push(' ');
-                }
-                full.push_str(&text);
-            }
-            // Discard everything transcribed so far and surface the failure
-            // so the chain can move to the next provider. This is deliberate:
-            // the provider contract is one text per file, and returning a
-            // transcript silently missing its back half would be worse than
-            // a clear failure. The cost is that the next provider in the
-            // chain re-transcribes the whole file from chunk 0, not just the
-            // failed chunk onward.
-            Err(e) => return Err(e),
+        // A failed chunk discards everything transcribed so far and surfaces
+        // the failure so the chain can move to the next provider. This is
+        // deliberate: the provider contract is one text per file, and
+        // returning a transcript silently missing its back half would be
+        // worse than a clear failure. The cost is that the next provider in
+        // the chain re-transcribes the whole file from chunk 0, not just the
+        // failed chunk onward.
+        let text = result?;
+        if !full.is_empty() {
+            full.push(' ');
         }
+        full.push_str(&text);
     }
 
     if full.trim().is_empty() {

@@ -161,18 +161,17 @@ impl SecretStore for KeyringStore {
 
 /// In-memory store for tests. Never touches the OS keychain.
 ///
-/// `#[doc(hidden)]` rather than `#[cfg(test)]`: later tasks (provider login
-/// flow tests, model-chain resolution tests) need this double outside this
-/// module's own `#[cfg(test)]` block, so it must be a normal, reachable type —
-/// just not part of the public API surface. Its backing `HashMap<String,
-/// String>` holds plaintext and is never zeroized; do not use it for anything
-/// but tests.
-#[doc(hidden)]
+/// `#[cfg(test)]`, so it is compiled only into test binaries — but visible to
+/// every `#[cfg(test)] mod tests` in the crate, which is what the provider and
+/// CLI tests need. Its backing `HashMap<String, String>` holds plaintext and
+/// is never zeroized; do not use it for anything but tests.
+#[cfg(test)]
 #[derive(Default)]
 pub struct MemoryStore {
     items: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
 
+#[cfg(test)]
 impl SecretStore for MemoryStore {
     fn get(&self, account: &str) -> Result<Option<Secret>> {
         Ok(self

@@ -56,6 +56,12 @@ use crate::config::Config;
 /// Build the chat chain in config order. Entries naming a missing provider
 /// block, or a provider whose kind cannot chat, are dropped — a config typo
 /// degrades the chain rather than killing the program.
+///
+/// `resolve` (a keychain read) runs only for providers that name a `key_env`.
+/// A local server like Ollama needs no credential, so reading the store for it
+/// is pure cost: with an unusable backend it prints a warning per entry per
+/// invocation for a value that would be discarded anyway. Mirrors the same
+/// rule in `build_transcribe_chain`.
 pub fn build_chat_chain(cfg: &Config, store: &dyn SecretStore) -> Vec<Box<dyn ChatProvider>> {
     let mut out: Vec<Box<dyn ChatProvider>> = Vec::new();
     for name in &cfg.chat.chain {
@@ -65,7 +71,10 @@ pub fn build_chat_chain(cfg: &Config, store: &dyn SecretStore) -> Vec<Box<dyn Ch
         if pc.kind != Some(ProviderKind::Openai) {
             continue;
         }
-        let key = resolve(name, pc.key_env.as_deref(), store);
+        let key = match pc.key_env.as_deref() {
+            Some(var) => resolve(name, Some(var), store),
+            None => None,
+        };
         out.push(Box::new(openai::OpenAiChat::new(name.clone(), pc, key)));
     }
     out
@@ -279,8 +288,7 @@ model_path = "/nonexistent/model.bin"
     }
 
     #[test]
-    fn whisper_cpp_only_chain_never_touches_the_secret_store() {
-        let cfg = Config::parse(
+    fn whisper_cpp_only_chain_never_touches_the_secret_store() {        let cfg = Config::parse(
             r#"
 [transcribe]
 chain = ["whisper_cpp"]
@@ -300,5 +308,57 @@ model_path = "/nonexistent/model.bin"
             0,
             "a provider needing no credential must never read the secret store"
         );
+    }
+
+    /// The chat side of the same rule. A keyless local server in the chat
+    /// chain must not trigger a keychain read either — on a machine with an
+    /// unusable backend that read only produces a warning about a credential
+    /// the provider would never use.
+    #[test]
+    fn keyless_chat_provider_never_touches_the_secret_store() {
+        let cfg = Config::parse(
+            r#"
+[chat]
+chain = ["ollama"]
+
+[providers.ollama]
+kind = "openai"
+base_url = "http://localhost:11434/v1"
+model = "qwen3:8b"
+"#,
+        )
+        .unwrap();
+        let store = CountingStore::default();
+        let chain = build_chat_chain(&cfg, &store);
+        assert_eq!(chain.len(), 1);
+        assert_eq!(
+            store.gets.get(),
+            0,
+            "a chat provider with no key_env must never read the secret store"
+        );
+    }
+
+    /// ...and a chat provider that *does* name a key_env must still read it.
+    #[test]
+    fn keyed_chat_provider_does_read_the_secret_store() {
+        let cfg = Config::parse(
+            r#"
+[chat]
+chain = ["openrouter"]
+
+[providers.openrouter]
+kind = "openai"
+base_url = "https://openrouter.ai/api/v1"
+model = "openrouter/free"
+key_env = "LEO_TEST_UNSET_KEY_ENV"
+"#,
+        )
+        .unwrap();
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("LEO_TEST_UNSET_KEY_ENV");
+        let store = CountingStore::default();
+        let chain = build_chat_chain(&cfg, &store);
+        assert_eq!(chain.len(), 1);
+        assert_eq!(store.gets.get(), 1);
     }
 }

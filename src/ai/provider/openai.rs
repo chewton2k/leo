@@ -34,14 +34,6 @@ impl OpenAiChat {
             max_tokens: cfg.max_tokens.unwrap_or(DEFAULT_MAX_TOKENS),
         }
     }
-
-    pub fn max_tokens(&self) -> u32 {
-        self.max_tokens
-    }
-
-    pub fn model(&self) -> &str {
-        &self.model
-    }
 }
 
 impl ChatProvider for OpenAiChat {
