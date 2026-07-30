@@ -49,8 +49,12 @@ fn truncate(body: &str) -> String {
 
 /// Classify an HTTP status into retryable or fatal.
 ///
-/// Only the response body is quoted — never a request header, so an
-/// Authorization value can never reach an error message.
+/// Only the response body is quoted — never a request header, so *our own*
+/// Authorization header can never reach an error message this way. That is
+/// narrower than "a key cannot leak": a gateway that reflects request
+/// headers into a debug body could still put a key in the text passed here.
+/// Callers holding a key scrub it from the body via `scrub_secret` before
+/// calling this function, as defense in depth against that case.
 pub fn classify_status(status: u16, provider: &str, body: &str) -> ProviderError {
     let msg = format!("{provider} returned {status}: {}", truncate(body));
     match status {
@@ -69,6 +73,19 @@ pub fn classify_reqwest(provider: &str, e: &reqwest::Error) -> ProviderError {
         ProviderError::Retryable(msg)
     } else {
         ProviderError::Fatal(msg)
+    }
+}
+
+/// Defense in depth for `classify_status`: replace every occurrence of
+/// `secret` in `body` with `…` before it is quoted in an error. Our own
+/// request headers are never echoed back as `body` (see `classify_status`),
+/// but a misbehaving gateway that reflects request headers into a 4xx debug
+/// payload could still put the key text in the response body itself — this
+/// is the guard against that. A pure string op; makes no network call.
+pub fn scrub_secret(body: &str, secret: Option<&str>) -> String {
+    match secret {
+        Some(s) if !s.is_empty() => body.replace(s, "…"),
+        _ => body.to_string(),
     }
 }
 
@@ -122,5 +139,19 @@ mod tests {
             "body should be truncated, got {} chars",
             e.message().len()
         );
+    }
+
+    #[test]
+    fn scrub_secret_removes_the_key_from_a_reflected_body() {
+        let body = "debug: header Authorization: Bearer sk-secret-value was sent upstream";
+        let scrubbed = scrub_secret(body, Some("sk-secret-value"));
+        assert!(!scrubbed.contains("sk-secret-value"), "got: {scrubbed}");
+        assert!(scrubbed.contains('…'));
+    }
+
+    #[test]
+    fn scrub_secret_is_a_no_op_without_a_key() {
+        assert_eq!(scrub_secret("plain body", None), "plain body");
+        assert_eq!(scrub_secret("plain body", Some("")), "plain body");
     }
 }

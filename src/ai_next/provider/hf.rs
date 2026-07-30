@@ -1,6 +1,8 @@
 use std::path::Path;
 
-use crate::ai_next::error::{classify_reqwest, classify_status, ProviderError, ProviderResult};
+use crate::ai_next::error::{
+    classify_reqwest, classify_status, scrub_secret, ProviderError, ProviderResult,
+};
 use crate::ai_next::provider::TranscribeProvider;
 use crate::config::provider::ProviderConfig;
 use crate::config::secret::Secret;
@@ -57,7 +59,10 @@ impl TranscribeProvider for HfTranscribe {
 
         let status = resp.status().as_u16();
         if !resp.status().is_success() {
+            // Scrub defensively in case a misbehaving gateway reflects the
+            // key back inside the body itself.
             let text = resp.text().unwrap_or_default();
+            let text = scrub_secret(&text, Some(key.as_str()));
             return Err(classify_status(status, &self.name, &text));
         }
 
@@ -85,5 +90,41 @@ impl TranscribeProvider for HfTranscribe {
 
     fn unavailable_reason(&self) -> String {
         format!("{}: no API key (run `leo model login {}`)", self.name, self.name)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::secret::{resolve, MemoryStore, SecretStore};
+
+    #[test]
+    fn max_bytes_is_twenty_megabytes() {
+        let cfg = ProviderConfig::default();
+        let provider = HfTranscribe::new("hf".to_string(), &cfg, None);
+        assert_eq!(provider.max_bytes(), Some(20 * 1024 * 1024));
+    }
+
+    #[test]
+    fn available_requires_a_key() {
+        let cfg = ProviderConfig::default();
+        assert!(!HfTranscribe::new("hf".to_string(), &cfg, None).available());
+
+        let store = MemoryStore::default();
+        store.set("hf", "a-key").unwrap();
+        let key = resolve("hf", None, &store);
+        assert!(HfTranscribe::new("hf".to_string(), &cfg, key).available());
+    }
+
+    #[test]
+    fn unavailable_reason_never_contains_the_key_value() {
+        let store = MemoryStore::default();
+        store.set("hf", "sk-super-secret-value").unwrap();
+        let key = resolve("hf", None, &store);
+        let cfg = ProviderConfig::default();
+        let provider = HfTranscribe::new("hf".to_string(), &cfg, key);
+        assert!(!provider
+            .unavailable_reason()
+            .contains("sk-super-secret-value"));
     }
 }
