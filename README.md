@@ -12,21 +12,36 @@ cd leo
 cargo install --path .
 ```
 
-Run `leo env` to open the config file and add your API keys:
+### Setup
+
+`leo` works with no API keys at all if you run models locally:
 
 ```sh
-leo env
+brew install ollama whisper-cpp
+ollama pull qwen3:8b
 ```
 
-```
-### this should be the output 
-OPENROUTER_API_KEY= 
-HF_API_KEY= ## Check (Make calls to Inference Providers), (Make calls to your Inference Endpoints)
-GROQ_API_KEY=
+Otherwise, store a key in your OS keychain — not a plaintext file:
+
+```sh
+leo model login openrouter   # free models via openrouter/free
+leo model login groq         # free Whisper transcription
+leo model list               # check what's configured
 ```
 
+`leo model login` reads the key with echo disabled, so it never appears on
+screen or in your shell history, and offers to import an existing `.env` value
+if it finds one. `leo model list` shows only the last four characters of any
+key.
+
+Tune providers and fallback order in `leo config edit`. Providers are tried in
+order and unavailable ones (no key, no binary, closed port) are skipped
+silently, so listing more providers than you have installed is fine.
 
 API keys are only required for AI features (`listen`, `ask`). All other commands work without them.
+
+The older `leo env` command still works and writes a plaintext `.env`; env vars
+take precedence over the keychain, which is useful in CI.
 
 
 ### Troubleshooting Installation
@@ -59,6 +74,8 @@ cargo uninstall leo
 | [SoX](https://sox.sourceforge.net/) | `listen` (audio recording) | `brew install sox` |
 | [Pandoc](https://pandoc.org/) | `export` to docx, pdf, rtf, odt | `brew install pandoc` |
 | [git](https://git-scm.com/) | `sync` (GitHub backup) | usually pre-installed |
+| [Ollama](https://ollama.com/) | free local chat (no API key) | `brew install ollama` |
+| [whisper.cpp](https://github.com/ggml-org/whisper.cpp) | free local transcription | `brew install whisper-cpp` |
 
 ## Getting started
 
@@ -180,7 +197,9 @@ leo> listen CS 101 Lecture       # custom title
 leo> listen add 1                # append to existing note
 ```
 
-**Requires:** `OPENROUTER_API_KEY` + `HF_API_KEY` + SoX (`brew install sox`).
+**Requires:** SoX (`brew install sox`), plus at least one working provider in
+each chain — either local (`ollama` + `whisper-cpp`) or a key for one cloud
+provider (`leo model login openrouter`, `leo model login groq`).
 
 ### Inline AI prompts
 
@@ -200,7 +219,8 @@ leo> ask 1
 
 The `@leo` line is replaced with the AI's answer inline. Works in both the REPL and as a CLI subcommand (`leo ask <id>`). Also triggers automatically when saving a note in `edit` if any `@leo` lines are present.
 
-**Requires:** `OPENROUTER_API_KEY`.
+**Requires:** one working chat provider — a running `ollama`, or
+`leo model login openrouter`.
 
 ### Export
 
@@ -210,6 +230,37 @@ leo> export 1 md
 ```
 
 Formats: `txt`, `md`, `html`, `docx`, `pdf`, `rtf`, `odt` (last four need Pandoc).
+
+### Model providers
+
+Inspect and manage the AI providers behind `listen` and `ask`:
+
+```sh
+leo model list                 # both chains, models, and credential status
+leo model test openrouter      # one minimal request to check it works
+leo model login openrouter     # store a key in the OS keychain (echo disabled)
+leo model logout openrouter    # remove it
+leo config path                # where config.toml lives
+leo config edit                # create/open config.toml in $EDITOR
+```
+
+`config.toml` holds the fallback chains and provider definitions:
+
+```toml
+[chat]
+chain = ["ollama", "openrouter"]
+
+[transcribe]
+chain = ["whisper_cpp", "groq", "hf"]
+
+[providers.ollama]
+kind = "openai"                # any OpenAI-compatible endpoint
+base_url = "http://localhost:11434/v1"
+model = "qwen3:8b"
+```
+
+Keys never go in this file — they live in your OS keychain, or in env vars
+(`OPENROUTER_API_KEY`, `GROQ_API_KEY`, `HF_API_KEY`), which take precedence.
 
 ### Serve
 
