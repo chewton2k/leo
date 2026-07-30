@@ -7,6 +7,7 @@
 
 pub mod cmdline;
 pub mod keys;
+pub mod task;
 pub mod view;
 
 use std::time::{Duration, Instant};
@@ -20,10 +21,12 @@ use ratatui::crossterm::terminal::{
 use ratatui::{DefaultTerminal, Frame};
 
 use crate::action::{
-    self, Action, ConfirmedAction, Ctx, Effect, Kind, Line, Outcome, Parsed, RealAi,
+    self, Action, ConfirmedAction, Ctx, Effect, Kind, Line, ListenRequest, Outcome, Parsed,
+    RealAi,
 };
 use crate::store::Store;
 use cmdline::{CmdLine, CmdOutcome};
+use task::{Job, TaskEvent};
 use keys::{Intent, Pane};
 use view::dirs::DirRow;
 use view::notes::NoteRow;
@@ -60,7 +63,24 @@ pub struct App {
     /// Output shown in the preview instead of the selected note, keeping each
     /// line's styling. Cleared by Esc, by moving the selection, or by `clear`.
     pinned: Option<(String, Vec<Line>)>,
+    /// The running recording, if any.
+    recording: Option<Recording>,
     quit: bool,
+}
+
+/// A recording in progress and everything it has produced so far.
+struct Recording {
+    job: Job,
+    /// What to do with the transcript when it finishes.
+    req: ListenRequest,
+    /// Status-line label from the worker.
+    label: String,
+    /// The condensed bullet stream, which is what the preview shows: a raw
+    /// transcript is not readable while you are still listening.
+    condensed: String,
+    /// The raw rolling transcript, behind a toggle.
+    raw: String,
+    show_raw: bool,
 }
 
 impl App {
@@ -79,6 +99,7 @@ impl App {
             preview_scroll: 0,
             message: None,
             pinned: None,
+            recording: None,
             quit: false,
         }
     }
@@ -172,6 +193,27 @@ impl App {
 
             Mode::Normal => {
                 self.mode = Mode::Normal;
+                // While recording, a few keys mean something else: Enter and
+                // Esc stop, `t` switches between the bullets and the raw text.
+                if let Some(rec) = self.recording.as_mut() {
+                    match key.code {
+                        event::KeyCode::Enter | event::KeyCode::Esc => {
+                            // Idempotent: pressing Enter again while the worker
+                            // finishes must not look like a second command.
+                            if !rec.job.stop_requested() {
+                                rec.job.request_stop();
+                                rec.label = "Finishing".to_string();
+                                self.say(Kind::Dim, "Stopping...");
+                            }
+                            return Ok(());
+                        }
+                        event::KeyCode::Char('t') => {
+                            rec.show_raw = !rec.show_raw;
+                            return Ok(());
+                        }
+                        _ => {}
+                    }
+                }
                 let intent = keys::normal(key, self.focus);
                 self.on_intent(intent, terminal)
             }
@@ -421,9 +463,23 @@ impl App {
                 crate::shell::run_editor(store, req, &RealAi)
             }),
 
-            Effect::Listen(req) => self.suspend_with_store(terminal, |store| {
-                crate::shell::record_and_apply(store, req, &RealAi)
-            }),
+            Effect::Listen(req) => {
+                if self.recording.is_some() {
+                    self.say(Kind::Warn, "Already recording — press Enter to stop.");
+                    return Ok(());
+                }
+                self.recording = Some(Recording {
+                    job: task::start_listen(req.screen),
+                    req,
+                    label: "Starting".to_string(),
+                    condensed: String::new(),
+                    raw: String::new(),
+                    show_raw: false,
+                });
+                self.pinned = None;
+                self.say(Kind::Dim, "Recording — Enter to stop, t toggles raw text.");
+                Ok(())
+            }
 
             Effect::Sync(a) => {
                 let notes_dir = self.store.notes_dir.clone();
@@ -506,6 +562,67 @@ impl App {
         }
     }
 
+    /// Absorb whatever the worker has sent since the last tick. Returns true
+    /// when something changed and a redraw is warranted.
+    fn pump_tasks(&mut self, terminal: &mut DefaultTerminal) -> Result<bool> {
+        let Some(rec) = self.recording.as_mut() else {
+            return Ok(false);
+        };
+
+        let events = rec.job.drain();
+        if events.is_empty() && !rec.job.is_done() {
+            return Ok(false);
+        }
+
+        let mut finished: Option<String> = None;
+        let mut failure: Option<String> = None;
+        let mut fallbacks: Vec<String> = Vec::new();
+
+        for event in events {
+            match event {
+                TaskEvent::Started { label } | TaskEvent::Progress { label } => rec.label = label,
+                TaskEvent::Transcript(text) => rec.raw = text,
+                TaskEvent::LiveNote(text) => rec.condensed = text,
+                TaskEvent::ProviderFallback { from, to } => {
+                    fallbacks.push(format!("{from} unavailable, using {to}"))
+                }
+                TaskEvent::Finished { transcript } => finished = Some(transcript),
+                TaskEvent::Failed(e) => failure = Some(e),
+            }
+        }
+
+        for f in fallbacks {
+            self.say(Kind::Warn, f);
+        }
+
+        if let Some(e) = failure {
+            self.recording = None;
+            self.say(Kind::Bad, e);
+            return Ok(true);
+        }
+
+        if let Some(transcript) = finished {
+            let rec = self.recording.take().expect("checked above");
+            self.say(Kind::Dim, "Structuring notes...");
+            // Draw once before blocking, so the user sees why the UI paused.
+            terminal.draw(|frame| self.draw(frame))?;
+            let outcome =
+                action::apply_transcript(&mut self.store, &rec.req, &transcript, &RealAi);
+            match outcome {
+                Ok(outcome) => self.absorb(outcome, terminal)?,
+                Err(e) => self.say(Kind::Bad, e.to_string()),
+            }
+            return Ok(true);
+        }
+
+        // The worker ended without a terminal event.
+        if self.recording.as_ref().map(|r| r.job.is_done()).unwrap_or(false) {
+            self.recording = None;
+            self.say(Kind::Warn, "Recording ended unexpectedly.");
+        }
+        Ok(true)
+    }
+
     // ── rendering ───────────────────────────────────────────────────────────
 
     fn draw(&self, frame: &mut Frame) {
@@ -524,10 +641,22 @@ impl App {
         );
 
         let selected_note = self.selected_id().and_then(|id| self.store.find_note(id));
-        let preview = match (&self.pinned, selected_note) {
-            (Some((title, lines)), _) => Preview::Lines { title: title.clone(), lines },
-            (None, Some(note)) => Preview::Note(note),
-            (None, None) => Preview::Empty,
+        let preview = match (&self.recording, &self.pinned, selected_note) {
+            // A live recording owns the preview: that stream is the reason the
+            // feature exists.
+            (Some(rec), _, _) => {
+                let (title, body) = if rec.show_raw {
+                    ("live transcript (t for notes)", rec.raw.clone())
+                } else if rec.condensed.is_empty() {
+                    ("live notes (t for raw text)", "  listening...".to_string())
+                } else {
+                    ("live notes (t for raw text)", rec.condensed.clone())
+                };
+                Preview::Text { title: title.to_string(), body }
+            }
+            (None, Some((title, lines)), _) => Preview::Lines { title: title.clone(), lines },
+            (None, None, Some(note)) => Preview::Note(note),
+            (None, None, None) => Preview::Empty,
         };
         view::preview::render(
             frame,
@@ -550,7 +679,7 @@ impl App {
             f.status,
             &self.current_dir,
             self.live_message(),
-            None,
+            self.recording.as_ref().map(|r| r.label.as_str()),
         );
 
         match &self.mode {
@@ -646,6 +775,8 @@ fn event_loop(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
         terminal.draw(|frame| app.draw(frame))?;
 
         if !event::poll(TICK)? {
+            // No input: give the worker a chance to report progress.
+            app.pump_tasks(terminal)?;
             continue;
         }
         match event::read()? {
@@ -655,6 +786,7 @@ fn event_loop(terminal: &mut DefaultTerminal, mut app: App) -> Result<()> {
             }
             _ => {}
         }
+        app.pump_tasks(terminal)?;
     }
     Ok(())
 }

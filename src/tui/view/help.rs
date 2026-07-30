@@ -32,6 +32,8 @@ pub const KEYS: &[(&str, &str)] = &[
     ("Ctrl-P", "fuzzy find a note"),
     ("Ctrl-D / Ctrl-U", "scroll the preview"),
     ("Ctrl-R", "reload from disk"),
+    ("Enter", "while recording: stop and save"),
+    ("t", "while recording: raw text or bullets"),
     ("?", "this help"),
     ("q", "quit"),
 ];

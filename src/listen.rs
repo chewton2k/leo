@@ -173,6 +173,130 @@ pub fn record_audio(screen: bool) -> Result<PathBuf> {
     Ok(tmp_path)
 }
 
+/// Where the in-progress recording is written. One fixed path, since only one
+/// recording can run at a time.
+pub fn recording_path() -> PathBuf {
+    std::env::temp_dir().join("leo-recording.wav")
+}
+
+/// Check that SoX is installed, with the install command in the error.
+fn require_sox() -> Result<()> {
+    if Command::new("rec")
+        .arg("--version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_err()
+    {
+        bail!(
+            "Audio recording requires SoX. Install it:\n  \
+             macOS:   brew install sox\n  \
+             Linux:   sudo apt install sox\n  \
+             Windows: choco install sox"
+        );
+    }
+    Ok(())
+}
+
+/// A recording in progress, owned by whoever started it.
+///
+/// The blocking [`record_audio`] waits for Enter; this exists for the TUI,
+/// where recording has to run alongside a live event loop and the same growing
+/// file has to be readable for rolling transcription.
+pub struct Recorder {
+    child: std::process::Child,
+    path: PathBuf,
+    started: Instant,
+}
+
+impl Recorder {
+    /// Start `rec` writing a 16kHz mono WAV, and return immediately.
+    pub fn start(screen: bool) -> Result<Recorder> {
+        require_sox()?;
+
+        let path = recording_path();
+        let _ = std::fs::remove_file(&path);
+
+        let device = if screen {
+            Some(std::env::var("LEO_SCREEN_DEVICE").unwrap_or_else(|_| "BlackHole 2ch".to_string()))
+        } else {
+            None
+        };
+
+        let path_str = path.to_str().context("temp path is not valid UTF-8")?;
+        let mut cmd = Command::new("rec");
+        if let Some(dev) = &device {
+            cmd.env("AUDIODEV", dev);
+        }
+        let child = cmd
+            .args([path_str, "rate", "16000", "channels", "1"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .with_context(|| match &device {
+                Some(dev) => format!(
+                    "Failed to start recording from screen audio device '{dev}'.\n  \
+                     Set up system audio capture:\n  \
+                     1. brew install blackhole-2ch\n  \
+                     2. Audio MIDI Setup → New Multi-Output Device (Speakers + BlackHole 2ch)\n  \
+                     3. Set that Multi-Output Device as System Output\n  \
+                     To use a different device: set LEO_SCREEN_DEVICE=<name>"
+                ),
+                None => "Failed to start recording".to_string(),
+            })?;
+
+        Ok(Recorder { child, path, started: Instant::now() })
+    }
+
+    pub fn elapsed(&self) -> std::time::Duration {
+        self.started.elapsed()
+    }
+
+    /// The file being written. Safe to read while recording continues, which is
+    /// what the rolling transcription loop does.
+    pub fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+
+    /// Stop recording and finalize the file. Returns the finished WAV.
+    pub fn stop(mut self) -> Result<PathBuf> {
+        self.child.kill().ok();
+        self.child.wait().ok();
+        repair_wav_header(&self.path);
+
+        if !self.path.exists() || std::fs::metadata(&self.path)?.len() < 100 {
+            bail!("Recording failed — no audio captured.");
+        }
+        Ok(self.path)
+    }
+}
+
+/// `rec` is killed before it can write the final DataSize field, leaving it
+/// zero. `sox --ignore-length` reads to EOF and writes a correct header.
+///
+/// Used for the finished file and, during live transcription, for a copy of the
+/// growing one — a slice cut from a header that claims zero length yields
+/// nothing.
+pub fn repair_wav_header(path: &std::path::Path) {
+    let fixed = path.with_extension("fixed.wav");
+    let ok = Command::new("sox")
+        .args([
+            "--ignore-length",
+            &path.to_string_lossy(),
+            &fixed.to_string_lossy(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success() && fixed.exists())
+        .unwrap_or(false);
+    if ok {
+        let _ = std::fs::rename(&fixed, path);
+    } else {
+        let _ = std::fs::remove_file(&fixed);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +305,14 @@ mod tests {
     fn record_audio_accepts_screen_bool() {
         // Compile-time proof the signature is correct.
         let _f: fn(bool) -> anyhow::Result<std::path::PathBuf> = record_audio;
+    }
+
+    #[test]
+    fn the_recorder_reports_a_path_before_any_audio_arrives() {
+        // Nothing here starts `rec`; this pins the naming contract the live
+        // transcription worker relies on.
+        let path = recording_path();
+        assert!(path.to_string_lossy().ends_with(".wav"));
+        assert!(path.to_string_lossy().contains("leo-recording"));
     }
 }

@@ -83,12 +83,37 @@ impl ChatProvider for OpenAiChat {
             .json()
             .map_err(|e| ProviderError::Fatal(format!("{}: unreadable response: {e}", self.name)))?;
 
-        json["choices"][0]["message"]["content"]
+        let message = &json["choices"][0]["message"];
+        let finish = json["choices"][0]["finish_reason"].as_str().unwrap_or("");
+
+        // Prefer `content`. Reasoning models on OpenRouter's free tier often
+        // return an empty or null `content` while putting text in `reasoning`,
+        // especially when the token budget ran out mid-thought, so fall back to
+        // that rather than discarding a usable answer.
+        let text = message["content"]
             .as_str()
-            .map(|s| s.to_string())
-            .ok_or_else(|| {
-                ProviderError::Fatal(format!("{}: unexpected response shape", self.name))
-            })
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| {
+                message["reasoning"]
+                    .as_str()
+                    .filter(|s| !s.trim().is_empty())
+            });
+
+        match text {
+            Some(t) => Ok(t.to_string()),
+            // Retryable, not fatal: an empty completion is this provider
+            // failing to answer, and the next one in the chain may well do
+            // better. Treating it as fatal would abort the whole chain over a
+            // truncated reasoning trace.
+            None if finish == "length" => Err(ProviderError::Retryable(format!(
+                "{}: hit the token limit before producing any content",
+                self.name
+            ))),
+            None => Err(ProviderError::Retryable(format!(
+                "{}: returned no content",
+                self.name
+            ))),
+        }
     }
 
     fn available(&self) -> bool {

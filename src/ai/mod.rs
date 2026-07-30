@@ -1,6 +1,7 @@
 pub mod chain;
 pub mod chat;
 pub mod error;
+pub mod live;
 pub mod provider;
 pub mod transcribe;
 
@@ -27,10 +28,26 @@ fn context() -> (Config, KeyringStore) {
     (Config::load(), KeyringStore)
 }
 
+/// Transcribe an audio file of any length through the configured chain,
+/// returning which provider served it and any degradation along the way.
+///
+/// Callers that own a terminal print the fallbacks; the TUI turns them into
+/// status-line events instead, since an `eprintln!` would smear ink across the
+/// alternate screen.
+pub fn transcribe_outcome(audio_path: &Path) -> Result<chain::ChainOutcome<String>> {
+    let (cfg, store) = context();
+    transcribe::run(&cfg, &store, audio_path)
+}
+
+/// One chat completion through the configured chain, without printing.
+pub fn chat_outcome(prompt: String, max_tokens: u32) -> Result<chain::ChainOutcome<String>> {
+    let (cfg, store) = context();
+    chat::complete(&cfg, &store, prompt, max_tokens)
+}
+
 /// Transcribe an audio file of any length through the configured chain.
 pub fn transcribe(audio_path: &Path) -> Result<String> {
-    let (cfg, store) = context();
-    let outcome = transcribe::run(&cfg, &store, audio_path)?;
+    let outcome = transcribe_outcome(audio_path)?;
     report(&outcome);
     Ok(outcome.value)
 }
