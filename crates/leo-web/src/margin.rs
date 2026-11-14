@@ -355,19 +355,48 @@ pub fn evictable(thread: &Thread, keep: Option<&str>) -> bool {
     !thread.pinned && Some(thread.id.as_str()) != keep
 }
 
-fn resolve_one<'a>(
+pub fn freeable(reads: &Reads, thread: &Thread, keep: Option<&str>) -> bool {
+    evictable(thread, keep) && !reads.is_replying(&thread.id)
+}
+
+fn resolved_if_open(chats: &Path, thread: &Thread, untouched: bool) -> bool {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let messages: Option<String> = tx
+                .query_row(
+                    "SELECT messages FROM margin_threads WHERE id = ?1 AND note = ?2 AND status = 'open'",
+                    [&thread.id, &thread.note],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            let Some(messages) = messages else {
+                return Ok(false);
+            };
+            let spoken = serde_json::from_str::<Vec<Message>>(&messages)
+                .map_or(true, |all| all.iter().any(|m| m.from != "felix"));
+            if untouched && spoken {
+                return Ok(false);
+            }
+            tx.execute(
+                "UPDATE margin_threads SET status = 'resolved', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+                params![Utc::now().to_rfc3339(), thread.id],
+            )?;
+            prune_closed(&tx, &thread.note)?;
+            tx.commit()?;
+            Ok(true)
+        })
+        .unwrap_or(false)
+}
+
+fn resolve_one(
     chats: &Path,
     reads: &Arc<Reads>,
-    mut candidates: impl Iterator<Item = &'a Thread>,
+    thread: &Thread,
+    untouched: bool,
 ) -> Option<Thread> {
-    candidates.find_map(|thread| {
-        let _held = reads.replying(&thread.id)?;
-        matches!(
-            set_status(chats, &thread.note, &thread.id, "resolved", MOST_OPEN),
-            Status::Done(_)
-        )
-        .then(|| thread.clone())
-    })
+    let _held = reads.replying(&thread.id)?;
+    resolved_if_open(chats, thread, untouched).then(|| thread.clone())
 }
 
 pub fn free_oldest(
@@ -376,8 +405,10 @@ pub fn free_oldest(
     note: &str,
     keep: Option<&str>,
 ) -> Option<Thread> {
-    let open = open_on(chats, note);
-    resolve_one(chats, reads, open.iter().filter(|t| evictable(t, keep)))
+    open_on(chats, note)
+        .iter()
+        .filter(|t| freeable(reads, t, keep))
+        .find_map(|t| resolve_one(chats, reads, t, false))
 }
 
 pub fn resolve_untouched(
@@ -401,7 +432,7 @@ pub fn resolve_untouched(
     let excess = open.len().saturating_sub(TIDY_TO);
     untouched
         .into_iter()
-        .filter_map(|t| resolve_one(chats, reads, std::iter::once(t)))
+        .filter_map(|t| resolve_one(chats, reads, t, true))
         .take(excess)
         .map(|t| t.id)
         .collect()
@@ -1673,6 +1704,31 @@ mod tests {
             (stored.status.as_str(), stored.messages.len()),
             ("resolved", 1)
         );
+    }
+
+    #[test]
+    fn quiet_resolving_keeps_a_dismissed_note_and_one_the_person_just_answered() {
+        let (_dir, chats) = chats_here();
+        let reads = Arc::new(Reads::default());
+        let dismissed = open_thread("n");
+        let answered = open_thread("n");
+        let plain = open_thread("n");
+        for thread in [&dismissed, &answered, &plain] {
+            assert!(put(&chats, thread, MOST_OPEN));
+        }
+        assert!(matches!(
+            set_status(&chats, "n", &dismissed.id, "dismissed", MOST_OPEN),
+            Status::Done(_)
+        ));
+        let mut spoken = answered.clone();
+        spoken.messages.push(you_say("wait"));
+        assert!(save_messages(&chats, &spoken));
+        assert!(resolve_one(&chats, &reads, &dismissed, false).is_none());
+        assert!(resolve_one(&chats, &reads, &answered, true).is_none());
+        assert!(resolve_one(&chats, &reads, &plain, true).is_some());
+        assert_eq!(one(&chats, "n", &dismissed.id).unwrap().status, "dismissed");
+        assert_eq!(one(&chats, "n", &answered.id).unwrap().status, "open");
+        assert_eq!(one(&chats, "n", &plain.id).unwrap().status, "resolved");
     }
 
     #[test]

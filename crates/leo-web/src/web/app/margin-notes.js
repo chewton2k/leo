@@ -36,7 +36,7 @@ const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb',
 const LEAST_ASKED = 3;
 const SHOWN_MESSAGES = 6;
 const MARGIN_AREA_MAX = 140;
-const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
+const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -800,7 +800,7 @@ function marginRevisits(source, origin) {
         marginPage.layer.appendChild(el);
         els[line] = el;
       }
-      el.style.transform = `translate(${Math.round(rect.left - origin.left)}px, ${Math.round(rect.bottom - origin.top - 5)}px)`;
+      el.style.transform = `translate(${Math.round(rect.left - origin.left)}px, ${Math.round(rect.bottom - origin.top)}px)`;
       el.style.width = `${Math.max(1, Math.round(rect.right - rect.left))}px`;
     });
     for (const extra of els.splice(rects.length)) extra.remove();
@@ -814,11 +814,17 @@ function marginRevisits(source, origin) {
 
 async function marginReopen(id) {
   const s = marginPage.s;
-  const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
-  if (marginPage.s !== s) return;
-  marginPage.resolved = marginPage.resolved.filter((r) => r.id !== id);
-  marginPage.threads.push(done);
-  marginOpen(done.id, true);
+  if (marginPage.reopening.has(id)) return;
+  marginPage.reopening.add(id);
+  try {
+    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
+    if (marginPage.s !== s) return;
+    marginPage.resolved = marginPage.resolved.filter((r) => r.id !== id);
+    if (!marginPage.threads.some((t) => t.id === done.id)) marginPage.threads.push(done);
+    marginOpen(done.id, true);
+  } finally {
+    marginPage.reopening.delete(id);
+  }
 }
 
 function marginPlaceInMargin(boxes, layout, page, origin) {
@@ -1272,8 +1278,20 @@ function marginAsk(s, picked, question = '') {
   return true;
 }
 
-function marginPause(s) {
-  return marginKit.pauseFor(marginKit.blocksOf(s.doc.source()).pop(), marginPrefs?.pace);
+function marginPlain() {
+  return READ_PAUSE[marginPrefs?.pace] || READ_PAUSE.regular;
+}
+
+function marginDue(s, again) {
+  const last = marginKit.changedBlocks(marginPage.baseline, s.doc.source()).pop();
+  const more = marginKit.pauseFor(last, marginPrefs?.pace) - marginPlain();
+  if (again && more > 0) marginPage.timer = setTimeout(() => marginDue(s, false), more);
+  else marginRead(s).catch(fail);
+}
+
+function marginArm(s) {
+  clearTimeout(marginPage.timer);
+  marginPage.timer = setTimeout(() => marginDue(s, true), Math.max(marginPlain(), marginPage.nextRead - Date.now()));
 }
 
 function marginEdited(s) {
@@ -1285,7 +1303,7 @@ function marginEdited(s) {
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
-  marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(marginPause(s), marginPage.nextRead - Date.now()));
+  marginArm(s);
 }
 
 function marginShowReading(s, source, blocks) {
@@ -1411,6 +1429,11 @@ function marginReadingBox(origin) {
   return { t: { id: 'reading', quote: '', messages: [] }, rects: [{ left: r.left - origin.left, right: r.left - origin.left, top, bottom: top + 20 }], el };
 }
 
+function marginTyped(id) {
+  const el = marginPage.els.get(id);
+  return id === marginPage.open || (!!el && !!$('textarea', el)?.value.trim());
+}
+
 async function marginRead(s) {
   if (marginPage.reading || marginPage.through) {
     marginPage.again = true;
@@ -1438,16 +1461,28 @@ async function marginRead(s) {
     else if (got?.failed) marginSetStatus(got.error || READ_FAILED);
     else marginSetStatus(got?.note ? '' : 'Felix read it; nothing to add.', true);
     if (!got?.failed) marginReadingDone(!got?.note);
-    if (got?.note) {
-      const freed = marginPage.threads.filter((t) => got.resolved?.includes(t.id));
+    if (got?.note || got?.resolved?.length) {
+      const held = [];
+      for (const id of got.resolved || []) {
+        if (!marginTyped(id)) continue;
+        const back = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } }).catch((e) => {
+          if (e instanceof Locked) throw e;
+          return null;
+        });
+        if (marginPage.s !== s) return;
+        if (back) held.push(id);
+      }
+      const freed = marginPage.threads.filter((t) => got.resolved?.includes(t.id) && !held.includes(t.id));
       for (const t of freed) marginDropThread(t.id);
       marginPage.threads = marginPage.threads.filter((t) => !freed.includes(t));
       marginPage.resolved.unshift(...freed.map(marginLight));
-      marginPage.threads.push(got.note);
-      marginPage.arriving.add(got.note.id);
-      marginPage.newest = got.note.id;
-      const voice = $('.margin-said-aloud', marginPage.layer);
-      if (voice) voice.textContent = `Felix: ${marginNow(got.note)}`;
+      if (got.note) {
+        marginPage.threads.push(got.note);
+        marginPage.arriving.add(got.note.id);
+        marginPage.newest = got.note.id;
+        const voice = $('.margin-said-aloud', marginPage.layer);
+        if (voice) voice.textContent = `Felix: ${marginNow(got.note)}`;
+      }
       marginRedraw();
     }
   } catch (e) {
@@ -1466,9 +1501,7 @@ async function marginRead(s) {
       if (marginPage.readingAt !== null || marginPage.readingEl) marginReadingDone();
       const again = marginPage.again;
       marginPage.again = false;
-      if (again && marginPage.mode === 'along') {
-        marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(marginPause(s), marginPage.nextRead - Date.now()));
-      }
+      if (again && marginPage.mode === 'along') marginArm(s);
     }
   }
 }
@@ -1645,7 +1678,7 @@ async function marginThrough(s, parts, spread) {
   else if (!count && !run.stop) marginSetStatus('Nothing to add this time', true);
   else marginSetStatus(spread ? 'This note is long, so Felix read parts from all through it.' : '');
   if (count) toast(`${run.stop ? 'Stopped. ' : ''}Felix added ${marginNotes(count)}`, { action: 'Undo', run: marginThroughUndo(s, run.added) });
-  if (marginPage.mode === 'along') marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(READ_PAUSE.regular, marginPage.nextRead - Date.now()));
+  if (marginPage.mode === 'along') marginArm(s);
 }
 
 const MARGIN_DIAGRAMS = {
@@ -1836,8 +1869,7 @@ document.addEventListener('pointerdown', (e) => {
 function marginShown() {
   const s = marginPage.s;
   if (!s || marginPage.mode !== 'along') return;
-  clearTimeout(marginPage.timer);
-  marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(READ_PAUSE[marginPrefs?.pace] || READ_PAUSE.regular, marginPage.nextRead - Date.now()));
+  marginArm(s);
 }
 document.addEventListener('visibilitychange', marginShown);
 window.addEventListener?.('leo-visibility', marginShown);

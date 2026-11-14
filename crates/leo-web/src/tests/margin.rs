@@ -566,7 +566,10 @@ async fn a_note_is_saved_even_when_another_read_used_the_last_one() {
         if let Some(started) = started.lock().unwrap().take() {
             let _ = started.send(());
         }
-        let _ = released.lock().unwrap().recv();
+        let _ = released
+            .lock()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(10));
         Ok(SAYS.to_string())
     });
     let engine = Arc::new(
@@ -592,6 +595,7 @@ async fn a_note_is_saved_even_when_another_read_used_the_last_one() {
     let (status, saved) = slow.await.unwrap();
     assert_eq!(status, 200, "{saved}");
     assert_eq!(saved["note"]["status"], "open");
+    Arc::into_inner(engine).unwrap().stop().await;
 }
 
 #[tokio::test]
@@ -925,7 +929,10 @@ async fn a_resent_reply_while_the_first_still_runs_is_busy_then_gets_its_answer(
         if let Some(started) = started.lock().unwrap().take() {
             let _ = started.send(());
         }
-        let _ = released.lock().unwrap().recv();
+        let _ = released
+            .lock()
+            .unwrap()
+            .recv_timeout(std::time::Duration::from_secs(10));
         Ok(crate::chat::Reply::from("Yes. Argon2id.".to_string()))
     });
     let engine = Arc::new(
@@ -950,6 +957,7 @@ async fn a_resent_reply_while_the_first_still_runs_is_busy_then_gets_its_answer(
     let (status, again) = engine.post(&path, body).await;
     assert_eq!(status, 200);
     assert_eq!(again["messages"].as_array().unwrap().len(), 3);
+    Arc::into_inner(engine).unwrap().stop().await;
 }
 
 #[tokio::test]
@@ -1895,16 +1903,20 @@ async fn a_full_note_and_a_missing_ai_say_why() {
     engine.stop().await;
 }
 
+fn nowhere() -> margin::Place {
+    margin::Place {
+        prefix: String::new(),
+        suffix: String::new(),
+    }
+}
+
 fn fill(engine: &Engine, id: &str, source: &str, count: usize, limit: usize) -> Vec<String> {
     (0..count)
         .map(|n| {
             let thread = margin::new_thread(
                 id,
                 source,
-                margin::Place {
-                    prefix: String::new(),
-                    suffix: String::new(),
-                },
+                nowhere(),
                 &format!("quote {n}"),
                 vec![margin::felix_says("Hm.")],
             );
@@ -2038,6 +2050,67 @@ async fn a_read_along_reads_a_full_note_and_frees_the_oldest_free_note_at_twice_
 }
 
 #[tokio::test]
+async fn a_read_along_that_finds_nothing_to_free_after_the_model_answered_costs_nothing_and_reads_again(
+) {
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let (started, was_started) = tokio::sync::oneshot::channel::<()>();
+    let started = Mutex::new(Some(started));
+    let writer: Writer = Arc::new(move |_, _, _| {
+        if let Some(started) = started.lock().unwrap().take() {
+            let _ = started.send(());
+            let _ = released
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(10));
+        }
+        Ok(SAYS.to_string())
+    });
+    let engine = Arc::new(
+        Engine::with(Powers {
+            toolless: Some(writer),
+            ..Default::default()
+        })
+        .await,
+    );
+    let (id, version) = engine.note("Raced", PASSAGE).await;
+    let ids = fill(
+        &engine,
+        &id,
+        "ask",
+        2 * margin::MOST_OPEN,
+        2 * margin::MOST_OPEN,
+    );
+    for pinned in &ids[1..] {
+        margin::set_pinned(&engine.chats(), &id, pinned, true);
+    }
+    let running = Arc::clone(&engine);
+    let (noted, seen) = (id.clone(), version.clone());
+    let slow = tokio::spawn(async move { running.read(&noted, &seen, &[PASSAGE]).await });
+    was_started.await.unwrap();
+    let held = engine.running.state.margin.replying(&ids[0]);
+    release.send(()).unwrap();
+    let (status, read) = slow.await.unwrap();
+    drop(held);
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(
+        (read["failed"].as_bool(), read["error"].as_str()),
+        (Some(true), Some(margin::FULL))
+    );
+    assert_eq!(engine.get("/api/margin").await.1["today"], 0);
+    assert_eq!(engine.running.state.margin.problem(), None);
+    assert_eq!(
+        engine
+            .running
+            .state
+            .margin
+            .unseen(&id, vec![PASSAGE.to_string()]),
+        vec![PASSAGE.to_string()]
+    );
+    Arc::into_inner(engine).unwrap().stop().await;
+}
+
+#[tokio::test]
 async fn a_read_along_with_nothing_free_to_resolve_says_so_and_costs_nothing() {
     let (engine, calls) = reading(SAYS).await;
     let (id, version) = engine.note("Pinned", PASSAGE).await;
@@ -2078,16 +2151,7 @@ fn seeded(engine: &Engine, id: &str, source: &str, said: bool, quote: &str) -> S
     if said {
         messages.push(margin::you_say("Why?"));
     }
-    let thread = margin::new_thread(
-        id,
-        source,
-        margin::Place {
-            prefix: String::new(),
-            suffix: String::new(),
-        },
-        quote,
-        messages,
-    );
+    let thread = margin::new_thread(id, source, nowhere(), quote, messages);
     assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
     thread.id
 }

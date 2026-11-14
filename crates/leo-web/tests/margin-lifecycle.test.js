@@ -102,6 +102,67 @@ test('a read that frees notes removes them and tells the server which thread is 
   assert.equal(h.state.status, '');
 });
 
+test('a read never drops the open note or one with typed text, and tells the server they stay open', async () => {
+  const h = harness();
+  const calls = [];
+  h.context.api = (path, init) => new Promise((resolve) => { calls.push({ path, body: init.body, resolve }); });
+  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : null);
+  h.context.toast = () => { throw new Error('a tidied note gets no toast'); };
+  Object.assign(h.state, {
+    gone: ['lost'],
+    threads: [{ id: 'old', quote: 'a' }, { id: 'open', quote: 'b' }, { id: 'typed', quote: 'c' }, { id: 'empty', quote: 'd' }],
+    open: 'open',
+  });
+  h.state.els.set('typed', { remove() {}, area: { value: 'half a thought' } });
+  h.state.els.set('empty', { remove() {}, area: { value: '  ' } });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  calls.shift().resolve({ note: { id: 't1', messages: [] }, resolved: ['old', 'open', 'typed', 'empty'] });
+  for (const id of ['open', 'typed']) {
+    await new Promise(setImmediate);
+    const back = calls.shift();
+    assert.ok(back.path.endsWith(`/threads/${id}`));
+    assert.equal(back.body.status, 'open');
+    assert.deepEqual([...back.body.gone], ['lost']);
+    back.resolve({ id, status: 'open', quote: 'x', messages: [] });
+  }
+  await pending;
+  assert.equal(calls.length, 0);
+  assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 'typed', 't1']);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id).sort(), ['empty', 'old']);
+});
+
+test('a read that saved nothing still removes the notes it resolved', async () => {
+  const h = harness();
+  h.context.toast = () => {};
+  Object.assign(h.state, { threads: [{ id: 'old', quote: 'a' }] });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: null, resolved: ['old'] });
+  await pending;
+  assert.deepEqual(h.state.threads, []);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['old']);
+});
+
+test('a double click or held Enter on a resolved passage reopens it once', async () => {
+  const h = harness();
+  const calls = [];
+  h.context.api = (path, init) => new Promise((resolve) => { calls.push(resolve); });
+  Object.assign(h.state, { resolved: [{ id: 'r1', quote: 'q' }] });
+  const first = h.context.marginReopen('r1');
+  const second = h.context.marginReopen('r1');
+  await second;
+  assert.equal(calls.length, 1);
+  calls[0]({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await first;
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  const again = h.context.marginReopen('r1');
+  calls[1]({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await again;
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  assert.equal(h.state.reopening.size, 0);
+});
+
 test('reopening a resolved passage sends the notes the page cannot place and opens the returned thread', async () => {
   const h = harness();
   const bodies = [];
@@ -347,14 +408,38 @@ test('a reply refused as busy keeps the text and says Felix is still answering',
   assert.equal(box.textContent, 'Felix is still answering this.');
 });
 
-test('an edit that stops mid-sentence waits half again as long', () => {
-  const h = harness();
-  h.state.loaded = true;
-  for (const [text, delay] of [['A changed paragraph long enough to read.', 4000], ['A changed paragraph still being', 6000]]) {
+test('an edit waits the plain pace, then the other half only when the changed block is unfinished', () => {
+  for (const [text, baseline, more] of [
+    ['A changed paragraph long enough to read.', [], false],
+    ['A changed paragraph still being written', [], true],
+    ['A changed paragraph long enough to read.\n\nAn older tail already read and unfinished', ['An older tail already read and unfinished'], false],
+  ]) {
+    const h = harness();
+    h.state.loaded = true;
+    h.state.baseline = baseline;
     h.state.s.doc.source = () => text;
     h.context.marginEdited(h.state.s);
-    assert.equal(h.timers.get(h.state.timer).delay, delay);
+    const armed = h.state.timer;
+    assert.equal(h.timers.get(armed).delay, 4000);
+    h.timers.get(armed)();
+    if (more) {
+      assert.notEqual(h.state.timer, armed);
+      assert.equal(h.timers.get(h.state.timer).delay, 2000);
+      assert.ok(!h.state.reading);
+      h.timers.get(h.state.timer)();
+    }
+    assert.ok(h.state.reading);
   }
+});
+
+test('coming back to the window arms the plain pace and checks the changed block when it fires', () => {
+  const h = harness();
+  h.state.s.doc.source = () => 'A changed paragraph still being written';
+  h.context.marginShown();
+  const armed = h.state.timer;
+  assert.equal(h.timers.get(armed).delay, 4000);
+  h.timers.get(armed)();
+  assert.equal(h.timers.get(h.state.timer).delay, 2000);
 });
 
 test('a new edit leaves a failure status alone', () => {
