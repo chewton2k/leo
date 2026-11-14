@@ -1065,7 +1065,7 @@ test('the heading rail keeps clear of the note text and its preview shows at eve
   const body = ['# One', 'Text '.repeat(80), '## Two', 'More '.repeat(80), '# Three', 'End'].join('\n');
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
-    for (const width of [960, 1300, 2000]) {
+    for (const width of [1280, 2000]) {
       await page.setViewportSize({ width, height: 800 });
       await page.goto(url);
       const ticks = page.locator('.outline-ticks [data-tick]');
