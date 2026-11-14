@@ -79,6 +79,7 @@ impl SileroVad {
             &ModelOptions {
                 backend: Backend::Cpu,
                 device: None,
+                no_mmap: false,
             },
         )
         .context("Silero VAD model")?;

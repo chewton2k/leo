@@ -241,11 +241,11 @@ mod tests {
         assert_eq!(
             names,
             [
-                "qwen3:1.7b",
-                "qwen3:4b",
-                "qwen3:8b",
-                "gemma3:12b",
-                "gemma3:27b"
+                "qwen3.5:2b",
+                "qwen3.5:4b",
+                "qwen3.5:9b",
+                "gemma4:12b",
+                "gemma4:26b"
             ]
         );
         assert!(catalog().windows(2).all(|w| w[0].bytes < w[1].bytes));
@@ -256,7 +256,7 @@ mod tests {
 
     #[test]
     fn fit_holds_at_the_edges() {
-        let model = entry("qwen3:8b");
+        let model = entry("qwen3.5:9b");
         let room = model.bytes + DISK_SPARE;
         assert_eq!(fit(model, &with(16, room)), Fit::Fits);
         assert_eq!(fit(model, &with(16, room - 1)), Fit::TooBig);
@@ -266,10 +266,10 @@ mod tests {
         };
         assert_eq!(fit(model, &memory(14_400_000_000)), Fit::Fits);
         assert_eq!(fit(model, &memory(14_399_999_999)), Fit::TooBig);
-        let eight = entry("qwen3:4b");
+        let eight = entry("qwen3.5:4b");
         assert_eq!(fit(eight, &memory(GIB * 78 / 10)), Fit::Fits);
         assert_eq!(fit(eight, &memory(6 * GIB)), Fit::TooBig);
-        assert_eq!(fit(entry("qwen3:1.7b"), &memory(6 * GIB)), Fit::Fits);
+        assert_eq!(fit(entry("qwen3.5:2b"), &memory(6 * GIB)), Fit::Fits);
         for entry in catalog() {
             assert_eq!(fit(entry, &Machine::default()), Fit::Fits);
         }
@@ -277,7 +277,7 @@ mod tests {
             memory_bytes: Some(8 * GIB),
             free_disk_bytes: None,
         };
-        assert_eq!(fit(entry("qwen3:4b"), &disk_unknown), Fit::Fits);
+        assert_eq!(fit(entry("qwen3.5:4b"), &disk_unknown), Fit::Fits);
         assert_eq!(fit(model, &disk_unknown), Fit::TooBig);
     }
 
@@ -286,18 +286,22 @@ mod tests {
         let name = |m: Machine| recommended(catalog(), &m).map(|e| e.name.clone());
         assert_eq!(
             name(with(16, 100_000_000_000)).as_deref(),
-            Some("gemma3:12b")
+            Some("gemma4:12b")
         );
-        assert_eq!(name(with(16, 9_000_000_000)).as_deref(), Some("qwen3:8b"));
-        assert_eq!(name(with(8, 100_000_000_000)).as_deref(), Some("qwen3:4b"));
+        assert_eq!(name(with(16, 9_000_000_000)).as_deref(), Some("qwen3.5:9b"));
+        assert_eq!(
+            name(with(8, 100_000_000_000)).as_deref(),
+            Some("qwen3.5:4b")
+        );
         assert_eq!(
             name(with(64, 100_000_000_000)).as_deref(),
-            Some("gemma3:27b")
+            Some("gemma4:26b")
         );
         assert_eq!(
-            name(with(4, 100_000_000_000)).as_deref(),
-            Some("qwen3:1.7b")
+            name(with(6, 100_000_000_000)).as_deref(),
+            Some("qwen3.5:2b")
         );
+        assert_eq!(name(with(4, 100_000_000_000)), None);
         assert_eq!(name(with(2, 100_000_000_000)), None);
         assert_eq!(name(Machine::default()), None);
     }

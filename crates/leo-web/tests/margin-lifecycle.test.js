@@ -74,6 +74,112 @@ test('a read that leaves a margin note says nothing about having read', async ()
   assert.equal(h.state.status, '');
 });
 
+test('a read refused because the margin is full keeps the baseline and says why', async () => {
+  const line = "Felix's margin is full. Resolve a note and he'll read again.";
+  const h = harness();
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: null, failed: true, error: line });
+  await pending;
+  assert.equal(h.state.baseline.length, 0);
+  assert.equal(h.state.status, line);
+});
+
+test('a read that frees notes removes them and tells the server which thread is open', async () => {
+  const h = harness();
+  const bodies = [];
+  const real = h.context.api;
+  h.context.api = (path, init) => { bodies.push(init.body); return real(path, init); };
+  h.context.toast = () => { throw new Error('a tidied note gets no toast'); };
+  Object.assign(h.state, { threads: [{ id: 'old', quote: 'a' }, { id: 'open', quote: 'b' }], open: 'open' });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: { id: 't1', messages: [] }, resolved: ['old'] });
+  await pending;
+  assert.equal(bodies[0].keep, 'open');
+  assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 't1']);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['old']);
+  assert.equal(h.state.status, '');
+});
+
+test('a read never drops the open note or one with typed text, and tells the server they stay open', async () => {
+  const h = harness();
+  const calls = [];
+  h.context.api = (path, init) => new Promise((resolve) => { calls.push({ path, body: init.body, resolve }); });
+  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : null);
+  h.context.toast = () => { throw new Error('a tidied note gets no toast'); };
+  Object.assign(h.state, {
+    gone: ['lost'],
+    threads: [{ id: 'old', quote: 'a' }, { id: 'open', quote: 'b' }, { id: 'typed', quote: 'c' }, { id: 'empty', quote: 'd' }],
+    open: 'open',
+  });
+  h.state.els.set('typed', { remove() {}, area: { value: 'half a thought' } });
+  h.state.els.set('empty', { remove() {}, area: { value: '  ' } });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  calls.shift().resolve({ note: { id: 't1', messages: [] }, resolved: ['old', 'open', 'typed', 'empty'] });
+  for (const id of ['open', 'typed']) {
+    await new Promise(setImmediate);
+    const back = calls.shift();
+    assert.ok(back.path.endsWith(`/threads/${id}`));
+    assert.equal(back.body.status, 'open');
+    assert.deepEqual([...back.body.gone], ['lost']);
+    back.resolve({ id, status: 'open', quote: 'x', messages: [] });
+  }
+  await pending;
+  assert.equal(calls.length, 0);
+  assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 'typed', 't1']);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id).sort(), ['empty', 'old']);
+});
+
+test('a read that saved nothing still removes the notes it resolved', async () => {
+  const h = harness();
+  h.context.toast = () => {};
+  Object.assign(h.state, { threads: [{ id: 'old', quote: 'a' }] });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: null, resolved: ['old'] });
+  await pending;
+  assert.deepEqual(h.state.threads, []);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['old']);
+});
+
+test('a double click or held Enter on a resolved passage reopens it once', async () => {
+  const h = harness();
+  const calls = [];
+  h.context.api = (path, init) => new Promise((resolve) => { calls.push(resolve); });
+  Object.assign(h.state, { resolved: [{ id: 'r1', quote: 'q' }] });
+  const first = h.context.marginReopen('r1');
+  const second = h.context.marginReopen('r1');
+  await second;
+  assert.equal(calls.length, 1);
+  calls[0]({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await first;
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  const again = h.context.marginReopen('r1');
+  calls[1]({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await again;
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  assert.equal(h.state.reopening.size, 0);
+});
+
+test('reopening a resolved passage sends the notes the page cannot place and opens the returned thread', async () => {
+  const h = harness();
+  const bodies = [];
+  const real = h.context.api;
+  h.context.api = (path, init) => { bodies.push(init.body); return real(path, init); };
+  h.context.toast = () => { throw new Error('reopening gets no toast'); };
+  Object.assign(h.state, { resolved: [{ id: 'r1', quote: 'q' }, { id: 'r2', quote: 'p' }], gone: ['lost'] });
+  const pending = h.context.marginReopen('r1');
+  h.settle().resolve({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await pending;
+  assert.equal(bodies[0].status, 'open');
+  assert.equal(bodies[0].gone[0], 'lost');
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['r2']);
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  assert.equal(h.state.open, 'r1');
+});
+
 test('mode updates retain confirmed state after failure and ignore departed notes', async () => {
   for (const departed of [false, true]) {
     const h = harness();
@@ -107,6 +213,32 @@ test('refused reads keep pending changes and show a safe pause reason', async ()
   }
 });
 
+test('Undo after Dismiss toasts the server reason when it fails', async () => {
+  const h = harness();
+  const toasts = [];
+  h.context.toast = (text, options) => toasts.push([text, options]);
+  const pending = h.context.marginStatus({ id: 't1', quote: 'q' }, 'dismissed');
+  h.settle().resolve({});
+  await pending;
+  assert.equal(toasts[0][0], 'Dismissed Felix’s note');
+  const undo = toasts[0][1].run();
+  h.settle().reject(new Error('Felix’s margin is full. Resolve a note first.'));
+  await undo;
+  assert.equal(toasts[1][0], 'Felix’s margin is full. Resolve a note first.');
+  assert.equal(toasts[1][1].bad, true);
+});
+
+test('an ask over the length limit says it goes to the chat', () => {
+  const h = harness();
+  h.context.chat.isOpen = () => false;
+  h.state.layer = {};
+  assert.equal(h.context.marginAsk(h.state.s, { text: 'x'.repeat(1001), from: 1 }), false);
+  assert.equal(h.state.status, 'Long selections go to the chat');
+  h.state.status = '';
+  assert.equal(h.context.marginAsk(h.state.s, { text: 'x', from: 1 }), false);
+  assert.equal(h.state.status, '');
+});
+
 test('a stale 409 without a reason says the note changed and a retry follows the next edit', async () => {
   const h = harness();
   const pending = h.context.marginRead(h.state.s);
@@ -125,7 +257,7 @@ test('a stale 409 without a reason says the note changed and a retry follows the
 });
 
 test('a refusal with a reason is never mistaken for a stale version', async () => {
-  for (const [status, why, expected] of [[409, 'daily', 'Paused for today: daily limit reached'], [429, 'soon', 'Paused after a recent comment'], [403, 'unedited', 'Reads changes after you edit']]) {
+  for (const [status, why, expected] of [[409, 'daily', 'Paused for today: daily limit reached'], [429, 'soon', 'Felix reads again in a moment'], [403, 'unedited', 'Reads changes after you edit']]) {
     const h = harness();
     const pending = h.context.marginRead(h.state.s);
     await new Promise(setImmediate);
@@ -236,6 +368,80 @@ test('a new edit clears a brief status but not a failure', () => {
   assert.equal(h.state.status, '');
 });
 
+function replyHarness() {
+  const h = harness();
+  const box = { textContent: '', hidden: true };
+  const send = { disabled: false };
+  const el = { isConnected: true, dataset: { id: 't1' } };
+  const area = { value: '', style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: () => el, focus() {} };
+  let count = 0;
+  Object.assign(h.context, { $: (sel) => (sel === 'textarea' ? area : sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}` });
+  h.state.threads = [{ id: 't1', messages: [] }];
+  h.state.draft = null;
+  const submit = async (text) => {
+    area.value = text;
+    await h.context.marginSubmit({ preventDefault() {}, target: { closest: () => el } });
+  };
+  return { h, box, send, area, submit };
+}
+
+test('a failed reply puts the text back, shows the error and keeps Send enabled, and a retry keeps its request', async () => {
+  const { h, box, send, area, submit } = replyHarness();
+  const bodies = [];
+  h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
+  await submit('Why?');
+  assert.equal(area.value, 'Why?');
+  assert.equal(box.textContent, 'Felix could not answer.');
+  assert.equal(box.hidden, false);
+  assert.equal(send.disabled, false);
+  assert.equal(h.state.thinking.size, 0);
+  await submit('Why?');
+  await submit('Why not?');
+  assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
+});
+
+test('a reply refused as busy keeps the text and says Felix is still answering', async () => {
+  const { h, box, area, submit } = replyHarness();
+  h.context.api = async () => { throw Object.assign(new Error('Felix is already answering this.'), { status: 409, data: { why: 'busy' } }); };
+  await submit('Why?');
+  assert.equal(area.value, 'Why?');
+  assert.equal(box.textContent, 'Felix is still answering this.');
+});
+
+test('an edit waits the plain pace, then the other half only when the changed block is unfinished', () => {
+  for (const [text, baseline, more] of [
+    ['A changed paragraph long enough to read.', [], false],
+    ['A changed paragraph still being written', [], true],
+    ['A changed paragraph long enough to read.\n\nAn older tail already read and unfinished', ['An older tail already read and unfinished'], false],
+  ]) {
+    const h = harness();
+    h.state.loaded = true;
+    h.state.baseline = baseline;
+    h.state.s.doc.source = () => text;
+    h.context.marginEdited(h.state.s);
+    const armed = h.state.timer;
+    assert.equal(h.timers.get(armed).delay, 4000);
+    h.timers.get(armed)();
+    if (more) {
+      assert.notEqual(h.state.timer, armed);
+      assert.equal(h.timers.get(h.state.timer).delay, 2000);
+      assert.ok(!h.state.reading);
+      h.timers.get(h.state.timer)();
+    }
+    assert.ok(h.state.reading);
+  }
+});
+
+test('coming back to the window arms the plain pace and checks the changed block when it fires', () => {
+  const h = harness();
+  h.state.s.doc.source = () => 'A changed paragraph still being written';
+  h.context.marginShown();
+  const armed = h.state.timer;
+  assert.equal(h.timers.get(armed).delay, 4000);
+  h.timers.get(armed)();
+  assert.equal(h.timers.get(h.state.timer).delay, 2000);
+});
+
 test('a new edit leaves a failure status alone', () => {
   const h = harness();
   h.state.loaded = true;
@@ -255,18 +461,27 @@ test('When you ask says how to ask, with the real shortcut and no promise of aut
   }
 });
 
+test('Reading pace is a row of picture cards that carry the pause and save to the pace field', () => {
+  const html = harness().context.felixSettingsCards({ gap: 90, gaps: [90], cap: 40, caps: [40], today: 0, default_mode: 'ask', layout: 'right', pace: 'slow' }, { tasks: [] });
+  const cards = JSON.parse(html.match(/<span class="set-label">Reading pace<\/span>(\{.*?\})<\/div>/)[1]);
+  assert.equal(cards.field, 'data-margin-pref="pace"');
+  assert.equal(cards.current, 'slow');
+  assert.deepEqual(cards.choices.map(([value, title, about]) => [value, title, about]), [['fast', 'Fast', 'After 2 sec of quiet, longer mid-sentence.'], ['regular', 'Regular', 'After 4 sec of quiet, longer mid-sentence.'], ['slow', 'Slow', 'After 8 sec of quiet, longer mid-sentence.']]);
+  assert.ok(cards.choices.every((choice) => choice[3].includes('<svg')));
+});
+
 test('the page keeps only the asking affordances it really has', () => {
   const passages = fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8');
-  assert.match(passages, /<span>Ask Felix<\/span>/);
+  for (const label of ['<span>Felix this</span>', '>Ask Felix</button>', '>Visualize</button>']) assert.ok(passages.includes(label), label);
   assert.match(passages, /pressed\(e, 'ask'\)/);
 });
 
-test('the mascot, the tether and the reading stub are gone from the margin script and styles', () => {
+test('the mascot and the reading stub are gone from the margin script and styles', () => {
   const script = fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8');
   const page = pageHtml();
   assert.match(page, /\.settings-layout[\s\S]*<\/html>/);
-  for (const dead of ['tether', 'felix.felix', 'margin-head', 'margin-face', 'readFace']) assert.equal(script.includes(dead), false, dead);
-  for (const dead of ['.tether', '.margin-reading', '.margin-head', 'margin-reveal', '@keyframes margin-draw', '.chat-history-new', '.settings-layout::before']) assert.equal(page.includes(dead), false, dead);
+  for (const dead of ['felix.felix', 'margin-head', 'margin-face', 'readFace']) assert.equal(script.includes(dead), false, dead);
+  for (const dead of ['.margin-reading', '.margin-head', 'margin-reveal', '@keyframes margin-draw', '.chat-history-new', '.settings-layout::before']) assert.equal(page.includes(dead), false, dead);
 });
 
 test('leaving with a queued hover lets the next note schedule and paint its own hover', () => {
@@ -432,7 +647,7 @@ function passages(room = true) {
     const on = {};
     const node = {
       hidden: false, dataset: {}, style: {}, value: '', offsetWidth: 200, offsetHeight: 30, focused: false,
-      addEventListener: (kind, fn) => { on[kind] = fn; },
+      setAttribute() {}, addEventListener: (kind, fn) => { on[kind] = fn; },
       fire: (kind, extra = {}) => { const e = { stopped: false, preventDefault() {}, stopPropagation() { e.stopped = true; }, ...extra }; on[kind]?.(e); return e; },
       focus() { node.focused = true; },
       querySelector: () => node.child || (node.child = fake()),
@@ -445,7 +660,7 @@ function passages(room = true) {
   const attached = [];
   const context = {
     document: { createElement: fake, body: { appendChild() {} }, addEventListener() {} },
-    window: { addEventListener() {}, innerHeight: 800 }, ICON: { chat: '' }, state: { view: 'note', session: s },
+    window: { addEventListener() {}, innerHeight: 800 }, ICON: { chat: '' }, ON_MAC: true, state: { view: 'note', session: s },
     $: () => ({ getBoundingClientRect: () => ({ left: 0, right: 600 }) }), toast() {}, cleanTitle: (t) => t,
     marginBeside: () => (room ? { prefix: '', suffix: '' } : null), marginAsk: (...args) => (room ? asked.push(args) > 0 : false),
     chat: { attachSelection: (x) => attached.push(x) },
@@ -454,13 +669,26 @@ function passages(room = true) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'), context);
   const pill = vm.runInContext('askFloat', context);
   const field = vm.runInContext('askField', context);
-  return { pill, field, input: field.child, asked, attached, s, picked };
+  const press = (ask) => pill.fire('click', { target: { closest: () => ({ dataset: { ask } }) } });
+  return { pill, field, input: field.child, asked, attached, s, picked, press };
 }
+
+test('Felix this and Visualize ask about the selection at once with their own message, and go to the chat without room', () => {
+  for (const [kind, question] of [['this', 'Respond to this passage.'], ['draw', 'Draw this step by step.']]) {
+    const p = passages();
+    p.press(kind);
+    assert.equal(p.field.hidden, true);
+    assert.deepEqual([...p.asked[0]], [p.s, p.picked, question]);
+    const none = passages(false);
+    none.press(kind);
+    assert.equal(none.attached[0].text, none.picked.text);
+  }
+});
 
 test('Ask Felix opens a question field: a typed question asks it, an empty Enter asks generally, Escape asks nothing', () => {
   for (const [typed, question] of [['  Why supervision?  ', 'Why supervision?'], ['', '']]) {
     const p = passages();
-    p.pill.fire('click');
+    p.press('ask');
     assert.equal(p.field.hidden, false);
     assert.equal(p.pill.hidden, true);
     assert.equal(p.input.focused, true);
@@ -473,7 +701,7 @@ test('Ask Felix opens a question field: a typed question asks it, an empty Enter
     assert.equal(p.asked[0][2], question);
   }
   const p = passages();
-  p.pill.fire('click');
+  p.press('ask');
   p.input.value = 'never sent';
   assert.equal(p.input.fire('keydown', { key: 'Escape' }).stopped, true);
   assert.equal(p.field.hidden, true);
@@ -483,7 +711,7 @@ test('Ask Felix opens a question field: a typed question asks it, an empty Enter
 
 test('without room in the margin Ask Felix goes straight to the chat with no field', () => {
   const p = passages(false);
-  p.pill.fire('click');
+  p.press('ask');
   assert.equal(p.field.hidden, true);
   assert.equal(p.attached.length, 1);
   assert.equal(p.attached[0].text, p.picked.text);
@@ -508,6 +736,8 @@ test('the persona chip names Felix once and the mode chip follows it without a p
   assert.match(els['#margin-persona-menu'].innerHTML, /Instructions for this note…/);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   assert.ok(core.indexOf('id="margin-persona"') < core.indexOf('id="margin-mode"'));
+  assert.ok(core.indexOf('<div class="note-meta">') < core.indexOf('<h1 id="title"'));
+  assert.ok(core.indexOf('<h1 id="title"') < core.indexOf('<div class="note-originals">'));
   assert.match(core, /<span id="margin-persona-label">Felix as Reader<\/span>/);
   assert.match(core, /<span id="margin-mode-label">When you ask<\/span>/);
 });
@@ -552,7 +782,7 @@ test('a writer failure shows the server sentence and a Set up writing AI link in
   assert.equal(status.textContent, sentence);
   assert.match(status.html, /<a href="#\/settings\/writing">Set up writing AI<\/a>/);
   status.html = '';
-  h.context.marginSetStatus('Paused after a recent comment');
+  h.context.marginSetStatus('Felix reads again in a moment');
   assert.equal(status.html, '');
 });
 

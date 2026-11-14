@@ -19,7 +19,7 @@ test('dictation preferences keep drafts and caret while shortcut and history upd
     const ON_MAC=true;
     ${keys}
     ${source}
-    app.innerHTML=dictationCards(state.dictation);
+    app.innerHTML=dictationShortcutRow(state.dictation)+dictationCards(state.dictation);
     app.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(!b)return;const actions={'segment-pick':()=>pickSegment(b),'dictation-record':()=>dictationChange({action:'record_shortcut'}),'dictation-clear':()=>dictationChange({action:'clear'}),'dictation-clear-now':()=>dictationChange({action:'clear'})};if(actions[b.dataset.action])actions[b.dataset.action]();});
     pollDictation(seq,++dictationGeneration);`;
   const server = http.createServer(async (request, response) => {

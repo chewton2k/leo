@@ -10,7 +10,7 @@
     letters: { key: 'leo-felix-letters', attr: 'data-felix-letters', choices: ['own', 'notes'], fallback: 'own' },
   };
   const CHOICES = ['system', 'light', 'dark'];
-  const COLORS = { light: '#f7f7f5', dark: '#141414' };
+  const COLORS = { light: '#f6f5f1', dark: '#181715' };
   const media = root.matchMedia ? root.matchMedia('(prefers-color-scheme: dark)') : null;
   const listeners = new Set();
   let current = 'system';

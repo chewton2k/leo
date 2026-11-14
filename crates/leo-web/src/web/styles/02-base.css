@@ -14,6 +14,7 @@ body {
   --bar-height: calc(var(--top) + var(--bar-row-height) + 21px);
   --mid: calc(var(--side) + (100% - var(--side) - var(--right)) / 2);
 }
+@media screen and (max-width: 599px) and (forced-colors: none) { body { background-image: var(--grain); } }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button, label, summary, [role="button"], [role="tab"], [draggable="true"], .bar, .actions, .select-bar, .activity-head, .set-label, .kanban-col-head {
@@ -41,13 +42,15 @@ a { color: var(--accent); }
 @media (prefers-reduced-motion: reduce) { .bar::after { transition: none; } }
 .bar-row { max-width: 728px; margin: 0 auto; display: flex; align-items: center; gap: 6px; min-height: var(--bar-row-height); }
 .brand { font-weight: 750; font-size: var(--fs-xl); letter-spacing: -.02em; border: 0; background: none; padding: 4px 6px 4px 2px; }
+.brand-mark { width: .8em; height: .8em; margin-right: .2em; vertical-align: -.05em; }
+.sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; color: var(--muted); font-size: var(--fs-md); }
 .crumbs button { border: 0; background: none; padding: 4px 6px; border-radius: var(--r-tile); color: var(--muted); max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
 .crumbs button:last-child { color: var(--text); font-weight: 600; }
 .crumbs .sep { color: var(--faint); }
 .icon-btn {
   width: 40px; height: 40px; flex: none; display: grid; place-items: center;
-  border: 0; border-radius: 12px; background: transparent; color: var(--text);
+  border: 0; border-radius: var(--r-md); background: transparent; color: var(--text);
 }
 .icon-btn:hover { background: var(--surface-2); }
 .icon-btn.danger { color: var(--danger); }
@@ -56,7 +59,7 @@ a { color: var(--accent); }
 svg[stroke-width="1.8"]:not(.felix *) :is(path, circle, rect, line, polyline) { vector-effect: non-scaling-stroke; stroke-width: 1.5px; }
 .search {
   max-width: 760px; margin: 8px auto 0; display: flex; align-items: center; gap: 8px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 0 12px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 0 12px;
 }
 .search svg { width: 16px; height: 16px; color: var(--faint); flex: none; }
 .search input { flex: 1; border: 0; outline: 0; background: none; padding: 10px 0; font-size: 16px; }

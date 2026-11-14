@@ -116,7 +116,7 @@ test('the calendar card offers to record when an event starts, on by default onc
   const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), segmented: () => '', settingsSwitch: (attrs, on) => `<input ${attrs}${on ? ' checked' : ''}>`, rel: () => 'today', api: async (url, options) => { sent.push([url, options]); return { offer: options.body.offer }; }, state: {} };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
-  const row = /<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<\/span><input data-cal-offer( checked)?><\/label>/;
+  const row = /<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">[^<]*<\/span><\/span><input data-cal-offer( checked)?><\/label>/;
   const linked = [{ id: 'a', name: 'Work', added_at: '2026-11-01T00:00:00Z' }];
   assert.doesNotMatch(context.calendarCard({ calendars: [] }), /calendar-offer/);
   assert.equal(context.calendarCard({ calendars: linked }).match(row)[1], ' checked');

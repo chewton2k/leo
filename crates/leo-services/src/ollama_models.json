@@ -1,7 +1,7 @@
 [
-  { "name": "qwen3:1.7b", "bytes": 1400000000, "memory_gb": 4, "about": "Fastest, simplest notes" },
-  { "name": "qwen3:4b", "bytes": 2500000000, "memory_gb": 8, "about": "Faster, shorter notes" },
-  { "name": "qwen3:8b", "bytes": 5200000000, "memory_gb": 16, "about": "Better notes from long recordings" },
-  { "name": "gemma3:12b", "bytes": 8100000000, "memory_gb": 16, "about": "Careful writing, slower" },
-  { "name": "gemma3:27b", "bytes": 17000000000, "memory_gb": 32, "about": "Best quality, slow" }
+  { "name": "qwen3.5:2b", "bytes": 2683396637, "memory_gb": 6, "about": "Fastest, simplest notes" },
+  { "name": "qwen3.5:4b", "bytes": 3324173757, "memory_gb": 8, "about": "Faster, shorter notes" },
+  { "name": "qwen3.5:9b", "bytes": 6550825373, "memory_gb": 16, "about": "Better notes from long recordings" },
+  { "name": "gemma4:12b", "bytes": 8021618699, "memory_gb": 16, "about": "Careful writing, slower" },
+  { "name": "gemma4:26b", "bytes": 18731025387, "memory_gb": 32, "about": "Best quality, slow" }
 ]

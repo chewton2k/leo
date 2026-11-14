@@ -94,7 +94,6 @@ const actions = {
   'task-delete': (el) => deleteTask(el.dataset.id),
   'task-promote': (el) => promoteTask(el.dataset.line),
   'note-tasks': () => noteTasksSheet(),
-  'tasks-fold': () => toggleTasksWindow(),
   'source-close': closeSource,
   'source-file': (el) => openSource(el.dataset.id, el.dataset.name),
   'set-model': (el) => changeSetting({ set: 'model', task: el.dataset.task, value: el.dataset.model }),

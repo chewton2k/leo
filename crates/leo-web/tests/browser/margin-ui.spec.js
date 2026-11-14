@@ -7,12 +7,93 @@ test.beforeEach(async ({ page }) => {
 
 const quiet = (page) => expect.poll(() => page.evaluate(() => document.getAnimations().filter((run) => run.playState === 'running' && run.effect && run.effect.getComputedTiming().iterations !== Infinity).length)).toBe(0);
 
+test('the leo mark is one symbol that the brand uses', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  await page.goto('/');
+  await expect(page.locator('svg.sprite symbol#leo-mark')).toHaveCount(1);
+  await expect(page.locator('.bar .brand svg use[href="#leo-mark"]')).toHaveCount(1);
+  await expect(page.locator('.side-head .brand svg use[href="#leo-mark"]')).toHaveCount(1);
+  await expect(page.locator('.side-head .brand')).toHaveAccessibleName('leo');
+});
+
+test('a stepped drawing steps through its parts with captions and theme colours, and stays an image', async ({ page }) => {
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Stepped', body: 'Words.' } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  await page.evaluate(() => {
+    const stepped = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 120"><title>Heat</title><g data-step="1" data-caption="Hot side"><circle cx="61" cy="60" r="30" style="stroke: var(--accent); fill: none"/></g><g data-step="2" data-caption="Heat moves"><path d="M100 60h120" style="stroke: var(--text)"/></g></svg>';
+    const broken = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80"><g data-step="1"><path d="M0 0h9"></svg>';
+    for (const [id, svg] of [['stepped', stepped], ['broken', broken]]) {
+      const box = document.createElement('div');
+      box.className = 'msg leo';
+      box.id = id;
+      box.innerHTML = `<div class="prose">${window.leoMarkdown.render('```svg\n' + svg + '\n```')}</div>`;
+      document.querySelector('#app').append(box);
+    }
+  });
+  const fig = page.locator('#stepped figure.drawing.inked');
+  const src = async () => decodeURIComponent(await fig.locator('img').getAttribute('src'));
+  await expect(fig.locator('.drawing-count')).toHaveText('1/2');
+  await expect(fig.locator('.drawing-caption')).toHaveText('Hot side');
+  await expect(fig.getByRole('button', { name: 'Previous step' })).toBeDisabled();
+  expect(await src()).not.toContain('var(--');
+  expect(await src()).toContain('opacity="0"');
+  await fig.getByRole('button', { name: 'Next step' }).click();
+  await expect(fig.locator('.drawing-count')).toHaveText('2/2');
+  await expect(fig.locator('.drawing-caption')).toHaveText('Heat moves');
+  await expect(fig.getByRole('button', { name: 'Next step' })).toBeDisabled();
+  expect(await src()).not.toContain('opacity="0"');
+  await fig.getByRole('button', { name: 'Start again' }).click();
+  await expect(fig.locator('.drawing-count')).toHaveText('1/2');
+  await expect(fig.locator('img')).toHaveCSS('filter', 'none');
+  expect(await page.locator('circle[cx="61"]').count()).toBe(0);
+  await expect(page.locator('#broken figure.drawing img')).toHaveCount(1);
+  await expect(page.locator('#broken figure.drawing.inked, #broken .drawing-steps')).toHaveCount(0);
+});
+
+test('the selection menu offers Felix this, Ask Felix and Visualize, and the two quick ones ask with their own message', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Selection menu', body: 'Intro line\n\nHeat flows from the hot side to the cold side.\n\nLast line' } })).json();
+  const asked = [];
+  await page.route(`**/api/notes/${note.id}/margin/threads`, async (route) => {
+    const body = route.request().postDataJSON();
+    asked.push(body);
+    await route.fulfill({ json: { id: `t${asked.length}`, note: note.id, quote: body.quote, prefix: body.prefix, suffix: body.suffix, status: 'open', source: 'ask', messages: [{ from: 'felix', text: 'Here it is.', at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' } });
+  });
+  await page.goto(`/#/n/${note.id}`);
+  const select = async () => {
+    await page.locator('#doc .blk', { hasText: 'Heat flows' }).click();
+    const area = page.locator('#doc textarea.line-edit');
+    await expect(area).toHaveCount(1);
+    await area.evaluate((a) => {
+      const at = a.value.indexOf('the hot side');
+      a.focus();
+      a.setSelectionRange(at, at + 'the hot side'.length);
+      a.dispatchEvent(new Event('select'));
+    });
+  };
+  await select();
+  const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button')).toHaveText([/Felix this/, 'Ask Felix', 'Visualize']);
+  await menu.getByRole('button', { name: 'Visualize' }).click();
+  await expect.poll(() => asked.length).toBe(1);
+  expect(asked[0]).toMatchObject({ quote: 'the hot side', question: 'Draw this step by step.' });
+  await expect(page.locator('.margin-note[data-open] .margin-felix')).toHaveText('Here it is.');
+  await page.keyboard.press('Escape');
+  await select();
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await expect.poll(() => asked.length).toBe(2);
+  expect(asked[1]).toMatchObject({ quote: 'the hot side', question: 'Respond to this passage.' });
+});
+
 test('note reading modes sit beside the save state, work in both orders and retain the confirmed mode on failure', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Reading modes', body: 'Words about a passage.' } })).json();
   await page.goto(`/#/n/${note.id}`);
   const button = page.locator('#margin-mode');
   await expect(button).toBeEnabled();
-  expect((await button.boundingBox()).y).toBeGreaterThan((await page.locator('#title').boundingBox()).y);
+  expect((await button.boundingBox()).y).toBeLessThan((await page.locator('#title').boundingBox()).y);
   for (const [key, label] of [['Home', 'Reads along'], ['End', 'When you ask'], ['Home', 'Reads along'], ['End', 'When you ask']]) {
     await button.click();
     await expect(page.getByRole('menu', { name: 'Note reading mode' })).toBeVisible();
@@ -354,4 +435,88 @@ test('a margin note on the second copy of a line in a code block sits by that co
   const line = await page.locator('.margin-ink .squiggle').first().boundingBox();
   const code = await page.locator('#doc pre').first().boundingBox();
   expect(line.y).toBeGreaterThan(code.y + code.height * 0.6);
+});
+
+test('a resolved passage reopens', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const quote = 'The password is stored as plain text.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Reopen', body: `Opening words.\n\n${quote} More words after it.` } })).json();
+  expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote, question: 'Why?' } })).ok()).toBe(true);
+  const open = async () => (await (await page.request.get(`/api/notes/${note.id}/margin`)).json()).threads.length;
+  await page.goto(`/#/n/${note.id}`);
+  const card = page.locator('.margin-note');
+  const back = page.getByTitle("Reopen Felix's note");
+  await expect(card).toBeVisible();
+  await expect(back).toHaveCount(0);
+  await card.click();
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.locator('.margin-ink .squiggle')).toHaveCount(0);
+  await expect(page.locator('.toast')).toHaveCount(0);
+  await expect(back).toBeVisible();
+  await expect(back).toHaveCSS('border-bottom-style', 'dotted');
+  expect(await open()).toBe(0);
+  await back.click();
+  await expect(card).toBeVisible();
+  await expect(card).toHaveAttribute('data-open', '');
+  await expect(card.locator('.margin-felix')).toBeVisible();
+  await expect(back).toHaveCount(0);
+  expect(await open()).toBe(1);
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  await expect(back).toBeVisible();
+  await back.focus();
+  await page.keyboard.press('Enter');
+  await expect(card).toHaveAttribute('data-open', '');
+  await expect(back).toHaveCount(0);
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  await back.focus();
+  await page.keyboard.press('Space');
+  await expect(card).toHaveAttribute('data-open', '');
+  await expect(back).toHaveCount(0);
+  expect(await open()).toBe(1);
+  await page.reload();
+  await expect(card).toBeVisible();
+  await expect(back).toHaveCount(0);
+});
+
+test('a changed passage says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const quote = 'The password is stored as plain text.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Changed passage', body: `Opening words.\n\n${quote} More words after it.` } })).json();
+  expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote, prefix: 'Opening words.\n\n', suffix: ' More words after it.', question: 'Why?' } })).ok()).toBe(true);
+  await page.goto(`/#/n/${note.id}`);
+  const card = page.locator('.margin-note');
+  await expect(card).toBeVisible();
+  await expect(card.locator('.margin-changed')).toBeHidden();
+  await page.locator('#doc .blk', { hasText: 'More words' }).click();
+  await page.locator('#doc textarea.line-edit').fill('The password is stored as clear text. More words after it.');
+  await expect(card.locator('.margin-changed')).toHaveText('The passage changed since Felix wrote this.');
+  await expect(card.locator('.margin-changed')).toBeVisible();
+});
+
+test('earlier messages fold', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const quote = 'The password is stored as plain text.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Long thread', body: `Opening words.\n\n${quote} More words after it.` } })).json();
+  expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote, question: 'Why?' } })).ok()).toBe(true);
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    body.threads[0].messages = Array.from({ length: 8 }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: `Message ${i + 1}`, at: '2026-11-14T10:00:00Z' }));
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`/#/n/${note.id}`);
+  const card = page.locator('.margin-note');
+  await expect(card).toBeVisible();
+  await card.click();
+  const earlier = card.getByRole('button', { name: 'Show 2 earlier' });
+  await expect(earlier).toBeVisible();
+  await expect(card.locator('.margin-said > div')).toHaveCount(6);
+  await earlier.click();
+  await expect(card.locator('.margin-said > div')).toHaveCount(8);
+  await expect(card.locator('.margin-said').getByText('Message 1')).toBeVisible();
+  await expect(earlier).toHaveCount(0);
 });

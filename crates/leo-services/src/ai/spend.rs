@@ -20,7 +20,13 @@ pub struct Answered {
 pub fn cache_read_share(provider: &str, model: &str) -> f64 {
     let model = model.to_lowercase();
     match provider {
-        "anthropic" if model.contains("fable-5-1") || model.contains("mythos-5-1") => 0.025,
+        "anthropic"
+            if model.contains("fable-5-1")
+                || model.contains("fable-5-2")
+                || model.contains("mythos-5-1") =>
+        {
+            0.025
+        }
         "anthropic" if model.contains("opus-5-5") || model.contains("sonnet-5-5") => 0.05,
         "anthropic" | "openai" => 0.1,
         "gemini" | "xai" => 0.25,
@@ -196,6 +202,7 @@ mod tests {
             ("openai", "gpt-5", 0.1),
             ("anthropic", "claude-sonnet-5-5", 0.05),
             ("anthropic", "claude-fable-5-1", 0.025),
+            ("anthropic", "claude-fable-5-2", 0.025),
             ("gemini", "gemini-3.8-flash", 0.25),
             ("openrouter", "x", 1.0),
         ] {

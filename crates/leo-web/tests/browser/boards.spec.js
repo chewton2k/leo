@@ -593,7 +593,7 @@ test('every lane has one fixed height, down to the window, and only a full lane 
   });
 });
 
-test('sections have their own colour, cards sit solid on it, and text stays readable', async ({ browser }) => {
+test('each column has its own tone dot, cards sit solid, and text stays readable', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const ratio = page.evaluate(() => {
       const rgb = text => { const box = document.createElement('i'); box.style.color = text; document.body.append(box); const c = getComputedStyle(box).color; box.remove(); const canvas = document.createElement('canvas').getContext('2d'); canvas.fillStyle = c; canvas.fillRect(0, 0, 1, 1); return [...canvas.getImageData(0, 0, 1, 1).data].slice(0, 3); };
@@ -607,7 +607,13 @@ test('sections have their own colour, cards sit solid on it, and text stays read
       await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
       await redraw(page);
       const row = await lanes(page);
-      for (let i = 1; i < row.length; i++) expect(row[i].color, `lanes ${i - 1} and ${i} differ`).not.toBe(row[i - 1].color);
+      expect(new Set(row.map(l => l.color)).size, 'every lane sits on the shelf tone').toBe(1);
+      const dots = await page.locator('.kanban-col-head').evaluateAll(els => els.map(el => { const dot = getComputedStyle(el, '::before'); return { color: dot.backgroundColor, width: dot.width }; }));
+      for (let i = 0; i < dots.length; i++) {
+        expect(dots[i].width, 'the tone dot is 7px').toBe('7px');
+        if (i) expect(dots[i].color, `columns ${i - 1} and ${i} have different tone dots`).not.toBe(dots[i - 1].color);
+      }
+      expect(await page.locator('.kanban-card').first().evaluate(el => getComputedStyle(el).backgroundColor), 'cards sit solid, off the lane').not.toBe(row[0].color);
       const checks = await page.evaluate(() => {
         const out = [];
         for (const lane of document.querySelectorAll('.kanban-col')) {
@@ -620,7 +626,6 @@ test('sections have their own colour, cards sit solid on it, and text stays read
       });
       for (const value of checks) expect(value, theme + ' contrast').toBeGreaterThanOrEqual(4.5);
     }
-    await expect(page.locator('.kanban-col .kanban-dot'), 'the lane itself carries the colour').toHaveCount(0);
     await page.evaluate(() => { window.db.boards[0].columns = ['Backlog', 'Research', 'Done', 'Later', 'Blocked', 'Review', 'Doing'].map((name, i) => ({ id: 'knamed' + i + '00000', name })); });
     await redraw(page);
     const tones = await page.locator('.kanban-col').evaluateAll(els => els.map(el => el.dataset.tone));
@@ -766,10 +771,30 @@ test('clicking anywhere in an empty card description shows it as a field with th
       await page.locator('#kanban-card-title').click();
       await description.click({ position: spot });
       await expect.poll(editing).toBe(true);
-      expect(await description.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--accent)'; el.append(probe); const accent = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).borderTopColor === accent; })).toBe(true);
+      expect(await description.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--focus)'; el.append(probe); const focus = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).borderTopColor === focus; })).toBe(true);
     }
     await page.keyboard.type('Bring the reading list');
     await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Bring the reading list');
+  });
+});
+
+test('a dropped card leaves no copy behind when its panel is open, edited and cannot close', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const strays = page.locator('body > .kanban-ghost, body > .kanban-card');
+    await drag(page, page.locator('[data-card="cread00001"]'), page.locator('[data-card="cemail0001"]'), { below: true });
+    await expect(strays).toHaveCount(0);
+    await page.locator('[data-card="cread00001"]').click();
+    await page.locator('#kanban-card-title').fill('Read chapter four');
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').title)).toBe('Read chapter four');
+    await drag(page, page.locator('[data-card="cread00001"]'), page.locator('.kanban-cards[data-col="kdone00001"]'));
+    await expect(strays).toHaveCount(0);
+    await page.evaluate(() => { window.realClose = kanbanClosePanel; kanbanClosePanel = () => { throw new Error('close failed'); }; window.slow = 100; });
+    await drag(page, page.locator('[data-card="cread00001"]'), page.locator('.kanban-tab[data-kanban-drop="bhome00001"]'));
+    await expect(strays).toHaveCount(0);
+    await page.evaluate(() => { kanbanClosePanel = window.realClose; window.slow = 0; window.errors.length = 0; });
+    await page.evaluate(() => { location.hash = '#/elsewhere'; });
+    await expect(page.locator('#elsewhere')).toBeVisible();
+    await expect(strays).toHaveCount(0);
   });
 });
 

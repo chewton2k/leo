@@ -7,7 +7,7 @@ use rusqlite::Connection;
 
 pub const FILE: &str = "leo.db";
 pub const BEFORE: &str = ".before-database";
-const VERSION: i64 = 3;
+const VERSION: i64 = 4;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS dictations (
@@ -134,7 +134,8 @@ CREATE TABLE IF NOT EXISTS margin_threads (
     source TEXT NOT NULL,
     messages TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    pinned INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS margin_threads_by_note ON margin_threads(note, status, created_at);
 CREATE TABLE IF NOT EXISTS margin_modes (
@@ -257,6 +258,16 @@ impl Db {
         )?;
         if !has_original {
             tx.execute_batch("ALTER TABLE dictations ADD COLUMN original TEXT;")?;
+        }
+        let has_pinned: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('margin_threads') WHERE name = 'pinned')",
+            [],
+            |r| r.get(0),
+        )?;
+        if !has_pinned {
+            tx.execute_batch(
+                "ALTER TABLE margin_threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
+            )?;
         }
         tx.pragma_update(None, "user_version", VERSION)?;
         tx.commit()?;

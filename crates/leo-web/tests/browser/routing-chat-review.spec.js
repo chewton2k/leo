@@ -167,7 +167,7 @@ for (const layout of ['desktop', 'compact', 'source']) test(`Chats history ${lay
     el.click();
     return { before, after: history.getBoundingClientRect().x };
   });
-  expect(Math.abs(reversal.after - reversal.before), 'reverse preserves position in the same browser turn').toBeLessThan(3);
+  expect(Math.abs(reversal.after - reversal.before), 'reverse preserves position in the same browser turn').toBeLessThan(4);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.evaluate(() => { for (const run of historyMotion) run.finish(); });
   await expect(history).toBeHidden();

@@ -228,7 +228,7 @@ pub const SPECS: [Spec; 32] = [
             Param {
                 name: "question",
                 required: true,
-                about: "the question in Markdown; for fill_blank write ___ where the missing words go; it may include a ```mermaid or ```svg diagram or a picture link from a note",
+                about: "the question in Markdown; for fill_blank write ___ where the missing words go; it may include a ```svg drawing or a picture link from a note",
             },
             Param {
                 name: "options",

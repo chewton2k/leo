@@ -7,6 +7,26 @@ const test = (name, fn) => cases.push([name, fn]);
 const source = 'Save the password in the users table,\nthen login just checks if it matches, I think?\n\nSessions last a day.';
 const quote = 'just checks if it matches';
 
+test('pauseFor: a finished last block keeps the pace and an unfinished one waits half again', () => {
+  for (const [pace, ms] of [['fast', 2000], ['regular', 4000], ['slow', 8000]]) {
+    assert.equal(M.pauseFor('It ends here.', pace), ms);
+    assert.equal(M.pauseFor('It is still going', pace), ms * 1.5);
+  }
+  assert.equal(M.pauseFor('Really?', 'regular'), 4000);
+  assert.equal(M.pauseFor('Stop!', 'regular'), 4000);
+  assert.equal(M.pauseFor('他说完了。', 'regular'), 4000);
+  assert.equal(M.pauseFor('真的吗？', 'regular'), 4000);
+  assert.equal(M.pauseFor('她还在写', 'regular'), 6000);
+  assert.equal(M.pauseFor('She said "done."', 'regular'), 4000);
+  assert.equal(M.pauseFor('# A heading', 'regular'), 4000);
+  assert.equal(M.pauseFor('- one\n- a list item', 'regular'), 4000);
+  assert.equal(M.pauseFor('1. a numbered item', 'regular'), 4000);
+  assert.equal(M.pauseFor('```js\nlet x = 1', 'regular'), 4000);
+  assert.equal(M.pauseFor('', 'regular'), 4000);
+  assert.equal(M.pauseFor(undefined, 'regular'), 4000);
+  assert.equal(M.pauseFor('Unfinished', 'unknown'), 6000);
+});
+
 test('anchor: one exact match', () => {
   const at = M.find(source, { quote });
   assert.equal(source.slice(at.from, at.to), quote);

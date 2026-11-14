@@ -20,6 +20,10 @@ pub(crate) struct ReadBody {
     blocks: Vec<String>,
     #[serde(default)]
     most: Option<usize>,
+    #[serde(default)]
+    gone: Vec<String>,
+    #[serde(default)]
+    keep: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -31,11 +35,15 @@ pub(crate) struct AskBody {
     #[serde(default)]
     suffix: String,
     question: String,
+    #[serde(default)]
+    gone: Vec<String>,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct ReplyBody {
     text: String,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -48,6 +56,13 @@ pub(crate) struct WeaveBody {
 #[derive(Deserialize)]
 pub(crate) struct StatusBody {
     status: String,
+    #[serde(default)]
+    gone: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct PinBody {
+    pinned: bool,
 }
 
 #[derive(Deserialize)]
@@ -76,10 +91,12 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
+    limit: usize,
+    free: bool,
 }
 
 enum Pass {
-    Saved(Vec<Thread>),
+    Saved(Vec<Thread>, Vec<String>),
     Silent,
     Failed(String),
     Refused(Response),
@@ -105,7 +122,9 @@ fn silent() -> Response {
 }
 
 fn failed(state: &AppState, error: String) -> Response {
-    state.margin.set_problem(Some(error.clone()));
+    if error != margin::FULL {
+        state.margin.set_problem(Some(error.clone()));
+    }
     Json(serde_json::json!({ "note": null, "failed": true, "error": error })).into_response()
 }
 
@@ -152,6 +171,7 @@ pub(crate) async fn note_margin(State(state): State<AppState>, Path(id): Path<St
             "persona": margin::persona_of(&chats, &id),
             "instructions": margin::instructions_of(&chats, &id),
             "threads": margin::open_on(&chats, &id),
+            "resolved": margin::resolved_on(&chats, &id),
         })
     })
     .await;
@@ -411,18 +431,23 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let id = id.clone();
         let created = note.created;
         let held = chats.clone();
+        let gone = body.gone.clone();
+        let keep = body.keep.clone();
+        let reads = state.margin.clone();
         let facts = blocking(move || {
             let prefs = margin::prefs(&held);
+            let open = margin::open_on(&held, &id);
             ReadFacts {
+                limit: margin::room(&open, &gone),
+                free: open
+                    .iter()
+                    .any(|thread| margin::freeable(&reads, thread, keep.as_deref())),
                 along: margin::mode_of(&held, &id, created) == "along",
                 voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
                 instructions: margin::instructions_of(&held, &id),
                 cap: prefs.cap,
                 gap: prefs.gap,
-                quotes: margin::open_on(&held, &id)
-                    .into_iter()
-                    .map(|thread| thread.quote)
-                    .collect(),
+                quotes: open.into_iter().map(|thread| thread.quote).collect(),
             }
         })
         .await;
@@ -431,7 +456,6 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             Err(refused) => return Pass::Refused(*refused),
         }
     };
-    let full = facts.quotes.len() >= margin::MOST_OPEN;
     if !through {
         if !facts.along {
             return Pass::Refused(said(
@@ -455,10 +479,10 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             "Felix is answering you.",
         ));
     }
-    if full {
-        if !through {
-            return Pass::Silent;
-        }
+    if !through && facts.quotes.len() >= 2 * margin::MOST_OPEN && !facts.free {
+        return Pass::Failed(margin::FULL.into());
+    }
+    if through && facts.quotes.len() >= facts.limit {
         return Pass::Refused(said(
             StatusCode::CONFLICT,
             "full",
@@ -508,8 +532,8 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let counted = chats.clone();
         let cap = facts.cap;
         if !matches!(
-            blocking(move || margin::spend_read(&counted, cap)).await,
-            Ok(true)
+            blocking(move || margin::reads_today(&counted, cap)).await,
+            Ok(used) if cap == margin::NO_CAP || used < cap
         ) {
             state.margin.forget_blocks(&id, &blocks);
             return Pass::Refused(said(
@@ -529,7 +553,12 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         &margin::voiced(system, &facts.voice, false),
         &facts.instructions,
     );
-    let user = margin::read_prompt(&note.title, &blocks, tag);
+    let earlier = if through {
+        String::new()
+    } else {
+        margin::earlier_text(&note.body, &blocks)
+    };
+    let user = margin::read_prompt(&note.title, &blocks, tag, &earlier);
     let answer = tokio::time::timeout(
         margin::READ_LIMIT,
         tokio::task::spawn_blocking(move || {
@@ -557,7 +586,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         .most
         .unwrap_or(margin::MOST_PER_PASS)
         .clamp(1, margin::MOST_PER_PASS)
-        .min(margin::MOST_OPEN - facts.quotes.len());
+        .min(facts.limit.saturating_sub(facts.quotes.len()));
     let founds = if through {
         margin::parsed_many(&reply, most)
     } else {
@@ -576,37 +605,81 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         Ok(now) => now,
         Err(_) => return Pass::Silent,
     };
+    let limit = if through {
+        facts.limit
+    } else {
+        2 * margin::MOST_OPEN
+    };
     let mut quotes = facts.quotes;
     let mut saved = Vec::new();
+    let mut resolved = Vec::new();
+    let mut stopped = false;
     for found in founds {
-        if margin::crowded(&now.body, &found.quote, &blocks, &quotes) {
+        if !through
+            && !blocks
+                .iter()
+                .any(|block| block.contains(found.quote.as_str()))
+        {
             continue;
         }
-        let Some(place) = margin::placed(&now.body, &found.quote, &blocks) else {
+        let quote = margin::whole_sentences(&now.body, &found.quote, &blocks);
+        if margin::crowded(&now.body, &quote, &blocks, &quotes) {
+            continue;
+        }
+        let Some(place) = margin::placed(&now.body, &quote, &blocks) else {
             continue;
         };
         let thread = margin::new_thread(
             &id,
-            "read",
+            if through { "through" } else { "read" },
             place,
-            &found.quote,
+            &quote,
             vec![margin::felix_says(&found.text)],
         );
+        if !through && quotes.len() >= limit {
+            let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
+            let keep = body.keep.clone();
+            let freed =
+                blocking(move || margin::free_oldest(&held, &reads, &noted, keep.as_deref())).await;
+            let Ok(Some(freed)) = freed else {
+                forget(state);
+                return Pass::Failed(margin::FULL.into());
+            };
+            if let Some(at) = quotes.iter().position(|q| *q == freed.quote) {
+                quotes.remove(at);
+            }
+            resolved.push(freed.id);
+        }
         let held = chats.clone();
         let stored = thread.clone();
         if !matches!(
-            blocking(move || margin::put(&held, &stored)).await,
+            blocking(move || margin::put(&held, &stored, limit)).await,
             Ok(true)
         ) {
+            stopped = true;
             break;
         }
-        quotes.push(found.quote);
+        quotes.push(quote);
+        if !through {
+            let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
+            let (keep, fresh) = (body.keep.clone(), thread.id.clone());
+            let tidied = blocking(move || {
+                margin::resolve_untouched(&held, &reads, &noted, keep.as_deref(), &fresh)
+            })
+            .await;
+            resolved.extend(tidied.unwrap_or_default());
+        }
         saved.push(thread);
     }
-    if saved.is_empty() {
+    if !through && (!stopped || !saved.is_empty()) {
+        let counted = chats.clone();
+        let cap = facts.cap;
+        let _ = blocking(move || margin::spend_read(&counted, cap)).await;
+    }
+    if saved.is_empty() && resolved.is_empty() {
         Pass::Silent
     } else {
-        Pass::Saved(saved)
+        Pass::Saved(saved, resolved)
     }
 }
 
@@ -616,8 +689,8 @@ pub(crate) async fn read(
     Json(body): Json<ReadBody>,
 ) -> Response {
     match pass(&state, id, body, false).await {
-        Pass::Saved(mut saved) => {
-            Json(serde_json::json!({ "note": saved.remove(0) })).into_response()
+        Pass::Saved(saved, resolved) => {
+            Json(serde_json::json!({ "note": saved.first(), "resolved": resolved })).into_response()
         }
         Pass::Silent => silent(),
         Pass::Failed(error) => failed(&state, error),
@@ -631,7 +704,7 @@ pub(crate) async fn analyze(
     Json(body): Json<ReadBody>,
 ) -> Response {
     match pass(&state, id, body, true).await {
-        Pass::Saved(saved) => Json(serde_json::json!({ "notes": saved })).into_response(),
+        Pass::Saved(saved, _) => Json(serde_json::json!({ "notes": saved })).into_response(),
         Pass::Silent => Json(serde_json::json!({ "notes": [] })).into_response(),
         Pass::Failed(error) => {
             state.margin.set_problem(Some(error.clone()));
@@ -793,11 +866,12 @@ pub(crate) async fn ask(
     };
     let chats = state.chats.clone();
     let held = id.clone();
-    let open = match blocking(move || margin::open_on(&chats, &held).len()).await {
+    let open = match blocking(move || margin::open_on(&chats, &held)).await {
         Ok(open) => open,
         Err(refused) => return *refused,
     };
-    if open >= margin::MOST_OPEN {
+    let limit = margin::room(&open, &body.gone);
+    if open.len() >= limit {
         return said(
             StatusCode::CONFLICT,
             "full",
@@ -820,7 +894,7 @@ pub(crate) async fn ask(
     }
     let chats = state.chats.clone();
     let saved = thread.clone();
-    match blocking(move || margin::put(&chats, &saved)).await {
+    match blocking(move || margin::put(&chats, &saved, limit)).await {
         Ok(true) => Json(thread).into_response(),
         Ok(false) => said(
             StatusCode::CONFLICT,
@@ -845,6 +919,12 @@ pub(crate) async fn reply(
     }
     if text.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
+    }
+    let request = body
+        .request
+        .filter(|r| !r.is_empty() && r.len() <= insert::MOST_REQUEST);
+    if let Some(found) = request.as_deref().and_then(|r| insert::remembered(&id, r)) {
+        return Json(found).into_response();
     }
     let note = match open_note(&state, &id).await {
         Ok(note) => note,
@@ -885,7 +965,12 @@ pub(crate) async fn reply(
     let chats = state.chats.clone();
     let saved = found.clone();
     match blocking(move || margin::save_messages(&chats, &saved)).await {
-        Ok(true) => Json(found).into_response(),
+        Ok(true) => {
+            if let Some(request) = request.as_deref() {
+                insert::remember(&id, request, &serde_json::json!(found));
+            }
+            Json(found).into_response()
+        }
         Ok(false) => said(
             StatusCode::CONFLICT,
             "closed",
@@ -1015,6 +1100,22 @@ pub(crate) async fn weave(
     }
 }
 
+pub(crate) async fn pin(
+    State(state): State<AppState>,
+    Path((id, thread)): Path<(String, String)>,
+    Json(body): Json<PinBody>,
+) -> Response {
+    if !margin::valid_note(&id) || !margin::valid_note(&thread) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let chats = state.chats.clone();
+    match blocking(move || margin::set_pinned(&chats, &id, &thread, body.pinned)).await {
+        Ok(Some(found)) => Json(found).into_response(),
+        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+        Err(refused) => *refused,
+    }
+}
+
 pub(crate) async fn set_status(
     State(state): State<AppState>,
     Path((id, thread)): Path<(String, String)>,
@@ -1027,7 +1128,11 @@ pub(crate) async fn set_status(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    let done = blocking(move || margin::set_status(&chats, &id, &thread, &body.status)).await;
+    let done = blocking(move || {
+        let limit = margin::room(&margin::open_on(&chats, &id), &body.gone);
+        margin::set_status(&chats, &id, &thread, &body.status, limit)
+    })
+    .await;
     match done {
         Ok(margin::Status::Done(found)) => Json(found).into_response(),
         Ok(margin::Status::Missing) => StatusCode::NOT_FOUND.into_response(),

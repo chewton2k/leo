@@ -932,3 +932,40 @@ test('explorer blank context menu offers creation and stays inside the viewport'
     await expect(page.locator('.side-tree')).toBeFocused();
   });
 });
+
+test('the paper grain is there and never takes faint text below 4.5:1 on a 9x9 grid of background pixels', async ({ browser }) => {
+  for (const colorScheme of ['light', 'dark']) {
+    for (const [width, lefts] of [[1200, [20, 340]], [400, [20]]]) {
+      const context = await browser.newContext({ viewport: { width, height: 600 }, colorScheme });
+      const page = await context.newPage();
+      await page.setContent(`<style>${pageCss()}</style><body><main style="height:560px"></main></body>`);
+      const faint = await page.evaluate(() => { const probe = document.createElement('i'); probe.style.color = 'var(--faint)'; document.body.append(probe); const color = getComputedStyle(probe).color; probe.remove(); return color.match(/\d+/g).slice(0, 3).map(Number); });
+      for (const left of lefts) {
+        const shot = (await page.screenshot({ clip: { x: left, y: 40, width: 72, height: 72 } })).toString('base64');
+        const result = await page.evaluate(async ([shot, faint]) => {
+          const img = new Image();
+          img.src = 'data:image/png;base64,' + shot;
+          await img.decode();
+          const canvas = document.createElement('canvas');
+          canvas.width = canvas.height = 72;
+          const draw = canvas.getContext('2d');
+          draw.drawImage(img, 0, 0);
+          const lin = v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; };
+          const lum = c => .2126 * lin(c[0]) + .7152 * lin(c[1]) + .0722 * lin(c[2]);
+          const seen = new Set();
+          let min = Infinity;
+          for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) {
+            const pixel = [...draw.getImageData(col * 8, row * 8, 1, 1).data].slice(0, 3);
+            seen.add(pixel.join());
+            const [hi, lo] = [lum(pixel), lum(faint)].sort((a, b) => b - a);
+            min = Math.min(min, (hi + .05) / (lo + .05));
+          }
+          return { min, distinct: seen.size };
+        }, [shot, faint]);
+        expect(result.min, `${colorScheme} ${width}px at ${left}`).toBeGreaterThanOrEqual(4.5);
+        if (width === 1200 && left === 20) expect(result.distinct, `${colorScheme} ${width}px shows grain`).toBeGreaterThan(1);
+      }
+      await context.close();
+    }
+  }
+});

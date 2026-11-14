@@ -468,13 +468,6 @@ fn padded(mut pcm: Vec<f32>) -> Vec<f32> {
     pcm
 }
 
-fn nudged(mut pcm: Vec<f32>) -> Vec<f32> {
-    if !pcm.is_empty() && (pcm.len() / 160).is_multiple_of(8) {
-        pcm.resize(pcm.len() + 160, 0.0);
-    }
-    pcm
-}
-
 fn run(
     queue: mpsc::Receiver<Message>,
     supervisor: EngineSupervisor,
@@ -696,7 +689,7 @@ fn run(
                         .is_some_and(|info| info.supports_vocabulary);
                     let run = run_options(&job.selected, job.words.clone(), vocabulary);
                     let echo = run.vocabulary.clone();
-                    let heard = supervisor.transcribe_since(mark, nudged(pcm), run);
+                    let heard = supervisor.transcribe_since(mark, pcm, run);
                     *lock(&serving) = false;
                     job.text.push(without_echo(heard?.text, &echo));
                 }
@@ -1019,15 +1012,6 @@ mod heard_tests {
 #[cfg(test)]
 mod option_tests {
     use super::*;
-
-    #[test]
-    fn lengths_that_lose_parakeet_text_get_one_more_hop() {
-        assert!(nudged(Vec::new()).is_empty());
-        assert_eq!(nudged(vec![0.5; 1_280]).len(), 1_440);
-        assert_eq!(nudged(vec![0.5; 1_439]).len(), 1_599);
-        assert_eq!(nudged(vec![0.5; 1_440]).len(), 1_440);
-        assert_eq!(nudged(padded(vec![0.5; 4_000])).len(), SHORT_CLIP_PADDED);
-    }
 
     #[test]
     fn custom_words_reach_only_models_that_take_vocabulary() {

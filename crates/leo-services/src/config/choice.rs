@@ -66,6 +66,7 @@ pub const WRITING: &[Choice] = &[
             m("gpt-6-luna", "included in your ChatGPT plan"),
             m("gpt-6-sol", "included in your ChatGPT plan"),
             m("gpt-6.1-sol", "included in your ChatGPT plan"),
+            m("gpt-6.1-terra", "included in your ChatGPT plan"),
             m("gpt-6-astra", "included in your ChatGPT plan"),
         ],
     },
@@ -76,7 +77,7 @@ pub const WRITING: &[Choice] = &[
             m("claude-haiku-5-5", "included in your Claude plan"),
             m("claude-sonnet-5-5", "included in your Claude plan"),
             m("claude-opus-5-5", "included in your Claude plan"),
-            m("claude-fable-5-1", "included with Max plans and above"),
+            m("claude-fable-5-2", "included with Max plans and above"),
         ],
     },
 ];
@@ -495,11 +496,17 @@ mod tests {
             "claude-haiku-5-5",
             "claude-sonnet-5-5",
             "claude-opus-5-5",
-            "claude-fable-5-1",
+            "claude-fable-5-2",
         ] {
             assert!(has("claude_code", model), "{model}");
         }
-        for model in ["gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6-astra"] {
+        for model in [
+            "gpt-6-luna",
+            "gpt-6-sol",
+            "gpt-6.1-sol",
+            "gpt-6.1-terra",
+            "gpt-6-astra",
+        ] {
             assert!(has("codex", model), "{model}");
         }
     }

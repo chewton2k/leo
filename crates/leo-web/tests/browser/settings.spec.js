@@ -345,6 +345,16 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.evaluate(()=>window.audit.redraw());
       await expect(words).toBeFocused();
       expect(await words.evaluate(el=>[el.selectionStart,el.selectionEnd])).toEqual([2,7]);
+      await expect(page.locator('#dictation-shortcut-field')).toHaveCount(0);
+      const filler=page.locator('[data-find="dictation-fillers"]');
+      await expect(filler.locator('.set-desc')).toHaveText('Take out words like um and uh as you speak.');
+      await expect(filler).toHaveCSS('border-top-width','1px');
+      await page.getByRole('link',{name:'Shortcuts',exact:true}).click();
+      await expect(page.getByRole('heading',{level:1,name:'Shortcuts'})).toBeVisible();
+      const dictationKeys=page.locator('[data-find="shortcut-dictation"]');
+      await expect(dictationKeys.locator('#dictation-shortcut-field')).toBeVisible();
+      await expect(dictationKeys.getByRole('button',{name:'Change',exact:true})).toBeVisible();
+      await expect(page.getByRole('link',{name:'Change in Dictation'})).toHaveCount(0);
       await page.getByRole('link',{name:'General',exact:true}).click();
       const themeReset=page.getByRole('button',{name:'Reset Theme to default'});
       await expect(themeReset).toBeHidden();

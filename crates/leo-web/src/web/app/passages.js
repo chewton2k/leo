@@ -1,11 +1,17 @@
-const askFloat = document.createElement('button');
-askFloat.type = 'button';
+const ASK_PRESETS = { this: 'Respond to this passage.', draw: 'Draw this step by step.' };
+const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
-askFloat.innerHTML = `${ICON.chat}<span>Ask Felix</span>`;
+askFloat.setAttribute('role', 'toolbar');
+askFloat.setAttribute('aria-label', 'Felix and this passage');
+askFloat.innerHTML = `<button type="button" data-ask="this">${ICON.chat}<span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
 askFloat.hidden = true;
 askFloat.dataset.keepSelection = '';
 askFloat.addEventListener('mousedown', (e) => e.preventDefault());
-askFloat.addEventListener('click', () => openAskField());
+askFloat.addEventListener('click', (e) => {
+  const kind = e.target.closest('[data-ask]')?.dataset.ask;
+  if (kind === 'ask') openAskField();
+  else if (kind) askAboutSelection(ASK_PRESETS[kind]);
+});
 document.body.appendChild(askFloat);
 
 const askField = document.createElement('form');
@@ -103,6 +109,13 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   askAboutSelection();
 });
+
+document.addEventListener('keydown', (e) => {
+  if (state.view !== 'note' || e.key !== 'Enter' || !(ON_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || askFloat.hidden || e.target.closest?.('.margin-layer, .chat, .scrim, .ask-field')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  askAboutSelection(ASK_PRESETS.this);
+}, true);
 
 window.addEventListener('scroll', hideAskFloat, { passive: true, capture: true });
 

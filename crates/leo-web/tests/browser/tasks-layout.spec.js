@@ -89,6 +89,9 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     await page.evaluate(task => audit.seed([task]), task);
     const row = page.locator('.tasks-row');
     const check = row.locator('input');
+    const panel = page.locator('#tasks-window');
+    await expect(page.locator('.tasks-body'), 'folded until hovered').toBeHidden();
+    await panel.hover();
     await page.evaluate(() => audit.delay());
     await check.click();
     await page.evaluate(() => audit.refresh());
@@ -119,6 +122,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     await page.emulateMedia({reducedMotion: 'reduce'});
     await page.evaluate(task => audit.seed([{...task, repeat: [0, 1, 2, 3, 4, 5, 6], date: audit.today, done_on: []}]), task);
     const occurrence = await check.getAttribute('data-on');
+    await panel.hover();
     await check.click();
     await expect(check).toBeChecked({timeout: 500});
     await page.evaluate(() => audit.refresh());
@@ -129,7 +133,8 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     expect(await row.evaluate(el => el.getAnimations().length)).toBe(0);
     await page.setViewportSize({width:1280,height:720});
     await page.evaluate(task => audit.seed(Array.from({length:30}, (_,i) => ({...task,id:"layout-"+i}))), task);
-    await expect(page.locator(".tasks-toggle")).toHaveAttribute("aria-expanded", "true");
+    await panel.hover();
+    await expect(page.locator(".tasks-body")).toBeVisible();
     await page.setViewportSize({width:620,height:600});
     expect(errors).toEqual([]);
   } finally {

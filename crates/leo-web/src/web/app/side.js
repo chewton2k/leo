@@ -1,6 +1,8 @@
 const SIDE_KEY = 'leo-side';
 const sideWide = () => Boolean(window.matchMedia && window.matchMedia('(min-width: 1000px)').matches);
-const sideActive = () => sideWide() && !side.mini || Boolean(document.querySelector('#folders-sheet'));
+const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-width: 600px) and (max-width: 999px)').matches);
+const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
+const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
 const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null };
 // Folders the user opened with their own hands, kept across restarts. Folders
@@ -33,7 +35,7 @@ try {
   side.flip = kept.flip === true;
   side.tasks = kept.tasks === true;
 } catch (e) {}
-document.body.classList.toggle('side-mini', side.mini);
+document.body.classList.toggle('side-mini', side.mini || sideNarrow());
 
 const SIDE_LEAST_WIDTH = 220;
 const SIDE_MOST_WIDTH = 520;
@@ -123,8 +125,8 @@ function drawSide() {
   const pillFrom = pillBefore ? pillBefore.getBoundingClientRect() : null;
   const paint = () => refreshPanel(box, `
     <div class="side-head" data-tauri-drag-region="deep">
-      <button class="icon-btn side-fold" data-action="side-fold" aria-label="${side.mini ? 'Show folders' : 'Hide folders'}" title="${side.mini ? 'Show folders' : 'Hide folders'}" aria-expanded="${!side.mini}" aria-controls="side-explorer">${ICON.sidebar}</button>
-      <button class="brand side-label" data-action="home">leo</button>
+      <button class="icon-btn side-fold" data-action="side-fold" aria-label="${sideShown() ? 'Hide folders' : 'Show folders'}" title="${sideShown() ? 'Hide folders' : 'Show folders'}" aria-expanded="${sideShown()}" aria-controls="side-explorer">${ICON.sidebar}</button>
+      <button class="brand side-label" data-action="home"><svg class="brand-mark" aria-hidden="true"><use href="#leo-mark"/></svg>leo</button>
     </div>
     <div class="side-rail">
       <nav class="side-rail-main" aria-label="Leo tools">
@@ -312,7 +314,34 @@ async function loadSideFolders() {
   drawSide();
 }
 
+const sideShown = () => (sideNarrow() ? sideDrawerOpen() : !side.mini);
+
+function sideDrawer(open) {
+  const body = document.body;
+  if (sideDrawerOpen() === open) return;
+  body.classList.toggle('side-drawer', open);
+  body.classList.toggle('side-mini', !open && (side.mini || sideNarrow()));
+  if (open) loadSideFolders().catch(() => {});
+  else drawSide();
+  if (open) ($('#side-filter') || $('#side .side-fold'))?.focus({ preventScroll: true });
+  else if ($('#side')?.contains(document.activeElement)) $('#side .side-fold')?.focus({ preventScroll: true });
+}
+
+matchMedia('(min-width: 600px) and (max-width: 999px)').addEventListener('change', () => {
+  document.body.classList.remove('side-drawer');
+  document.body.classList.toggle('side-mini', side.mini || sideNarrow());
+  drawSide();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && sideDrawerOpen() && !document.querySelector('.scrim, .popup-menu')) sideDrawer(false);
+});
+document.addEventListener('pointerdown', (e) => {
+  if (sideDrawerOpen() && !e.target.closest('#side, .popup-menu, .scrim, .sheet')) sideDrawer(false);
+}, true);
+window.addEventListener('hashchange', () => sideDrawer(false));
+
 function foldSide() {
+  if (sideNarrow()) return sideDrawer(!sideDrawerOpen());
   side.mini = !side.mini;
   const generation = side.folding = (side.folding || 0) + 1;
   const body = document.body;
@@ -369,7 +398,8 @@ function openFolder(el) {
     return;
   }
   revealFolder(path);
-  if (!sideWide()) showFolders();
+  if (sideNarrow()) sideDrawer(true);
+  else if (!sideWide()) showFolders();
   else if (side.mini) foldSide();
 }
 

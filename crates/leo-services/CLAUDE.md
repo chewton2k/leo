@@ -124,8 +124,7 @@ per-dictation counter and kills the worker call only while a dictation is being
 served, so recording segments and live passes keep running; waiting dictations
 return Cancelled within 50 ms and the actor re-checks after model load and
 between chunks. Custom words go to `RunOptions::vocabulary` when the model
-supports it, and only those runs' text goes through the echo filter. Offline
-clips whose `(len/160)%8` is 0 get 160 zeros (padding guard, until transcribe-cpp 0.4.2 is on crates.io). A transcribe.cpp backend
+supports it, and only those runs' text goes through the echo filter. A transcribe.cpp backend
 error counts as a lost worker (one fresh GPU retry, then CPU); `loaded()` is
 cleared when a worker is lost, and idle unload waits for a dictation. One actor owns supervisor
 and model. Recording pins it; otherwise idle unload is five minutes. Stop and
@@ -144,7 +143,7 @@ or runs inference; the one exception is Silero VAD (CPU-only, in the app process
 written to `models_dir()/vad` from embedded bytes and compared before use, one
 `Model` per detector). Framed JSON/PCM, queues, stderr and deadlines are bounded;
 crashes/hangs are reaped and retried once (CPU after GPU). The Rust binding and
-native sys crate are both pinned to exactly 0.4.0 (pre-1.0 patch versions are
+native sys crate are both pinned to exactly 0.4.2 (pre-1.0 patch versions are
 not ABI-compatible). Filesystem/native work stays outside application mutexes.
 
 ### Ollama (`ollama.rs`)

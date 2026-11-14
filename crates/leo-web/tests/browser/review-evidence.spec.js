@@ -393,7 +393,7 @@ test('R2 slowed arrival: the dotted underline reveals left to right in place', a
   const read = await startRead(page, note);
   await expect.poll(() => read.requested(), { timeout: 12000 }).not.toBeNull();
   await expect(page.locator('.margin-waiting')).toBeVisible({ timeout: 5000 });
-  await page.addStyleTag({ content: '.line-edit { caret-color: transparent !important; }' });
+  await page.addStyleTag({ content: '.line-edit { caret-color: transparent !important; } .margin-ink path.pencil { display: none !important; }' });
   const block = await page.locator('#doc .blk').last().boundingBox();
   const clip = { x: Math.max(0, block.x - 4), y: Math.max(0, block.y - 4), width: Math.min(1600 - Math.max(0, block.x - 4), block.width + 8), height: Math.min(890 - block.y, block.height + 14) };
   const base = (await page.screenshot({ scale: 'css', clip })).toString('base64');
@@ -672,7 +672,7 @@ test('Settings chooses how often Felix reads and says so in one sentence', async
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/settings/felix');
   const rhythm = page.locator('#felix-rhythm');
-  await expect(rhythm).toContainText('at most once every 90 sec.');
+  await expect(rhythm).toContainText('(longer mid-sentence), at most once every 90 sec.');
   await expect(rhythm).not.toContainText('today');
   const reads = page.locator('.felix-rhythm header #felix-reads');
   await expect(reads).toHaveText(/^\d+\/40 today$/);
@@ -750,7 +750,7 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto('/#/');
     await expect(page.locator('#app')).not.toBeEmpty();
-    if (width >= 1000) await page.locator('#side [data-action="usage"]').click();
+    if (width >= 600) await page.locator('#side [data-action="usage"]').click();
     else { await page.locator('#menu').click(); await page.locator(':is(.sheet, .popup-menu) [data-action="usage"]').click(); }
     await expect(page.locator('.usage-sheet .coding-plan')).toHaveCount(2);
     await settle(page);
@@ -799,7 +799,7 @@ test('R11/R13 the explorer has no Collapse all and the rail has no Felix, while 
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto(`/#/n/${inside.id}`);
     await expect(page.locator('#title')).toHaveText(inside.title);
-    if (width >= 1000) {
+    if (width >= 600) {
       await expect(page.locator('#side')).toBeVisible();
       expect(await page.locator('#side .side-group').evaluate(named), 'no Collapse all in the Folders heading').toBe(false);
       expect(await page.locator('#side .side-rail').evaluate((el) => /felix/i.test(`${el.innerText} ${[...el.querySelectorAll('[aria-label],[title]')].map((x) => `${x.getAttribute('aria-label')} ${x.getAttribute('title')}`).join(' ')}`)), 'no Felix in the rail').toBe(false);
@@ -812,7 +812,7 @@ test('R11/R13 the explorer has no Collapse all and the rail has no Felix, while 
     }
     await settle(page);
     await still(page, `r11-explorer-${width}-${scheme}`);
-    if (width < 1000) await page.locator('#folders-sheet [data-action="close"]').click();
+    if (width < 600) await page.locator('#folders-sheet [data-action="close"]').click();
     const toggle = page.locator('#chat-toggle');
     await expect(toggle, `toolbar chat access at ${width}`).toBeVisible();
     await toggle.click();

@@ -1337,7 +1337,7 @@ pub(crate) async fn act(
                         &saying.0,
                         vec![crate::margin::felix_says(&saying.1)],
                     );
-                    if crate::margin::put(&chats, &thread) {
+                    if crate::margin::put(&chats, &thread, crate::margin::MOST_OPEN) {
                         Ok(thread.id)
                     } else {
                         Err(StatusCode::TOO_MANY_REQUESTS)

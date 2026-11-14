@@ -1,6 +1,84 @@
 const MERMAID_URL = '/vendor/mermaid-11.4.1.js';
 const DIAGRAMS_KEPT = 60;
-const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0 };
+const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0, inked: new WeakMap() };
+const DRAWING_COLOURS = ['--text', '--muted', '--faint', '--line', '--accent', '--accent-soft', '--surface'];
+const DRAWING_URL = 'data:image/svg+xml;charset=utf-8,';
+const MOST_STEPS = 12;
+
+function inked(svg, colour) {
+  return svg.replace(/var\(\s*(--[\w-]+)\s*(?:,[^()]*)?\)/g, (all, name) => colour(DRAWING_COLOURS.includes(name) ? name : '--text'));
+}
+
+function drawingSteps(svg) {
+  const doc = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const root = doc.documentElement;
+  if (!root || root.localName !== 'svg' || doc.getElementsByTagName('parsererror').length) return null;
+  const stepOf = (g) => Number(g.getAttribute('data-step')) || 0;
+  const groups = [...root.children].filter((g) => g.localName === 'g' && g.hasAttribute('data-step'));
+  const numbers = [...new Set(groups.map(stepOf))].sort((a, b) => a - b);
+  if (!root.hasAttribute('fill')) root.setAttribute('fill', 'var(--text)');
+  if (!numbers.length || numbers.length > MOST_STEPS) return [{ svg: new XMLSerializer().serializeToString(root), caption: '' }];
+  const kept = new Map(groups.map((g) => [g, g.getAttribute('opacity')]));
+  return numbers.map((n) => {
+    for (const g of groups) {
+      if (stepOf(g) > n) g.setAttribute('opacity', '0');
+      else if (kept.get(g) === null) g.removeAttribute('opacity');
+      else g.setAttribute('opacity', kept.get(g));
+    }
+    return { svg: new XMLSerializer().serializeToString(root), caption: groups.find((g) => stepOf(g) === n).getAttribute('data-caption') || '' };
+  });
+}
+
+function inkedUrl(svg) {
+  const css = getComputedStyle(document.documentElement);
+  return DRAWING_URL + encodeURIComponent(inked(svg, (name) => css.getPropertyValue(name).trim() || 'currentColor'));
+}
+
+function paintDrawing(fig, at) {
+  const kept = diagrams.inked.get(fig);
+  const last = kept.variants.length - 1;
+  kept.at = Math.max(0, Math.min(last, at));
+  const step = kept.variants[kept.at];
+  fig.querySelector('img').src = inkedUrl(step.svg);
+  const bar = fig.querySelector('.drawing-steps');
+  if (!bar) return;
+  bar.querySelector('.drawing-count').textContent = `${kept.at + 1}/${last + 1}`;
+  bar.querySelector('.drawing-caption').textContent = step.caption;
+  bar.querySelector('[data-step-go="-1"]').disabled = kept.at === 0;
+  bar.querySelector('[data-step-go="1"]').disabled = kept.at === last;
+}
+
+function stepDrawings() {
+  for (const img of document.querySelectorAll('figure.drawing:not(.pending, [data-inked]) > img')) {
+    const fig = img.parentElement;
+    if (fig.closest('.viewer-diagram')) continue;
+    fig.dataset.inked = '';
+    const src = img.getAttribute('src') || '';
+    let source = '';
+    try {
+      source = src.startsWith(DRAWING_URL) ? decodeURIComponent(src.slice(DRAWING_URL.length)) : '';
+    } catch (e) {
+      continue;
+    }
+    if (!source.includes('var(--') && !source.includes('data-step')) continue;
+    const variants = drawingSteps(source);
+    if (!variants) continue;
+    const stepped = variants.length > 1 && !fig.closest('.doc');
+    diagrams.inked.set(fig, { variants, at: 0 });
+    fig.classList.add('inked');
+    if (stepped) fig.insertAdjacentHTML('beforeend', '<figcaption class="drawing-steps"><button type="button" data-step-go="-1" aria-label="Previous step">‹</button><span class="drawing-count"></span><button type="button" data-step-go="1" aria-label="Next step">›</button><button type="button" data-step-go="0" aria-label="Start again">↻</button><span class="drawing-caption" aria-live="polite"></span></figcaption>');
+    paintDrawing(fig, stepped ? 0 : variants.length - 1);
+  }
+}
+
+document.addEventListener('click', (e) => {
+  const go = e.target.closest?.('[data-step-go]');
+  const fig = go?.closest('figure.drawing');
+  const kept = fig && diagrams.inked.get(fig);
+  if (!kept) return;
+  const step = Number(go.dataset.stepGo);
+  paintDrawing(fig, step ? kept.at + step : 0);
+});
 
 function diagramScheme() {
   return window.leoTheme.dark() ? 'dark' : 'default';
@@ -49,7 +127,7 @@ function diagramTheme(dark) {
     signalColor: muted,
     signalTextColor: text,
     pieTitleTextSize: '17px',
-    pieSectionTextColor: dark ? '#141414' : '#ffffff',
+    pieSectionTextColor: dark ? '#181715' : '#ffffff',
     pieSectionTextSize: '13px',
     pieLegendTextColor: text,
     pieStrokeColor: surface,
@@ -113,6 +191,9 @@ function expandDiagrams(button) {
     const row = fig.closest('.drawing-row');
     const copy = (row || fig).cloneNode(true);
     copy.querySelector('.diagram-src')?.remove();
+    copy.querySelector('.drawing-steps')?.remove();
+    const kept = diagrams.inked.get(fig);
+    if (kept) copy.querySelector('img').src = inkedUrl(kept.variants[kept.variants.length - 1].svg);
     const mine = copy.querySelector('svg, img');
     let target = mine;
     if (mine.localName === 'svg') {
@@ -216,6 +297,7 @@ async function drawDiagrams() {
 
 function watchDiagrams(records) {
   if (records && !records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) return;
+  stepDrawings();
   drawKnownDiagrams();
   clearTimeout(diagrams.timer);
   diagrams.timer = setTimeout(() => drawDiagrams().catch(() => {}), 60);
@@ -223,6 +305,7 @@ function watchDiagrams(records) {
 
 new MutationObserver(watchDiagrams).observe(document.body, { childList: true, subtree: true });
 window.leoTheme.onChange(() => {
+  for (const fig of document.querySelectorAll('figure.drawing.inked')) if (diagrams.inked.has(fig)) paintDrawing(fig, diagrams.inked.get(fig).at);
   for (const fig of document.querySelectorAll('figure.diagram[data-drawn]')) {
     if (fig.closest('.viewer-diagram')) continue;
     fig.removeAttribute('data-drawn');

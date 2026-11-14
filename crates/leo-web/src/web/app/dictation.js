@@ -16,24 +16,30 @@ function dictationKeycaps(keys) {
 function dictationShortcutField(shortcut, saved) {
   return shortcut.recording ? `<span class="shortcut-prompt">Press your keys\u2026</span><span class="shortcut-held">${dictationKeycaps(shortcut.held)}</span>` : dictationKeycaps(saved);
 }
+function dictationSection(name) {
+  return name === 'dictation' || name === 'shortcuts';
+}
+function dictationShortcutRow(view) {
+  const s = view.settings || {}, keys = view.shortcut || {};
+  return `<div class="set-row column" data-find="shortcut-dictation"><div class="set-line"><span class="set-label">Dictation (works in any app)</span><span class="set-shortcut dictation-keys"><input type="hidden" data-dictation="shortcut" value="${esc(s.shortcut || '')}"><span class="shortcut-field${keys.recording ? ' recording' : ''}" id="dictation-shortcut-field" role="group" aria-label="Dictation shortcut">${dictationShortcutField(keys, s.shortcut)}</span><button class="btn plain sm" data-action="dictation-record">Change</button></span></div><span id="dictation-shortcut-status" class="hint${keys.problem && !keys.recording ? ' bad' : ''}" aria-live="polite">${esc(keys.recording ? 'Esc to cancel' : keys.problem || '')}</span></div>`;
+}
 function dictationCards(view) {
   if (!view) return '';
-  const s = view.settings || {}, keys = view.shortcut || {};
+  const s = view.settings || {};
   const select = (name, choices) => `<span class="select-control"><select data-dictation="${name}">${choices.map(([value, label]) => settingsOption(value, label, String(s[name] == null ? '' : s[name]))).join('')}</select>${ICON.chevron}</span>`;
   const row = (label, control, find) => `<label class="set-row" data-find="${find}"><span class="set-label">${label}</span><span class="set-value">${control}</span></label>`;
-  const toggle = (name, label, find) => `<label class="set-row" data-find="${find}"><span class="grow">${label}</span>${settingsSwitch(`data-dictation="${name}"`, s[name])}</label>`;
+  const toggle = (name, label, find, about) => `<label class="set-row" data-find="${find}"><span class="grow">${label}<span class="set-desc">${about}</span></span>${settingsSwitch(`data-dictation="${name}"`, s[name])}</label>`;
   const choice = (name, label, choices, find) => `<div class="set-row" data-find="${find}"><span class="set-label">${label}</span>${segmented({ label, choices, current: String(s[name] == null ? choices[0][0] : s[name]), field: `data-dictation="${name}"` })}</div>`;
   const microphones = [['', 'System default']].concat((view.microphones || []).map((name) => [name, name]));
-  return `<section class="set-card" id="dictation-preferences"><header><h3>Shortcut and microphone</h3><span class="set-value"><span class="hint" id="dictation-result" role="status"></span></span></header>
+  return `<section class="set-card" id="dictation-preferences"><header><h3>Activation and microphone</h3><span class="set-value"><span class="hint" id="dictation-result" role="status"></span></span></header>
     ${view.problem ? `<p class="set-note warn">${esc(view.problem)}</p>` : ''}
     <p class="hint">Custom words and filler rules run on this computer, without writing AI unless you turn on AI writing below.</p>
-    <div class="set-row column" data-find="dictation-shortcut"><div class="set-line"><span class="set-label">Shortcut</span><span class="set-shortcut"><input type="hidden" data-dictation="shortcut" value="${esc(s.shortcut || '')}"><span class="shortcut-field${keys.recording ? ' recording' : ''}" id="dictation-shortcut-field" role="group" aria-label="Dictation shortcut">${dictationShortcutField(keys, s.shortcut)}</span><button class="btn plain sm" data-action="dictation-record">Change</button></span></div><span id="dictation-shortcut-status" class="hint${keys.problem && !keys.recording ? ' bad' : ''}" aria-live="polite">${esc(keys.recording ? 'Esc to cancel' : keys.problem || '')}</span></div>
     ${choice('mode', 'Activation', [['both', 'Hold or tap'], ['hold', 'Hold'], ['tap', 'Tap']], 'dictation-activation')}
     ${row('Microphone', select('microphone', microphones), 'dictation-microphone')}
-    ${toggle('sounds', 'Start and stop sounds', 'dictation-sounds')}
+    ${toggle('sounds', 'Start and stop sounds', 'dictation-sounds', 'Play a short sound when dictation starts and stops.')}
   </section><section class="set-card"><header><h3>Text</h3></header>
     <label class="set-row column" data-find="dictation-words"><span class="set-label">Custom words</span><textarea class="set-input" data-dictation="custom_words" rows="3" placeholder="Names and terms, one per line">${esc((s.custom_words || []).join('\n'))}</textarea><span class="hint">Names and terms leo should spell your way, up to 200. Some models also listen for them; the first ones count most.</span></label>
-    ${toggle('fillers', 'Remove filler words', 'dictation-fillers')}
+    ${toggle('fillers', 'Remove filler words', 'dictation-fillers', 'Take out words like um and uh as you speak.')}
     <div class="set-row column" data-find="dictation-ai"><label class="set-line"><span class="grow">AI writing</span>${settingsSwitch(`data-dictation="writing" data-on="${s.writing && s.writing !== 'off' ? esc(s.writing) : 'quick'}"`, s.writing && s.writing !== 'off')}</label><span class="hint">Fixes grammar, writes times like 2:30 and formats lists with your <a href="#/settings/writing">Writing AI</a>. Matches the tone of the app you dictate into (only the app’s name is used). Adds a few seconds; Escape cancels.</span>${view.writing_ready === false ? '<span class="set-note warn">No writing AI is set up yet, so dictations are pasted as spoken. <a href="#/settings/writing">Set up writing AI</a>.</span>' : ''}</div>
   </section><section class="set-card"><header><h3>Popup</h3></header>
     ${choice('popup', 'Popup', [['live', 'Live'], ['minimal', 'Minimal'], ['off', 'Off']], 'dictation-popup')}
@@ -193,7 +199,7 @@ function updateDictationStatus(view) {
   if (shortcut.captured && !shortcut.recording && dictationCaptureArmed) captureDictationShortcut(shortcut.captured).catch(fail);
 }
 function dictationPolling(mine, generation) {
-  const here = state.view === 'settings' && state.section === 'dictation' && appVisible();
+  const here = state.view === 'settings' && dictationSection(state.section) && appVisible();
   if (!here) dictationCaptureArmed = false;
   return here && mine === seq && generation === dictationGeneration && !!state.dictation;
 }
@@ -258,7 +264,7 @@ if (typeof window !== 'undefined' && window.addEventListener) {
   window.addEventListener('keydown', holdKeys, true);
   window.addEventListener('keyup', holdKeys, true);
   window.addEventListener('click', (e) => {
-    if (dictationRecording() && !e.target.closest?.('.set-shortcut')) stopDictationRecording();
+    if (dictationRecording() && !e.target.closest?.('.dictation-keys')) stopDictationRecording();
   }, true);
 }
 if (typeof window !== 'undefined' && window.leoTheme) {

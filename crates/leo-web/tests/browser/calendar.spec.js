@@ -543,6 +543,67 @@ test('a task at the end of the day stays inside the grid and keeps its real time
   });
 });
 
+test('a task with an end is as tall as its time: 2 to 3 PM stops at the 3 PM line, half an hour shows title and time on one line', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const task = cal.data.tasks.find(task => task.id === 'task-lab');
+      for (const [id, time, end] of [['task-hour', '14:00:00', '15:00:00'], ['task-half', '16:00:00', '16:30:00']]) {
+        const made = { ...task, id, title: 'Block ' + id, time, end };
+        cal.data.tasks.push(made);
+        window.db.tasks.push(made);
+      }
+      drawCalendar();
+    });
+    const column = await page.locator('.cal-col[data-day="2026-11-05"]').boundingBox();
+    const hour = await page.locator('.cal-item[data-id="task-hour"]').boundingBox();
+    expect(hour.height).toBeCloseTo(46, 0);
+    expect(hour.y + hour.height).toBeLessThanOrEqual(column.y + 15 * 48);
+    const half = page.locator('.cal-item[data-id="task-half"]');
+    expect((await half.boundingBox()).height).toBeCloseTo(22, 0);
+    await expect(half).toHaveClass(/inline/);
+    const title = await half.locator('.cal-title').boundingBox();
+    const sub = await half.locator('.cal-sub').boundingBox();
+    expect(sub.width).toBeGreaterThan(0);
+    expect(Math.abs((sub.y + sub.height / 2) - (title.y + title.height / 2))).toBeLessThan(8);
+    await expect(page.locator('.cal-item[data-id="task-lab"]')).toHaveCount(1);
+    expect((await page.locator('.cal-item[data-id="task-lab"]').boundingBox()).height).toBeGreaterThanOrEqual(60);
+  });
+});
+
+test('resizing a task smaller shrinks it while the pointer is still down', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const study = page.locator('.cal-item[data-id="task-study"]');
+    expect((await study.boundingBox()).height).toBeCloseTo(46, 0);
+    const grip = await page.locator('.cal-item[data-id="task-study"] .cal-grip').boundingBox();
+    const from = { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 };
+    await page.mouse.move(from.x, from.y);
+    await page.mouse.down();
+    await page.mouse.move(from.x, from.y - 6, { steps: 2 });
+    await page.mouse.move(from.x, from.y - 24, { steps: 6 });
+    await expect.poll(async () => (await study.boundingBox()).height).toBeCloseTo(22, 0);
+    await expect(study).toHaveClass(/inline/);
+    await expect(study.locator('.cal-sub')).toHaveText(/1:00.*1:30/);
+    expect(await patches(page, 'task-study')).toHaveLength(0);
+    await page.mouse.up();
+    await settled(page);
+    expect(await task(page, 'task-study')).toMatchObject({ time: '13:00:00', end: '13:30:00' });
+  });
+});
+
+test('today is a filled accent circle in the mini calendar, the week header and the month', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const mini = page.locator('.cal-mini-day.today');
+    await expect(mini).toHaveText('3');
+    const fill = await page.locator('.cal-dayhead.today b').evaluate(el => getComputedStyle(el).backgroundColor);
+    const look = await mini.evaluate(el => { const style = getComputedStyle(el); const box = el.getBoundingClientRect(); return { fill: style.backgroundColor, radius: style.borderRadius, square: Math.abs(box.width - box.height) < 1 }; });
+    expect(look).toEqual({ fill, radius: '50%', square: true });
+    await page.locator('.cal-views [data-view="month"]').click();
+    await settled(page);
+    expect(await page.locator('.cal-cell.today .cal-num').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
+    expect(await page.locator('.cal-mini-day.today').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
+  });
+});
+
 test('the hour grid reaches the bottom of the calendar in a tall window', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await page.evaluate(() => {

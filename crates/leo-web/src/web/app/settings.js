@@ -31,7 +31,7 @@ async function showSettings(section) {
   drawSettings(page);
   if (section === 'health') loadHealth().catch(fail);
   startSpeechPolling(mine);
-  if (section === 'dictation') pollDictation(mine, ++dictationGeneration);
+  if (dictationSection(section)) pollDictation(mine, ++dictationGeneration);
 }
 
 const CALENDAR_PROVIDERS = {
@@ -108,7 +108,7 @@ function calendarCard(cal) {
     <header><h3>Calendar</h3>${chip}</header>
     <p class="hint">Recordings are named after the class or meeting you are in, and the AI gets its description and who was invited. leo only reads your calendar.</p>
     ${rows}
-    ${count ? `<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts</span>${settingsSwitch('data-cal-offer', cal.offer !== false)}</label>` : ''}
+    ${count ? `<label class="set-row" data-find="calendar-offer"><span class="grow">Offer to record when an event starts<span class="set-desc">Ask whether to record when a connected calendar event begins.</span></span>${settingsSwitch('data-cal-offer', cal.offer !== false)}</label>` : ''}
     ${adder}
   </section>`;
 }
@@ -454,8 +454,8 @@ const APPEARANCE_DEFAULTS = { theme: 'system', felix: 'cute', width: 'wide', siz
 const THEME_LABELS = { system: 'Match device', light: 'Light', dark: 'Dark' };
 
 const THEME_SURFACES = {
-  light: { ground: '#f2f1ec', page: '#f9f8f5', head: '#1c1c1a', line: '#d9d8d3', side: '#e3e2dc' },
-  dark: { ground: '#141413', page: '#1f1f1e', head: '#ecebe7', line: '#3a3a38', side: '#2a2a28' },
+  light: { ground: '#f0eee8', page: '#faf9f6', head: '#1c1c1a', line: '#d9d8d3', side: '#e3e1db' },
+  dark: { ground: '#181715', page: '#22211f', head: '#e9e7e2', line: '#3a3835', side: '#2b2a27' },
 };
 function themeScene(look) {
   const c = THEME_SURFACES[look];
@@ -993,7 +993,7 @@ function shortcutRow(name, find) {
 function shortcutsCard() {
   return `<section class="set-card"><header><h3>Keyboard shortcuts</h3></header><p class="hint">Click Change, then press the new keys. Esc cancels.</p>
     ${shortcutRow('quick', 'shortcut-quick')}${shortcutRow('new', 'shortcut-new')}${shortcutRow('ask', 'shortcut-ask')}
-    <div class="set-row column" data-find="shortcut-dictation"><div class="set-line"><span class="set-label">Dictation (works in any app)</span><span class="set-shortcut"><span class="shortcut-field" role="group" aria-label="Dictation shortcut">${dictationKeycaps(state.dictation?.settings?.shortcut)}</span><a href="#/settings/dictation">Change in Dictation</a></span></div></div>
+    ${state.dictation ? dictationShortcutRow(state.dictation) : ''}
   </section>`;
 }
 function shortcutRefusal(name, chord) {

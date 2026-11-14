@@ -394,7 +394,7 @@ are passed only in the selected provider's supported format.
 Recording notes (whole, appended and per part) and upload notes share one
 guide: tell it as a story (why it matters, the core idea, build up from the
 simple case), examples right where ideas appear, connections and common
-mistakes, Mermaid diagrams and the material's pictures where they help; code
+mistakes, stepped SVG drawings (320 wide, theme colour tokens, `data-step` groups) and the material's pictures where they help; code
 problems get a breakdown, then the code, then foldable `> [!example]-`
 explanations; every note ends with `## Check yourself` questions whose
 answers fold away (only the last part of a long recording or upload writes

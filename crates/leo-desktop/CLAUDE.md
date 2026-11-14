@@ -32,7 +32,7 @@ a test, or leave it unset to see the user's own data.
 
 ## Behaviour
 
-- Close hides the window; Dock click and "Open leo" show
+- Close hides the window; in macOS full screen it first leaves full screen (`set_fullscreen(false)`) and hides on the first `Resized` that reports windowed, or after 1 s if none arrives, because hiding a full-screen window left a black Space (`LEAVING_FULLSCREEN`, `show` clears it); Dock click and "Open leo" show
   it; on macOS, Leo's Quit menu items or ⌘Q need a second attempt within three seconds
   (the first shows a prompt). Update restarts and error exits bypass this guard.
   `RunEvent::Exit` stops the engine (6 s cap), without committing or pushing notes.

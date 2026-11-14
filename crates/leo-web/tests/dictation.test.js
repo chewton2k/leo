@@ -29,11 +29,13 @@ test('dictation controls escape history and preserve explicit text settings', ()
   assert.ok(/<input type="checkbox" class="switch" role="switch" data-dictation="writing" data-on="quick">/.test(html));
   assert.ok(html.includes('Adds a few seconds'));
   assert.ok(html.includes('Names and terms leo should spell your way, up to 200. Some models also listen for them; the first ones count most.'));
-  assert.ok(html.includes('<kbd>\u2325</kbd><kbd>Space</kbd>'));
-  assert.ok(html.includes('data-action="dictation-record">Change</button>'));
-  for (const gone of ['Use shortcut', 'dictation-use-shortcut', 'dictation-resume', 'Change shortcut']) assert.ok(!html.includes(gone));
-  assert.ok(html.includes('<input type="hidden" data-dictation="shortcut" value="option+space">'));
-  const recording = context.dictationCards({ settings: { shortcut: 'option+space' }, recent: [], shortcut: { recording: true, held: 'command+shift' } });
+  for (const gone of ['Use shortcut', 'dictation-use-shortcut', 'dictation-resume', 'Change shortcut', 'dictation-record', 'dictation-shortcut-field', 'data-dictation="shortcut"']) assert.ok(!html.includes(gone));
+  const row = context.dictationShortcutRow({ settings: { shortcut: 'option+space' }, shortcut: {} });
+  assert.ok(row.includes('<kbd>\u2325</kbd><kbd>Space</kbd>'));
+  assert.ok(row.includes('data-action="dictation-record">Change</button>'));
+  assert.ok(row.includes('data-find="shortcut-dictation"'));
+  assert.ok(row.includes('<input type="hidden" data-dictation="shortcut" value="option+space">'));
+  const recording = context.dictationShortcutRow({ settings: { shortcut: 'option+space' }, shortcut: { recording: true, held: 'command+shift' } });
   assert.ok(recording.includes('shortcut-field recording'));
   assert.ok(recording.includes('Press your keys\u2026'));
   assert.ok(recording.includes('<kbd>\u2318</kbd><kbd>\u21e7</kbd>'));

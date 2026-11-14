@@ -114,7 +114,9 @@ pub(crate) fn router(state: AppState) -> Router {
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}",
-            post(margin::set_status).delete(margin::forget),
+            post(margin::set_status)
+                .patch(margin::pin)
+                .delete(margin::forget),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/reply",
@@ -185,7 +187,14 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/saving.js", get(saving_js))
         .route("/schedule.js", get(assets::schedule_js))
         .route("/margin.js", get(assets::margin_js))
+        .route("/prefs.js", get(crate::prefs::script))
         .route("/theme.js", get(assets::theme_js))
+        .route(
+            "/api/ui-prefs",
+            axum::routing::put(crate::prefs::change).layer(axum::extract::DefaultBodyLimit::max(
+                crate::prefs::BODY_BYTES,
+            )),
+        )
         .route("/chat.js", get(chat_js))
         .route("/pane-resize.js", get(assets::pane_resize_js))
         .route("/api/chat", post(chat_reply))

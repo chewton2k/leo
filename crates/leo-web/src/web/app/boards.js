@@ -950,13 +950,17 @@ function kanbanCancel() {
 async function kanbanDrop() {
   const d = kanbanEnd(true);
   if (!d) return;
-  if (d.tab && kanban.panel?.id === d.id && !await kanbanLeavePanel(false)) {
-    d.ghost?.remove();
-    return;
+  let flying = false;
+  try {
+    if (d.tab && kanban.panel?.id === d.id && !await kanbanLeavePanel(false)) return;
+    const home = d.tab ? app.querySelector(`[data-kanban-drop="${CSS.escape(d.tab)}"]`) : null;
+    if (home) {
+      flyInto(d.ghost, home.matches('.kanban-over') ? app.querySelector('.kanban-more') : home);
+      flying = true;
+    }
+  } finally {
+    if (!flying) d.ghost?.remove();
   }
-  const home = d.tab ? app.querySelector(`[data-kanban-drop="${CSS.escape(d.tab)}"]`) : null;
-  if (home) flyInto(d.ghost, home.matches('.kanban-over') ? app.querySelector('.kanban-more') : home);
-  else d.ghost?.remove();
   if (!kanban.board) return;
   if (!d.tab) {
     settleLater(`kanban-${d.kind}`, d.id, d.settled);
@@ -1114,5 +1118,6 @@ document.addEventListener('keydown', (e) => {
 function leaveBoards() {
   if (kanban.drag?.live) kanbanCancel();
   else kanbanEnd();
+  for (const stray of document.querySelectorAll('body > .kanban-ghost, body > .kanban-card, body > .kanban-col')) stray.remove();
   kanbanClosePanel(false);
 }

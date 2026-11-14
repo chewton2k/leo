@@ -17,6 +17,8 @@
   const AROUND = 48;
   const WORD_MS = 62;
   const STAGGER_MS = 650;
+  const READ_PAUSE = { fast: 2000, regular: 4000, slow: 8000 };
+  const UNFINISHED_PAUSE = 1.5;
 
   function occurrences(source, text) {
     const hits = [];
@@ -146,6 +148,14 @@
     return source.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
   }
 
+  function pauseFor(lastBlock, pace) {
+    const base = READ_PAUSE[pace] || READ_PAUSE.regular;
+    const block = (lastBlock || '').trim();
+    const line = block.split('\n').pop();
+    const finished = !block || /^(```|~~~)/.test(block) || /^\s*(#{1,6}\s|[-*+]\s|\d+[.)]\s)/.test(line) || /[.!?。！？]["'”’)\]*_]*$/.test(block);
+    return finished ? base : base * UNFINISHED_PAUSE;
+  }
+
   function changedBlocks(before, source) {
     const known = new Map();
     for (const block of before) known.set(block, (known.get(block) || 0) + 1);
@@ -210,7 +220,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, find, around, lineAfter, stack, sides, clear, arrangement, wordDelay, blocksOf, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, find, around, lineAfter, stack, sides, clear, arrangement, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);

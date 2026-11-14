@@ -22,6 +22,7 @@ mod keeping;
 pub mod margin;
 pub mod ollama;
 mod originals;
+mod prefs;
 mod progress;
 mod read_cache;
 pub mod record;

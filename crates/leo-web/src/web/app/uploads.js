@@ -314,10 +314,10 @@ async function drawOriginals(note) {
   } catch (e) {
     return;
   }
-  const meta = $('.note-meta');
-  if (!files.length || !meta || state.view !== 'note' || state.session.note.id !== note.id) return;
+  const row = $('.note-originals');
+  if (!files.length || !row || state.view !== 'note' || state.session.note.id !== note.id) return;
   const all = files.length > 1 ? `<a class="chip original all" href="/api/notes/${enc(note.id)}/originals.zip" download>${ICON.paperclip}Download all ${files.length}</a>` : '';
-  meta.insertAdjacentHTML('beforeend', files.map((f) => {
+  row.insertAdjacentHTML('beforeend', files.map((f) => {
     const look = viewKind(f.name) ? ` data-action="view-original" data-id="${esc(note.id)}" data-name="${esc(f.name)}" title="Open ${esc(f.name)}"` : '';
     return `<a class="chip original" href="/api/notes/${enc(note.id)}/originals/${enc(f.name)}" download="${esc(f.name)}"${look}>${ICON.paperclip}${esc(f.name)}</a>`;
   }).join('') + all);

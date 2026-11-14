@@ -3962,7 +3962,7 @@ test.describe('passages', () => {
     });
     const ask = page.locator('.ask-float');
     await expect(ask).toBeVisible();
-    await ask.click();
+    await ask.getByRole('button', { name: 'Ask Felix' }).click();
     await page.getByRole('textbox', { name: 'Ask Felix about this passage' }).press('Enter');
     await page.locator('.margin-note[data-open]').getByRole('button', { name: 'Ask in chat' }).click();
     const chat = page.locator('#chat');
@@ -4665,65 +4665,133 @@ test.describe('beside the note', () => {
     await expect(pane).toBeHidden();
   });
 
-  test('the Tasks panel shows open tasks in the bottom corner, stays across pages and folds', async ({ page }) => {
+  test('the Tasks panel sits folded in the bottom corner, opens on hover or keyboard focus only, and stays across pages', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     await page.request.post('/api/tasks', { data: { title: `Panel task ${tag}` } });
     await page.setViewportSize({ width: 1280, height: 1000 });
-    await page.goto('/');
-    const box = page.locator('#dock #tasks-window');
-    await expect(box).toBeVisible();
-    await expect(box).toContainText(`Panel task ${tag}`);
-    await expect(page.locator('#side [data-action="tasks-toggle"]')).toHaveCount(0);
     await page.goto('/#/settings');
-    await expect(box).toBeVisible();
-    const wide = (await box.boundingBox()).width;
-    const folding = await box.evaluate((el) => {
-      el.querySelector('[data-action="tasks-fold"]').click();
-      return { clips: el.getAnimations().filter((run) => !run.animationName).map((run) => run.effect.getKeyframes().map((k) => k.clipPath)), body: Boolean(el.querySelector('.tasks-body')) };
-    });
-    expect(folding.body).toBe(true);
-    expect(folding.clips[0][0]).toBe('inset(0px round 14px)');
-    expect(folding.clips[0][1]).toMatch(/round 23px/);
-    await expect(box.locator('.tasks-body')).toHaveCount(0);
-    const pill = box.locator('.tasks-pill');
-    await expect(pill).toHaveAttribute('aria-label', /^Show tasks: .*to do$/);
-    await expect(pill).toBeFocused();
-    await expect(box.locator('.tasks-badge')).toHaveText(/^\d+\+?$/);
-    const small = await box.boundingBox();
-    expect(small.width).toBeLessThan(60);
-    expect(small.width).toBeLessThan(wide / 4);
     await page.reload();
-    await expect(page.locator('#dock #tasks-window .tasks-pill')).toBeVisible();
-    await box.locator('.tasks-pill').hover();
-    await expect(box.locator('.tasks-body'), 'hovering the pill opens the panel').toBeVisible();
-    await box.locator('.tasks-body').hover();
-    await expect(box.locator('.tasks-body'), 'it stays open while the pointer is over it').toBeVisible();
+    const box = page.locator('#dock #tasks-window');
+    const body = box.locator('.tasks-body');
+    await expect(box).toBeVisible();
+    await expect(body, 'folded at start').toBeHidden();
+    await expect(box.locator('.tasks-badge')).toHaveText(/^\d+\+?$/);
+    await expect(box).toHaveAttribute('aria-label', /^Tasks: .*to do$/);
+    expect((await box.boundingBox()).width).toBeLessThan(60);
+    expect(await page.evaluate(() => localStorage.getItem('leo-tasks-folded'))).toBeNull();
+    await expect(page.locator('#side [data-action="tasks-toggle"]')).toHaveCount(0);
+    await box.hover();
+    await expect(body, 'hovering opens the panel').toContainText(`Panel task ${tag}`);
+    await body.hover();
+    await expect(body, 'it stays open while the pointer is over it').toBeVisible();
     await page.mouse.move(640, 300);
-    await expect(box.locator('.tasks-pill'), 'leaving folds it again').toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('leo-tasks-folded'))).toBe('1');
-    const opening = await box.evaluate((el) => {
-      el.querySelector('.tasks-pill').click();
-      return { runs: el.getAnimations().filter((run) => !run.animationName).length, body: Boolean(el.querySelector('.tasks-body')) };
-    });
-    expect(opening).toEqual({ runs: 1, body: true });
-    await expect(page.locator('#dock #tasks-window .tasks-body')).toBeVisible();
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    const still = await box.evaluate((el) => {
-      el.querySelector('[data-action="tasks-fold"]').click();
-      return { runs: el.getAnimations().filter((run) => !run.animationName).length, pill: Boolean(el.querySelector('.tasks-pill')) };
-    });
-    expect(still).toEqual({ runs: 0, pill: true });
-    const spot = await box.locator('.tasks-pill').boundingBox();
+    await expect(body, 'leaving folds it again').toBeHidden();
+    const spot = await box.boundingBox();
     await page.mouse.click(spot.x + spot.width / 2, spot.y + spot.height / 2);
-    await page.emulateMedia({ reducedMotion: 'no-preference' });
-    await expect(page.locator('#dock #tasks-window [data-action="tasks-fold"]')).toContainText('Hide');
-    await expect(page, 'a click as the pill opens pins the panel, not the row now under the pointer').not.toHaveURL(/#\/calendar/);
+    await expect(body).toBeVisible();
     await page.mouse.move(640, 300);
-    await expect(box.locator('.tasks-body'), 'a pinned panel stays open after the pointer leaves').toBeVisible();
-    expect(await page.evaluate(() => localStorage.getItem('leo-tasks-folded'))).toBe('0');
+    await expect(body, 'a click does not keep it open').toBeHidden();
+    await box.focus();
+    await expect(body, 'keyboard focus opens it').toBeVisible();
+    await page.keyboard.press('Tab');
+    await expect(box.locator('.tasks-new')).toBeFocused();
+    await expect(body).toBeVisible();
+    await page.evaluate(() => document.activeElement.blur());
+    await expect(body, 'moving focus away folds it').toBeHidden();
+    await page.goto('/#/search/panel');
+    await expect(box).toBeVisible();
+    await expect(body).toBeHidden();
+    await page.reload();
+    await expect(box).toBeVisible();
+    await expect(body, 'folded again after a reload').toBeHidden();
     await page.goto('/#/calendar');
     await expect(page.locator('#tasks-window')).toBeHidden();
+  });
+
+  test('a narrow window keeps a toggleable explorer beside the rail', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the drawer is for windows between phone and wide');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    const note = await (await page.request.post('/api/notes', { data: { title: `Drawer ${tag}`, body: 'Words.' } })).json();
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto('/#/');
+    await page.reload();
+    const side = page.locator('#side');
+    const fold = side.locator('.side-fold');
+    await expect(side.locator('.side-rail')).toBeVisible();
+    await expect(page.locator('#menu')).toBeHidden();
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await fold.click();
+    await expect(side.locator('.side-explorer')).toBeVisible();
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#side-filter')).toBeFocused();
+    const main = await page.locator('main').boundingBox();
+    expect(main.x, 'the drawer overlays the page instead of pushing it').toBeLessThan(120);
+    await page.keyboard.press('Escape');
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await expect(fold).toBeFocused();
+    await fold.click();
+    await page.locator('#side-filter').fill(`Drawer ${tag}`);
+    await side.locator('.side-note', { hasText: `Drawer ${tag}` }).first().click();
+    await expect(page).toHaveURL(new RegExp(`#/n/${note.id}`));
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await fold.click();
+    await page.mouse.click(860, 400);
+    await expect(side.locator('.side-explorer')).toBeHidden();
+  });
+
+  test('home lists today', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    const today = new Date().toLocaleDateString('en-CA');
+    await page.request.post('/api/tasks', { data: { title: `Home today ${tag}`, date: today } });
+    await page.request.post('/api/tasks', { data: { title: `Home later ${tag}` } });
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto('/#/');
+    await page.reload();
+    const list = page.locator('#home-today');
+    const row = list.locator('.tasks-row', { hasText: `Home today ${tag}` });
+    await expect(row).toBeVisible();
+    await expect(list.locator('.tasks-row', { hasText: `Home later ${tag}` }), 'only today and overdue').toHaveCount(0);
+    await expect(page.locator('#tasks-window'), 'the card gives way on Home').toBeHidden();
+    const ask = await page.locator('.home-ask').boundingBox();
+    const at = await list.boundingBox();
+    expect(at.y, 'under the quick bar').toBeGreaterThanOrEqual(ask.y + ask.height);
+    expect(at.x + at.width, 'inside the page').toBeLessThanOrEqual(1280);
+    await row.locator('.sched-check').click();
+    await expect(row.locator('.sched-check'), 'the box ticks once leo saved it').toBeChecked();
+    await expect(row, 'a finished task leaves the list').toHaveCount(0);
+    await page.goto('/#/settings');
+    await expect(page.locator('#tasks-window')).toBeVisible();
+    await expect(page.locator('#home-today')).toHaveCount(0);
+  });
+
+  test('tasks window folds while reading', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}`, date: new Date().toLocaleDateString('en-CA') } });
+    const note = await (await page.request.post('/api/notes', { data: { title: `Reading ${tag}`, body: 'Words to read.' } })).json();
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const box = page.locator('#dock #tasks-window');
+    const body = box.locator('.tasks-body');
+    await page.reload();
+    for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
+      await page.goto(`/${hash}`);
+      await expect(page.locator(content), hash).toBeVisible();
+      await expect(box, hash).toBeVisible();
+      await expect(body, `${hash} starts folded`).toBeHidden();
+      await expect(box.locator('.tasks-badge'), hash).toHaveText(/^\d+\+?$/);
+      const chip = await box.boundingBox();
+      const text = await page.locator(content).boundingBox();
+      expect(chip.width, hash).toBeLessThan(60);
+      expect(chip.x + chip.width <= text.x || chip.y + chip.height <= text.y || chip.x >= text.x + text.width || chip.y >= text.y + text.height, `${hash}: the chip stays off the page`).toBe(true);
+      await box.hover();
+      await expect(body, `${hash}: hovering opens it`).toContainText(`Reading task ${tag}`);
+      await page.mouse.move(640, 300);
+      await expect(body, `${hash}: leaving folds it`).toBeHidden();
+      expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => /tasks/.test(key)))).toEqual([]);
+    }
   });
 
   test('with Felix open, the notes scrollbar sits beside the notes, not past the chat', async ({ page }) => {
@@ -5023,18 +5091,18 @@ test('the same step repeated in a row shows once with how many times', async ({ 
   await expect(steps.nth(2)).toContainText('Retried open note: "note" is missing.');
 });
 
-test('the open Tasks panel stays open and its own size through page changes and refreshes', async ({ page }) => {
+test('the Tasks panel keeps its own size through page changes and refreshes', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'phones have no Tasks panel');
   await page.setViewportSize({ width: 1400, height: 1000 });
   const tag = Date.now().toString(36);
   const tasks = [];
   for (let n = 0; n < 3; n++) tasks.push(await (await page.request.post('/api/tasks', { data: { title: `Steady ${tag} ${n}: attempt section ${n} before reading its solutions on Piazza, it is practice and is not graded` } })).json());
   const note = await (await page.request.post('/api/notes', { data: { title: `Steady note ${tag}`, body: 'x' } })).json();
-  await page.evaluate(() => localStorage.setItem('leo-tasks-folded', '0'));
   const panel = page.locator('#tasks-window');
   const steady = async () => {
-    await expect(panel.locator('.tasks-head')).toBeVisible();
-    await expect(panel).not.toHaveClass(/folded/);
+    await page.mouse.move(5, 5);
+    await panel.hover();
+    await expect(panel.locator('.tasks-body')).toBeVisible();
     expect((await panel.boundingBox()).width).toBeLessThanOrEqual(340);
   };
   await page.goto(`/#/n/${note.id}`);
@@ -5321,15 +5389,11 @@ test('Quick Leo finds folders and past chats and opens them', async ({ page }) =
 test('the Tasks panel stays usable beside a long note on short and tall screens', async ({ page }) => {
   const task = await (await page.request.post('/api/tasks', { data: { title: 'Task beside reading' } })).json();
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long reading', body: ('Reading paragraph.\n\n').repeat(100) } })).json();
-  await page.evaluate(() => localStorage.setItem('leo-tasks-folded', '0'));
   await page.setViewportSize({ width: 1280, height: 600 });
   await page.goto('/#/n/' + note.id);
   const panel = page.locator('#tasks-window');
-  await expect(panel.locator('.tasks-body')).toBeVisible();
-  await panel.locator('[data-action="tasks-fold"]').first().click();
-  await expect(panel.locator('.tasks-pill')).toBeVisible();
-  const pill = await panel.locator('.tasks-pill').boundingBox();
-  await page.mouse.click(pill.x + pill.width / 2, pill.y + pill.height / 2);
+  await expect(panel.locator('.tasks-body')).toBeHidden();
+  await panel.hover();
   await expect(panel.locator('.tasks-body')).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect(panel.locator('.tasks-body')).toBeVisible();

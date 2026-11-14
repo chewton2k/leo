@@ -32,7 +32,6 @@ const SETTINGS_INDEX = [
   { section: 'shortcuts', id: 'shortcut-new', label: 'New note shortcut', keywords: 'keyboard hotkey keys bind create change' },
   { section: 'shortcuts', id: 'shortcut-ask', label: 'Ask Felix shortcut', keywords: 'keyboard hotkey keys bind selection margin change' },
   { section: 'shortcuts', id: 'shortcut-dictation', label: 'Dictation shortcut (any app)', keywords: 'keyboard hotkey keys bind speak record' },
-  { section: 'dictation', id: 'dictation-shortcut', label: 'Dictation shortcut', keywords: 'keys hotkey record speak keyboard' },
   { section: 'dictation', id: 'dictation-activation', label: 'Activation', keywords: 'hold tap press dictation shortcut' },
   { section: 'dictation', id: 'dictation-microphone', label: 'Microphone', keywords: 'dictation input device audio mic' },
   { section: 'dictation', id: 'dictation-words', label: 'Custom words', keywords: 'dictionary names terms spelling vocabulary dictation' },
