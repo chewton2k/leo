@@ -173,3 +173,14 @@ test('the explorer and Home rest quietly: faint sentence-case labels, a borderle
   assert.match(body('.empty h3'), /font-size: var\(--fs-md\); font-weight: var\(--fw-semibold\)/);
   assert.match(body('.empty p'), /font-size: var\(--fs-sm\)/);
 });
+
+test('the note chrome is one graphite row above the title, with originals on their own row and a quiet action bar', () => {
+  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
+  assert.match(body('.margin-mode'), /color: var\(--muted\)/);
+  assert.match(body('.margin-mode:hover'), /color: var\(--text\)/);
+  assert.doesNotMatch(body('.margin-through'), /color:/);
+  assert.match(body('.note-originals .chip'), /cursor: pointer/);
+  assert.match(body('.actions button.danger svg'), /color: var\(--muted\)/);
+  assert.match(body('.actions button.danger:is(:hover, :focus-visible) svg'), /color: var\(--danger\)/);
+  assert.doesNotMatch(body('.actions'), /shadow-(pop|lift)/);
+});

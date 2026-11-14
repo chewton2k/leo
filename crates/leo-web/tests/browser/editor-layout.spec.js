@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { pageCss } = require('../page-source');
+const { signIn } = require('./sign-in');
 
 async function editorFixture(browser, run, { remember = false, body = null, touch = false, related = false } = {}) {
   const web = path.resolve(__dirname, '../../src/web');
@@ -1571,4 +1572,44 @@ test('every kind of formatting is typed with the keyboard and stays plain Markdo
     await expect(doc.locator('td.align-right').first()).toHaveText('3');
     await expect(doc.locator('tbody tr')).toHaveCount(2);
   }, { body: '' });
+});
+
+test('a new note focuses the title first, the reading controls come before it, and Tab leaves it for the body', async ({ page }) => {
+  await signIn(page, '#/new');
+  await expect(page.locator('#title')).toBeFocused();
+  expect(await page.evaluate(() => ['#margin-persona', '#margin-mode', '#margin-through'].map((id) => Boolean(document.querySelector(id).compareDocumentPosition(document.querySelector('#title')) & Node.DOCUMENT_POSITION_FOLLOWING)))).toEqual([true, true, true]);
+  await page.keyboard.type('Reading order');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('#doc .line-edit')).toBeFocused();
+});
+
+test('the title stays put when the original-file chips load below it', async ({ page }) => {
+  await signIn(page);
+  const note = await (await page.request.post('/api/notes', { data: { title: `Originals ${Date.now().toString(36)}`, body: 'x' } })).json();
+  const folder = path.join(process.env.LEO_BROWSER_HOME, 'attachments', note.id);
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, 'notes.txt'), 'Plain text.');
+  fs.writeFileSync(path.join(folder, 'slides.pptx'), 'pptx');
+  const url = `**/api/notes/${note.id}/originals`;
+  for (const width of [1280, 400]) {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/#/');
+    await page.route(url, async (route) => { await gate; await route.continue(); });
+    await page.goto(`/#/n/${note.id}`);
+    const title = page.locator('#title');
+    await expect(title).toBeVisible();
+    await expect(page.locator('.chip.original')).toHaveCount(0);
+    const before = (await title.boundingBox()).y;
+    const doc = (await page.locator('#doc').boundingBox()).y;
+    release();
+    await expect(page.locator('.chip.original')).toHaveCount(3);
+    expect((await title.boundingBox()).y, `${width}px: the title does not move`).toBe(before);
+    expect((await page.locator('.chip.original').first().boundingBox()).y, `${width}px: the chips sit below the title`).toBeGreaterThan(before);
+    expect((await page.locator('#doc').boundingBox()).y, `${width}px: the body makes room`).toBeGreaterThan(doc);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `${width}px: no sideways scroll`).toBe(true);
+    await page.unroute(url);
+  }
+  await page.request.delete(`/api/notes/${note.id}`);
 });

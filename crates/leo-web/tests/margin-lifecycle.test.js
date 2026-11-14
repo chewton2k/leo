@@ -530,6 +530,8 @@ test('the persona chip names Felix once and the mode chip follows it without a p
   assert.match(els['#margin-persona-menu'].innerHTML, /Instructions for this note…/);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   assert.ok(core.indexOf('id="margin-persona"') < core.indexOf('id="margin-mode"'));
+  assert.ok(core.indexOf('<div class="note-meta">') < core.indexOf('<h1 id="title"'));
+  assert.ok(core.indexOf('<h1 id="title"') < core.indexOf('<div class="note-originals">'));
   assert.match(core, /<span id="margin-persona-label">Felix as Reader<\/span>/);
   assert.match(core, /<span id="margin-mode-label">When you ask<\/span>/);
 });

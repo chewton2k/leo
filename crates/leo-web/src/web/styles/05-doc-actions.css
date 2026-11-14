@@ -101,7 +101,8 @@
 .actions button svg { width: 20px; height: 20px; color: var(--text); }
 .actions button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
 .actions button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
-.actions button.danger svg { color: var(--danger); }
+.actions button.danger svg { color: var(--muted); }
+.actions button.danger:is(:hover, :focus-visible) svg { color: var(--danger); }
 .actions button::after {
   content: attr(aria-label); position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%);
   padding: 5px 9px; border-radius: var(--r-tile); background: var(--text); color: var(--page); font-size: var(--fs-xs); font-weight: 550; line-height: 1.2; white-space: nowrap;

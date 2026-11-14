@@ -231,14 +231,14 @@ figure.drawing.inked img { filter: none !important; }
 .persona-form-acts { display: flex; align-items: center; gap: 8px; }
 .persona-form-acts .danger-text { margin-left: auto; }
 .margin-mode:disabled { cursor: default; opacity: 1; }
-.margin-mode { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--accent); font-size: var(--fs-xs); padding: 3px 6px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap; }
+.margin-mode { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--muted); font-size: var(--fs-xs); padding: 3px 6px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap; }
 .margin-mode svg { width: 12px; height: 12px; flex: none; opacity: .7; }
 .margin-mode > svg:last-child { transform: rotate(90deg); transition: transform var(--t-follow) var(--ease-arrive); }
 .margin-mode[aria-expanded="true"] > svg:last-child { transform: rotate(-90deg); }
 .margin-mode-icon { display: inline-grid; place-items: center; flex: none; }
 .margin-mode-icon svg { width: 13px; height: 13px; }
-.margin-mode:hover { background: var(--tint); }
-.margin-through { background: var(--tint); color: var(--text); }
+.margin-mode:hover { background: var(--tint); color: var(--text); }
+.margin-through { background: var(--tint); }
 .margin-through:hover { background: color-mix(in srgb, var(--text) 10%, var(--tint)); }
 .margin-through .margin-mode-icon svg { opacity: 1; }
 .margin-through .dot { fill: var(--accent); stroke: none; }
