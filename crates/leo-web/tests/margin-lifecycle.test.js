@@ -236,6 +236,46 @@ test('a new edit clears a brief status but not a failure', () => {
   assert.equal(h.state.status, '');
 });
 
+function replyHarness() {
+  const h = harness();
+  const box = { textContent: '', hidden: true };
+  const send = { disabled: false };
+  const el = { isConnected: true, dataset: { id: 't1' } };
+  const area = { value: '', style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: () => el, focus() {} };
+  let count = 0;
+  Object.assign(h.context, { $: (sel) => (sel === 'textarea' ? area : sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}` });
+  h.state.threads = [{ id: 't1', messages: [] }];
+  h.state.draft = null;
+  const submit = async (text) => {
+    area.value = text;
+    await h.context.marginSubmit({ preventDefault() {}, target: { closest: () => el } });
+  };
+  return { h, box, send, area, submit };
+}
+
+test('a failed reply puts the text back, shows the error and keeps Send enabled, and a retry keeps its request', async () => {
+  const { h, box, send, area, submit } = replyHarness();
+  const bodies = [];
+  h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
+  await submit('Why?');
+  assert.equal(area.value, 'Why?');
+  assert.equal(box.textContent, 'Felix could not answer.');
+  assert.equal(box.hidden, false);
+  assert.equal(send.disabled, false);
+  assert.equal(h.state.thinking.size, 0);
+  await submit('Why?');
+  await submit('Why not?');
+  assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
+});
+
+test('a reply refused as busy keeps the text and says Felix is still answering', async () => {
+  const { h, box, area, submit } = replyHarness();
+  h.context.api = async () => { throw Object.assign(new Error('Felix is already answering this.'), { status: 409, data: { why: 'busy' } }); };
+  await submit('Why?');
+  assert.equal(area.value, 'Why?');
+  assert.equal(box.textContent, 'Felix is still answering this.');
+});
+
 test('an edit that stops mid-sentence waits half again as long', () => {
   const h = harness();
   h.state.loaded = true;

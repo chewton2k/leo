@@ -890,6 +890,69 @@ async fn a_thread_takes_replies_within_its_limits() {
 }
 
 #[tokio::test]
+async fn a_resent_reply_gets_the_first_answer_and_adds_one_message() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let engine = Engine::with(Powers {
+        toolless_chat: Some(talking("Yes. Argon2id.", Arc::clone(&prompts))),
+        ..Default::default()
+    })
+    .await;
+    let (id, _) = engine.note("Thread", PASSAGE).await;
+    let thread = thread_on(&engine, &id).await;
+    let path = format!("/api/notes/{id}/margin/threads/{thread}/reply");
+    let body = serde_json::json!({ "text": "Hash it?", "request": "press-one" });
+    let (first_status, first) = engine.post(&path, body.clone()).await;
+    let (second_status, second) = engine.post(&path, body).await;
+    assert_eq!((first_status, second_status), (200, 200));
+    assert_eq!(first, second);
+    assert_eq!(prompts.lock().unwrap().len(), 1);
+    let stored = margin::one(&engine.chats(), &id, &thread).unwrap();
+    assert_eq!(stored.messages.len(), 3);
+    let other = serde_json::json!({ "text": "And salt?", "request": "press-two" });
+    assert_eq!(engine.post(&path, other).await.0, 200);
+    let stored = margin::one(&engine.chats(), &id, &thread).unwrap();
+    assert_eq!(stored.messages.len(), 5);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_resent_reply_while_the_first_still_runs_is_busy_then_gets_its_answer() {
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let (started, was_started) = tokio::sync::oneshot::channel::<()>();
+    let started = Mutex::new(Some(started));
+    let streamer: crate::chat::Streamer = Arc::new(move |_, _, _, _, _, _| {
+        if let Some(started) = started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        let _ = released.lock().unwrap().recv();
+        Ok(crate::chat::Reply::from("Yes. Argon2id.".to_string()))
+    });
+    let engine = Arc::new(
+        Engine::with(Powers {
+            toolless_chat: Some(streamer),
+            ..Default::default()
+        })
+        .await,
+    );
+    let (id, _) = engine.note("Thread", PASSAGE).await;
+    let thread = thread_on(&engine, &id).await;
+    let path = format!("/api/notes/{id}/margin/threads/{thread}/reply");
+    let body = serde_json::json!({ "text": "Hash it?", "request": "press-one" });
+    let running = Arc::clone(&engine);
+    let (first_path, first_body) = (path.clone(), body.clone());
+    let slow = tokio::spawn(async move { running.post(&first_path, first_body).await });
+    was_started.await.unwrap();
+    let (status, why) = engine.post(&path, body.clone()).await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("busy")));
+    release.send(()).unwrap();
+    assert_eq!(slow.await.unwrap().0, 200);
+    let (status, again) = engine.post(&path, body).await;
+    assert_eq!(status, 200);
+    assert_eq!(again["messages"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn a_weave_rewrites_only_the_paragraph_and_keeps_the_note_safe() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let engine = Engine::with(Powers {

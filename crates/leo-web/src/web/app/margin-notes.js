@@ -946,8 +946,9 @@ async function marginSubmit(e) {
   marginSaying(el, '');
   marginPage.thinking.set(t.id, { text });
   marginDraw();
+  if (t.reply?.text !== text) t.reply = { text, request: requestId() };
   try {
-    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}/reply`, { method: 'POST', body: { text } });
+    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}/reply`, { method: 'POST', body: { text, request: t.reply.request } });
     if (marginPage.s !== s) return;
     marginPage.thinking.delete(t.id);
     marginPage.threads = marginPage.threads.map((old) => (old.id === done.id ? done : old));
@@ -964,7 +965,7 @@ async function marginSubmit(e) {
     if (el.isConnected) {
       area.value = text;
       marginSized(area);
-      marginSaying(el, error.message);
+      marginSaying(el, error.status === 409 && error.data?.why === 'busy' ? 'Felix is still answering this.' : error.message);
     }
   }
 }
