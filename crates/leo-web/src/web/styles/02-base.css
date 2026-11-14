@@ -14,7 +14,7 @@ body {
   --bar-height: calc(var(--top) + var(--bar-row-height) + 21px);
   --mid: calc(var(--side) + (100% - var(--side) - var(--right)) / 2);
 }
-@media screen and (max-width: 999px) and (forced-colors: none) { body { background-image: var(--grain); } }
+@media screen and (max-width: 599px) and (forced-colors: none) { body { background-image: var(--grain); } }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button, label, summary, [role="button"], [role="tab"], [draggable="true"], .bar, .actions, .select-bar, .activity-head, .set-label, .kanban-col-head {

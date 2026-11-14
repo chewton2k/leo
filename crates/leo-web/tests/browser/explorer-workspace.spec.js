@@ -149,7 +149,7 @@ test('explorer keyboard menu clamps to the viewport and blank space cannot delet
   await expect(page.locator('.popup-menu')).toHaveCount(0);
 });
 
-for (const width of [390, 900]) test(`compact Folders at ${width} shares rows, traps focus and returns to More`, async ({ page }, testInfo) => {
+for (const width of [390]) test(`compact Folders at ${width} shares rows, traps focus and returns to More`, async ({ page }, testInfo) => {
   const dir = await createFolder(page);
   const nested = await createFolder(page, `${dir}/Child`);
   const current = await createNote(page, nested);

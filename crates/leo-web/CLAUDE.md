@@ -100,6 +100,10 @@ Decided: one app, window only (2026-10-31).
   overwrite a newer page (also on a return to the same route).
 - Arriving on a page closes sheets left from before but keeps one opened on the
   new address (`scrim.openedOn`).
+- Narrow windows (600–999 px, 2026-11-14, the user's call): the icon rail stays;
+  the sidebar button opens the explorer as a drawer over the page (`side-drawer`;
+  Esc, a click outside or opening a note closes it; focus goes to Filter and back).
+  The More sheet (`#menu`) is for phones only (under 600 px).
 - Layout variables on `body`: `--side`, `--right`, `--mid`. Fixed things
   (toolbar, select bar, toasts, FABs, `#dock`) use them so nothing covers
   anything. Page toolbars share one 760 px maximum width.

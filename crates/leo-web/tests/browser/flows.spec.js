@@ -4709,6 +4709,38 @@ test.describe('beside the note', () => {
     await expect(page.locator('#tasks-window')).toBeHidden();
   });
 
+  test('a narrow window keeps a toggleable explorer beside the rail', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the drawer is for windows between phone and wide');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    const note = await (await page.request.post('/api/notes', { data: { title: `Drawer ${tag}`, body: 'Words.' } })).json();
+    await page.setViewportSize({ width: 900, height: 800 });
+    await page.goto('/#/');
+    await page.reload();
+    const side = page.locator('#side');
+    const fold = side.locator('.side-fold');
+    await expect(side.locator('.side-rail')).toBeVisible();
+    await expect(page.locator('#menu')).toBeHidden();
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await expect(fold).toHaveAttribute('aria-expanded', 'false');
+    await fold.click();
+    await expect(side.locator('.side-explorer')).toBeVisible();
+    await expect(fold).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#side-filter')).toBeFocused();
+    const main = await page.locator('main').boundingBox();
+    expect(main.x, 'the drawer overlays the page instead of pushing it').toBeLessThan(120);
+    await page.keyboard.press('Escape');
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await expect(fold).toBeFocused();
+    await fold.click();
+    await page.locator('#side-filter').fill(`Drawer ${tag}`);
+    await side.locator('.side-note', { hasText: `Drawer ${tag}` }).first().click();
+    await expect(page).toHaveURL(new RegExp(`#/n/${note.id}`));
+    await expect(side.locator('.side-explorer')).toBeHidden();
+    await fold.click();
+    await page.mouse.click(860, 400);
+    await expect(side.locator('.side-explorer')).toBeHidden();
+  });
+
   test('home lists today', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;

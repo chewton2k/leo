@@ -750,7 +750,7 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto('/#/');
     await expect(page.locator('#app')).not.toBeEmpty();
-    if (width >= 1000) await page.locator('#side [data-action="usage"]').click();
+    if (width >= 600) await page.locator('#side [data-action="usage"]').click();
     else { await page.locator('#menu').click(); await page.locator(':is(.sheet, .popup-menu) [data-action="usage"]').click(); }
     await expect(page.locator('.usage-sheet .coding-plan')).toHaveCount(2);
     await settle(page);
@@ -799,7 +799,7 @@ test('R11/R13 the explorer has no Collapse all and the rail has no Felix, while 
     await page.emulateMedia({ colorScheme: scheme });
     await page.goto(`/#/n/${inside.id}`);
     await expect(page.locator('#title')).toHaveText(inside.title);
-    if (width >= 1000) {
+    if (width >= 600) {
       await expect(page.locator('#side')).toBeVisible();
       expect(await page.locator('#side .side-group').evaluate(named), 'no Collapse all in the Folders heading').toBe(false);
       expect(await page.locator('#side .side-rail').evaluate((el) => /felix/i.test(`${el.innerText} ${[...el.querySelectorAll('[aria-label],[title]')].map((x) => `${x.getAttribute('aria-label')} ${x.getAttribute('title')}`).join(' ')}`)), 'no Felix in the rail').toBe(false);

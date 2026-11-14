@@ -1,6 +1,6 @@
 @property --side { syntax: '<length>'; inherits: true; initial-value: 0px; }
 .side { display: none; }
-@media (min-width: 1000px) {
+@media (min-width: 600px) {
   body { --side: var(--explorer-w, 284px); padding-left: var(--side); }
   body::before, body::after { content: ''; position: fixed; z-index: -1; top: 0; bottom: 0; pointer-events: none; }
   body::before { left: 0; width: calc(var(--side) + 16px); background: var(--ground); }
@@ -15,7 +15,11 @@
   }
   .side[hidden] { display: none; }
 }
-@media screen and (min-width: 1000px) and (forced-colors: none) { body::before, body::after { background-image: var(--grain); } }
+@media (min-width: 600px) and (max-width: 999px) {
+  body, body.side-mini { --side: 52px; }
+  body.side-drawer .side { width: min(var(--explorer-w, 284px), calc(100vw - 48px)); box-shadow: var(--shadow-pop); }
+}
+@media screen and (min-width: 600px) and (forced-colors: none) { body::before, body::after { background-image: var(--grain); } }
 .side-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 2px; padding: var(--top) 6px 0; min-width: 0; }
 @media (min-width: 1000px) and (max-width: 1199px) { body:not(.side-mini) { --side: var(--explorer-w, 240px); } }
 .side-head .brand { padding-left: 8px; }
@@ -23,8 +27,8 @@ html[data-app="mac"]:not([data-fullscreen]) .side-head { padding-left: 84px; }
 html[data-app="mac"]:not([data-fullscreen]) body.side-mini .side-head { padding-left: 6px; }
 html[data-app="mac"]:not([data-fullscreen]) body.side-mini .side-fold { position: absolute; top: calc(var(--top) + 60px); left: 6px; }
 html[data-app="mac"]:not([data-fullscreen]) body.side-mini .side-rail { padding-top: 45px; }
-@media (max-width: 999px) { html[data-app="mac"]:not([data-fullscreen]) .bar { padding-left: 84px; } }
-@media (min-width: 1000px) { html[data-app="mac"]:not([data-fullscreen]) body.side-mini .bar { padding-left: 34px; } }
+@media (max-width: 599px) { html[data-app="mac"]:not([data-fullscreen]) .bar { padding-left: 84px; } }
+@media (min-width: 600px) { html[data-app="mac"]:not([data-fullscreen]) body.side-mini .bar { padding-left: 34px; } }
 
 .side-rail { grid-area: 2 / 1; display: flex; flex-direction: column; min-height: 0; padding: 4px; }
 .side-rail-main { display: flex; flex-direction: column; gap: 6px; flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
