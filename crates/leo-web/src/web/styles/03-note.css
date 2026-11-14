@@ -66,7 +66,7 @@
 .margin-ink path.squiggle.on { opacity: 0; }
 .margin-ink path.squiggle.arriving { animation: margin-wipe var(--wipe-t, .5s) linear var(--wipe-d, 0s) both; }
 .margin-ink path.pencil { stroke: color-mix(in srgb, var(--text) 55%, transparent); stroke-width: 1.2; stroke-linejoin: round; stroke-dasharray: 1; transition: opacity .12s ease-out; }
-.margin-ink path.pencil.sketching { animation: pencil-draw var(--pencil-t, 240ms) var(--ease-move) var(--pencil-d, 0ms) both; }
+.margin-ink path.pencil.sketching { animation: pencil-draw var(--pencil-t, 650ms) var(--ease-pencil) var(--pencil-d, 0ms) both; }
 .margin-ink path.pencil.leaving { opacity: 0; }
 @keyframes pencil-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .margin-ink path.tether { stroke: var(--accent); stroke-width: 1; opacity: 0; transition: opacity .14s ease-out; }
@@ -92,13 +92,12 @@
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
 .margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-note[data-open] .margin-toggle { inset: -6px -8px auto auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
+.margin-note[data-open] .margin-toggle { inset: auto -8px -2px auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
 .margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
 .margin-note[data-open] .margin-toggle svg { display: block; }
 .margin-note[data-open] .margin-toggle:hover svg { color: var(--text); }
-.margin-note[data-open] .margin-said > :first-child { padding-top: 24px; }
 .margin-chat, .margin-pin { display: none; }
-.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 2; top: -6px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 2; bottom: -2px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .margin-note[data-open] .margin-pin { right: 48px; }
 .margin-chat:hover, .margin-pin:hover { color: var(--text); }
 .margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
@@ -175,6 +174,7 @@ figure.drawing.inked img { filter: none !important; }
 .margin-changed { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
 .margin-problem { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
 .margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 10px; }
+.margin-note[data-open] .margin-acts { padding-right: 84px; min-height: 38px; }
 .margin-add { font-size: var(--fs-xs); font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
 .margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

@@ -491,10 +491,10 @@ Felix (2026-10-19).
   restoring reading; check the page sequence after loading. Read completion
   checks session and request identity. While a read runs, the `#leo-mark`
   symbol (`.margin-waiting`, breathing by opacity) and a pencil under the
-  changed block (`path.pencil` per line within `DRAWER_MS`, one side line for
+  changed block (`path.pencil` per line over max(650 ms, width ÷ 1.6 px per ms), 900 ms for the side line; one side line for
   4+ lines) are never a `.margin-note` and never in `threads`; the read's end,
   an edit and leaving clear them (`marginReadingDone`, `marginPencilGone`). A lit
-  note's tether (`path.tether`) runs from just under the end of its passage (the start, for a left-side note) to the note; it shows while the note is hovered, focused or open, and always (fainter) for a pinned note.
+  note's tether (`path.tether`) runs from the middle of its passage's last line (the first line's start, for a left-side note) to the note; it shows while the note is hovered, focused or open, and always (fainter) for a pinned note.
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
 Decided: margin threads never in files (2026-11-04); read-along default for new

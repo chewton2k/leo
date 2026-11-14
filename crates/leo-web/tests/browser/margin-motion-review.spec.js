@@ -271,7 +271,7 @@ test.describe('reading pencil', () => {
   }, marker);
   const pencil = (page) => page.locator('.margin-ink path.pencil');
 
-  test('a short passage gets one pencil line under each line, drawn within the drawer tier, and the mark breathes; silence clears both', async ({ browser }) => {
+  test('a short passage gets one pencil line under each line, drawn at a pencil pace, and the mark breathes; silence clears both', async ({ browser }) => {
     await fixture(browser, async (page) => {
       await startRead(page, 'plain text');
       await expect(pencil(page).first()).toBeAttached();
@@ -281,7 +281,7 @@ test.describe('reading pencil', () => {
       expect(shape.paths.length).toBe(shape.bottoms.length);
       expect(shape.paths.length).toBeLessThan(4);
       shape.paths.forEach((line, i) => expect(line.top).toBeGreaterThanOrEqual(shape.bottoms[i]));
-      for (const end of shape.draws) expect(end).toBeLessThanOrEqual(241);
+      expect(Math.max(...shape.draws)).toBeGreaterThanOrEqual(650);
       await page.evaluate(() => fake.answer({ note: null }));
       await expect(pencil(page)).toHaveCount(0);
       await expect(page.locator('.margin-waiting')).toHaveCount(0);
@@ -412,7 +412,7 @@ test.describe('passage states', () => {
       const note = await page.locator('.margin-note[data-id="t1"]').boundingBox();
       expect(end).not.toBeNull();
       expect(line.x).toBeGreaterThanOrEqual(end - 1);
-      expect(line.x).toBeLessThanOrEqual(end + 8);
+      expect(line.x).toBeLessThanOrEqual(end + 10);
       expect(line.x + line.width).toBeLessThanOrEqual(note.x);
       await page.mouse.move(5, 5);
       await expect(tether).toHaveCount(0);

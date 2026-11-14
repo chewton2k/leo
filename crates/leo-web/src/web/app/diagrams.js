@@ -127,7 +127,7 @@ function diagramTheme(dark) {
     signalColor: muted,
     signalTextColor: text,
     pieTitleTextSize: '17px',
-    pieSectionTextColor: dark ? '#141414' : '#ffffff',
+    pieSectionTextColor: dark ? '#181715' : '#ffffff',
     pieSectionTextSize: '13px',
     pieLegendTextColor: text,
     pieStrokeColor: surface,

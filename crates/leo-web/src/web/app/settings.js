@@ -455,7 +455,7 @@ const THEME_LABELS = { system: 'Match device', light: 'Light', dark: 'Dark' };
 
 const THEME_SURFACES = {
   light: { ground: '#f0eee8', page: '#faf9f6', head: '#1c1c1a', line: '#d9d8d3', side: '#e3e1db' },
-  dark: { ground: '#141413', page: '#1f1f1e', head: '#ecebe7', line: '#3a3a38', side: '#2a2a28' },
+  dark: { ground: '#181715', page: '#22211f', head: '#e9e7e2', line: '#3a3835', side: '#2b2a27' },
 };
 function themeScene(look) {
   const c = THEME_SURFACES[look];

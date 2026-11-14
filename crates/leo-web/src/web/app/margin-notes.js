@@ -5,6 +5,9 @@ const MARGIN_SETTLE_MS = 1400;
 const MARGIN_LAYOUT_KEY = 'leo-margin-layout';
 const GLOW_MS = 2200;
 const NO_COMMENT_MS = 4000;
+const PENCIL_LEAST_MS = 650;
+const PENCIL_SIDE_MS = 900;
+const PENCIL_PX_PER_MS = 1.6;
 const READING_FADE_MS = 120;
 const WIPE_MS = 500;
 const MENU_MS = MOTION_MS;
@@ -858,8 +861,8 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     marginPage.marks.delete(t.id);
     if (t.id === 'reading') continue;
     const end = on === 'right' ? rects[rects.length - 1] : rects[0];
-    const mid = end.bottom + 2;
-    const from = on === 'right' ? end.right + 2 : end.left - 2;
+    const mid = (end.top + end.bottom) / 2;
+    const from = on === 'right' ? end.right + 6 : end.left - 6;
     const to = on === 'right' ? x - 2 : x + marginKit.MARGIN_WIDTH + 2;
     const top = tops[t.id] + 10;
     const bend = (from + to) / 2;
@@ -1393,6 +1396,7 @@ function marginPencil(origin) {
     ? [{ d: marginWobble(block.getBoundingClientRect().left - origin.left - 4, top, bottom - top, true), size: bottom - top }]
     : lines.map((l) => ({ d: marginWobble(l.left, l.bottom + 4, Math.max(1, l.right - l.left)), size: Math.max(1, l.right - l.left) }));
   const total = strokes.reduce((sum, stroke) => sum + stroke.size, 0);
+  const drawMs = lines.length >= 4 ? PENCIL_SIDE_MS : Math.max(PENCIL_LEAST_MS, Math.round(total / PENCIL_PX_PER_MS));
   let before = 0;
   strokes.forEach((stroke, line) => {
     const fresh = !marginPage.paths.has(`reading:pencil:${line}`);
@@ -1401,8 +1405,8 @@ function marginPencil(origin) {
     if (fresh) {
       path.setAttribute('pathLength', '1');
       if (!stillMotion()) {
-        path.style.setProperty('--pencil-d', `${Math.round((DRAWER_MS * before) / total)}ms`);
-        path.style.setProperty('--pencil-t', `${Math.max(1, Math.round((DRAWER_MS * stroke.size) / total))}ms`);
+        path.style.setProperty('--pencil-d', `${Math.round((drawMs * before) / total)}ms`);
+        path.style.setProperty('--pencil-t', `${Math.max(1, Math.round((drawMs * stroke.size) / total))}ms`);
         path.classList.add('sketching');
       }
     }
