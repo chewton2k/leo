@@ -321,6 +321,37 @@ pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
         .is_ok_and(|added| added > 0)
 }
 
+pub const FULL: &str = "Felix's margin is full. Resolve a note and he'll read again.";
+
+pub fn evictable(thread: &Thread, keep: Option<&str>) -> bool {
+    !thread.pinned && Some(thread.id.as_str()) != keep
+}
+
+fn resolve_one<'a>(
+    chats: &Path,
+    reads: &Arc<Reads>,
+    mut candidates: impl Iterator<Item = &'a Thread>,
+) -> Option<Thread> {
+    candidates.find_map(|thread| {
+        let _held = reads.replying(&thread.id)?;
+        matches!(
+            set_status(chats, &thread.note, &thread.id, "resolved", MOST_OPEN),
+            Status::Done(_)
+        )
+        .then(|| thread.clone())
+    })
+}
+
+pub fn free_oldest(
+    chats: &Path,
+    reads: &Arc<Reads>,
+    note: &str,
+    keep: Option<&str>,
+) -> Option<Thread> {
+    let open = open_on(chats, note);
+    resolve_one(chats, reads, open.iter().filter(|t| evictable(t, keep)))
+}
+
 pub fn save_messages(chats: &Path, thread: &Thread) -> bool {
     let messages = serde_json::to_string(&thread.messages).unwrap_or_else(|_| "[]".into());
     db_of(chats)
@@ -1313,6 +1344,12 @@ impl Reads {
             .replying
             .insert(thread.into())
             .then(|| Replying(Arc::clone(self), thread.into()))
+    }
+
+    pub fn is_replying(&self, thread: &str) -> bool {
+        self.0
+            .lock()
+            .is_ok_and(|inner| inner.replying.contains(thread))
     }
 
     pub fn problem(&self) -> Option<String> {

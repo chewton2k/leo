@@ -1995,6 +1995,85 @@ async fn however_many_notes_are_gone_the_note_holds_twice_the_limit() {
 }
 
 #[tokio::test]
+async fn a_read_along_reads_a_full_note_and_frees_the_oldest_free_note_at_twice_the_limit() {
+    let (engine, calls) = reading(SAYS).await;
+    let (id, version) = engine.note("Full", PASSAGE).await;
+    fill(&engine, &id, "ask", margin::MOST_OPEN, margin::MOST_OPEN);
+    let (status, read) = engine.read(&id, &version, &[PASSAGE]).await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["note"]["source"], "read");
+    assert_eq!(read["resolved"], serde_json::json!([]));
+    assert_eq!(
+        margin::open_on(&engine.chats(), &id).len(),
+        margin::MOST_OPEN + 1
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    engine.stop().await;
+
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Twice", PASSAGE).await;
+    let ids = fill(
+        &engine,
+        &id,
+        "ask",
+        2 * margin::MOST_OPEN,
+        2 * margin::MOST_OPEN,
+    );
+    for pinned in ids.iter().filter(|t| **t != ids[1]) {
+        margin::set_pinned(&engine.chats(), &id, pinned, true);
+    }
+    let (status, read) = engine.read(&id, &version, &[PASSAGE]).await;
+    assert_eq!(status, 200, "{read}");
+    assert!(read["note"]["id"].is_string());
+    assert_eq!(read["resolved"], serde_json::json!([ids[1]]));
+    assert_eq!(
+        margin::one(&engine.chats(), &id, &ids[1]).unwrap().status,
+        "resolved"
+    );
+    assert_eq!(
+        margin::open_on(&engine.chats(), &id).len(),
+        2 * margin::MOST_OPEN
+    );
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_read_along_with_nothing_free_to_resolve_says_so_and_costs_nothing() {
+    let (engine, calls) = reading(SAYS).await;
+    let (id, version) = engine.note("Pinned", PASSAGE).await;
+    let ids = fill(
+        &engine,
+        &id,
+        "ask",
+        2 * margin::MOST_OPEN,
+        2 * margin::MOST_OPEN,
+    );
+    for pinned in &ids[1..] {
+        margin::set_pinned(&engine.chats(), &id, pinned, true);
+    }
+    let path = format!("/api/notes/{id}/margin/read");
+    let body = |keep: Option<&str>| serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": keep });
+    let held = engine.running.state.margin.replying(&ids[0]);
+    let (status, read) = engine.post(&path, body(None)).await;
+    assert_eq!(status, 200);
+    assert_eq!(read["failed"], true);
+    assert_eq!(read["error"], margin::FULL);
+    drop(held);
+    let (_, read) = engine.post(&path, body(Some(&ids[0]))).await;
+    assert_eq!(
+        (read["failed"].as_bool(), read["error"].as_str()),
+        (Some(true), Some(margin::FULL))
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(engine.get("/api/margin").await.1["today"], 0);
+    assert_eq!(
+        margin::open_on(&engine.chats(), &id).len(),
+        2 * margin::MOST_OPEN
+    );
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn forgetting_a_thread_deletes_it_unless_you_replied() {
     let (engine, _) = reading(SAYS).await;
     let (id, version) = engine.plain(PASSAGE).await;

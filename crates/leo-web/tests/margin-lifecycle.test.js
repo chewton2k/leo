@@ -74,6 +74,32 @@ test('a read that leaves a margin note says nothing about having read', async ()
   assert.equal(h.state.status, '');
 });
 
+test('a read refused because the margin is full keeps the baseline and says why', async () => {
+  const line = "Felix's margin is full. Resolve a note and he'll read again.";
+  const h = harness();
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: null, failed: true, error: line });
+  await pending;
+  assert.equal(h.state.baseline.length, 0);
+  assert.equal(h.state.status, line);
+});
+
+test('a read that frees notes removes them and tells the server which thread is open', async () => {
+  const h = harness();
+  const bodies = [];
+  const real = h.context.api;
+  h.context.api = (path, init) => { bodies.push(init.body); return real(path, init); };
+  Object.assign(h.state, { threads: [{ id: 'old', quote: 'a' }, { id: 'open', quote: 'b' }], open: 'open' });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: { id: 't1', messages: [] }, resolved: ['old'] });
+  await pending;
+  assert.equal(bodies[0].keep, 'open');
+  assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 't1']);
+  assert.equal(h.state.status, '');
+});
+
 test('mode updates retain confirmed state after failure and ignore departed notes', async () => {
   for (const departed of [false, true]) {
     const h = harness();

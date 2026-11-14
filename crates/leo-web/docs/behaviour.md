@@ -865,6 +865,7 @@ target. Check the page sequence after loading preferences.
   overlapping reads and the daily cap (429 with `why`). A useful comment adds no
   separate five-minute lockout. Reads can explain, connect ideas, ask a worthwhile
   question or correct a mistake, about the passage as a whole thought; they never draw.
+  A read-along never refuses for a full margin (2026-11-14, the user's call; only Read through answers 409 `full`): it saves with a limit of twice `MOST_OPEN` (48). At 48 open it first resolves the oldest open note that is not pinned, not the thread open on the page (`keep` in the body) and not being replied to (`margin::free_oldest`) and lists it in the response's `resolved`, which the page removes without a toast. When none qualifies the read answers `{failed: true, error}` with "Felix's margin is full. Resolve a note and he'll read again." before the model is asked: no read is spent and the page keeps its baseline.
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is still saved if another read used the last one), and a broken day row counts as spent. Blocks already read are dropped. A failed
   read forgets its blocks and answers `{failed: true}`, so the page keeps its baseline.
   A refused read waits for the next edit; a stale-version refusal resets the page's

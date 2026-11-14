@@ -1357,7 +1357,7 @@ async function marginRead(s) {
     marginPage.newest = null;
     for (const path of marginPage.svg?.querySelectorAll('path.pencil.leaving') || []) path.remove();
     marginShowReading(s, source, blocks);
-    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks } });
+    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: marginPage.open } });
     if (s !== marginPage.s) return;
     const along = marginPage.mode === 'along';
     if (!got?.failed) marginPage.baseline = marginKit.blocksOf(source);
@@ -1366,6 +1366,8 @@ async function marginRead(s) {
     else marginSetStatus(got?.note ? '' : 'Felix read it; nothing to add.', true);
     if (!got?.failed) marginReadingDone(!got?.note);
     if (got?.note) {
+      for (const gone of got.resolved || []) marginDropThread(gone);
+      marginPage.threads = marginPage.threads.filter((t) => !got.resolved?.includes(t.id));
       marginPage.threads.push(got.note);
       marginPage.arriving.add(got.note.id);
       marginPage.newest = got.note.id;

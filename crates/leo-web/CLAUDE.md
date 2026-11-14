@@ -416,6 +416,13 @@ Felix (2026-10-19).
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a
   streaming reply, the gap, overlapping reads and the daily cap (429 with `why`).
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is saved even if another read used the last one).
+  A read-along never refuses for a full margin (2026-11-14, the user's call): it saves
+  with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it first
+  resolves the oldest open note that is not pinned, not `keep` (the thread open on the
+  page, sent as `keep`) and not being replied to (`margin::free_oldest`), listing it
+  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL`
+  before the model is asked, so nothing is spent and the page keeps its baseline.
+  Only Read through still answers 409 `full`.
   Silence (`{}`/empty) is success; malformed JSON or prose is a failure
   (`{failed: true}`). ≤8,000 characters in, `READ_TOKENS` (220) out, bounded
   when parsed (CLIs ignore `max_tokens`). Gaps `READ_GAPS` (default 90 s);

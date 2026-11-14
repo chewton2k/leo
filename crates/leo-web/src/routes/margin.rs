@@ -22,6 +22,8 @@ pub(crate) struct ReadBody {
     most: Option<usize>,
     #[serde(default)]
     gone: Vec<String>,
+    #[serde(default)]
+    keep: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -90,10 +92,11 @@ struct ReadFacts {
     gap: u32,
     quotes: Vec<String>,
     limit: usize,
+    free: bool,
 }
 
 enum Pass {
-    Saved(Vec<Thread>),
+    Saved(Vec<Thread>, Vec<String>),
     Silent,
     Failed(String),
     Refused(Response),
@@ -426,11 +429,16 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let created = note.created;
         let held = chats.clone();
         let gone = body.gone.clone();
+        let keep = body.keep.clone();
+        let reads = state.margin.clone();
         let facts = blocking(move || {
             let prefs = margin::prefs(&held);
             let open = margin::open_on(&held, &id);
             ReadFacts {
                 limit: margin::room(&open, &gone),
+                free: open.iter().any(|thread| {
+                    margin::evictable(thread, keep.as_deref()) && !reads.is_replying(&thread.id)
+                }),
                 along: margin::mode_of(&held, &id, created) == "along",
                 voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
                 instructions: margin::instructions_of(&held, &id),
@@ -445,7 +453,6 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             Err(refused) => return Pass::Refused(*refused),
         }
     };
-    let full = facts.quotes.len() >= facts.limit;
     if !through {
         if !facts.along {
             return Pass::Refused(said(
@@ -469,10 +476,10 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             "Felix is answering you.",
         ));
     }
-    if full {
-        if !through {
-            return Pass::Silent;
-        }
+    if !through && facts.quotes.len() >= 2 * margin::MOST_OPEN && !facts.free {
+        return Pass::Failed(margin::FULL.into());
+    }
+    if through && facts.quotes.len() >= facts.limit {
         return Pass::Refused(said(
             StatusCode::CONFLICT,
             "full",
@@ -600,8 +607,14 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         Ok(now) => now,
         Err(_) => return Pass::Silent,
     };
+    let limit = if through {
+        facts.limit
+    } else {
+        2 * margin::MOST_OPEN
+    };
     let mut quotes = facts.quotes;
     let mut saved = Vec::new();
+    let mut resolved = Vec::new();
     for found in founds {
         if !through
             && !blocks
@@ -624,9 +637,21 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             &quote,
             vec![margin::felix_says(&found.text)],
         );
+        if !through && quotes.len() >= limit {
+            let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
+            let keep = body.keep.clone();
+            let freed =
+                blocking(move || margin::free_oldest(&held, &reads, &noted, keep.as_deref())).await;
+            let Ok(Some(freed)) = freed else {
+                return Pass::Failed(margin::FULL.into());
+            };
+            if let Some(at) = quotes.iter().position(|q| *q == freed.quote) {
+                quotes.remove(at);
+            }
+            resolved.push(freed.id);
+        }
         let held = chats.clone();
         let stored = thread.clone();
-        let limit = facts.limit;
         if !matches!(
             blocking(move || margin::put(&held, &stored, limit)).await,
             Ok(true)
@@ -639,7 +664,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
     if saved.is_empty() {
         Pass::Silent
     } else {
-        Pass::Saved(saved)
+        Pass::Saved(saved, resolved)
     }
 }
 
@@ -649,8 +674,9 @@ pub(crate) async fn read(
     Json(body): Json<ReadBody>,
 ) -> Response {
     match pass(&state, id, body, false).await {
-        Pass::Saved(mut saved) => {
-            Json(serde_json::json!({ "note": saved.remove(0) })).into_response()
+        Pass::Saved(mut saved, resolved) => {
+            Json(serde_json::json!({ "note": saved.remove(0), "resolved": resolved }))
+                .into_response()
         }
         Pass::Silent => silent(),
         Pass::Failed(error) => failed(&state, error),
@@ -664,7 +690,7 @@ pub(crate) async fn analyze(
     Json(body): Json<ReadBody>,
 ) -> Response {
     match pass(&state, id, body, true).await {
-        Pass::Saved(saved) => Json(serde_json::json!({ "notes": saved })).into_response(),
+        Pass::Saved(saved, _) => Json(serde_json::json!({ "notes": saved })).into_response(),
         Pass::Silent => Json(serde_json::json!({ "notes": [] })).into_response(),
         Pass::Failed(error) => {
             state.margin.set_problem(Some(error.clone()));
