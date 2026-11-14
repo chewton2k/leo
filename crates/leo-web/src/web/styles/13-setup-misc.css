@@ -430,7 +430,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
   .chat { border-left: 1px solid CanvasText; }
   .settings-nav { border-right: 1px solid CanvasText; }
   .segment.on, .choice-pick.on, .settings-link.on, .settings-result.on, .side-row.on, .side-folder.on, .kanban-tab.on, .chat-pick-row.on, .chat-history-row.on, .rec-kind input:checked + .rec-kind-body { background: Highlight; color: HighlightText; border-color: Highlight; forced-color-adjust: none; }
-  .segment.on svg:not(.felix), .choice-pick.on :is(.choice-title, .choice-about), .rec-kind input:checked + .rec-kind-body :is(.choice-title, .choice-about), .settings-link.on svg, .side-folder.on .side-row, .side-folder.on .side-twist, .side-row.on svg, .kanban-tab.on .kanban-count { color: HighlightText; }
+  .segment.on svg:not(.felix), .choice-pick.on :is(.choice-title, .choice-about), .rec-kind input:checked + .rec-kind-body :is(.choice-title, .choice-about), .settings-link.on svg, .side-folder.on .side-row, .side-folder.on .side-row svg, .side-folder.on .side-twist, .side-row.on svg, .kanban-tab.on .kanban-count { color: HighlightText; }
   .choice-pick.on { outline: 3px solid Highlight; outline-offset: 2px; }
   .choice-ring { box-shadow: none; outline: 3px solid Highlight; outline-offset: 2px; }
   .side-folder.on:has(> .side-pill), .side-note.on:has(> .side-pill) { background: Highlight; color: HighlightText; }

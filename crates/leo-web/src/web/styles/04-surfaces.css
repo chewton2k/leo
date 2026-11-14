@@ -170,9 +170,9 @@
 .chip.progress { background: none; padding: 0; }
 
 .empty { text-align: center; color: var(--muted); padding: 56px 20px; }
-.empty svg { width: 44px; height: 44px; color: var(--faint); }
-.empty h3 { color: var(--text); margin: 10px 0 4px; font-size: var(--fs-lg); text-wrap: balance; }
-.empty p { margin: 0; font-size: var(--fs-base); text-wrap: pretty; }
+.empty svg { width: 22px; height: 22px; color: var(--faint); }
+.empty h3 { color: var(--text); margin: 10px 0 4px; font-size: var(--fs-md); font-weight: var(--fw-semibold); text-wrap: balance; }
+.empty p { margin: 0; font-size: var(--fs-sm); text-wrap: pretty; }
 .empty .btn { margin: 16px 4px 0; }
 .empty .btn svg { width: 16px; height: 16px; color: currentColor; }
 .empty .btn.plain { color: var(--text); }

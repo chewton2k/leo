@@ -155,3 +155,21 @@ test('sizes and radii come from the scale, and the note title and prose use thei
   assert.match(body('.prose'), /line-height: 1\.72/);
   assert.match(body('.doc .line-edit'), /line-height: 1\.72/);
 });
+
+test('the explorer and Home rest quietly: faint sentence-case labels, a borderless filter, a shelf-toned quick bar', () => {
+  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
+  const label = all.find((r) => r.selector.split(/,\s*/).includes('.side-group') && /font-size: var\(--fs-xs\)/.test(r.body));
+  assert.match(label.body, /color: var\(--faint\)/);
+  assert.doesNotMatch(label.body, /text-transform|letter-spacing/);
+  assert.match(body('.side-filter'), /border-color: transparent/);
+  assert.match(body('.side-row.on'), /background: var\(--accent-soft\)[^}]*font-weight: 550/);
+  assert.match(body('.side-row:hover'), /background: var\(--wash\)/);
+  assert.doesNotMatch(body('.side-new kbd'), /border|padding/);
+  const ask = body('.home-ask');
+  assert.match(ask, /background: var\(--ground\)/);
+  assert.doesNotMatch(ask, /box-shadow|var\(--line\)/);
+  assert.match(body('.home-ask input'), /font-size: var\(--fs-lg\)/);
+  assert.match(body('.empty svg'), /width: 22px/);
+  assert.match(body('.empty h3'), /font-size: var\(--fs-md\); font-weight: var\(--fw-semibold\)/);
+  assert.match(body('.empty p'), /font-size: var\(--fs-sm\)/);
+});
