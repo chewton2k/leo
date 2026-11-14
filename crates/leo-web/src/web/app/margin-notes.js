@@ -858,8 +858,8 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     marginPage.marks.delete(t.id);
     if (t.id === 'reading') continue;
     const end = on === 'right' ? rects[rects.length - 1] : rects[0];
-    const mid = (end.top + end.bottom) / 2;
-    const from = on === 'right' ? end.right + 6 : end.left - 6;
+    const mid = end.bottom + 2;
+    const from = on === 'right' ? end.right + 2 : end.left - 2;
     const to = on === 'right' ? x - 2 : x + marginKit.MARGIN_WIDTH + 2;
     const top = tops[t.id] + 10;
     const bend = (from + to) / 2;

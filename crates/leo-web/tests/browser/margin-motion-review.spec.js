@@ -412,7 +412,7 @@ test.describe('passage states', () => {
       const note = await page.locator('.margin-note[data-id="t1"]').boundingBox();
       expect(end).not.toBeNull();
       expect(line.x).toBeGreaterThanOrEqual(end);
-      expect(line.x).toBeLessThanOrEqual(end + 12);
+      expect(line.x).toBeLessThanOrEqual(end + 8);
       expect(line.x + line.width).toBeLessThanOrEqual(note.x);
       await page.mouse.move(5, 5);
       await expect(tether).toHaveCount(0);

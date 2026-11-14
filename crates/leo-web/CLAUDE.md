@@ -490,7 +490,7 @@ Felix (2026-10-19).
   changed block (`path.pencil` per line within `DRAWER_MS`, one side line for
   4+ lines) are never a `.margin-note` and never in `threads`; the read's end,
   an edit and leaving clear them (`marginReadingDone`, `marginPencilGone`). A lit
-  note's tether (`path.tether`) runs from the end of its passage (the start, for a left-side note) to the note; it shows while the note is hovered, focused or open, and always (fainter) for a pinned note.
+  note's tether (`path.tether`) runs from just under the end of its passage (the start, for a left-side note) to the note; it shows while the note is hovered, focused or open, and always (fainter) for a pinned note.
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
 Decided: margin threads never in files (2026-11-04); read-along default for new
