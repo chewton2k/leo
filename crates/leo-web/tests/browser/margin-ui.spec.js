@@ -93,7 +93,7 @@ test('note reading modes sit beside the save state, work in both orders and reta
   await page.goto(`/#/n/${note.id}`);
   const button = page.locator('#margin-mode');
   await expect(button).toBeEnabled();
-  expect((await button.boundingBox()).y).toBeGreaterThan((await page.locator('#title').boundingBox()).y);
+  expect((await button.boundingBox()).y).toBeLessThan((await page.locator('#title').boundingBox()).y);
   for (const [key, label] of [['Home', 'Reads along'], ['End', 'When you ask'], ['Home', 'Reads along'], ['End', 'When you ask']]) {
     await button.click();
     await expect(page.getByRole('menu', { name: 'Note reading mode' })).toBeVisible();

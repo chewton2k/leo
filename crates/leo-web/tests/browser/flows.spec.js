@@ -4671,6 +4671,7 @@ test.describe('beside the note', () => {
     await page.request.post('/api/tasks', { data: { title: `Panel task ${tag}` } });
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto('/#/settings');
+    await page.reload();
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
     await expect(box).toBeVisible();
@@ -4716,6 +4717,7 @@ test.describe('beside the note', () => {
     await page.request.post('/api/tasks', { data: { title: `Home later ${tag}` } });
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto('/#/');
+    await page.reload();
     const list = page.locator('#home-today');
     const row = list.locator('.tasks-row', { hasText: `Home today ${tag}` });
     await expect(row).toBeVisible();
@@ -4740,6 +4742,7 @@ test.describe('beside the note', () => {
     await page.setViewportSize({ width: 1280, height: 1000 });
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
+    await page.reload();
     for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
       await page.goto(`/${hash}`);
       await expect(page.locator(content), hash).toBeVisible();
