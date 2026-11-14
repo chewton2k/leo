@@ -396,6 +396,14 @@ Felix (2026-10-19).
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
   (`margin::room`, `n` counts only this note's open ids), passed to `put` and
   `set_status` as `limit`.
+- Resolved passages stay findable (2026-11-14, the user's call: no Undo toast): GET
+  `.../margin` adds `resolved: [{id, quote, prefix, suffix}]` (`margin::resolved_on`: status
+  resolved, newest first, no messages, never dismissed). The page keeps them in
+  `marginPage.resolved` (never in `threads`) and `marginRevisits` draws a dotted underline
+  (`.margin-revisit`, text at 5%) for each it can place: a button on the first line (title
+  "Reopen Felix's note", focusable) and aria-hidden spans on the others, a thin strip so
+  the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
+  `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
 - Fold unless pinned (2026-11-14): `margin_threads.pinned` (guarded `ALTER`,
   db `VERSION` 4, in `margin.json`), PATCH `.../threads/{id}` `{pinned}`. A
   closed note that is not pinned or focused shows only its first line and dims

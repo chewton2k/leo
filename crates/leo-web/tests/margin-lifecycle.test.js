@@ -98,7 +98,25 @@ test('a read that frees notes removes them and tells the server which thread is 
   await pending;
   assert.equal(bodies[0].keep, 'open');
   assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 't1']);
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['old']);
   assert.equal(h.state.status, '');
+});
+
+test('reopening a resolved passage sends the notes the page cannot place and opens the returned thread', async () => {
+  const h = harness();
+  const bodies = [];
+  const real = h.context.api;
+  h.context.api = (path, init) => { bodies.push(init.body); return real(path, init); };
+  h.context.toast = () => { throw new Error('reopening gets no toast'); };
+  Object.assign(h.state, { resolved: [{ id: 'r1', quote: 'q' }, { id: 'r2', quote: 'p' }], gone: ['lost'] });
+  const pending = h.context.marginReopen('r1');
+  h.settle().resolve({ id: 'r1', status: 'open', quote: 'q', messages: [] });
+  await pending;
+  assert.equal(bodies[0].status, 'open');
+  assert.equal(bodies[0].gone[0], 'lost');
+  assert.deepEqual([...h.state.resolved].map((r) => r.id), ['r2']);
+  assert.deepEqual([...h.state.threads].map((t) => t.id), ['r1']);
+  assert.equal(h.state.open, 'r1');
 });
 
 test('mode updates retain confirmed state after failure and ignore departed notes', async () => {

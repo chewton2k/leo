@@ -173,6 +173,9 @@ figure.drawing.inked img { filter: none !important; }
 .margin-add { font-size: var(--fs-xs); font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
 .margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.margin-revisit { position: absolute; left: 0; top: 0; height: 10px; box-sizing: border-box; padding: 0; border: 0; border-bottom: 1px dotted color-mix(in srgb, var(--text) 5%, transparent); border-radius: 0; background: none; cursor: pointer; transition: border-color .14s ease-out; }
+.margin-revisit:hover, .margin-revisit:focus-visible { border-bottom-color: color-mix(in srgb, var(--text) 48%, transparent); }
+.margin-revisit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0 6px 0 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center end; cursor: pointer; }
 .margin-anchor { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--page); transition: transform .14s ease-out; }
 .margin-mark[data-active] .margin-anchor { transform: scale(1.35); }
@@ -251,10 +254,11 @@ figure.drawing.inked img { filter: none !important; }
 .choice-diagram .d-head { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) {
   .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-drop { animation: none; }
-  .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting { transition: none; }
+  .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit { transition: none; }
 }
 @media (forced-colors: active) {
   .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
   .margin-ink path.pencil { stroke: CanvasText; }

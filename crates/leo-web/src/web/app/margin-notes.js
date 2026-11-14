@@ -35,7 +35,7 @@ let personaDetails = false;
 const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb', cap: 'Graduation cap', leaf: 'Leaf', compass: 'Compass', code: 'Code', heart: 'Heart', star: 'Star', pen: 'Pen', target: 'Target', thumb: 'Thumbs up' };
 const LEAST_ASKED = 3;
 const MARGIN_AREA_MAX = 140;
-const marginPage = { gone: [], adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
+const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -82,9 +82,10 @@ function marginLeave() {
   columns?.style.removeProperty('--anchor-gutter');
   marginPage.layer?.remove();
   marginPage.roomy?.classList.remove('margin-room');
-  Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
+  Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
   marginPage.els.clear();
   marginPage.paths.clear();
+  marginPage.revisits.clear();
   marginPage.marks.clear();
   marginPage.rects.clear();
   marginPage.arriving.clear();
@@ -138,6 +139,7 @@ async function marginLoad(s, current = () => true, id = s.note.id) {
   marginPage.saved = marginPage.persona;
   marginPage.instructions = view.instructions || '';
   marginPage.threads = view.threads || [];
+  marginPage.resolved = view.resolved || [];
   marginPage.loaded = true;
   cancelAnimationFrame(marginPage.frame);
   marginDraw();
@@ -755,6 +757,7 @@ function marginDraw() {
     marginPage.rects.set(t.id, rects);
     marginInk(t, rects);
   }
+  marginRevisits(source, origin);
   marginPaint();
   if (marginPage.arriving.size && !stillMotion()) {
     const done = [...marginPage.arriving];
@@ -766,6 +769,51 @@ function marginDraw() {
       }
     }, MARGIN_SETTLE_MS);
   } else marginPage.arriving.clear();
+}
+
+function marginRevisits(source, origin) {
+  const live = new Set();
+  for (const r of marginPage.resolved) {
+    const at = marginKit.find(source, r);
+    const rects = at ? marginPage.s.doc.spanRects(at.from, at.to) : [];
+    if (!rects.length) continue;
+    live.add(r.id);
+    const els = marginPage.revisits.get(r.id) || [];
+    marginPage.revisits.set(r.id, els);
+    rects.forEach((rect, line) => {
+      let el = els[line];
+      if (!el) {
+        el = document.createElement(line ? 'span' : 'button');
+        el.className = 'margin-revisit';
+        el.dataset.resolved = r.id;
+        if (line) el.setAttribute('aria-hidden', 'true');
+        else {
+          el.type = 'button';
+          el.title = "Reopen Felix's note";
+          el.setAttribute('aria-label', `Reopen Felix’s note on “${r.quote.slice(0, 80)}”`);
+        }
+        marginPage.layer.appendChild(el);
+        els[line] = el;
+      }
+      el.style.transform = `translate(${Math.round(rect.left - origin.left)}px, ${Math.round(rect.bottom - origin.top - 5)}px)`;
+      el.style.width = `${Math.max(1, Math.round(rect.right - rect.left))}px`;
+    });
+    for (const extra of els.splice(rects.length)) extra.remove();
+  }
+  for (const [id, els] of marginPage.revisits) {
+    if (live.has(id)) continue;
+    for (const el of els) el.remove();
+    marginPage.revisits.delete(id);
+  }
+}
+
+async function marginReopen(id) {
+  const s = marginPage.s;
+  const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
+  if (marginPage.s !== s) return;
+  marginPage.resolved = marginPage.resolved.filter((r) => r.id !== id);
+  marginPage.threads.push(done);
+  marginOpen(done.id, true);
 }
 
 function marginPlaceInMargin(boxes, layout, page, origin) {
@@ -891,6 +939,11 @@ function marginClose() {
 
 function marginClick(e) {
   if (e.target.closest('[data-step-go]')) return;
+  const back = e.target.closest('[data-resolved]');
+  if (back) {
+    marginReopen(back.dataset.resolved).catch(fail);
+    return;
+  }
   const action = e.target.closest('[data-margin-act]');
   const id = e.target.closest('[data-id]')?.dataset.id;
   if (!id) return;
@@ -1062,12 +1115,15 @@ async function marginPin(t) {
   marginDraw();
 }
 
+const marginLight = ({ id, quote, prefix, suffix }) => ({ id, quote, prefix, suffix });
+
 async function marginStatus(t, status) {
   const s = marginPage.s;
   await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status } });
   if (marginPage.s !== s) return;
   marginPage.threads = marginPage.threads.filter((old) => old.id !== t.id);
   marginDropThread(t.id);
+  if (status === 'resolved') marginPage.resolved.unshift(marginLight(t));
   marginDraw();
   if (status === 'dismissed') {
     toast('Dismissed Felix’s note', {
@@ -1366,8 +1422,10 @@ async function marginRead(s) {
     else marginSetStatus(got?.note ? '' : 'Felix read it; nothing to add.', true);
     if (!got?.failed) marginReadingDone(!got?.note);
     if (got?.note) {
-      for (const gone of got.resolved || []) marginDropThread(gone);
-      marginPage.threads = marginPage.threads.filter((t) => !got.resolved?.includes(t.id));
+      const freed = marginPage.threads.filter((t) => got.resolved?.includes(t.id));
+      for (const t of freed) marginDropThread(t.id);
+      marginPage.threads = marginPage.threads.filter((t) => !freed.includes(t));
+      marginPage.resolved.unshift(...freed.map(marginLight));
       marginPage.threads.push(got.note);
       marginPage.arriving.add(got.note.id);
       marginPage.newest = got.note.id;

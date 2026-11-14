@@ -169,6 +169,7 @@ pub(crate) async fn note_margin(State(state): State<AppState>, Path(id): Path<St
             "persona": margin::persona_of(&chats, &id),
             "instructions": margin::instructions_of(&chats, &id),
             "threads": margin::open_on(&chats, &id),
+            "resolved": margin::resolved_on(&chats, &id),
         })
     })
     .await;

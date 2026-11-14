@@ -244,6 +244,33 @@ pub fn open_on(chats: &Path, note: &str) -> Vec<Thread> {
         .unwrap_or_default()
 }
 
+#[derive(Debug, Serialize)]
+pub struct Passage {
+    pub id: String,
+    pub quote: String,
+    pub prefix: String,
+    pub suffix: String,
+}
+
+pub fn resolved_on(chats: &Path, note: &str) -> Vec<Passage> {
+    db_of(chats)
+        .with(|c| {
+            let mut query = c.prepare_cached(
+                "SELECT id, quote, prefix, suffix FROM margin_threads WHERE note = ?1 AND status = 'resolved' ORDER BY updated_at DESC",
+            )?;
+            let rows = query.query_map([note], |row| {
+                Ok(Passage {
+                    id: row.get(0)?,
+                    quote: row.get(1)?,
+                    prefix: row.get(2)?,
+                    suffix: row.get(3)?,
+                })
+            })?;
+            rows.collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn one(chats: &Path, note: &str, id: &str) -> Option<Thread> {
     db_of(chats)
         .with(|c| {

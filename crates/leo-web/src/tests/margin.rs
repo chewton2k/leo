@@ -2178,6 +2178,36 @@ async fn read_through_notes_are_stored_as_through_and_never_tidied() {
 }
 
 #[tokio::test]
+async fn the_margin_lists_resolved_passages_without_their_messages_and_never_dismissed_ones() {
+    let engine = Engine::with(Powers::default()).await;
+    let (id, _) = engine.note("Closed", PASSAGE).await;
+    let open = seeded(&engine, &id, "read", false, "open one");
+    let resolved = seeded(&engine, &id, "read", true, "resolved one");
+    let dismissed = seeded(&engine, &id, "read", false, "dismissed one");
+    let chats = engine.chats();
+    margin::set_status(&chats, &id, &resolved, "resolved", margin::MOST_OPEN);
+    margin::set_status(&chats, &id, &dismissed, "dismissed", margin::MOST_OPEN);
+    let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
+    assert_eq!(view["threads"].as_array().unwrap().len(), 1);
+    assert_eq!(view["threads"][0]["id"], open);
+    assert_eq!(
+        view["resolved"],
+        serde_json::json!([{ "id": resolved, "quote": "resolved one", "prefix": "", "suffix": "" }])
+    );
+    let path = format!("/api/notes/{id}/margin/threads/{resolved}");
+    let (status, reopened) = engine
+        .post(&path, serde_json::json!({ "status": "open" }))
+        .await;
+    assert_eq!(
+        (status, reopened["messages"].as_array().map(Vec::len)),
+        (200, Some(2))
+    );
+    let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
+    assert_eq!(view["resolved"], serde_json::json!([]));
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn forgetting_a_thread_deletes_it_unless_you_replied() {
     let (engine, _) = reading(SAYS).await;
     let (id, version) = engine.plain(PASSAGE).await;
