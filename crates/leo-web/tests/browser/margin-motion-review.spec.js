@@ -419,6 +419,18 @@ test.describe('passage states', () => {
     }, { threads: [THREADS.short] });
   });
 
+  test('a pinned note keeps a faint tether at rest that brightens on hover', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const tether = page.locator('.margin-ink path.tether[data-id="t1"]');
+      await expect(tether).toHaveCount(1);
+      await expect.poll(() => tether.evaluate((p) => Number(getComputedStyle(p).opacity))).toBeLessThan(0.3);
+      await page.locator('.margin-note[data-id="t1"]').hover();
+      await expect.poll(() => tether.evaluate((p) => Number(getComputedStyle(p).opacity))).toBeGreaterThan(0.3);
+      await page.mouse.move(5, 5);
+      await expect(tether).toHaveCount(1);
+    }, { threads: [{ ...THREADS.short, pinned: true }] });
+  });
+
   test('quiet dotted at rest, solid underline and a subtle wash when open, hovered or focused', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const rest = await page.evaluate(stateOf, 't1');

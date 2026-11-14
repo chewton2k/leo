@@ -654,8 +654,12 @@ function marginMark(t) {
 function marginPaint() {
   for (const [id, d] of marginPage.tethers) {
     const key = `${id}:tether:0`;
-    if (d && marginLit(id)) marginPath(id, 'tether').setAttribute('d', d);
-    else {
+    const pinned = marginPage.threads.some((t) => t.id === id && t.pinned);
+    if (d && (marginLit(id) || pinned)) {
+      const tether = marginPath(id, 'tether');
+      tether.setAttribute('d', d);
+      tether.classList.toggle('pinned', pinned);
+    } else {
       marginPage.paths.get(key)?.remove();
       marginPage.paths.delete(key);
       if (!d) marginPage.tethers.delete(id);
