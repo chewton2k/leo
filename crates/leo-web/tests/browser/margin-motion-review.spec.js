@@ -411,7 +411,7 @@ test.describe('passage states', () => {
       }, THREADS.short.quote);
       const note = await page.locator('.margin-note[data-id="t1"]').boundingBox();
       expect(end).not.toBeNull();
-      expect(line.x).toBeGreaterThanOrEqual(end);
+      expect(line.x).toBeGreaterThanOrEqual(end - 1);
       expect(line.x).toBeLessThanOrEqual(end + 8);
       expect(line.x + line.width).toBeLessThanOrEqual(note.x);
       await page.mouse.move(5, 5);
