@@ -513,8 +513,8 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let counted = chats.clone();
         let cap = facts.cap;
         if !matches!(
-            blocking(move || margin::spend_read(&counted, cap)).await,
-            Ok(true)
+            blocking(move || margin::reads_today(&counted, cap)).await,
+            Ok(used) if cap == margin::NO_CAP || used < cap
         ) {
             state.margin.forget_blocks(&id, &blocks);
             return Pass::Refused(said(
@@ -576,6 +576,11 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         forget(state);
         return Pass::Failed(margin::PROBLEM.into());
     };
+    if !through {
+        let counted = chats.clone();
+        let cap = facts.cap;
+        let _ = blocking(move || margin::spend_read(&counted, cap)).await;
+    }
     state.margin.set_problem(None);
     let now = match open_note(state, &id).await {
         Ok(now) => now,

@@ -408,7 +408,7 @@ Felix (2026-10-19).
   refuses a stale version (409), a note not `along` or not edited in this engine
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a
   streaming reply, the gap, overlapping reads and the daily cap (429 with `why`).
-  The cap is spent in one transaction after the claim, so failures spend it.
+  The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is saved even if another read used the last one).
   Silence (`{}`/empty) is success; malformed JSON or prose is a failure
   (`{failed: true}`). ≤8,000 characters in, `READ_TOKENS` (220) out, bounded
   when parsed (CLIs ignore `max_tokens`). Gaps `READ_GAPS` (default 90 s);

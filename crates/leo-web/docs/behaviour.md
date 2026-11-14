@@ -861,8 +861,7 @@ target. Check the page sequence after loading preferences.
   overlapping reads and the daily cap (429 with `why`). A useful comment adds no
   separate five-minute lockout. Reads can explain, connect ideas, ask a worthwhile
   question or correct a mistake, about the passage as a whole thought; they never draw.
-  The cap is spent in one transaction after the read is claimed, so failures spend it
-  too, and a broken day row counts as spent. Blocks already read are dropped. A failed
+  The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is still saved if another read used the last one), and a broken day row counts as spent. Blocks already read are dropped. A failed
   read forgets its blocks and answers `{failed: true}`, so the page keeps its baseline.
   A refused read waits for the next edit; a stale-version refusal resets the page's
   retry delay to the normal typing pause, while provider cooldowns stay bounded.

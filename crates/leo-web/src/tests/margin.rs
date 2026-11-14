@@ -350,6 +350,7 @@ async fn silence_is_a_success_and_saves_nothing() {
         let (status, read) = engine.read(&id, &version, &[PASSAGE]).await;
         assert_eq!((status, &read["note"]), (200, &serde_json::Value::Null));
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(engine.get("/api/margin").await.1["today"], 1);
         assert!(engine.get("/api/margin").await.1["problem"].is_null());
         let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
         assert!(view["threads"].as_array().unwrap().is_empty());
@@ -370,6 +371,7 @@ async fn malformed_reads_report_failure_instead_of_successful_silence() {
         assert_eq!(status, 200);
         assert_eq!(read["failed"], true);
         assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(engine.get("/api/margin").await.1["today"], 0);
         assert_eq!(
             engine.get("/api/margin").await.1["problem"],
             margin::PROBLEM
@@ -504,6 +506,44 @@ async fn the_daily_cap_counts_reads_across_notes() {
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert_eq!(engine.get("/api/margin").await.1["today"], 1);
     engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_note_is_saved_even_when_another_read_used_the_last_one() {
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let released = Mutex::new(released);
+    let (started, was_started) = tokio::sync::oneshot::channel::<()>();
+    let started = Mutex::new(Some(started));
+    let writer: Writer = Arc::new(move |_, _, _| {
+        if let Some(started) = started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        let _ = released.lock().unwrap().recv();
+        Ok(SAYS.to_string())
+    });
+    let engine = Arc::new(
+        Engine::with(Powers {
+            toolless: Some(writer),
+            ..Default::default()
+        })
+        .await,
+    );
+    margin::set_prefs(
+        &engine.chats(),
+        &margin::Prefs {
+            cap: 1,
+            ..Default::default()
+        },
+    );
+    let (id, version) = engine.note("One", PASSAGE).await;
+    let running = Arc::clone(&engine);
+    let slow = tokio::spawn(async move { running.read(&id, &version, &[PASSAGE]).await });
+    was_started.await.unwrap();
+    assert!(margin::spend_read(&engine.chats(), 1));
+    release.send(()).unwrap();
+    let (status, saved) = slow.await.unwrap();
+    assert_eq!(status, 200, "{saved}");
+    assert_eq!(saved["note"]["status"], "open");
 }
 
 #[tokio::test]
@@ -704,9 +744,11 @@ async fn a_missing_or_failing_ai_stays_silent_and_leaves_one_line() {
         "Your writing AI didn't answer just now (unavailable). Try again in a moment."
     );
     assert!(!settings.to_string().contains("secret provider detail"));
+    assert_eq!(settings["today"], 0);
     fails.store(false, Ordering::SeqCst);
     let (other, other_version) = engine.note("Fine", PASSAGE).await;
     assert_eq!(engine.read(&other, &other_version, &[PASSAGE]).await.0, 200);
+    assert_eq!(engine.get("/api/margin").await.1["today"], 1);
     assert!(engine.get("/api/margin").await.1["problem"].is_null());
     engine.stop().await;
 }
