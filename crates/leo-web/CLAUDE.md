@@ -391,6 +391,9 @@ Felix (2026-10-19).
   so a resent reply gets the first answer; a resend while it runs is 409 `busy`.
 - A thread whose passage is gone is not shown (2026-11-09; there is no lost-place
   box).
+- A passage found only by its context (`marginKit.find` answers `how: 'context'`) keeps
+  its note, with one muted line, "The passage changed since Felix wrote this."
+  (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
 - Notes the page cannot place do not fill the limit: `marginDraw` collects their ids
   (`marginPage.gone`, by `marginKit.find`) and asks, Read through and reopening send
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`

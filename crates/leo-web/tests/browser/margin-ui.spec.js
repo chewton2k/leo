@@ -473,3 +473,18 @@ test('a resolved passage reopens', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(back).toHaveCount(0);
 });
+
+test('a changed passage says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const quote = 'The password is stored as plain text.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Changed passage', body: `Opening words.\n\n${quote} More words after it.` } })).json();
+  expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote, prefix: 'Opening words.\n\n', suffix: ' More words after it.', question: 'Why?' } })).ok()).toBe(true);
+  await page.goto(`/#/n/${note.id}`);
+  const card = page.locator('.margin-note');
+  await expect(card).toBeVisible();
+  await expect(card.locator('.margin-changed')).toBeHidden();
+  await page.locator('#doc .blk', { hasText: 'More words' }).click();
+  await page.locator('#doc textarea').fill('The password is stored as clear text. More words after it.');
+  await expect(card.locator('.margin-changed')).toHaveText('The passage changed since Felix wrote this.');
+  await expect(card.locator('.margin-changed')).toBeVisible();
+});

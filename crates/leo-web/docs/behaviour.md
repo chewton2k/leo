@@ -824,6 +824,8 @@ target. Check the page sequence after loading preferences.
   sent as `gone` with an ask, a Read through part or a reopening, and each of this
   note's open ids in it raises the open limit by one, up to twice `MOST_OPEN`
   (`margin::room`); other ids are ignored.
+  A note whose passage the page finds only by its context (`how: 'context'`) shows one muted
+  line, "The passage changed since Felix wrote this."; an exact match shows nothing.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
   from the trash removes them at once (`forget_notes`). The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a

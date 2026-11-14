@@ -507,7 +507,7 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}">${ICON.close}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat" title="Ask in chat">${ICON.chat}</button><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><div class="margin-said"></div><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}">${ICON.close}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat" title="Ask in chat">${ICON.chat}</button><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
     <form class="margin-reply"><textarea rows="1" maxlength="1000" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
     <p class="margin-problem" role="status" hidden></p>
     <div class="margin-acts"><button type="button" class="msg-act" data-margin-act="resolve">Resolve</button><button type="button" class="msg-act" data-margin-act="dismiss">Dismiss</button><button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger" title="See it larger">${ICON.expand}</button><button type="button" class="margin-add" data-margin-act="add">Add to note</button></div></div></div>`;
@@ -517,7 +517,7 @@ function marginElement(t) {
   return el;
 }
 
-function marginFill(el, t, arriving) {
+function marginFill(el, t, arriving, changed) {
   const said = $('.margin-said', el);
   const open = marginPage.open === t.id;
   const key = `${open}:${(t.messages || []).length}`;
@@ -541,6 +541,7 @@ function marginFill(el, t, arriving) {
       }
     }
   }
+  $('.margin-changed', el).hidden = !changed;
   const draft = t.id === 'draft';
   const waiting = marginPage.thinking.get(t.id);
   const pending = $('.margin-pending', el);
@@ -727,7 +728,7 @@ function marginDraw() {
   const page = $('article.note', columns).getBoundingClientRect();
   const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginPage.open === box.t.id ? marginElement(box.t) : null);
-    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id));
+    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how === 'context');
     return { ...box, el };
   });
   const shown = new Set(boxes.map(({ t }) => t.id));
