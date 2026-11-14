@@ -35,7 +35,7 @@ let personaDetails = false;
 const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb', cap: 'Graduation cap', leaf: 'Leaf', compass: 'Compass', code: 'Code', heart: 'Heart', star: 'Star', pen: 'Pen', target: 'Target', thumb: 'Thumbs up' };
 const LEAST_ASKED = 3;
 const MARGIN_AREA_MAX = 140;
-const marginPage = { adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
+const marginPage = { gone: [], adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -82,7 +82,7 @@ function marginLeave() {
   columns?.style.removeProperty('--anchor-gutter');
   marginPage.layer?.remove();
   marginPage.roomy?.classList.remove('margin-room');
-  Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
+  Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.marks.clear();
@@ -708,10 +708,13 @@ function marginDraw() {
   const source = s.doc.source();
   const threads = marginPage.draft ? [...marginPage.threads, marginPage.draft] : marginPage.threads;
   const placed = [];
+  const gone = [];
   for (const t of threads) {
     const at = marginKit.find(source, t);
     if (at) placed.push({ t, at });
+    else gone.push(t.id);
   }
+  marginPage.gone = gone;
   const layout = marginLayout(columns);
   if (columns.dataset.margin !== layout) columns.dataset.margin = layout;
   const margins = layout === 'right' || layout === 'both';
@@ -1010,7 +1013,7 @@ async function marginAskOn(s, t, question) {
   let done;
   try {
     await flush(s);
-    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question } });
+    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone } });
   } catch (error) {
     if (marginPage.s !== s) return;
     marginPage.thinking.delete('draft');
@@ -1070,7 +1073,7 @@ async function marginStatus(t, status) {
     toast('Dismissed Felix’s note', {
       action: 'Undo',
       run: async () => {
-        await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open' } });
+        await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
         if (marginPage.s === s) await marginLoad(s);
       },
     });
@@ -1156,7 +1159,7 @@ async function marginAdd(t) {
     run: async () => {
       try {
         await api(`/api/notes/${enc(id)}`, { method: 'PATCH', body: { body: done.before, base: done.version } });
-        await api(threadPath, { method: 'POST', body: { status: 'open' } }).catch(() => {});
+        await api(threadPath, { method: 'POST', body: { status: 'open', gone: marginPage.gone } }).catch(() => {});
         if (open()) await showNote(id);
         toast('Took it out of the note');
       } catch (e) {
@@ -1463,7 +1466,7 @@ async function marginThroughPart(s, run, part, label) {
       s.doc.glow(part.from, part.to);
       let got;
       try {
-        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length) } });
+        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone } });
       } finally {
         s.doc.glow();
       }

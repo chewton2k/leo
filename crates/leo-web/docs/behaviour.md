@@ -820,6 +820,10 @@ target. Check the page sequence after loading preferences.
   (read, ask, chat) and `messages`. At most `MOST_OPEN` (24) open threads per note,
   held inside the INSERT and on reopening, and `MOST_CLOSED` (48) closed ones.
   Replies update messages only, and only while the thread is open.
+  A note the page cannot place (`marginKit.find` finds nothing; `marginPage.gone`) is
+  sent as `gone` with an ask, a Read through part or a reopening, and each of this
+  note's open ids in it raises the open limit by one, up to twice `MOST_OPEN`
+  (`margin::room`); other ids are ignored.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
   from the trash removes them at once (`forget_notes`). The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a

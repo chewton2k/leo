@@ -287,7 +287,11 @@ fn open_count(c: &rusqlite::Connection, note: &str) -> rusqlite::Result<usize> {
     .map(|n| n as usize)
 }
 
-pub fn put(chats: &Path, thread: &Thread) -> bool {
+pub fn room(open: &[Thread], gone: &[String]) -> usize {
+    (MOST_OPEN + open.iter().filter(|t| gone.contains(&t.id)).count()).min(2 * MOST_OPEN)
+}
+
+pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
     let messages = serde_json::to_string(&thread.messages).unwrap_or_else(|_| "[]".into());
     db_of(chats)
         .with(|c| {
@@ -307,7 +311,7 @@ pub fn put(chats: &Path, thread: &Thread) -> bool {
                     messages,
                     thread.created_at.to_rfc3339(),
                     thread.updated_at.to_rfc3339(),
-                    MOST_OPEN as i64,
+                    limit as i64,
                     thread.pinned,
                 ],
             )?;
@@ -336,7 +340,7 @@ pub enum Status {
     Full,
 }
 
-pub fn set_status(chats: &Path, note: &str, id: &str, status: &str) -> Status {
+pub fn set_status(chats: &Path, note: &str, id: &str, status: &str, limit: usize) -> Status {
     let done = db_of(chats).with(|c| {
         let tx = c.transaction()?;
         let was: Option<String> = tx
@@ -349,7 +353,7 @@ pub fn set_status(chats: &Path, note: &str, id: &str, status: &str) -> Status {
         let Some(was) = was else {
             return Ok(Status::Missing);
         };
-        if status == "open" && was != "open" && open_count(&tx, note)? >= MOST_OPEN {
+        if status == "open" && was != "open" && open_count(&tx, note)? >= limit {
             return Ok(Status::Full);
         }
         tx.execute(
@@ -1543,12 +1547,31 @@ mod tests {
     }
 
     #[test]
+    fn notes_the_page_cannot_place_make_room_up_to_twice_the_limit() {
+        let threads: Vec<Thread> = (0..MOST_OPEN).map(|_| open_thread("n")).collect();
+        let ids: Vec<String> = threads.iter().map(|t| t.id.clone()).collect();
+        assert_eq!(room(&threads, &[]), MOST_OPEN);
+        assert_eq!(room(&threads, &ids[..3]), MOST_OPEN + 3);
+        assert_eq!(room(&threads, &ids), 2 * MOST_OPEN);
+        let others: Vec<String> = (0..30).map(|n| format!("other-{n}")).collect();
+        assert_eq!(room(&threads, &others), MOST_OPEN);
+        let many = [ids, others].concat();
+        assert_eq!(room(&threads, &many), 2 * MOST_OPEN);
+        let (_dir, chats) = chats_here();
+        for thread in &threads {
+            assert!(put(&chats, thread, MOST_OPEN));
+        }
+        assert!(!put(&chats, &open_thread("n"), MOST_OPEN));
+        assert!(put(&chats, &open_thread("n"), MOST_OPEN + 1));
+    }
+
+    #[test]
     fn a_reply_cannot_reopen_a_closed_thread() {
         let (_dir, chats) = chats_here();
         let mut thread = open_thread("n");
-        assert!(put(&chats, &thread));
+        assert!(put(&chats, &thread, MOST_OPEN));
         assert!(matches!(
-            set_status(&chats, "n", &thread.id, "resolved"),
+            set_status(&chats, "n", &thread.id, "resolved", MOST_OPEN),
             Status::Done(_)
         ));
         thread.messages.push(you_say("late"));
@@ -1565,24 +1588,30 @@ mod tests {
         let (_dir, chats) = chats_here();
         let threads: Vec<Thread> = (0..MOST_OPEN).map(|_| open_thread("n")).collect();
         for thread in &threads {
-            assert!(put(&chats, thread));
+            assert!(put(&chats, thread, MOST_OPEN));
         }
-        assert!(!put(&chats, &open_thread("n")), "the limit holds at insert");
-        assert!(put(&chats, &open_thread("other")));
+        assert!(
+            !put(&chats, &open_thread("n"), MOST_OPEN),
+            "the limit holds at insert"
+        );
+        assert!(put(&chats, &open_thread("other"), MOST_OPEN));
         assert!(matches!(
-            set_status(&chats, "n", &threads[0].id, "dismissed"),
+            set_status(&chats, "n", &threads[0].id, "dismissed", MOST_OPEN),
             Status::Done(_)
         ));
-        assert!(put(&chats, &open_thread("n")));
+        assert!(put(&chats, &open_thread("n"), MOST_OPEN));
         assert_eq!(
-            set_status(&chats, "n", &threads[0].id, "open"),
+            set_status(&chats, "n", &threads[0].id, "open", MOST_OPEN),
             Status::Full
         );
-        assert_eq!(set_status(&chats, "n", "nope", "open"), Status::Missing);
+        assert_eq!(
+            set_status(&chats, "n", "nope", "open", MOST_OPEN),
+            Status::Missing
+        );
         for _ in 0..MOST_CLOSED + 5 {
             let thread = open_thread("closing");
-            put(&chats, &thread);
-            set_status(&chats, "closing", &thread.id, "resolved");
+            put(&chats, &thread, MOST_OPEN);
+            set_status(&chats, "closing", &thread.id, "resolved", MOST_OPEN);
         }
         assert_eq!(
             every(&chats).iter().filter(|t| t.note == "closing").count(),
@@ -1593,7 +1622,7 @@ mod tests {
     #[test]
     fn a_missing_note_waits_before_its_threads_go_and_coming_back_clears_the_wait() {
         let (_dir, chats) = chats_here();
-        put(&chats, &open_thread("n"));
+        put(&chats, &open_thread("n"), MOST_OPEN);
         let start = Utc::now();
         let days = |n| start + chrono::Duration::days(n);
         let none = HashSet::new();

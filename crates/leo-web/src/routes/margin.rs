@@ -20,6 +20,8 @@ pub(crate) struct ReadBody {
     blocks: Vec<String>,
     #[serde(default)]
     most: Option<usize>,
+    #[serde(default)]
+    gone: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -31,6 +33,8 @@ pub(crate) struct AskBody {
     #[serde(default)]
     suffix: String,
     question: String,
+    #[serde(default)]
+    gone: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +54,8 @@ pub(crate) struct WeaveBody {
 #[derive(Deserialize)]
 pub(crate) struct StatusBody {
     status: String,
+    #[serde(default)]
+    gone: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -83,6 +89,7 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
+    limit: usize,
 }
 
 enum Pass {
@@ -418,18 +425,18 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let id = id.clone();
         let created = note.created;
         let held = chats.clone();
+        let gone = body.gone.clone();
         let facts = blocking(move || {
             let prefs = margin::prefs(&held);
+            let open = margin::open_on(&held, &id);
             ReadFacts {
+                limit: margin::room(&open, &gone),
                 along: margin::mode_of(&held, &id, created) == "along",
                 voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
                 instructions: margin::instructions_of(&held, &id),
                 cap: prefs.cap,
                 gap: prefs.gap,
-                quotes: margin::open_on(&held, &id)
-                    .into_iter()
-                    .map(|thread| thread.quote)
-                    .collect(),
+                quotes: open.into_iter().map(|thread| thread.quote).collect(),
             }
         })
         .await;
@@ -438,7 +445,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             Err(refused) => return Pass::Refused(*refused),
         }
     };
-    let full = facts.quotes.len() >= margin::MOST_OPEN;
+    let full = facts.quotes.len() >= facts.limit;
     if !through {
         if !facts.along {
             return Pass::Refused(said(
@@ -569,7 +576,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         .most
         .unwrap_or(margin::MOST_PER_PASS)
         .clamp(1, margin::MOST_PER_PASS)
-        .min(margin::MOST_OPEN - facts.quotes.len());
+        .min(facts.limit.saturating_sub(facts.quotes.len()));
     let founds = if through {
         margin::parsed_many(&reply, most)
     } else {
@@ -619,8 +626,9 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         );
         let held = chats.clone();
         let stored = thread.clone();
+        let limit = facts.limit;
         if !matches!(
-            blocking(move || margin::put(&held, &stored)).await,
+            blocking(move || margin::put(&held, &stored, limit)).await,
             Ok(true)
         ) {
             break;
@@ -818,11 +826,12 @@ pub(crate) async fn ask(
     };
     let chats = state.chats.clone();
     let held = id.clone();
-    let open = match blocking(move || margin::open_on(&chats, &held).len()).await {
+    let open = match blocking(move || margin::open_on(&chats, &held)).await {
         Ok(open) => open,
         Err(refused) => return *refused,
     };
-    if open >= margin::MOST_OPEN {
+    let limit = margin::room(&open, &body.gone);
+    if open.len() >= limit {
         return said(
             StatusCode::CONFLICT,
             "full",
@@ -845,7 +854,7 @@ pub(crate) async fn ask(
     }
     let chats = state.chats.clone();
     let saved = thread.clone();
-    match blocking(move || margin::put(&chats, &saved)).await {
+    match blocking(move || margin::put(&chats, &saved, limit)).await {
         Ok(true) => Json(thread).into_response(),
         Ok(false) => said(
             StatusCode::CONFLICT,
@@ -1079,7 +1088,11 @@ pub(crate) async fn set_status(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    let done = blocking(move || margin::set_status(&chats, &id, &thread, &body.status)).await;
+    let done = blocking(move || {
+        let limit = margin::room(&margin::open_on(&chats, &id), &body.gone);
+        margin::set_status(&chats, &id, &thread, &body.status, limit)
+    })
+    .await;
     match done {
         Ok(margin::Status::Done(found)) => Json(found).into_response(),
         Ok(margin::Status::Missing) => StatusCode::NOT_FOUND.into_response(),

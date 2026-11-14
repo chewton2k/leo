@@ -391,6 +391,11 @@ Felix (2026-10-19).
   so a resent reply gets the first answer; a resend while it runs is 409 `busy`.
 - A thread whose passage is gone is not shown (2026-11-09; there is no lost-place
   box).
+- Notes the page cannot place do not fill the limit: `marginDraw` collects their ids
+  (`marginPage.gone`, by `marginKit.find`) and asks, Read through and reopening send
+  them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
+  (`margin::room`, `n` counts only this note's open ids), passed to `put` and
+  `set_status` as `limit`.
 - Fold unless pinned (2026-11-14): `margin_threads.pinned` (guarded `ALTER`,
   db `VERSION` 4, in `margin.json`), PATCH `.../threads/{id}` `{pinned}`. A
   closed note that is not pinned or focused shows only its first line and dims

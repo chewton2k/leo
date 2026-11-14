@@ -469,7 +469,7 @@ async fn a_recent_comment_does_not_add_a_five_minute_read_lockout() {
         "Spoken already",
         vec![margin::felix_says("Hm.")],
     );
-    assert!(margin::put(&engine.chats(), &held));
+    assert!(margin::put(&engine.chats(), &held, margin::MOST_OPEN));
     let (status, reply) = engine.read(&id, &version, &[PASSAGE]).await;
     assert_eq!(status, 200);
     assert!(reply["note"].is_object());
@@ -488,7 +488,7 @@ async fn a_sentence_with_a_margin_note_gets_no_second_one() {
         "then login",
         vec![margin::felix_says("Hm.")],
     );
-    assert!(margin::put(&engine.chats(), &held));
+    assert!(margin::put(&engine.chats(), &held, margin::MOST_OPEN));
     let (status, reply) = engine.read(&id, &version, &[PASSAGE]).await;
     assert_eq!((status, reply["note"].is_null()), (200, true));
     assert_eq!(calls.load(Ordering::SeqCst), 1);
@@ -820,7 +820,7 @@ async fn thread_on(engine: &Engine, id: &str) -> String {
         PASSAGE,
         vec![margin::felix_says("In plain text?")],
     );
-    margin::put(&engine.chats(), &thread);
+    margin::put(&engine.chats(), &thread, margin::MOST_OPEN);
     thread.id
 }
 
@@ -1017,7 +1017,7 @@ async fn a_weave_rewrites_only_the_paragraph_and_keeps_the_note_safe() {
         .await;
     assert_eq!((status, why["why"].as_str()), (409, Some("code")));
     let version = engine.edit(&id, &old).await;
-    margin::set_status(&engine.chats(), &id, &thread, "resolved");
+    margin::set_status(&engine.chats(), &id, &thread, "resolved", margin::MOST_OPEN);
     let (status, _) = engine
         .post(&path, serde_json::json!({ "base": version }))
         .await;
@@ -1296,6 +1296,7 @@ fn an_unreadable_file_stops_the_sweep() {
             "words",
             Vec::new(),
         ),
+        margin::MOST_OPEN,
     );
     let start = chrono::Utc::now();
     assert_eq!(margin::sweep_store(&chats, &store), 0);
@@ -1412,7 +1413,7 @@ fn the_sweep_keeps_everything_while_notes_cannot_be_trusted() {
         "words",
         Vec::new(),
     );
-    margin::put(&chats, &thread);
+    margin::put(&chats, &thread, margin::MOST_OPEN);
     assert_eq!(margin::sweep_store(&chats, &store), 0);
     assert_eq!(margin::open_on(&chats, "note").len(), 1);
 }
@@ -1557,6 +1558,7 @@ fn a_thread_on_a_trashed_note_exports_only_with_the_trash() {
             "words",
             Vec::new(),
         ),
+        margin::MOST_OPEN,
     );
     let packed = |trash: bool| {
         let parts = crate::export::Parts {
@@ -1590,7 +1592,7 @@ fn exports_cover_margin_threads() {
         "words",
         vec![margin::felix_says("Kept here.")],
     );
-    margin::put(&chats, &thread);
+    margin::put(&chats, &thread, margin::MOST_OPEN);
     let mut zip = std::io::Cursor::new(Vec::new());
     crate::export::write_zip(&mut zip, &store.notes_dir, &chats, Default::default()).unwrap();
     zip.set_position(0);
@@ -1669,7 +1671,7 @@ async fn a_part_saves_at_most_its_share_and_drops_what_it_cannot_place() {
         "in the users table",
         vec![margin::felix_says("Seeded.")],
     );
-    assert!(margin::put(&engine.chats(), &seed));
+    assert!(margin::put(&engine.chats(), &seed, margin::MOST_OPEN));
     let (status, reply) = engine.analyze(&id, &version, &[TWO_BLOCKS], Some(3)).await;
     assert_eq!(status, 200);
     let quotes: Vec<&str> = reply["notes"]
@@ -1871,7 +1873,7 @@ async fn a_full_note_and_a_missing_ai_say_why() {
             &format!("quote {n}"),
             vec![margin::felix_says("Hm.")],
         );
-        assert!(margin::put(&engine.chats(), &thread));
+        assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
     }
     let (status, why) = engine.analyze(&id, &version, &[PASSAGE], None).await;
     assert_eq!((status, why["why"].as_str()), (409, Some("full")));
@@ -1889,6 +1891,105 @@ async fn a_full_note_and_a_missing_ai_say_why() {
     assert_eq!(
         engine.get("/api/margin").await.1["problem"].as_str(),
         Some(crate::no_writer().as_str())
+    );
+    engine.stop().await;
+}
+
+fn fill(engine: &Engine, id: &str, source: &str, count: usize, limit: usize) -> Vec<String> {
+    (0..count)
+        .map(|n| {
+            let thread = margin::new_thread(
+                id,
+                source,
+                margin::Place {
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+                &format!("quote {n}"),
+                vec![margin::felix_says("Hm.")],
+            );
+            assert!(margin::put(&engine.chats(), &thread, limit));
+            thread.id
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn notes_the_page_cannot_place_make_room_to_ask_reopen_and_read_through() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let (writer, _) = answering("{}");
+    let engine = Engine::with(Powers {
+        toolless: Some(writer),
+        toolless_chat: Some(talking("Because it is.", prompts)),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("Full", PASSAGE).await;
+    margin::set_mode(&engine.chats(), &id, "ask");
+    let ids = fill(&engine, &id, "ask", margin::MOST_OPEN, margin::MOST_OPEN);
+    let path = format!("/api/notes/{id}/margin/threads");
+    let ask = |gone: &[String]| serde_json::json!({ "version": version, "quote": "login", "prefix": "then ", "question": "Why?", "gone": gone });
+    let (status, why) = engine.post(&path, ask(&[])).await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("full")));
+    let (other, _) = engine.plain(PASSAGE).await;
+    let strangers = fill(&engine, &other, "ask", 5, margin::MOST_OPEN);
+    assert_eq!(engine.post(&path, ask(&strangers)).await.0, 409);
+    assert_eq!(engine.post(&path, ask(&ids[..1])).await.0, 200);
+    assert_eq!(engine.analyze(&id, &version, &[PASSAGE], None).await.0, 409);
+    let through = serde_json::json!({ "version": version, "blocks": [PASSAGE], "gone": &ids[..2] });
+    let (status, reply) = engine
+        .post(&format!("/api/notes/{id}/margin/analyze"), through)
+        .await;
+    assert_eq!(status, 200, "{reply}");
+    let status_path = format!("{path}/{}", ids[0]);
+    margin::set_status(&engine.chats(), &id, &ids[0], "resolved", margin::MOST_OPEN);
+    let (status, why) = engine
+        .post(&status_path, serde_json::json!({ "status": "open" }))
+        .await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("full")));
+    let (status, _) = engine
+        .post(
+            &status_path,
+            serde_json::json!({ "status": "open", "gone": &ids[1..3] }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn however_many_notes_are_gone_the_note_holds_twice_the_limit() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let engine = Engine::with(Powers {
+        toolless_chat: Some(talking("Because it is.", prompts)),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("Many", PASSAGE).await;
+    margin::set_mode(&engine.chats(), &id, "ask");
+    let mut gone = fill(&engine, &id, "ask", margin::MOST_OPEN, margin::MOST_OPEN);
+    gone.extend(fill(
+        &engine,
+        &id,
+        "ask",
+        margin::MOST_OPEN,
+        2 * margin::MOST_OPEN,
+    ));
+    gone.extend((0..30).map(|n| format!("other-{n}")));
+    assert_eq!(
+        margin::open_on(&engine.chats(), &id).len(),
+        2 * margin::MOST_OPEN
+    );
+    let (status, why) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/threads"),
+            serde_json::json!({ "version": version, "quote": "login", "prefix": "then ", "question": "Why?", "gone": gone }),
+        )
+        .await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("full")));
+    assert_eq!(
+        margin::open_on(&engine.chats(), &id).len(),
+        2 * margin::MOST_OPEN
     );
     engine.stop().await;
 }
@@ -1937,7 +2038,7 @@ async fn forgetting_a_thread_deletes_it_unless_you_replied() {
         vec![margin::felix_says("Hm."), margin::you_say("Why?")],
     );
     kept.id = "kept-thread".into();
-    assert!(margin::put(&engine.chats(), &kept));
+    assert!(margin::put(&engine.chats(), &kept, margin::MOST_OPEN));
     let kept_path = format!("/api/notes/{id}/margin/threads/kept-thread");
     let (status, why) = engine
         .send_as(&engine.cookie, "DELETE", &kept_path, None)
