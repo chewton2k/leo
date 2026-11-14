@@ -826,6 +826,7 @@ target. Check the page sequence after loading preferences.
   (`margin::room`); other ids are ignored.
   A note whose passage the page finds only by its context (`how: 'context'`) shows one muted
   line, "The passage changed since Felix wrote this."; an exact match shows nothing.
+  An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
   from the trash removes them at once (`forget_notes`). The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a

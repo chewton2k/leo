@@ -34,6 +34,7 @@ let personaEditing = null;
 let personaDetails = false;
 const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb', cap: 'Graduation cap', leaf: 'Leaf', compass: 'Compass', code: 'Code', heart: 'Heart', star: 'Star', pen: 'Pen', target: 'Target', thumb: 'Thumbs up' };
 const LEAST_ASKED = 3;
+const SHOWN_MESSAGES = 6;
 const MARGIN_AREA_MAX = 140;
 const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
 let marginPrefs = null;
@@ -520,7 +521,7 @@ function marginElement(t) {
 function marginFill(el, t, arriving, changed) {
   const said = $('.margin-said', el);
   const open = marginPage.open === t.id;
-  const key = `${open}:${(t.messages || []).length}`;
+  const key = `${open}:${(t.messages || []).length}:${el.dataset.all || ''}`;
   if (el.dataset.drawn !== key) {
     el.dataset.drawn = key;
     said.textContent = '';
@@ -532,7 +533,10 @@ function marginFill(el, t, arriving, changed) {
       const more = (t.messages || []).length - 1;
       if (more > 0) said.insertAdjacentHTML('beforeend', `<div class="margin-foot">${ICON.chat}<span>${more} more</span></div>`);
     } else {
-      for (const message of t.messages || []) {
+      const all = t.messages || [];
+      const folded = el.dataset.all ? 0 : Math.max(0, all.length - SHOWN_MESSAGES);
+      if (folded) said.insertAdjacentHTML('beforeend', `<button type="button" class="margin-earlier" data-margin-act="earlier">Show ${folded} earlier</button>`);
+      for (const message of all.slice(folded)) {
         const line = document.createElement('div');
         line.className = message.from === 'felix' ? 'margin-felix' : 'margin-you';
         if (message.from === 'felix') marginAnswer(line, message.text);
@@ -951,7 +955,11 @@ function marginClick(e) {
   if (action) {
     const t = marginThread(id);
     if (!t) return;
-    if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
+    if (action.dataset.marginAct === 'earlier') {
+      marginPage.els.get(id).dataset.all = '1';
+      marginDraw();
+      $('.margin-reply textarea', marginPage.els.get(id)).focus({ preventScroll: true });
+    } else if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
     else if (action.dataset.marginAct === 'add') marginAdd(t).catch(fail);
     else if (action.dataset.marginAct === 'chat') marginToChat(t);
     else if (action.dataset.marginAct === 'resolve') marginStatus(t, 'resolved').catch(fail);

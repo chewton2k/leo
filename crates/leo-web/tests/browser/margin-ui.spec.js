@@ -484,7 +484,32 @@ test('a changed passage says so', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.margin-changed')).toBeHidden();
   await page.locator('#doc .blk', { hasText: 'More words' }).click();
-  await page.locator('#doc textarea').fill('The password is stored as clear text. More words after it.');
+  await page.locator('#doc textarea.line-edit').fill('The password is stored as clear text. More words after it.');
   await expect(card.locator('.margin-changed')).toHaveText('The passage changed since Felix wrote this.');
   await expect(card.locator('.margin-changed')).toBeVisible();
+});
+
+test('earlier messages fold', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const quote = 'The password is stored as plain text.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Long thread', body: `Opening words.\n\n${quote} More words after it.` } })).json();
+  expect((await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote, question: 'Why?' } })).ok()).toBe(true);
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    body.threads[0].messages = Array.from({ length: 8 }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: `Message ${i + 1}`, at: '2026-11-14T10:00:00Z' }));
+    await route.fulfill({ response, json: body });
+  });
+  await page.goto(`/#/n/${note.id}`);
+  const card = page.locator('.margin-note');
+  await expect(card).toBeVisible();
+  await card.click();
+  const earlier = card.getByRole('button', { name: 'Show 2 earlier' });
+  await expect(earlier).toBeVisible();
+  await expect(card.locator('.margin-said > div')).toHaveCount(6);
+  await earlier.click();
+  await expect(card.locator('.margin-said > div')).toHaveCount(8);
+  await expect(card.locator('.margin-said').getByText('Message 1')).toBeVisible();
+  await expect(earlier).toHaveCount(0);
 });

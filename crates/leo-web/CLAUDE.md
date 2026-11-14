@@ -394,6 +394,8 @@ Felix (2026-10-19).
 - A passage found only by its context (`marginKit.find` answers `how: 'context'`) keeps
   its note, with one muted line, "The passage changed since Felix wrote this."
   (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
+- An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
+  "Show N earlier" button (`.margin-earlier`) that shows them all for that note.
 - Notes the page cannot place do not fill the limit: `marginDraw` collects their ids
   (`marginPage.gone`, by `marginKit.find`) and asks, Read through and reopening send
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
