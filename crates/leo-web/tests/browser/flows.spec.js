@@ -4727,7 +4727,8 @@ test.describe('beside the note', () => {
     const at = await list.boundingBox();
     expect(at.y, 'under the quick bar').toBeGreaterThanOrEqual(ask.y + ask.height);
     expect(at.x + at.width, 'inside the page').toBeLessThanOrEqual(1280);
-    await row.locator('.sched-check').check();
+    await row.locator('.sched-check').click();
+    await expect(row.locator('.sched-check'), 'the box ticks once leo saved it').toBeChecked();
     await expect(row, 'a finished task leaves the list').toHaveCount(0);
     await page.goto('/#/settings');
     await expect(page.locator('#tasks-window')).toBeVisible();
@@ -4737,7 +4738,7 @@ test.describe('beside the note', () => {
   test('tasks window folds while reading', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
-    await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}` } });
+    await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}`, date: new Date().toLocaleDateString('en-CA') } });
     const note = await (await page.request.post('/api/notes', { data: { title: `Reading ${tag}`, body: 'Words to read.' } })).json();
     await page.setViewportSize({ width: 1280, height: 1000 });
     const box = page.locator('#dock #tasks-window');
