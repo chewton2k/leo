@@ -4708,6 +4708,32 @@ test.describe('beside the note', () => {
     await expect(page.locator('#tasks-window')).toBeHidden();
   });
 
+  test('tasks window folds while reading', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}` } });
+    const note = await (await page.request.post('/api/notes', { data: { title: `Reading ${tag}`, body: 'Words to read.' } })).json();
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    const box = page.locator('#dock #tasks-window');
+    const body = box.locator('.tasks-body');
+    for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
+      await page.goto(`/${hash}`);
+      await expect(page.locator(content), hash).toBeVisible();
+      await expect(box, hash).toBeVisible();
+      await expect(body, `${hash} starts folded`).toBeHidden();
+      await expect(box.locator('.tasks-badge'), hash).toHaveText(/^\d+\+?$/);
+      const chip = await box.boundingBox();
+      const text = await page.locator(content).boundingBox();
+      expect(chip.width, hash).toBeLessThan(60);
+      expect(chip.x + chip.width <= text.x || chip.y + chip.height <= text.y || chip.x >= text.x + text.width || chip.y >= text.y + text.height, `${hash}: the chip stays off the page`).toBe(true);
+      await box.hover();
+      await expect(body, `${hash}: hovering opens it`).toContainText(`Reading task ${tag}`);
+      await page.mouse.move(640, 300);
+      await expect(body, `${hash}: leaving folds it`).toBeHidden();
+      expect(await page.evaluate(() => Object.keys(localStorage).filter((key) => /tasks/.test(key)))).toEqual([]);
+    }
+  });
+
   test('with Felix open, the notes scrollbar sits beside the notes, not past the chat', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'Felix covers the page on phones');
     const body = Array.from({ length: 160 }, (_, i) => `Line ${i + 1} of a long note to scroll through.`).join('\n\n');
