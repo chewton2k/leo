@@ -534,7 +534,12 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         &margin::voiced(system, &facts.voice, false),
         &facts.instructions,
     );
-    let user = margin::read_prompt(&note.title, &blocks, tag);
+    let earlier = if through {
+        String::new()
+    } else {
+        margin::earlier_text(&note.body, &blocks)
+    };
+    let user = margin::read_prompt(&note.title, &blocks, tag, &earlier);
     let answer = tokio::time::timeout(
         margin::READ_LIMIT,
         tokio::task::spawn_blocking(move || {
@@ -589,6 +594,13 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
     let mut quotes = facts.quotes;
     let mut saved = Vec::new();
     for found in founds {
+        if !through
+            && !blocks
+                .iter()
+                .any(|block| block.contains(found.quote.as_str()))
+        {
+            continue;
+        }
         let quote = margin::whole_sentences(&now.body, &found.quote, &blocks);
         if margin::crowded(&now.body, &quote, &blocks, &quotes) {
             continue;

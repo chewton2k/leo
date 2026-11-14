@@ -343,6 +343,54 @@ async fn a_read_saves_one_note_anchored_in_the_text() {
 }
 
 #[tokio::test]
+async fn a_read_sees_the_earlier_text_as_context_and_cannot_quote_it() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&prompts);
+    let writer: Writer = Arc::new(move |_, user, _| {
+        seen.lock().unwrap().push(user.to_string());
+        Ok(r#"{"quote":"Sessions last a day","text":"Is that long?"}"#.to_string())
+    });
+    let engine = Engine::with(Powers {
+        toolless: Some(writer),
+        ..Default::default()
+    })
+    .await;
+    let body = format!("Sessions last a day, said the first paragraph.\n\n{PASSAGE}, I think.");
+    let (id, version) = engine.note("Earlier", &body).await;
+    let (status, read) = engine
+        .read(&id, &version, &[&format!("{PASSAGE}, I think.")])
+        .await;
+    assert_eq!((status, &read["note"]), (200, &serde_json::Value::Null));
+    let asked = prompts.lock().unwrap()[0].clone();
+    let (before, changed) = asked.split_once("<changed_text_").unwrap();
+    let earlier = before.split("<earlier_text_").nth(1).unwrap();
+    assert!(earlier.contains("Sessions last a day, said the first paragraph."));
+    assert!(!earlier.contains(PASSAGE));
+    assert!(changed.contains(PASSAGE));
+    assert!(!changed.contains("Sessions last a day"));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_read_without_earlier_text_has_no_earlier_block() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let seen = Arc::clone(&prompts);
+    let writer: Writer = Arc::new(move |_, user, _| {
+        seen.lock().unwrap().push(user.to_string());
+        Ok("{}".to_string())
+    });
+    let engine = Engine::with(Powers {
+        toolless: Some(writer),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("First", PASSAGE).await;
+    assert_eq!(engine.read(&id, &version, &[PASSAGE]).await.0, 200);
+    assert!(!prompts.lock().unwrap()[0].contains("earlier_text"));
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn silence_is_a_success_and_saves_nothing() {
     for answer in ["{}", "", "```json\n{}\n```"] {
         let (engine, calls) = reading(answer).await;

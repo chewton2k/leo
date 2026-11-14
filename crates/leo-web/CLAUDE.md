@@ -424,6 +424,7 @@ Felix (2026-10-19).
   rewrite under half or over 3× + 400 of the block or with a new link),
   version-checked before and after the AI; only a lost, code or long passage falls
   back to `/insert`.
+- A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent. Read through sends none.
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
   then `margin::crowded` allows one open note per sentence. The server anchors on prefix + quote + suffix exactly and
