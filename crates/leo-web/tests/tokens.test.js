@@ -139,3 +139,19 @@ test('links are ink and underlined, toasts sit on paper, and scrims use the toke
   assert.match(print.body, /--accent: #1c1c1a/);
   assert.match(print.body, /--accent-text: #fff/);
 });
+
+test('sizes and radii come from the scale, and the note title and prose use theirs', () => {
+  for (const rule of all) {
+    for (const [key, value] of declarations(rule.body)) {
+      if (key === 'font-size' || key === 'font') assert.doesNotMatch(value, /^(11|11\.5|12\.5|13\.5|14\.5|15\.5)px\b/, `${rule.selector} { ${key}: ${value} }`);
+      if (/^border(-[a-z]+)*-radius$/.test(key)) assert.doesNotMatch(value, /(^|[\s(])(2|3|7|9|12)px\b/, `${rule.selector} { ${key}: ${value} }`);
+    }
+  }
+  const t = tokens(themes.light);
+  assert.equal(t['--fs-title'], '32px');
+  assert.equal(t['--r-xl'], '14px');
+  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
+  assert.match(body('.note-head h1'), /font-size: var\(--fs-title\); font-weight: 650;[^}]*letter-spacing: -\.025em/);
+  assert.match(body('.prose'), /line-height: 1\.72/);
+  assert.match(body('.doc .line-edit'), /line-height: 1\.72/);
+});

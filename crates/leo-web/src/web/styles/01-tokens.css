@@ -44,9 +44,9 @@
   --shadow-sm: 0 0 0 1px rgba(28, 28, 26, .08);
   --shadow-pop: 0 0 0 1px rgba(28, 28, 26, .08), 0 1px 1px rgba(28, 28, 26, .04), 0 10px 28px -12px rgba(28, 28, 26, .3);
   --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .08);
-  --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 26px;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 26px; --fs-title: 32px;
   --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
-  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: var(--radius); --r-xl: 20px; --r-pill: 999px; --r-tile: 8px;
+  --r-xs: 4px; --r-sm: 6px; --r-md: 10px; --r-lg: var(--radius); --r-xl: 14px; --r-pill: 999px; --r-tile: 8px;
   --tone-pdf: #c42b2b;
   --tone-doc: #1d5fd1;
   --tone-slides: #b4500a;
