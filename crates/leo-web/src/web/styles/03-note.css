@@ -96,7 +96,7 @@
 .margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
 .margin-note[data-open] .margin-toggle svg { display: block; }
 .margin-note[data-open] .margin-toggle:hover svg { color: var(--text); }
-.margin-note[data-open] .margin-said > :first-child { padding-right: 78px; }
+.margin-note[data-open] .margin-said > :first-child { padding-top: 24px; }
 .margin-chat, .margin-pin { display: none; }
 .margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 2; top: -6px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .margin-note[data-open] .margin-pin { right: 48px; }
@@ -166,7 +166,6 @@ figure.drawing.inked img { filter: none !important; }
 .margin-note .drawing-row p { font-size: calc(14px * var(--read)); }
 .margin-note .drawing-title { font-size: calc(16px * var(--read)); }
 .margin-note .drawing-sub { font-size: calc(12.5px * var(--read)); }
-.margin-note[data-open] .margin-said > :first-child > .drawing-row:not(:first-child) { margin-right: -78px; }
 
 .margin-reply textarea::placeholder { color: var(--muted); }
 .margin-earlier { justify-self: start; padding: 3px 6px; margin-left: -6px; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
