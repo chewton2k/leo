@@ -388,7 +388,7 @@ test.describe('folding and pins', () => {
 });
 
 test.describe('passage states', () => {
-  test('a lit note draws a thin tether across the gap only, never over text or the note', async ({ browser }) => {
+  test('a lit note draws a thin tether from the end of its passage to the note, never over the note', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const tether = page.locator('.margin-ink path.tether[data-id="t1"]');
       await expect(tether).toHaveCount(0);
@@ -396,9 +396,23 @@ test.describe('passage states', () => {
       await expect(tether).toHaveCount(1);
       await expect.poll(() => tether.evaluate((p) => Number(getComputedStyle(p).opacity))).toBeGreaterThan(0.3);
       const line = await tether.boundingBox();
-      const article = await page.locator('article.note').boundingBox();
+      const end = await page.evaluate((quote) => {
+        const walk = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT);
+        for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+          const at = node.data.indexOf(quote);
+          if (at < 0) continue;
+          const range = document.createRange();
+          range.setStart(node, at);
+          range.setEnd(node, at + quote.length);
+          const rects = [...range.getClientRects()];
+          return rects[rects.length - 1].right;
+        }
+        return null;
+      }, THREADS.short.quote);
       const note = await page.locator('.margin-note[data-id="t1"]').boundingBox();
-      expect(line.x).toBeGreaterThanOrEqual(article.x + article.width);
+      expect(end).not.toBeNull();
+      expect(line.x).toBeGreaterThanOrEqual(end);
+      expect(line.x).toBeLessThanOrEqual(end + 12);
       expect(line.x + line.width).toBeLessThanOrEqual(note.x);
       await page.mouse.move(5, 5);
       await expect(tether).toHaveCount(0);
