@@ -251,7 +251,7 @@ body.files-over main::after {
 .picker-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-effort { color: var(--muted); }
 .picker-button svg { width: 15px; height: 15px; flex: none; color: var(--muted); transform: rotate(90deg); }
-.picker-menu { position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); width: min(360px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow-y: auto; padding: 6px; border: 0; border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow); }
+.picker-menu { position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); width: min(360px, calc(100vw - 32px)); max-height: min(70vh, 520px); overflow-y: auto; padding: 6px; border: 0; border-radius: var(--r-lg); background: var(--raised); box-shadow: var(--shadow); }
 .pick-head { padding: 8px 10px 4px; }
 .pick-model { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-tile); background: none; color: var(--text); text-align: left; }
 .pick-model:hover { background: var(--surface-2); }

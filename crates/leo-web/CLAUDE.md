@@ -161,6 +161,11 @@ Decided: one app, window only (2026-10-31).
   and access menus (they move through `leoMotion`).
 - Colour: ink for actions and selection, `--focus` for focus cues, tone only as
   dots and ticks (calendar events keep their colour fills).
+- Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
+  (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
+  rest, `--shadow-pop` for menus, toasts and sheets, `--shadow-lift` while
+  dragging); dark mode lifts with lighter surfaces and a faint top highlight.
+  Inputs, tables, code and focus rings keep a clear edge.
 
 Decided: reuse components throughout (2026-11-06).
 
