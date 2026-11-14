@@ -25,7 +25,7 @@ are gone:
 | Granola switcher | Raw transcript, no share | Call recorded, honest note, Copy as Markdown; still no share link (out of scope) and calendar needs an iCal address (approved) |
 | Student on Windows | Blocked at writing AI | Ollama path exists; an 8 GB laptop had no model that fit (fixed below) |
 | ChatGPT/Claude user | Found chat by luck; no retry/edit | Ask field on home, Ask Felix for dropped files, Copy/Retry/Edit; first question with PDFs could not be retried (fixed below) |
-| Riddled writer | Default persona didn't push back; no per-note instructions | Critic persona, per-note instructions, question field on a selection; silent reads left no trace (fixed below) |
+| Margin-notes writer | Default persona didn't push back; no per-note instructions | Critic persona, per-note instructions, question field on a selection; silent reads left no trace (fixed below) |
 | Evaluator | Health contradicted privacy; silent failures | Honest quit/relaunch, privacy lines, Keeping; Health still green for Ollama with no model (fixed below) |
 
 ## Follow-ups found and fixed in this round

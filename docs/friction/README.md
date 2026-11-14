@@ -1,7 +1,7 @@
 # Reducing friction in leo
 
 Research date: 2026-11-09. Question: how can leo reduce user friction compared
-with Wispr Flow, Granola, Riddled and a general chat app (Claude, ChatGPT)?
+with Wispr Flow, Granola, a margin-notes writing app and a general chat app (Claude, ChatGPT)?
 This folder holds the evidence and a ranked list of actionable items to go
 through together.
 
@@ -41,7 +41,7 @@ Three other themes follow:
 
 ## How the others remove friction (baseline)
 
-| | Wispr Flow | Granola | Riddled | Claude / ChatGPT | leo today |
+| | Wispr Flow | Granola | Margin-notes writing app | Claude / ChatGPT | leo today |
 |---|---|---|---|---|---|
 | **AI to set up** | None: cloud AI built in | None: built in | None: built in | None: it is the AI | Pick Claude Code, Codex or Ollama, each needs a terminal; not in onboarding |
 | **First-run teaching** | Mic test, hotkey, then a practice sandbox with mock Gmail and Notion | User type picks default templates | n/a | Text box on launch | Permissions and speech model; the shortcut is never shown |
@@ -60,7 +60,6 @@ Sources: [Wispr Flow context awareness](https://docs.wisprflow.ai/articles/46782
 [How Granola works](https://zackproser.com/blog/how-does-granola-ai-work),
 [Granola recipes](https://docs.granola.ai/help-center/getting-more-from-your-notes/recipes),
 [Granola chat](https://docs.granola.ai/help-center/getting-more-from-your-notes/chatting-with-your-meetings),
-[Riddled](https://www.riddled.ai/) and [About](https://www.riddled.ai/about) (from search summaries; the pages refused a direct fetch),
 [ChatGPT record mode](https://help.openai.com/en/articles/11487532-record-mode),
 [Claude vs ChatGPT projects](https://unmarkdown.com/blog/claude-projects-vs-chatgpt-projects).
 Most competitor claims come from their own docs or reviews; treat numbers
@@ -70,7 +69,7 @@ Most competitor claims come from their own docs or reviews; treat numbers
 
 Each item has an ID to refer to when we go through them. **Evidence** names
 the personas (W Wispr switcher, G Granola switcher, S student, C chat user,
-R Riddled writer, E evaluator) and whether I verified it in code. Effort is
+R margin-notes writer, E evaluator) and whether I verified it in code. Effort is
 S (hours), M (a day or two), L (a week or more).
 
 ### Now: quick fixes, no design decisions needed
@@ -149,7 +148,6 @@ framed with the stageshow rules. They are proposals, not the app.
   The simulated users read the page code; nobody ran the app. Real users are
   slower and more distracted, so detours probably cost more than reported.
 - **From competitor docs and reviews (medium to low):** the baseline table.
-  Riddled's pages could not be fetched directly.
 
 ## Experiments to confirm
 
@@ -173,5 +171,5 @@ framed with the stageshow rules. They are proposals, not the app.
   only path to Granola-level "it just works" for someone with no AI plan.
 - Is leo for students, for meetings, or both? The copy says students; the Record
   page and the calendar say both. Q7 assumes both.
-- How far should leo follow Riddled's quiet, questioning style for Felix by default?
+- How far should leo follow a quiet, questioning style for Felix by default?
   Today Reader is the default persona and reads along.

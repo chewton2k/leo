@@ -3,7 +3,7 @@
 ## Summary
 
 Six simulated first-time users, each shaped by a competing product, walked
-leo's main flows on 2026-11-09. Two reached their goal cleanly (the Riddled
+leo's main flows on 2026-11-09. Two reached their goal cleanly (the margin-notes
 writer, with detours; the evaluator, who lost no work), four did not. The top
 problems:
 
@@ -26,7 +26,7 @@ reproduced by reading the code afterwards (marked "reproduced").
 | **G** Granola switcher, founder, call in 5 minutes, Claude Code installed but never signed in | Notes on a Zoom call, send a summary | Partial | Raw transcript instead of notes; sign-in needs a terminal; share is PDF only |
 | **S** First-year student on Windows, never used a terminal | Record a lecture, get notes, get quizzed | Gave up | Same writing AI wall, then raw errors from Felix |
 | **C** Grad student who lives in Claude and ChatGPT, Codex signed in | Ask questions across three PDFs | Partial, by luck | No chat on launch; file drop makes notes; default AI is Ollama, not the signed-in Codex |
-| **R** Philosophy student who uses Riddled, Claude Code signed in | Draft an essay with pushback in the margin | Achieved with detours | Default persona doesn't push back; no per-note instructions |
+| **R** Philosophy student who uses a margin-notes writing app, Claude Code signed in | Draft an essay with pushback in the margin | Achieved with detours | Default persona doesn't push back; no per-note instructions |
 | **E** IT lead evaluating for a team; skips setup, denies the mic, quits mid-write | Decide on privacy, cost and data safety | No work lost; verdict "not yet" | Health contradicts the privacy promise; silent failures |
 
 ## Findings
@@ -86,7 +86,7 @@ reproduced by reading the code afterwards (marked "reproduced").
 - **What happened**: No check before Start. A missing speech model shows up as "Your note could not be saved" with the cause under Error details. A denied microphone shows as "No sound for a while: is the right microphone chosen, and not muted?". A headset on a Call may fail the second track only after Start.
 - **Basis**: inferred (pre-flight absence confirmed by the code audit: `health::recording()` is used only in a test).
 
-### 8. Felix in the margin is close to Riddled, but its controls are hidden
+### 8. Felix in the margin is close to a margin-notes writing app, but its controls are hidden
 - **Severity**: Minor. **Hit by** 1 of 6 (R).
 - **Kind**: mental-model mismatch.
 - **Where**: note meta line, selection pill.
