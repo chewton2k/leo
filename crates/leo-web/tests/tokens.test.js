@@ -197,3 +197,14 @@ test('menus lift without a border, rows wash on hover, the Record form has no pa
   assert.match(body('.chat-compose'), /box-shadow: var\(--shadow\)/);
   assert.match(body('.chat-compose:focus-within'), /box-shadow: 0 0 0 2px var\(--focus\)/);
 });
+
+test('the paper grain is a data: SVG background layer on the shell surfaces, screen only and never in forced colours or print', () => {
+  for (const [name, theme] of Object.entries(themes)) assert.match(theme.body, /--grain: url\("data:image\/svg\+xml,[^"]*feTurbulence[^"]*"\)/, name);
+  const used = all.filter((r) => /var\(--grain\)/.test(r.body));
+  assert.deepEqual(used.map((r) => r.selector).sort(), ['body', 'body::before, body::after']);
+  for (const rule of used) {
+    assert.ok(rule.at.some((a) => /^@media screen\b/.test(a) && /\(forced-colors: none\)/.test(a)), rule.selector);
+    assert.ok(rule.at.every((a) => !/forced-colors: active|print/.test(a)), rule.selector);
+  }
+  assert.doesNotMatch(pageCss(), /mix-blend-mode|background-blend-mode/);
+});

@@ -155,6 +155,8 @@ Decided: one app, window only (2026-10-31).
   `.chat-history-group`, `.pick-head`).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
+- Colour: ink for actions and selection, `--focus` for focus cues, tone only as
+  dots and ticks (calendar events keep their colour fills).
 
 Decided: reuse components throughout (2026-11-06).
 
