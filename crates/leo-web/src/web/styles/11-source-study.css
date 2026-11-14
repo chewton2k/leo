@@ -80,7 +80,7 @@ body.source-resizing iframe { pointer-events: none; }
 .add-results { display: flex; flex-direction: column; gap: 2px; max-height: 220px; overflow: auto; margin: 8px 0 10px; }
 .add-results .list-row svg { width: 16px; height: 16px; color: var(--muted); }
 #add-search { width: 100%; }
-.chat-compose:focus-within { box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus) 55%, transparent); }
+.chat-compose:focus-within { box-shadow: 0 0 0 2px var(--focus); }
 @media (forced-colors: active) { .chat-compose:focus-within { outline: 2px solid Highlight; } }
 .chat-tools { display: flex; align-items: center; gap: 4px; }
 .chat-chip { flex: 0 1 auto; min-width: min(76px, 100%); display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border: 0; border-radius: var(--r-tile); background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }

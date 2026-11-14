@@ -184,3 +184,16 @@ test('the note chrome is one graphite row above the title, with originals on the
   assert.match(body('.actions button.danger:is(:hover, :focus-visible) svg'), /color: var\(--danger\)/);
   assert.doesNotMatch(body('.actions'), /shadow-(pop|lift)/);
 });
+
+test('menus lift without a border, rows wash on hover, the Record form has no panel and the composer rests on a ring', () => {
+  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
+  const menu = body('.popup-menu, .popup-menu-gone');
+  assert.doesNotMatch(menu, /border:/);
+  assert.match(menu, /border-radius: var\(--r-md\)/);
+  assert.match(menu, /box-shadow: var\(--shadow-pop\)/);
+  assert.match(body('.popup-menu button:not(:disabled):hover'), /background: var\(--wash\)/);
+  assert.match(body('.popup-menu button:focus-visible'), /outline: 2px solid var\(--focus\)/);
+  assert.match(body('.rec-card'), /padding: 0; background: none/);
+  assert.match(body('.chat-compose'), /box-shadow: var\(--shadow\)/);
+  assert.match(body('.chat-compose:focus-within'), /box-shadow: 0 0 0 2px var\(--focus\)/);
+});

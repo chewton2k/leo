@@ -91,7 +91,9 @@
 @media (max-width: 520px) { .set-row:not(.column) { flex-direction: column; align-items: stretch; gap: 6px; } .set-label { width: auto; } .set-row:not(.column):has(> .switch) { flex-direction: row; align-items: center; } .set-row > .segmented { flex: none; max-width: none; margin-left: 0; } .set-line:has(> .set-shortcut) { flex-direction: column; align-items: stretch; } .set-shortcut { justify-content: flex-start; } .set-shortcut .shortcut-field { flex: 1 1 160px; } }
 .rec { display: flex; flex-direction: column; gap: 14px; margin: 0 0 120px; }
 .rec .section-title { margin-bottom: -4px; }
-.rec-card { display: flex; flex-direction: column; }
+.rec-card { display: flex; flex-direction: column; padding: 0; background: none; }
+.rec-card .choice-pick { background: var(--tint); }
+.rec-card .btn.plain { background: var(--surface-2); }
 .rec-kinds { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 12px 0 12px; }
 .rec-kind { position: relative; display: flex; cursor: pointer; }
 .rec-kind input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
@@ -424,7 +426,8 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-hint > :last-child { margin-bottom: 0; }
 
 @media (forced-colors: active) {
-  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .home-ask, .side-filter, .chat-compose, .margin-add, .see-larger, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
+  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .home-ask, .side-filter, .chat-compose, .margin-add, .see-larger, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
+  .rec-card { border: 0; }
   .fa-stack i, .fa-meter i, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i { forced-color-adjust: none; }
   .settings-section .segmented { border: 1px solid CanvasText; }
   .chat { border-left: 1px solid CanvasText; }
