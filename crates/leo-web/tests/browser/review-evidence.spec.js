@@ -672,7 +672,7 @@ test('Settings chooses how often Felix reads and says so in one sentence', async
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/#/settings/felix');
   const rhythm = page.locator('#felix-rhythm');
-  await expect(rhythm).toContainText('at most once every 90 sec.');
+  await expect(rhythm).toContainText('(longer mid-sentence), at most once every 90 sec.');
   await expect(rhythm).not.toContainText('today');
   const reads = page.locator('.felix-rhythm header #felix-reads');
   await expect(reads).toHaveText(/^\d+\/40 today$/);

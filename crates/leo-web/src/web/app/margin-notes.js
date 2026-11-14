@@ -1,5 +1,4 @@
 const MARGIN_KINDS = ['add_margin_note', 'remove_margin_note'];
-const READ_PAUSE = { fast: 2000, regular: 4000, slow: 8000 };
 const READ_GAP_SECONDS = 90;
 const READ_FACE_AFTER_MS = 200;
 const MARGIN_SETTLE_MS = 1400;
@@ -12,6 +11,7 @@ const MENU_MS = MOTION_MS;
 const MENU_SLIDE = [{ clipPath: 'inset(0 0 100% 0)', opacity: 0, transform: `scale(${POP_FROM})` }, { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'none' }];
 const MOST_ASKED = 1000;
 const marginKit = window.leoMargin;
+const READ_PAUSE = marginKit.READ_PAUSE;
 const PERSONA_ICON = {
   book: ICON.book,
   target: svg('<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/>'),
@@ -1195,6 +1195,10 @@ function marginAsk(s, picked, question = '') {
   return true;
 }
 
+function marginPause(s) {
+  return marginKit.pauseFor(marginKit.blocksOf(s.doc.source()).pop(), marginPrefs?.pace);
+}
+
 function marginEdited(s) {
   if (s !== marginPage.s) return;
   clearTimeout(marginPage.faceTimer);
@@ -1204,8 +1208,7 @@ function marginEdited(s) {
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
-  const pause = READ_PAUSE[marginPrefs?.pace] || READ_PAUSE.regular;
-  marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(pause, marginPage.nextRead - Date.now()));
+  marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(marginPause(s), marginPage.nextRead - Date.now()));
 }
 
 function marginShowReading(s, source, blocks) {
@@ -1383,7 +1386,7 @@ async function marginRead(s) {
       const again = marginPage.again;
       marginPage.again = false;
       if (again && marginPage.mode === 'along') {
-        marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(READ_PAUSE[marginPrefs?.pace] || READ_PAUSE.regular, marginPage.nextRead - Date.now()));
+        marginPage.timer = setTimeout(() => marginRead(s).catch(fail), Math.max(marginPause(s), marginPage.nextRead - Date.now()));
       }
     }
   }
@@ -1578,7 +1581,7 @@ function marginWait(seconds) {
 
 function felixRhythm(view) {
   const pause = (READ_PAUSE[view.pace] || READ_PAUSE.regular) / 1000;
-  return `After ${pause} sec of quiet, at most once every ${marginWait(view.gap)}.`;
+  return `After ${pause} sec of quiet (longer mid-sentence), at most once every ${marginWait(view.gap)}.`;
 }
 
 function felixReads(view) {
@@ -1716,7 +1719,7 @@ function felixSettingsCards(view, page) {
     ${felixPersonaCard(view)}
     <section class="set-card" data-find="felix-where"><header><h3>Where notes appear</h3></header>${choiceCards({ label: 'Where notes appear', field: 'data-margin-pref="layout"', current: view.layout, choices: [['both', 'Both margins', 'Your words in the middle.', MARGIN_DIAGRAMS.both], ['right', 'Right margin', 'One column beside you.', MARGIN_DIAGRAMS.right], ['marks', 'Marks only', 'A small mark to open.', MARGIN_DIAGRAMS.marks]] })}</section>
     <section class="set-card" data-find="felix-auto-model"><header><h3>Which model answers</h3></header><div class="set-row"><span class="set-label">Cheaper model for lookups</span>${settingsSwitch('data-margin-pref="auto_model"', view.auto_model !== false, 'Cheaper model for lookups')}</div><p class="hint">Short lookups use the cheapest model of your writing AI. Everything else uses the model you chose, and a chat never moves down while it is open.</p></section>
-    <section class="set-card felix-rhythm"><header><h3>How often he reads</h3>${felixReads(view)}</header><p class="hint" id="felix-rhythm" aria-live="polite">${esc(felixRhythm(view))}</p><div class="set-row column" data-find="felix-pace"><span class="set-label">Reading pace</span>${choiceCards({ label: 'Reading pace', field: 'data-margin-pref="pace"', current: view.pace, choices: [['fast', 'Fast', `After ${READ_PAUSE.fast / 1000} sec of quiet.`, PACE_DIAGRAMS.fast], ['regular', 'Regular', `After ${READ_PAUSE.regular / 1000} sec of quiet.`, PACE_DIAGRAMS.regular], ['slow', 'Slow', `After ${READ_PAUSE.slow / 1000} sec of quiet.`, PACE_DIAGRAMS.slow]] })}</div>
+    <section class="set-card felix-rhythm"><header><h3>How often he reads</h3>${felixReads(view)}</header><p class="hint" id="felix-rhythm" aria-live="polite">${esc(felixRhythm(view))}</p><div class="set-row column" data-find="felix-pace"><span class="set-label">Reading pace</span>${choiceCards({ label: 'Reading pace', field: 'data-margin-pref="pace"', current: view.pace, choices: [['fast', 'Fast', `After ${READ_PAUSE.fast / 1000} sec of quiet, longer mid-sentence.`, PACE_DIAGRAMS.fast], ['regular', 'Regular', `After ${READ_PAUSE.regular / 1000} sec of quiet, longer mid-sentence.`, PACE_DIAGRAMS.regular], ['slow', 'Slow', `After ${READ_PAUSE.slow / 1000} sec of quiet, longer mid-sentence.`, PACE_DIAGRAMS.slow]] })}</div>
     <div class="set-row" data-find="felix-gap"><span class="set-label">Time between reads</span>${segmented({ label: 'Time between reads', field: 'data-margin-pref="gap"', current: String(view.gap), choices: (view.gaps || []).map((gap) => [String(gap), marginWait(gap)]) })}</div>
     <div class="set-row" data-find="felix-cap"><span class="set-label">Reads a day</span>${segmented({ label: 'Reads a day', field: 'data-margin-pref="cap"', current: String(view.cap), choices: (view.caps || []).map((cap) => [String(cap), cap ? String(cap) : 'No limit']) })}</div>
     ${view.problem ? `<p class="set-note warn" role="status">${esc(view.problem)}</p>` : ''}</section>`;

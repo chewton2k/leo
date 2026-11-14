@@ -236,6 +236,16 @@ test('a new edit clears a brief status but not a failure', () => {
   assert.equal(h.state.status, '');
 });
 
+test('an edit that stops mid-sentence waits half again as long', () => {
+  const h = harness();
+  h.state.loaded = true;
+  for (const [text, delay] of [['A changed paragraph long enough to read.', 4000], ['A changed paragraph still being', 6000]]) {
+    h.state.s.doc.source = () => text;
+    h.context.marginEdited(h.state.s);
+    assert.equal(h.timers.get(h.state.timer).delay, delay);
+  }
+});
+
 test('a new edit leaves a failure status alone', () => {
   const h = harness();
   h.state.loaded = true;
@@ -260,7 +270,7 @@ test('Reading pace is a row of picture cards that carry the pause and save to th
   const cards = JSON.parse(html.match(/<span class="set-label">Reading pace<\/span>(\{.*?\})<\/div>/)[1]);
   assert.equal(cards.field, 'data-margin-pref="pace"');
   assert.equal(cards.current, 'slow');
-  assert.deepEqual(cards.choices.map(([value, title, about]) => [value, title, about]), [['fast', 'Fast', 'After 2 sec of quiet.'], ['regular', 'Regular', 'After 4 sec of quiet.'], ['slow', 'Slow', 'After 8 sec of quiet.']]);
+  assert.deepEqual(cards.choices.map(([value, title, about]) => [value, title, about]), [['fast', 'Fast', 'After 2 sec of quiet, longer mid-sentence.'], ['regular', 'Regular', 'After 4 sec of quiet, longer mid-sentence.'], ['slow', 'Slow', 'After 8 sec of quiet, longer mid-sentence.']]);
   assert.ok(cards.choices.every((choice) => choice[3].includes('<svg')));
 });
 
