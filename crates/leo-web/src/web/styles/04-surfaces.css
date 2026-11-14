@@ -1,6 +1,6 @@
   .choice-diagram .d-mark { fill: Highlight; }
 }
-.section-title { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); font-weight: 650; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 4px 8px; }
+.section-title { font-variant-numeric: tabular-nums; font-size: var(--fs-sm); font-weight: 650; color: var(--muted); margin: 18px 4px 8px; }
 
 .cards { display: flex; flex-direction: column; gap: 10px; }
 @media (min-width: 1000px) {
@@ -178,7 +178,7 @@
 
 .note-head h1 { text-wrap: balance; position: relative; min-height: 1.25em; font-size: var(--fs-title); font-weight: 650; line-height: 1.25; letter-spacing: -.025em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
 .note-head h1.blank::before { content: attr(data-placeholder); color: var(--faint); position: absolute; left: 0; top: 0; pointer-events: none; }
-.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .note-originals { display: flex; flex-wrap: wrap; gap: 6px; }
 .note-originals:not(:empty) { margin: 0 0 8px; }
 .note-originals .chip { cursor: pointer; }
