@@ -92,12 +92,12 @@
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
 .margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-note[data-open] .margin-toggle { inset: auto -8px -2px auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
+.margin-note[data-open] .margin-toggle { z-index: 3; inset: auto -8px -2px auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
 .margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
 .margin-note[data-open] .margin-toggle svg { display: block; }
 .margin-note[data-open] .margin-toggle:hover svg { color: var(--text); }
 .margin-chat, .margin-pin { display: none; }
-.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 2; bottom: -2px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 3; bottom: -2px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .margin-note[data-open] .margin-pin { right: 48px; }
 .margin-chat:hover, .margin-pin:hover { color: var(--text); }
 .margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
