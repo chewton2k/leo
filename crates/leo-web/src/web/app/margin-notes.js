@@ -1130,7 +1130,12 @@ async function marginStatus(t, status) {
     toast('Dismissed Felix’s note', {
       action: 'Undo',
       run: async () => {
-        await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
+        try {
+          await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status: 'open', gone: marginPage.gone } });
+        } catch (e) {
+          if (e instanceof Locked) throw e;
+          return toast(e.message, { bad: true });
+        }
         if (marginPage.s === s) await marginLoad(s);
       },
     });
@@ -1242,7 +1247,10 @@ function marginBeside(s, picked) {
 
 function marginAsk(s, picked, question = '') {
   const beside = marginBeside(s, picked);
-  if (!beside) return false;
+  if (!beside) {
+    if (marginPage.layer && !chat.isOpen() && [...picked.text].length > MOST_ASKED) marginSetStatus('Long selections go to the chat', true);
+    return false;
+  }
   if (marginPage.thinking.has('draft')) {
     toast('Felix is still answering the last one.');
     return true;
@@ -1437,7 +1445,7 @@ async function marginRead(s) {
   } catch (e) {
     if (e instanceof Locked) throw e;
     if (marginPage.s === s) {
-      const paused = { daily: 'Paused for today: daily limit reached', soon: 'Paused after a recent comment', busy: 'Already reading', felix: 'Paused while Felix answers', unedited: 'Reads changes after you edit', mode: '' };
+      const paused = { daily: 'Paused for today: daily limit reached', soon: 'Felix reads again in a moment', busy: 'Already reading', felix: 'Paused while Felix answers', unedited: 'Reads changes after you edit', mode: '' };
       const stale = e.status === 409 && !e.data?.why;
       if (stale) marginPage.nextRead = 0;
       if (marginPage.mode !== 'along') marginSetStatus('');

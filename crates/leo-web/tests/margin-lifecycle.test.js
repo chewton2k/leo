@@ -152,6 +152,32 @@ test('refused reads keep pending changes and show a safe pause reason', async ()
   }
 });
 
+test('Undo after Dismiss toasts the server reason when it fails', async () => {
+  const h = harness();
+  const toasts = [];
+  h.context.toast = (text, options) => toasts.push([text, options]);
+  const pending = h.context.marginStatus({ id: 't1', quote: 'q' }, 'dismissed');
+  h.settle().resolve({});
+  await pending;
+  assert.equal(toasts[0][0], 'Dismissed Felix’s note');
+  const undo = toasts[0][1].run();
+  h.settle().reject(new Error('Felix’s margin is full. Resolve a note first.'));
+  await undo;
+  assert.equal(toasts[1][0], 'Felix’s margin is full. Resolve a note first.');
+  assert.equal(toasts[1][1].bad, true);
+});
+
+test('an ask over the length limit says it goes to the chat', () => {
+  const h = harness();
+  h.context.chat.isOpen = () => false;
+  h.state.layer = {};
+  assert.equal(h.context.marginAsk(h.state.s, { text: 'x'.repeat(1001), from: 1 }), false);
+  assert.equal(h.state.status, 'Long selections go to the chat');
+  h.state.status = '';
+  assert.equal(h.context.marginAsk(h.state.s, { text: 'x', from: 1 }), false);
+  assert.equal(h.state.status, '');
+});
+
 test('a stale 409 without a reason says the note changed and a retry follows the next edit', async () => {
   const h = harness();
   const pending = h.context.marginRead(h.state.s);
@@ -170,7 +196,7 @@ test('a stale 409 without a reason says the note changed and a retry follows the
 });
 
 test('a refusal with a reason is never mistaken for a stale version', async () => {
-  for (const [status, why, expected] of [[409, 'daily', 'Paused for today: daily limit reached'], [429, 'soon', 'Paused after a recent comment'], [403, 'unedited', 'Reads changes after you edit']]) {
+  for (const [status, why, expected] of [[409, 'daily', 'Paused for today: daily limit reached'], [429, 'soon', 'Felix reads again in a moment'], [403, 'unedited', 'Reads changes after you edit']]) {
     const h = harness();
     const pending = h.context.marginRead(h.state.s);
     await new Promise(setImmediate);
@@ -671,7 +697,7 @@ test('a writer failure shows the server sentence and a Set up writing AI link in
   assert.equal(status.textContent, sentence);
   assert.match(status.html, /<a href="#\/settings\/writing">Set up writing AI<\/a>/);
   status.html = '';
-  h.context.marginSetStatus('Paused after a recent comment');
+  h.context.marginSetStatus('Felix reads again in a moment');
   assert.equal(status.html, '');
 });
 
