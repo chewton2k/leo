@@ -384,7 +384,7 @@ Felix (2026-10-19).
 
 - Storage: `margin_threads`, `margin_modes`, `margin_state`, `margin_personas`,
   `margin_instructions` in leo.db, never note files or git. At most `MOST_OPEN`
-  (24) open threads per note (held inside the INSERT and on reopening) and
+  (24) open threads per note (held inside the INSERT and on reopening; a read-along saves up to 48) and
   `MOST_CLOSED` (48). Replies only while open, never two at once for a thread
   (`MOST_REPLY` 4,000, `MOST_MESSAGES`, the last 8 sent). `/reply` takes `request` (a uuid per
   typed message, kept on retry) and checks `insert::remembered` before the replying guard,
@@ -405,9 +405,9 @@ Felix (2026-10-19).
   `.../margin` adds `resolved: [{id, quote, prefix, suffix}]` (`margin::resolved_on`: status
   resolved, newest first, no messages, never dismissed). The page keeps them in
   `marginPage.resolved` (never in `threads`) and `marginRevisits` draws a dotted underline
-  (`.margin-revisit`, text at 5%) for each it can place: a button on the first line (title
-  "Reopen Felix's note", focusable) and aria-hidden spans on the others, a thin strip so
-  the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
+  (`.margin-revisit`, text at 20%) for each it can place: a button on the first line (title
+  "Reopen Felix's note", focusable) and aria-hidden spans on the others, a 5 px strip below
+  the text line so the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
   `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
 - Fold unless pinned (2026-11-14): `margin_threads.pinned` (guarded `ALTER`,
   db `VERSION` 4, in `margin.json`), PATCH `.../threads/{id}` `{pinned}`. A
@@ -433,8 +433,7 @@ Felix (2026-10-19).
   with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it first
   resolves the oldest open note that is not pinned, not `keep` (the thread open on the
   page, sent as `keep`) and not being replied to (`margin::free_oldest`), listing it
-  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL`
-  before the model is asked, so nothing is spent and the page keeps its baseline.
+  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL` (no Settings problem), before the model is asked or, if the last free note was taken meanwhile, after it (its blocks are forgotten, so nothing is spent and the text is read again). The page never drops the open thread or one with typed text from `resolved`: it POSTs status `open` for it.
   Only Read through still answers 409 `full`.
   Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more
   than `TIDY_TO` (5) notes are open, the least recently updated ones are resolved

@@ -469,6 +469,13 @@ test('a resolved passage reopens', async ({ page }) => {
   await page.keyboard.press('Enter');
   await expect(card).toHaveAttribute('data-open', '');
   await expect(back).toHaveCount(0);
+  await card.getByRole('button', { name: 'Resolve' }).click();
+  await expect(card).toHaveCount(0);
+  await back.focus();
+  await page.keyboard.press('Space');
+  await expect(card).toHaveAttribute('data-open', '');
+  await expect(back).toHaveCount(0);
+  expect(await open()).toBe(1);
   await page.reload();
   await expect(card).toBeVisible();
   await expect(back).toHaveCount(0);
