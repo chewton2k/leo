@@ -613,7 +613,7 @@ test('each column has its own tone dot, cards sit solid, and text stays readable
         expect(dots[i].width, 'the tone dot is 7px').toBe('7px');
         if (i) expect(dots[i].color, `columns ${i - 1} and ${i} have different tone dots`).not.toBe(dots[i - 1].color);
       }
-      expect(await page.locator('.kanban-card').first().evaluate(el => getComputedStyle(el).backgroundColor), 'cards sit solid, off the lane').toMatch(/^rgb\(/);
+      expect(await page.locator('.kanban-card').first().evaluate(el => getComputedStyle(el).backgroundColor), 'cards sit solid, off the lane').not.toBe(row[0].color);
       const checks = await page.evaluate(() => {
         const out = [];
         for (const lane of document.querySelectorAll('.kanban-col')) {

@@ -40,11 +40,11 @@
   .note-outline .outline-ticks span[data-distance="0"] { transform: scaleX(1.8); }
   .note-outline .outline-ticks span[data-distance="1"] { transform: scaleX(1.35); }
   .note-outline .outline-ticks span[data-distance="2"] { transform: scaleX(1.1); }
-  .note-outline .outline-preview { transform-origin: 0 50%; transition: top var(--t-drawer) var(--ease-move); display: block; position: absolute; left: 48px; width: 280px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); pointer-events: none; font-size: var(--fs-sm); line-height: 1.5; color: var(--text); }
+  .note-outline .outline-preview { transform-origin: 0 50%; transition: top var(--t-drawer) var(--ease-move); display: block; position: absolute; left: 48px; width: 280px; padding: 12px; border: 0; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); pointer-events: none; font-size: var(--fs-sm); line-height: 1.5; color: var(--text); }
   @media (prefers-reduced-motion: reduce) { .note-outline .outline-preview { transition: none; } }
   .outline-preview strong { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
   .outline-preview > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; overflow-wrap: anywhere; margin-top: 4px; color: var(--muted); }
-  .note-outline nav { position: absolute; top: 0; left: 40px; width: 280px; max-height: calc(100dvh - var(--outline-center, var(--outline-top, 76px)) - 12px); padding: 6px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); opacity: 0; pointer-events: none; }
+  .note-outline nav { position: absolute; top: 0; left: 40px; width: 280px; max-height: calc(100dvh - var(--outline-center, var(--outline-top, 76px)) - 12px); padding: 6px; border: 0; border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); opacity: 0; pointer-events: none; }
   .note-outline .source-more[open] nav { opacity: 1; pointer-events: auto; }
 }
 :root { --margin-w: 240px; --margin-gap: 24px; --ink-settling: color-mix(in srgb, var(--faint) 60%, #a58a62); }
@@ -100,7 +100,7 @@
 .margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 2; top: -6px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .margin-note[data-open] .margin-pin { right: 48px; }
 .margin-chat:hover, .margin-pin:hover { color: var(--text); }
-.margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); }
+.margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
 .margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-chat svg, .margin-pin svg { width: 15px; height: 15px; }
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }

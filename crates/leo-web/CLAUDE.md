@@ -150,8 +150,8 @@ Decided: one app, window only (2026-10-31).
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). `sheet()` focuses the first control and
   traps Tab. Rename and New folder use `inlineEdit` over the tree row.
-- Empty pages `empty(icon, title, text)`; counts `.badge`; small uppercase
-  labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
+- Empty pages `empty(icon, title, text)`; counts `.badge`; small faint
+  sentence-case labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).

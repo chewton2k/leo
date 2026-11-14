@@ -1613,6 +1613,11 @@ function tasksRows(groups) {
   return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map(tasksRow).join('')}`).join('');
 }
 
+function tasksFocus(host) {
+  const active = host.contains(document.activeElement) ? document.activeElement : null;
+  return active ? {action: active.dataset.action, id: active.dataset.id, on: active.dataset.on} : null;
+}
+
 function refocusTasks(host, focus) {
   if (!focus) return;
   const same = [...host.querySelectorAll('[data-action]')].find(el => el.dataset.action === focus.action && el.dataset.id === focus.id && el.dataset.on === focus.on);
@@ -1623,8 +1628,7 @@ function drawHomeToday(groups) {
   const box = document.getElementById('home-today');
   if (!box) return;
   const due = groups.filter(([name]) => name === 'Overdue' || name === 'Today');
-  const active = box.contains(document.activeElement) ? document.activeElement : null;
-  const focus = active ? {action: active.dataset.action, id: active.dataset.id, on: active.dataset.on} : null;
+  const focus = tasksFocus(box);
   box.hidden = !due.length;
   box.innerHTML = tasksRows(due);
   if (due.length) refocusTasks(box, focus);
@@ -1641,8 +1645,7 @@ function drawTasksWindow() {
   tasksBox.hidden = !open || here || state.view === 'locked';
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
-  const active = tasksBox.contains(document.activeElement) ? document.activeElement : null;
-  const focus = active ? {action: active.dataset.action, id: active.dataset.id, on: active.dataset.on} : null;
+  const focus = tasksFocus(tasksBox);
   const label = late ? `${late[1].length} overdue · ${open} to do` : `${open} to do`;
   tasksBox.setAttribute('aria-label', `Tasks: ${label}`);
   tasksBox.innerHTML = `<div class="tasks-head">

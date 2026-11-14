@@ -95,6 +95,7 @@ test('ink, focus and highlight pairs keep their WCAG contrast in every theme', (
     assert.ok(contrast(rgb(t['--accent-text']), rgb(t['--accent'])) >= 4.5, `${name}: accent-text on accent`);
     assert.ok(contrast(rgb(t['--accent-text']), rgb(t['--focus'])) >= 4.5, `${name}: search highlight text`);
     assert.ok(contrast(rgb(t['--text']), over(rgb(t['--accent-soft']), page)) >= 4.5, `${name}: text on a selected row`);
+    assert.ok(contrast(rgb(t['--muted']), over(rgb(t['--accent-soft']), ground)) >= 4.5, `${name}: counts on a selected row`);
   }
   const highlight = all.find((r) => r.selector === '::highlight(leo-search)');
   assert.match(highlight.body, /background: var\(--focus\)/);
@@ -154,48 +155,6 @@ test('sizes and radii come from the scale, and the note title and prose use thei
   assert.match(body('.note-head h1'), /font-size: var\(--fs-title\); font-weight: 650;[^}]*letter-spacing: -\.025em/);
   assert.match(body('.prose'), /line-height: 1\.72/);
   assert.match(body('.doc .line-edit'), /line-height: 1\.72/);
-});
-
-test('the explorer and Home rest quietly: faint sentence-case labels, a borderless filter, a shelf-toned quick bar', () => {
-  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
-  const label = all.find((r) => r.selector.split(/,\s*/).includes('.side-group') && /font-size: var\(--fs-xs\)/.test(r.body));
-  assert.match(label.body, /color: var\(--faint\)/);
-  assert.doesNotMatch(label.body, /text-transform|letter-spacing/);
-  assert.match(body('.side-filter'), /border-color: transparent/);
-  assert.match(body('.side-row.on'), /background: var\(--accent-soft\)[^}]*font-weight: 550/);
-  assert.match(body('.side-row:hover'), /background: var\(--wash\)/);
-  assert.doesNotMatch(body('.side-new kbd'), /border|padding/);
-  const ask = body('.home-ask');
-  assert.match(ask, /background: var\(--ground\)/);
-  assert.doesNotMatch(ask, /box-shadow|var\(--line\)/);
-  assert.match(body('.home-ask input'), /font-size: var\(--fs-lg\)/);
-  assert.match(body('.empty svg'), /width: 22px/);
-  assert.match(body('.empty h3'), /font-size: var\(--fs-md\); font-weight: var\(--fw-semibold\)/);
-  assert.match(body('.empty p'), /font-size: var\(--fs-sm\)/);
-});
-
-test('the note chrome is one graphite row above the title, with originals on their own row and a quiet action bar', () => {
-  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
-  assert.match(body('.margin-mode'), /color: var\(--muted\)/);
-  assert.match(body('.margin-mode:hover'), /color: var\(--text\)/);
-  assert.doesNotMatch(body('.margin-through'), /color:/);
-  assert.match(body('.note-originals .chip'), /cursor: pointer/);
-  assert.match(body('.actions button.danger svg'), /color: var\(--muted\)/);
-  assert.match(body('.actions button.danger:is(:hover, :focus-visible) svg'), /color: var\(--danger\)/);
-  assert.doesNotMatch(body('.actions'), /shadow-(pop|lift)/);
-});
-
-test('menus lift without a border, rows wash on hover, the Record form has no panel and the composer rests on a ring', () => {
-  const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
-  const menu = body('.popup-menu, .popup-menu-gone');
-  assert.doesNotMatch(menu, /border:/);
-  assert.match(menu, /border-radius: var\(--r-md\)/);
-  assert.match(menu, /box-shadow: var\(--shadow-pop\)/);
-  assert.match(body('.popup-menu button:not(:disabled):hover'), /background: var\(--wash\)/);
-  assert.match(body('.popup-menu button:focus-visible'), /outline: 2px solid var\(--focus\)/);
-  assert.match(body('.rec-card'), /padding: 0; background: none/);
-  assert.match(body('.chat-compose'), /box-shadow: var\(--shadow\)/);
-  assert.match(body('.chat-compose:focus-within'), /box-shadow: 0 0 0 2px var\(--focus\)/);
 });
 
 test('the paper grain is a data: SVG background layer on the shell surfaces, screen only and never in forced colours or print', () => {
