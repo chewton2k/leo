@@ -4670,7 +4670,7 @@ test.describe('beside the note', () => {
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     await page.request.post('/api/tasks', { data: { title: `Panel task ${tag}` } });
     await page.setViewportSize({ width: 1280, height: 1000 });
-    await page.goto('/');
+    await page.goto('/#/settings');
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
     await expect(box).toBeVisible();
@@ -4698,7 +4698,7 @@ test.describe('beside the note', () => {
     await expect(body).toBeVisible();
     await page.evaluate(() => document.activeElement.blur());
     await expect(body, 'moving focus away folds it').toBeHidden();
-    await page.goto('/#/settings');
+    await page.goto('/#/search/panel');
     await expect(box).toBeVisible();
     await expect(body).toBeHidden();
     await page.reload();
@@ -4706,6 +4706,30 @@ test.describe('beside the note', () => {
     await expect(body, 'folded again after a reload').toBeHidden();
     await page.goto('/#/calendar');
     await expect(page.locator('#tasks-window')).toBeHidden();
+  });
+
+  test('home lists today', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
+    const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
+    const today = new Date().toLocaleDateString('en-CA');
+    await page.request.post('/api/tasks', { data: { title: `Home today ${tag}`, date: today } });
+    await page.request.post('/api/tasks', { data: { title: `Home later ${tag}` } });
+    await page.setViewportSize({ width: 1280, height: 1000 });
+    await page.goto('/#/');
+    const list = page.locator('#home-today');
+    const row = list.locator('.tasks-row', { hasText: `Home today ${tag}` });
+    await expect(row).toBeVisible();
+    await expect(list.locator('.tasks-row', { hasText: `Home later ${tag}` }), 'only today and overdue').toHaveCount(0);
+    await expect(page.locator('#tasks-window'), 'the card gives way on Home').toBeHidden();
+    const ask = await page.locator('.home-ask').boundingBox();
+    const at = await list.boundingBox();
+    expect(at.y, 'under the quick bar').toBeGreaterThanOrEqual(ask.y + ask.height);
+    expect(at.x + at.width, 'inside the page').toBeLessThanOrEqual(1280);
+    await row.locator('.sched-check').check();
+    await expect(row, 'a finished task leaves the list').toHaveCount(0);
+    await page.goto('/#/settings');
+    await expect(page.locator('#tasks-window')).toBeVisible();
+    await expect(page.locator('#home-today')).toHaveCount(0);
   });
 
   test('tasks window folds while reading', async ({ page }) => {

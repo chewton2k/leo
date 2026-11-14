@@ -1561,7 +1561,7 @@ function finishTaskInWindow(id, done, on) {
   if (held) clearTimeout(held.timer);
   tasksWin.finished.delete(id);
   const task = calFind(id);
-  const row = tasksBox.querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
+  const row = tasksHost().querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
   if (!done || !task || !row) { drawTasksWindow(); return; }
   if (tasksWin.finished.size >= MOST_TASK_FEEDBACK) {
     const oldest = tasksWin.finished.keys().next().value;
@@ -1571,12 +1571,12 @@ function finishTaskInWindow(id, done, on) {
   const entry = { task: { ...task, done: true, date: on || task.date, on }, timer: 0 };
   tasksWin.finished.set(id, entry);
   drawTasksWindow();
-  const check = tasksBox.querySelector(`.sched-check[data-id="${CSS.escape(id)}"]`);
+  const check = tasksHost().querySelector(`.sched-check[data-id="${CSS.escape(id)}"]`);
   pulse(check, { lift: 1.18 });
   entry.timer = setTimeout(() => {
     if (tasksWin.finished.get(id) !== entry) return;
     tasksWin.finished.delete(id);
-    const row = tasksBox.querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
+    const row = tasksHost().querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
     if (row) {
       const height = row.getBoundingClientRect().height;
       row.style.minHeight = '0';
@@ -1598,34 +1598,60 @@ function tasksDueBadge() {
   return `<span class="due-badge${late ? ' late' : ''}" aria-label="${esc(late ? `${due} due, ${late} overdue` : `${due} due today`)}">${due} due</span>`;
 }
 
+const tasksAtHome = () => state.view === 'workspace' && /^(?:#\/?)?$/.test(location.hash);
+const tasksHost = () => (tasksAtHome() && document.getElementById('home-today')) || tasksBox;
+
+function tasksRow(t) {
+  return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
+    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ' checked' : ''} aria-label="Done: ${esc(t.title)}">
+    <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
+    ${t.date ? `<span class="tasks-when">${esc(t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+  </div>`;
+}
+
+function tasksRows(groups) {
+  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map(tasksRow).join('')}`).join('');
+}
+
+function refocusTasks(host, focus) {
+  if (!focus) return;
+  const same = [...host.querySelectorAll('[data-action]')].find(el => el.dataset.action === focus.action && el.dataset.id === focus.id && el.dataset.on === focus.on);
+  (same || host).focus({ preventScroll: true });
+}
+
+function drawHomeToday(groups) {
+  const box = document.getElementById('home-today');
+  if (!box) return;
+  const due = groups.filter(([name]) => name === 'Overdue' || name === 'Today');
+  const active = box.contains(document.activeElement) ? document.activeElement : null;
+  const focus = active ? {action: active.dataset.action, id: active.dataset.id, on: active.dataset.on} : null;
+  box.hidden = !due.length;
+  box.innerHTML = tasksRows(due);
+  if (due.length) refocusTasks(box, focus);
+}
+
 function drawTasksWindow() {
   const tasks = tasksWin.tasks || (cal.data && cal.data.tasks) || [];
   const groups = tasksGroups(tasks, true);
   const open = groups.reduce((n, [, list]) => n + list.length, 0);
-  // Calendar lists these tasks itself, and on Boards the panel would cover the columns.
-  const here = /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
+  const home = tasksAtHome();
+  if (home) drawHomeToday(groups);
+  // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
+  const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
   tasksBox.hidden = !open || here || state.view === 'locked';
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
   const active = tasksBox.contains(document.activeElement) ? document.activeElement : null;
   const focus = active ? {action: active.dataset.action, id: active.dataset.id, on: active.dataset.on} : null;
-  const row = (t) => `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
-    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ' checked' : ''} aria-label="Done: ${esc(t.title)}">
-    <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when">${esc(t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
-  </div>`;
   const label = late ? `${late[1].length} overdue · ${open} to do` : `${open} to do`;
   tasksBox.setAttribute('aria-label', `Tasks: ${label}`);
   tasksBox.innerHTML = `<div class="tasks-head">
       <div class="tasks-toggle"><span class="tasks-icon${late ? ' late' : ''}">${ICON.check}</span><span class="tasks-badge${late ? ' late' : ''}">${open > 99 ? '99+' : open}</span><span class="grow">Tasks <span class="tasks-count">${esc(label)}</span></span></div>
       <button type="button" class="icon-btn tasks-new" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button>
     </div>
-    <div class="tasks-body">${groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map(row).join('')}`).join('')}</div>
+    <div class="tasks-body">${tasksRows(groups)}</div>
     <div class="tasks-foot"><button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
-  if (focus) {
-    const same = [...tasksBox.querySelectorAll('[data-action]')].find(el => el.dataset.action === focus.action && el.dataset.id === focus.id && el.dataset.on === focus.on);
-    (same || tasksBox).focus({ preventScroll: true });
-  }
+  refocusTasks(tasksBox, focus);
   fitTasksWindow();
 }
 

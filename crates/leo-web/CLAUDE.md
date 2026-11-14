@@ -540,7 +540,8 @@ is hidden or the capture activity gate is busy.
 - The Tasks card in `#dock` is folded to a badge at every start and opens only
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
-  not take focus).
+  not take focus). Home draws today's and overdue
+  tasks inline under the quick bar (`#home-today`, the same rows) and hides the card.
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
   copy is kept).
 
