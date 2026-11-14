@@ -812,7 +812,7 @@ test('R11/R13 the explorer has no Collapse all and the rail has no Felix, while 
     }
     await settle(page);
     await still(page, `r11-explorer-${width}-${scheme}`);
-    if (width < 1000) await page.locator('#folders-sheet [data-action="close"]').click();
+    if (width < 600) await page.locator('#folders-sheet [data-action="close"]').click();
     const toggle = page.locator('#chat-toggle');
     await expect(toggle, `toolbar chat access at ${width}`).toBeVisible();
     await toggle.click();
