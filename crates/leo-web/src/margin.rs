@@ -20,6 +20,7 @@ pub const MOST_ASKED: usize = 1_000;
 pub const MOST_MESSAGES: usize = 24;
 pub const MOST_OPEN: usize = 24;
 pub const MOST_CLOSED: usize = 48;
+pub const TIDY_TO: usize = 5;
 pub const SWEEP_AFTER_DAYS: i64 = 7;
 pub const MOST_BLOCKS: usize = 6;
 pub const MOST_BLOCK_CHARS: usize = 4_000;
@@ -350,6 +351,33 @@ pub fn free_oldest(
 ) -> Option<Thread> {
     let open = open_on(chats, note);
     resolve_one(chats, reads, open.iter().filter(|t| evictable(t, keep)))
+}
+
+pub fn resolve_untouched(
+    chats: &Path,
+    reads: &Arc<Reads>,
+    note: &str,
+    keep: Option<&str>,
+    fresh: &str,
+) -> Vec<String> {
+    let open = open_on(chats, note);
+    let mut untouched: Vec<&Thread> = open
+        .iter()
+        .filter(|t| {
+            t.source == "read"
+                && t.id != fresh
+                && evictable(t, keep)
+                && t.messages.iter().all(|m| m.from == "felix")
+        })
+        .collect();
+    untouched.sort_by_key(|t| t.updated_at);
+    let excess = open.len().saturating_sub(TIDY_TO);
+    untouched
+        .into_iter()
+        .filter_map(|t| resolve_one(chats, reads, std::iter::once(t)))
+        .take(excess)
+        .map(|t| t.id)
+        .collect()
 }
 
 pub fn save_messages(chats: &Path, thread: &Thread) -> bool {

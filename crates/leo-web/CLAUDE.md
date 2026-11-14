@@ -423,6 +423,13 @@ Felix (2026-10-19).
   in `resolved`; with none free it answers `{failed: true}` with `margin::FULL`
   before the model is asked, so nothing is spent and the page keeps its baseline.
   Only Read through still answers 409 `full`.
+  Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more
+  than `TIDY_TO` (5) notes are open, the least recently updated ones are resolved
+  (`margin::resolve_untouched`) if they have `source` `read` (not asks, chat-made or
+  Read through notes, which are saved as `through`), no message from you, are not pinned,
+  `keep`, being replied to or the note just saved; their ids join `resolved` and the page
+  removes them with no toast. A note reopened from its underline has a fresh
+  `updated_at`, so it is the last to go.
   Silence (`{}`/empty) is success; malformed JSON or prose is a failure
   (`{failed: true}`). ≤8,000 characters in, `READ_TOKENS` (220) out, bounded
   when parsed (CLIs ignore `max_tokens`). Gaps `READ_GAPS` (default 90 s);

@@ -90,6 +90,7 @@ test('a read that frees notes removes them and tells the server which thread is 
   const bodies = [];
   const real = h.context.api;
   h.context.api = (path, init) => { bodies.push(init.body); return real(path, init); };
+  h.context.toast = () => { throw new Error('a tidied note gets no toast'); };
   Object.assign(h.state, { threads: [{ id: 'old', quote: 'a' }, { id: 'open', quote: 'b' }], open: 'open' });
   const pending = h.context.marginRead(h.state.s);
   await new Promise(setImmediate);

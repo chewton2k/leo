@@ -632,7 +632,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         };
         let thread = margin::new_thread(
             &id,
-            "read",
+            if through { "through" } else { "read" },
             place,
             &quote,
             vec![margin::felix_says(&found.text)],
@@ -659,6 +659,15 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             break;
         }
         quotes.push(quote);
+        if !through {
+            let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
+            let (keep, fresh) = (body.keep.clone(), thread.id.clone());
+            let tidied = blocking(move || {
+                margin::resolve_untouched(&held, &reads, &noted, keep.as_deref(), &fresh)
+            })
+            .await;
+            resolved.extend(tidied.unwrap_or_default());
+        }
         saved.push(thread);
     }
     if saved.is_empty() {

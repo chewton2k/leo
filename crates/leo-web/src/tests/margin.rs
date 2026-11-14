@@ -1638,7 +1638,7 @@ async fn reading_through_works_in_ask_mode_on_a_note_never_edited() {
     assert_eq!(status, 200);
     let notes = reply["notes"].as_array().unwrap();
     assert_eq!(notes.len(), 1);
-    assert_eq!(notes[0]["source"], "read");
+    assert_eq!(notes[0]["source"], "through");
     assert_eq!(notes[0]["quote"], "just checks if it matches");
     assert_eq!(notes[0]["prefix"], "then login ");
     assert_eq!(notes[0]["suffix"], "");
@@ -2070,6 +2070,110 @@ async fn a_read_along_with_nothing_free_to_resolve_says_so_and_costs_nothing() {
         margin::open_on(&engine.chats(), &id).len(),
         2 * margin::MOST_OPEN
     );
+    engine.stop().await;
+}
+
+fn seeded(engine: &Engine, id: &str, source: &str, said: bool, quote: &str) -> String {
+    let mut messages = vec![margin::felix_says("Hm.")];
+    if said {
+        messages.push(margin::you_say("Why?"));
+    }
+    let thread = margin::new_thread(
+        id,
+        source,
+        margin::Place {
+            prefix: String::new(),
+            suffix: String::new(),
+        },
+        quote,
+        messages,
+    );
+    assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
+    thread.id
+}
+
+#[tokio::test]
+async fn a_saved_read_along_note_quietly_resolves_the_least_recently_updated_untouched_ones() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Tidy", PASSAGE).await;
+    let replied: Vec<String> = (0..3)
+        .map(|n| seeded(&engine, &id, "read", true, &format!("replied {n}")))
+        .collect();
+    let untouched: Vec<String> = (0..4)
+        .map(|n| seeded(&engine, &id, "read", false, &format!("untouched {n}")))
+        .collect();
+    let (status, read) = engine.read(&id, &version, &[PASSAGE]).await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!(untouched[..3]));
+    let open: Vec<String> = margin::open_on(&engine.chats(), &id)
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    assert_eq!(open.len(), margin::TIDY_TO);
+    for kept in replied.iter().chain([
+        &untouched[3],
+        &read["note"]["id"].as_str().unwrap().to_string(),
+    ]) {
+        assert!(open.contains(kept));
+    }
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn the_tidy_never_takes_what_you_started_wrote_in_pinned_kept_or_are_answering() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Careful", PASSAGE).await;
+    seeded(&engine, &id, "ask", false, "asked");
+    seeded(&engine, &id, "chat", false, "chatted");
+    seeded(&engine, &id, "through", false, "through");
+    let pinned = seeded(&engine, &id, "read", false, "pinned");
+    margin::set_pinned(&engine.chats(), &id, &pinned, true);
+    let kept = seeded(&engine, &id, "read", false, "kept");
+    let answering = seeded(&engine, &id, "read", false, "answering");
+    let held = engine.running.state.margin.replying(&answering);
+    let free = seeded(&engine, &id, "read", false, "free");
+    let (status, read) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": kept }),
+        )
+        .await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!([free]));
+    assert_eq!(margin::open_on(&engine.chats(), &id).len(), 7);
+    drop(held);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_note_reopened_from_its_underline_is_the_last_to_be_tidied() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Reopened", PASSAGE).await;
+    for n in 0..3 {
+        seeded(&engine, &id, "read", true, &format!("replied {n}"));
+    }
+    let untouched: Vec<String> = (0..4)
+        .map(|n| seeded(&engine, &id, "read", false, &format!("untouched {n}")))
+        .collect();
+    let chats = engine.chats();
+    margin::set_status(&chats, &id, &untouched[0], "resolved", margin::MOST_OPEN);
+    margin::set_status(&chats, &id, &untouched[0], "open", margin::MOST_OPEN);
+    let (_, read) = engine.read(&id, &version, &[PASSAGE]).await;
+    assert_eq!(read["resolved"], serde_json::json!(untouched[1..]));
+    assert_eq!(
+        margin::one(&chats, &id, &untouched[0]).unwrap().status,
+        "open"
+    );
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn read_through_notes_are_stored_as_through_and_never_tidied() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.plain(PASSAGE).await;
+    let (_, reply) = engine.analyze(&id, &version, &[PASSAGE], None).await;
+    assert_eq!(reply["notes"][0]["source"], "through");
+    assert!(reply.get("resolved").is_none());
     engine.stop().await;
 }
 
