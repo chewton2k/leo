@@ -102,12 +102,12 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-item.task .cal-title { text-indent: 20px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .cal-col { container: calcol / inline-size; }
 @container calcol (max-width: 140px) { .cal-item.task .cal-title { text-indent: 0; padding-top: 18px; } }
-.cal-col .cal-item.task.inline { align-items: center; padding: 2px 8px; }
+.cal-col .cal-item.task.inline { align-items: center; padding: 2px 8px 2px 28px; }
 .cal-col .cal-item.task.inline .cal-check { top: 50%; translate: 0 -50%; }
 .cal-col .cal-item.task.inline .cal-open { flex-direction: row; align-items: baseline; gap: 6px; }
-.cal-col .cal-item.task.inline .cal-title { flex: 0 1 auto; min-width: 0; padding-top: 0; -webkit-line-clamp: 1; }
+.cal-col .cal-item.task.inline .cal-title { flex: 0 1 auto; min-width: 3em; padding-top: 0; text-indent: 0; -webkit-line-clamp: 1; }
 .cal-col .cal-item.task.inline .cal-title:not(:last-child)::after { content: ","; }
-.cal-col .cal-item.task.inline .cal-sub { flex: none; white-space: nowrap; }
+.cal-col .cal-item.task.inline .cal-sub { flex: 0 4 auto; min-width: 3ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-cell .cal-item.task { min-height: 64px; align-items: flex-start; padding: 5px 8px; }
 .cal-cell .cal-item.task .cal-open { flex-direction: column; align-items: flex-start; gap: 2px; }
 .cal-item.peeked { outline: 2px solid var(--accent); outline-offset: -1px; }
