@@ -588,7 +588,7 @@ function calLift() {
     const ghost = document.createElement('div');
     ghost.className = 'cal-ghost';
     ghost.setAttribute('aria-hidden', 'true');
-    ghost.style.setProperty('--tone', getComputedStyle(d.source).getPropertyValue('--tone') || 'var(--accent)');
+    ghost.style.setProperty('--tone', getComputedStyle(d.source).getPropertyValue('--tone') || 'var(--hue-slate)');
     ghost.textContent = d.task.title || 'Untitled';
     document.body.appendChild(ghost);
     d.ghost = ghost;

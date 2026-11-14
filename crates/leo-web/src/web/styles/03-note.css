@@ -31,7 +31,7 @@
   .note-outline .source-more > summary { width: 36px; justify-content: flex-start; padding: 8px 0 8px 8px; }
   .note-outline .source-more > summary > svg { display: none; }
   .note-outline .outline-ticks { display: flex; flex-direction: column; width: 100%; height: min(calc(var(--outline-count) * 12px), calc(100dvh - var(--outline-top, 76px) - 160px)); min-height: 12px; padding: 0 0 0 8px; border: 0; background: transparent; cursor: pointer; }
-  .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-xs); }
+  .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
   .note-outline .outline-ticks span { position: relative; flex: 1; min-height: 0; display: block; width: 100%; transition: transform var(--t-drawer) var(--ease-arrive); transform-origin: left center; }
   .note-outline .outline-ticks span::after { content: ''; position: absolute; left: 0; top: calc(50% - 1px); width: 8px; height: 2px; border-radius: 1px; background: var(--faint); }
   .note-outline .outline-ticks span[data-level="1"]::after { width: 18px; }
@@ -90,7 +90,7 @@
 @media (prefers-reduced-motion: no-preference) { .margin-drop { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
-.margin-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-note[data-open] .margin-toggle { inset: -6px -8px auto auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
 .margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
 .margin-note[data-open] .margin-toggle svg { display: block; }
@@ -101,7 +101,7 @@
 .margin-note[data-open] .margin-pin { right: 48px; }
 .margin-chat:hover, .margin-pin:hover { color: var(--text); }
 .margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); }
-.margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-chat svg, .margin-pin svg { width: 15px; height: 15px; }
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }
 .margin-note[data-open] { z-index: 2; }
@@ -131,7 +131,7 @@
 .margin-send { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--accent); display: grid; place-items: center; cursor: pointer; }
 .margin-send:disabled { color: var(--faint); opacity: .6; cursor: default; }
 .margin-send svg { width: 16px; height: 16px; }
-.margin-reply textarea:focus-visible { outline: none; box-shadow: 0 1px 0 var(--accent); border-radius: 0; }
+.margin-reply textarea:focus-visible { outline: none; box-shadow: 0 1px 0 var(--focus); border-radius: 0; }
 .margin-note .diagram-art svg, .viewer-diagram.from-margin .diagram-art svg { background: transparent !important; }
 .margin-note .diagram-art svg text, .margin-note .diagram-art .nodeLabel, .viewer-diagram.from-margin .diagram-art svg text, .viewer-diagram.from-margin .diagram-art .nodeLabel, .msg.leo > .prose .diagram-art svg text, .msg.leo > .prose .diagram-art .nodeLabel, .viewer-diagram.from-chat .diagram-art svg text, .viewer-diagram.from-chat .diagram-art .nodeLabel { font-family: "Iowan Old Style", "New York", Georgia, serif !important; }
 .margin-note .diagram-art .node rect, .margin-note .diagram-art .node circle, .margin-note .diagram-art .node polygon, .viewer-diagram.from-margin .diagram-art .node rect, .viewer-diagram.from-margin .diagram-art .node circle, .viewer-diagram.from-margin .diagram-art .node polygon { fill: transparent !important; stroke: var(--muted) !important; stroke-width: 2px !important; stroke-linejoin: round; }
@@ -146,7 +146,7 @@ figure.drawing.inked img { filter: none !important; }
 .drawing-steps button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .drawing-steps button:hover:not(:disabled) { background: var(--tint); color: var(--text); }
 .drawing-steps button:disabled { opacity: .4; cursor: default; }
-.drawing-steps button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.drawing-steps button:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .drawing-count { font-variant-numeric: tabular-nums; }
 .drawing-caption { flex-basis: 100%; line-height: 1.4; }
 .margin-note .drawing img, .viewer-diagram.from-margin img, .viewer-diagram .drawing-row img, .msg.leo > .prose .drawing-row img { filter: grayscale(1); }
@@ -172,7 +172,7 @@ figure.drawing.inked img { filter: none !important; }
 .margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 10px; }
 .margin-add { font-size: 12.5px; font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
-.margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0 6px 0 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center end; cursor: pointer; }
 .margin-anchor { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--page); transition: transform .14s ease-out; }
 .margin-mark[data-active] .margin-anchor { transform: scale(1.35); }
@@ -193,7 +193,7 @@ figure.drawing.inked img { filter: none !important; }
 .margin-mode-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: min(260px, calc(100vw - 32px)); }
 .margin-mode-menu button { border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--fs-sm); cursor: pointer; display: block; width: 100%; padding: 8px 10px; color: var(--text); text-align: left; }
 .margin-mode-menu button[aria-checked="true"], .margin-mode-menu button:hover { background: var(--tint); }
-.margin-mode-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.margin-mode-menu button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .margin-mode-menu small { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.35; color: var(--muted); }
 .margin-persona-menu button { display: flex; align-items: center; gap: 10px; padding: 7px 10px 7px 7px; }
 .margin-persona-menu hr { margin: 4px 6px; border: 0; border-top: 1px solid var(--line); }
@@ -214,14 +214,14 @@ figure.drawing.inked img { filter: none !important; }
 .persona-edit svg { width: 13px; height: 13px; }
 .persona-slot:hover .persona-edit, .persona-edit:focus-visible { opacity: 1; }
 .persona-edit:hover { color: var(--text); background: var(--tint); }
-.persona-edit:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.persona-edit:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 @media (hover: none) { .persona-edit { opacity: 1; } }
 .persona-tile > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
 .persona-tile .persona-icon { width: 24px; height: 24px; background: none; color: inherit; }
 .persona-tile .persona-icon svg { width: 20px; height: 20px; }
 .persona-tile:has(> input:checked) { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 40%, transparent); color: var(--accent); }
 .persona-tile:hover:not(:has(> input:checked)) { color: var(--text); }
-.persona-tile:has(> input:focus-visible), button.persona-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.persona-tile:has(> input:focus-visible), button.persona-tile:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .persona-tile.add { background: none; border: 1px dashed var(--line); }
 .persona-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin-top: 12px; font-size: var(--fs-sm); color: var(--muted); }
 .persona-details { margin: 8px 0 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--page); font-size: var(--fs-sm); line-height: 1.5; color: var(--text); white-space: pre-wrap; }

@@ -56,7 +56,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 @media (min-width: 900px) { .chat-history-back { display: none; } }
 .chat-history-find { padding: 0 10px 8px 12px; }
 .chat-history-find input { width: 100%; font: inherit; font-size: 13.5px; color: var(--text); background: var(--tint); border: 1px solid transparent; border-radius: var(--r-md); padding: 8px 10px; }
-.chat-history-find input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.chat-history-find input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 .chat-history-list { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px calc(var(--bottom) + 12px); }
 .chat-history-group { padding: 14px 8px 4px; }
 .chat-history-row { display: flex; align-items: center; border-radius: 9px; }
@@ -69,7 +69,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .chat-history-x { flex: none; display: grid; place-items: center; width: 30px; height: 28px; margin-right: 4px; padding: 0; overflow: hidden; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; border-radius: 7px; opacity: 0; transition: width var(--t-follow) var(--ease-arrive), background-color .14s ease-out, color .14s ease-out, opacity var(--t-press) var(--ease-arrive); }
 .chat-delete-x, .chat-delete-label { grid-area: 1 / 1; white-space: nowrap; transition: opacity .14s ease-out; }
 .chat-delete-label { opacity: 0; font-size: var(--fs-xs); font-weight: 650; }
-.chat-history-x:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-history-x:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .chat-history-row:hover .chat-history-x, .chat-history-row.on .chat-history-x, .chat-history-x.sure, .chat-history-x:focus-visible { opacity: 1; }
 .chat-history-x.sure { width: 60px; background: var(--danger); color: var(--accent-text); }
 .chat-history-x.sure .chat-delete-x { opacity: 0; }
@@ -143,7 +143,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .quiz-row.column { flex-direction: column; align-items: stretch; }
 .quiz-row.column .btn { align-self: flex-end; }
 .quiz-input { flex: 1; min-width: 0; font: inherit; font-size: 14.5px; color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 11px; resize: vertical; }
-.quiz-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.quiz-input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 .quiz-card { transition: border-color var(--t-open), box-shadow var(--t-open), opacity var(--t-open); }
 .quiz-card.marking { opacity: .78; }
 .quiz-card.right { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); }
@@ -204,6 +204,6 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .chat-pick-row span { flex: none; max-width: 45%; margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
 .chat-pick-row.on, .chat-pick-row:hover { background: var(--tint); }
 .chat-pick-none { padding: 7px 10px; font-size: 13.5px; color: var(--muted); }
-.link-btn { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.link-btn { border: 0; background: none; padding: 0; font: inherit; color: var(--accent); text-decoration: underline; cursor: pointer; }
 html:has(> body.on-boards) { scrollbar-gutter: auto; }
 body.on-boards main { max-width: none; padding: 0 20px calc(var(--bottom) + 20px); }

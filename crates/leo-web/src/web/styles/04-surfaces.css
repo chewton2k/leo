@@ -18,7 +18,7 @@
   box-shadow: var(--shadow);
 }
 @media (hover: hover) { .card:hover { background: color-mix(in srgb, var(--text) 3%, var(--raised)); } }
-.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .card-title { font-weight: 650; font-size: 16.5px; display: flex; align-items: center; gap: 4px; }
 .card-title > span { min-width: 0; overflow-wrap: anywhere; text-wrap: balance; }
 .pin-toggle {
@@ -86,9 +86,9 @@
 .file-card.tone-slides { --tone: var(--tone-slides); }
 .file-card.tone-sheet { --tone: var(--tone-sheet); }
 .file-card.tone-image { --tone: var(--tone-image); }
-.file-card.tone-note { --tone: var(--accent); }
+.file-card.tone-note { --tone: var(--hue-indigo); }
 .file-open { display: flex; flex-direction: inherit; align-items: inherit; flex: 1; min-width: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: inherit; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.file-open:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.file-open:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .file-peek { position: relative; flex: 1; min-height: 0; overflow: hidden; display: grid; place-items: center; background: color-mix(in srgb, var(--tone) 8%, var(--surface-2)); }
 .file-peek img { width: 100%; height: 100%; object-fit: cover; }
 .file-page {
@@ -214,7 +214,7 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 .prose .task input:checked { background: var(--accent); border-color: var(--accent); }
 .prose .task input::after { content: ''; position: absolute; inset: 0; background: var(--accent-text); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.4l3.2 3.2L15 6.6' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M5 10.4l3.2 3.2L15 6.6' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 100% 100% no-repeat; clip-path: inset(0 100% 0 0); transition: clip-path var(--t-follow) var(--ease-arrive); }
 .prose .task input:checked::after { clip-path: inset(0); }
-.prose .task input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.prose .task input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .prose .task input::after { transition: none; } }
 @media (forced-colors: active) { .prose .task input { appearance: auto; -webkit-appearance: auto; } .prose .task input::after { display: none; } }
 .prose .task > span { text-decoration: line-through 1px transparent; transition: text-decoration-color var(--t-follow) var(--ease-arrive), color var(--t-press); }

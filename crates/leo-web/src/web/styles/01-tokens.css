@@ -1,4 +1,4 @@
-::highlight(leo-search) { background: var(--accent); color: var(--accent-text); }
+::highlight(leo-search) { background: var(--focus); color: var(--accent-text); }
 :root {
   --bg: #f6f5f1;
   --surface: #faf9f6;
@@ -10,10 +10,13 @@
   --fam-openai-1: #0d8a6a; --fam-openai-2: #0a5a46; --fam-openai-3: #3c7d22;
   --fam-claude-1: #c4613f; --fam-claude-2: #8a3a1c; --fam-claude-3: #b0485f;
   --fam-local-1: #66707f; --fam-local-2: #2c323c; --fam-local-3: #4e6a9e;
-  --line: #e3e1db;
-  --accent: #4f46e5;
-  --accent-soft: #eceafd;
-  --accent-text: #ffffff;
+  --line: #e9e7e2;
+  --accent: #1c1c1a;
+  --accent-soft: rgba(28, 28, 26, .09);
+  --accent-text: #faf9f6;
+  --wash: rgba(28, 28, 26, .05);
+  --focus: #4f46e5;
+  --scrim: rgba(28, 28, 26, .22);
   --danger: #bd2e27;
   --good: #187040;
   --mark: #fff1a8;
@@ -36,10 +39,10 @@
   --t-drawer: 240ms;
   --t-follow-out: calc(var(--t-follow) * .8);
   --t-open-out: calc(var(--t-open) * .8);
-  --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .06);
+  --shadow: 0 0 0 1px rgba(28, 28, 26, .08);
   --radius: 14px;
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .08);
-  --shadow-pop: 0 1px 2px rgba(0, 0, 0, .06), 0 8px 28px rgba(0, 0, 0, .14);
+  --shadow-sm: 0 0 0 1px rgba(28, 28, 26, .08);
+  --shadow-pop: 0 0 0 1px rgba(28, 28, 26, .08), 0 1px 1px rgba(28, 28, 26, .04), 0 10px 28px -12px rgba(28, 28, 26, .3);
   --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .22), 0 2px 6px rgba(0, 0, 0, .08);
   --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 26px;
   --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
@@ -68,10 +71,13 @@
     --fam-openai-1: #10a37f; --fam-openai-2: #9be3b0; --fam-openai-3: #3fd0d6;
     --fam-claude-1: #d97757; --fam-claude-2: #f6c08f; --fam-claude-3: #e48aa0;
     --fam-local-1: #8b95a5; --fam-local-2: #d3d9e2; --fam-local-3: #7fa2d6;
-    --line: #2e2e2c;
-    --accent: #8b85ff;
-    --accent-soft: #29274a;
-    --accent-text: #0f0e1f;
+    --line: #2b2b29;
+    --accent: #ecebe7;
+    --accent-soft: rgba(236, 235, 231, .11);
+    --accent-text: #1a1a19;
+    --wash: rgba(236, 235, 231, .06);
+    --focus: #8b85ff;
+    --scrim: rgba(0, 0, 0, .55);
     --danger: #ff6b61;
     --good: #4cc47e;
     --mark: #5c4d0a;
@@ -80,8 +86,8 @@
     --page: #1a1a19;
     --raised: #262625;
     --tint: #222221;
-    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .35);
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-pop: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 32px rgba(0, 0, 0, .5); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
+    --shadow: 0 0 0 1px rgba(236, 235, 231, .09);
+    --shadow-sm: 0 0 0 1px rgba(236, 235, 231, .09); --shadow-pop: 0 0 0 1px rgba(236, 235, 231, .1), 0 12px 32px -12px rgba(0, 0, 0, .7); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
     --tone-pdf: #ff7a72;
     --tone-doc: #79abff;
     --tone-slides: #ff9b52;
@@ -103,10 +109,13 @@
   --fam-openai-1: #10a37f; --fam-openai-2: #9be3b0; --fam-openai-3: #3fd0d6;
   --fam-claude-1: #d97757; --fam-claude-2: #f6c08f; --fam-claude-3: #e48aa0;
   --fam-local-1: #8b95a5; --fam-local-2: #d3d9e2; --fam-local-3: #7fa2d6;
-  --line: #2e2e2c;
-  --accent: #8b85ff;
-  --accent-soft: #29274a;
-  --accent-text: #0f0e1f;
+  --line: #2b2b29;
+  --accent: #ecebe7;
+  --accent-soft: rgba(236, 235, 231, .11);
+  --accent-text: #1a1a19;
+  --wash: rgba(236, 235, 231, .06);
+  --focus: #8b85ff;
+  --scrim: rgba(0, 0, 0, .55);
   --danger: #ff6b61;
   --good: #4cc47e;
   --mark: #5c4d0a;
@@ -115,8 +124,8 @@
   --page: #1a1a19;
   --raised: #262625;
   --tint: #222221;
-  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 6px 20px rgba(0, 0, 0, .35);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, .4); --shadow-pop: 0 1px 2px rgba(0, 0, 0, .4), 0 10px 32px rgba(0, 0, 0, .5); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
+  --shadow: 0 0 0 1px rgba(236, 235, 231, .09);
+  --shadow-sm: 0 0 0 1px rgba(236, 235, 231, .09); --shadow-pop: 0 0 0 1px rgba(236, 235, 231, .1), 0 12px 32px -12px rgba(0, 0, 0, .7); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
   --tone-pdf: #ff7a72;
   --tone-doc: #79abff;
   --tone-slides: #ff9b52;

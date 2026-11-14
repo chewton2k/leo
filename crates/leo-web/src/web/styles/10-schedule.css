@@ -8,7 +8,7 @@
 .sched-day.on .sched-n { background: var(--accent); color: var(--accent-text); }
 .sched-day.on.today .sched-n { box-shadow: 0 0 0 2px var(--surface), 0 0 0 3.5px var(--accent); }
 .sched-day:focus-visible { outline: none; }
-.sched-day:focus-visible .sched-n { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sched-day:focus-visible .sched-n { outline: 2px solid var(--focus); outline-offset: 2px; }
 .sched-check { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--tone, var(--accent)); cursor: pointer; }
 .sched-preview { padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); }
 .sched-preview p { margin: 2px 0 10px; }
@@ -27,7 +27,7 @@
 .repeat-day { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
 .repeat-day:hover { border-color: var(--accent); }
 .repeat-day.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
-.repeat-day:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.repeat-day:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .pick-month { display: flex; align-items: center; justify-content: space-between; margin: 12px 0 4px; font-weight: 600; font-size: var(--fs-base); }
 .sched-grid.small .sched-day { height: 36px; padding-top: 2px; }
 .sched-grid.small .sched-n { width: 28px; height: 28px; font-size: var(--fs-sm); }
@@ -125,7 +125,7 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-slot { position: absolute; left: 2px; right: 3px; z-index: 30; padding: 3px 7px; border: 1.5px dashed var(--accent); border-radius: 7px; background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: 11px; font-weight: 600; pointer-events: none; font-variant-numeric: tabular-nums; }
 .cal-ghost { position: fixed; left: 0; top: 0; z-index: 90; scale: 1.02; max-width: 220px; padding: 5px 9px; border-radius: var(--r-tile); background: var(--surface); box-shadow: inset 3px 0 0 var(--tone), var(--shadow-lift); font-size: var(--fs-xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
-.cal-compose { position: absolute; left: 2px; right: 3px; z-index: 40; display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 4px 7px; border-radius: 7px; background: var(--surface); box-shadow: 0 0 0 2px var(--accent), 0 6px 18px -6px rgba(0, 0, 0, .25); }
+.cal-compose { position: absolute; left: 2px; right: 3px; z-index: 40; display: flex; flex-direction: column; gap: 2px; margin: 0; padding: 4px 7px; border-radius: 7px; background: var(--surface); box-shadow: 0 0 0 2px var(--focus), 0 6px 18px -6px rgba(0, 0, 0, .25); }
 .cal-compose.all-day { position: relative; left: auto; right: auto; margin: 2px 3px; }
 .cal-allday-cell .cal-compose.all-day { position: absolute; inset: 4px 3px auto; margin: 0; }
 .cal-compose-input { width: 100%; min-width: 0; padding: 0; border: 0; outline: 0; background: none; font: inherit; font-size: var(--fs-xs); font-weight: 600; }
@@ -179,7 +179,7 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-peek-bar .grow { flex: 1; text-align: right; padding-right: 4px; }
 .cal-peek-where { display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
 .cal-peek-where span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cal-dot { flex: none; width: 9px; height: 9px; border-radius: 3px; background: var(--tone, var(--accent)); }
+.cal-dot { flex: none; width: 9px; height: 9px; border-radius: 3px; background: var(--tone, var(--hue-indigo)); }
 .cal-peek-title { margin: 0 0 0 -9px; font-size: var(--fs-xl); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .cal-peek-done { justify-content: space-between; cursor: pointer; }
@@ -190,7 +190,7 @@ h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .cal-peek-times input[type="time"] { flex: 1 1 0; }
 .cal-peek-times .set-input { width: auto; min-width: 0; padding: 6px 8px; font-size: var(--fs-sm); }
 .cal-peek-about { box-sizing: border-box; width: 100%; min-height: 84px; padding: 8px 10px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--surface-2); font: inherit; font-size: var(--fs-base); line-height: 1.5; color: var(--text); resize: vertical; }
-.cal-peek-about:focus { outline: none; border-color: var(--accent); background: var(--surface); }
+.cal-peek-about:focus { outline: none; border-color: var(--focus); background: var(--surface); }
 @media (max-width: 1100px) { .cal-head { flex-wrap: wrap; } .cal-status { order: 9; flex-basis: 100%; } }
 @container cal (max-width: 760px) {
   .cal-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -227,7 +227,7 @@ h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .tasks-row.done .tasks-title { color: var(--muted); text-decoration: line-through; }
 .tasks-when { flex: none; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .tasks-foot { padding: 8px 16px 12px; font-size: var(--fs-sm); }
-.tasks-window:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tasks-window:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tasks-badge { display: none; position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-text); font-size: 11.5px; font-weight: 700; line-height: 19px; text-align: center; font-variant-numeric: tabular-nums; }
 .tasks-window:not(:hover, :focus-within) { align-self: flex-start; border-radius: 50%; overflow: visible; }
 .tasks-window:not(:hover, :focus-within) :is(.tasks-body, .tasks-foot, .tasks-new, .tasks-toggle .grow) { display: none; }

@@ -333,7 +333,7 @@ function stopSlide(el) {
 function pulse(el, { lift = 1.04, ring = false } = {}) {
   if (!el || stillMotion() || typeof el.animate !== 'function') return null;
   const frames = ring
-    ? { boxShadow: ['0 0 0 0 transparent', '0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent)', '0 0 0 5px transparent'] }
+    ? { boxShadow: ['0 0 0 0 transparent', '0 0 0 3px color-mix(in srgb, var(--focus) 45%, transparent)', '0 0 0 5px transparent'] }
     : { scale: [1, lift, 1] };
   return el.animate(frames, { duration: PULSE_MS, easing: EASE_MOVE });
 }

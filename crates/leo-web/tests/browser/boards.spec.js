@@ -766,7 +766,7 @@ test('clicking anywhere in an empty card description shows it as a field with th
       await page.locator('#kanban-card-title').click();
       await description.click({ position: spot });
       await expect.poll(editing).toBe(true);
-      expect(await description.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--accent)'; el.append(probe); const accent = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).borderTopColor === accent; })).toBe(true);
+      expect(await description.evaluate(el => { const probe = document.createElement('i'); probe.style.color = 'var(--focus)'; el.append(probe); const focus = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).borderTopColor === focus; })).toBe(true);
     }
     await page.keyboard.type('Bring the reading list');
     await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Bring the reading list');
