@@ -1816,6 +1816,7 @@
         const { left, right, top, bottom } = blk.getBoundingClientRect();
         return right > left ? [{ left, right, top, bottom }] : [];
       },
+      domPoint: (at) => pointFor(at),
       blockAt(at) {
         const index = blockAtLine(lineOf(at));
         return index < 0 ? null : container.querySelector(`.blk[data-i="${index}"]`);

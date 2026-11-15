@@ -258,4 +258,13 @@ label.trash-row { cursor: pointer; }
   .diagram-art { border: 0; padding: 0; }
   .diagram-art svg { max-height: 150mm; }
   a { color: inherit; text-decoration: underline; }
+  sup[data-print][hidden] { display: inline !important; margin-left: 1px; font-size: 7pt; line-height: 0; color: #555; font-variant-numeric: tabular-nums; }
+  sup[data-print]::after { content: attr(data-print); }
+  .print-notes[hidden] { display: block !important; margin-top: 18pt; padding-top: 8pt; border-top: 1px solid var(--line); }
+  .print-notes ol { margin: 0; padding: 0; list-style: none; counter-reset: print-note; font: 9.5pt/1.5 var(--voice); color: #333; }
+  .print-notes li { position: relative; margin: 0 0 4pt; padding-left: 14pt; counter-increment: print-note; break-inside: avoid; }
+  .print-notes li::before { content: counter(print-note); position: absolute; left: 0; top: 1pt; font: 600 8pt var(--writing-font); color: #555; font-variant-numeric: tabular-nums; }
+  .print-notes li > :first-child { margin-top: 0; }
+  .print-notes li > :last-child { margin-bottom: 0; }
+  .print-notes .see-larger { display: none !important; }
 }

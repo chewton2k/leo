@@ -612,17 +612,20 @@ function shareMenu(owner) {
       { text: 'Copy as Markdown', icon: ICON.note, run: copyMarkdown },
       { text: 'Save .md file', icon: ICON.download, run: saveMarkdown },
       { text: 'Export as PDF', icon: ICON.share, run: share },
+      ...(marginPrintable().length ? [{ text: 'Export as PDF with Felix’s notes', icon: ICON.share, run: () => share(true) }] : []),
     ],
   });
 }
 
-async function share() {
+async function share(notes = false) {
+  printNotesClear();
   const mine = seq;
   const s = await ready();
   if (mine !== seq) return;
   if (!s) return toast('Write something first.');
   const before = document.title;
   document.title = s.note.title;
+  if (notes) printNotes(s);
   const restore = () => {
     if (mine === seq) document.title = before;
     window.removeEventListener('afterprint', restore);
@@ -630,10 +633,61 @@ async function share() {
   window.addEventListener('afterprint', restore);
   try {
     await window.print();
+    if (printingNotes) for (const name of ['pointerdown', 'keydown']) window.addEventListener(name, printNotesClear, true);
   } catch (e) {
     restore();
+    printNotesClear();
     toast('Could not open the print dialog. Try PDF export again.', { bad: true });
   }
+}
+
+let printingNotes = false;
+
+function printNotesClear() {
+  if (!printingNotes) return;
+  printingNotes = false;
+  for (const name of ['afterprint', 'pointerdown', 'keydown']) window.removeEventListener(name, printNotesClear, true);
+  for (const el of document.querySelectorAll('[data-print]')) {
+    const up = el.parentNode;
+    el.remove();
+    up?.normalize();
+  }
+}
+
+function printNotes(s) {
+  const found = marginPage.s === s ? marginPrintable() : [];
+  const list = document.createElement('ol');
+  for (const { at, text } of found) {
+    const point = s.doc.domPoint(at.to);
+    const range = document.createRange();
+    if (point.node.nodeType === Node.TEXT_NODE) range.setStart(point.node, point.offset);
+    else {
+      const blk = s.doc.blockAt(Math.max(at.from, at.to - 1));
+      if (!blk) continue;
+      range.selectNodeContents(blk);
+      range.collapse(false);
+    }
+    const sup = document.createElement('sup');
+    sup.hidden = true;
+    sup.dataset.print = String(list.childElementCount + 1);
+    range.insertNode(sup);
+    const item = document.createElement('li');
+    marginAnswer(item, text);
+    list.append(item);
+  }
+  if (!list.childElementCount) return;
+  const notes = document.createElement('section');
+  notes.className = 'print-notes';
+  notes.hidden = true;
+  notes.dataset.print = '';
+  notes.append(list);
+  $('#doc').after(notes);
+  const footer = document.createElement('style');
+  footer.dataset.print = '';
+  footer.textContent = `@media print { @page { @bottom-center { content: "${s.note.title.replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ')} · " counter(page) " / " counter(pages); } } }`;
+  document.head.append(footer);
+  printingNotes = true;
+  window.addEventListener('afterprint', printNotesClear, true);
 }
 
 async function openTitle(title) {

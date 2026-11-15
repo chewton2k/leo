@@ -537,3 +537,36 @@ test('earlier messages fold', async ({ page }) => {
   await expect(card.locator('.margin-said').getByText('Message 1')).toBeVisible();
   await expect(earlier).toHaveCount(0);
 });
+
+test('Export as PDF with Felix’s notes prints numbered notes and leaves the note text, quotes and saved body as they were', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const body = 'A transition matrix holds the chance of moving.\n\n- Each row sums to one hundred\n- Absorbing states never leave';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Markov chains', body } })).json();
+  const thread = (id, quote, text) => ({ id, note: note.id, quote, prefix: '', suffix: '', status: 'open', source: 'read', pinned: false, messages: [{ from: 'felix', text, at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' });
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...view, threads: [thread('t2', 'Each row sums to one hundred', 'Rows sum to one.'), thread('t1', 'transition matrix', 'Indexed by state.')] } });
+  });
+  await page.addInitScript(() => { window.print = async () => { window.printSaw = document.querySelectorAll('[data-print]').length; }; });
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('.margin-note')).toHaveCount(2);
+  const text = await page.locator('#doc').textContent();
+  await page.locator('[data-action="share"]').first().click();
+  await page.getByRole('menuitem', { name: 'Export as PDF with Felix’s notes' }).click();
+  await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(4);
+  await expect(page.locator('#doc')).toHaveText(text);
+  await page.emulateMedia({ media: 'print' });
+  await expect(page.locator('#doc sup[data-print]')).toHaveCount(2);
+  expect(await page.locator('#doc sup[data-print]').evaluateAll((sups) => sups.map((s) => [s.dataset.print, s.previousSibling.textContent.trim().slice(-6)]))).toEqual([['1', 'matrix'], ['2', 'undred']]);
+  await expect(page.locator('.print-notes li')).toHaveText(['Indexed by state.', 'Rows sum to one.']);
+  await page.emulateMedia({ media: 'screen' });
+  await expect(page.locator('.print-notes')).toBeHidden();
+  await page.keyboard.press('Shift');
+  await expect(page.locator('[data-print]')).toHaveCount(0);
+  await expect(page.locator('#doc')).toHaveText(text);
+  await page.locator('[data-action="share"]').first().click();
+  await page.getByRole('menuitem', { name: 'Export as PDF', exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(0);
+  expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(body);
+});

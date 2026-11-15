@@ -467,6 +467,13 @@ function marginRedraw() {
 
 if (document.fonts) Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
 
+function marginPrintable() {
+  const s = marginPage.s;
+  if (!s) return [];
+  const source = s.doc.source();
+  return marginPage.threads.map((t) => ({ at: marginKit.find(source, t), text: marginNow(t) })).filter(({ at, text }) => at && text).sort((a, b) => a.at.to - b.at.to);
+}
+
 function marginNow(t) {
   const felixSaid = [...(t.messages || [])].reverse().find((m) => m.from === 'felix');
   return felixSaid ? felixSaid.text : '';

@@ -42,7 +42,7 @@ test('desktop printing keeps the Windows native print function and bridges only 
 
 test('PDF export reports print errors and restores its title', async () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/sheets.js'), 'utf8');
-  const share = source.slice(source.indexOf('async function share()'), source.indexOf('async function openTitle'));
+  const share = source.slice(source.indexOf('async function share('), source.indexOf('async function openTitle'));
   for (const rejects of [false, true]) {
     const listeners = new Map(), errors = [];
     const context = { seq: 1, document: { title: 'Leo' }, ready: async () => ({ note: { title: 'My note' } }), toast: (text, options) => errors.push([text, options]), window: { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name), print: async () => { if (rejects) throw Error('raw programmer error'); listeners.get('afterprint')(); } } };
@@ -58,7 +58,7 @@ test('PDF export reports print errors and restores its title', async () => {
 
 test('finishing a save or print never prints or renames a newer page', async () => {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/sheets.js'), 'utf8');
-  const share = source.slice(source.indexOf('async function share()'), source.indexOf('async function openTitle'));
+  const share = source.slice(source.indexOf('async function share('), source.indexOf('async function openTitle'));
   for (const navigate of ['save', 'print']) {
     const listeners = new Map();
     let printed = 0;
@@ -84,7 +84,7 @@ function shareHarness(extra = {}) {
   const code = source.slice(source.indexOf('async function noteMarkdown()'), source.indexOf('async function openTitle'));
   const log = { toasts: [], menus: [], clicks: [], printed: 0 };
   const context = {
-    seq: 1, ICON: { note: 'N', download: 'D', share: 'S' }, document: { title: 'Leo', createElement: () => ({ click() { log.clicks.push(this); } }) },
+    seq: 1, ICON: { note: 'N', download: 'D', share: 'S' }, marginPrintable: () => [], document: { title: 'Leo', createElement: () => ({ click() { log.clicks.push(this); } }) },
     ready: async () => ({ note: { title: 'Saved title' }, id: 1 }), snapshot: () => ({ title: 'Cell biology', body: 'First line\n- [ ] one\n' }),
     toast: (text, options) => log.toasts.push([text, options]), popupMenu: (owner, menu) => log.menus.push([owner, menu]),
     navigator: { clipboard: { writeText: async (text) => { log.copied = text; } } },
@@ -142,4 +142,62 @@ test('Export as PDF from the menu still prints, and an unsaved note says to writ
   assert.equal(empty.log.copied, undefined);
   assert.equal(empty.log.clicks.length, 0);
   assert.deepEqual(empty.log.toasts.map((t) => t[0]), ['Write something first.', 'Write something first.']);
+});
+
+function notesHarness({ notes = [{ at: { from: 0, to: 9 }, text: 'Rows sum to one.' }, { at: { from: 20, to: 30 }, text: 'Name the damping factor.' }], fails = false } = {}) {
+  const live = [], listeners = new Map(), log = { printed: [], toasts: [], normalized: 0, menus: [] };
+  const place = (node) => { live.push(node); node.parentNode = { normalize() { log.normalized++; } }; };
+  const element = (tag) => ({ tag, dataset: {}, children: [], hidden: false, textContent: '', get childElementCount() { return this.children.length; }, append(...kids) { this.children.push(...kids); }, after(node) { place(node); }, remove() { live.splice(live.indexOf(this), 1); } });
+  const s = { note: { title: 'Markov "chains"' }, doc: { domPoint: (at) => ({ node: { nodeType: 3 }, offset: at }), blockAt: () => null } };
+  const context = {
+    seq: 1, ICON: { note: 'N', download: 'D', share: 'S' }, Node: { TEXT_NODE: 3 }, marginPage: { s },
+    marginPrintable: () => notes, marginAnswer: (item, text) => { item.textContent = text; },
+    $: () => element('div'), ready: async () => s, snapshot: () => ({ title: 'x', body: '' }), toast: (text) => log.toasts.push(text), popupMenu: (owner, menu) => log.menus.push(menu),
+    document: { title: 'Leo', head: { append: place }, createElement: element, createRange: () => ({ setStart() {}, selectNodeContents() {}, collapse() {}, insertNode: place }), querySelectorAll: (q) => (q === '[data-print]' ? [...live] : []) },
+    window: {
+      addEventListener: (name, fn) => listeners.set(`${name}:${fn.name}`, fn), removeEventListener: (name, fn) => listeners.delete(`${name}:${fn.name}`),
+      print: async () => { log.printed.push(live.map((n) => n.tag)); if (fails) throw Error('no dialog'); },
+    },
+  };
+  vm.createContext(context);
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/sheets.js'), 'utf8');
+  vm.runInContext(source.slice(source.indexOf('async function noteMarkdown()'), source.indexOf('async function openTitle')), context);
+  return { context, live, listeners, log, fire: (name) => [...listeners].filter(([key]) => key.startsWith(`${name}:`)).forEach(([, fn]) => fn()) };
+}
+
+test('Export as PDF with Felix’s notes shows only when the note has open margin notes, and prints them numbered after the text', async () => {
+  const none = notesHarness({ notes: [] });
+  none.context.shareMenu({});
+  assert.deepEqual([...none.log.menus[0].rows].map((row) => row.text), ['Copy as Markdown', 'Save .md file', 'Export as PDF']);
+  const { context, live, log } = notesHarness();
+  context.shareMenu({});
+  const rows = [...log.menus[0].rows];
+  assert.deepEqual(rows.map((row) => row.text), ['Copy as Markdown', 'Save .md file', 'Export as PDF', 'Export as PDF with Felix’s notes']);
+  await rows[3].run();
+  assert.deepEqual(log.printed[0], ['sup', 'sup', 'section', 'style']);
+  assert.deepEqual(live.filter((n) => n.tag === 'sup').map((n) => [n.dataset.print, n.hidden, n.children.length, n.textContent]), [['1', true, 0, ''], ['2', true, 0, '']]);
+  assert.deepEqual(live.find((n) => n.tag === 'section').children[0].children.map((li) => li.textContent), ['Rows sum to one.', 'Name the damping factor.']);
+  assert.match(live.find((n) => n.tag === 'style').textContent, /content: "Markov \\"chains\\" · " counter\(page\) " \/ " counter\(pages\)/);
+});
+
+test('notes printed without an afterprint never reach a later plain export, and clear on the next press, afterprint or a print error', async () => {
+  const quiet = notesHarness();
+  await quiet.context.share(true);
+  assert.equal(quiet.live.length, 4);
+  assert.ok(quiet.listeners.has('pointerdown:printNotesClear') && quiet.listeners.has('keydown:printNotesClear'));
+  await quiet.context.share();
+  assert.deepEqual(quiet.log.printed[1], []);
+  assert.equal(quiet.live.length, 0);
+  assert.equal(quiet.log.normalized, 4);
+  assert.ok(![...quiet.listeners.keys()].some((key) => key.endsWith(':printNotesClear')));
+  for (const event of ['pointerdown', 'keydown', 'afterprint']) {
+    const h = notesHarness();
+    await h.context.share(true);
+    h.fire(event);
+    assert.equal(h.live.length, 0, event);
+  }
+  const failed = notesHarness({ fails: true });
+  await failed.context.share(true);
+  assert.equal(failed.live.length, 0);
+  assert.equal(failed.log.toasts.length, 1);
 });
