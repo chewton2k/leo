@@ -35,6 +35,8 @@
   background: var(--code-bg); border-radius: var(--r-md); padding: 14px 16px; margin: .4em 0;
 }
 .doc .blk-quote .line-edit { border-left: 3px solid var(--accent); padding-left: 14px; }
+#doc .blk-quote.editing { position: relative; }
+#doc .blk-quote .line-edit { border-left: 0; padding-left: 17px; background: var(--surface); border-radius: 0 10px 10px 0; }
 .coding-plans { display: grid; gap: 28px; }
 .coding-plan { --plan-tone: var(--hue-slate); min-width: 0; }
 .coding-plan[data-provider="claude_code"] { --plan-tone: var(--hue-4); }

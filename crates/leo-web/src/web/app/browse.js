@@ -5,11 +5,10 @@ function stopPageArrival() {
   pageArrival = null;
 }
 
-function arriveOnPage(element = app) {
+function arriveOnPage(element) {
   stopPageArrival();
-  if (stillMotion() || typeof app.animate !== 'function') return;
-  const from = element === app ? 'translateY(4px)' : 'none';
-  const run = element.animate([{ opacity: .45, transform: from }, { opacity: 1, transform: 'none' }], { duration: MOTION_MS, easing: EASE_OUT });
+  if (stillMotion() || typeof element.animate !== 'function') return;
+  const run = element.animate([{ opacity: .6 }, { opacity: 1 }], { duration: 140, easing: EASE_OUT });
   pageArrival = run;
   run.onfinish = () => { if (pageArrival === run) pageArrival = null; };
 }

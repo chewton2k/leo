@@ -335,7 +335,7 @@ body.files-over main::after {
   .rec-go { transition: transform var(--t-press), scale var(--t-press) var(--ease-arrive); }
   .segment { transition: color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
   .switch { transition: background-color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
-  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .see-larger, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
+  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .see-larger, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
   .rec-go:active:not(:disabled) { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }

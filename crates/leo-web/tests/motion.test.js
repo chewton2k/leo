@@ -156,3 +156,19 @@ test('no two parts of the page script declare the same top-level function', () =
   }
   assert.deepEqual(repeated, []);
 });
+
+test('opening a note fades only the note text from .6 over 140 ms, never the title, and not under reduced motion', () => {
+  const browse = fs.readFileSync(path.resolve(__dirname, '../src/web/app/browse.js'), 'utf8');
+  for (const still of [false, true]) {
+    const runs = [];
+    const element = { animate: (frames, timing) => { runs.push({ frames, timing }); return {}; } };
+    const context = { stillMotion: () => still, EASE_OUT: 'arrive' };
+    vm.createContext(context);
+    vm.runInContext(`${browse.slice(0, browse.indexOf('\n}\n', browse.indexOf('function arriveOnPage(')) + 3)}; this.arrive = arriveOnPage;`, context);
+    context.arrive(element);
+    assert.deepEqual(JSON.parse(JSON.stringify(runs)), still ? [] : [{ frames: [{ opacity: .6 }, { opacity: 1 }], timing: { duration: 140, easing: 'arrive' } }]);
+  }
+  const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
+  assert.match(show, /if \(opened\) arriveOnPage\(\$\('#doc'\)\);/);
+  assert.doesNotMatch(show, /title\.animate/);
+});

@@ -370,6 +370,36 @@ test('placeholders inside links, images and math resolve, and attributes only ev
   assert.ok(!render('a\u00000\u0000b `c`').includes('\u0000'));
 });
 
+test('the note page alone right-aligns number columns, unless the Markdown aligned them', () => {
+  const table = '| Item | Price | Share | Mixed | Set |\n|---|---|---|---|:-:|\n| Tea | $1,200.50 | 15% | 3 | 4 |\n| Cake | -2 |  | n/a | 5 |\n| Jam | 0.15 | 7.5% | 4 | 6 |';
+  const html = render(table, { noteTools: true });
+  assert.ok(html.includes('<th>Item</th><th class="align-right">Price</th><th class="align-right">Share</th><th>Mixed</th><th class="align-center">Set</th>'), html);
+  assert.ok(html.includes('<td>Cake</td><td class="align-right">-2</td><td class="align-right"></td><td>n/a</td>'), html);
+  assert.ok(!render('| a |\n|---|\n| 1,2 |\n| . |', { noteTools: true }).includes('align-right'));
+  assert.ok(!render('| a |\n|---|\n|  |', { noteTools: true }).includes('align-right'));
+});
+
+test('the note page alone labels code with its language and offers Copy without adding text', () => {
+  const html = render('```python\nprint(1 < 2)\n```\n\n```\nplain\n```', { noteTools: true });
+  assert.ok(html.startsWith('<div class="code" data-lang="python"><pre><code class="language-python">print(1 &lt; 2)</code></pre><button type="button" class="code-copy" aria-label="Copy code" title="Copy code"><svg'), html);
+  assert.ok(html.includes('<div class="code"><pre><code>plain</code></pre><button'), html);
+  assert.equal(html.replace(/<[^>]*>/g, ''), 'print(1 &lt; 2)plain');
+});
+
+test('without the note page option every other reader gets the same markup as before', () => {
+  const body = '| a | n |\n|---|---|\n| x | 1 |\n| y | 2.5 |\n\n```js\nlet a = 1;\n```\n\n> quote';
+  assert.equal(render(body), '<div class="table"><table><thead><tr><th>a</th><th>n</th></tr></thead><tbody><tr><td>x</td><td>1</td></tr><tr><td>y</td><td>2.5</td></tr></tbody></table></div><pre><code class="language-js">let a = 1;</code></pre><blockquote><p>quote</p></blockquote>');
+  assert.equal(render(body, { noteTools: false }), render(body));
+});
+
+test('the facts line counts words outside code and reads at 238 a minute', () => {
+  assert.equal(md.facts(''), '0 words');
+  assert.equal(md.facts('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '7 words · 1 min read');
+  assert.equal(md.facts('word'), '1 word · 1 min read');
+  assert.equal(md.facts('w '.repeat(239)), '239 words · 2 min read');
+  assert.equal(md.facts('w '.repeat(1200)), '1,200 words · 6 min read');
+});
+
 test('a long run of unmatched ![[ openers stays fast', () => {
   const started = Date.now();
   render('![['.repeat(7000));

@@ -14,7 +14,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   const passages = read('app/passages.js');
   const source = body ?? (remember ? Array.from({ length: 160 }, (_, i) => `Paragraph number ${i + 1} about reading.`).join('\n\n') : 'An ordinary paragraph.');
   const fixture = `window.doc = leoDoc.mount(document.querySelector('#doc'), {
-    source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {}, outline: document.querySelector('.note-outline')
+    source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {}, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
   });
   const syncSegmented = () => {}, syncAppearanceResets = () => {};
   ${pickWidth}
@@ -89,6 +89,73 @@ for (const theme of ['light', 'dark']) {
     });
   });
 }
+
+test('the note page marks links, quotes, tables and code in pencil, Copy copies only the code, and other editors keep plain markup', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.setViewportSize({ width: 1200, height: 900 });
+    const body = 'Read [the paper](https://example.org/p) first.\n\n> A chain has no memory.\n\n| From | To A |\n|---|---|\n| A | 0.20 |\n| B | 1,200 |\n\n```python\nprint(1)\n```\n\nAfter the code.';
+    await page.goto(url + '?tools&body=' + encodeURIComponent(body));
+    const doc = page.locator('#doc');
+    const link = doc.locator('a');
+    expect(await link.evaluate(el => [getComputedStyle(el).textDecorationLine, getComputedStyle(el).backgroundImage.includes('svg')])).toEqual(['none', true]);
+    const quote = doc.locator('blockquote');
+    expect(await quote.evaluate(el => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).paddingLeft, getComputedStyle(el, '::before').maskImage.includes('svg'), getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'])).toEqual(['0px', '17px', true, true]);
+    await expect(doc.locator('th.align-right')).toHaveText('To A');
+    await expect(doc.locator('td.align-right')).toHaveText(['0.20', '1,200']);
+    expect(await doc.locator('thead').evaluate(el => [getComputedStyle(el.querySelector('th')).backgroundColor, getComputedStyle(el.querySelector('th'), '::after').maskImage.includes('svg')])).toEqual(['rgba(0, 0, 0, 0)', true]);
+    const code = doc.locator('.code[data-lang="python"]');
+    const copy = code.locator('button.code-copy');
+    await expect(copy).toHaveAttribute('aria-label', 'Copy code');
+    expect(await code.evaluate(el => [el.textContent, getComputedStyle(el, '::before').content])).toEqual(['print(1)', '"python"']);
+    expect(await copy.evaluate(el => getComputedStyle(el).opacity)).toBe('0');
+    await code.hover();
+    await expect.poll(() => copy.evaluate(el => getComputedStyle(el).opacity)).toBe('1');
+    await copy.click();
+    await expect(copy).toHaveAttribute('aria-label', 'Copied');
+    await expect(copy.locator('.pencil-tick')).toHaveCount(1);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('print(1)');
+    await expect(doc.locator('.editing')).toHaveCount(0);
+    await expect(copy).toHaveAttribute('aria-label', 'Copy code', { timeout: 3000 });
+    await expect(copy.locator('.pencil-tick')).toHaveCount(0);
+    const quoted = await page.evaluate(() => {
+      const range = document.createRange();
+      range.setStart(document.querySelector('#doc p').firstChild, 5);
+      range.setEnd([...document.querySelectorAll('#doc .blk p')].at(-1).firstChild, 9);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      const picked = window.doc.selection();
+      getSelection().removeAllRanges();
+      return picked;
+    });
+    expect(quoted.text).toContain('```python\nprint(1)\n```\n\nAfter the');
+    await code.locator('pre').click({ position: { x: 40, y: 12 } });
+    await expect(doc.locator('.blk-code.editing textarea')).toHaveValue('```python\nprint(1)\n```');
+    await quote.click();
+    expect(await doc.locator('.blk-quote.editing').evaluate(el => [getComputedStyle(el.querySelector('textarea')).borderLeftWidth, getComputedStyle(el, '::before').maskImage.includes('svg')])).toEqual(['0px', true]);
+    await page.goto(url + '?body=' + encodeURIComponent(body));
+    expect(await page.evaluate(() => {
+      const range = document.createRange();
+      range.setStart(document.querySelector('#doc p').firstChild, 5);
+      range.setEnd([...document.querySelectorAll('#doc .blk p')].at(-1).firstChild, 9);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+      return window.doc.selection();
+    })).toEqual(quoted);
+    expect(await page.evaluate(body => {
+      const card = document.createElement('div');
+      card.className = 'prose doc kanban-description';
+      document.body.append(card);
+      leoDoc.mount(card, { source: body, onChange() {} });
+      const a = card.querySelector('a');
+      return [card.querySelectorAll('.code, .code-copy, .align-right').length, getComputedStyle(a).textDecorationLine, getComputedStyle(card.querySelector('blockquote')).borderLeftWidth];
+    }, body)).toEqual([0, 'underline', '3px']);
+    expect(errors).toEqual([]);
+  });
+});
 
 test('a style key with no selection opens a pair to type in, and leaves it or removes it', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {

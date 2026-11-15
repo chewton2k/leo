@@ -186,6 +186,8 @@
 
   const aligned = (rule) => cells(rule).map((c) => (c.startsWith(':') ? (c.endsWith(':') ? 'center' : 'left') : c.endsWith(':') ? 'right' : ''));
   const cell = (tag, text, align) => `<${tag}${align ? ` class="align-${align}"` : ''}>${inline(text)}</${tag}>`;
+  const NUMBER = /^[-+\u2212]?[$€£¥]?(?:\d{1,3}(?:,\d{3})+|\d*)(?:\.\d+)?%?$/;
+  const numeric = (body, n) => body.some((row) => (row[n] || '').trim()) && body.every((row) => !(row[n] || '').trim() || (/\d/.test(row[n]) && NUMBER.test(row[n].trim())));
 
   function letterValue(marker) {
     const run = marker.slice(0, -1).toLowerCase();
@@ -337,7 +339,8 @@
           }
         }
         const lang = fence[2] ? ` class="language-${escape(fence[2])}"` : '';
-        html += `<pre><code${lang}>${escape(code.join('\n'))}</code></pre>`;
+        const pre = `<pre><code${lang}>${escape(code.join('\n'))}</code></pre>`;
+        html += state.tools ? `<div class="code"${fence[2] ? ` data-lang="${escape(fence[2])}"` : ''}>${pre}<button type="button" class="code-copy" aria-label="Copy code" title="Copy code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button></div>` : pre;
         continue;
       }
 
@@ -380,12 +383,13 @@
         const head = cells(line);
         const aligns = aligned(lines[i + 1]);
         i += 2;
-        let rows = '';
+        const body = [];
         while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
-          const row = cells(lines[i]);
-          rows += `<tr>${head.map((_, n) => cell('td', row[n] || '', aligns[n])).join('')}</tr>`;
+          body.push(cells(lines[i]));
           i++;
         }
+        if (state.tools) head.forEach((_, n) => { if (!aligns[n] && numeric(body, n)) aligns[n] = 'right'; });
+        const rows = body.map((row) => `<tr>${head.map((_, n) => cell('td', row[n] || '', aligns[n])).join('')}</tr>`).join('');
         html += `<div class="table"><table><thead><tr>${head
           .map((c, n) => cell('th', c, aligns[n]))
           .join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -423,6 +427,7 @@
         after: options.after,
         first: options.first,
         rows: Boolean(options.rows),
+        tools: Boolean(options.noteTools),
       });
     } finally {
       pictureDir = '';
@@ -446,7 +451,12 @@
       .trim();
   }
 
-  const api = { render, plain, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon };
+  function facts(markdown) {
+    const words = plain(markdown).split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+    return words ? `${words.toLocaleString('en')} ${words === 1 ? 'word' : 'words'} · ${Math.ceil(words / 238)} min read` : '0 words';
+  }
+
+  const api = { render, plain, facts, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -4,7 +4,7 @@
   const md = root.leoMarkdown;
   const ed = root.leoEditing;
 
-  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null }) {
+  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null, noteTools = false }) {
     let lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
     let blocks = [];
     let rendered = [];
@@ -120,6 +120,7 @@
         depth: block.kind === 'line' ? Math.max(levels[block.start], 0) + 1 : 1,
         after: block.kind === 'line' && levels[block.start - 1] >= 0,
         first: block.kind === 'line' ? starts[block.start] : undefined,
+        noteTools,
       });
     }
 
@@ -1377,6 +1378,26 @@
       return e.clientX < text.getBoundingClientRect().left ? input : null;
     }
 
+    function copyCode(button) {
+      const code = button.parentNode.querySelector('pre code');
+      const shown = (label) => {
+        button.setAttribute('aria-label', label);
+        button.title = label;
+      };
+      Promise.resolve().then(() => root.navigator.clipboard.writeText(code ? code.textContent : '')).then(() => {
+        button.classList.add('copied');
+        button.querySelector('.pencil-tick') || button.insertAdjacentHTML('beforeend', '<span class="pencil-tick writing" aria-hidden="true"></span>');
+        shown('Copied');
+      }, () => shown('Could not copy')).finally(() => {
+        clearTimeout(button.copyTimer);
+        button.copyTimer = setTimeout(() => {
+          button.classList.remove('copied');
+          button.querySelector('.pencil-tick')?.remove();
+          shown('Copy code');
+        }, 1200);
+      });
+    }
+
     let framed = null;
 
     function unframe() {
@@ -1505,6 +1526,11 @@
         return;
       }
       if (e.target.closest('.pic-frame')) return;
+      const copy = e.target.closest('.code-copy');
+      if (copy) {
+        copyCode(copy);
+        return;
+      }
       const pic = e.target.closest('img.note-img');
       if (pic && !pic.closest('.editing') && !e.shiftKey) {
         e.preventDefault();

@@ -465,7 +465,7 @@ test.describe('editing like Obsidian', () => {
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (frames, options) {
         const run = animate.call(this, frames, options);
-        if (this.matches('article.note')) { run.pause(); run.currentTime = 0; }
+        if (this.matches('#doc')) { run.pause(); run.currentTime = 0; }
         return run;
       };
     });
@@ -476,7 +476,7 @@ test.describe('editing like Obsidian', () => {
       if (body.startsWith('$$')) await expect(page.locator('#doc .math')).toHaveAttribute('data-drawn', 'yes');
       const place = () => page.locator('#doc .blk').first().boundingBox();
       const before = await place();
-      await page.locator('article.note').evaluate(el => { for (const run of el.getAnimations()) run.finish(); });
+      await page.locator('#doc').evaluate(el => { for (const run of el.getAnimations()) run.finish(); });
       await expect.poll(place, { message: body }).toEqual(before);
     }
   });
