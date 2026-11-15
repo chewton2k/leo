@@ -92,8 +92,8 @@ for (const theme of ['light', 'dark']) {
 
 test('the note page marks links, quotes, tables and code in pencil, Copy copies only the code, and other editors keep plain markup', async ({ browser }) => {
   await editorFixture(browser, async (context, url) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const page = await context.newPage();
+    await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text) => { window.copied = text; } } }));
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width: 1200, height: 900 });
@@ -118,7 +118,7 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
     await expect(copy).toHaveAttribute('aria-label', 'Copied');
     await expect(copy.locator('.pencil-tick')).toHaveCount(1);
     await expect(page.locator('#code-said[role="status"]'), 'screen readers hear the copy').toHaveText('Copied');
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('print(1)');
+    expect(await page.evaluate(() => window.copied)).toBe('print(1)');
     await expect(doc.locator('.editing')).toHaveCount(0);
     await expect(copy).toHaveAttribute('aria-label', 'Copy code', { timeout: 3000 });
     await expect(copy.locator('.pencil-tick')).toHaveCount(0);
