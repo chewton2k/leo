@@ -86,9 +86,11 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-layout { display: block; padding: 0; min-height: 0; }
   .settings-nav { position: static; max-height: none; overflow: visible; padding: 12px 16px 4px; max-width: 760px; margin: 0 auto; }
   .settings-lists { margin-top: 10px; }
-  .settings-sections { display: flex; flex-wrap: wrap; gap: 6px; }
-  .settings-group-title { display: none; }
-  .settings-group { display: contents; }
+  .settings-sections { display: grid; gap: 8px; }
+  .settings-group { position: relative; display: flex; flex-wrap: wrap; gap: 6px; padding-left: 92px; }
+  .settings-group + .settings-group { margin-top: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+  .settings-group-title { position: absolute; left: 0; top: 9px; width: 84px; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .settings-group + .settings-group .settings-group-title { top: 17px; }
   .settings-link, .settings-link + .settings-link { flex: none; min-height: 34px; margin: 0; padding: 0 12px; gap: 7px; background: var(--tint); border-radius: var(--r-pill); font-size: var(--fs-base); }
   .settings-link.on { background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); }
   .settings-link svg { width: 16px; height: 16px; }
@@ -99,10 +101,10 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-section .set-card { padding: 14px; }
 }
 @container settingsmain (max-width: 479px) {
-  .settings-nav { position: sticky; z-index: 5; top: var(--bar-h); max-width: none; margin: 0; padding: 10px 16px; background: var(--ground); }
+  .settings-nav { max-width: none; margin: 0; padding: 10px 16px; background: var(--ground); }
   .settings-lists { margin-top: 8px; }
-  .settings-sections { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-inline: 16px; margin-inline: -16px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
-  .settings-sections::-webkit-scrollbar { display: none; }
+  .settings-group { padding-left: 0; }
+  .settings-group-title, .settings-group + .settings-group .settings-group-title { position: static; flex: 0 0 100%; width: auto; padding: 0 2px; }
   .settings-head h1 { font-size: 22px; }
 }
 .settings-section .set-label, .settings-section .set-row > .grow, .settings-section .set-line > .grow { color: var(--text); font-size: var(--fs-base); font-weight: 500; }

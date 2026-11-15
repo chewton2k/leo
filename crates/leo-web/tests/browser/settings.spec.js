@@ -281,7 +281,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.locator('.settings-section').evaluate(el=>{el.style.minHeight='';scrollTo(0,0);});
       await page.setViewportSize({width:900,height:850});
       const chips=await page.evaluate(()=>{const links=[...document.querySelectorAll('.settings-sections .settings-link')].map(a=>a.getBoundingClientRect());return {visible:links.every(r=>r.width>0&&r.height>0),rows:new Set(links.map(r=>Math.round(r.top))).size,position:getComputedStyle(document.querySelector('.settings-nav')).position,titles:getComputedStyle(document.querySelector('.settings-group-title')).display};});
-      expect(chips).toEqual({visible:true,rows:expect.any(Number),position:'static',titles:'none'});
+      expect(chips).toEqual({visible:true,rows:expect.any(Number),position:'static',titles:'block'});
       expect(chips.rows).toBeGreaterThan(1);
       await page.setViewportSize({width:1280,height:850});
       const search = page.locator('#settings-search');
