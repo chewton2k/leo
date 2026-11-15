@@ -1732,12 +1732,16 @@
           const walker = document.createTreeWalker(root.nodeType === Node.TEXT_NODE ? root.parentNode : root, NodeFilter.SHOW_TEXT);
           const piece = document.createRange();
           const found = [];
-          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const begin = range.startContainer;
+          walker.currentNode = begin;
+          for (let node = begin.nodeType === Node.TEXT_NODE ? begin : walker.nextNode(); node; node = walker.nextNode()) {
+            if (range.comparePoint(node, 0) > 0) break;
             if (!range.intersectsNode(node)) continue;
             piece.selectNodeContents(node);
             if (node === range.startContainer) piece.setStart(node, range.startOffset);
             if (node === range.endContainer) piece.setEnd(node, range.endOffset);
             for (const box of piece.getClientRects()) if (box.width > 0) found.push(box);
+            if (node === range.endContainer) break;
           }
           const lines = [];
           for (const { left, right, top, bottom } of found.sort((a, b) => a.top - b.top)) {
