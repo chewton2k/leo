@@ -1760,13 +1760,15 @@ function homeTally(today) {
   return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
 }
 
-const homeWeek = { events: null, load: 0, from: '' };
+const homeWeek = { events: null, load: 0, from: '', at: 0 };
+const HOME_WEEK_FRESH = 10 * 60000;
 
 async function loadHomeWeek() {
   if (!document.getElementById('home-week')) return;
   const days = S.daysOf('week', S.dayKey(new Date()), S.weekStart(calLocale()));
   const mine = ++homeWeek.load;
   homeWeek.from = days[0];
+  homeWeek.at = Date.now();
   try {
     const data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[6]), 1).toISOString())}`);
     if (mine !== homeWeek.load) return;
@@ -1913,7 +1915,7 @@ async function loadTasksWindow() {
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
     if (data.events) {
-      if (home && tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) loadHomeWeek();
+      if (home && ((tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) || Date.now() - homeWeek.at > HOME_WEEK_FRESH)) loadHomeWeek();
       tasksWin.events = data.events;
       tasksWin.eventsAt = Date.now();
     }

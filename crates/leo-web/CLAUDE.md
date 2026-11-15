@@ -784,8 +784,9 @@ is hidden or the capture activity gate is busy.
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that
   never sets `cal.ringAt`; a 3 px dot on days with tasks (`tasksWin.tasks`) or
-  events (`homeWeek`: one `/api/schedule` read of the week on mount, at midnight
-  and when the tasks poll's events change, never written into `tasksWin.events`);
+  events (`homeWeek`: one `/api/schedule` read of the week on mount, at midnight,
+  when the tasks poll's events change and on a poll at least `HOME_WEEK_FRESH` (10 min)
+  after the last read, never written into `tasksWin.events`);
   a day sets only `cal.selected` and opens the Calendar in its last view) and,
   under the quick bar, Earlier and Today rows (`#home-today`, the same rows;
   today's done rows stay until midnight; six at most, then "N more in Calendar";
