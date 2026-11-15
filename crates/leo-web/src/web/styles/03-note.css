@@ -31,12 +31,12 @@
   .note-outline .source-more > summary { width: 36px; justify-content: flex-start; padding: 8px 0 8px 8px; }
   .note-outline .source-more > summary > svg { display: none; }
   .note-outline .outline-ticks { display: flex; flex-direction: column; width: 100%; height: min(calc(var(--outline-count) * 12px), calc(100dvh - var(--outline-top, 76px) - 160px)); min-height: 12px; padding: 0 0 0 8px; border: 0; background: transparent; cursor: pointer; }
-  .note-outline .outline-page { display: grid; place-items: center; width: 36px; height: 22px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); }
+  .note-outline .outline-page { display: grid; place-items: center; width: 36px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); }
   .note-outline .outline-page:disabled { visibility: hidden; }
   .note-outline .outline-page:hover { color: var(--text); background: var(--tint); }
   .note-outline .outline-page:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
-  .note-outline .outline-ticks span { position: relative; flex: 1; min-height: 0; display: block; width: 100%; transition: transform var(--t-drawer) var(--ease-arrive); transform-origin: left center; }
+  .note-outline .outline-ticks span { position: relative; flex: 0 0 calc(100% / var(--outline-count)); min-height: 0; display: block; width: 100%; transition: transform var(--t-drawer) var(--ease-arrive); transform-origin: left center; }
   .note-outline .outline-ticks span::after { content: ''; position: absolute; left: 0; top: calc(50% - 1px); width: 8px; height: 2px; border-radius: 1px; background: var(--faint); }
   .note-outline .outline-ticks span[data-level="1"]::after { width: 18px; }
   .note-outline .outline-ticks span[data-level="2"]::after { width: 12px; }

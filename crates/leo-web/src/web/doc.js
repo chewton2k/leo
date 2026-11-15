@@ -177,6 +177,7 @@
     const outlineDownArrow = outlineNav ? document.createElement('button') : null;
     let outlineStart = 0;
     let outlineFollowed = null;
+    let outlineLanding = null;
     let outlineIndex = null;
     let outlineMotion = null;
     let outlineClosing = false;
@@ -204,6 +205,8 @@
     }
     const OUTLINE_PAUSE = 300;
     const OUTLINE_PAGE = 24;
+    const OUTLINE_LANDING_MS = 1500;
+    const outlineShows = (index) => index >= outlineStart && index < outlineStart + OUTLINE_PAGE;
     const OUTLINE_WIDE = 900;
     const MOST_PREVIEW_LINES = 24;
     const MOST_PREVIEW_CHARS = 800;
@@ -339,17 +342,19 @@
     function outlinePointer(y) {
       const rect = outlineTicks.getBoundingClientRect();
       const shown = Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart);
-      return Math.max(outlineStart, Math.min(outlineStart + shown - 1, outlineStart + Math.floor((y - rect.top) / rect.height * shown)));
+      const slots = Math.min(OUTLINE_PAGE, outlineRows.length);
+      return Math.max(outlineStart, Math.min(outlineStart + shown - 1, outlineStart + Math.floor((y - rect.top) / rect.height * slots)));
     }
 
     function outlinePage(start) {
       outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
       for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
-      outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart));
+      outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length));
       outlineUpArrow.hidden = outlineDownArrow.hidden = outlineRows.length <= OUTLINE_PAGE;
       outlineUpArrow.disabled = outlineStart === 0;
       outlineDownArrow.disabled = outlineStart + OUTLINE_PAGE >= outlineRows.length;
-      if (outlineIndex !== null && (outlineIndex < outlineStart || outlineIndex >= outlineStart + OUTLINE_PAGE)) outlinePeek(null);
+      for (const [arrow, other] of [[outlineUpArrow, outlineDownArrow], [outlineDownArrow, outlineUpArrow]]) if (arrow.disabled && document.activeElement === arrow) other.focus({ preventScroll: true });
+      if (outlineIndex !== null && !outlineShows(outlineIndex)) outlinePeek(null);
     }
 
     function outlineEscape(e) {
@@ -372,8 +377,7 @@
     function outlineFocus() {
       if (outlineIndex !== null) return;
       const current = Math.max(0, outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick));
-      if (current < outlineStart || current >= outlineStart + OUTLINE_PAGE) outlinePage(current);
-      outlinePeek(current);
+      outlinePeek(outlineShows(current) ? current : outlineStart);
     }
 
     function outlineBlur() {
@@ -385,7 +389,7 @@
       const next = { ArrowDown: Math.min(outlineRows.length - 1, index + 1), ArrowUp: Math.max(0, index - 1), Home: 0, End: outlineRows.length - 1 }[e.key];
       if (next !== undefined) {
         e.preventDefault();
-        if (next < outlineStart || next >= outlineStart + OUTLINE_PAGE) outlinePage(next);
+        if (!outlineShows(next)) outlinePage(next);
         outlinePeek(next);
       }
     }
@@ -419,9 +423,10 @@
       }
       for (const tick of outlineTicks.children) tick.classList.toggle('on', Boolean(current) && tick.dataset.tick === String(current.line));
       const at = current ? outlineRows.indexOf(current) : 0;
-      if (current?.line !== outlineFollowed) {
-        outlineFollowed = current?.line;
-        if (at < outlineStart || at >= outlineStart + OUTLINE_PAGE) outlinePage(at);
+      if (outlineLanding && (current?.line === outlineLanding.line || bottom || performance.now() > outlineLanding.until)) outlineLanding = null;
+      if (!outlineLanding && current?.key !== outlineFollowed) {
+        outlineFollowed = current?.key;
+        if (!outlineShows(at)) outlinePage(at);
       }
       if (outlineIndex !== null) outlinePeek(outlineIndex);
     }
@@ -493,7 +498,6 @@
       const arrow = e.target.closest('.outline-page');
       if (arrow) {
         outlinePage(outlineStart + (arrow === outlineUpArrow ? -OUTLINE_PAGE : OUTLINE_PAGE));
-        if (arrow.disabled) (arrow === outlineUpArrow ? outlineDownArrow : outlineUpArrow).focus({ preventScroll: true });
         return;
       }
       const button = e.target.closest('button[data-line], .outline-ticks');
@@ -508,6 +512,8 @@
       block.focus({ preventScroll: true });
       if (!outlineWide) outlineDetails.open = false;
       const inset = outlineWide ? 0 : outlineDetails.querySelector('summary').getBoundingClientRect().height + 8;
+      outlineLanding = { line, until: performance.now() + OUTLINE_LANDING_MS };
+      setTimeout(outlineScroll, OUTLINE_LANDING_MS + 50);
       root.scrollTo({ top: Math.max(0, root.scrollY + block.getBoundingClientRect().top - outlineTop() - inset), behavior: root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
       outlineScroll();
     }
