@@ -1054,8 +1054,8 @@ test('margin replies expand as borderless retained controls and collapse out of 
     const values = await frames(page, 500, () => {
       const el = document.querySelector('.margin-note[data-id="t1"] .margin-more');
       return { height: el.getBoundingClientRect().height, opacity: Number(getComputedStyle(el).opacity) };
-    }, [[30, "marginOpen('t1', true)"]]);
-    expect(values.some(frame => frame.opacity > .01 && frame.opacity < .99)).toBe(true);
+    }, [[30, "marginOpen('t1', true); window.moving = document.querySelector('.margin-note[data-id=\"t1\"] .margin-more').getAnimations().map((a) => a.transitionProperty)"]]);
+    expect(await page.evaluate(() => window.moving)).toEqual(expect.arrayContaining(['opacity', 'grid-template-rows']));
     expect(values.at(-1).height).toBeGreaterThan(35);
     await expect(note.locator('textarea')).toBeFocused();
     expect(await note.locator('textarea').evaluate(el => getComputedStyle(el).outlineStyle)).toBe('none');
@@ -1065,8 +1065,8 @@ test('margin replies expand as borderless retained controls and collapse out of 
     const closing = await frames(page, 500, () => {
       const el = document.querySelector('.margin-note[data-id="t1"] .margin-more');
       return { height: el.getBoundingClientRect().height, opacity: Number(getComputedStyle(el).opacity) };
-    }, [[30, 'marginClose()']]);
-    expect(closing.some(frame => frame.height > 1 && frame.opacity > .01 && frame.opacity < .99)).toBe(true);
+    }, [[30, "marginClose(); window.moving = document.querySelector('.margin-note[data-id=\"t1\"] .margin-more').getAnimations().map((a) => a.transitionProperty)"]]);
+    expect(await page.evaluate(() => window.moving)).toEqual(expect.arrayContaining(['opacity', 'grid-template-rows']));
     expect(closing.at(-1).height).toBe(0);
     expect(await more.evaluate(el => el.inert)).toBe(true);
     await expect(more).toHaveAttribute('aria-hidden', 'true');
