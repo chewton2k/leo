@@ -1512,8 +1512,14 @@
       else again.addEventListener('load', show, { once: true });
     }
 
+    function lonePicture(el) {
+      const blk = el.closest('.blk');
+      const pictures = blk && !blk.textContent.trim() ? blk.querySelectorAll('img.note-img') : [];
+      return pictures.length === 1 && pictures[0].naturalWidth ? pictures[0] : null;
+    }
+
     container.addEventListener('dblclick', (e) => {
-      const img = e.target.closest('img.note-img');
+      const img = e.target.closest('img.note-img') || lonePicture(e.target);
       if (!img || img.closest('.editing')) return;
       const blk = img.closest('.blk');
       unframe();
@@ -1610,7 +1616,7 @@
         editLine(lines.length - 1, 'end', false);
         return;
       }
-      const lone = !blk.textContent.trim() && blk.querySelector('img.note-img');
+      const lone = !e.shiftKey && lonePicture(blk);
       if (lone) {
         frame(lone);
         return;

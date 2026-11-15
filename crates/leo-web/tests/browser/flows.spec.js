@@ -5261,6 +5261,24 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
+test('beside a lone picture a double-click or a Shift-click opens its Markdown, and a broken picture never hides it', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const make = async (body) => (await page.request.post('/api/notes', { data: { title: `Beside ${Date.now().toString(36)}`, body } })).json();
+  const pictured = await make(`Intro line\n\n![Box](data:image/svg+xml;utf8,${svg})\n\nAfter line`);
+  await page.goto(`/#/n/${pictured.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  const box = await img.boundingBox();
+  await page.mouse.dblclick(box.x + box.width + 40, box.y + box.height / 2);
+  await expect(page.locator('#doc textarea')).toHaveValue(/^!\[Box\]\(data:image/);
+  const broken = await make('Intro line\n\n![](missing.png)\n\nAfter line');
+  await page.goto(`/#/n/${broken.id}`);
+  const line = await page.locator('#doc .blk').nth(2).boundingBox();
+  await page.mouse.click(line.x + 200, line.y + line.height / 2);
+  await expect(page.locator('#doc textarea')).toHaveValue('![](missing.png)');
+  for (const note of [pictured, broken]) await page.request.delete(`/api/notes/${note.id}`);
+});
+
 test('the header starts where each page\'s content starts, in a wide window', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'widths matter on a wide screen');
   await page.setViewportSize({ width: 1600, height: 900 });
