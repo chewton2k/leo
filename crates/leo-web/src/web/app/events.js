@@ -313,6 +313,7 @@ async function render() {
     } else if (e instanceof Offline) {
       app.innerHTML = empty(ICON.cloud, "Can't reach leo", 'Quit leo and open it again.');
     } else {
+      for (const room of app.querySelectorAll('.blk.margin-room')) room.classList.remove('margin-room');
       fail(e);
     }
   }
