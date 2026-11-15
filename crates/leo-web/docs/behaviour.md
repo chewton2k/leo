@@ -366,7 +366,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   a corner handle: drag, arrow keys (Shift for 100 px) or double-click to
   reset; the change is written by `editing.setPictureWidth` and saved like any
   edit. It counts only pictures the page draws (not outside links or
-  `code`), so the size lands on the picture that was framed. Double-clicking the picture edits its Markdown; Escape closes only the
+  `code`), so the size lands on the picture that was framed. A click beside a picture that is alone on its line frames it too (2026-11-15, the user's call); a broken picture, a line of several pictures or Shift opens the Markdown instead. Double-clicking the picture, or beside a lone one, edits its Markdown; Escape closes only the
   frame.
 
 - Upload names (`safe_file_name`) drop trailing dots and spaces and dash
@@ -508,13 +508,18 @@ higher levels, the current one in the accent). Hovering or focusing the rail
 magnifies nearby bars (they stay inside the 48 px gutter, at least 6 px from the
 text) and previews the heading and a bounded plain-text excerpt (up to 24 lines /
 800 UTF-16 units, escaped); clicking or Enter/Space jumps there. The preview always
-shows (`outlineRoom`): between the rail and the text, else right of the text, else over
-the text (2026-11-06, the owner: "these preview boxes should show even if they cover
-the text"; this reverses the earlier same-day "free space only" rule). It sits above the
+shows right beside the rail (`outlineRoom`), over the text when it must (2026-11-15,
+the user's call: never on the far side of the text). It sits above the
 margin layer (z 12) and ignores the pointer.
 
 Arrow keys, Home and End select a preview, Escape dismisses it, and Reduced Motion
-snaps the bars. All 300 markers fit within the viewport. The existing disclosure
+snaps the bars. Past 24 headings the rail shows one section of 24 at a time
+(`OUTLINE_PAGE`, 2026-11-15) with pencil-stroke Earlier/Later headings arrows above and
+below it; an arrow at an end stays in place, invisible and disabled, so nothing moves
+under the pointer, and the rail keeps its height on a shorter last section. The
+section follows the heading being read, but a jump from a tick lets its scroll land
+before following again, and focusing the rail keeps the section the arrows chose.
+The heading list opens at most 340 px tall and scrolls. The existing disclosure
 below the rail opens the full nested outline; narrow panes keep their disclosure.
 The wide rail is vertically centred in the reading viewport, including short
 notes. Its dropdown reveals over 240 ms and retracts over 192 ms from its toggle,
@@ -844,7 +849,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   cancels on Escape or leaving the control, and keeps the chat on a failed request;
   Reduced Motion snaps the width and label.
 
-- Perch (2026-11-06, the user's call: "i like A. perch best flow and it's simple"; replaces the header and surface description above): the Chats list sits on `--ground`, the chat on `--page` with the 16 px corner, the composer, selected row and user bubble on `--raised`; `--field` and `--field-hi` are gone, pills and circles are 9 to 16 px rounded rectangles. An empty chat is `.chat.perched`: the greeting, composer and starters are one block centred in the panel at any height (`display: contents` on the body and hello, DOM order (`#chat-below` holds the starters after the footer) and two flex spacers), Felix perched on the composer's top edge with his `hi!!`. Attached notes, passages and files stay above the composer (`#chat-refs`); there files are 52 px tiles (a 40 px page or picture, name, kind) so they never push the chat far down, while sent files in messages keep the full cards. Attached notes are the same cards (`noteCard`: a Note badge and the note's first lines, fetched once per note and cached), in the composer and in the sent message. The note finder (`#chat-pick`) is a small popover at the paperclip inside the composer, like the attach menu, and never pushes the layout (2026-11-09, the user's call). The first send docks the composer to the bottom (`leoMotion.dock`, `DRAWER_MS`, snaps under Reduced Motion) and it stays docked while the chat has messages. While a reply streams in, a 2 px caret in Felix's blue (`--felix`) sits after its last line, and his top-bar button carries a small blue dot (`#chat-toggle.working`) from send to done. Felix lives in `#chat-face` inside the composer, so his state classes still apply (`mood` finds every `.felix`). Cameos (2026-11-15, the user's call): Felix keeps his top-bar button and perches as a 50 px drawing (one unit of his `felix()` grid per pixel, never a fractional scale, the same size at every chat width) on the composer and on the top edge of Quick Leo (`.quick-perch`, `aria-hidden`, no clicks, hidden while the chat is open so only one Felix shows and on phones, where the sheet rises from the bottom; on wider windows the sheet lets it overhang and scrolls `.quick-results` instead). There is no cameo on home, in the rail or in lists. The header is toggle, chat title (or "New chat") and close; New chat is in the Chats heading while Chats is open and in the header otherwise (one `[data-chat="new"]` shows at a time; specs use `:visible`). The composer holds paperclip, the note chip (the `data-chat="drop"` eye toggle, hidden with no note, `.off` when not reading), the access chip (no indigo for Auto; "⇧Tab to switch" is only its tooltip) and send.
+- Perch (2026-11-06, the user's call: "i like A. perch best flow and it's simple"; replaces the header and surface description above): the Chats list sits on `--ground`, the chat on `--page` with the 16 px corner, the composer, selected row and user bubble on `--raised`; `--field` and `--field-hi` are gone, pills and circles are 9 to 16 px rounded rectangles. An empty chat is `.chat.perched`: the greeting, composer and starters are one block centred in the panel at any height (`display: contents` on the body and hello, DOM order (`#chat-below` holds the starters after the footer) and two flex spacers), Felix perched on the composer's top edge, without a `hi!!` (2026-11-15, the user's call). Attached notes, passages and files stay above the composer (`#chat-refs`); there files are 52 px tiles (a 40 px page or picture, name, kind) so they never push the chat far down, while sent files in messages keep the full cards. Attached notes are the same cards (`noteCard`: a Note badge and the note's first lines, fetched once per note and cached), in the composer and in the sent message. The note finder (`#chat-pick`) is a small popover at the paperclip inside the composer, like the attach menu, and never pushes the layout (2026-11-09, the user's call). The first send docks the composer to the bottom (`leoMotion.dock`, `DRAWER_MS`, snaps under Reduced Motion) and it stays docked while the chat has messages. While a reply streams in, a 2 px caret in Felix's blue (`--felix`) sits after its last line, and his top-bar button carries a small blue dot (`#chat-toggle.working`) from send to done. Felix lives in `#chat-face` inside the composer, so his state classes still apply (`mood` finds every `.felix`). Cameos (2026-11-15, the user's call): Felix keeps his top-bar button and perches as a 50 px drawing (one unit of his `felix()` grid per pixel, never a fractional scale, the same size at every chat width) on the composer and on the top edge of Quick Leo (`.quick-perch`, `aria-hidden`, no clicks, hidden while the chat is open so only one Felix shows and on phones, where the sheet rises from the bottom; on wider windows the sheet lets it overhang and scrolls `.quick-results` instead). There is no cameo on home, in the rail or in lists. The header is toggle, chat title (or "New chat") and close; New chat is in the Chats heading while Chats is open and in the header otherwise (one `[data-chat="new"]` shows at a time; specs use `:visible`). The composer holds paperclip, the note chip (the `data-chat="drop"` eye toggle, hidden with no note, `.off` when not reading), the access chip (no indigo for Auto; "⇧Tab to switch" is only its tooltip) and send.
 - Chat titles (2026-11-06): a short question is told apart as `<question>: <note>` only by the open
   note (a source with `why: "open"`, `chats::note_of`), so the row reads the same while Felix answers
   (`draftTitle` uses the same rule, including attached notes and chat references, and the same clip of 80
@@ -1605,8 +1610,9 @@ the explorer opening change the layout without a window resize. From 930 px of
 main the nav is the labelled, sticky 220 px column with the gliding pill (it keeps
 its own scroll); from 480 to 929 px the section links are wrapping chips above the
 content in one centred 760 px column (not sticky, no pill, active chip `--raised`
-with an inset `--line` ring); under 480 px they are one sticky sideways strip
-with a faded edge. Cards have 20 px gaps. The current section stays visible, and
+with an inset `--line` ring), each group's links on a row beside its label (2026-11-15,
+the user's call: keep the categories); under 480 px each label sits above its links and
+the nav scrolls with the page. Cards have 20 px gaps. The current section stays visible, and
 search results replace the chips while searching. Keeping rows share one 150 px
 select width and stack under 500 px of card content.
 
@@ -1662,8 +1668,7 @@ settings and explorer panels by stable keys, retaining native controls, file
 selections and unchanged rows through async updates. Custom select buttons and open
 menus retain their native elements and focus through reconciliation. Dictation autosaves snapshot the draft and page generation
 before queuing or debouncing, so navigation cannot lose edits or update a later page.
-Settings navigation stays between sections; its phone strip recentres only when
-the section changes.
+Settings navigation stays between sections.
 
 First-launch setup
 (`onboarding.js`, 2026-11-02, the user's request: like other dictation apps) is a

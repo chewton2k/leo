@@ -99,7 +99,7 @@ function drawSide() {
   if (showing !== side.showing) {
     side.showing = showing;
     side.revealed.clear();
-    side.shut.clear();
+    if (state.view === 'note') side.shut.clear();
     const parts = dir.split('/').filter(Boolean);
     for (let i = 1; i <= parts.length; i++) side.revealed.add(parts.slice(0, i).join('/'));
   }

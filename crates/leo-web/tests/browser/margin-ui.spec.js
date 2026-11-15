@@ -572,3 +572,23 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
   await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(0);
   expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(body);
 });
+
+test('opening the open note again keeps its column still while it loads', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 820 });
+  const stamp = Date.now().toString(36);
+  const note = await (await page.request.post('/api/notes', { data: { title: `Still ${stamp}`, body: 'One line.\n\nAnother line.', directory: `Still ${stamp}` } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  const row = page.locator(`#side .side-note[data-id="${note.id}"]`);
+  await expect(row).toBeVisible();
+  await quiet(page);
+  const before = await page.locator('#doc').boundingBox();
+  let release;
+  const held = new Promise((done) => { release = done; });
+  await page.route(`**/api/notes/${note.id}**`, async (route) => { await held; await route.continue(); });
+  await row.click();
+  await expect(page.locator('.margin-layer')).toHaveCount(0);
+  const during = await page.locator('#doc').boundingBox();
+  release();
+  expect([during.x, during.width]).toEqual([before.x, before.width]);
+  await page.request.delete(`/api/notes/${note.id}`);
+});

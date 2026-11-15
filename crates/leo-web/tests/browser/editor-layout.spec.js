@@ -1143,6 +1143,7 @@ test('the heading rail keeps clear of the note text and its preview shows at eve
       await page.goto(url);
       const ticks = page.locator('.outline-ticks [data-tick]');
       await expect(ticks).toHaveCount(3);
+      await expect(page.locator('.outline-page:visible'), 'a short outline has no section arrows').toHaveCount(0);
       for (let i = 0; i < 3; i++) {
         await ticks.nth(i).hover();
         await expect(ticks.nth(i)).toHaveAttribute('data-distance', '0');
@@ -1159,9 +1160,65 @@ test('the heading rail keeps clear of the note text and its preview shows at eve
         expect(seen.tip, `the preview shows at ${width}px, over the text if it must`).not.toBeNull();
         expect(seen.tip[0]).toBeGreaterThanOrEqual(0);
         expect(seen.tip[1]).toBeLessThanOrEqual(width);
+        expect(seen.tip[0], `the preview sits beside the ticks at ${width}px`).toBeLessThanOrEqual(seen.bar + 40);
       }
     }
   }, { body });
+});
+
+test('a long outline shows its ticks a section at a time, with arrows only where there is more', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(url);
+    const shown = page.locator('.outline-ticks [data-tick]:not([hidden])');
+    const up = page.getByRole('button', { name: 'Earlier headings' });
+    const down = page.getByRole('button', { name: 'Later headings' });
+    await expect(page.locator('.outline-ticks [data-tick]')).toHaveCount(30);
+    await expect(shown).toHaveCount(24);
+    await expect(up).toBeHidden();
+    const rail = (await page.locator('.outline-ticks').boundingBox()).height;
+    const arrow = await down.boundingBox();
+    const at = [arrow.x + arrow.width / 2, arrow.y + arrow.height / 2];
+    await page.mouse.click(...at);
+    await page.mouse.click(...at);
+    expect(await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('.outline-ticks')), at), 'a second press where the arrow was never lands on a tick').toBe(false);
+    await expect(shown).toHaveCount(6);
+    expect((await page.locator('.outline-ticks').boundingBox()).height, 'a shorter section keeps the rail its height').toBe(rail);
+    await expect(shown.first()).toHaveAttribute('data-tick', await page.locator('.outline-ticks [data-tick]').nth(24).getAttribute('data-tick'));
+    await expect(down).toBeHidden();
+    const tick = await shown.first().boundingBox();
+    await page.mouse.move(tick.x + 3, tick.y + tick.height / 2);
+    await expect(page.locator('.outline-preview')).toContainText('Heading 25');
+    const title = page.locator('.outline-preview strong');
+    await page.mouse.move(1500, 850);
+    await page.locator('.outline-ticks').focus();
+    await expect(shown, 'focusing the ticks keeps the section the arrows chose').toHaveCount(6);
+    await expect(title).toHaveText('Heading 25');
+    await page.keyboard.press('Home');
+    await expect(shown).toHaveCount(24);
+    await expect(title).toHaveText('Heading 1');
+    await page.keyboard.press('End');
+    await expect(shown).toHaveCount(6);
+    await expect(title).toHaveText('Heading 30');
+    await page.locator('.outline-ticks').blur();
+    const sections = page.evaluate(() => new Promise((done) => {
+      const seen = new Set();
+      const t0 = performance.now();
+      const look = () => {
+        seen.add(document.querySelectorAll('.outline-ticks [data-tick]:not([hidden])').length);
+        if (performance.now() - t0 < 1500) requestAnimationFrame(look);
+        else done([...seen]);
+      };
+      look();
+    }));
+    await shown.nth(2).click();
+    expect(await sections, 'jumping to a heading never flips the rail back while it scrolls').toEqual([6]);
+    await up.click();
+    await expect(shown).toHaveCount(24);
+    await expect(up).toBeHidden();
+    await expect(down).toBeVisible();
+  }, { body: Array.from({ length: 30 }, (_, i) => `## Heading ${i + 1}\n\nText under heading ${i + 1}.`).join('\n\n') });
 });
 
 test('dragging down through the note never highlights the empty space or the page chrome under it', async ({ browser }) => {
