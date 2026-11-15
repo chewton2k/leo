@@ -254,6 +254,7 @@ function drawKanban() {
   }
   settleNow('kanban-card', (id) => app.querySelector(`.kanban-card[data-card="${CSS.escape(id)}"]`));
   settleNow('kanban-col', (id) => app.querySelector(`.kanban-col[data-col="${CSS.escape(id)}"]`));
+  inkSettle(kanbanInked);
   const again = focus && app.querySelector(focus);
   if (again) {
     if (typing) {
@@ -264,6 +265,8 @@ function drawKanban() {
   }
   kanbanFit();
 }
+
+const kanbanInked = (id) => app.querySelectorAll(`.kanban-card[data-card="${CSS.escape(id)}"]`);
 
 function kanbanCounts() {
   for (const el of app.querySelectorAll('[data-count-col]')) el.textContent = String(kanbanCardsIn(el.dataset.countCol).length);
@@ -525,6 +528,8 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
       const list = app.querySelector(`.kanban-cards[data-col="${CSS.escape(columnId)}"]`);
       list?.insertAdjacentHTML('beforeend', kanbanCardHtml(card));
       if (list) list.scrollTop = list.scrollHeight;
+      inkLand(card.id);
+      inkSettle(kanbanInked);
       kanbanCounts();
       kanbanFit();
       pulse(list?.lastElementChild, { lift: 1.02 });

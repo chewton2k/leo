@@ -632,6 +632,34 @@ test('today is a drawn ring no bigger than the old circle in the mini calendar, 
   });
 });
 
+test('today\'s ring draws once as the calendar opens, a redraw keeps the end frame, and reduced motion shows only the end frames', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const look = () => page.evaluate(() => {
+      const path = document.querySelector('.cal-dayhead.today .cal-ring path');
+      const tick = document.querySelector('.cal-check');
+      tick.checked = true;
+      const after = getComputedStyle(tick, '::after');
+      return { inking: path.classList.contains('inking'), animation: getComputedStyle(path).animationName, offset: parseFloat(getComputedStyle(path).strokeDashoffset), tick: parseFloat(after.transitionDuration), clip: /^inset\(0(px)?( 0(px)?)*\)$/.test(after.clipPath) };
+    });
+    await page.evaluate(() => { showCalendar(); });
+    expect(await look()).toMatchObject({ inking: true, animation: 'pencil-draw', tick: 0.16 });
+    await page.waitForTimeout(350);
+    await page.evaluate(() => drawCalendar());
+    expect(await look()).toMatchObject({ inking: false, animation: 'none', offset: 0 });
+    await settled(page);
+    expect(await page.evaluate(() => {
+      document.querySelector('.cal-item[data-id="task-study"] .cal-check').click();
+      const box = document.querySelector('.cal-item[data-id="task-study"] .cal-check');
+      return [box.checked, box.hasAttribute('data-writing'), box.getAnimations({ subtree: true }).map(run => run.animationName)];
+    })).toEqual([true, true, ['tick-write']]);
+    await settled(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(() => { showCalendar(); });
+    expect(await look()).toEqual({ inking: true, animation: 'none', offset: 0, tick: 0, clip: true });
+    await settled(page);
+  });
+});
+
 test('task boxes are drawn marks whose variant follows the task and survives a redraw', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const marks = () => page.evaluate(() => [...document.querySelectorAll('.cal-check')].map(el => {

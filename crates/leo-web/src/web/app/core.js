@@ -338,6 +338,25 @@ function pulse(el, { lift = 1.04, ring = false } = {}) {
   return el.animate(frames, { duration: PULSE_MS, easing: EASE_MOVE });
 }
 
+const INK_MS = 600;
+const inkedAt = new Map();
+
+function inkLand(id) {
+  if (!stillMotion()) inkedAt.set(id, performance.now());
+}
+
+function inkSettle(find) {
+  for (const [id, at] of inkedAt) {
+    const elapsed = performance.now() - at;
+    if (elapsed >= INK_MS) { inkedAt.delete(id); continue; }
+    for (const el of find(id)) {
+      if (typeof el.animate !== 'function' || el.getAnimations().some((run) => run.id === 'ink')) continue;
+      const look = getComputedStyle(el);
+      el.animate({ color: ['var(--text)', look.color], backgroundColor: [`color-mix(in srgb, var(--text) 12%, ${look.backgroundColor})`, look.backgroundColor] }, { id: 'ink', duration: INK_MS, delay: -elapsed, easing: EASE_OUT });
+    }
+  }
+}
+
 function cascade(el, kind = 'rows-in') {
   if (!el || stillMotion()) return;
   el.classList.add(kind);

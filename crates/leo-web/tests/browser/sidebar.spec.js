@@ -382,6 +382,24 @@ test('explorer refresh keeps file rows and a click in progress intact', async ({
   });
 });
 
+test('a note just created lands in the explorer in full ink, and one moved in from elsewhere does not', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page=await context.newPage();
+    await page.goto(url);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
+    await page.evaluate(()=>{notes.Course.push({id:'fresh-note',title:'Fresh',directory:'Course',created_at:new Date().toISOString()},{id:'old-note',title:'Old',directory:'Course',created_at:'2020-01-01T00:00:00Z'});return refreshSideTree();});
+    const inked=id=>page.locator(`.side-note[data-id="${id}"]`).evaluate(el=>el.getAnimations().filter(run=>run.id==='ink').length);
+    await expect(page.locator('.side-note[data-id="fresh-note"]')).toBeVisible();
+    expect(await inked('fresh-note')).toBe(1);
+    expect(await inked('old-note')).toBe(0);
+    expect(await inked('course-note')).toBe(0);
+    await page.evaluate(()=>{seq++;drawSide();});
+    expect(await inked('fresh-note')).toBeLessThanOrEqual(1);
+    expect(await page.evaluate(()=>window.errors)).toEqual([]);
+  });
+});
+
 test('the explorer filter keeps its text, focus and matches through a redraw', async ({ browser }) => {
   await sidebarFixture(browser,async(context,url)=>{
     const page=await context.newPage();

@@ -16,6 +16,7 @@ const SIDE_NOTES_FOLDERS = 64;
 const SIDE_NOTES_AUTOMATIC = 32;
 const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
+const SIDE_NEW_MS = 60000;
 
 try {
   side.open = new Set(JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) || '[]'));
@@ -151,6 +152,7 @@ function drawSide() {
     </div>`);
   if (listChanged && !side.twisted && !side.growing && !side.closing.size && sideWide()) flipList(box, '.side-tree .side-folder[data-refresh-key], .side-tree .side-note[data-id]', (el) => (el.dataset.id ? `n:${el.dataset.id}` : `d:${el.dataset.refreshKey}`), paint);
   else paint();
+  inkSettle((id) => box.querySelectorAll(`.side-tree .side-note[data-id="${CSS.escape(id)}"]`));
   applySideFilter(box.querySelector('.side-tree'));
   sideRoving(box.querySelector('.side-tree'));
   const pill = box.querySelector('.side-tree .side-pill');
@@ -457,9 +459,11 @@ async function readSideNotes(path, entry) {
     const page = await api(`/api/notes?${query}`, { total: true, signal: controller.signal });
     if (side.notes.get(path) !== entry || entry.seq !== seq) return;
     if (!Array.isArray(page.items)) throw new Error('Notes could not be opened.');
+    const had = entry.refreshing && new Set(entry.items.map((note) => note.id));
     entry.items = page.items.slice(0, SIDE_NOTES_PAGE).filter((note) => typeof note.id === 'string' && typeof note.title === 'string');
     entry.total = Number.isSafeInteger(page.total) && page.total >= 0 ? page.total : entry.items.length;
     entry.loaded = true;
+    if (had) for (const note of entry.items) if (!had.has(note.id) && Date.now() - Date.parse(note.created_at) < SIDE_NEW_MS) inkLand(note.id);
     if (!entry.items.length && entry.offset && entry.total) setTimeout(() => loadSideNotes(path, Math.floor((entry.total - 1) / SIDE_NOTES_PAGE) * SIDE_NOTES_PAGE, true));
   } catch (e) {
     if (side.notes.get(path) === entry && entry.seq === seq) {

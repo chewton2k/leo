@@ -56,6 +56,7 @@ async function showCalendar() {
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   cal.peek = null;
   cal.scrolled = '';
+  cal.ringAt = null;
   app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>';
   calSized.disconnect();
   calSized.observe($('#cal-main'));
@@ -238,6 +239,7 @@ function calTone(item) {
   return toneOfTask(item.task);
 }
 
+const CAL_RING_MS = 300;
 const CAL_RINGS = [
   'M20.3 6.5L21.5 7.7 22.4 9 23.2 10.6 23.6 12.2 23.8 14 23.5 15.7 22.9 17.4 22 18.9 20.8 20.2 19.3 21.3 17.7 22 15.9 22.5 14.1 22.7 12.4 22.7 10.6 22.4 9 21.8 7.4 21.1 6 20.1 4.7 18.9 3.7 17.6 2.8 16.1 2.2 14.4 2 12.7 2.1 10.9 2.6 9.2 3.4 7.5 4.5 6.1 6 4.9 7.6 4 9.3 3.4 11.2 3 13 3 14.8 3.2 16.5 3.7 18.1 4.4 19.7 5.3 21 6.4 22.2 7.8 23.2 9.3 23.9 10.9',
   'M3.6 16.8L2.9 15.2 2.5 13.6 2.4 11.9 2.6 10.2 3.2 8.5 4.1 7 5.4 5.7 6.8 4.6 8.5 3.8 10.3 3.4 12 3.2 13.8 3.3 15.5 3.7 17.2 4.3 18.7 5.1 20.1 6.1 21.3 7.2 22.3 8.6 23.2 10.1 23.7 11.8 23.9 13.5 23.8 15.3 23.3 17 22.5 18.6 21.3 20 19.9 21.2 18.3 22.1 16.5 22.7 14.7 23 12.8 23 11 22.7 9.3 22.2 7.7 21.5 6.2 20.5 4.9 19.4 3.8 18 2.9 16.6 2.2 14.9 1.8 13.2 1.8 11.3',
@@ -246,12 +248,15 @@ const CAL_RINGS = [
 ];
 
 function calRing(key) {
-  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
+  cal.ringAt ??= performance.now();
+  const ago = performance.now() - cal.ringAt;
+  const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
+  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
 }
 
 function calCheck(task) {
   const on = task.on ? ` data-on="${esc(task.on)}"` : '';
-  return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ' checked' : ''}>`;
+  return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ` checked${tickWrite(task.id, task.on)}` : ''}>`;
 }
 
 function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false } = {}) {
@@ -464,6 +469,7 @@ function drawCalendar() {
       side.innerHTML = calTray(plan, today);
     }
   }
+  inkSettle((id) => app.querySelectorAll(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
   requestAnimationFrame(calFit);
 }
 
@@ -811,6 +817,7 @@ function calCompose(day, start, end) {
     const body = { title, date: day, time: timed ? S.timeOf(start) : null, end: timed ? S.timeOf(end) : null, kind: 'other' };
     try {
       const made = await api('/api/tasks', { method: 'POST', body });
+      inkLand(made.id);
       toast(`Added “${made.title}”`, { action: 'Undo', run: () => api(`/api/tasks/${enc(made.id)}`, { method: 'DELETE' }).then(() => loadSchedule(seq)).catch(fail) });
       loadTasksWindow().catch(() => {});
       cal.stale = true;
@@ -1117,7 +1124,16 @@ function markTaskDone(id, done, on) {
   drawCalendar();
 }
 
+const TICK_MS = 160;
+const tickedAt = new Map();
+
+function tickWrite(id, on) {
+  const ago = performance.now() - (tickedAt.get(`${id} ${on || ''}`) ?? -Infinity);
+  return ago < TICK_MS ? ` data-writing style="--tick-at: ${-Math.round(ago)}ms"` : '';
+}
+
 async function setTaskDone(id, done, on = null) {
+  if (done) tickedAt.set(`${id} ${on || ''}`, performance.now());
   const before = calFind(id);
   const was = before && (on ? before.done_on : before.done);
   markTaskDone(id, done, on);
@@ -1262,6 +1278,7 @@ function newTaskSheet(day = null) {
     add.disabled = true;
     try {
       const made = await api('/api/tasks', { method: 'POST', body: { title: text, description: $('#task-description', box).value.trim(), date: pick.date, time: pick.time || null, kind, repeat } });
+      inkLand(made.id);
       closeSheet();
       toast(`Added “${made.title}”`);
       loadTasksWindow().catch(() => {});
@@ -1636,7 +1653,7 @@ const tasksHost = () => (tasksAtHome() && document.getElementById('home-today'))
 
 function tasksRow(t) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
-    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ' checked' : ''} aria-label="Done: ${esc(t.title)}">
+    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
     ${t.date ? `<span class="tasks-when">${esc(t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
@@ -1657,6 +1674,8 @@ function refocusTasks(host, focus) {
   (same || host).focus({ preventScroll: true });
 }
 
+const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
+
 function drawHomeToday(groups) {
   const box = document.getElementById('home-today');
   if (!box) return;
@@ -1664,6 +1683,7 @@ function drawHomeToday(groups) {
   const focus = tasksFocus(box);
   box.hidden = !due.length;
   box.innerHTML = tasksRows(due);
+  inkSettle(tasksInked);
   if (due.length) refocusTasks(box, focus);
 }
 
@@ -1687,6 +1707,7 @@ function drawTasksWindow() {
     </div>
     <div class="tasks-body">${tasksRows(groups)}</div>
     <div class="tasks-foot"><button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
+  inkSettle(tasksInked);
   refocusTasks(tasksBox, focus);
   fitTasksWindow();
 }

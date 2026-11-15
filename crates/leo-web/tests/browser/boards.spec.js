@@ -247,6 +247,29 @@ test('cards are added, opened, edited, moved by keyboard and deleted with undo',
   });
 });
 
+test('a new card lands in full ink and settles by colour alone, without restarting on a redraw', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-action="kanban-add-card"][data-col="ktodo00001"]').click();
+    const composer = page.locator('.kanban-composer textarea');
+    await composer.fill('Fresh ink');
+    await composer.press('Enter');
+    const card = page.locator('.kanban-card', { hasText: 'Fresh ink' });
+    await expect(card).toHaveCount(1);
+    const ink = () => card.evaluate(el => {
+      const run = el.getAnimations().find(a => a.id === 'ink');
+      if (!run) return null;
+      const props = Object.keys(run.effect.getKeyframes()[0]).filter(k => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort();
+      return { at: run.currentTime, props, ms: run.effect.getTiming().duration };
+    });
+    const first = await ink();
+    expect(first).toMatchObject({ props: ['backgroundColor', 'color'], ms: 600 });
+    await page.evaluate(() => drawKanban());
+    const again = await ink();
+    if (again) expect(again.at).toBeGreaterThanOrEqual(first.at);
+    await expect.poll(ink).toBeNull();
+  });
+});
+
 test('a card\'s details render as Markdown like a note, toggle checkboxes, edit by line and stay plain Markdown', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const markdown = '## Plan\n\nSome **bold** and [a link](https://example.com)\n\n- [ ] first\n\n`code`\n\n<img src=x onerror="window.ran=1"> [bad](javascript:window.ran=2)';

@@ -211,7 +211,18 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   tests scope lookups to `#app`). Colour arrives with the thumb or as a wipe,
   never on hover; `iconSwap`. Rubber band `rubber`, `pastEdge`, no overshoot.
 - Board lanes and cards and the Chats list only fade (transforms break
-  `kanbanFit` and a scrolled list's `scrollTop`). The explorer fold is the one
+  `kanbanFit` and a scrolled list's `scrollTop`).
+- Two signatures (2026-11-15): write-on, the task tick wipes in over 160 ms
+  (`--ease-pencil`, a transition, so a redraw never replays it; a box redrawn
+  inside the 160 ms carries `data-writing` and `--tick-at` from `tickWrite` and
+  resumes with `tick-write`) and today's ring
+  draws once over 300 ms with `pencil-draw` when the Calendar opens
+  (`cal.ringAt`; redraws inside the 300 ms resume it with a negative delay,
+  later ones draw the end frame); ink settles, `inkLand(id)` when leo creates a
+  card, task or note and `inkSettle(find)` after each redraw: the row starts in
+  `--text` with a 12% ink wash and fades to its own colours over 600 ms
+  (`INK_MS`, colour only, resumed by elapsed time). Explorer notes count as new
+  when a refresh brings an id created in the last minute. The explorer fold is the one
   width animation (`--side` as an `@property`).
 - Cancelling a menu animation clears closing state synchronously and detaches its
   old cancellation callback before a new animation owns that state.
