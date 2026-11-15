@@ -13,10 +13,8 @@ const KANBAN_MOST_DESCRIPTION = 8000;
 const KANBAN_PRIORITIES = [['', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const KANBAN_ICON = {
   pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
-  high: svg('<path d="M6 13l6-6 6 6M6 19l6-6 6 6"/>'),
-  medium: svg('<path d="M6 9.5h12M6 14.5h12"/>'),
-  low: svg('<path d="M6 9l6 6 6-6"/>'),
 };
+const KANBAN_STROKES = ['<path d="M2.2 11.6 Q3.1 7.4 4.3 3.1"/>', '<path d="M6.1 11.8 Q7.2 7.6 8.2 3.3"/>', '<path d="M10.1 11.5 Q11.1 7.2 12.3 3.2"/>'];
 const KANBAN_TONES = [
   [/\b(done|complete|completed|finished|shipped|closed)\b/i, 'done'],
   [/\b(in progress|doing|working|review|reviewing|testing|started)\b/i, 'doing'],
@@ -58,7 +56,7 @@ async function showBoards(arg) {
   state = { view: 'boards', dir: '' };
   chrome({ showBack: true });
   document.title = 'Boards · leo';
-  if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3)}</div>`;
+  if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3, 'board')}</div>`;
   const { boards } = await api('/api/boards');
   if (mine !== seq) return;
   kanban.boards = boards || [];
@@ -124,7 +122,9 @@ function kanbanUpdate(card, saved) {
 function kanbanPriority(priority) {
   if (!priority) return '';
   const label = KANBAN_PRIORITIES.find(([id]) => id === priority)?.[1] || priority;
-  return `<span class="kanban-priority ${esc(priority)}" title="${esc(label)} priority" aria-label="${esc(label)} priority">${KANBAN_ICON[priority] || ''}</span>`;
+  const strokes = { low: 1, medium: 2, high: 3 }[priority] || 0;
+  const width = 6 + strokes * 4;
+  return `<span class="kanban-priority ${esc(priority)}" title="${esc(label)} priority"><svg width="${width}" height="14" viewBox="0 0 ${width} 14" aria-hidden="true">${KANBAN_STROKES.slice(0, strokes).join('')}</svg><span class="kanban-priority-word">${esc(label)} priority</span></span>`;
 }
 
 function kanbanCardHtml(card) {
@@ -931,7 +931,7 @@ function kanbanFollow() {
   const d = kanban.drag;
   if (!d || !d.live) return;
   const page = app.getBoundingClientRect();
-  d.ghost.style.transform = `translate(${pastEdge(d.x, page.left, page.right) - d.dx}px, ${pastEdge(d.y, page.top, page.bottom) - d.dy}px)`;
+  d.ghost.style.transform = `translate(${pastEdge(d.x, page.left, page.right) - d.dx}px, ${pastEdge(d.y, page.top, page.bottom) - d.dy}px) rotate(var(--tilt, 0deg))`;
   const under = document.elementFromPoint(d.x, d.y);
   for (const tab of document.querySelectorAll('.kanban-tab.drop-on')) tab.classList.remove('drop-on');
   d.tab = null;

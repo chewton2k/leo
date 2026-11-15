@@ -21,7 +21,7 @@ async function showSettings(section) {
   chrome({ showBack: true });
   $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
-  refreshPanel(app, settingsFrame(section, skeleton(3)));
+  refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
   const [page, calendar, speech, dictation, margin] = await Promise.all([api('/api/settings'), api('/api/calendar').catch(() => null), api('/api/speech').catch(() => null), api('/api/dictation').catch(() => null), section === 'felix' ? api('/api/margin').catch(() => null) : null]);
   if (mine !== seq) return;
   state.margin = margin;
@@ -1278,7 +1278,7 @@ app.addEventListener('change', (event) => {
 
 async function showUsage(trigger = null) {
   const opener = trigger?.closest?.('.scrim') ? $('#menu') : trigger || document.activeElement;
-  const plan = '<section class="coding-plan"><div class="skeleton plan-sk-head"></div><div class="skeleton plan-sk-row"></div><div class="skeleton plan-sk-row"></div></section>';
+  const plan = `<section class="coding-plan">${skeleton(3, 'plan')}</section>`;
   const box = sheet(`<header class="usage-head"><div><h3>Usage</h3><p class="usage-sub">Plan limits</p></div><div class="usage-tools"><button type="button" class="icon-btn" data-action="usage-refresh" aria-label="Refresh" title="Refresh" disabled>${ICON.refresh}</button><button type="button" class="icon-btn" data-action="close" aria-label="Close" title="Close">${ICON.close}</button></div></header><div class="usage-content" aria-busy="true"><div class="coding-plans" aria-hidden="true">${plan}${plan}</div></div>`);
   box.returnFocus = opener;
   box.querySelector('.sheet').classList.add('usage-sheet');

@@ -125,7 +125,10 @@ test('every focus cue that sets an outline, border colour or ring uses the focus
 test('links are ink and underlined, toasts sit on paper, and scrims use the token', () => {
   const body = (selector) => all.find((r) => r.selector === selector)?.body || '';
   assert.match(body('.link-btn'), /text-decoration: underline/);
-  for (const r of all.filter((r) => /(^|[\s,])a(?=$|[\s,:])|\.link-btn|\.set-link/.test(r.selector))) assert.doesNotMatch(r.body, /text-decoration: none/, r.selector);
+  for (const r of all.filter((r) => /(^|[\s,])a(?=$|[\s,:])|\.link-btn|\.set-link/.test(r.selector) && r.selector !== '#doc a')) assert.doesNotMatch(r.body, /text-decoration: none/, r.selector);
+  assert.match(body('#doc a'), /background: var\(--link-under\) 0 100% \/ 100% 4px no-repeat;.*box-decoration-break: clone/);
+  for (const at of ['#doc a', '#doc a:nth-of-type(3n+2)', '#doc a:nth-of-type(3n)']) assert.match(all.filter((r) => r.selector === at).map((r) => r.body).join(''), /--link-under: url\("data:image\/svg\+xml/, at);
+  assert.match(all.find((r) => r.selector === '#doc a' && r.at.some((a) => a.includes('forced-colors') && a.includes('print'))).body, /background: none; text-decoration: underline/);
   const toast = body('.toast, .toast-gone');
   assert.match(toast, /background: var\(--raised\)/);
   assert.match(toast, /color: var\(--text\)/);
@@ -203,6 +206,7 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
     '.msg-step-busy',
     '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
     '.proposal-wait',
+    '.side-reading',
   ]);
 });
 

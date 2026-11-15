@@ -48,6 +48,10 @@ const actions = {
     if (el.dataset.to) calSetView(el.dataset.to);
     calGo();
   },
+  'home-day': (el) => {
+    cal.selected = el.dataset.id;
+    go('#/calendar');
+  },
   'cal-prev': () => calStep(-1),
   'cal-next': () => calStep(1),
   'cal-today': () => {

@@ -80,7 +80,7 @@ test('Usage keeps cached readings through refresh failure and ignores a closed s
     const rel=()=> '10 minutes ago'; let seq=1, finishUsage, failUsage, usageCalls=0, writer='claude_code';
     const cached={tasks:[{task:'writing',provider:'claude_code'}],plans:[{provider:'codex',name:'Codex',installed:true,signed_in:true,limits:{five_hour:{used:.39,resets_at:Date.now()/1000+3600},seven_day:{used:.06,resets_at:Date.now()/1000+86400},seen_at:new Date(Date.now()-600000).toISOString()}},{provider:'claude_code',name:'Claude Code',installed:true,signed_in:true,limits:{five_hour:{used:1,resets_at:Date.now()/1000+3600},seven_day:{used:.95,resets_at:Date.now()/1000+86400},seen_at:new Date().toISOString()}}]};
     function sheet(html){const box=document.createElement('div');box.className='scrim';box.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';box.addEventListener('click',e=>{if(e.target.closest('[data-action="close"]')) box.classList.add('scrim-gone');});document.body.append(box);trapSheetFocus(box);return box;}
-    const bodies=[], ICON={refresh:'<svg></svg>',close:'<svg></svg>'}, cascade=()=>{};
+    const bodies=[], ICON={refresh:'<svg></svg>',close:'<svg></svg>'}, cascade=()=>{}, skeleton=(n)=>'<div class="skeleton"></div>'.repeat(n);
     async function api(url,options){if(url==='/api/settings')return structuredClone(cached);usageCalls++;bodies.push(options&&options.body);return new Promise((resolve,reject)=>{finishUsage=resolve;failUsage=reject;});}
     ${focus}
     ${plans}
@@ -281,7 +281,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.locator('.settings-section').evaluate(el=>{el.style.minHeight='';scrollTo(0,0);});
       await page.setViewportSize({width:900,height:850});
       const chips=await page.evaluate(()=>{const links=[...document.querySelectorAll('.settings-sections .settings-link')].map(a=>a.getBoundingClientRect());return {visible:links.every(r=>r.width>0&&r.height>0),rows:new Set(links.map(r=>Math.round(r.top))).size,position:getComputedStyle(document.querySelector('.settings-nav')).position,titles:getComputedStyle(document.querySelector('.settings-group-title')).display};});
-      expect(chips).toEqual({visible:true,rows:expect.any(Number),position:'static',titles:'none'});
+      expect(chips).toEqual({visible:true,rows:expect.any(Number),position:'static',titles:'block'});
       expect(chips.rows).toBeGreaterThan(1);
       await page.setViewportSize({width:1280,height:850});
       const search = page.locator('#settings-search');
@@ -675,4 +675,48 @@ test('Felix activity draws gridlines and colours bars by maker', async ({ page }
   const colours = await page.locator('.fa-day:last-child .fa-stack i').evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
   expect(colours).toHaveLength(2);
   expect(colours[0]).not.toBe(colours[1]);
+});
+
+test('switch rows that sit together share one raised panel split by an inset hairline; a hint or other row starts a new panel', async ({ page }) => {
+  const sw = (name) => `<label class="set-row" id="${name}"><span class="grow">${name}<span class="set-desc">About ${name}.</span></span><input type="checkbox" class="switch" role="switch"></label>`;
+  await page.setContent(`<style>${pageCss()}</style><main class="settings-section"><section class="set-card">${sw('a')}${sw('b')}${sw('c')}<p class="hint">A hint between.</p>${sw('lone')}<label class="set-row" id="pick"><span class="set-label">Pick</span><span class="set-value"><select><option>One</option></select></span></label>${sw('d')}<div class="set-row column" id="ai"><label class="set-line"><span class="grow">AI writing</span><input type="checkbox" class="switch" role="switch"></label><span class="hint">Below.</span></div></section></main>`);
+  const look = (id) => page.locator('#' + id).evaluate((el) => {
+    const s = getComputedStyle(el), line = getComputedStyle(el, '::before');
+    const prev = el.previousElementSibling;
+    return { top: s.borderTopLeftRadius, bottom: s.borderBottomRightRadius, shadow: s.boxShadow !== 'none', gap: prev ? Math.round(el.getBoundingClientRect().top - prev.getBoundingClientRect().bottom) : null, line: line.content !== 'none' && line.content !== 'normal' };
+  });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    expect(await look('a')).toEqual({ top: '10px', bottom: '0px', shadow: true, gap: null, line: false });
+    expect(await look('b')).toEqual({ top: '0px', bottom: '0px', shadow: true, gap: 0, line: true });
+    expect(await look('c')).toEqual({ top: '0px', bottom: '10px', shadow: true, gap: 0, line: true });
+    expect(await look('lone')).toMatchObject({ top: '10px', bottom: '10px', shadow: true, line: false });
+    expect(await look('d')).toMatchObject({ top: '10px', bottom: '0px', line: false });
+    expect(await look('ai')).toMatchObject({ top: '0px', bottom: '10px', gap: 0, line: true });
+    expect(await page.locator('#pick').evaluate((el) => getComputedStyle(el).boxShadow)).toBe('none');
+  }
+  expect(await page.locator('#b').evaluate((el) => getComputedStyle(el, '::before').backgroundImage)).toContain('14px');
+  expect(await page.locator('#b').evaluate((el) => { el.dataset.find = 'b'; el.classList.add('found-still'); const s = getComputedStyle(el); return [s.clipPath, s.zIndex, s.outlineStyle]; })).toEqual(['none', '1', 'solid']);
+  await page.locator('#b').evaluate((el) => el.classList.remove('found-still'));
+  await page.emulateMedia({ forcedColors: 'active' });
+  expect(await page.locator('#b').evaluate((el) => [getComputedStyle(el).borderTopStyle, getComputedStyle(el, '::before').display])).toEqual(['solid', 'none']);
+});
+
+test('loader sketches draw once without reduced motion and show the drawn lines still with it', async ({ page }) => {
+  const line = (w) => `<svg viewBox="0 0 400 6" preserveAspectRatio="none" style="width: ${w}%"><path d="M1 3 h398"/></svg>`;
+  const card = `<div class="skeleton sk-draw" data-sketch="search">${line(33)}${line(64)}${line(47)}</div>`;
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    await page.emulateMedia({ reducedMotion });
+    await page.setContent(`<style>${pageCss()}</style><div id="app"><div class="cards">${card}</div></div>`);
+    const lines = await page.locator('.skeleton svg').evaluateAll((els) => els.map((el) => el.getAnimations().map((a) => [a.animationName, a.effect.getTiming().delay, a.effect.getTiming().iterations])));
+    expect(lines).toEqual(reducedMotion === 'reduce' ? [[], [], []] : [[['tick-write', 0, 1]], [['tick-write', 30, 1]], [['tick-write', 60, 1]]]);
+    expect(await page.locator('.skeleton').evaluate((el) => [el.getBoundingClientRect().height, el.getAnimations().length])).toEqual([96, 0]);
+    const half = await page.locator('.skeleton svg').first().evaluate((el) => { el.getAnimations().forEach((a) => { a.pause(); a.currentTime = 200; }); return getComputedStyle(el).clipPath; });
+    if (reducedMotion === 'reduce') expect(half).toBe('inset(-2px)');
+    else expect(half).toMatch(/^inset\(.*%/);
+  }
+  for (const [theme, tone] of [['light', 'rgb(239, 237, 231)'], ['dark', 'rgb(32, 31, 29)']]) {
+    await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    expect(await page.locator('.skeleton').evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(tone);
+  }
 });

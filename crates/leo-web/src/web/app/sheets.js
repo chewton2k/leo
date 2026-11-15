@@ -186,7 +186,7 @@ const inQuick = (sel) => (quick.root && !quick.root.classList.contains('scrim-go
 function quickLeo() {
   Object.assign(quick, { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '' });
   quick.root = sheet(`<div class="quick-leo"><span class="quick-perch" aria-hidden="true">${chat.button(50)}</span>
-    <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search, ask, remind or jot anything…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
+    <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
     <div class="quick-results" id="quick-results" role="listbox" aria-label="Results"></div>
   </div>`);
   const input = inQuick('#quick-input');
@@ -311,7 +311,7 @@ function drawQuickDue() {
   const box = inQuick('#quick-results');
   if (!box || quick.rows.length) return;
   box.innerHTML = quick.due.length
-    ? `<div class="quick-due-head">Due today</div>${quick.due.map((t) => `<label class="quick-task${t.late ? ' late' : ''}"><input type="checkbox" class="sched-check" data-action="quick-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''} aria-label="Done: ${esc(t.title)}"><span class="grow">${esc(t.title)}</span><span class="hint">${esc(t.late ? 'Overdue' : t.time ? S.timeLabel(t.time, calLocale()) : 'Today')}</span></label>`).join('')}`
+    ? `<div class="quick-due-head">Due today</div>${quick.due.map((t) => `<label class="quick-task${t.late ? ' late' : ''}"><input type="checkbox" class="sched-check" data-action="quick-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''} aria-label="Done: ${esc(t.title)}"><span class="grow">${esc(t.title)}</span><span class="hint">${esc(t.late ? 'Earlier' : t.time ? S.timeLabel(t.time, calLocale()) : 'Today')}</span></label>`).join('')}`
     : '';
 }
 
@@ -478,7 +478,7 @@ async function trashFolder(from) {
   if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
   loadSideFolders();
   refocusExplorer({ kind: 'folder', dir: parentOf(from) });
-  toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done) });
+  toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done, from) });
 }
 
 async function saveFolder(name, parent) {
@@ -543,7 +543,7 @@ async function trashNote(note = null, at = null) {
   }
   loadSideFolders();
   if (at) refocusExplorer({ kind: 'folder', dir: at.dir });
-  toast('Moved to the trash', { action: 'Undo', run: () => restore(note.id, false) });
+  toast(`Moved “${note.title || 'Untitled'}” to the trash`, { action: 'Undo', run: () => restore(note.id, false) });
 }
 
 async function restore(id, open) {
@@ -565,7 +565,7 @@ async function pinCard(el) {
   el.setAttribute('aria-pressed', String(on));
   try {
     await api(`/api/notes/${enc(el.dataset.id)}`, { method: 'PATCH', body: { pinned: on } });
-    toast(on ? 'Pinned to the top of its folder' : 'Unpinned');
+    toast(on ? 'Pinned to the top of its folder' : `Unpinned “${el.dataset.title || 'Untitled'}”`);
     await render();
   } catch (e) {
     el.classList.toggle('on', !on);
@@ -589,7 +589,7 @@ async function copyMarkdown() {
   if (!note) return;
   try {
     await navigator.clipboard.writeText(note.text);
-    toast('Copied as Markdown');
+    toast(`Copied “${note.title || 'Untitled'}” as Markdown`);
   } catch (e) {
     toast(`Could not copy: ${e.message || 'the clipboard is not available.'}`, { bad: true });
   }
@@ -612,11 +612,13 @@ function shareMenu(owner) {
       { text: 'Copy as Markdown', icon: ICON.note, run: copyMarkdown },
       { text: 'Save .md file', icon: ICON.download, run: saveMarkdown },
       { text: 'Export as PDF', icon: ICON.share, run: share },
+      ...(marginPrintable().length ? [{ text: 'Export as PDF with Felix’s notes', icon: ICON.share, run: () => share(true) }] : []),
     ],
   });
 }
 
-async function share() {
+async function share(notes = false) {
+  printNotesClear();
   const mine = seq;
   const s = await ready();
   if (mine !== seq) return;
@@ -629,10 +631,65 @@ async function share() {
   };
   window.addEventListener('afterprint', restore);
   try {
+    if (notes) printNotes(s);
     await window.print();
+    if (printingNotes) for (const name of ['pointerdown', 'keydown']) window.addEventListener(name, printNotesClear, true);
   } catch (e) {
     restore();
+    printNotesClear();
     toast('Could not open the print dialog. Try PDF export again.', { bad: true });
+  }
+}
+
+let printingNotes = false;
+
+function printNotesClear() {
+  if (!printingNotes) return;
+  printingNotes = false;
+  for (const name of ['afterprint', 'pointerdown', 'keydown']) window.removeEventListener(name, printNotesClear, true);
+  for (const el of document.querySelectorAll('[data-print]')) {
+    const up = el.parentNode;
+    el.remove();
+    up?.normalize();
+  }
+}
+
+function printNotes(s) {
+  printingNotes = true;
+  window.addEventListener('afterprint', printNotesClear, true);
+  const found = marginPage.s === s ? marginPrintable() : [];
+  const list = document.createElement('ol');
+  for (const { at, text } of found) {
+    const point = s.doc.domPoint(at.to);
+    const range = document.createRange();
+    if (point.node.nodeType === Node.TEXT_NODE) range.setStart(point.node, point.offset);
+    else {
+      const blk = s.doc.blockAt(Math.max(at.from, at.to - 1));
+      if (!blk) continue;
+      range.selectNodeContents(blk);
+      range.collapse(false);
+    }
+    const sup = document.createElement('sup');
+    sup.hidden = true;
+    sup.dataset.print = String(list.childElementCount + 1);
+    range.insertNode(sup);
+    const item = document.createElement('li');
+    marginAnswer(item, text);
+    list.append(item);
+  }
+  if (!list.childElementCount) return;
+  const notes = document.createElement('section');
+  notes.className = 'print-notes';
+  notes.hidden = true;
+  notes.dataset.print = '';
+  notes.append(list);
+  $('#doc').after(notes);
+  const title = (s.note.title || '').trim().replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ');
+  if (title) {
+    const footer = document.createElement('style');
+    footer.dataset.print = '';
+    footer.textContent = `@media print { @page { @bottom-center { content: "${title} · " counter(page) " / " counter(pages); } } }`;
+    document.head.append(footer);
   }
 }
 

@@ -88,11 +88,7 @@ function marginLeave() {
   marginPage.personaSlide?.cancel();
   marginPage.observer?.disconnect();
   marginPage.observer = null;
-  const columns = marginPage.layer?.parentElement;
-  columns?.style.removeProperty('--anchor-gutter');
-  columns?.style.removeProperty('--margin-w');
   marginPage.layer?.remove();
-  marginPage.roomy?.classList.remove('margin-room');
   Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
   marginPage.els.clear();
   marginPage.paths.clear();
@@ -466,6 +462,13 @@ function marginRedraw() {
 }
 
 if (document.fonts) Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
+
+function marginPrintable() {
+  const s = marginPage.s;
+  if (!s) return [];
+  const source = s.doc.source();
+  return marginPage.threads.map((t) => ({ at: marginKit.find(source, t), text: marginNow(t) })).filter(({ at, text }) => at && text).sort((a, b) => a.at.to - b.at.to);
+}
 
 function marginNow(t) {
   const felixSaid = [...(t.messages || [])].reverse().find((m) => m.from === 'felix');
@@ -1598,6 +1601,7 @@ async function marginRead(s) {
   if (!marginKit.changedBlocks(marginPage.baseline, s.doc.source()).length) return;
   const reading = {};
   marginPage.reading = reading;
+  queueMicrotask(sideRedrawSoon);
   try {
     await flush(s);
     if (s !== marginPage.s || marginPage.mode !== 'along' || saving.unsaved()) return;
@@ -1657,6 +1661,7 @@ async function marginRead(s) {
       const again = marginPage.again;
       marginPage.again = false;
       if (again && marginPage.mode === 'along') marginArm(s);
+      queueMicrotask(sideRedrawSoon);
     }
   }
 }

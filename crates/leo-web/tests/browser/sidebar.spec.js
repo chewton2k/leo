@@ -49,7 +49,7 @@ async function sidebarFixture(browser, run) {
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint'))}
-    const overlapOut=()=>{};
+    const overlapOut=()=>{}, marginPage={reading:false};
     ${read('app/motion.js')}
     ${read('app/popup-menu.js')}
     ${read('app/select-menu.js')}
@@ -524,6 +524,13 @@ test('old saved folders are dropped, and after its folder is closed a newly open
     await expect(row('Course'), 'a redraw does not reopen a folder the user closed').toHaveAttribute('aria-expanded','false');
     await page.evaluate(()=>audit.note('escaped-note','Course'));
     await expect(page.locator('.side-note[data-id="escaped-note"]'), 'another note in the same folder unfolds it again').toHaveCount(1);
+    await page.evaluate(()=>audit.note('personal-note','Personal'));
+    await row('Course').click();
+    await expect(row('Course')).toHaveAttribute('aria-expanded','true');
+    await row('Course').click();
+    await expect(row('Course')).toHaveAttribute('aria-expanded','false');
+    await page.evaluate(()=>{state={view:'settings'};audit.draw();});
+    await expect(row('Course'), 'leaving the note for another page keeps a folder the user closed closed').toHaveAttribute('aria-expanded','false');
   });
 });
 
@@ -951,6 +958,86 @@ test('explorer blank context menu offers creation and stays inside the viewport'
     await expect(page.getByRole('menuitem', { name: 'New folder', exact: true })).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(page.locator('.side-tree')).toBeFocused();
+  });
+});
+
+test('the Folders label ends in a pencil rule, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
+  await sidebarFixture(browser, async (context, url) => {
+    const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(url);
+    const rule = await page.locator('.side-group').evaluate((el) => {
+      const after = getComputedStyle(el, '::after');
+      return { mask: after.maskImage || after.webkitMaskImage, width: parseFloat(after.width), word: el.firstElementChild.getBoundingClientRect().right, tools: el.querySelector('.side-group-tools').getBoundingClientRect().left };
+    });
+    expect(rule.mask).toContain('url(');
+    expect(rule.width).toBeGreaterThan(40);
+    expect(rule.word + 8 + rule.width).toBeLessThanOrEqual(rule.tools + 0.5);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
+    await page.evaluate(() => {
+      notes.Course[0].updated_at = new Date(Date.now() - SIDE_FRESH_MS + 1500).toISOString();
+      notes.Course[1].updated_at = '2020-01-01T00:00:00Z';
+      return refreshSideTree();
+    });
+    const fresh = page.locator('.side-note[data-id="course-note"] .side-fresh');
+    await expect(fresh).toBeVisible();
+    await expect(fresh).toHaveAttribute('aria-hidden', 'true');
+    await expect(fresh).toHaveAttribute('title', 'Edited in the last 30 minutes');
+    await expect(page.locator('.side-note[data-id="course-note"]')).not.toHaveAccessibleName(/Edited/);
+    await expect(page.locator('.side-note[data-id="escaped-note"] .side-fresh')).toHaveCount(0);
+    expect(await fresh.evaluate((el) => [el.getBoundingClientRect().width, el.previousElementSibling.className])).toEqual([4, 'side-label']);
+    await page.evaluate(() => { window.rel = () => 'just now'; side.sort = 'updated'; drawSide(); });
+    await expect(page.locator('.side-tree .side-fresh')).toHaveCount(0);
+    await page.evaluate(() => { side.sort = 'title'; drawSide(); });
+    await expect(fresh).toBeVisible();
+    await expect(fresh).toHaveCount(0, { timeout: 5000 });
+    await page.evaluate(() => { notes.Course[0].updated_at = new Date().toISOString(); return refreshSideTree(); });
+    await expect(fresh).toBeVisible();
+    await page.evaluate(() => audit.note('course-note', 'Course'));
+    await page.evaluate(() => { marginPage.reading = {}; drawSide(); });
+    const reading = page.locator('.side-note[data-id="course-note"] .side-reading');
+    await expect(reading).toHaveAttribute('aria-hidden', 'true');
+    await expect(reading).toHaveAttribute('title', 'Felix is reading this note');
+    await expect(page.locator('.side-note[data-id="course-note"] .side-fresh')).toHaveCount(0);
+    expect(await reading.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).animationName])).toEqual([await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--felix').trim() === '#3f6d97' ? 'rgb(63, 109, 151)' : 'rgb(180, 207, 231)'), 'none']);
+    await expect(page.locator('.side-tree .side-reading')).toHaveCount(1);
+    await page.emulateMedia({ forcedColors: 'active' });
+    if (browserName !== 'webkit') expect(await reading.evaluate((el) => getComputedStyle(el).forcedColorAdjust)).toBe('none');
+    await page.emulateMedia({ forcedColors: 'none' });
+    await page.locator('.side-note[data-id="course-note"]').click({ button: 'right' });
+    await expect(page.locator('.popup-menu')).toBeVisible();
+    await page.evaluate(() => { marginPage.reading = false; sideRedrawSoon(); });
+    await expect(page.locator('.side-tree .side-reading'), 'the explorer waits while one of its menus is open').toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.popup-menu')).toHaveCount(0);
+    await expect(page.locator('.side-tree .side-reading')).toHaveCount(0);
+    await expect(page.locator('.side-note[data-id="course-note"] .side-fresh')).toBeVisible();
+    expect(await page.evaluate(() => window.errors)).toEqual([]);
+  });
+});
+
+test('menus fill the hovered row with the menu tint, inset separators to the text, and show the New note keycap only where it works', async ({ browser }) => {
+  await sidebarFixture(browser, async (context, url) => {
+    const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(url);
+    await expect(page.locator('.side-note[data-id="root-note"]')).toBeVisible();
+    await page.locator('.side-tree').dispatchEvent('contextmenu', { clientX: 600, clientY: 400 });
+    const newNote = page.getByRole('menuitem', { name: 'New note', exact: true });
+    await expect(newNote).toBeFocused();
+    await expect(newNote.locator('kbd')).toHaveText(await page.evaluate(() => shortcutText(shortcutKeys('new'))));
+    await expect(newNote.locator('kbd')).toHaveAttribute('aria-hidden', 'true');
+    await page.keyboard.press('Escape');
+    await page.locator('.side-tree .side-row[data-dir="Personal"]').dispatchEvent('contextmenu', { clientX: 120, clientY: 300 });
+    await expect(page.getByRole('menuitem', { name: 'New note here', exact: true })).toBeVisible();
+    await expect(page.locator('.popup-menu kbd')).toHaveCount(0);
+    const hr = await page.locator('.popup-menu hr').first().evaluate((el) => [getComputedStyle(el).marginLeft, getComputedStyle(el).marginRight]);
+    expect(hr).toEqual(['12px', '12px']);
+    for (const [theme, fill] of [['light', 'rgb(236, 233, 226)'], ['dark', 'rgba(233, 231, 226, 0.06)']]) {
+      await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      const rename = page.getByRole('menuitem', { name: 'Rename', exact: true });
+      await rename.hover();
+      await expect.poll(() => rename.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(fill);
+    }
   });
 });
 

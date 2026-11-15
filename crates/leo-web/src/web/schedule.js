@@ -309,6 +309,25 @@
     return at.toLocaleTimeString(locale || undefined, { hour: 'numeric', minute: '2-digit' });
   }
 
+  function dayWord(key, now, locale) {
+    const ahead = Math.round((fromKey(key) - fromKey(dayKey(now))) / 864e5);
+    if (ahead === 0) return 'Today';
+    if (ahead === 1) return 'Tomorrow';
+    return fromKey(key).toLocaleDateString(locale || undefined, Math.abs(ahead) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' });
+  }
+
+  function dayName(key, locale) {
+    return fromKey(key).toLocaleDateString(locale || undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
+  const TALLY = ['M2.4 1.3Q1.2 6 1.2 10.9', 'M6.4 1.4Q6 6 5.9 10.7', 'M10.9 1Q10.2 6 10.4 10.7', 'M15.5 1.3Q14.8 6 14.9 10.3', 'M1 9.5Q9.2 6.2 18.5 2.6'];
+
+  function tally(count) {
+    const n = Math.max(0, Math.floor(count) || 0);
+    const marks = Array.from({ length: n }, (_, i) => ({ d: TALLY[i % 5], x: Math.floor(i / 5) * 23.5 }));
+    return { marks, width: Math.floor(n / 5) * 23.5 + 2.5 + (n % 5) * 4.5 };
+  }
+
   const TEXT_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   const escapeText = (text) => String(text).replace(/[&<>"']/g, (c) => TEXT_ESCAPES[c]);
   const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
@@ -600,7 +619,7 @@
     return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
   }
 
-  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, nextWeekday };
+  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

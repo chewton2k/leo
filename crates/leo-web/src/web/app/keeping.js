@@ -12,11 +12,11 @@ async function showKeeping() {
   chrome({ showBack: true });
   $('#crumbs').innerHTML = settingsCrumbs('keeping');
   document.title = 'Keeping · leo';
-  refreshPanel(app, settingsFrame('keeping', skeleton(4)));
+  refreshPanel(app, settingsFrame('keeping', skeleton(4, 'keeping')));
   let keep;
   try { keep = await api('/api/keep'); }
   catch (error) {
-    if (mine === seq) refreshPanel(app, settingsFrame('keeping', empty(ICON.storage, 'Keeping could not be opened', 'leo did not answer. Open this page again in a moment.')));
+    if (mine === seq) refreshPanel(app, settingsFrame('keeping', empty(DRAWN.broken, 'Keeping could not be opened', 'leo did not answer. Open this page again in a moment.')));
     throw error;
   }
   if (mine !== seq) return;

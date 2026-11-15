@@ -247,9 +247,9 @@ const CAL_RINGS = [
   'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
 ];
 
-function calRing(key) {
-  cal.ringAt ??= performance.now();
-  const ago = performance.now() - cal.ringAt;
+function calRing(key, still = false) {
+  if (!still) cal.ringAt ??= performance.now();
+  const ago = still ? CAL_RING_MS : performance.now() - cal.ringAt;
   const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
   return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
 }
@@ -362,7 +362,8 @@ function calColumn(key, plan, today, room = Infinity) {
   let now = '';
   if (key === today) {
     const at = new Date();
-    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
+    const top = ((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX;
+    now = `<div class="cal-past" style="height: ${top}px" aria-hidden="true"></div><div class="cal-now" style="top: ${top}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
   }
   const wknd = [0, 6].includes(S.fromKey(key).getDay()) ? ' weekend' : '';
   return `<div class="cal-col${wknd}" data-day="${key}">${blocks}${now}</div>`;
@@ -422,8 +423,8 @@ function calMini(today) {
 }
 
 function calTrayRow(task) {
-  const when = task.date ? S.fromKey(task.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }) : '';
-  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub">${esc(when)}</span>` : ''}</button></div>`;
+  const when = task.date ? S.dayWord(task.date, new Date(), calLocale()) : '';
+  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub" aria-hidden="true" title="${esc(S.dayName(task.date, calLocale()))}">${esc(when)}</span><span class="said">, ${esc(S.dayName(task.date, calLocale()))}</span>` : ''}</button></div>`;
 }
 
 function calTray(plan, today) {
@@ -433,7 +434,7 @@ function calTray(plan, today) {
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Overdue', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
 }
 
 function drawCalendar() {
@@ -1142,14 +1143,15 @@ function tickTaskBoxes(id, done, on) {
 
 const TICK_MS = 160;
 const tickedAt = new Map();
+const tickKey = (id, on) => `${id} ${on || ''}`;
 
 function tickWrite(id, on) {
-  const ago = performance.now() - (tickedAt.get(`${id} ${on || ''}`) ?? -Infinity);
+  const ago = performance.now() - (tickedAt.get(tickKey(id, on)) ?? -Infinity);
   return ago < TICK_MS ? ` data-writing style="--tick-at: ${-Math.round(ago)}ms"` : '';
 }
 
 async function setTaskDone(id, done, on = null) {
-  if (done) tickedAt.set(`${id} ${on || ''}`, performance.now());
+  if (done) tickedAt.set(tickKey(id, on), performance.now());
   const before = calFind(id);
   const was = before && (on ? before.done_on : before.done);
   markTaskDone(id, done, on);
@@ -1175,7 +1177,7 @@ async function setTaskDone(id, done, on = null) {
     drawCalendar();
     tickTaskBoxes(id, done, on);
   }
-  if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
+  if (done) toast(`Marked “${task?.title || 'Untitled'}” done`, { action: 'Undo', run: () => setTaskDone(id, false, on) });
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
 
@@ -1251,7 +1253,9 @@ async function saveDate(task, pick, confirm) {
     return;
   }
   closeSheet();
-  toast(pick.date ? 'Date saved' : 'Date cleared');
+  const named = `“${task.title || 'Untitled'}”`;
+  const day = pick.date && S.fromKey(pick.date).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
+  toast(!pick.date ? 'Date cleared' : pick.date === task.date ? `Saved ${named}` : task.date ? `Moved ${named} to ${day}` : `Set ${named} for ${day}`);
   loadTasksWindow().catch(() => {});
   if (state.view === 'calendar') {
     if (pick.date) cal.selected = pick.date;
@@ -1416,7 +1420,7 @@ function taskSheet(id, on = null) {
         task.description = saved.description;
         if (!descSaved) {
           descSaved = true;
-          toast('Description saved', { action: 'Undo', run: async () => {
+          toast(`Saved the description of “${task.title || 'Untitled'}”`, { action: 'Undo', run: async () => {
             const undone = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { description: opened } });
             task.description = undone.description;
             if (box.isConnected) {
@@ -1563,8 +1567,8 @@ async function promoteTask(line) {
   const s = state.view === 'note' ? state.session : null;
   if (!s || !s.note.id) return;
   try {
-    await api('/api/tasks/promote', { method: 'POST', body: { note: s.note.id, line: Number(line) } });
-    toast('Added to your tasks', { action: 'Calendar', run: () => go('#/calendar') });
+    const task = await api('/api/tasks/promote', { method: 'POST', body: { note: s.note.id, line: Number(line) } });
+    toast(`Added “${task?.title || 'Untitled'}” to your tasks`, { action: 'Calendar', run: () => go('#/calendar') });
     await noteTasksSheet();
   } catch (e) {
     if (e instanceof Locked) throw e;
@@ -1586,6 +1590,7 @@ async function openTaskAnywhere(id, on = null) {
 
 var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
 const TASKS_AHEAD_DAYS = 7;
+const TASK_GROUP_NAMES = { Overdue: 'Earlier' };
 const TASK_DONE_MS = 1200;
 const TASKS_LEAST_ROOM = 150;
 const MOST_TASK_FEEDBACK = 80;
@@ -1681,22 +1686,22 @@ function tasksDue() {
 function tasksDueBadge() {
   const { late, due } = tasksDue();
   if (!due) return '';
-  return `<span class="due-badge${late ? ' late' : ''}" aria-label="${esc(late ? `${due} due, ${late} overdue` : `${due} due today`)}">${due} due</span>`;
+  return `<span class="due-badge${late ? ' late' : ''}" aria-label="${esc(late ? `${due} due, ${late} from earlier` : `${due} due today`)}">${due} due</span>`;
 }
 
 const tasksAtHome = () => state.view === 'workspace' && /^(?:#\/?)?$/.test(location.hash);
 const tasksHost = () => (tasksAtHome() && document.getElementById('home-today')) || tasksBox;
 
-function tasksRow(t, when) {
+function tasksRow(t) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
     <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when">${esc(when || (t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' })))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+    ${t.date ? `<span class="tasks-when" aria-hidden="true" title="${esc(S.dayName(t.date, calLocale()))}">${esc(t.date === S.dayKey(new Date()) && t.time ? S.timeLabel(t.time, calLocale()) : S.dayWord(t.date, new Date(), calLocale()))}</span><span class="said">${esc(S.dayName(t.date, calLocale()))}${t.date === S.dayKey(new Date()) && t.time ? `, ${esc(S.timeLabel(t.time, calLocale()))}` : ''}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
 }
 
 function tasksRows(groups) {
-  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
+  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${TASK_GROUP_NAMES[name] || name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
 }
 
 function tasksFocus(host) {
@@ -1713,6 +1718,7 @@ function refocusTasks(host, focus) {
 const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
 
 const HOME_ROWS = 6;
+const HOME_RECENT_WAIT = 20000;
 let homeMidnight = 0;
 
 function drawHomeToday() {
@@ -1725,10 +1731,10 @@ function drawHomeToday() {
   const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
   const day = today.slice(0, HOME_ROWS - early.length);
   const more = earlier.length + today.length - early.length - day.length;
-  const ago = (t) => (S.fromKey(S.dayKey(now)) - S.fromKey(t.date)) / 864e5;
   const focus = tasksFocus(box);
+  const said = `${today.filter((t) => t.done).length} of ${today.length} done`;
   box.hidden = !early.length && !day.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t, S.fromKey(t.date).toLocaleDateString(calLocale(), ago(t) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }))).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
   const root = side.notes.get('');
@@ -1740,8 +1746,108 @@ function drawHomeToday() {
   const first = ready && notes === 0 && !tasks.length;
   $('.home-foot').classList.toggle('first', Boolean(first));
   $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : `Open a note${sideActive() ? '' : ' from Folders'}, or start a new one.`;
+  drawHomeWeek();
+  drawHomeRecent();
   clearTimeout(homeMidnight);
-  homeMidnight = setTimeout(drawTasksWindow, S.addDays(now, 1) - now + 1000);
+  homeMidnight = setTimeout(() => { drawTasksWindow(); loadHomeWeek(); }, S.addDays(now, 1) - now + 1000);
+}
+
+function homeTally(today) {
+  const done = today.filter((t) => t.done);
+  const { marks, width } = S.tally(done.length);
+  if (!marks.length) return '';
+  const ago = performance.now() - Math.max(...done.map((t) => tickedAt.get(tickKey(t.id, t.on)) ?? -Infinity));
+  return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
+}
+
+const homeWeek = { events: null, load: 0, from: '', at: 0 };
+const HOME_WEEK_FRESH = 10 * 60000;
+
+async function loadHomeWeek() {
+  if (!document.getElementById('home-week')) return;
+  const days = S.daysOf('week', S.dayKey(new Date()), S.weekStart(calLocale()));
+  const mine = ++homeWeek.load;
+  homeWeek.from = days[0];
+  homeWeek.at = Date.now();
+  try {
+    const data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[6]), 1).toISOString())}`);
+    if (mine !== homeWeek.load) return;
+    homeWeek.events = data.events || [];
+  } catch (e) {
+    return;
+  }
+  drawHomeWeek();
+}
+
+function drawHomeWeek() {
+  const box = document.getElementById('home-week');
+  if (!box) return;
+  const today = S.dayKey(new Date());
+  const days = S.daysOf('week', today, S.weekStart(calLocale()));
+  if (homeWeek.from && homeWeek.from !== days[0]) loadHomeWeek();
+  const plan = S.plan(tasksWin.tasks || (cal.data && cal.data.tasks) || [], homeWeek.events || [], today, { from: days[0], to: days[6] });
+  const focus = tasksFocus(box);
+  const held = focus && days.includes(focus.id) ? focus.id : today;
+  const html = days.map((key) => {
+    const d = S.fromKey(key);
+    const name = d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
+    const busy = plan.byDay.has(key);
+    const stop = key === held;
+    return `<button type="button" class="home-wd${key < today ? ' past' : key === today ? ' today' : ''}" data-action="home-day" data-id="${key}" tabindex="${stop ? 0 : -1}" aria-label="${esc(busy ? `${name}, planned` : name)}" title="${esc(name)}"${key === today ? ' aria-current="date"' : ''}><b>${d.getDate()}${key === today ? calRing(key, true) : ''}</b>${busy ? '<i></i>' : ''}</button>`;
+  }).join('');
+  if (box.drawn === html) return;
+  box.drawn = html;
+  box.innerHTML = html;
+  box.onkeydown = homeWeekKeys;
+  if (focus) box.querySelector('[tabindex="0"]')?.focus({ preventScroll: true });
+}
+
+function homeWeekKeys(e) {
+  const days = [...e.currentTarget.querySelectorAll('.home-wd')];
+  const at = days.indexOf(document.activeElement);
+  const to = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: days.length - 1 }[e.key];
+  if (at < 0 || to === undefined || !days[to]) return;
+  e.preventDefault();
+  for (const day of days) day.tabIndex = day === days[to] ? 0 : -1;
+  days[to].focus();
+}
+
+const homeRecent = { notes: null, busy: 0, again: false };
+
+async function loadHomeRecent() {
+  if (!document.getElementById('home-recent')) return;
+  if (homeRecent.busy && Date.now() - homeRecent.busy < HOME_RECENT_WAIT) {
+    homeRecent.again = true;
+    return;
+  }
+  const mine = (homeRecent.busy = Date.now());
+  try {
+    const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
+    const notes = await api(`/api/notes?sort=updated&brief=true&limit=${Math.min(pinned + 3, 1000)}`);
+    if (homeRecent.busy !== mine) return;
+    homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
+  } catch (e) {
+    if (!homeRecent.notes) homeRecent.notes = [];
+  } finally {
+    if (homeRecent.busy === mine) homeRecent.busy = 0;
+  }
+  drawHomeRecent();
+  if (homeRecent.again) {
+    homeRecent.again = false;
+    loadHomeRecent();
+  }
+}
+
+function drawHomeRecent() {
+  const box = document.getElementById('home-recent');
+  if (!box || !homeRecent.notes) return;
+  const at = box.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+  const html = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(n.summary || '')}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
+  box.hidden = !homeRecent.notes.length;
+  if (box.drawn === html) return;
+  box.drawn = html;
+  box.innerHTML = html;
+  if (at) box.querySelector(`[href="${CSS.escape(at)}"]`)?.focus({ preventScroll: true });
 }
 
 function drawTasksWindow() {
@@ -1756,7 +1862,7 @@ function drawTasksWindow() {
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
   const focus = tasksFocus(tasksBox);
-  const label = late ? `${late[1].length} overdue · ${open} to do` : `${open} to do`;
+  const label = late ? `${late[1].length} from earlier · ${open} to do` : `${open} to do`;
   tasksBox.setAttribute('aria-label', `Tasks: ${label}`);
   tasksBox.innerHTML = `<div class="tasks-head">
       <div class="tasks-toggle"><span class="tasks-icon${late ? ' late' : ''}">${ICON.check}</span><span class="tasks-badge${late ? ' late' : ''}">${open > 99 ? '99+' : open}</span><span class="grow">Tasks <span class="tasks-count">${esc(label)}</span></span></div>
@@ -1809,6 +1915,7 @@ async function loadTasksWindow() {
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
     if (data.events) {
+      if (home && ((tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) || Date.now() - homeWeek.at > HOME_WEEK_FRESH)) loadHomeWeek();
       tasksWin.events = data.events;
       tasksWin.eventsAt = Date.now();
     }

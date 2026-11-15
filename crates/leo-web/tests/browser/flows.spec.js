@@ -465,7 +465,7 @@ test.describe('editing like Obsidian', () => {
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (frames, options) {
         const run = animate.call(this, frames, options);
-        if (this.matches('article.note')) { run.pause(); run.currentTime = 0; }
+        if (this.matches('#doc')) { run.pause(); run.currentTime = 0; }
         return run;
       };
     });
@@ -476,7 +476,7 @@ test.describe('editing like Obsidian', () => {
       if (body.startsWith('$$')) await expect(page.locator('#doc .math')).toHaveAttribute('data-drawn', 'yes');
       const place = () => page.locator('#doc .blk').first().boundingBox();
       const before = await place();
-      await page.locator('article.note').evaluate(el => { for (const run of el.getAnimations()) run.finish(); });
+      await page.locator('#doc').evaluate(el => { for (const run of el.getAnimations()) run.finish(); });
       await expect.poll(place, { message: body }).toEqual(before);
     }
   });
@@ -1466,7 +1466,8 @@ test.describe('Felix', () => {
     await chat.locator('#chat-input').fill('is my BFS note right?');
     await chat.locator('#chat-input').press('Enter');
     const answer = chat.locator('.msg.leo').last();
-    await expect(answer.locator('.msg-trace > summary')).toHaveText('Searched your notes');
+    await expect(answer.locator('.msg-trace > summary')).toHaveText(/^Searched your notes( · \d+ s)?$/);
+    await expect(answer.locator('.msg-trace > summary > .pencil-tick')).toHaveCount(1);
     await answer.locator('.msg-trace > summary').click();
     const steps = answer.locator('.msg-step');
     await expect(steps).toHaveCount(2);
@@ -1483,8 +1484,10 @@ test.describe('Felix', () => {
     const waiting = await cards.first().evaluate((el) => { const s = getComputedStyle(el), probe = document.createElement('i'); probe.style.color = 'var(--felix)'; el.append(probe); const felix = getComputedStyle(probe).color; probe.remove(); return { label: getComputedStyle(el.querySelector('.proposal-wait')).color, felix, left: s.borderLeftColor, top: s.borderTopColor, width: s.borderLeftWidth }; });
     expect(waiting.label).toBe(waiting.felix);
     expect([waiting.left, waiting.width], 'no coloured edge, only the label').toEqual([waiting.top, '1px']);
-    await expect(cards.first().locator('.proposal-old')).toHaveText('newest');
-    await expect(cards.first().locator('.proposal-new')).toHaveText('oldest');
+    await expect(cards.first().locator('.proposal-marked del')).toHaveText('newest');
+    await expect(cards.first().locator('.proposal-marked ins')).toHaveText('oldest');
+    await expect(cards.first().locator('.proposal-marked ins .proposal-caret')).toHaveCount(1);
+    await expect(cards.first().locator('.proposal-old, .proposal-new'), 'one passage with marks, not two coloured boxes').toHaveCount(0);
     expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe('BFS takes the newest vertex.');
     await cards.first().locator('[data-chat="apply"]').click();
     await expect(cards.first().locator('.proposal-done')).toContainText('Applied');
@@ -3558,7 +3561,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   const hint = (name) => row(name).locator('.hint');
   const search = page.locator('[data-action="quick-leo"]');
   const quick = page.locator('.scrim:not(.scrim-gone) .quick-leo');
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
 
   await change('quick').click();
   await expect(row('quick').locator('.shortcut-field')).toHaveClass(/recording/);
@@ -3576,12 +3579,12 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   await change('quick').click();
   await page.keyboard.press('j');
   await expect(hint('quick')).toHaveText(`Use ${mac ? '⌘' : 'Ctrl'} with a key.`);
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
 
   await change('quick').click();
   await page.keyboard.press('ControlOrMeta+j');
   await expect(hint('quick')).toHaveText('Saved');
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('J')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('J')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await page.waitForTimeout(300);
   await expect(page.locator('.quick-leo'), 'the old keys no longer open Quick Leo').toHaveCount(0);
@@ -3605,7 +3608,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
 
   await row('quick').getByRole('button', { name: 'Reset' }).click();
   await expect(row('quick').getByRole('button', { name: 'Reset' })).toHaveCount(0);
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await expect(quick).toBeVisible();
   await page.keyboard.press('Escape');
@@ -4519,8 +4522,14 @@ test.describe('study sessions', () => {
     await expect(progress).toBeVisible();
     await expect(progress).toContainText('Root');
     await expect(progress).toContainText('0 of 2');
+    await expect(progress.locator('.study-idea.now')).toHaveText('Root');
+    await expect(progress.locator('.study-mark')).toHaveCount(2);
     await chat.locator('.quiz-card button', { hasText: 'the minimum' }).first().click();
     await expect(progress).toContainText('1 of 2');
+    await expect(progress.locator('.study-idea.first .study-mark')).toHaveAttribute('aria-label', 'right the first time');
+    await expect(progress.locator('.study-idea.first .study-ok')).toHaveCount(1);
+    await expect(progress.locator('.study-idea.open .study-mark')).toHaveAttribute('aria-label', 'not yet');
+    await expect(progress.locator('.study-idea.now')).toHaveCount(0);
     await chat.locator('.quiz-card [data-chat="quiz-next"]').click();
     await expect.poll(() => asked.length).toBe(2);
     expect(asked[1].session).toEqual({ ideas: ['Root', 'Sift down'], closed: [true, false], asked: 1 });
@@ -4675,7 +4684,7 @@ test.describe('calendar', () => {
     await expect(page.locator('.toast')).toContainText('Opened in Google Calendar');
 
     await item.locator('.cal-check').click();
-    await expect(page.locator('.toast')).toContainText('Done');
+    await expect(page.locator('.toast')).toContainText(`Marked “Ask tutor ${tag}” done`);
     await expect.poll(async () => (await (await page.request.get('/api/tasks')).json()).tasks.find((t) => t.id === undated.id).done).toBe(true);
     await page.locator('.toast button', { hasText: 'Undo' }).click();
     await expect.poll(async () => (await (await page.request.get('/api/tasks')).json()).tasks.find((t) => t.id === undated.id).done).toBe(false);
@@ -4702,7 +4711,7 @@ test.describe('calendar', () => {
     const sheet = page.locator('.sheet');
     await expect(sheet).toContainText('Book the room');
     await sheet.locator('[data-action="task-promote"]').click();
-    await expect(page.locator('.toast')).toContainText('Added to your tasks');
+    await expect(page.locator('.toast')).toContainText('Added “Book the room” to your tasks');
     await expect(page.locator('.sheet [data-action="task-open-here"]')).toHaveText('In your tasks');
     const tasks = (await (await page.request.get('/api/tasks')).json()).tasks;
     expect(tasks.some((t) => t.title === 'Book the room' && t.note.id === note.id)).toBe(true);
@@ -5097,13 +5106,13 @@ test('Felix shows one live step, then one line, and marks an answer from outside
   await page.locator('#chat-input').fill('what are the lab safety rules?');
   await page.locator('#chat-input').press('Enter');
   const answer = page.locator('.msg.leo').last();
-  await expect(answer.locator('.msg-step')).toHaveText(['Searched your notes for “lab safety”']);
+  await expect(answer.locator('.msg-step')).toHaveText(['Searching your notes for “lab safety”…']);
   const blot = answer.locator('.msg-status .msg-step-busy');
   await expect(blot, 'the live step shows Felix\'s blot, not a spinner').toHaveAttribute('aria-label', 'working');
   await expect(blot.locator('use')).toHaveAttribute('href', '#leo-mark');
   expect(await blot.evaluate((el) => { const probe = document.createElement('i'); probe.style.color = 'var(--felix)'; el.parentElement.append(probe); const felix = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).color === felix; })).toBe(true);
   await expect(answer.locator('.msg-status .msg-step-icon'), 'the blot stands in for the tool icon while it works').toHaveCount(0);
-  await expect(answer.locator('.msg-step')).toHaveText(['Worked out the numbers']);
+  await expect(answer.locator('.msg-step')).toHaveText(['Working out the numbers…']);
   await expect(answer.locator('.msg-trace')).toHaveCount(0);
   await expect(answer.locator('.prose')).toHaveText('Wear goggles.');
   const inReply = () => answer.evaluate((el) => Math.round(el.querySelector('.prose').getBoundingClientRect().y - el.getBoundingClientRect().y));
@@ -5111,7 +5120,7 @@ test('Felix shows one live step, then one line, and marks an answer from outside
   const words = await answer.locator('.prose').boundingBox();
   expect(status.y, 'the live step sits above the words, where the summary will be').toBeLessThan(words.y);
   const before = await inReply();
-  await expect(answer.locator('.msg-trace > summary')).toHaveText('Searched your notes');
+  await expect(answer.locator('.msg-trace > summary'), 'the summary says how long the work took').toHaveText(/^Searched your notes · \d+ s$/);
   expect(await inReply(), 'the words do not move inside the reply when Felix finishes').toBe(before);
   await expect(answer.locator('.msg-steps .msg-step').first()).toBeHidden();
   await expect(answer.locator('.msg-outside')).toHaveText('Not from your notes');
@@ -5130,7 +5139,7 @@ test('an opened trace stays open through the next reply, and a failed read is no
   await page.locator('#chat-input').fill('what are the lab rules?');
   await page.locator('#chat-input').press('Enter');
   const first = page.locator('.msg.leo').first();
-  await expect(first.locator('.msg-trace > summary')).toHaveText('Searched your notes');
+  await expect(first.locator('.msg-trace > summary')).toHaveText(/^Searched your notes( · \d+ s)?$/);
   await expect(first.locator('.msg-outside')).toHaveText('Not from your notes');
   await first.locator('.msg-trace > summary').click();
   await expect(first.locator('.msg-trace')).toHaveAttribute('open', '');
@@ -5228,6 +5237,12 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.goto(`/#/n/${note.id}`);
   const img = page.locator('#doc img.note-img');
   await expect(img).toBeVisible();
+  const beside = await img.boundingBox();
+  await page.mouse.click(beside.x + beside.width + 40, beside.y + beside.height / 2);
+  await expect(img).toHaveClass(/picked/);
+  await expect(page.locator('#doc textarea')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(img).not.toHaveClass(/picked/);
   await img.click();
   await expect(img).toHaveClass(/picked/);
   await expect(page.locator('#doc textarea')).toHaveCount(0);
@@ -5253,6 +5268,24 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.locator('#doc img.note-img').dblclick();
   await expect(page.locator('#doc textarea')).toHaveValue(/^!\[Box\]\(data:image/);
   await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('beside a lone picture a double-click or a Shift-click opens its Markdown, and a broken picture never hides it', async ({ page }) => {
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const make = async (body) => (await page.request.post('/api/notes', { data: { title: `Beside ${Date.now().toString(36)}`, body } })).json();
+  const pictured = await make(`Intro line\n\n![Box](data:image/svg+xml;utf8,${svg})\n\nAfter line`);
+  await page.goto(`/#/n/${pictured.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toBeVisible();
+  const box = await img.boundingBox();
+  await page.mouse.dblclick(box.x + box.width + 40, box.y + box.height / 2);
+  await expect(page.locator('#doc textarea')).toHaveValue(/^!\[Box\]\(data:image/);
+  const broken = await make('Intro line\n\n![](missing.png)\n\nAfter line');
+  await page.goto(`/#/n/${broken.id}`);
+  const line = await page.locator('#doc .blk').nth(2).boundingBox();
+  await page.mouse.click(line.x + 200, line.y + line.height / 2);
+  await expect(page.locator('#doc textarea')).toHaveValue('![](missing.png)');
+  for (const note of [pictured, broken]) await page.request.delete(`/api/notes/${note.id}`);
 });
 
 test('the header starts where each page\'s content starts, in a wide window', async ({ page }) => {

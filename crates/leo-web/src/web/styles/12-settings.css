@@ -58,8 +58,12 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-section .segmented { flex: 0 1 auto; min-width: 0; grid-auto-columns: 1fr; }
   .settings-section .segment { padding: 0 14px; }
 }
-.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raised); }
-.settings-section label.set-row:has(> .switch) + label.set-row:has(> .switch) { margin-top: 8px; }
+.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { position: relative; padding: 12px 14px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):has(+ label.set-row > .switch, + .set-row.column > .set-line > .switch) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) { border-top-left-radius: 0; border-top-right-radius: 0; clip-path: inset(0 -24px -24px); }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--raised) 14px, var(--line) 14px calc(100% - 14px), var(--raised) calc(100% - 14px)); pointer-events: none; }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):is(.found, .found-still), .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):is(.found, .found-still) { z-index: 1; clip-path: none; }
+@media (forced-colors: active) { .settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { border-color: CanvasText; } .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { display: none; } }
 .set-desc { display: block; margin-top: 2px; font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; color: var(--muted); }
 .settings-section .set-row.column > .btn { align-self: flex-start; }
 .settings-section .btn { white-space: nowrap; }
@@ -86,9 +90,11 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-layout { display: block; padding: 0; min-height: 0; }
   .settings-nav { position: static; max-height: none; overflow: visible; padding: 12px 16px 4px; max-width: 760px; margin: 0 auto; }
   .settings-lists { margin-top: 10px; }
-  .settings-sections { display: flex; flex-wrap: wrap; gap: 6px; }
-  .settings-group-title { display: none; }
-  .settings-group { display: contents; }
+  .settings-sections { display: grid; gap: 8px; }
+  .settings-group { position: relative; display: flex; flex-wrap: wrap; gap: 6px; padding-left: 92px; }
+  .settings-group + .settings-group { margin-top: 0; padding-top: 8px; border-top: 1px solid var(--line); }
+  .settings-group-title { position: absolute; left: 0; top: 9px; width: 84px; padding: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .settings-group + .settings-group .settings-group-title { top: 17px; }
   .settings-link, .settings-link + .settings-link { flex: none; min-height: 34px; margin: 0; padding: 0 12px; gap: 7px; background: var(--tint); border-radius: var(--r-pill); font-size: var(--fs-base); }
   .settings-link.on { background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); }
   .settings-link svg { width: 16px; height: 16px; }
@@ -99,10 +105,10 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-section .set-card { padding: 14px; }
 }
 @container settingsmain (max-width: 479px) {
-  .settings-nav { position: sticky; z-index: 5; top: var(--bar-h); max-width: none; margin: 0; padding: 10px 16px; background: var(--ground); }
+  .settings-nav { max-width: none; margin: 0; padding: 10px 16px; background: var(--ground); }
   .settings-lists { margin-top: 8px; }
-  .settings-sections { flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding-inline: 16px; margin-inline: -16px; -webkit-mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent); mask-image: linear-gradient(90deg, transparent, #000 16px, #000 calc(100% - 16px), transparent); }
-  .settings-sections::-webkit-scrollbar { display: none; }
+  .settings-group { padding-left: 0; }
+  .settings-group-title, .settings-group + .settings-group .settings-group-title { position: static; flex: 0 0 100%; width: auto; padding: 0 2px; }
   .settings-head h1 { font-size: 22px; }
 }
 .settings-section .set-label, .settings-section .set-row > .grow, .settings-section .set-line > .grow { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
@@ -333,6 +339,7 @@ button.choice-pick .felix { cursor: inherit; }
 .set-status.missing { background: var(--raised); }
 .hc-card { display: flex; flex-direction: column; gap: 18px; }
 .hc-card.hc-loading .skeleton { height: 64px; margin: 0; border-radius: var(--r-tile); --sk-base: var(--raised); }
+.hc-card.hc-loading .skeleton > svg:nth-child(3) { display: none; }
 .hc-sum .activity-spin { flex: none; margin-top: 2px; }
 .hc-g { display: block; flex: none; width: 16px; height: 16px; stroke-width: 2; }
 .hc-g.ready { color: var(--muted); }

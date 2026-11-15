@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0 };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -17,6 +17,8 @@ const SIDE_NOTES_AUTOMATIC = 32;
 const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
 const SIDE_NEW_MS = 60000;
+const SIDE_FRESH_MS = 30 * 60000;
+const SIDE_FRESH_GROUP = 1000;
 
 try {
   side.open = new Set(JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) || '[]'));
@@ -97,7 +99,7 @@ function drawSide() {
   if (showing !== side.showing) {
     side.showing = showing;
     side.revealed.clear();
-    side.shut.clear();
+    if (state.view === 'note') side.shut.clear();
     const parts = dir.split('/').filter(Boolean);
     for (let i = 1; i <= parts.length; i++) side.revealed.add(parts.slice(0, i).join('/'));
   }
@@ -131,7 +133,7 @@ function drawSide() {
     </div>
     <div class="side-rail">
       <nav class="side-rail-main" aria-label="Leo tools">
-        ${sideRow('quick-leo', ICON.search, 'Search', { hint: `Search, ask, remind or jot anything (${shortcutText(shortcutKeys('quick'))})` })}
+        ${sideRow('quick-leo', ICON.search, 'Search', { hint: `Search or ask (${shortcutText(shortcutKeys('quick'))})` })}
         ${sideRow('calendar', ICON.calendar, 'Calendar', { on: here === 'calendar' })}
         ${sideRow('boards', ICON.board, 'Boards', { on: here === 'boards', hint: 'Boards · track tasks from To do to Done' })}
         ${sideRow('record', ICON.mic, 'Record', { on: here === 'record', attrs: ` data-dir="${esc(actionDir)}"` })}
@@ -164,6 +166,8 @@ function drawSide() {
   revealNoteRow(tree);
   box.querySelector('.side-rail-main').scrollTop = railScroll;
   drawFoldersSheet();
+  clearTimeout(side.freshTimer);
+  if (side.freshUntil < Infinity) side.freshTimer = setTimeout(sideFreshCheck, side.freshUntil - Date.now() + SIDE_FRESH_GROUP);
   if (side.growing) growFolder(high);
   if (focused) {
     const buttons = [...box.querySelectorAll('button[data-action]')];
@@ -206,6 +210,7 @@ function keepOpenFolders() {
 function folderTree(here) {
   side.visible = [''];
   side.sig = [];
+  side.freshUntil = Infinity;
   const children = (parent) => side.folders.filter((d) => {
     const cut = d.name.lastIndexOf('/');
     return (cut < 0 ? '' : d.name.slice(0, cut)) === parent;
@@ -297,6 +302,7 @@ function twistFolder(path, control = null, keep = true) {
 }
 
 async function loadSideFolders() {
+  if (tasksAtHome()) loadHomeRecent();
   if ((!sideWide() && !sideActive()) || state.view === 'locked') return drawSide();
   const mine = seq, generation = ++side.generation;
   try {
@@ -412,7 +418,7 @@ function sideNoteRows(path, depth) {
   const selected = state.view === 'note' ? state.session?.note?.id : null;
   const held = Boolean(side.target);
   for (const note of entry.items) side.sig.push(`n:${note.id}`);
-  const rows = entry.items.map((note) => `<div class="side-note-wrap" data-refresh-key="n:${esc(note.id)}"><button class="side-row side-note${selected === note.id ? (held ? ' open' : ' on') : ''}" data-action="open-note" tabindex="-1" data-id="${esc(note.id)}" data-from="${esc(path)}" data-drop-dir="${esc(path)}" data-title="${esc(note.title)}" draggable="true" style="--depth:${depth}" title="${esc(note.title)}"${selected === note.id ? ' aria-current="page"' : ''}>${selected === note.id && !held ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${ICON.note}<span class="side-label">${esc(note.title || 'Untitled')}</span>${sideNoteWhen(note)}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="note" data-id="${esc(note.id)}" data-dir="${esc(path)}" aria-label="Options for ${esc(note.title || 'Untitled')}" title="Note options" aria-haspopup="menu">${ICON.more}</button></div>`).join('');
+  const rows = entry.items.map((note) => `<div class="side-note-wrap" data-refresh-key="n:${esc(note.id)}"><button class="side-row side-note${selected === note.id ? (held ? ' open' : ' on') : ''}" data-action="open-note" tabindex="-1" data-id="${esc(note.id)}" data-from="${esc(path)}" data-drop-dir="${esc(path)}" data-title="${esc(note.title)}" draggable="true" style="--depth:${depth}" title="${esc(note.title)}"${selected === note.id ? ' aria-current="page"' : ''}>${selected === note.id && !held ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${ICON.note}<span class="side-label">${esc(note.title || 'Untitled')}</span>${sideNoteMark(note, selected === note.id)}${sideNoteWhen(note)}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="note" data-id="${esc(note.id)}" data-dir="${esc(path)}" aria-label="Options for ${esc(note.title || 'Untitled')}" title="Note options" aria-haspopup="menu">${ICON.more}</button></div>`).join('');
   const status = entry.loading && !entry.refreshing ? '<span>Opening notes…</span>' : entry.error ? `Notes could not be opened. ${action('Try again', entry.offset)}` : !entry.items.length && side.tasks ? '<span>No open tasks here</span>' : !entry.items.length && !side.folders.some((folder) => folder.name.startsWith(path ? `${path}/` : '')) ? (path === '' ? `<span>No notes yet.</span> <button class="side-note-page" data-action="new" data-dir="">Write your first note</button>` : '<span>Empty folder</span>') : '';
   const pages = !entry.error ? `${entry.offset ? action('Previous notes', Math.max(0, entry.offset - SIDE_NOTES_PAGE)) : ''}${entry.offset + entry.items.length < entry.total ? action('Next notes', entry.offset + SIDE_NOTES_PAGE) : ''}` : '';
   return rows + (status || pages ? `<div class="side-note-status" data-drop-dir="${esc(path)}" style="--depth:${depth}">${status}${pages}</div>` : '');
@@ -478,6 +484,27 @@ async function readSideNotes(path, entry) {
       if (!path && tasksAtHome()) drawHomeToday();
     }
   }
+}
+
+function sideNoteMark(note, open) {
+  const until = Date.parse(note.updated_at) + SIDE_FRESH_MS;
+  const fresh = side.sort !== 'updated' && until > Date.now() && until - Date.now() <= SIDE_FRESH_MS + SIDE_NEW_MS;
+  if (fresh) side.freshUntil = Math.min(side.freshUntil, until);
+  if (open && marginPage.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
+  return fresh ? '<i class="side-fresh" aria-hidden="true" title="Edited in the last 30 minutes"></i>' : '';
+}
+
+function sideRedrawSoon() {
+  clearTimeout(side.quietTimer);
+  if (popup) side.quietTimer = setTimeout(sideRedrawSoon, 500);
+  else drawSide();
+}
+
+function sideFreshCheck() {
+  const left = side.freshUntil - Date.now();
+  clearTimeout(side.freshTimer);
+  if (left <= 0) sideRedrawSoon();
+  else if (left < Infinity) side.freshTimer = setTimeout(sideFreshCheck, left + SIDE_FRESH_GROUP);
 }
 
 function sideNoteWhen(note) {
@@ -568,14 +595,16 @@ function explorerMenu(el, event = null) {
   if (!owner) return;
   const rows = target.kind === 'note'
     ? [['open', 'Open', ICON.note], ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
-    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
+    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
   popupMenu(owner, {
     label: target.kind === 'note' ? 'Note options' : 'Folder options',
     point: event && { x: event.clientX, y: event.clientY },
-    rows: rows.map((row) => row ? { text: row[1], icon: row[2], danger: row[3], run: () => explorerAction(row[0], target) } : { line: true }),
+    rows: rows.map((row) => row ? { text: row[1], icon: row[2], danger: row[3], after: row[4], run: () => explorerAction(row[0], target) } : { line: true }),
   });
 }
 
+addEventListener('focus', sideFreshCheck);
+document.addEventListener('visibilitychange', sideFreshCheck);
 document.addEventListener('contextmenu', (event) => {
   const el = event.target.closest('.side-tree, .side-group');
   if (!el) return;

@@ -170,8 +170,9 @@ Decided: one app, window only (2026-10-31).
   `::before`/`::after`, four variants picked by the last digit of `data-box` or
   `data-id`; the tick takes `--tone`); dark mode breaks the tick with the static
   `--chalk-break` mask; forced colours get the native box. The same tick stands
-  alone as `.pencil-tick` (ink, `currentColor`) for Health's passed checks and
-  first-run setup's Allowed; `.writing` writes it on with `tick-write`.
+  alone as `.pencil-tick` (ink, `currentColor`) for Health's passed checks,
+  first-run setup's Allowed, the start of Felix's finished step summary (`.msg-trace`)
+  and a code block's Copy once it copied; `.writing` writes it on with `tick-write`.
 - Dropdowns: a `<select>` inside `.select-control`; select-menu.js turns every
   one into the app's menu (not under forced colours), keeping id, value and
   `change`. Do not hand-build list menus.
@@ -186,15 +187,24 @@ Decided: one app, window only (2026-10-31).
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). `sheet()` focuses the first control and
   traps Tab. Rename and New folder use `inlineEdit` over the tree row.
+  Rows hover with `--menu-hover` (`--tint` light, `--wash` dark, where `--tint`
+  would dip below `--raised`); separators inset 12 px; a faint keycap
+  (`.popup-rows kbd`, `aria-hidden`) only where a real shortcut acts: New note
+  when its folder is ⌘N's folder and no sheet is open (2026-11-15).
 - Empty pages `empty(icon, title, text)`; an empty state with nothing to do yet
   (Trash, Boards, calendar Tasks, Chats, Search no-results, home) takes one
   single-stroke line drawing from `DRAWN` (app/core.js; `fill="none"`,
   `currentColor`, shown in `--muted`, no colour) in place of the icon; chat.js
-  gets them as `drawings`. Home's arrow points at the explorer and shows only
+  gets them as `drawings`. Three error states take one too (2026-11-15): Can't
+  reach leo (`DRAWN.offline`), the chat's no-writing-AI reply (`drawings.noink`,
+  72×55) and Keeping could not be opened (`DRAWN.broken`); the missing-note toast
+  and Felix's read-failure status stay text. Home's arrow points at the explorer and shows only
   on the first day (no notes, no tasks) while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
   (2026-11-15, the user's call); counts `.badge`; small faint
   sentence-case labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
-  `.chat-history-group`, `.pick-head`).
+  `.chat-history-group`, `.pick-head`), ending in the note rule's pencil stroke
+  (`::after`, same mask, a plain 1 px line in print and forced colours; the
+  Folders rule stops at New folder).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
 - The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
@@ -217,7 +227,10 @@ Decided: one app, window only (2026-10-31).
   working blot (`.msg-step-busy`), the first 600 ms of what he just made
   (`inkLand(id, true)`), and while he
   waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
-  reply's proposals until Apply or Dismiss (no coloured edge). Never links,
+  reply's proposals until Apply or Dismiss (no coloured edge), and the still 6 px
+  dot after the open note's explorer row while he reads along (`.side-reading`,
+  from `marginPage.reading`; margin-notes.js redraws the explorer when a read
+  starts and ends; 2026-11-15). Never links,
   buttons, selection, tags or text.
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
@@ -225,6 +238,9 @@ Decided: one app, window only (2026-10-31).
   dragging); dark mode lifts with lighter surfaces and a faint top highlight.
   Inputs, tables, code and focus rings keep a clear edge; so do board lanes, one
   step off the board's tone with a 1px inset edge (they vanish otherwise).
+  Neighbouring Settings switch rows share one `--raised` panel with `--shadow`,
+  split by a `--line` hairline inset 14 px; a hint or another kind of row starts
+  a new panel; forced colours restore the row border (2026-11-15).
 
 Decided: reuse components throughout (2026-11-06).
 
@@ -260,7 +276,15 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   tests scope lookups to `#app`). Colour arrives with the thumb or as a wipe,
   never on hover; `iconSwap`. Rubber band `rubber`, `pastEdge`, no overshoot.
 - Board lanes and cards and the Chats list only fade (transforms break
-  `kanbanFit` and a scrolled list's `scrollTop`).
+  `kanbanFit` and a scrolled list's `scrollTop`); the one exception (2026-11-15,
+  the user's call) is a dragged card's ghost, which tilts 1.5° (`--tilt`, a
+  registered angle written into the ghost's transform after its position, never
+  the `rotate` property, which pivots about the page origin) arriving with `lift`
+  (its keyframe at offset 0, so it starts flat) and returning to 0 in `settle` (`liftedRect` carries `tilt`); none under Reduced
+  Motion, none for lane or calendar ghosts.
+- Opening a note fades only `#doc` from .6 to 1 over 140 ms (`arriveOnPage`,
+  `EASE_OUT`, only when `swap()` says it opened, none under `stillMotion()`); the
+  title stays still.
 - Two signatures (2026-11-15): write-on, the task tick wipes in over 160 ms
   (`--ease-pencil`, a transition, so a redraw never replays it; a box redrawn
   inside the 160 ms carries `data-writing` and `--tick-at` from `tickWrite` and
@@ -275,9 +299,16 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   Felix's variant: core.js `onOrganized` lands an applied add_card, add_task or
   add_margin_note (the id read from its `undo`, `FELIX_MAKES`) starting in
   `--felix` with no wash; the margin settles `.margin-felix` after each
-  `marginDraw`. Explorer notes count as new
+  `marginDraw`; home's newest tally stroke writes on over 160 ms with
+  `pencil-draw`, resumed by elapsed time from `tickedAt`. Explorer notes count as new
   when a refresh brings an id created in the last minute. The explorer fold is the one
   width animation (`--side` as an `@property`).
+- Loaders (2026-11-15): `skeleton(n, surface)` (search, board, settings,
+  keeping, trash, health, plan) holds faint pencil lines that wipe in once with
+  `tick-write` (400 ms, `--ease-pencil`, 30 ms stagger, class `sk-draw`, only
+  under `prefers-reduced-motion: no-preference`) and then stay still; a skeleton
+  rendered while one of its surface shows, or within 400 ms of the last
+  (`skeletonAt`), takes the end frame. No shimmer, no loop.
 - Cancelling a menu animation clears closing state synchronously and detaches its
   old cancellation callback before a new animation owns that state.
 
@@ -292,6 +323,27 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   stays text), picture widths Obsidian-style (`![alt|400](path)`,
   `![[file|400]]`, 16–4000 px). Nesting and list styles change only the page,
   never the file.
+- Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
+  passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
+  without it, byte-identical): a column whose body cells are all numbers (%, a
+  currency sign, a sign and thousands commas allowed) takes `align-right` unless the
+  Markdown aligned it; a fenced block becomes `<div class="code" data-lang>` around
+  the `<pre>` with an icon-only `.code-copy` button (no text nodes; the label is
+  `::before { content: attr(data-lang) }`, the code starts below both). Copy shows on
+  hover and `:focus-visible`, takes its own keys, copies `pre code` text only, never
+  opens the block, says the result in the hidden `#code-said` status region and shows
+  `.pencil-tick.writing` with aria-label "Copied" for 1.2 s. `#doc` styles: links take
+  the search match's three pencil strokes as a `box-decoration-break: clone`
+  background (colours baked into the data URIs: a grey equal to ink 45% dark / 55%
+  light at rest, full ink on hover, so a wrapped link gets a stroke per line); quotes
+  keep the `--surface` tint and radius beside a pencil bracket (the folder-guide
+  stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
+  header fill, every other body row sits on `--wash`, and each `th::after` draws the
+  double pencil rule across its cell, edge to edge. Print and forced colours keep
+  the old look: a plain underline, the 3 px quote bar, row rules. The facts line
+  `#note-facts` (`md.facts`: words outside code by word segmentation, 238 a minute
+  rounded up, "0 words" when empty) sits under the title, updates 300 ms after a
+  change (`factsSoon`), is skipped by search highlights and hidden in print.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
   `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays
@@ -319,6 +371,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   or sheet; moving or trashing the open note's folder flushes its draft first.
   Never two rows highlighted. Saved open folders (`leo-side-folders`) hold only
   folders the user opened; reveals (`side.revealed`) are never saved.
+  Note rows edited less than 30 minutes ago carry a 4 px ink dot after the title
+  (`.side-fresh`, `SIDE_FRESH_MS`; not when sorted by Last edited, which shows the
+  time); one timer set to the earliest expiry (plus `SIDE_FRESH_GROUP`, 1 s, so
+  notes saved together clear in one redraw) redraws the explorer, re-armed if it
+  fires early, checked again on focus and visibilitychange (2026-11-15). Unprompted
+  explorer redraws (expiry, Felix's read starting and ending, queued off the read)
+  go through `sideRedrawSoon`, which waits while any menu is open.
   Beside Filter: a sort menu (Name, Last edited, Created; only open tasks) and a
   flip button that reverses it (its icon shows the order: a down arrow beside
   A–Z/Z–A letters or wide/narrow bars, 2026-11-12), both driving `/api/notes` `sort`/`show` for every
@@ -364,8 +423,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
-- Outline: at most 300 headings (excluding code, maths, quotes, tables); preview
-  ≤24 lines / 800 UTF-16 units, escaped; preview updates never redraw the editor.
+- Outline: at most 300 headings (excluding code, maths, quotes, tables), shown on
+  the rail 24 at a time (`OUTLINE_PAGE`) with Earlier/Later arrows; preview
+  ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
+  never redraw the editor.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens
 (2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags hidden on
@@ -417,7 +478,11 @@ the web (root CLAUDE.md).
   that is never sent, and a covered idea stays refused. On the page a failed
   step is hidden once the same tool (quiz and ask_user count as one) later
   succeeds (`fixedSteps`). While Felix works the reply shows only his newest
-  step, in one `.msg-status` row at the top of the reply. A broken agent
+  step, in one `.msg-status` row at the top of the reply, worded in the present
+  tense (`doing`, keyed by the step's verb; unknown or failed steps keep their
+  words) in `--felix-letters` italic `--faint`, the one serif in chat chrome,
+  because it is Felix speaking; the finished summary adds " · N s" only for
+  replies timed on this page (`timed`) (2026-11-15). A broken agent
   session sends `{"reset"}` and is redone through the text protocol
   (`FALLBACK_TRIES`). Felix has no web tool of leo's own.
 - Panel layout: docked beside the note (1200 px and up) the note's page ends at
@@ -455,6 +520,13 @@ the web (root CLAUDE.md).
   carry the result, never colour alone; `--chalk-break` in dark). A mark writes on
   over 160 ms (`QUIZ_MARK_MS`, `pencil-draw`) only within 160 ms of the answer
   (`markedAt`), resumed by elapsed time, so a redraw never replays it.
+- Edit proposals are marked like proof (2026-11-15): `leoMarkdown.wordDiff`
+  (a word LCS, capped; null falls back to `.proposal-old`/`.proposal-new`) into
+  `.proposal-marked` with real `<del>` (line-through, `DELETE_MARK` loop) and
+  `<ins>` (`CARET_MARK`), no red or green. The study strip's ideas carry
+  `.study-mark` circles with the same chalk check and × paths and
+  `--chalk-break` mask, a heavier ring on the idea being asked; forced colours
+  draw them in CanvasText without the mask.
 - Routing (`routing::light`): only obvious cases (short lookups and greetings,
   no attachments, files, selection, study or Auto access, ≤6 turns) go to the
   quick tier, other languages stay on the chosen model; a chat moves up once when needed, never down while warm
@@ -644,7 +716,16 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   attach to another recording.
 - Share and PDF: Save .md is a Blob download (no route); print CSS hides every
   fixed overlay with fixed `@page` margins; a completed export cannot rename a
-  newer page.
+  newer page. Export as PDF with Felix's notes (2026-11-15; shown only when
+  `marginPrintable()` finds open placed notes with Felix text) inserts empty
+  `sup[data-print]` numbers drawn by `::after` (no text enters the note), a
+  `.print-notes` list after `#doc` in Newsreader under a hairline and a
+  `<style data-print>` footer with the title; every `[data-print]` is removed
+  (parents normalized) at the start of every `share()`, on `afterprint`, a print
+  error and the first pointerdown/keydown after printing; the cleanup is armed
+  before the first mark is placed, inside `share()`'s error handling. The title
+  footer needs `@page` margin boxes, which the macOS window's print engine does
+  not draw (the page counter there is the engine's own).
 
 Decided: one note per uploaded file (2026-10-20).
 
@@ -701,11 +782,38 @@ is hidden or the capture activity gate is busy.
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
   not take focus). Home draws the date, one sentence
-  (`schedule.dateline`, local data only, never "overdue") and, under the quick bar,
-  Earlier and Today rows (`#home-today`, the same rows; today's done rows stay until
-  midnight; six at most, then "N more in Calendar") and hides the card. While home is
-  open the Tasks poll reads `/api/schedule` (today to a week ahead, not `live`) for
-  the cached events.
+  (`schedule.dateline`, local data only, never "overdue"), the week ribbon
+  (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
+  `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that
+  never sets `cal.ringAt`; a 3 px dot on days with tasks (`tasksWin.tasks`) or
+  events (`homeWeek`: one `/api/schedule` read of the week on mount, at midnight,
+  when the tasks poll's events change and on a poll at least `HOME_WEEK_FRESH` (10 min)
+  after the last read, never written into `tasksWin.events`);
+  a day sets only `cal.selected` and opens the Calendar in its last view) and,
+  under the quick bar, Earlier and Today rows (`#home-today`, the same rows;
+  today's done rows stay until midnight; six at most, then "N more in Calendar";
+  Today's done count is a pencil tally `S.tally`, "N of M done" kept as the title
+  and hidden text) and Recently written (`#home-recent`: the three notes edited
+  last, from the `x-total` of `/api/notes?show=pinned&limit=1` then
+  `sort=updated&brief=true&limit=<pinned+3, at most 1000>` sorted by `updated_at` on the
+  client, fetched from `loadSideFolders` and Felix's note changes while home is open,
+  one load at a time (a call during one queues one more; a load hung past
+  `HOME_RECENT_WAIT`, 20 s, gives way and its late answer is dropped), painted from
+  cache by `drawHomeToday`, room reserved only once notes are known, hidden with no
+  notes; the ribbon and this list skip a redraw that would change nothing, the
+  ribbon reloads its week when the week rolls over, and is one Tab stop with
+  arrow, Home and End keys) and hides the card. While home is open
+  the Tasks poll reads `/api/schedule` (today to a week ahead, not `live`) for the
+  cached events.
+- Task dates say `S.dayWord` (Today, Tomorrow, a short weekday within six days
+  either way, else "Nov 3"; the full date, `S.dayName`, as the title and as hidden
+  `.said` text, the short word `aria-hidden`) in the Tasks card, home and
+  the Calendar tray. The late group shows "Earlier" (`TASK_GROUP_NAMES`; the key
+  stays `Overdue`, which Quick Leo filters on), and so do its count ("N from
+  earlier · M to do"), the badge label, the tray ("Nothing from earlier.") and
+  Quick Leo's late rows.
+- Day and Week shade today's column from midnight to the now-line with `--wash`
+  (`.cal-past`, under the events, no pointer events).
 - POST `/api/tasks` takes `request` (uuid, kept across a retry of the same quick-add): a
   repeated one is answered with the first task (`insert::remembered_creation`, scope `task`, a queue of its own beside the margin's `insert::remembered`).
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
@@ -741,6 +849,10 @@ is hidden or the capture activity gate is busy.
   first, then save; a failed save puts the card, chip or tick back and shows the error toast.
   Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
+- Card priority (2026-11-15) is one to three slanted pencil strokes
+  (`KANBAN_STROKES`, ink at 60%, 14 px) before the title, the title indented by
+  `text-indent`; the word stays as hidden text (`.kanban-priority-word`) plus a
+  `title`, and the `.kanban-priority.<level>` classes remain.
 
 Decided: Jira-style boards on their own page (2026-11-02); the card panel is not
 a modal.

@@ -328,6 +328,40 @@ test('the home dateline shortens titles, skips events made from tasks and keeps 
   }
 });
 
+test('task dates read as words: today, tomorrow, a weekday within a week either way, then the date', () => {
+  const now = new Date(2026, 10, 12, 14, 20);
+  const word = (key) => S.dayWord(key, now, 'en-US');
+  assert.equal(word('2026-11-12'), 'Today');
+  assert.equal(word('2026-11-13'), 'Tomorrow');
+  assert.equal(word('2026-11-17'), 'Tue');
+  assert.equal(word('2026-11-18'), 'Wed');
+  assert.equal(word('2026-11-19'), 'Nov 19');
+  assert.equal(word('2026-11-11'), 'Wed');
+  assert.equal(word('2026-11-10'), 'Tue');
+  assert.equal(word('2026-11-06'), 'Fri');
+  assert.equal(word('2026-11-05'), 'Nov 5');
+  assert.equal(word('2026-11-03'), 'Nov 3');
+  assert.equal(S.dayWord('2026-11-02', new Date(2026, 10, 1, 23, 30), 'en-US'), 'Tomorrow', 'a clock change in between still counts whole days');
+  assert.equal(S.dayName('2026-11-17', 'en-US'), 'Tuesday, November 17', 'the full date screen readers and tooltips get');
+});
+
+test('a tally draws one stroke per task, gates every fifth and never re-rolls', () => {
+  assert.deepEqual(S.tally(0), { marks: [], width: 2.5 });
+  assert.equal(S.tally(1).marks.length, 1);
+  assert.equal(S.tally(1).width, 7);
+  assert.equal(S.tally(3).width, 16);
+  assert.equal(S.tally(4).width, 20.5);
+  const five = S.tally(5);
+  assert.equal(five.width, 26);
+  assert.match(five.marks[4].d, /^M1 9\.5/, 'the fifth is the gate across the four');
+  const seven = S.tally(7);
+  assert.equal(seven.width, 35);
+  assert.deepEqual(seven.marks.slice(5).map((m) => m.x), [23.5, 23.5]);
+  assert.deepEqual(seven.marks.slice(0, 5), five.marks);
+  assert.deepEqual(S.tally(7), seven);
+  assert.deepEqual(S.tally(-2).marks, []);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try {

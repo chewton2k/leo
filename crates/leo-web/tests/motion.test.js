@@ -30,7 +30,7 @@ const motionSource = fs.readFileSync(path.resolve(__dirname, '../src/web/app/mot
 function motion(extra = {}) {
   const context = { overlapOut() {}, unfold() {}, fold() {}, cascade() {}, pulse() {}, rubber() {}, iconSwap() {}, stillMotion: () => false, EASE_OUT: 'ease-out', EASE_MOVE: 'ease-in-out', EASE_EXIT: 'ease-in', MOTION_MS: 180, OPEN_MS: 200, DRAWER_MS: 240, EXIT_SHARE: .8, document: { addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], documentElement: { classList: { add() {}, remove() {} } } }, window: { scrollTo() {} }, innerHeight: 800, innerWidth: 1200, performance: { now: () => 0 }, Date, ...extra };
   vm.createContext(context);
-  vm.runInContext(`${motionSource}\nglobalThis.api = { flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
+  vm.runInContext(`${motionSource}\nglobalThis.api = { flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, liftedRect, lift, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
   return context.api;
 }
 
@@ -143,6 +143,20 @@ test('a settling object takes a slight curve and ends exactly in place', () => {
   assert.equal(played[0].at(-1).transform, 'none');
 });
 
+test('a tilted card settles back to flat, and only a drop that was tilted rotates', () => {
+  const played = [];
+  const el = () => ({ dataset: {}, getBoundingClientRect: () => ({ left: 100, top: 100 }), animate: (frames) => { played.push(frames); return {}; } });
+  const m = motion({ performance: { now: () => 0 } });
+  m.settleLater('kanban-card', 'a', { left: 120, top: 90, tilt: 1.5 });
+  m.settleNow('kanban-card', el);
+  assert.equal(played[0][0].transform, 'translate(20px, -10px) scale(1.02) rotate(1.5deg)');
+  assert.match(played[0].at(-2).transform, /rotate\(0\.\d+deg\)$/);
+  assert.equal(played[0].at(-1).transform, 'none');
+  m.settleLater('cal', 'b', { left: 120, top: 90, tilt: 0 });
+  m.settleNow('cal', el);
+  assert.ok(played[1].every((frame) => !frame.transform.includes('rotate')));
+});
+
 test('no two parts of the page script declare the same top-level function', () => {
   const parts = [...fs.readFileSync(path.join(__dirname, '../src/routes/assets.rs'), 'utf8').matchAll(/include_str!\("\.\.\/web\/(app\/[^"]+)"\)/g)].map((m) => m[1]);
   assert.ok(parts.length > 10);
@@ -155,4 +169,74 @@ test('no two parts of the page script declare the same top-level function', () =
     }
   }
   assert.deepEqual(repeated, []);
+});
+
+test('opening a note fades only the note text from .6 over 140 ms, never the title, and not under reduced motion', () => {
+  const browse = fs.readFileSync(path.resolve(__dirname, '../src/web/app/browse.js'), 'utf8');
+  for (const still of [false, true]) {
+    const runs = [];
+    const element = { animate: (frames, timing) => { runs.push({ frames, timing }); return {}; } };
+    const context = { stillMotion: () => still, EASE_OUT: 'arrive' };
+    vm.createContext(context);
+    vm.runInContext(`${browse.slice(0, browse.indexOf('\n}\n', browse.indexOf('function arriveOnPage(')) + 3)}; this.arrive = arriveOnPage;`, context);
+    context.arrive(element);
+    assert.deepEqual(JSON.parse(JSON.stringify(runs)), still ? [] : [{ frames: [{ opacity: .6 }, { opacity: 1 }], timing: { duration: 140, easing: 'arrive' } }]);
+  }
+  const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
+  assert.match(show, /if \(opened\) arriveOnPage\(\$\('#doc'\)\);/);
+  assert.doesNotMatch(show, /title\.animate/);
+});
+
+test('a loader sketch draws once per surface and takes the end frame while one shows or within 400 ms', () => {
+  let now = 1000, showing = null;
+  const context = { performance: { now: () => now }, document: { querySelector: (sel) => (showing && sel.includes(`"${showing}"`) ? {} : null) }, marginWobble: (x, y, length, down, seed) => `M${x} ${y} h${length} s${seed}` };
+  vm.createContext(context);
+  vm.runInContext(core.slice(core.indexOf('const skeletonAt = {};'), core.indexOf('let state = { view: null };')), context);
+  const drawing = (html) => (html.match(/class="skeleton sk-draw"/g) || []).length;
+  const first = context.skeleton(3, 'search');
+  assert.equal((first.match(/class="skeleton/g) || []).length, 3);
+  assert.equal(drawing(first), 3);
+  assert.equal((first.match(/<svg /g) || []).length, 9);
+  assert.match(first, /data-sketch="search"/);
+  now += 200;
+  assert.equal(drawing(context.skeleton(3, 'search')), 0);
+  assert.equal(drawing(context.skeleton(2, 'trash')), 2);
+  now += 1000;
+  showing = 'search';
+  assert.equal(drawing(context.skeleton(3, 'search')), 0);
+  now += 1000;
+  showing = null;
+  const again = context.skeleton(3, 'search');
+  assert.equal(drawing(again), 3);
+  assert.equal(again.replace(/ sk-draw/g, ''), context.skeleton(3, 'search'));
+});
+
+test('loader sketches animate only without reduced motion and never loop', () => {
+  const css = require('./page-source').pageCss();
+  assert.doesNotMatch(css, /shimmer/);
+  const base = css.match(/(^|\n)\.skeleton \{[^}]*\}/)[0];
+  assert.doesNotMatch(base, /animation/);
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{ \.skeleton\.sk-draw > svg \{ animation: tick-write 400ms var\(--ease-pencil\) both; \}/);
+  assert.doesNotMatch(css, /\.skeleton[^{]*\{[^}]*infinite/);
+});
+
+test('a lifted ghost is measured from its own size and carries its tilt to the settle', () => {
+  const m = motion({ getComputedStyle: () => ({ getPropertyValue: () => '1.5deg' }) });
+  const ghost = { getBoundingClientRect: () => ({ left: 98, top: 47, width: 104, height: 56 }), offsetWidth: 100, offsetHeight: 50 };
+  assert.deepEqual({ ...m.liftedRect(ghost) }, { left: 100, top: 50, tilt: 1.5 });
+  const flat = motion({ getComputedStyle: () => ({ getPropertyValue: () => '' }) });
+  assert.equal(flat.liftedRect(ghost).tilt, 0);
+  assert.equal(flat.liftedRect(null), null);
+});
+
+test('a toast lets a long unbroken title wrap so Undo stays in view', () => {
+  const css = require('./page-source').pageCss();
+  assert.match(css, /:is\(\.toast, \.toast-gone\) > span \{ min-width: 0; overflow-wrap: anywhere; \}/);
+});
+
+test('a lift starts flat and arrives at the lifted look', () => {
+  const runs = [];
+  const m = motion();
+  m.lift({ animate: (frames, timing) => { runs.push({ frames, timing }); return {}; } });
+  assert.deepEqual(JSON.parse(JSON.stringify(runs[0].frames)), [{ offset: 0, scale: '1', boxShadow: 'none', '--tilt': '0deg' }]);
 });

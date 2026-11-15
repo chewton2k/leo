@@ -125,7 +125,8 @@ function settle(el, { from = null, elapsed = 0, ms = SETTLE_MS } = {}) {
   const { dx, dy } = settleOffset(from, to);
   settleLayer?.cancel();
   const flyer = from && clippedBy(el) ? settleCarrier(el, to) : null;
-  const frames = arcPoints().map(({ x, y }) => ({ transform: `translate(${dx * (1 - x)}px, ${dy * (1 - y)}px) scale(${1 + Number(((SETTLE_SCALE - 1) * (1 - x)).toFixed(4))})` }));
+  const tilt = from?.tilt ? (x) => ` rotate(${Number((from.tilt * (1 - x)).toFixed(4))}deg)` : () => '';
+  const frames = arcPoints().map(({ x, y }) => ({ transform: `translate(${dx * (1 - x)}px, ${dy * (1 - y)}px) scale(${1 + Number(((SETTLE_SCALE - 1) * (1 - x)).toFixed(4))})${tilt(x)}` }));
   frames[0].boxShadow = '0 10px 28px rgba(0, 0, 0, .18), 0 2px 6px rgba(0, 0, 0, .1)';
   frames[ARC_STEPS] = { transform: 'none', boxShadow: '0 0 0 rgba(0, 0, 0, 0)' };
   const run = (flyer || el).animate(frames, { duration: ms, easing: 'linear' });
@@ -217,13 +218,13 @@ function pillGlide(from, pill, ms = PILL_MS) {
 
 function lift(el) {
   if (!el || stillMotion() || typeof el.animate !== 'function') return null;
-  return el.animate([{ scale: '1', boxShadow: 'none' }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_OUT });
+  return el.animate([{ offset: 0, scale: '1', boxShadow: 'none', '--tilt': '0deg' }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_OUT });
 }
 
 function liftedRect(el) {
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { left: r.left + (r.width - r.width / SETTLE_SCALE) / 2, top: r.top + (r.height - r.height / SETTLE_SCALE) / 2 };
+  return { left: r.left + (r.width - el.offsetWidth) / 2, top: r.top + (r.height - el.offsetHeight) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
 }
 
 window.leoMotion = { unfold, fold, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };

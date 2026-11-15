@@ -370,6 +370,81 @@ test('placeholders inside links, images and math resolve, and attributes only ev
   assert.ok(!render('a\u00000\u0000b `c`').includes('\u0000'));
 });
 
+test('the note page alone right-aligns number columns, unless the Markdown aligned them', () => {
+  const table = '| Item | Price | Share | Mixed | Set |\n|---|---|---|---|:-:|\n| Tea | $1,200.50 | 15% | 3 | 4 |\n| Cake | -2 |  | n/a | 5 |\n| Jam | 0.15 | 7.5% | 4 | 6 |';
+  const html = render(table, { noteTools: true });
+  assert.ok(html.includes('<th>Item</th><th class="align-right">Price</th><th class="align-right">Share</th><th>Mixed</th><th class="align-center">Set</th>'), html);
+  assert.ok(html.includes('<td>Cake</td><td class="align-right">-2</td><td class="align-right"></td><td>n/a</td>'), html);
+  assert.ok(!render('| a |\n|---|\n| 1,2 |\n| . |', { noteTools: true }).includes('align-right'));
+  assert.ok(!render('| a |\n|---|\n|  |', { noteTools: true }).includes('align-right'));
+});
+
+test('the note page alone labels code with its language and offers Copy without adding text', () => {
+  const html = render('```python\nprint(1 < 2)\n```\n\n```\nplain\n```', { noteTools: true });
+  assert.ok(html.startsWith('<div class="code" data-lang="python"><pre><code class="language-python">print(1 &lt; 2)</code></pre><button type="button" class="code-copy" aria-label="Copy code" title="Copy code"><svg'), html);
+  assert.ok(html.includes('<div class="code"><pre><code>plain</code></pre><button'), html);
+  assert.equal(html.replace(/<[^>]*>/g, ''), 'print(1 &lt; 2)plain');
+});
+
+test('without the note page option every other reader gets the same markup as before', () => {
+  const body = '| a | n |\n|---|---|\n| x | 1 |\n| y | 2.5 |\n\n```js\nlet a = 1;\n```\n\n> quote';
+  assert.equal(render(body), '<div class="table"><table><thead><tr><th>a</th><th>n</th></tr></thead><tbody><tr><td>x</td><td>1</td></tr><tr><td>y</td><td>2.5</td></tr></tbody></table></div><pre><code class="language-js">let a = 1;</code></pre><blockquote><p>quote</p></blockquote>');
+  assert.equal(render(body, { noteTools: false }), render(body));
+});
+
+test('the facts line counts words outside code and reads at 238 a minute', () => {
+  assert.equal(md.facts(''), '0 words');
+  assert.equal(md.facts('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '7 words · 1 min read');
+  assert.equal(md.facts('word'), '1 word · 1 min read');
+  assert.equal(md.facts('w '.repeat(239)), '239 words · 2 min read');
+  assert.equal(md.facts('w '.repeat(1200)), '1,200 words · 6 min read');
+});
+
+test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {
+  const words = (s) => s.split(/\s+/).filter(Boolean).join(' ');
+  const pairs = [
+    ['Each row of the matrix sums to one hundred percent.', 'Each row of the matrix sums to one, because it is a probability distribution.'],
+    ['BFS takes the newest vertex.', 'BFS takes the oldest vertex.'],
+    ['the cat sat on a mat', 'the dog lay on a rug'],
+    ['Line one\n\nLine two\n', 'Line one\n\nLine 2 here\n'],
+    ['', 'Ask about mixing time next week.'],
+    ['Gone entirely.', ''],
+    ['café über naïve', 'café unter naïve'],
+  ];
+  for (const [before, after] of pairs) {
+    const parts = md.wordDiff(before, after);
+    assert.equal(parts.filter((p) => p.kind !== 'del').map((p) => p.text).join(''), after);
+    assert.equal(words(parts.filter((p) => p.kind !== 'ins').map((p) => p.text).join('')), words(before));
+    assert.ok(parts.every((p) => p.text && ['same', 'del', 'ins'].includes(p.kind)), JSON.stringify(parts));
+  }
+  assert.deepEqual(md.wordDiff('Each row sums to one hundred percent.', 'Each row sums to one, because it is a distribution.'), [
+    { kind: 'same', text: 'Each row sums to one' },
+    { kind: 'del', text: ' hundred percent' },
+    { kind: 'ins', text: ', because it is a distribution' },
+    { kind: 'same', text: '.' },
+  ]);
+  assert.deepEqual(md.wordDiff('takes the newest vertex', 'takes the oldest vertex'), [
+    { kind: 'same', text: 'takes the ' },
+    { kind: 'del', text: 'newest' },
+    { kind: 'ins', text: 'oldest' },
+    { kind: 'same', text: ' vertex' },
+  ]);
+  assert.deepEqual(md.wordDiff('a b', 'a b'), [{ kind: 'same', text: 'a b' }]);
+  assert.equal(md.wordDiff('word '.repeat(400), 'other '.repeat(400)), null);
+  assert.ok(md.wordDiff('word '.repeat(300), 'other '.repeat(300)));
+});
+
+test('an edit whose marks would hide a change of line breaks or indentation gives up, so the card shows both texts', () => {
+  for (const [find, replace] of [['one\ntwo', 'one two'], ['- a\n- b', '- a\n\n- b'], ['  indented', 'indented'], ['alpha beta\ngamma', 'alpha delta gamma'], ['a, b', 'a,b']]) {
+    assert.equal(md.wordDiff(find, replace), null, JSON.stringify([find, replace]));
+  }
+  for (const [find, replace] of [['the newest one', 'the oldest one'], ['a b c', 'a c'], ['x', 'x y'], ['x y', 'x']]) {
+    assert.ok(md.wordDiff(find, replace), JSON.stringify([find, replace]));
+  }
+  assert.deepEqual(md.wordDiff('Intro. Next point here.', 'Intro.\n\nNew para. Next point here.'), [{ kind: 'same', text: 'Intro.' }, { kind: 'ins', text: '\n\nNew para.' }, { kind: 'same', text: ' Next point here.' }]);
+  assert.deepEqual(md.wordDiff('a b', 'a b\n'), [{ kind: 'same', text: 'a b' }, { kind: 'ins', text: '\n' }]);
+});
+
 test('a long run of unmatched ![[ openers stays fast', () => {
   const started = Date.now();
   render('![['.repeat(7000));

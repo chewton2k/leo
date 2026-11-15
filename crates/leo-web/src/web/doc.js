@@ -4,7 +4,7 @@
   const md = root.leoMarkdown;
   const ed = root.leoEditing;
 
-  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null }) {
+  function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null, noteTools = false }) {
     let lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
     let blocks = [];
     let rendered = [];
@@ -112,7 +112,7 @@
       const text = lines.slice(block.start, block.end).join('\n');
       if (!text.trim()) {
         const lone = lines.length === 1;
-        return lone ? `<p class="placeholder">${md.escape(placeholder || 'Start writing, or type # for a heading and - for a list')}</p>` : '<p class="blank">&#8203;</p>';
+        return lone ? `<p class="placeholder">${md.escape(placeholder || 'Write, or paste anything')}</p>` : '<p class="blank">&#8203;</p>';
       }
       return md.render(text.replace(/^\s+/, ''), {
         boxOffset: boxes,
@@ -120,6 +120,7 @@
         depth: block.kind === 'line' ? Math.max(levels[block.start], 0) + 1 : 1,
         after: block.kind === 'line' && levels[block.start - 1] >= 0,
         first: block.kind === 'line' ? starts[block.start] : undefined,
+        noteTools,
       });
     }
 
@@ -173,6 +174,11 @@
     const outlineDetails = outline && outline.querySelector('details');
     const outlineTicks = outlineNav ? document.createElement('button') : null;
     const outlinePreview = outlineNav ? document.createElement('div') : null;
+    const outlineUpArrow = outlineNav ? document.createElement('button') : null;
+    const outlineDownArrow = outlineNav ? document.createElement('button') : null;
+    let outlineStart = 0;
+    let outlineFollowed = null;
+    let outlineLanding = null;
     let outlineIndex = null;
     let outlineMotion = null;
     let outlineClosing = false;
@@ -188,9 +194,20 @@
       outlinePreview.className = 'outline-preview';
       outlinePreview.setAttribute('role', 'tooltip');
       outlinePreview.hidden = true;
-      outline.append(outlineTicks, outlinePreview);
+      for (const [arrow, label, path] of [[outlineUpArrow, 'Earlier headings', 'M2.2 8.1 Q5.4 4.6 8.1 2.3 Q10.9 4.9 13.8 7.7'], [outlineDownArrow, 'Later headings', 'M2.1 2.2 Q5.3 5.6 8 7.8 Q10.8 5.2 13.9 2.4']]) {
+        arrow.type = 'button';
+        arrow.className = 'outline-page';
+        arrow.hidden = true;
+        arrow.setAttribute('aria-label', label);
+        arrow.title = label;
+        arrow.innerHTML = `<svg viewBox="0 0 16 10" width="16" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+      }
+      outline.append(outlineUpArrow, outlineTicks, outlineDownArrow, outlinePreview);
     }
     const OUTLINE_PAUSE = 300;
+    const OUTLINE_PAGE = 24;
+    const OUTLINE_LANDING_MS = 1500;
+    const outlineShows = (index) => index >= outlineStart && index < outlineStart + OUTLINE_PAGE;
     const OUTLINE_WIDE = 900;
     const MOST_PREVIEW_LINES = 24;
     const MOST_PREVIEW_CHARS = 800;
@@ -319,18 +336,26 @@
 
     function outlineRoom() {
       const rail = outline.getBoundingClientRect();
-      const text = container.getBoundingClientRect();
       const end = Math.min(root.innerWidth, outline.parentElement.getBoundingClientRect().right) - 12;
-      const before = text.left - rail.right - 24;
-      const after = end - text.right - 12;
-      if (before >= 220) return { left: rail.width + 12, width: Math.min(280, before) };
-      if (after >= 220) return { left: text.right + 12 - rail.left, width: Math.min(280, after) };
       return { left: rail.width + 12, width: Math.min(280, end - rail.right - 12) };
     }
 
     function outlinePointer(y) {
       const rect = outlineTicks.getBoundingClientRect();
-      return Math.max(0, Math.min(outlineRows.length - 1, Math.floor((y - rect.top) / rect.height * outlineRows.length)));
+      const shown = Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart);
+      const slots = Math.min(OUTLINE_PAGE, outlineRows.length);
+      return Math.max(outlineStart, Math.min(outlineStart + shown - 1, outlineStart + Math.floor((y - rect.top) / rect.height * slots)));
+    }
+
+    function outlinePage(start) {
+      outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
+      for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
+      outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length));
+      outlineUpArrow.hidden = outlineDownArrow.hidden = outlineRows.length <= OUTLINE_PAGE;
+      outlineUpArrow.disabled = outlineStart === 0;
+      outlineDownArrow.disabled = outlineStart + OUTLINE_PAGE >= outlineRows.length;
+      for (const [arrow, other] of [[outlineUpArrow, outlineDownArrow], [outlineDownArrow, outlineUpArrow]]) if (arrow.disabled && document.activeElement === arrow) other.focus({ preventScroll: true });
+      if (outlineIndex !== null && !outlineShows(outlineIndex)) outlinePeek(null);
     }
 
     function outlineEscape(e) {
@@ -352,8 +377,8 @@
 
     function outlineFocus() {
       if (outlineIndex !== null) return;
-      const current = outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick);
-      outlinePeek(Math.max(0, current));
+      const current = Math.max(0, outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick));
+      outlinePeek(outlineShows(current) ? current : outlineStart);
     }
 
     function outlineBlur() {
@@ -365,6 +390,7 @@
       const next = { ArrowDown: Math.min(outlineRows.length - 1, index + 1), ArrowUp: Math.max(0, index - 1), Home: 0, End: outlineRows.length - 1 }[e.key];
       if (next !== undefined) {
         e.preventDefault();
+        if (!outlineShows(next)) outlinePage(next);
         outlinePeek(next);
       }
     }
@@ -397,6 +423,12 @@
         else button.removeAttribute('aria-current');
       }
       for (const tick of outlineTicks.children) tick.classList.toggle('on', Boolean(current) && tick.dataset.tick === String(current.line));
+      const at = current ? outlineRows.indexOf(current) : 0;
+      if (outlineLanding && (current?.line === outlineLanding.line || bottom || performance.now() > outlineLanding.until)) outlineLanding = null;
+      if (!outlineLanding && current?.key !== outlineFollowed) {
+        outlineFollowed = current?.key;
+        if (!outlineShows(at)) outlinePage(at);
+      }
       if (outlineIndex !== null) outlinePeek(outlineIndex);
     }
 
@@ -435,8 +467,8 @@
         outlineKey = key;
         outlineNav.innerHTML = outlineList(ed.headingTree(outlineRows));
         outlinePeek(null);
-        outlineTicks.style.setProperty('--outline-count', outlineRows.length);
         outlineTicks.innerHTML = outlineRows.map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+        outlinePage(outlineStart);
         if (focused) {
           const button = outlineNav.querySelector(`[data-${focused.type}="${focused.line}"]`) || outlineNav.querySelector('button[data-line]');
           if (button) button.focus({ preventScroll: true });
@@ -464,6 +496,11 @@
         }
         return;
       }
+      const arrow = e.target.closest('.outline-page');
+      if (arrow) {
+        outlinePage(outlineStart + (arrow === outlineUpArrow ? -OUTLINE_PAGE : OUTLINE_PAGE));
+        return;
+      }
       const button = e.target.closest('button[data-line], .outline-ticks');
       if (!button || !outline.contains(button)) return;
       const index = e.detail ? outlinePointer(e.clientY) : outlineIndex ?? 0;
@@ -476,6 +513,8 @@
       block.focus({ preventScroll: true });
       if (!outlineWide) outlineDetails.open = false;
       const inset = outlineWide ? 0 : outlineDetails.querySelector('summary').getBoundingClientRect().height + 8;
+      outlineLanding = { line, until: performance.now() + OUTLINE_LANDING_MS };
+      setTimeout(outlineScroll, OUTLINE_LANDING_MS + 50);
       root.scrollTo({ top: Math.max(0, root.scrollY + block.getBoundingClientRect().top - outlineTop() - inset), behavior: root.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth' });
       outlineScroll();
     }
@@ -821,6 +860,7 @@
 
     function onDocumentKey(e) {
       if (!container.isConnected || e.isComposing || e.defaultPrevented) return;
+      if (e.target.closest?.('.code-copy')) return;
       if (editing && document.activeElement === editing.area) return;
       const focus = document.activeElement;
       if ((!focus || focus === document.body || container.contains(focus)) && (historyKey(e) || styleKey(e))) return;
@@ -1377,6 +1417,30 @@
       return e.clientX < text.getBoundingClientRect().left ? input : null;
     }
 
+    function copyCode(button) {
+      const code = button.parentNode.querySelector('pre code');
+      const doc = button.ownerDocument;
+      const said = doc.getElementById('code-said') || doc.body.appendChild(Object.assign(doc.createElement('span'), { id: 'code-said', className: 'code-said' }));
+      said.setAttribute('role', 'status');
+      const shown = (label) => {
+        button.setAttribute('aria-label', label);
+        button.title = label;
+        said.textContent = label === 'Copy code' ? '' : label;
+      };
+      Promise.resolve().then(() => root.navigator.clipboard.writeText(code ? code.textContent : '')).then(() => {
+        button.classList.add('copied');
+        button.querySelector('.pencil-tick') || button.insertAdjacentHTML('beforeend', '<span class="pencil-tick writing" aria-hidden="true"></span>');
+        shown('Copied');
+      }, () => shown('Could not copy')).finally(() => {
+        clearTimeout(button.copyTimer);
+        button.copyTimer = setTimeout(() => {
+          button.classList.remove('copied');
+          button.querySelector('.pencil-tick')?.remove();
+          shown('Copy code');
+        }, 1200);
+      });
+    }
+
     let framed = null;
 
     function unframe() {
@@ -1480,8 +1544,14 @@
       else again.addEventListener('load', show, { once: true });
     }
 
+    function lonePicture(el) {
+      const blk = el.closest('.blk');
+      const pictures = blk && !blk.textContent.trim() ? blk.querySelectorAll('img.note-img') : [];
+      return pictures.length === 1 && pictures[0].naturalWidth ? pictures[0] : null;
+    }
+
     container.addEventListener('dblclick', (e) => {
-      const img = e.target.closest('img.note-img');
+      const img = e.target.closest('img.note-img') || lonePicture(e.target);
       if (!img || img.closest('.editing')) return;
       const blk = img.closest('.blk');
       unframe();
@@ -1505,6 +1575,11 @@
         return;
       }
       if (e.target.closest('.pic-frame')) return;
+      const copy = e.target.closest('.code-copy');
+      if (copy) {
+        copyCode(copy);
+        return;
+      }
       const pic = e.target.closest('img.note-img');
       if (pic && !pic.closest('.editing') && !e.shiftKey) {
         e.preventDefault();
@@ -1576,6 +1651,11 @@
           draw();
         }
         editLine(lines.length - 1, 'end', false);
+        return;
+      }
+      const lone = !e.shiftKey && lonePicture(blk);
+      if (lone) {
+        frame(lone);
         return;
       }
       const block = blocks[Number(blk.dataset.i)];
@@ -1652,6 +1732,8 @@
           document.removeEventListener('pointerdown', outlineOutside, true);
           outlineTicks.remove();
           outlinePreview.remove();
+          outlineUpArrow.remove();
+          outlineDownArrow.remove();
         }
         root.removeEventListener('scroll', outlineScroll);
         root.removeEventListener('resize', outlineScroll);
@@ -1790,6 +1872,7 @@
         const { left, right, top, bottom } = blk.getBoundingClientRect();
         return right > left ? [{ left, right, top, bottom }] : [];
       },
+      domPoint: (at) => pointFor(at),
       blockAt(at) {
         const index = blockAtLine(lineOf(at));
         return index < 0 ? null : container.querySelector(`.blk[data-i="${index}"]`);

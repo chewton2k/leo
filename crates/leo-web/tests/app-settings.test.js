@@ -153,6 +153,43 @@ test('the export text matches what the zip holds', () => {
   assert.ok(keeping.includes('Your notes and tasks, plus the parts you choose below: uploads with recording transcripts, chats with margin notes, and trash. Settings and keys are never included.'));
 });
 
+test('Keeping that could not be opened shows the broken pencil drawing', async () => {
+  const keeping = fs.readFileSync(path.join(__dirname, '../src/web/app/keeping.js'), 'utf8');
+  const shown = [];
+  const ctx = { seq: 0, state: {}, app: { addEventListener() {} }, chrome() {}, $: () => ({}), document: {}, settingsCrumbs: () => '', skeleton: () => 'loading', settingsFrame: (name, html) => html, refreshPanel: (box, html) => shown.push(html), DRAWN: { broken: '<svg class="drawn drawn-broken"></svg>' }, empty: (icon, title) => `${icon}<h3>${title}</h3>`, api: async () => { throw new Error('offline'); } };
+  vm.createContext(ctx);
+  vm.runInContext(keeping, ctx);
+  await assert.rejects(ctx.showKeeping());
+  assert.equal(shown.at(-1), '<svg class="drawn drawn-broken"></svg><h3>Keeping could not be opened</h3>');
+});
+test('the error drawings are single-stroke line drawings like the empty states', () => {
+  const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
+  const ctx = {};
+  vm.createContext(ctx);
+  vm.runInContext(`${core.slice(core.indexOf('const lineDrawing ='), core.indexOf('const recorder ='))};globalThis.drawn = DRAWN;`, ctx);
+  for (const name of ['offline', 'noink', 'broken']) {
+    assert.match(ctx.drawn[name], new RegExp(`^<svg class="drawn drawn-${name}" viewBox="0 0 120 92" fill="none" stroke="currentColor" stroke-width="1.5"[^>]*aria-hidden="true">`));
+    assert.doesNotMatch(ctx.drawn[name], /fill="(?!none)|#[0-9a-f]{3,6}/i);
+  }
+});
+test('About leo ends with a colophon of plain facts', () => {
+  const { value } = context();
+  const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'idle' }, paths: { notes: '/n', models: '/m' } });
+  const colophon = html.slice(html.indexOf('<div class="about-colophon">'), html.lastIndexOf('</section>'));
+  assert.ok(colophon.startsWith('<div class="about-colophon"><p>Your notes are Markdown files on this computer.</p>'));
+  assert.deepEqual([...colophon.matchAll(/<span class="set-label">([^<]+)<\/span>/g)].map((m) => m[1]), ['Version', 'Note text', 'Felix’s voice', 'Licences']);
+  assert.ok(colophon.includes('<span class="set-value-text">1.2.3</span>'));
+  assert.ok(colophon.includes('Instrument Sans <span>· what you write</span>') && colophon.includes('Newsreader <span>· what Felix says in the margin and chat</span>'));
+  assert.ok(colophon.includes('<span class="hint">MIT, fonts under the SIL Open Font License</span><a class="set-link" href="https://github.com/chewton2k/leo-cli/blob/main/NOTICE" target="_blank" rel="noopener noreferrer">NOTICE</a>'));
+  assert.doesNotMatch(colophon, /set-path/);
+});
+test('the colophon names the lettering Felix really writes in', () => {
+  const { value } = context();
+  value.window.leoTheme = { felixLetters: () => 'notes' };
+  const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'idle' }, paths: {} });
+  assert.ok(html.includes('Instrument Sans <span>· what Felix says in the margin and chat</span>'));
+  assert.ok(!html.includes('Newsreader'));
+});
 test('the downloading update shows a percent and a bar', () => {
   const { value } = context();
   const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'downloading', version: '2.0.0', bytes: 41200000, total: 96500000 }, paths: {} });

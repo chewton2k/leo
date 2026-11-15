@@ -186,6 +186,8 @@
 
   const aligned = (rule) => cells(rule).map((c) => (c.startsWith(':') ? (c.endsWith(':') ? 'center' : 'left') : c.endsWith(':') ? 'right' : ''));
   const cell = (tag, text, align) => `<${tag}${align ? ` class="align-${align}"` : ''}>${inline(text)}</${tag}>`;
+  const NUMBER = /^[-+\u2212]?[$€£¥]?(?:\d{1,3}(?:,\d{3})+|\d*)(?:\.\d+)?%?$/;
+  const numeric = (body, n) => body.some((row) => (row[n] || '').trim()) && body.every((row) => !(row[n] || '').trim() || (/\d/.test(row[n]) && NUMBER.test(row[n].trim())));
 
   function letterValue(marker) {
     const run = marker.slice(0, -1).toLowerCase();
@@ -337,7 +339,8 @@
           }
         }
         const lang = fence[2] ? ` class="language-${escape(fence[2])}"` : '';
-        html += `<pre><code${lang}>${escape(code.join('\n'))}</code></pre>`;
+        const pre = `<pre><code${lang}>${escape(code.join('\n'))}</code></pre>`;
+        html += state.tools ? `<div class="code"${fence[2] ? ` data-lang="${escape(fence[2])}"` : ''}>${pre}<button type="button" class="code-copy" aria-label="Copy code" title="Copy code"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button></div>` : pre;
         continue;
       }
 
@@ -380,12 +383,13 @@
         const head = cells(line);
         const aligns = aligned(lines[i + 1]);
         i += 2;
-        let rows = '';
+        const body = [];
         while (i < lines.length && lines[i].includes('|') && lines[i].trim()) {
-          const row = cells(lines[i]);
-          rows += `<tr>${head.map((_, n) => cell('td', row[n] || '', aligns[n])).join('')}</tr>`;
+          body.push(cells(lines[i]));
           i++;
         }
+        if (state.tools) head.forEach((_, n) => { if (!aligns[n] && numeric(body, n)) aligns[n] = 'right'; });
+        const rows = body.map((row) => `<tr>${head.map((_, n) => cell('td', row[n] || '', aligns[n])).join('')}</tr>`).join('');
         html += `<div class="table"><table><thead><tr>${head
           .map((c, n) => cell('th', c, aligns[n]))
           .join('')}</tr></thead><tbody>${rows}</tbody></table></div>`;
@@ -423,6 +427,7 @@
         after: options.after,
         first: options.first,
         rows: Boolean(options.rows),
+        tools: Boolean(options.noteTools),
       });
     } finally {
       pictureDir = '';
@@ -446,7 +451,71 @@
       .trim();
   }
 
-  const api = { render, plain, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon };
+  function facts(markdown) {
+    const text = plain(markdown);
+    const words = typeof Intl === 'object' && Intl.Segmenter
+      ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
+      : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+    return words ? `${words.toLocaleString('en')} ${words === 1 ? 'word' : 'words'} · ${Math.ceil(words / 238)} min read` : '0 words';
+  }
+
+  function wordDiff(before, after, most = 120000) {
+    const split = (text) => String(text || '').match(/\s*(?:[\p{L}\p{N}_'’]+|\S)|\s+/gu) || [];
+    const a = split(before);
+    const b = split(after);
+    if (a.length * b.length > most) return null;
+    const width = b.length + 1;
+    const kept = new Uint16Array((a.length + 1) * width);
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        kept[i * width + j] = a[i].trim() === b[j].trim() ? kept[(i + 1) * width + j + 1] + 1 : Math.max(kept[(i + 1) * width + j], kept[i * width + j + 1]);
+      }
+    }
+    const runs = [];
+    const put = (kind, del, ins) => {
+      const last = runs.at(-1);
+      if (last && last.kind === kind) {
+        last.del += del;
+        last.ins += ins;
+        last.words += 1;
+      } else runs.push({ kind, del, ins, words: 1 });
+    };
+    let i = 0;
+    let j = 0;
+    let hidden = false;
+    const gap = (word) => /^\s*/.exec(word)[0];
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i].trim() === b[j].trim()) {
+        const [was, now] = [gap(a[i]), gap(b[j])];
+        if (was !== now && (/\n|\t| {2}/.test(was + now) || !runs.length || runs.at(-1).kind === 'same')) hidden = true;
+        put('same', a[i++], b[j++]);
+      } else if (i < a.length && (j === b.length || kept[(i + 1) * width + j] >= kept[i * width + j + 1])) put('del', a[i++], '');
+      else put('ins', '', b[j++]);
+    }
+    const parts = [];
+    runs.forEach((run, k) => {
+      const lone = run.kind === 'same' && run.words === 1 && run.ins.trim().length <= 3 && k > 0 && k < runs.length - 1;
+      if (run.kind === 'same' && !lone) {
+        parts.push({ kind: 'same', text: run.ins });
+        return;
+      }
+      let change = parts.at(-1);
+      if (!change || change.kind === 'same') parts.push((change = { kind: 'change', del: '', ins: '' }));
+      change.del += run.del;
+      change.ins += run.ins;
+    });
+    parts.forEach((part, k) => {
+      const space = part.kind === 'change' && k > 0 ? /^[ \t]*/.exec(part.ins)[0] : '';
+      if (!space || (part.del && !part.del.startsWith(space))) return;
+      parts[k - 1].text += space;
+      part.ins = part.ins.slice(space.length);
+      part.del = part.del.slice(space.length);
+    });
+    if (hidden) return null;
+    return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
+  }
+
+  const api = { render, plain, facts, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

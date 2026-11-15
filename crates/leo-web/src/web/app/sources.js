@@ -8,7 +8,7 @@ async function showRecordingSources(query = '') {
   const page = await api(`/api/notes/${enc(s.note.id)}/recording?q=${enc(query)}`);
   if (mine !== seq) return;
   if (!page.sources.length) return toast('This note was not made from a recording leo kept.');
-  sourcePage = { ...page, note: s.note.id };
+  sourcePage = { ...page, note: s.note.id, title: s.note.title };
   generatedPreview = null;
   drawRecordingSources(query);
 }
@@ -116,7 +116,7 @@ async function saveSource() {
   if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
   sourcePage = { ...page, ...updated };
   drawRecordingSources();
-  toast('Fixes saved.');
+  toast(`Saved your fixes to “${page.title || 'Untitled'}”`);
 }
 
 async function regenerateSource() {

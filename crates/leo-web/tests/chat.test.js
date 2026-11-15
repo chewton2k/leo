@@ -534,7 +534,7 @@ function chatSendFixture(id = 'practice', access = 'ask', before = async () => t
   const input = { value: 'Put the solution in my code area.' };
   const noop = () => {};
   const context = vm.createContext({
-    state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), MOST_REFS: C.MOST_REFS,
+    state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), timed: new Set(), MOST_REFS: C.MOST_REFS,
     historyText: C.historyText, modelHistory: C.modelHistory, historyRequest: C.historyRequest, threadRefs: C.threadRefs, recentNotes: C.recentNotes, sessionBody: C.sessionBody, splitLines: C.splitLines, grade: C.grade, scoreSession: C.scoreSession,
     cardOf: doc => doc, currentSession: () => null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
     pose: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
@@ -775,6 +775,20 @@ test('a finished trace says what was opened, used and changed in one line', () =
   assert.equal(C.traceSummary([{ ...step('open_note', 'Looked for “x”'), failed: true }, step('search_notes', 'Searched')], [], 0), 'Searched your notes');
 });
 
+test('the live step says what Felix is doing now, and anything unknown keeps his words', () => {
+  const step = (tool, text, failed = false) => ({ tool, text, failed, found: [] });
+  assert.equal(C.doing(step('open_note', 'Read “Markov chains”')), 'Reading “Markov chains”…');
+  assert.equal(C.doing(step('open_note', 'Read part 2 of 3 of “B” (lines 40–80)')), 'Reading part 2 of 3 of “B” (lines 40–80)…');
+  assert.equal(C.doing(step('search_notes', 'Searched your notes for “lab safety”')), 'Searching your notes for “lab safety”…');
+  assert.equal(C.doing(step('connected_notes', 'Followed connections from “Heaps”')), 'Following connections from “Heaps”…');
+  assert.equal(C.doing(step('edit_note', 'Suggested a change to “Heaps”')), 'Suggesting a change to “Heaps”…');
+  assert.equal(C.doing(step('read_transcript', 'Looked for “x” in the recording of “T”')), 'Looking for “x” in the recording of “T”…');
+  assert.equal(C.doing(step('calculate', 'Worked out the numbers.')), 'Working out the numbers…');
+  assert.equal(C.doing(step('open_note', 'Looked for “x”', true)), 'Looked for “x”', 'a failed step keeps its words');
+  assert.equal(C.doing(step('quiz', 'Wanted to change a note (read only)')), 'Wanted to change a note (read only)');
+  assert.equal(C.doing(step('', '')), '');
+});
+
 test('only an empty search with nothing cited is marked as not from the notes', () => {
   const empty = [{ tool: 'search_notes', text: 'Searched', found: [] }];
   assert.equal(C.notFromNotes(empty, 'Wear goggles.', 0), true);
@@ -967,8 +981,8 @@ function answers(messages, { busy = null, send = () => {}, clipboard = null, fet
   const calls = [];
   const input = { value: '', focus() { calls.push('focus'); } };
   const context = {
-    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
-    root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), tick() {}, workingFor: () => '', writer: () => '', writerOf: () => '',
+    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
+    root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), timed: new Set(), tick() {}, workingFor: () => '', tookFor: () => '', writer: () => '', writerOf: () => '',
     stepChevron: '', MOST_REPLY_STEPS: 64, clipped: (t) => t, stored: () => messages.filter((m) => !m.pending), fit() {}, persist() {}, draw() {}, send,
     notify: (text) => calls.push(`notify:${text}`), setTimeout: () => 0,
     request: async (url, init) => { calls.push(['fetch', url, JSON.parse(init.body)]); return { ok: fetchOk }; },
@@ -1068,6 +1082,12 @@ test('a writer failure shows the sentence in Felix\u2019s voice with a Set up wr
   assert.match(failed, /<div class="prose"><p>leo can&#39;t write yet|<div class="prose"><p>leo can't write yet/);
   assert.match(failed, /<a class="btn primary sm" href="#\/settings\/writing">Set up writing AI<\/a>/);
   assert.doesNotMatch(failed, /msg-error/);
+  const drawn = answers([{ role: 'user', text: 'Quiz me' }, { role: 'assistant', text: '', error: sentence }]);
+  drawn.context.drawings = { noink: '<svg class="drawn drawn-noink"></svg>' };
+  assert.match(drawn.html()[1], /<svg class="drawn drawn-noink"><\/svg><div class="prose"><p>leo can/);
+  const plain = answers([{ role: 'user', text: 'Hi' }, { role: 'assistant', text: '', error: 'Felix finished without an answer. Try again.' }]);
+  plain.context.drawings = drawn.context.drawings;
+  assert.doesNotMatch(plain.html()[1], /drawn-noink/);
   assert.equal(C.noAi(sentence), true);
   assert.equal(C.noAi('Stopped.'), false);
   assert.equal(C.noAi(undefined), false);
@@ -1186,4 +1206,29 @@ test('a step Felix got wrong and then fixed with the same tool is not shown', ()
   assert.deepEqual(C.fixedSteps([read, lost, tried], true).map((s) => s.text), [read.text, said, said]);
   const broken = { text: 'Retried open note: no such note', tool: 'open_note', failed: true };
   assert.deepEqual(C.fixedSteps([broken], true), [broken], 'other failures keep their words');
+});
+
+test('an edit card shows proof marks, falls back to both texts when marks would hide a change, and marks an addition at the end', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const marks = source.slice(source.indexOf('  const DELETE_MARK'), source.indexOf('\n', source.indexOf('  const CARET_MARK')));
+  const from = source.indexOf('    const proofMarks = new WeakMap();');
+  const code = source.slice(from, source.indexOf('\n    }\n', source.indexOf('    function proposalCard(', from)) + 7);
+  const escape = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const context = { escape, render: escape, retiredPractice: () => false, state: { messages: [{ role: 'assistant' }] }, root: { leoMarkdown: require('../src/web/markdown.js') } };
+  vm.createContext(context);
+  vm.runInContext(`${marks}\n${code}\n;globalThis.card = proposalCard;`, context);
+  const marked = context.card({ kind: 'edit', title: 'Heaps', find: 'the newest one', replace: 'the oldest one', state: 'new' }, 0, 0);
+  assert.match(marked, /class="proposal-marked">the <del>newest<svg class="proposal-loop"/);
+  assert.match(marked, /<ins><svg class="proposal-caret"[^]*?<\/svg>oldest<\/ins> one<\/div>/);
+  assert.doesNotMatch(marked, /proposal-old|proposal-new/);
+  const spacing = context.card({ kind: 'edit', title: 'Heaps', find: 'one\ntwo', replace: 'one two', state: 'new' }, 0, 0);
+  assert.match(spacing, /<div class="proposal-old">one\ntwo<\/div><div class="proposal-new">one two<\/div>/);
+  assert.doesNotMatch(spacing, /proposal-marked/);
+  const added = context.card({ kind: 'edit', title: 'Heaps', find: '', replace: 'Ask about it.', state: 'new' }, 0, 0);
+  assert.match(added, /<div class="proposal-note">Added at the end:<\/div><div class="proposal-marked"><ins><svg class="proposal-caret"/);
+  const same = { kind: 'edit', title: 'Heaps', find: 'a b', replace: 'a c', state: 'new' };
+  assert.equal(context.card(same, 0, 0), context.card(same, 0, 0), 'a redraw reuses the marks');
 });

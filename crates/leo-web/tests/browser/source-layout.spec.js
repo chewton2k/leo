@@ -183,6 +183,12 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(nav.locator('button[data-line]')).toHaveCount(4);
     await expect(nav.getByRole('button', {name:'Ignore code'})).toHaveCount(0);
     await expect(page.locator('.note-outline details')).not.toHaveAttribute('open', '');
+    const facts = page.locator('#title + #note-facts');
+    await expect(facts).toHaveText(await page.evaluate(text => leoMarkdown.facts(text), body));
+    expect(await facts.evaluate(el => getComputedStyle(el).fontVariantNumeric)).toBe('tabular-nums');
+    await page.emulateMedia({media:'print'});
+    await expect(facts).toBeHidden();
+    await page.emulateMedia({media:'screen'});
     const rail = await page.locator('.note-outline').evaluate(el => {
       const ticks = el.querySelector('.outline-ticks').getBoundingClientRect(), note = document.querySelector('.note').getBoundingClientRect(), columns = document.querySelector('.note-columns').getBoundingClientRect();
       return {ticks:note.left - ticks.right, centre:(note.left - columns.left) - (columns.right - note.right), count:el.querySelectorAll('.outline-ticks span').length};
@@ -236,6 +242,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(editor).toBeFocused();
     await expect(nested).toHaveAttribute('aria-expanded', 'false');
     expect(await page.evaluate(() => audit.saved())).toContain('## Newly typed heading');
+    await expect(facts).toHaveText(await page.evaluate(() => leoMarkdown.facts(audit.saved())));
     for (const theme of ['light','dark']) {
       for (const width of [1600, 1100, 390]) {
         await page.setViewportSize({width, height:900});

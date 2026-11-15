@@ -106,6 +106,13 @@
   const VERDICT_WITHIN = 240;
   const QUIZ_MARK_MS = 160;
   const BLOT = '<svg class="msg-step-busy" role="img" aria-label="working"><use href="#leo-mark"/></svg>';
+  const DELETE_MARK = '<svg class="proposal-loop" width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><path d="M0.5 8.1 Q5.2 7.6 7.6 4.6 Q9.4 1.9 7.2 1.3 Q4.9 1.1 5.6 4.6 Q6.4 8.4 10.2 10.6"/></svg>';
+  const STUDY_MARKS = {
+    rings: ['M9 2.3 Q14.9 2.6 15.4 8.7 Q15.2 15.2 8.8 15.5 Q2.6 15.2 2.4 9.1 Q2.7 3.2 9.6 2.4', 'M9.2 2.4 Q15.3 2.9 15.3 9.2 Q14.8 15.4 8.7 15.3 Q2.5 14.9 2.6 8.8 Q2.9 2.6 9.8 2.6', 'M8.8 2.5 Q15.1 2.4 15.5 9 Q15.4 15.1 9.2 15.6 Q2.4 15.4 2.3 8.9 Q2.4 2.9 9.4 2.3'],
+    ok: 'M5.6 9.4 Q7 10.4 8.1 12.3 Q10.1 8.2 14.6 3.6',
+    no: 'M6.2 6 Q9.1 9.1 12 12.2 M11.9 6.2 Q9 9 6 12',
+  };
+  const CARET_MARK = '<svg class="proposal-caret" width="10" height="7" viewBox="0 0 10 7" aria-hidden="true"><path d="M1.2 6.2 Q3.4 3.6 5.1 1.1 Q6.7 3.7 8.9 6"/></svg>';
 
   function grade(text) {
     const value = String(text || '');
@@ -160,6 +167,14 @@
     else if (worked.some((step) => step.tool === 'search_chats')) line = 'Searched your chats';
     else line = plural(steps.length, 'step');
     return changes > 0 ? `${line} · made ${plural(changes, 'change')}` : line;
+  }
+
+  const DOING = { Read: 'Reading', Searched: 'Searching', Followed: 'Following', Suggested: 'Suggesting', Looked: 'Looking', Opened: 'Opening', Asked: 'Asking', Checked: 'Checking', Calculated: 'Calculating', Worked: 'Working', Planned: 'Planning' };
+
+  function doing(step) {
+    const text = String(step && step.text || '');
+    const verb = /^(\S+)(.*)$/s.exec(text);
+    return step && !step.failed && verb && DOING[verb[1]] ? `${DOING[verb[1]]}${verb[2].replace(/[.…]$/, '')}…` : text;
   }
 
   function fixedSteps(steps, finished = false) {
@@ -972,9 +987,13 @@
       }
     }
     const working = new WeakMap();
+    const timed = new WeakSet();
+    function tookFor(ms) {
+      const secs = Math.max(0, Math.round(ms / 1000));
+      return secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `${secs} s`;
+    }
     function workingFor(since) {
-      const secs = Math.max(0, Math.round((Date.now() - since) / 1000));
-      return `Working · ${secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `${secs} s`}`;
+      return `Working · ${tookFor(Date.now() - since)}`;
     }
     let ticking = 0;
     function tick() {
@@ -1871,11 +1890,15 @@
         return;
       }
       const c = sessionSummary(s);
+      const latest = state.messages.slice(state.messages.findLastIndex((m) => m.session === s)).flatMap((m) => m.quizzes || []).findLast((q) => q.idea);
+      const asking = latest && typeof latest.given !== 'string' ? latest.idea : 0;
       const ideas = s.ideas.map((t, i) => {
         const o = s.outcomes[i];
-        const mark = o.state === 'first' || o.state === 'done' ? '✓ ' : '';
-        return `<span class="study-idea ${o.state}" title="${escape(t)}">${mark}${escape(t)}</span>`;
-      }).join('<span class="study-sep" aria-hidden="true">·</span>');
+        const now = o.state === 'open' && asking === i + 1;
+        const mark = o.state === 'first' || o.state === 'done' ? `<path class="study-ok" d="${STUDY_MARKS.ok}"/>` : o.state === 'review' ? `<path class="study-no" d="${STUDY_MARKS.no}"/>` : '';
+        const said = { first: 'right the first time', done: 'right', review: 'to look at again' }[o.state] || (now ? 'asking now' : 'not yet');
+        return `<span class="study-idea ${o.state}${now ? ' now' : ''}" title="${escape(t)}"><svg class="study-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path class="study-ring" d="${STUDY_MARKS.rings[i % STUDY_MARKS.rings.length]}"/>${mark}</svg>${escape(t)}</span>`;
+      }).join('');
       box.hidden = false;
       box.innerHTML = `<div class="study-ideas" aria-label="Ideas in this session">${ideas}</div><span class="study-count">${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'}</span><button type="button" class="msg-act" data-chat="session-finish">Finish</button>`;
     }
@@ -1968,7 +1991,7 @@
         ? `<div class="msg-from">${marks.map((x) => `<button class="cite cite-src" data-chat="open" data-id="${escape(x.s.id)}"${x.lines ? ` data-line="${x.lines}"` : ''}><b>${x.n}</b>${escape(x.s.title)}${x.where ? ` · ${escape(x.where)}` : ''}</button>`).join('')}</div>`
         : '';
       const error = noAi(m.error)
-        ? `<div class="prose"><p>${escape(m.error)}</p></div><div class="msg-acts"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a></div>`
+        ? `${drawings.noink || ''}<div class="prose"><p>${escape(m.error)}</p></div><div class="msg-acts"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a></div>`
         : m.error ? `<div class="msg-error">${escape(m.error)}</div>` : '';
       const verdict = grade(m.text).verdict;
       const badge = verdict ? `<span class="verdict ${verdict}">${verdict === 'correct' ? 'Correct' : 'Not quite'}</span>` : '';
@@ -1994,7 +2017,7 @@
       const trace = now
         ? `<div class="msg-status" role="status">${stepLine({ ...now.step, found: [] }, true, now.times)}</div>`
         : !m.pending && taken.length
-        ? `<details class="msg-trace" data-i="${i}"${openTraces.has(m) ? ' open' : ''}><summary>${escape(traceSummary(taken, used.map((s) => s.title), made))}${stepChevron}</summary><div class="msg-steps">${stepRuns(taken).map((run) => stepLine(run.step, false, run.times)).join('')}</div></details>`
+        ? `<details class="msg-trace" data-i="${i}"${openTraces.has(m) ? ' open' : ''}><summary>${m.error ? '' : '<span class="pencil-tick" aria-hidden="true"></span>'}${escape(traceSummary(taken, used.map((s) => s.title), made))}${timed.has(m) && Math.round(m.elapsed_ms / 1000) >= 1 ? `<span class="msg-trace-took"> · ${tookFor(m.elapsed_ms)}</span>` : ''}${stepChevron}</summary><div class="msg-steps">${stepRuns(taken).map((run) => stepLine(run.step, false, run.times)).join('')}</div></details>`
         : '';
       const words = parts.length ? parts.map((part) => part.steps ? '' : prose(part.text)).join('') : html ? `<div class="prose">${html}</div>` : '';
       const outside = !m.pending && notFromNotes(taken, shown, used.length) ? '<div class="msg-note msg-outside">Not from your notes</div>' : '';
@@ -2120,12 +2143,13 @@
     function stepLine(step, working, times = 1) {
       const item = typeof step === 'string' ? { text: step, tool: '', found: [] } : step;
       const icon = working ? BLOT : `<svg class="msg-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[item.tool] || '<circle cx="12" cy="12" r="3"/>'}</svg>`;
-      const label = `${icon}<span>${escape(item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}`;
+      const label = `${icon}<span>${escape(working ? doing(item) : item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}`;
       const found = (item.found || []).filter((f) => f && f !== item.text);
       if (!found.length || item.tool === 'open_note') return `<div class="msg-step">${label}</div>`;
       return `<details class="msg-step"><summary>${label}<span class="msg-step-count">${found.length}</span>${stepChevron}</summary><ul>${found.map((f) => `<li>${escape(f)}</li>`).join('')}</ul></details>`;
     }
 
+    const proofMarks = new WeakMap();
     function proposalCard(p, i, j) {
       const where = `data-i="${i}" data-j="${j}"`;
       if (retiredPractice(p)) return '<div class="proposal-done">Interview practice is no longer part of leo.</div>';
@@ -2149,8 +2173,14 @@
           <div class="proposal-body prose">${render(body.length > 900 ? `${body.slice(0, 900)}…` : body)}</div>${done}</div>`;
       }
       const old = p.find ? `<div class="proposal-old">${escape(p.find)}</div>` : '<div class="proposal-note">Added at the end:</div>';
+      const marked = proofMarks.get(p);
+      const parts = marked && marked.find === p.find && marked.replace === p.replace ? marked.parts : p.find ? root.leoMarkdown?.wordDiff?.(p.find, p.replace || '') : [{ kind: 'ins', text: p.replace || '' }];
+      proofMarks.set(p, { find: p.find, replace: p.replace, parts });
+      const change = parts
+        ? `${p.find ? '' : old}<div class="proposal-marked">${parts.map(({ kind, text }) => (kind === 'del' ? `<del>${escape(text)}${DELETE_MARK}</del>` : kind === 'ins' ? `<ins>${CARET_MARK}${escape(text)}</ins>` : escape(text))).join('')}</div>`
+        : `${old}<div class="proposal-new">${escape(p.replace || '')}</div>`;
       return `<div class="proposal">${waiting}<div class="proposal-title">Change to “${escape(p.title || 'a note')}”</div>${p.why ? `<div class="proposal-why">${escape(p.why)}</div>` : ''}
-        ${old}<div class="proposal-new">${escape(p.replace || '')}</div>${done}</div>`;
+        ${change}${done}</div>`;
     }
 
     const inline = (text) => render(String(text || '')).replace(/^<p>/, '').replace(/<\/p>$/, '');
@@ -2934,6 +2964,7 @@
       answer.pending = false;
       answer.elapsed_ms = Math.max(0, Date.now() - (working.get(answer) ?? Date.now()));
       working.delete(answer);
+      timed.add(answer);
       answer.at = new Date().toISOString();
       const cards = ['asks', 'quizzes', 'proposals'].some((key) => (answer[key] || []).length);
       const stopped = controller.signal.aborted || answer.error === 'Stopped.';
@@ -3420,5 +3451,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps };
 })(typeof window !== 'undefined' ? window : globalThis);
