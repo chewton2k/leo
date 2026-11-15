@@ -342,6 +342,7 @@ test('task dates read as words: today, tomorrow, a weekday within a week either 
   assert.equal(word('2026-11-05'), 'Nov 5');
   assert.equal(word('2026-11-03'), 'Nov 3');
   assert.equal(S.dayWord('2026-11-02', new Date(2026, 10, 1, 23, 30), 'en-US'), 'Tomorrow', 'a clock change in between still counts whole days');
+  assert.equal(S.dayName('2026-11-17', 'en-US'), 'Tuesday, November 17', 'the full date screen readers and tooltips get');
 });
 
 test('a tally draws one stroke per task, gates every fifth and never re-rolls', () => {

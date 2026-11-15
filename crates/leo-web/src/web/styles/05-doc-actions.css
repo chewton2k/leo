@@ -12,6 +12,7 @@
 .doc .blk h2, .doc .blk h3, .doc .blk h4, .doc .blk h5, .doc .blk h6 { margin: .5em 0 .15em; }
 .doc .blk:first-child h2, .doc .blk:first-child h3 { margin-top: 0; }
 .doc .blk pre, .doc .blk .table, .doc .blk blockquote { margin: .4em 0; }
+.doc .blk :where(.code) { margin: .4em 0; }
 .doc .blk hr { margin: .8em 0; }
 .doc .blk .task { padding: 1px 0; }
 .doc .blk .task-item { touch-action: manipulation; }

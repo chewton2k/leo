@@ -1207,3 +1207,28 @@ test('a step Felix got wrong and then fixed with the same tool is not shown', ()
   const broken = { text: 'Retried open note: no such note', tool: 'open_note', failed: true };
   assert.deepEqual(C.fixedSteps([broken], true), [broken], 'other failures keep their words');
 });
+
+test('an edit card shows proof marks, falls back to both texts when marks would hide a change, and marks an addition at the end', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const marks = source.slice(source.indexOf('  const DELETE_MARK'), source.indexOf('\n', source.indexOf('  const CARET_MARK')));
+  const from = source.indexOf('    const proofMarks = new WeakMap();');
+  const code = source.slice(from, source.indexOf('\n    }\n', source.indexOf('    function proposalCard(', from)) + 7);
+  const escape = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const context = { escape, render: escape, retiredPractice: () => false, state: { messages: [{ role: 'assistant' }] }, root: { leoMarkdown: require('../src/web/markdown.js') } };
+  vm.createContext(context);
+  vm.runInContext(`${marks}\n${code}\n;globalThis.card = proposalCard;`, context);
+  const marked = context.card({ kind: 'edit', title: 'Heaps', find: 'the newest one', replace: 'the oldest one', state: 'new' }, 0, 0);
+  assert.match(marked, /class="proposal-marked">the <del>newest<svg class="proposal-loop"/);
+  assert.match(marked, /<ins><svg class="proposal-caret"[^]*?<\/svg>oldest<\/ins> one<\/div>/);
+  assert.doesNotMatch(marked, /proposal-old|proposal-new/);
+  const spacing = context.card({ kind: 'edit', title: 'Heaps', find: 'one\ntwo', replace: 'one two', state: 'new' }, 0, 0);
+  assert.match(spacing, /<div class="proposal-old">one\ntwo<\/div><div class="proposal-new">one two<\/div>/);
+  assert.doesNotMatch(spacing, /proposal-marked/);
+  const added = context.card({ kind: 'edit', title: 'Heaps', find: '', replace: 'Ask about it.', state: 'new' }, 0, 0);
+  assert.match(added, /<div class="proposal-note">Added at the end:<\/div><div class="proposal-marked"><ins><svg class="proposal-caret"/);
+  const same = { kind: 'edit', title: 'Heaps', find: 'a b', replace: 'a c', state: 'new' };
+  assert.equal(context.card(same, 0, 0), context.card(same, 0, 0), 'a redraw reuses the marks');
+});

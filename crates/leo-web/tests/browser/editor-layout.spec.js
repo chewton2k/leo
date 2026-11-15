@@ -117,6 +117,7 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
     await copy.click();
     await expect(copy).toHaveAttribute('aria-label', 'Copied');
     await expect(copy.locator('.pencil-tick')).toHaveCount(1);
+    await expect(page.locator('#code-said[role="status"]'), 'screen readers hear the copy').toHaveText('Copied');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe('print(1)');
     await expect(doc.locator('.editing')).toHaveCount(0);
     await expect(copy).toHaveAttribute('aria-label', 'Copy code', { timeout: 3000 });

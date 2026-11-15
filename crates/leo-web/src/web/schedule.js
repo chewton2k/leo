@@ -316,6 +316,10 @@
     return fromKey(key).toLocaleDateString(locale || undefined, Math.abs(ahead) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' });
   }
 
+  function dayName(key, locale) {
+    return fromKey(key).toLocaleDateString(locale || undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+
   const TALLY = ['M2.4 1.3Q1.2 6 1.2 10.9', 'M6.4 1.4Q6 6 5.9 10.7', 'M10.9 1Q10.2 6 10.4 10.7', 'M15.5 1.3Q14.8 6 14.9 10.3', 'M1 9.5Q9.2 6.2 18.5 2.6'];
 
   function tally(count) {
@@ -615,7 +619,7 @@
     return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
   }
 
-  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, tally, nextWeekday };
+  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, dayName, tally, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

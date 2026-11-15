@@ -424,7 +424,7 @@ function calMini(today) {
 
 function calTrayRow(task) {
   const when = task.date ? S.dayWord(task.date, new Date(), calLocale()) : '';
-  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub" title="${esc(S.fromKey(task.date).toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${esc(when)}</span>` : ''}</button></div>`;
+  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub" aria-hidden="true" title="${esc(S.dayName(task.date, calLocale()))}">${esc(when)}</span><span class="said">, ${esc(S.dayName(task.date, calLocale()))}</span>` : ''}</button></div>`;
 }
 
 function calTray(plan, today) {
@@ -1176,7 +1176,7 @@ async function setTaskDone(id, done, on = null) {
     drawCalendar();
     tickTaskBoxes(id, done, on);
   }
-  if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
+  if (done) toast(`Marked “${task?.title || 'Untitled'}” done`, { action: 'Undo', run: () => setTaskDone(id, false, on) });
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
 
@@ -1419,7 +1419,7 @@ function taskSheet(id, on = null) {
         task.description = saved.description;
         if (!descSaved) {
           descSaved = true;
-          toast('Description saved', { action: 'Undo', run: async () => {
+          toast(`Saved the description of “${task.title || 'Untitled'}”`, { action: 'Undo', run: async () => {
             const undone = await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { description: opened } });
             task.description = undone.description;
             if (box.isConnected) {
@@ -1695,7 +1695,7 @@ function tasksRow(t) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
     <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when" title="${esc(S.fromKey(t.date).toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${esc(t.date === S.dayKey(new Date()) && t.time ? S.timeLabel(t.time, calLocale()) : S.dayWord(t.date, new Date(), calLocale()))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+    ${t.date ? `<span class="tasks-when" aria-hidden="true" title="${esc(S.dayName(t.date, calLocale()))}">${esc(t.date === S.dayKey(new Date()) && t.time ? S.timeLabel(t.time, calLocale()) : S.dayWord(t.date, new Date(), calLocale()))}</span><span class="said">${esc(S.dayName(t.date, calLocale()))}${t.date === S.dayKey(new Date()) && t.time ? `, ${esc(S.timeLabel(t.time, calLocale()))}` : ''}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
 }
 

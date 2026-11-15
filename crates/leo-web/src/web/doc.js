@@ -1381,9 +1381,13 @@
 
     function copyCode(button) {
       const code = button.parentNode.querySelector('pre code');
+      const doc = button.ownerDocument;
+      const said = doc.getElementById('code-said') || doc.body.appendChild(Object.assign(doc.createElement('span'), { id: 'code-said', className: 'code-said' }));
+      said.setAttribute('role', 'status');
       const shown = (label) => {
         button.setAttribute('aria-label', label);
         button.title = label;
+        said.textContent = label === 'Copy code' ? '' : label;
       };
       Promise.resolve().then(() => root.navigator.clipboard.writeText(code ? code.textContent : '')).then(() => {
         button.classList.add('copied');

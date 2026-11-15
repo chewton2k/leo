@@ -452,7 +452,10 @@
   }
 
   function facts(markdown) {
-    const words = plain(markdown).split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+    const text = plain(markdown);
+    const words = typeof Intl === 'object' && Intl.Segmenter
+      ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
+      : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
     return words ? `${words.toLocaleString('en')} ${words === 1 ? 'word' : 'words'} · ${Math.ceil(words / 238)} min read` : '0 words';
   }
 

@@ -190,7 +190,7 @@ body.pane-resizing iframe, body.pane-resizing canvas { pointer-events: none; }
 .home-tally { display: inline-flex; align-items: center; color: var(--muted); }
 .home-tally-marks { display: block; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.2; stroke-linecap: round; }
 @media (prefers-reduced-motion: no-preference) { .home-tally-marks path.inking { stroke-dasharray: 1; animation: pencil-draw 160ms var(--ease-pencil) both; } }
-.home-tally-said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.home-tally-said, .said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .home-recent { margin: 0 0 24px; }
 .home-recent.reserve:empty { min-height: 131px; }
 .home-recent .tasks-group { margin: 20px 8px 4px; }

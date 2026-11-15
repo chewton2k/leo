@@ -4684,7 +4684,7 @@ test.describe('calendar', () => {
     await expect(page.locator('.toast')).toContainText('Opened in Google Calendar');
 
     await item.locator('.cal-check').click();
-    await expect(page.locator('.toast')).toContainText('Done');
+    await expect(page.locator('.toast')).toContainText(`Marked “Ask tutor ${tag}” done`);
     await expect.poll(async () => (await (await page.request.get('/api/tasks')).json()).tasks.find((t) => t.id === undated.id).done).toBe(true);
     await page.locator('.toast button', { hasText: 'Undo' }).click();
     await expect.poll(async () => (await (await page.request.get('/api/tasks')).json()).tasks.find((t) => t.id === undated.id).done).toBe(false);

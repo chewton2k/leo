@@ -218,7 +218,7 @@ function pillGlide(from, pill, ms = PILL_MS) {
 
 function lift(el) {
   if (!el || stillMotion() || typeof el.animate !== 'function') return null;
-  return el.animate([{ scale: '1', boxShadow: 'none', '--tilt': '0deg' }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_OUT });
+  return el.animate([{ offset: 0, scale: '1', boxShadow: 'none', '--tilt': '0deg' }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_OUT });
 }
 
 function liftedRect(el) {
