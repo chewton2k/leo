@@ -375,14 +375,21 @@ function popEdge(menu, from) {
 
 const popShut = (edge) => (edge.up ? 'inset(100% 0 0 0)' : 'inset(0 0 100% 0)');
 
+function popNow(menu) {
+  if (!moving.has(menu)) return null;
+  const style = getComputedStyle(menu);
+  return { clipPath: style.clipPath, opacity: style.opacity, transform: style.transform };
+}
+
 function unfold(menu, from = null) {
+  const now = popNow(menu);
   stopSlide(menu);
   menu.hidden = false;
   if (stillMotion()) return;
   const edge = from ? popEdge(menu, from) : { origin: '50% 0', up: false };
   popEdges.set(menu, edge);
   menu.style.transformOrigin = edge.origin;
-  const run = menu.animate([{ clipPath: popShut(edge), transform: `scale(${POP_FROM})` }, { clipPath: POP_OPEN, transform: 'none' }], { duration: MOTION_MS, easing: EASE_OUT });
+  const run = menu.animate([now || { clipPath: popShut(edge), opacity: 1, transform: `scale(${POP_FROM})` }, { clipPath: POP_OPEN, opacity: 1, transform: 'none' }], { duration: MOTION_MS, easing: EASE_OUT });
   moving.set(menu, run);
   run.onfinish = () => moving.delete(menu);
 }
@@ -392,6 +399,7 @@ function fold(menu, then = null) {
     if (then && menu.hidden) then();
     return;
   }
+  const now = popNow(menu);
   stopSlide(menu);
   if (stillMotion()) {
     menu.hidden = true;
@@ -400,7 +408,7 @@ function fold(menu, then = null) {
   }
   menu.dataset.folding = '1';
   const edge = popEdges.get(menu) || { up: false };
-  const run = menu.animate([{ clipPath: POP_OPEN, opacity: 1, transform: 'none' }, { clipPath: popShut(edge), opacity: 0, transform: `scale(${POP_FROM})` }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_EXIT });
+  const run = menu.animate([now || { clipPath: POP_OPEN, opacity: 1, transform: 'none' }, { clipPath: popShut(edge), opacity: 0, transform: `scale(${POP_FROM})` }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_EXIT });
   moving.set(menu, run);
   run.onfinish = () => {
     moving.delete(menu);

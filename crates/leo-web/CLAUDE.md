@@ -197,7 +197,8 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   tooltips or disabled controls.
 - Knobs `knobStretch(el, pseudo)` (12% along the travel, on `scale`, ends at 1).
   Popovers `unfold(menu, from)` / `fold(menu, then)` (`popEdge` origin, start at
-  .95, clip reveal; a closing context menu takes `.popup-menu-gone` and
+  .95, clip reveal; reversing mid-run starts from the live clip, opacity and
+  transform, never a snap; a closing context menu takes `.popup-menu-gone` and
   `aria-hidden`). Stagger `cascade(list)` 30 ms (cap 150) on first arrival only,
   never a re-render. Moves `flipList`, `pillGlide`, `settle` (arc; lifts onto a
   fixed carrier when clipped), `flyInto`. Pulse `pulse(el, { lift, ring })`, one
