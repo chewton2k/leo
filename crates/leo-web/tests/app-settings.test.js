@@ -172,6 +172,17 @@ test('the error drawings are single-stroke line drawings like the empty states',
     assert.doesNotMatch(ctx.drawn[name], /fill="(?!none)|#[0-9a-f]{3,6}/i);
   }
 });
+test('About leo ends with a colophon of plain facts', () => {
+  const { value } = context();
+  const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'idle' }, paths: { notes: '/n', models: '/m' } });
+  const colophon = html.slice(html.indexOf('<div class="about-colophon">'), html.lastIndexOf('</section>'));
+  assert.ok(colophon.startsWith('<div class="about-colophon"><p>Your notes are Markdown files on this computer.</p>'));
+  assert.deepEqual([...colophon.matchAll(/<span class="set-label">([^<]+)<\/span>/g)].map((m) => m[1]), ['Version', 'Note text', 'Felix’s voice', 'Licences']);
+  assert.ok(colophon.includes('<span class="set-value-text">1.2.3</span>'));
+  assert.ok(colophon.includes('Instrument Sans <span>· what you write</span>') && colophon.includes('Newsreader <span>· what Felix says in the margin and chat</span>'));
+  assert.ok(colophon.includes('<span class="hint">MIT, fonts under the SIL Open Font License</span><a class="set-link" href="https://github.com/chewton2k/leo-cli/blob/main/NOTICE" target="_blank" rel="noopener noreferrer">NOTICE</a>'));
+  assert.doesNotMatch(colophon, /set-path/);
+});
 test('the downloading update shows a percent and a bar', () => {
   const { value } = context();
   const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'downloading', version: '2.0.0', bytes: 41200000, total: 96500000 }, paths: {} });

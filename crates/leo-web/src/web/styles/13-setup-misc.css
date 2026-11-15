@@ -88,6 +88,14 @@
 .about code.set-label { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; color: var(--text); }
 .set-card.about .set-row { flex-direction: row; flex-wrap: nowrap; align-items: center; }
 .about .set-row > .hint { margin-left: auto; font-size: var(--fs-base); color: var(--muted); text-align: right; }
+.about-colophon { margin-top: 6px; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--text) 10%, transparent); }
+.about-colophon > p { margin: 4px 0 8px; font-size: var(--fs-base); color: var(--text); }
+.settings-section .about-colophon .set-row { align-items: baseline; }
+.settings-section .about-colophon .set-label { flex: none; width: 118px; }
+.about .about-colophon .set-row > .hint { margin-left: 0; text-align: left; }
+.about-colophon .colophon-face { font-size: var(--fs-base); color: var(--text); }
+.about-colophon .colophon-face > span { color: var(--muted); }
+.about-colophon .set-link { margin-left: auto; }
 .set-notice { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 4px; padding: 8px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--hue-amber) 12%, var(--raised)); font-size: var(--fs-sm); line-height: 1.4; color: var(--text); }
 .set-notice svg { flex: none; width: 15px; height: 15px; margin-top: 1px; color: var(--hue-amber); }
 @media (max-width: 520px) { .set-row:not(.column) { flex-direction: column; align-items: stretch; gap: 6px; } .set-label { width: auto; } .set-row:not(.column):has(> .switch) { flex-direction: row; align-items: center; } .set-row > .segmented { flex: none; max-width: none; margin-left: 0; } .set-line:has(> .set-shortcut) { flex-direction: column; align-items: stretch; } .set-shortcut { justify-content: flex-start; } .set-shortcut .shortcut-field { flex: 1 1 160px; } }
