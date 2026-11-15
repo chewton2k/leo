@@ -514,7 +514,15 @@ Felix (2026-10-19).
   changed block (`path.pencil` per line over max(650 ms, width ÷ 1.6 px per ms), 900 ms for the side line; one side line for
   4+ lines) are never a `.margin-note` and never in `threads`; the read's end,
   an edit and leaving clear them (`marginReadingDone`, `marginPencilGone`). A lit
-  note's tether (`path.tether`) runs from the middle of its passage's last line (the first line's start, for a left-side note) to the note; it shows while the note is hovered, focused or open, and always (fainter) for a pinned note.
+  note's tether (`path.tether`, 2026-11-15) is a tie (`.tie`) and, for a passage over more than one line, a
+  spine (`.spine`): a vertical line 8 px outside the column on the note's side (right) or 3 px left of
+  the list markers (left; `marginMarker` measures the bullet, number or checkbox, else the block's
+  text start −6). The tie runs from the spine's middle (one line: 8 px past its end, or that left edge)
+  to the note's first line; a multi-line note aligns its first line with the passage's middle. It shows
+  while the note is hovered, focused or open, and always (fainter) for a pinned note. A newly shown
+  tether draws passage to note with `pencil-draw` (`pathLength` 1: tie 450 ms, then spine 350 ms),
+  once per light-up; repaints keep the path, so they never restart it; none under `stillMotion()`.
+  `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box).
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
 Decided: margin threads never in files (2026-11-04); read-along default for new

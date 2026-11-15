@@ -1727,7 +1727,26 @@
         } catch (e) {
           return [];
         }
-        const boxes = () => [...range.getClientRects()].filter((box) => box.width > 0).slice(0, 24).map(({ left, right, top, bottom }) => ({ left, right, top, bottom }));
+        const boxes = () => {
+          const root = range.commonAncestorContainer;
+          const walker = document.createTreeWalker(root.nodeType === Node.TEXT_NODE ? root.parentNode : root, NodeFilter.SHOW_TEXT);
+          const piece = document.createRange();
+          const found = [];
+          for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+            if (!range.intersectsNode(node)) continue;
+            piece.selectNodeContents(node);
+            if (node === range.startContainer) piece.setStart(node, range.startOffset);
+            if (node === range.endContainer) piece.setEnd(node, range.endOffset);
+            for (const box of piece.getClientRects()) if (box.width > 0) found.push(box);
+          }
+          const lines = [];
+          for (const { left, right, top, bottom } of found.sort((a, b) => a.top - b.top)) {
+            const line = lines.find((l) => (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom);
+            if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
+            else lines.push({ left, right, top, bottom });
+          }
+          return lines.slice(0, 24);
+        };
         const found = boxes();
         if (found.length) return found;
         const index = blockAtLine(lineOf(from));

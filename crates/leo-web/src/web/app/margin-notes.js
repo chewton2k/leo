@@ -557,7 +557,6 @@ function marginFill(el, t, arriving, changed) {
       }
     }
   }
-  for (const block of el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')) block.classList.toggle('margin-cut', !open && block.scrollHeight > block.clientHeight + 1);
   $('.margin-changed', el).hidden = !changed;
   const draft = t.id === 'draft';
   const waiting = marginPage.thinking.get(t.id);
@@ -582,6 +581,7 @@ function marginFill(el, t, arriving, changed) {
   more.inert = !open;
   more.setAttribute('aria-hidden', String(!open));
   el.toggleAttribute('data-open', open);
+  for (const block of el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')) block.classList.toggle('margin-cut', !open && block.scrollHeight > block.clientHeight + 1);
   const toggle = $('.margin-toggle', el);
   toggle.setAttribute('aria-expanded', String(open));
   toggle.setAttribute('aria-label', `${open ? 'Close' : 'Open'} Felix’s note on “${t.quote.slice(0, 80)}”`);
@@ -666,17 +666,24 @@ function marginMark(t) {
 
 function marginPaint() {
   for (const [id, d] of marginPage.tethers) {
-    const key = `${id}:tether:0`;
     const pinned = marginPage.threads.some((t) => t.id === id && t.pinned);
-    if (d && (marginLit(id) || pinned)) {
-      const tether = marginPath(id, 'tether');
-      tether.setAttribute('d', d);
-      tether.classList.toggle('pinned', pinned);
-    } else {
-      marginPage.paths.get(key)?.remove();
-      marginPage.paths.delete(key);
-      if (!d) marginPage.tethers.delete(id);
+    for (const part of ['tie', 'spine']) {
+      const key = `${id}:tether ${part}:0`;
+      if (d?.[part] && (marginLit(id) || pinned)) {
+        const fresh = !marginPage.paths.has(key);
+        const path = marginPath(id, `tether ${part}`);
+        path.setAttribute('d', d[part]);
+        path.classList.toggle('pinned', pinned);
+        if (fresh) {
+          path.setAttribute('pathLength', '1');
+          if (!stillMotion()) path.classList.add('sketching');
+        }
+      } else {
+        marginPage.paths.get(key)?.remove();
+        marginPage.paths.delete(key);
+      }
     }
+    if (!d) marginPage.tethers.delete(id);
   }
   for (const [key, path] of marginPage.paths) path.classList.toggle('on', marginLit(key.slice(0, key.indexOf(':'))));
   for (const [id, el] of marginPage.els) el.toggleAttribute('data-active', marginLit(id));
@@ -848,7 +855,7 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
   const left = page.left - origin.left;
   const right = page.right - origin.left;
   const size = parseFloat(getComputedStyle(marginPage.layer.parentElement).getPropertyValue('--margin-w')) || marginKit.MARGIN_WIDTH;
-  const all = boxes.map(({ t, rects, el }) => ({ id: t.id, want: rects[0].top - 2, height: el.offsetHeight }));
+  const all = boxes.map(({ t, rects, el }) => ({ id: t.id, want: rects.length > 1 ? (rects[0].top + rects[rects.length - 1].bottom) / 2 - 10 : rects[0].top - 2, height: el.offsetHeight }));
   const items = all.filter((i) => i.id !== 'reading');
   const side = layout === 'both' ? marginKit.sides(items, 16, marginPage.sides) : Object.fromEntries(items.map((item) => [item.id, 'right']));
   marginPage.sides = layout === 'both' ? side : {};
@@ -860,7 +867,7 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     side.reading = spot.side;
     tops.reading = spot.top;
   }
-  for (const { t, el, rects } of boxes) {
+  for (const { t, at, el, rects } of boxes) {
     const on = side[t.id];
     const x = on === 'right' ? right + marginKit.MARGIN_GAP : left - marginKit.MARGIN_GAP - size;
     el.hidden = false;
@@ -871,14 +878,48 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     marginPage.marks.get(t.id)?.remove();
     marginPage.marks.delete(t.id);
     if (t.id === 'reading') continue;
-    const end = on === 'right' ? rects[rects.length - 1] : rects[0];
-    const mid = (end.top + end.bottom) / 2;
-    const from = on === 'right' ? end.right + 6 : end.left - 6;
+    const first = rects[0];
+    const last = rects[rects.length - 1];
+    const multi = rects.length > 1;
+    const mid = multi ? (first.top + last.bottom) / 2 : (first.top + first.bottom) / 2;
+    const from = on === 'right' ? (multi ? right : last.right) + 8 : marginLeftEdge(at, rects, origin);
     const to = on === 'right' ? x - 2 : x + size + 2;
     const top = tops[t.id] + 10;
     const bend = (from + to) / 2;
-    marginPage.tethers.set(t.id, `M${from.toFixed(1)} ${mid.toFixed(1)} C${bend.toFixed(1)} ${mid.toFixed(1)} ${bend.toFixed(1)} ${top.toFixed(1)} ${to.toFixed(1)} ${top.toFixed(1)}`);
+    marginPage.tethers.set(t.id, {
+      tie: `M${from.toFixed(1)} ${mid.toFixed(1)} C${bend.toFixed(1)} ${mid.toFixed(1)} ${bend.toFixed(1)} ${top.toFixed(1)} ${to.toFixed(1)} ${top.toFixed(1)}`,
+      spine: multi ? `M${from.toFixed(1)} ${first.top.toFixed(1)} V${last.bottom.toFixed(1)}` : '',
+    });
   }
+}
+
+function marginMarker(li) {
+  const box = li.getBoundingClientRect();
+  const task = li.querySelector(':scope > .task > input');
+  if (task) return task.getBoundingClientRect().left;
+  const style = getComputedStyle(li);
+  const size = parseFloat(style.fontSize);
+  const list = li.parentElement;
+  if (list.tagName !== 'OL') return box.left - size * 1.05;
+  const type = getComputedStyle(list).listStyleType;
+  let n = li.hasAttribute('value') ? li.value : list.start + [...list.children].indexOf(li);
+  let label = String(n);
+  if (/roman/.test(type)) label = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']].reduce((out, [v, s]) => { for (; n >= v; n -= v) out += s; return out; }, '');
+  else if (/lower|upper/.test(type)) label = String.fromCharCode((/upper/.test(type) ? 64 : 96) + ((n - 1) % 26) + 1).repeat(Math.ceil(n / 26));
+  const pen = (marginMarker.pen ||= document.createElement('canvas').getContext('2d'));
+  pen.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  return box.left - pen.measureText(`${label}${/paren/.test(type) ? ')' : '.'} `).width - 1;
+}
+
+function marginLeftEdge(at, rects, origin) {
+  const block = marginPage.s.doc.blockAt(at.from);
+  const items = block ? [...block.querySelectorAll('li')] : [];
+  const blockLeft = block ? block.getBoundingClientRect().left - origin.left : rects[0].left;
+  return Math.min(...rects.map((r) => {
+    const y = (r.top + r.bottom) / 2 + origin.top;
+    const li = items.findLast((item) => { const b = item.getBoundingClientRect(); return y > b.top && y < b.bottom; });
+    return li ? marginMarker(li) - origin.left - 3 : blockLeft - 6;
+  }));
 }
 
 function marginPlaceAsMarks(boxes, page, origin) {

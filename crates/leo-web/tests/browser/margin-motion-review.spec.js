@@ -539,6 +539,109 @@ test.describe('passage states', () => {
   });
 });
 
+test.describe('tether geometry', () => {
+  const LIST = 'Opening line of the note.\n\n- a mesh office chair\n- a nice unique and short couch\n- a low futon bed\n\nClosing words that sit in a plain paragraph of the note.';
+  const thread = (id, quote, prefix, suffix) => ({ id, quote, prefix, suffix, status: 'open', messages: [{ from: 'felix', text: 'A note.' }] });
+  const SPAN = thread('t2', 'office chair\n- a nice unique and short couch\n- a low futon bed', '- a mesh ', '\n\nClosing words');
+  const ITEM = thread('t1', 'a nice unique and short couch', 'chair\n- ', '\n- a low');
+  const MIDDLE = thread('t3', 'sit in a plain paragraph', 'Closing words that ', ' of the note.');
+  const ends = (page, id) => page.evaluate((key) => {
+    const svg = document.querySelector('.margin-ink').getBoundingClientRect();
+    const at = (p, n) => { const pt = p.getPointAtLength(n * p.getTotalLength()); return { x: pt.x + svg.left, y: pt.y + svg.top }; };
+    const tie = document.querySelector(`.margin-ink path.tie[data-id="${key}"]`);
+    const spine = document.querySelector(`.margin-ink path.spine[data-id="${key}"]`);
+    return { tie: tie && [at(tie, 0), at(tie, 1)], spine: spine && [at(spine, 0), at(spine, 1)] };
+  }, id);
+  const items = (page) => page.evaluate(() => [...document.querySelectorAll('#doc li')].map((li) => {
+    const range = document.createRange();
+    range.selectNodeContents(li);
+    const text = range.getBoundingClientRect();
+    return { left: text.left, right: text.right, top: text.top, bottom: text.bottom, size: parseFloat(getComputedStyle(li).fontSize) };
+  }));
+
+  test('a list passage washes only its text lines and ties to the note from a spine at its middle', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const rects = await page.evaluate(() => rectsOf('t2'));
+      const lines = await items(page);
+      expect(rects).toHaveLength(3);
+      for (const [i, r] of rects.entries()) {
+        expect(r.left).toBeGreaterThanOrEqual(lines[i].left - 1);
+        expect(r.right).toBeLessThanOrEqual(lines[i].right + 4);
+      }
+      const wash = await page.locator('.margin-ink path.wash[data-id="t2"]').boundingBox();
+      expect(wash.width).toBeLessThanOrEqual(Math.max(...lines.map((l) => l.right - l.left)) + 8);
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.spine[data-id="t2"]')).toHaveCount(1);
+      await page.waitForTimeout(900);
+      const { tie, spine } = await ends(page, 't2');
+      const middle = (rects[0].top + rects[2].bottom) / 2;
+      const column = await page.locator('article.note').boundingBox();
+      expect(Math.abs(tie[0].y - middle)).toBeLessThanOrEqual(2);
+      expect(Math.abs(tie[1].y - middle)).toBeLessThanOrEqual(2);
+      expect(Math.abs(tie[0].x - (column.x + column.width + 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[0].x - tie[0].x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[0].y - rects[0].top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[1].y - rects[2].bottom)).toBeLessThanOrEqual(1);
+    }, { source: LIST, threads: [SPAN] });
+  });
+
+  test('a one-line passage has a tie and no spine, starting just past its end', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const [r] = await page.evaluate(() => rectsOf('t1'));
+      await page.locator('.margin-note[data-id="t1"]').hover();
+      await expect(page.locator('.margin-ink path.tie[data-id="t1"]')).toHaveCount(1);
+      await expect(page.locator('.margin-ink path.spine')).toHaveCount(0);
+      const { tie } = await ends(page, 't1');
+      expect(Math.abs(tie[0].x - (r.right + 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(tie[0].y - (r.top + r.bottom) / 2)).toBeLessThanOrEqual(2);
+    }, { source: LIST, threads: [ITEM] });
+  });
+
+  test('on the left a list tie ends just before the bullet and a mid-line tie stops outside the text', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t1: 'left', t3: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t1"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      const line = (await items(page))[1];
+      await page.evaluate(() => { marginPage.hover = 't1'; marginPage.focus = 't3'; marginPaint(); });
+      const item = (await ends(page, 't1')).tie[0];
+      expect(item.x).toBeLessThanOrEqual(line.left - line.size * 1.03 - 1);
+      expect(item.x).toBeGreaterThanOrEqual(line.left - line.size * 1.03 - 8);
+      expect(Math.abs(item.y - (line.top + line.bottom) / 2)).toBeLessThanOrEqual(2);
+      const middle = (await ends(page, 't3')).tie[0];
+      const block = await page.locator('#doc .blk').last().boundingBox();
+      expect(middle.x).toBeLessThan(block.x - 4);
+    }, { width: 1600, height: 900, layout: 'both', source: LIST, threads: [ITEM, MIDDLE] });
+  });
+
+  test('a lit tether draws once, tie then spine, and a repaint never restarts it', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      const tie = page.locator('.margin-ink path.tie[data-id="t2"]');
+      const spine = page.locator('.margin-ink path.spine[data-id="t2"]');
+      await expect(tie).toHaveClass(/sketching/);
+      await expect(spine).toHaveClass(/sketching/);
+      expect(await tie.evaluate((p) => [p.getAttribute('pathLength'), getComputedStyle(p).animationName, getComputedStyle(p).animationDuration])).toEqual(['1', 'pencil-draw', '0.45s']);
+      expect(await spine.evaluate((p) => [getComputedStyle(p).animationDuration, getComputedStyle(p).animationDelay])).toEqual(['0.35s', '0.45s']);
+      await tie.evaluate((p) => { p.dataset.probe = 'kept'; });
+      const before = await tie.evaluate((p) => p.getAnimations()[0].currentTime);
+      await page.evaluate(() => { marginRedraw(); window.scrollBy(0, 1); });
+      await page.waitForTimeout(100);
+      await expect(tie).toHaveAttribute('data-probe', 'kept');
+      expect(await tie.evaluate((p) => p.getAnimations().length ? p.getAnimations()[0].currentTime : Infinity)).toBeGreaterThan(before);
+      await page.mouse.move(5, 5);
+      await expect(tie).toHaveCount(0);
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(tie).toHaveClass(/sketching/);
+      await expect(tie).not.toHaveAttribute('data-probe', 'kept');
+    }, { source: LIST, threads: [SPAN] });
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.tie[data-id="t2"]')).toHaveCount(1);
+      await expect(page.locator('.margin-ink path.tether.sketching')).toHaveCount(0);
+    }, { source: LIST, threads: [SPAN], context: { reducedMotion: 'reduce' } });
+  });
+});
+
 test.describe('compact gutter anchor', () => {
   for (const [name, context] of [['touch', { hasTouch: true, isMobile: true }], ['touch and reduced motion', { hasTouch: true, isMobile: true, reducedMotion: 'reduce' }], ['touch and forced colors', { hasTouch: true, isMobile: true, forcedColors: 'active' }]]) {
     test(`390px ${name}: the 44px target fits the screen, the dot sits outside the text at the passage centre`, async ({ browser }) => {
