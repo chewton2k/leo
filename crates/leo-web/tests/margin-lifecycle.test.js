@@ -18,7 +18,7 @@ function harness() {
     flush: async () => {}, api: () => new Promise((resolve, reject) => { settle = { resolve, reject }; }),
     enc: encodeURIComponent, Locked: class extends Error {}, AbortController,
     setTimeout: (fn, delay) => { const id = ++next; fn.delay = delay; timers.set(id, fn); return id; },
-    clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {}, sideRedrawSoon() {},
+    clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {}, sideRedrawSoon() {}, queueMicrotask,
     $: () => null, svg: (paths) => paths, ICON: { book: '' }, stillMotion: () => false, fail: (e) => { throw e; }, ON_MAC: true, MOTION_MS: 180, POP_FROM: .95,
     noAi: globalThis.leoChat.noAi, esc: (text) => String(text), choiceCards: (options) => JSON.stringify(options), segmented: () => '', settingsSwitch: () => '',
   };
@@ -63,8 +63,19 @@ test('the explorer redraws when a read along starts and when it ends, so its rea
     if (failed) h.settle().reject(new Error('provider failed'));
     else h.settle().resolve({ note: null });
     await pending;
+    await new Promise(setImmediate);
     assert.deepEqual(seen, [true, false]);
   }
+  const h = harness();
+  const seen = [];
+  h.context.sideRedrawSoon = () => seen.push('redraw');
+  const pending = h.context.marginRead(h.state.s);
+  assert.deepEqual(seen, [], 'the explorer redraws outside the read, so its errors never become a failed read');
+  await new Promise(setImmediate);
+  h.settle().resolve({ note: null });
+  await pending;
+  await new Promise(setImmediate);
+  assert.deepEqual(seen, ['redraw', 'redraw']);
 });
 
 test('read completion distinguishes silence from failure without losing failed blocks', async () => {

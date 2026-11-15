@@ -2149,6 +2149,7 @@
       return `<details class="msg-step"><summary>${label}<span class="msg-step-count">${found.length}</span>${stepChevron}</summary><ul>${found.map((f) => `<li>${escape(f)}</li>`).join('')}</ul></details>`;
     }
 
+    const proofMarks = new WeakMap();
     function proposalCard(p, i, j) {
       const where = `data-i="${i}" data-j="${j}"`;
       if (retiredPractice(p)) return '<div class="proposal-done">Interview practice is no longer part of leo.</div>';
@@ -2172,7 +2173,9 @@
           <div class="proposal-body prose">${render(body.length > 900 ? `${body.slice(0, 900)}…` : body)}</div>${done}</div>`;
       }
       const old = p.find ? `<div class="proposal-old">${escape(p.find)}</div>` : '<div class="proposal-note">Added at the end:</div>';
-      const parts = p.find ? root.leoMarkdown?.wordDiff?.(p.find, p.replace || '') : [{ kind: 'ins', text: p.replace || '' }];
+      const marked = proofMarks.get(p);
+      const parts = marked && marked.find === p.find && marked.replace === p.replace ? marked.parts : p.find ? root.leoMarkdown?.wordDiff?.(p.find, p.replace || '') : [{ kind: 'ins', text: p.replace || '' }];
+      proofMarks.set(p, { find: p.find, replace: p.replace, parts });
       const change = parts
         ? `${p.find ? '' : old}<div class="proposal-marked">${parts.map(({ kind, text }) => (kind === 'del' ? `<del>${escape(text)}${DELETE_MARK}</del>` : kind === 'ins' ? `<ins>${CARET_MARK}${escape(text)}</ins>` : escape(text))).join('')}</div>`
         : `${old}<div class="proposal-new">${escape(p.replace || '')}</div>`;

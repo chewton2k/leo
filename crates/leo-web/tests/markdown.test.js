@@ -435,12 +435,14 @@ test('an edit reads as kept, removed and added words, and too long an edit gives
 });
 
 test('an edit whose marks would hide a change of line breaks or indentation gives up, so the card shows both texts', () => {
-  for (const [find, replace] of [['one\ntwo', 'one two'], ['- a\n- b', '- a\n\n- b'], ['  indented', 'indented'], ['alpha beta\ngamma', 'alpha delta gamma']]) {
+  for (const [find, replace] of [['one\ntwo', 'one two'], ['- a\n- b', '- a\n\n- b'], ['  indented', 'indented'], ['alpha beta\ngamma', 'alpha delta gamma'], ['a, b', 'a,b']]) {
     assert.equal(md.wordDiff(find, replace), null, JSON.stringify([find, replace]));
   }
   for (const [find, replace] of [['the newest one', 'the oldest one'], ['a b c', 'a c'], ['x', 'x y'], ['x y', 'x']]) {
     assert.ok(md.wordDiff(find, replace), JSON.stringify([find, replace]));
   }
+  assert.deepEqual(md.wordDiff('Intro. Next point here.', 'Intro.\n\nNew para. Next point here.'), [{ kind: 'same', text: 'Intro.' }, { kind: 'ins', text: '\n\nNew para.' }, { kind: 'same', text: ' Next point here.' }]);
+  assert.deepEqual(md.wordDiff('a b', 'a b\n'), [{ kind: 'same', text: 'a b' }, { kind: 'ins', text: '\n' }]);
 });
 
 test('a long run of unmatched ![[ openers stays fast', () => {

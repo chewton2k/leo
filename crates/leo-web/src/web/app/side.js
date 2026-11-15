@@ -18,6 +18,7 @@ const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
 const SIDE_NEW_MS = 60000;
 const SIDE_FRESH_MS = 30 * 60000;
+const SIDE_FRESH_GROUP = 1000;
 
 try {
   side.open = new Set(JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) || '[]'));
@@ -166,7 +167,7 @@ function drawSide() {
   box.querySelector('.side-rail-main').scrollTop = railScroll;
   drawFoldersSheet();
   clearTimeout(side.freshTimer);
-  if (side.freshUntil < Infinity) side.freshTimer = setTimeout(sideFreshCheck, side.freshUntil - Date.now());
+  if (side.freshUntil < Infinity) side.freshTimer = setTimeout(sideFreshCheck, side.freshUntil - Date.now() + SIDE_FRESH_GROUP);
   if (side.growing) growFolder(high);
   if (focused) {
     const buttons = [...box.querySelectorAll('button[data-action]')];
@@ -495,12 +496,15 @@ function sideNoteMark(note, open) {
 
 function sideRedrawSoon() {
   clearTimeout(side.quietTimer);
-  if (popup && document.getElementById('side')?.contains(popup.owner)) side.quietTimer = setTimeout(sideRedrawSoon, 500);
+  if (popup) side.quietTimer = setTimeout(sideRedrawSoon, 500);
   else drawSide();
 }
 
 function sideFreshCheck() {
-  if (side.freshUntil <= Date.now()) sideRedrawSoon();
+  const left = side.freshUntil - Date.now();
+  clearTimeout(side.freshTimer);
+  if (left <= 0) sideRedrawSoon();
+  else if (left < Infinity) side.freshTimer = setTimeout(sideFreshCheck, left + SIDE_FRESH_GROUP);
 }
 
 function sideNoteWhen(note) {
@@ -591,7 +595,7 @@ function explorerMenu(el, event = null) {
   if (!owner) return;
   const rows = target.kind === 'note'
     ? [['open', 'Open', ICON.note], ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
-    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
+    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
   popupMenu(owner, {
     label: target.kind === 'note' ? 'Note options' : 'Folder options',
     point: event && { x: event.clientX, y: event.clientY },

@@ -625,13 +625,13 @@ async function share(notes = false) {
   if (!s) return toast('Write something first.');
   const before = document.title;
   document.title = s.note.title;
-  if (notes) printNotes(s);
   const restore = () => {
     if (mine === seq) document.title = before;
     window.removeEventListener('afterprint', restore);
   };
   window.addEventListener('afterprint', restore);
   try {
+    if (notes) printNotes(s);
     await window.print();
     if (printingNotes) for (const name of ['pointerdown', 'keydown']) window.addEventListener(name, printNotesClear, true);
   } catch (e) {
@@ -655,6 +655,8 @@ function printNotesClear() {
 }
 
 function printNotes(s) {
+  printingNotes = true;
+  window.addEventListener('afterprint', printNotesClear, true);
   const found = marginPage.s === s ? marginPrintable() : [];
   const list = document.createElement('ol');
   for (const { at, text } of found) {
@@ -689,8 +691,6 @@ function printNotes(s) {
     footer.textContent = `@media print { @page { @bottom-center { content: "${title} · " counter(page) " / " counter(pages); } } }`;
     document.head.append(footer);
   }
-  printingNotes = true;
-  window.addEventListener('afterprint', printNotesClear, true);
 }
 
 async function openTitle(title) {

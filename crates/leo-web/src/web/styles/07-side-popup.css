@@ -238,7 +238,7 @@ body.side-mini .home-foot svg.drawn-arrow { display: none; }
 .note-icon[data-tone="violet"] { --tone: var(--hue-violet); }
 .note-icon[data-tone="pink"] { --tone: var(--hue-5); }
 .note-icon[data-tone="teal"] { --tone: var(--hue-teal); }
-.popup-rows kbd { display: inline-flex; align-items: center; height: 20px; margin-left: auto; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-sm); font-family: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; color: var(--faint); font-variant-numeric: tabular-nums; }
+.popup-rows kbd { display: inline-flex; align-items: center; height: 20px; margin-left: auto; padding: 0 6px; border: 1px solid var(--line); border-radius: var(--r-sm); font-family: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; color: var(--muted); font-variant-numeric: tabular-nums; }
 .popup-menu:has(input) .popup-rows { max-height: min(320px, calc(100dvh - 80px)); overflow-y: auto; }
 .inline-edit { position: fixed; z-index: 111; box-sizing: border-box; min-width: 120px; padding: 0 6px; border: 1px solid var(--focus); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-sm); outline: none; }
 .popup-menu button:not(:disabled):hover { background: var(--menu-hover); }

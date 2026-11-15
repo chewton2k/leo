@@ -483,7 +483,8 @@
     const gap = (word) => /^\s*/.exec(word)[0];
     while (i < a.length || j < b.length) {
       if (i < a.length && j < b.length && a[i].trim() === b[j].trim()) {
-        if (gap(a[i]) !== gap(b[j]) && /\n|\t| {2}/.test(gap(a[i]) + gap(b[j]))) hidden = true;
+        const [was, now] = [gap(a[i]), gap(b[j])];
+        if (was !== now && (/\n|\t| {2}/.test(was + now) || !runs.length || runs.at(-1).kind === 'same')) hidden = true;
         put('same', a[i++], b[j++]);
       } else if (i < a.length && (j === b.length || kept[(i + 1) * width + j] >= kept[i * width + j + 1])) put('del', a[i++], '');
       else put('ins', '', b[j++]);
@@ -501,7 +502,7 @@
       change.ins += run.ins;
     });
     parts.forEach((part, k) => {
-      const space = part.kind === 'change' && k > 0 ? /^\s*/.exec(part.ins)[0] : '';
+      const space = part.kind === 'change' && k > 0 ? /^[ \t]*/.exec(part.ins)[0] : '';
       if (!space || (part.del && !part.del.startsWith(space))) return;
       parts[k - 1].text += space;
       part.ins = part.ins.slice(space.length);

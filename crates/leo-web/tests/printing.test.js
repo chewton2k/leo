@@ -201,5 +201,14 @@ test('notes printed without an afterprint never reach a later plain export, and 
   const failed = notesHarness({ fails: true });
   await failed.context.share(true);
   assert.equal(failed.live.length, 0);
-  assert.equal(failed.log.toasts.length, 1);
+  assert.equal(failed.log.toasts.length, 1);  const broken = notesHarness();
+  let points = 0;
+  broken.context.marginPage.s.doc.domPoint = (at) => {
+    if (++points > 1) throw Error('lost the passage');
+    return { node: { nodeType: 3 }, offset: at };
+  };
+  await broken.context.share(true);
+  assert.equal(broken.live.length, 0, 'marks placed before a failure are cleared');
+  assert.deepEqual(broken.log.printed, [], 'nothing prints half-marked');
+  assert.equal(broken.log.toasts.length, 1);
 });
