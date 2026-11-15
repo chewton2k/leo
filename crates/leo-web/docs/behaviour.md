@@ -639,7 +639,10 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   are answered in the card. Marking never waits for a Felix reply
   (2026-10-19, the user's call: it was slow and used the plan): multiple
   choice is marked by the page and shows the quiz's `explain` (required for
-  multiple choice: why the right one is right and each other wrong);
+  multiple choice: why the right one is right and each other wrong; the
+  wrong pick takes a chalky red × and outline, the right answer a chalky green
+  check and outline, and the card's outline the result's tone, the mark writing
+  on in 160 ms; 2026-11-15);
   fill-ins that match an accepted answer are marked by the page; anything
   else goes to POST `/api/quiz/mark` (the quick model, `MARK`, JSON verdict
   and feedback). The card then offers Next question and Ask Felix why

@@ -104,6 +104,7 @@
   }
 
   const VERDICT_WITHIN = 240;
+  const QUIZ_MARK_MS = 160;
 
   function grade(text) {
     const value = String(text || '');
@@ -2163,6 +2164,13 @@
 
     const BLANK = 'QUIZBLANKMARK';
 
+    function quizMark(q, said) {
+      const ago = Date.now() - (markedAt.get(q) ?? 0);
+      const writing = ago < QUIZ_MARK_MS ? ` class="writing" style="animation-delay: ${-ago}ms"` : '';
+      const path = said === 'Your answer, not right' ? 'M4.6 4.2 Q9.4 9.3 14 14.2 M13.8 4.4 Q8.8 9 4.4 13.8' : 'M3.3 8.7 Q4.9 10.1 6.1 12.6 Q8.6 7.9 14 2.5';
+      return `<svg class="quiz-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path pathLength="1"${writing} d="${path}"/></svg>`;
+    }
+
     function quizCard(q, i, k, pending, sources) {
       const where = `data-i="${i}" data-k="${k}"`;
       const done = typeof q.given === 'string';
@@ -2177,7 +2185,7 @@
       if (q.kind === 'multiple_choice') {
         answer = `<div class="quiz-options">${(q.options || []).map((o, n) => {
           const mark = !done ? '' : plainAnswer(o) === plainAnswer(q.answer) ? ' right' : o === q.given ? ' wrong' : '';
-          return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span></button>`;
+          return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span>${mark ? quizMark(q, mark === ' right' ? (o === q.given ? 'Your answer, right' : 'The right answer') : 'Your answer, not right') : ''}</button>`;
         }).join('')}</div>`;
       } else if (q.kind === 'fill_blank') {
         answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
@@ -2228,6 +2236,7 @@
 
     const checking = new WeakSet();
     const thinkingOpen = new WeakSet();
+    const markedAt = new WeakMap();
 
     async function answerQuiz(i, k, given) {
       const m = state.messages[i];
@@ -2259,6 +2268,7 @@
       }
       q.given = text;
       q.correct = correct;
+      markedAt.set(q, Date.now());
       if (thinking) q.thinking = thinking;
       scoreSession(currentSession(), q.idea, correct, q.more || q.sure === 'guess');
       delete state.drafts[`${i}:${k}`];

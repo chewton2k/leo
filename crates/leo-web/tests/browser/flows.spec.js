@@ -3160,6 +3160,14 @@ test.describe('Felix asks, quizzes and listens while he works', () => {
     await card.locator('.quiz-option', { hasText: 'a stack' }).click();
     await expect(card.locator('.quiz-option.wrong')).toContainText('a stack');
     await expect(card.locator('.quiz-option.right')).toContainText('a queue');
+    await expect(card.locator('.quiz-option.wrong .quiz-mark')).toHaveAttribute('aria-label', 'Your answer, not right');
+    await expect(card.locator('.quiz-option.right .quiz-mark')).toHaveAttribute('aria-label', 'The right answer');
+    await expect(card.locator('.quiz-option:not(.right, .wrong) .quiz-mark')).toHaveCount(0);
+    const chalk = await card.evaluate((el) => { const tone = (name) => { const probe = document.createElement('i'); probe.style.color = `var(${name})`; el.append(probe); const c = getComputedStyle(probe).color; probe.remove(); return c; }; return { good: tone('--chalk-good'), bad: tone('--chalk-bad') }; });
+    await expect(card).toHaveCSS('border-top-color', chalk.bad);
+    await expect(card.locator('.quiz-option.wrong')).toHaveCSS('border-top-color', chalk.bad);
+    await expect(card.locator('.quiz-option.right')).toHaveCSS('border-top-color', chalk.good);
+    await expect(card.locator('.quiz-option.right .quiz-mark')).toHaveCSS('stroke', chalk.good);
     await expect(card.locator('.quiz-result'), 'what is said about the answer comes from Felix, not the page').toHaveCount(0);
     await expect(card).toHaveClass(/wrong/);
     await expect(card.locator('[data-chat="quiz-hint"]'), 'no hint once it is answered').toHaveCount(0);

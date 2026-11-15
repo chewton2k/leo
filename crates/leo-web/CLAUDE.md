@@ -249,7 +249,8 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   resumes with `tick-write`) and today's ring
   draws once over 300 ms with `pencil-draw` when the Calendar opens
   (`cal.ringAt`; redraws inside the 300 ms resume it with a negative delay,
-  later ones draw the end frame); ink settles, `inkLand(id)` when leo creates a
+  later ones draw the end frame), and a marked quiz's check or × writes on over
+  160 ms (`QUIZ_MARK_MS`, `pencil-draw`, resumed by elapsed time); ink settles, `inkLand(id)` when leo creates a
   card, task or note and `inkSettle(find)` after each redraw: the row starts in
   `--text` with a 12% ink wash and fades to its own colours over 600 ms
   (`INK_MS`, colour only, resumed by elapsed time). Explorer notes count as new
@@ -423,6 +424,15 @@ the web (root CLAUDE.md).
   refuses `gives_itself_away`. Sessions stop at `MOST_SESSION_QUESTIONS`; review
   (`review.rs`) brings misses back after 20 h. The `aside` answer line must stay
   one line.
+- Marked quizzes read like a teacher's marks (2026-11-15, the user's call:
+  green and red kept, in muted chalk tones): `--chalk-good`/`--chalk-bad` (one
+  pair per theme, ≥ 4.5:1 on every chat surface, `tokens.test.js`) outline the
+  right and wrong options and the card, colour the verdict words and `.verdict`
+  badges, and stroke the `.quiz-mark` check or × (`role="img"` with "The right
+  answer", "Your answer, right" or "Your answer, not right", so shape and words
+  carry the result, never colour alone; `--chalk-break` in dark). A mark writes on
+  over 160 ms (`QUIZ_MARK_MS`, `pencil-draw`) only within 160 ms of the answer
+  (`markedAt`), resumed by elapsed time, so a redraw never replays it.
 - Routing (`routing::light`): only obvious cases (short lookups and greetings,
   no attachments, files, selection, study or Auto access, ≤6 turns) go to the
   quick tier, other languages stay on the chosen model; a chat moves up once when needed, never down while warm

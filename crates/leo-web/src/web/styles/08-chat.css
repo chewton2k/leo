@@ -135,10 +135,12 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .quiz-q p { margin: 0; }
 .quiz-blank { display: inline-block; width: 4.5em; border-bottom: 2px solid var(--accent); margin: 0 3px; transform: translateY(-3px); }
 .quiz-letter { flex: none; width: 24px; height: 24px; border-radius: var(--r-pill); display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
-.quiz-option.right { border-color: var(--good); background: color-mix(in srgb, var(--good) 12%, transparent); }
-.quiz-option.right .quiz-letter { background: var(--good); border-color: var(--good); color: var(--surface); }
-.quiz-option.wrong { border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, transparent); }
-.quiz-option.wrong .quiz-letter { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+.quiz-option.right { --chalk: var(--chalk-good); }
+.quiz-option.wrong { --chalk: var(--chalk-bad); }
+.quiz-option:is(.right, .wrong), .quiz-option:is(.right, .wrong) .quiz-letter { border-color: var(--chalk); }
+.quiz-option:is(.right, .wrong) .quiz-letter { color: var(--chalk); }
+.quiz-mark { flex: none; width: 18px; height: 18px; margin-left: auto; fill: none; stroke: var(--chalk); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; overflow: visible; -webkit-mask: var(--chalk-break); mask: var(--chalk-break); }
+@media (prefers-reduced-motion: no-preference) { .quiz-mark path.writing { stroke-dasharray: 1; animation: pencil-draw 160ms var(--ease-pencil) both; } }
 .quiz-row { display: flex; gap: 8px; align-items: center; }
 .quiz-row.column { flex-direction: column; align-items: stretch; }
 .quiz-row.column .btn { align-self: flex-end; }
@@ -146,22 +148,22 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .quiz-input:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 .quiz-card { transition: border-color var(--t-open), box-shadow var(--t-open), opacity var(--t-open); }
 .quiz-card.marking { opacity: .78; }
-.quiz-card.right { border-color: var(--good); box-shadow: 0 0 0 1px var(--good); }
-.quiz-card.wrong { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+.quiz-card.right { border-color: var(--chalk-good); box-shadow: 0 0 0 1px var(--chalk-good); }
+.quiz-card.wrong { border-color: var(--chalk-bad); box-shadow: 0 0 0 1px var(--chalk-bad); }
 .quiz-input:disabled { color: var(--text); background: var(--surface); }
 .quiz-reply { font-size: var(--fs-base); line-height: 1.55; padding-top: 10px; }
 .quiz-reply p { margin: 0 0 6px; }
 .quiz-result { font-size: var(--fs-sm); font-weight: 650; color: var(--muted); }
-.quiz-result.right { color: var(--good); }
-.quiz-result.wrong { color: var(--danger); }
+.quiz-result.right { color: var(--chalk-good); }
+.quiz-result.wrong { color: var(--chalk-bad); }
 .quiz-explain { font-size: var(--fs-sm); color: var(--muted); line-height: 1.5; }
-.quiz-card.right .quiz-verdict { color: var(--good); }
-.quiz-card.wrong .quiz-verdict { color: var(--danger); }
+.quiz-card.right .quiz-verdict { color: var(--chalk-good); }
+.quiz-card.wrong .quiz-verdict { color: var(--chalk-bad); }
 .quiz-verdict { font-size: var(--fs-base); font-weight: 700; }
 .quiz-next { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .verdict { display: inline-block; font-size: var(--fs-xs); font-weight: 700; padding: 2px 9px; border-radius: var(--r-pill); margin-bottom: 6px; }
-.verdict.correct { background: color-mix(in srgb, var(--good) 16%, transparent); color: var(--good); }
-.verdict.incorrect { background: color-mix(in srgb, var(--danger) 14%, transparent); color: var(--danger); }
+.verdict.correct { background: color-mix(in srgb, var(--chalk-good) 14%, transparent); color: var(--chalk-good); }
+.verdict.incorrect { background: color-mix(in srgb, var(--chalk-bad) 14%, transparent); color: var(--chalk-bad); }
 .cite { display: inline-flex; align-items: center; max-width: 100%; margin: 0 2px; padding: 0 7px; height: 20px; vertical-align: 1px; border: 0; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cite:hover { filter: brightness(.95); }
 .cite.cite-n { position: relative; display: inline; height: auto; margin: 0 1px 0 2px; padding: 0 3px; border-radius: var(--r-xs); background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; line-height: 1; vertical-align: super; overflow: visible; font-variant-numeric: tabular-nums; }

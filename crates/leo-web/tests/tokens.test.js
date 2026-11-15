@@ -203,3 +203,21 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
     '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
   ]);
 });
+
+test('quiz chalk tones are one plain token pair per theme, readable as text on every chat surface', () => {
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    for (const tone of ['--chalk-good', '--chalk-bad']) {
+      assert.match(t[tone] || '', /^#[0-9a-f]{6}$/i, `${name} defines ${tone}`);
+      for (const under of ['--page', '--ground', '--surface', '--surface-2', '--bg', '--raised']) assert.ok(contrast(rgb(t[tone]), rgb(t[under])) >= 4.5, `${name}: ${tone} on ${under} is ${contrast(rgb(t[tone]), rgb(t[under])).toFixed(2)}`);
+      for (const under of ['--page', '--surface']) {
+        const badge = over([...rgb(t[tone]).slice(0, 3), 0.14], rgb(t[under]));
+        assert.ok(contrast(rgb(t[tone]), badge) >= 4.5, `${name}: ${tone} on its badge over ${under} is ${contrast(rgb(t[tone]), badge).toFixed(2)}`);
+      }
+    }
+  }
+  const at = (selector) => all.find((r) => r.selector === selector).body;
+  assert.match(at('.quiz-card.right'), /var\(--chalk-good\)/);
+  assert.match(at('.quiz-card.wrong'), /var\(--chalk-bad\)/);
+  assert.match(at('.quiz-mark'), /mask: var\(--chalk-break\)/);
+});
