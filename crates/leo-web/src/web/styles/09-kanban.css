@@ -39,7 +39,7 @@ body.kanban-dragging .kanban-tab.kanban-over { display: inline-flex; }
 :is(.kanban-tabs, .kanban-cols):is(.kanban-fade-left, .kanban-fade-right) { -webkit-mask-image: linear-gradient(90deg, transparent, #000 var(--fade-left, 0px), #000 calc(100% - var(--fade-right, 0px)), transparent); mask-image: linear-gradient(90deg, transparent, #000 var(--fade-left, 0px), #000 calc(100% - var(--fade-right, 0px)), transparent); }
 .kanban-fade-left { --fade-left: 40px; }
 .kanban-fade-right { --fade-right: 40px; }
-.kanban-col { --tone: var(--hue-slate); --lane: var(--ground); --lane-ink: color-mix(in srgb, var(--text) 74%, var(--lane)); flex: 1 1 0; min-width: 224px; min-height: 0; display: flex; flex-direction: column; border-radius: var(--radius); background: var(--lane); }
+.kanban-col { --tone: var(--hue-slate); --lane: color-mix(in srgb, var(--text) 4%, var(--ground)); --lane-edge: color-mix(in srgb, var(--line) 88%, var(--text)); --lane-ink: color-mix(in srgb, var(--text) 74%, var(--lane)); flex: 1 1 0; min-width: 224px; min-height: 0; display: flex; flex-direction: column; border-radius: var(--radius); background: var(--lane); box-shadow: inset 0 0 0 1px var(--lane-edge); }
 .kanban-col[data-tone="todo"], .kanban-panel[data-tone="todo"], .kanban-start-column[data-tone="todo"] { --tone: var(--hue-0); }
 .kanban-col[data-tone="doing"], .kanban-panel[data-tone="doing"], .kanban-start-column[data-tone="doing"] { --tone: var(--hue-amber); }
 .kanban-col[data-tone="done"], .kanban-panel[data-tone="done"], .kanban-start-column[data-tone="done"] { --tone: var(--good); }

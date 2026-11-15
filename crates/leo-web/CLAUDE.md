@@ -165,7 +165,8 @@ Decided: one app, window only (2026-10-31).
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
   rest, `--shadow-pop` for menus, toasts and sheets, `--shadow-lift` while
   dragging); dark mode lifts with lighter surfaces and a faint top highlight.
-  Inputs, tables, code and focus rings keep a clear edge.
+  Inputs, tables, code and focus rings keep a clear edge; so do board lanes, one
+  step off the board's tone with a 1px inset edge (they vanish otherwise).
 
 Decided: reuse components throughout (2026-11-06).
 

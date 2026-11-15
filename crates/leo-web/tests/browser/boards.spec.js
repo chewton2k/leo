@@ -608,6 +608,9 @@ test('each column has its own tone dot, cards sit solid, and text stays readable
       await redraw(page);
       const row = await lanes(page);
       expect(new Set(row.map(l => l.color)).size, 'every lane sits on the shelf tone').toBe(1);
+      const edge = await page.locator('.kanban-col').first().evaluate(el => ({ shadow: getComputedStyle(el).boxShadow, lane: getComputedStyle(el).backgroundColor, board: getComputedStyle(document.body).backgroundColor }));
+      expect(edge.shadow, theme + ' lane keeps an outline').not.toBe('none');
+      expect(edge.lane, theme + ' lane tone differs from the board').not.toBe(edge.board);
       const dots = await page.locator('.kanban-col-head').evaluateAll(els => els.map(el => { const dot = getComputedStyle(el, '::before'); return { color: dot.backgroundColor, width: dot.width }; }));
       for (let i = 0; i < dots.length; i++) {
         expect(dots[i].width, 'the tone dot is 7px').toBe('7px');
