@@ -565,7 +565,7 @@ async function pinCard(el) {
   el.setAttribute('aria-pressed', String(on));
   try {
     await api(`/api/notes/${enc(el.dataset.id)}`, { method: 'PATCH', body: { pinned: on } });
-    toast(on ? 'Pinned to the top of its folder' : `Unpinned “${el.previousElementSibling?.textContent || 'Untitled'}”`);
+    toast(on ? 'Pinned to the top of its folder' : `Unpinned “${el.dataset.title || 'Untitled'}”`);
     await render();
   } catch (e) {
     el.classList.toggle('on', !on);

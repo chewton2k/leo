@@ -791,8 +791,9 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   `wordDiff` (markdown.js, a word LCS) keeps shared words muted, puts removed words
   in a real `<del>` with a straight line-through and a pencil delete loop, and added
   words in a real `<ins>` in ink with a pencil caret below the insertion point; "Added
-  at the end:" keeps its label above the addition. Past `wordDiff`'s size cap the card
-  falls back to the two `.proposal-old`/`.proposal-new` boxes. Forced colours underline
+  at the end:" keeps its label above the addition. Past `wordDiff`'s size cap, or when the marks
+  would hide a change of spacing, line breaks or indentation, the card falls back to
+  the two `.proposal-old`/`.proposal-new` boxes. Forced colours underline
   the added words.
 
 - Choosing the model (`routing.rs`, 2026-11-06, the user's call; same shape as Copilot Auto and Cursor Router, with rules instead of a trained classifier because leo has one user and a classifier call would cost tokens): `routing::light` sends only obvious cases (short lookups and greetings, no attachments, files, selection, study or Auto access, at most six turns) to the cheapest model of the chosen AI (`ai::quick_config`, through `Instructions.light` or `Powers.light_chat` when no session opens, as on a Codex without app-server isolation); every doubt stays on the chosen model, and other languages stay there too. `Powers.lighter` turns routing off when the quick tier is the same model and effort, and a failing light writer gives way to the chosen one on the last try, so `Auto` always names who really answered. The tier is part of the warm key, and `Slot::light` keeps a warm full chat from moving down, since a switch loses the cache: a chat moves up once when it needs to, never down while warm. Settings → Felix → Cheaper model for lookups (`Prefs.auto_model`, on by default) turns it off; a routed reply says `Auto` in its usage line.
@@ -1498,7 +1499,7 @@ ISO datetimes as one date/time before removing them from the title.
   unsigned-copy warning as a compact amber notice, `leo update` and
   `leo uninstall` as two rows, and Release notes in the card header. The card ends
   with a colophon (2026-11-15): "Your notes are Markdown files on this computer.",
-  Version, Note text (Instrument Sans), Felix's voice (Newsreader) and Licences with a
+  Version, Note text (Instrument Sans), Felix's voice (his current lettering: Newsreader, or Instrument Sans when Felix writes in the notes' letters) and Licences with a
   NOTICE link, all in the system sans.
 
 - Keeping (`keeping.rs`, `app/keeping.js`; 2026-11-05, the user's call, replacing

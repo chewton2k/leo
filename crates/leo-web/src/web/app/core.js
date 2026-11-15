@@ -520,7 +520,7 @@ function snippet(body, words) {
 
 function pinButton(note) {
   const label = note.pinned ? 'Unpin' : 'Pin to the top';
-  return `<button class="pin-toggle${note.pinned ? ' on' : ''}" data-action="pin-card" data-id="${esc(note.id)}" aria-pressed="${note.pinned}" aria-label="${label}" title="${label}">${ICON.pin}</button>`;
+  return `<button class="pin-toggle${note.pinned ? ' on' : ''}" data-action="pin-card" data-id="${esc(note.id)}" data-title="${esc(note.title || '')}" aria-pressed="${note.pinned}" aria-label="${label}" title="${label}">${ICON.pin}</button>`;
 }
 
 function card(note, { words = [], showFolder = false, why = null } = {}) {
@@ -916,7 +916,7 @@ function noteActions(id, recorded = false) {
 }
 
 let factsTimer = 0;
-function countWords(text) {
+function factsSoon(text) {
   const line = $('#note-facts');
   clearTimeout(factsTimer);
   factsTimer = setTimeout(() => {
@@ -957,7 +957,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     s.title = $('#title');
     drawOriginals(note);
     hideAskFloat();
-    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s); marginEdited(s); countWords(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
+    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s); marginEdited(s); factsSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
     marginMount(s, mine).catch(fail);
     if (citedLines && citedLines.id === note.id) showCitedLines();
     else if (passage && highlightSearch(app.querySelector('article.note'), passage.query)) {

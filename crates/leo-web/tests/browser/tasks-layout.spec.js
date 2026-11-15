@@ -404,6 +404,7 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     expect(await page.evaluate(() => cal.ringAt), 'home never starts the Calendar\'s ring').toBeUndefined();
     const box = await today.locator('.cal-ring').boundingBox();
     expect(box.width).toBeLessThanOrEqual(26);
+    const pollEvents = await page.evaluate(() => JSON.stringify(tasksWin.events));
     const weekReads = () => page.evaluate(() => window.calls.filter(url => url.startsWith('/api/schedule') && url.includes(encodeURIComponent(new Date(2026, 10, 15).toISOString()))).length);
     expect(await weekReads(), 'one week read per home mount').toBe(1);
 
@@ -437,6 +438,7 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     await page.emulateMedia({reducedMotion: 'no-preference'});
     await expect(group).toHaveText('Today2 of 3 done');
     expect(await weekReads(), 'ticking and redrawing never read the week again').toBe(1);
+    expect(await page.evaluate(() => JSON.stringify(tasksWin.events)), 'the week read never replaces the events the dateline uses').toBe(pollEvents);
     expect(await page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes')).length), 'redraws paint from the cached notes').toBe(2);
     await page.evaluate(() => Promise.all([loadHomeRecent(), loadHomeRecent(), loadHomeRecent()]));
     await expect.poll(() => page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes')).length), 'calls during a load make one more load, not one each').toBe(6);

@@ -280,7 +280,7 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   the user's call) is a dragged card's ghost, which tilts 1.5° (`--tilt`, a
   registered angle written into the ghost's transform after its position, never
   the `rotate` property, which pivots about the page origin) arriving with `lift`
-  and returning to 0 in `settle` (`liftedRect` carries `tilt`); none under Reduced
+  (its keyframe at offset 0, so it starts flat) and returning to 0 in `settle` (`liftedRect` carries `tilt`); none under Reduced
   Motion, none for lane or calendar ghosts.
 - Opening a note fades only `#doc` from .6 to 1 over 140 ms (`arriveOnPage`,
   `EASE_OUT`, only when `swap()` says it opened, none under `stillMotion()`); the
@@ -323,6 +323,27 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   stays text), picture widths Obsidian-style (`![alt|400](path)`,
   `![[file|400]]`, 16–4000 px). Nesting and list styles change only the page,
   never the file.
+- Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
+  passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
+  without it, byte-identical): a column whose body cells are all numbers (%, a
+  currency sign, a sign and thousands commas allowed) takes `align-right` unless the
+  Markdown aligned it; a fenced block becomes `<div class="code" data-lang>` around
+  the `<pre>` with an icon-only `.code-copy` button (no text nodes; the label is
+  `::before { content: attr(data-lang) }`, the code starts below both). Copy shows on
+  hover and `:focus-visible`, takes its own keys, copies `pre code` text only, never
+  opens the block, says the result in the hidden `#code-said` status region and shows
+  `.pencil-tick.writing` with aria-label "Copied" for 1.2 s. `#doc` styles: links take
+  the search match's three pencil strokes as a `box-decoration-break: clone`
+  background (colours baked into the data URIs: a grey equal to ink 45% dark / 55%
+  light at rest, full ink on hover, so a wrapped link gets a stroke per line); quotes
+  keep the `--surface` tint and radius beside a pencil bracket (the folder-guide
+  stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
+  header fill, every other body row sits on `--wash`, and each `th::after` draws the
+  double pencil rule across its cell, edge to edge. Print and forced colours keep
+  the old look: a plain underline, the 3 px quote bar, row rules. The facts line
+  `#note-facts` (`md.facts`: words outside code by word segmentation, 238 a minute
+  rounded up, "0 words" when empty) sits under the title, updates 300 ms after a
+  change (`factsSoon`), is skipped by search highlights and hidden in print.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
   `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays
@@ -352,8 +373,11 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   folders the user opened; reveals (`side.revealed`) are never saved.
   Note rows edited less than 30 minutes ago carry a 4 px ink dot after the title
   (`.side-fresh`, `SIDE_FRESH_MS`; not when sorted by Last edited, which shows the
-  time); one timer set to the earliest expiry redraws the explorer, checked again
-  on focus and visibilitychange (2026-11-15).
+  time); one timer set to the earliest expiry (plus `SIDE_FRESH_GROUP`, 1 s, so
+  notes saved together clear in one redraw) redraws the explorer, re-armed if it
+  fires early, checked again on focus and visibilitychange (2026-11-15). Unprompted
+  explorer redraws (expiry, Felix's read starting and ending, queued off the read)
+  go through `sideRedrawSoon`, which waits while any menu is open.
   Beside Filter: a sort menu (Name, Last edited, Created; only open tasks) and a
   flip button that reverses it (its icon shows the order: a down arrow beside
   A–Z/Z–A letters or wide/narrow bars, 2026-11-12), both driving `/api/notes` `sort`/`show` for every
@@ -696,7 +720,10 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `.print-notes` list after `#doc` in Newsreader under a hairline and a
   `<style data-print>` footer with the title; every `[data-print]` is removed
   (parents normalized) at the start of every `share()`, on `afterprint`, a print
-  error and the first pointerdown/keydown after printing.
+  error and the first pointerdown/keydown after printing; the cleanup is armed
+  before the first mark is placed, inside `share()`'s error handling. The title
+  footer needs `@page` margin boxes, which the macOS window's print engine does
+  not draw (the page counter there is the engine's own).
 
 Decided: one note per uploaded file (2026-10-20).
 
@@ -765,13 +792,19 @@ is hidden or the capture activity gate is busy.
   Today's done count is a pencil tally `S.tally`, "N of M done" kept as the title
   and hidden text) and Recently written (`#home-recent`: the three notes edited
   last, from the `x-total` of `/api/notes?show=pinned&limit=1` then
-  `sort=updated&brief=true&limit=<pinned+3>` sorted by `updated_at` on the
-  client, fetched from `loadSideFolders` while home is open, painted from cache by
-  `drawHomeToday`, hidden with no notes) and hides the card. While home is open
+  `sort=updated&brief=true&limit=<pinned+3, at most 1000>` sorted by `updated_at` on the
+  client, fetched from `loadSideFolders` and Felix's note changes while home is open,
+  one load at a time (a call during one queues one more; a load hung past
+  `HOME_RECENT_WAIT`, 20 s, gives way and its late answer is dropped), painted from
+  cache by `drawHomeToday`, room reserved only once notes are known, hidden with no
+  notes; the ribbon and this list skip a redraw that would change nothing, the
+  ribbon reloads its week when the week rolls over, and is one Tab stop with
+  arrow, Home and End keys) and hides the card. While home is open
   the Tasks poll reads `/api/schedule` (today to a week ahead, not `live`) for the
   cached events.
 - Task dates say `S.dayWord` (Today, Tomorrow, a short weekday within six days
-  either way, else "Nov 3"; the full date as title) in the Tasks card, home and
+  either way, else "Nov 3"; the full date, `S.dayName`, as the title and as hidden
+  `.said` text, the short word `aria-hidden`) in the Tasks card, home and
   the Calendar tray. The late group shows "Earlier" (`TASK_GROUP_NAMES`; the key
   stays `Overdue`, which Quick Leo filters on), and so do its count ("N from
   earlier · M to do"), the badge label, the tray ("Nothing from earlier.") and

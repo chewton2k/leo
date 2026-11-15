@@ -954,7 +954,7 @@ test('explorer blank context menu offers creation and stays inside the viewport'
   });
 });
 
-test('the Folders label ends in a pencil rule, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser }) => {
+test('the Folders label ends in a pencil rule, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
   await sidebarFixture(browser, async (context, url) => {
     const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(url);
@@ -995,9 +995,14 @@ test('the Folders label ends in a pencil rule, notes edited in the last 30 minut
     expect(await reading.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).animationName])).toEqual([await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--felix').trim() === '#3f6d97' ? 'rgb(63, 109, 151)' : 'rgb(180, 207, 231)'), 'none']);
     await expect(page.locator('.side-tree .side-reading')).toHaveCount(1);
     await page.emulateMedia({ forcedColors: 'active' });
-    expect(await reading.evaluate((el) => getComputedStyle(el).forcedColorAdjust ?? 'none')).toBe('none');
+    if (browserName !== 'webkit') expect(await reading.evaluate((el) => getComputedStyle(el).forcedColorAdjust)).toBe('none');
     await page.emulateMedia({ forcedColors: 'none' });
-    await page.evaluate(() => { marginPage.reading = false; drawSide(); });
+    await page.locator('.side-note[data-id="course-note"]').click({ button: 'right' });
+    await expect(page.locator('.popup-menu')).toBeVisible();
+    await page.evaluate(() => { marginPage.reading = false; sideRedrawSoon(); });
+    await expect(page.locator('.side-tree .side-reading'), 'the explorer waits while one of its menus is open').toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.popup-menu')).toHaveCount(0);
     await expect(page.locator('.side-tree .side-reading')).toHaveCount(0);
     await expect(page.locator('.side-note[data-id="course-note"] .side-fresh')).toBeVisible();
     expect(await page.evaluate(() => window.errors)).toEqual([]);

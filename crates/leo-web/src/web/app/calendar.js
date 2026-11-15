@@ -1143,14 +1143,15 @@ function tickTaskBoxes(id, done, on) {
 
 const TICK_MS = 160;
 const tickedAt = new Map();
+const tickKey = (id, on) => `${id} ${on || ''}`;
 
 function tickWrite(id, on) {
-  const ago = performance.now() - (tickedAt.get(`${id} ${on || ''}`) ?? -Infinity);
+  const ago = performance.now() - (tickedAt.get(tickKey(id, on)) ?? -Infinity);
   return ago < TICK_MS ? ` data-writing style="--tick-at: ${-Math.round(ago)}ms"` : '';
 }
 
 async function setTaskDone(id, done, on = null) {
-  if (done) tickedAt.set(`${id} ${on || ''}`, performance.now());
+  if (done) tickedAt.set(tickKey(id, on), performance.now());
   const before = calFind(id);
   const was = before && (on ? before.done_on : before.done);
   markTaskDone(id, done, on);
@@ -1755,7 +1756,7 @@ function homeTally(today) {
   const done = today.filter((t) => t.done);
   const { marks, width } = S.tally(done.length);
   if (!marks.length) return '';
-  const ago = performance.now() - Math.max(...done.map((t) => tickedAt.get(`${t.id} ${t.on || ''}`) ?? -Infinity));
+  const ago = performance.now() - Math.max(...done.map((t) => tickedAt.get(tickKey(t.id, t.on)) ?? -Infinity));
   return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
 }
 
@@ -1820,7 +1821,7 @@ async function loadHomeRecent() {
   const mine = (homeRecent.busy = Date.now());
   try {
     const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
-    const notes = await api(`/api/notes?sort=updated&brief=true&limit=${pinned + 3}`);
+    const notes = await api(`/api/notes?sort=updated&brief=true&limit=${Math.min(pinned + 3, 1000)}`);
     if (homeRecent.busy !== mine) return;
     homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
   } catch (e) {
