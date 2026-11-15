@@ -98,7 +98,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     await page.evaluate(() => release());
     await expect(check).toBeChecked({timeout: 500});
     await expect(row).toHaveClass(/done/);
-    expect(await page.evaluate(() => audit.saved()[0].done)).toBe(true);
+    await expect.poll(() => page.evaluate(() => audit.saved()[0].done)).toBe(true);
     await page.evaluate(() => audit.refresh());
     await expect(check).toBeChecked();
     await page.waitForTimeout(300);
@@ -116,7 +116,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     await check.click();
     await expect(check).toBeChecked({timeout: 500});
     await page.evaluate(() => audit.finishRefresh());
-    expect(await page.evaluate(() => audit.saved()[0].done)).toBe(true);
+    await expect.poll(() => page.evaluate(() => audit.saved()[0].done)).toBe(true);
     await expect(row).toBeHidden();
     await expect(page.locator('#tasks-window')).toBeHidden();
     await page.emulateMedia({reducedMotion: 'reduce'});
