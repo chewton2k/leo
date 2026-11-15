@@ -1717,6 +1717,7 @@ function refocusTasks(host, focus) {
 const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
 
 const HOME_ROWS = 6;
+const HOME_RECENT_WAIT = 20000;
 let homeMidnight = 0;
 
 function drawHomeToday() {
@@ -1758,12 +1759,13 @@ function homeTally(today) {
   return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
 }
 
-const homeWeek = { events: null, load: 0 };
+const homeWeek = { events: null, load: 0, from: '' };
 
 async function loadHomeWeek() {
   if (!document.getElementById('home-week')) return;
   const days = S.daysOf('week', S.dayKey(new Date()), S.weekStart(calLocale()));
   const mine = ++homeWeek.load;
+  homeWeek.from = days[0];
   try {
     const data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[6]), 1).toISOString())}`);
     if (mine !== homeWeek.load) return;
@@ -1779,17 +1781,22 @@ function drawHomeWeek() {
   if (!box) return;
   const today = S.dayKey(new Date());
   const days = S.daysOf('week', today, S.weekStart(calLocale()));
+  if (homeWeek.from && homeWeek.from !== days[0]) loadHomeWeek();
   const plan = S.plan(tasksWin.tasks || (cal.data && cal.data.tasks) || [], homeWeek.events || [], today, { from: days[0], to: days[6] });
   const focus = tasksFocus(box);
-  box.innerHTML = days.map((key) => {
+  const held = focus && days.includes(focus.id) ? focus.id : today;
+  const html = days.map((key) => {
     const d = S.fromKey(key);
     const name = d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
     const busy = plan.byDay.has(key);
-    const stop = focus?.id ? key === focus.id : key === today;
+    const stop = key === held;
     return `<button type="button" class="home-wd${key < today ? ' past' : key === today ? ' today' : ''}" data-action="home-day" data-id="${key}" tabindex="${stop ? 0 : -1}" aria-label="${esc(busy ? `${name}, planned` : name)}" title="${esc(name)}"${key === today ? ' aria-current="date"' : ''}><b>${d.getDate()}${key === today ? calRing(key, true) : ''}</b>${busy ? '<i></i>' : ''}</button>`;
   }).join('');
+  if (box.drawn === html) return;
+  box.drawn = html;
+  box.innerHTML = html;
   box.onkeydown = homeWeekKeys;
-  refocusTasks(box, focus);
+  if (focus) box.querySelector('[tabindex="0"]')?.focus({ preventScroll: true });
 }
 
 function homeWeekKeys(e) {
@@ -1802,23 +1809,24 @@ function homeWeekKeys(e) {
   days[to].focus();
 }
 
-const homeRecent = { notes: null, busy: false, again: false };
+const homeRecent = { notes: null, busy: 0, again: false };
 
 async function loadHomeRecent() {
   if (!document.getElementById('home-recent')) return;
-  if (homeRecent.busy) {
+  if (homeRecent.busy && Date.now() - homeRecent.busy < HOME_RECENT_WAIT) {
     homeRecent.again = true;
     return;
   }
-  homeRecent.busy = true;
+  const mine = (homeRecent.busy = Date.now());
   try {
     const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
     const notes = await api(`/api/notes?sort=updated&brief=true&limit=${pinned + 3}`);
+    if (homeRecent.busy !== mine) return;
     homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
   } catch (e) {
     if (!homeRecent.notes) homeRecent.notes = [];
   } finally {
-    homeRecent.busy = false;
+    if (homeRecent.busy === mine) homeRecent.busy = 0;
   }
   drawHomeRecent();
   if (homeRecent.again) {
@@ -1831,8 +1839,11 @@ function drawHomeRecent() {
   const box = document.getElementById('home-recent');
   if (!box || !homeRecent.notes) return;
   const at = box.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+  const html = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(n.summary || '')}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
   box.hidden = !homeRecent.notes.length;
-  box.innerHTML = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(n.summary || '')}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
+  if (box.drawn === html) return;
+  box.drawn = html;
+  box.innerHTML = html;
   if (at) box.querySelector(`[href="${CSS.escape(at)}"]`)?.focus({ preventScroll: true });
 }
 

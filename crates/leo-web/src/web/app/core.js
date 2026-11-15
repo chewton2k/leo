@@ -124,6 +124,7 @@ const chat = felix.create({
   onChanged: (note) => {
     const open = state.view === 'note' && state.session && state.session.note.id === note.id;
     if (open && !saving.unsaved()) showNote(note.id);
+    if (tasksAtHome()) loadHomeRecent();
     toast(open && saving.unsaved() ? 'Felix changed this note while you were typing; reopen it to see the change.' : `Changed “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
   },
   onToggle: () => { drawSide(); pageBarLater(); marginRedraw(); },
@@ -756,7 +757,7 @@ async function showWorkspace(dir = null) {
   document.body.classList.remove('on-note');
   chrome({});
   swap('workspace', () => {
-    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Search notes, or ask Felix"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent${homeRecent.notes?.length ? ' reserve' : ''}" id="home-recent" aria-label="Recently written"></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
+    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Search notes, or ask Felix"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent${(homeRecent.notes ? homeRecent.notes.length : side.notes.get('')?.items?.length) ? ' reserve' : ''}" id="home-recent" aria-label="Recently written"></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
     wireHomeAsk();
     drawTasksWindow();
     drawHomeToday();

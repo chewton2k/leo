@@ -438,6 +438,11 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     await expect(group).toHaveText('Today2 of 3 done');
     expect(await weekReads(), 'ticking and redrawing never read the week again').toBe(1);
     expect(await page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes')).length), 'redraws paint from the cached notes').toBe(2);
+    await page.evaluate(() => Promise.all([loadHomeRecent(), loadHomeRecent(), loadHomeRecent()]));
+    await expect.poll(() => page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes')).length), 'calls during a load make one more load, not one each').toBe(6);
+    await recent.evaluate(el => { el.firstElementChild.kept = true; });
+    await page.evaluate(() => drawHomeToday());
+    expect(await recent.evaluate(el => el.firstElementChild.kept === true), 'an unchanged redraw keeps the rows a click may be landing on').toBe(true);
     await expect(page.locator('#home-today .tasks-row', {hasText: 'Email the TA'}).locator('.tasks-when')).toHaveText('Nov 10');
 
     await week.locator('button[data-id="2026-11-20"]').click();

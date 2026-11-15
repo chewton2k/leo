@@ -1890,7 +1890,7 @@
         return;
       }
       const c = sessionSummary(s);
-      const latest = state.messages.flatMap((m) => m.quizzes || []).findLast((q) => q.idea);
+      const latest = state.messages.slice(state.messages.findLastIndex((m) => m.session === s)).flatMap((m) => m.quizzes || []).findLast((q) => q.idea);
       const asking = latest && typeof latest.given !== 'string' ? latest.idea : 0;
       const ideas = s.ideas.map((t, i) => {
         const o = s.outcomes[i];
