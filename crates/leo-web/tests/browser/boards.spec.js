@@ -280,7 +280,8 @@ test('moves, priorities and deletes show before leo answers and come back when t
     await page.locator('#kanban-panel [data-kanban="delete"]').click();
     expect(await page.evaluate(() => [document.querySelectorAll('[data-card="cread00001"]').length, window.pending > 0])).toEqual([0, true]);
     await expect(page.locator('[data-card="cread00001"]')).toHaveCount(1);
-    expect(await page.evaluate(() => window.errors)).toContain('Leo could not delete the card.');
+    await expect.poll(() => page.evaluate(() => window.errors)).toContain('Leo could not delete the card.');
+    await settled(page);
     expect(await page.evaluate(() => window.db.cards.some(c => c.id === 'cread00001'))).toBe(true);
     await page.evaluate(() => { window.errors.length = 0; });
   });
