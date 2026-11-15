@@ -524,6 +524,13 @@ test('old saved folders are dropped, and after its folder is closed a newly open
     await expect(row('Course'), 'a redraw does not reopen a folder the user closed').toHaveAttribute('aria-expanded','false');
     await page.evaluate(()=>audit.note('escaped-note','Course'));
     await expect(page.locator('.side-note[data-id="escaped-note"]'), 'another note in the same folder unfolds it again').toHaveCount(1);
+    await page.evaluate(()=>audit.note('personal-note','Personal'));
+    await row('Course').click();
+    await expect(row('Course')).toHaveAttribute('aria-expanded','true');
+    await row('Course').click();
+    await expect(row('Course')).toHaveAttribute('aria-expanded','false');
+    await page.evaluate(()=>{state={view:'settings'};audit.draw();});
+    await expect(row('Course'), 'leaving the note for another page keeps a folder the user closed closed').toHaveAttribute('aria-expanded','false');
   });
 });
 
