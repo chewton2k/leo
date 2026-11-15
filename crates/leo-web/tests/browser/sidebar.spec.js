@@ -21,7 +21,7 @@ async function sidebarFixture(browser, run) {
     const folderLabel=dir=>dir.split('/').pop()||'Top level', folderHash=dir=>dir?'#/f/'+encodeURIComponent(dir):'#/', noteHash=id=>'#/n/'+encodeURIComponent(id);
     const closeSheet=()=>{}, go=hash=>{location.hash=hash;}, fail=error=>window.errors.push(error.message);
     const stillMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const moves=[], enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false};
+    const moves=[], tasksAtHome=()=>false, enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false};
     const notes={
       '':[{id:'root-note',title:'Welcome',directory:''}],
       Course:[{id:'course-note',title:'Course overview',directory:'Course'},{id:'escaped-note',title:'<script> stays text',directory:'Course'}],
