@@ -59,8 +59,9 @@ This file holds the rules. How each screen behaves, area by area, is in
   fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
   variable fonts Instrument Sans (note titles and text, `--writing-font`, roman and italic) and
   Newsreader (Felix's margin voice, `--voice`, roman and italic; SIL OFL,
-  @fontsource-variable 5.3.0) are vendored under `web/vendor/` (checked against
-  npm's sha512, served `immutable`; the fonts at `/vendor/fonts-5.3.0/`, their
+  @fontsource-variable 5.3.0) are vendored under `web/vendor/` (served
+  `immutable`; the fonts' npm tarball sha512 and per-file sha256 are recorded in
+  NOTICE; the fonts at `/vendor/fonts-5.3.0/`, their
   `@font-face` in `page-head.html`). `margin-notes.js` redraws the margin once
   both families have loaded, since the swap moves measured text.
 - Keys and calendar links are write-only: accepted from the window, never
