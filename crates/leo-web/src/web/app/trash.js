@@ -18,7 +18,7 @@ async function showTrash() {
 function drawTrash() {
   const items = state.items || [];
   if (!items.length) {
-    refreshPanel(app, settingsFrame('trash', empty(ICON.trash, 'The trash is empty', `Deleted notes wait here ${state.trashDays === null ? 'until you empty the trash' : `for ${state.trashDays === 365 ? 'a year' : plural(state.trashDays, 'day')}`}, so a mistake can be undone.`)));
+    refreshPanel(app, settingsFrame('trash', empty(DRAWN.trash, 'Nothing thrown away.', `Deleted notes wait here ${state.trashDays === null ? 'until you empty the trash' : `for ${state.trashDays === 365 ? 'a year' : plural(state.trashDays, 'day')}`}, so a mistake can be undone.`)));
     floating.innerHTML = '';
     return;
   }

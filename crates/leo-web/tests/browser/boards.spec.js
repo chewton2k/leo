@@ -311,6 +311,19 @@ test('a card\'s details render as Markdown like a note, toggle checkboxes, edit 
   });
 });
 
+test('no boards shows the drawn empty state with its facts and the New board button', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.db.boards = []; window.db.cards = []; location.hash = '#/elsewhere'; });
+    await expect(page.locator('#elsewhere')).toBeVisible();
+    await page.evaluate(() => { location.hash = '#/boards'; });
+    const none = page.locator('.kanban-none');
+    await expect(none.locator('svg.drawn-board')).toBeVisible();
+    await expect(none.locator('h3')).toHaveText('No boards yet');
+    await expect(none.locator('[data-action="kanban-new-board"]')).toBeVisible();
+    expect(await none.locator('svg.drawn-board').evaluate(el => [el.getAttribute('fill'), el.getAttribute('stroke')])).toEqual(['none', 'currentColor']);
+  });
+});
+
 test('Escape and Close each leave a card at one press', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const panel = page.locator('#kanban-panel');

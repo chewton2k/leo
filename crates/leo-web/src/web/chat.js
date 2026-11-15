@@ -871,7 +871,7 @@
 
   const retiredPractice = (p) => typeof p?.kind === 'string' && p.kind.includes('interview');
 
-  function create({ render, escape, icons = {}, onOpen = () => {}, onCite = () => {}, onOriginal = () => {}, storage = root.localStorage, prepare = null, notify = () => {}, onSaved = () => {}, onChanged = () => {}, onUndone = () => {}, onToggle = () => {}, onAdd = () => {}, onOrganized = () => {}, onLocked = () => {} }) {
+  function create({ render, escape, icons = {}, drawings = {}, onOpen = () => {}, onCite = () => {}, onOriginal = () => {}, storage = root.localStorage, prepare = null, notify = () => {}, onSaved = () => {}, onChanged = () => {}, onUndone = () => {}, onToggle = () => {}, onAdd = () => {}, onOrganized = () => {}, onLocked = () => {} }) {
     const request = async (url, init = {}) => {
       const response = await fetch(url, { credentials: 'same-origin', ...init });
       if (response.status === 401) onLocked();
@@ -1468,7 +1468,7 @@
         : [];
       const list = [...ghost, ...state.chats];
       if (!list.length) {
-        box.innerHTML = '<div class="chat-history-none">Your conversations with Felix are kept here, on this computer.</div>';
+        box.innerHTML = `<div class="chat-history-none">${drawings.chats || ''}Your conversations with Felix are kept here, on this computer.</div>`;
         return;
       }
       box.innerHTML = groups(list)

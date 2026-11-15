@@ -241,6 +241,7 @@ test('the task sidebar creates undated tasks from its empty state', async ({ bro
     await page.evaluate(async () => { window.db.tasks = []; await loadSchedule(); });
     const side = page.locator('#cal-side');
     await expect(side).toContainText('Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.');
+    await expect(side.locator('svg.drawn-tasks')).toBeVisible();
     await side.getByRole('button', { name: 'New task', exact: true }).click();
     await expect(page.locator('#task-title')).toBeFocused();
     await page.locator('#task-title').fill('Read the next chapter');

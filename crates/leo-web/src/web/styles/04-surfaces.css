@@ -170,6 +170,12 @@
 
 .empty { text-align: center; color: var(--muted); padding: 56px 20px; }
 .empty svg { width: 22px; height: 22px; color: var(--faint); }
+.empty svg.drawn, svg.drawn { display: block; width: 96px; height: 74px; margin: 0 auto; color: var(--muted); }
+.empty svg.drawn-arrow { width: 76px; height: 60px; margin-bottom: 4px; }
+body.side-mini .empty svg.drawn-arrow { display: none; }
+@media (max-width: 999px) { .empty svg.drawn-arrow { display: none; } }
+.chat-history-none svg.drawn { width: 72px; height: 55px; margin: 0 0 6px -10px; }
+svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
 .empty h3 { color: var(--text); margin: 10px 0 4px; font-size: var(--fs-md); font-weight: var(--fw-semibold); text-wrap: balance; }
 .empty p { margin: 0; font-size: var(--fs-sm); text-wrap: pretty; }
 .empty .btn { margin: 16px 4px 0; }

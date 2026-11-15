@@ -2242,7 +2242,7 @@ test.describe('trash', () => {
     await expect(page.locator('.trash-row', { hasText: `Trashed 5 ${tag}` })).toBeVisible();
     await page.locator('[data-action="trash-empty"]').click();
     await page.locator('[data-action="trash-delete-now"]').click();
-    await expect(page.locator('.empty')).toContainText('The trash is empty');
+    await expect(page.locator('.empty')).toContainText('Nothing thrown away.');
     await expect(row(5)).toHaveCount(0);
     expect(await mine()).toEqual([]);
   });

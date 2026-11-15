@@ -40,6 +40,7 @@ test('workspace and legacy folder links reveal folders without a library or a cr
   const before = await (await page.request.get('/api/notes?limit=1')).headers();
   await page.goto('/#/');
   await expect(page.getByText('Pick a note on the left')).toBeVisible();
+  await expect(page.locator('#app .empty svg.drawn-arrow')).toBeVisible();
   await expect(page.locator('.library-tools, .library-cards, #app .cards')).toHaveCount(0);
   for (const target of [dir, nested]) {
     await page.goto(`/#/f/${encodeURIComponent(target)}`);

@@ -397,7 +397,8 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(page.locator('select[data-keep="upload_days"]')).toHaveValue('90');
       await page.getByRole('link',{name:'Trash',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/trash');
-      await expect(page.getByText('The trash is empty',{exact:true})).toBeVisible();
+      await expect(page.getByText('Nothing thrown away.',{exact:true})).toBeVisible();
+      await expect(page.locator('.empty svg.drawn-trash')).toBeVisible();
       await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Trash');
       expect(await keptNav.evaluate(el=>el.isConnected)).toBe(true);
       await page.setViewportSize({width:620,height:850});

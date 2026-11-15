@@ -37,7 +37,9 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   the menu for a second step. `sheet()` itself focuses the first control and traps Tab.
 - Explorer rename and New folder use `inlineEdit` over the tree row (side.js). New folder
   falls back to its sheet when the tree is hidden.
-- Empty pages: `empty(icon, title, text)`. Counts: `.badge`. Small uppercase section
+- Empty pages: `empty(icon, title, text)`. Trash, Boards, calendar Tasks, Chats, Search
+  no-results and home show a small line drawing in the muted ink (home: an arrow toward the
+  open explorer); the empty Trash says "Nothing thrown away." over its facts. Counts: `.badge`. Small uppercase section
   labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`).
 - Kept on purpose: the model picker (a menu of models with effort chips), the margin-mode menu (its own
