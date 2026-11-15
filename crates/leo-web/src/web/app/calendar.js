@@ -1252,7 +1252,9 @@ async function saveDate(task, pick, confirm) {
     return;
   }
   closeSheet();
-  toast(pick.date ? `Moved “${task.title || 'Untitled'}” to ${S.fromKey(pick.date).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Date cleared');
+  const named = `“${task.title || 'Untitled'}”`;
+  const day = pick.date && S.fromKey(pick.date).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' });
+  toast(!pick.date ? 'Date cleared' : pick.date === task.date ? `Saved ${named}` : task.date ? `Moved ${named} to ${day}` : `Set ${named} for ${day}`);
   loadTasksWindow().catch(() => {});
   if (state.view === 'calendar') {
     if (pick.date) cal.selected = pick.date;
@@ -1565,7 +1567,7 @@ async function promoteTask(line) {
   if (!s || !s.note.id) return;
   try {
     const task = await api('/api/tasks/promote', { method: 'POST', body: { note: s.note.id, line: Number(line) } });
-    toast(`Added “${task.title || 'Untitled'}” to your tasks`, { action: 'Calendar', run: () => go('#/calendar') });
+    toast(`Added “${task?.title || 'Untitled'}” to your tasks`, { action: 'Calendar', run: () => go('#/calendar') });
     await noteTasksSheet();
   } catch (e) {
     if (e instanceof Locked) throw e;

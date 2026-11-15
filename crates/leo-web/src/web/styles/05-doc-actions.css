@@ -213,6 +213,7 @@ label.trash-row { cursor: pointer; }
 .toast button, .toast-gone button { border: 0; background: none; color: inherit; font-weight: 700; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
 .toast.bad, .toast-gone.bad { background: var(--danger); color: var(--accent-text); }
 .toast, .toast-gone { overflow: hidden; }
+:is(.toast, .toast-gone) > span { min-width: 0; overflow-wrap: anywhere; }
 .toast-time { position: absolute; left: 12px; right: 12px; bottom: 3px; height: 4px; margin: 0; background: currentColor; opacity: .5; -webkit-mask-size: max(100%, 544px) 100%; mask-size: max(100%, 544px) 100%; animation: toast-time linear forwards; }
 @media (forced-colors: active) { .toast-time { height: 0; -webkit-mask: none; mask: none; border-top: 1px solid currentColor; } }
 .toast-gone .toast-time { display: none; }
