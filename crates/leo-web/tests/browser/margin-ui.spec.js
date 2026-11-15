@@ -548,13 +548,15 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
     const view = await (await route.fetch()).json();
     await route.fulfill({ json: { ...view, threads: [thread('t2', 'Each row sums to one hundred', 'Rows sum to one.'), thread('t1', 'transition matrix', 'Indexed by state.')] } });
   });
-  await page.addInitScript(() => { window.print = async () => { window.printSaw = document.querySelectorAll('[data-print]').length; }; });
+  const errors = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('.margin-note')).toHaveCount(2);
+  await page.evaluate(() => { window.print = async () => { window.printSaw = document.querySelectorAll('[data-print]').length; }; });
   const text = await page.locator('#doc').textContent();
   await page.locator('[data-action="share"]').first().click();
   await page.getByRole('menuitem', { name: 'Export as PDF with Felix’s notes' }).click();
-  await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(4);
+  await expect.poll(async () => (await page.evaluate(() => window.printSaw)) ?? `no print: ${JSON.stringify({ errors, toasts: await page.locator('.toast').allTextContents() })}`).toBe(4);
   await expect(page.locator('#doc')).toHaveText(text);
   await page.emulateMedia({ media: 'print' });
   await expect(page.locator('#doc sup[data-print]')).toHaveCount(2);

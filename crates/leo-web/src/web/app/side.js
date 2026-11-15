@@ -133,7 +133,7 @@ function drawSide() {
     </div>
     <div class="side-rail">
       <nav class="side-rail-main" aria-label="Leo tools">
-        ${sideRow('quick-leo', ICON.search, 'Search', { hint: `Search notes, or ask Felix (${shortcutText(shortcutKeys('quick'))})` })}
+        ${sideRow('quick-leo', ICON.search, 'Search', { hint: `Search or ask (${shortcutText(shortcutKeys('quick'))})` })}
         ${sideRow('calendar', ICON.calendar, 'Calendar', { on: here === 'calendar' })}
         ${sideRow('boards', ICON.board, 'Boards', { on: here === 'boards', hint: 'Boards · track tasks from To do to Done' })}
         ${sideRow('record', ICON.mic, 'Record', { on: here === 'record', attrs: ` data-dir="${esc(actionDir)}"` })}

@@ -80,7 +80,7 @@ test('Usage keeps cached readings through refresh failure and ignores a closed s
     const rel=()=> '10 minutes ago'; let seq=1, finishUsage, failUsage, usageCalls=0, writer='claude_code';
     const cached={tasks:[{task:'writing',provider:'claude_code'}],plans:[{provider:'codex',name:'Codex',installed:true,signed_in:true,limits:{five_hour:{used:.39,resets_at:Date.now()/1000+3600},seven_day:{used:.06,resets_at:Date.now()/1000+86400},seen_at:new Date(Date.now()-600000).toISOString()}},{provider:'claude_code',name:'Claude Code',installed:true,signed_in:true,limits:{five_hour:{used:1,resets_at:Date.now()/1000+3600},seven_day:{used:.95,resets_at:Date.now()/1000+86400},seen_at:new Date().toISOString()}}]};
     function sheet(html){const box=document.createElement('div');box.className='scrim';box.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';box.addEventListener('click',e=>{if(e.target.closest('[data-action="close"]')) box.classList.add('scrim-gone');});document.body.append(box);trapSheetFocus(box);return box;}
-    const bodies=[], ICON={refresh:'<svg></svg>',close:'<svg></svg>'}, cascade=()=>{};
+    const bodies=[], ICON={refresh:'<svg></svg>',close:'<svg></svg>'}, cascade=()=>{}, skeleton=(n)=>'<div class="skeleton"></div>'.repeat(n);
     async function api(url,options){if(url==='/api/settings')return structuredClone(cached);usageCalls++;bodies.push(options&&options.body);return new Promise((resolve,reject)=>{finishUsage=resolve;failUsage=reject;});}
     ${focus}
     ${plans}

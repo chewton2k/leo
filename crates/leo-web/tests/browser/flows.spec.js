@@ -3561,7 +3561,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   const hint = (name) => row(name).locator('.hint');
   const search = page.locator('[data-action="quick-leo"]');
   const quick = page.locator('.scrim:not(.scrim-gone) .quick-leo');
-  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
 
   await change('quick').click();
   await expect(row('quick').locator('.shortcut-field')).toHaveClass(/recording/);
@@ -3579,12 +3579,12 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   await change('quick').click();
   await page.keyboard.press('j');
   await expect(hint('quick')).toHaveText(`Use ${mac ? '⌘' : 'Ctrl'} with a key.`);
-  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
 
   await change('quick').click();
   await page.keyboard.press('ControlOrMeta+j');
   await expect(hint('quick')).toHaveText('Saved');
-  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('J')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('J')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await page.waitForTimeout(300);
   await expect(page.locator('.quick-leo'), 'the old keys no longer open Quick Leo').toHaveCount(0);
@@ -3608,7 +3608,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
 
   await row('quick').getByRole('button', { name: 'Reset' }).click();
   await expect(row('quick').getByRole('button', { name: 'Reset' })).toHaveCount(0);
-  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search or ask (${label('K')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await expect(quick).toBeVisible();
   await page.keyboard.press('Escape');

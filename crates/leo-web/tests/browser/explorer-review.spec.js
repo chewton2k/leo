@@ -34,7 +34,7 @@ async function menuFor(page, locator) {
   await locator.dispatchEvent('contextmenu', { clientX: 200, clientY: 300 });
   await expect(page.locator('.popup-menu')).toBeVisible();
 }
-const items = (page) => page.getByRole('menuitem').allTextContents();
+const items = (page) => page.getByRole('menuitem').evaluateAll((els) => els.map((el) => [...el.childNodes].filter((n) => !(n.nodeType === 1 && n.getAttribute('aria-hidden') === 'true')).map((n) => n.textContent).join('')));
 async function folders(page) {
   await page.locator('#menu').click();
   await page.locator(':is(.sheet, .popup-menu) [data-action="folders"]').click();
