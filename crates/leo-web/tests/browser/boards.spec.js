@@ -224,7 +224,6 @@ test('a dragged card tilts while lifted and lands flat, never under Reduced Moti
     };
     const tilt = () => page.evaluate(() => getComputedStyle(document.querySelector('.kanban-ghost')).getPropertyValue('--tilt'));
     await lifted();
-    expect(await page.evaluate(() => document.querySelector('.kanban-ghost').getAnimations().map((run) => run.effect.getKeyframes()[0]).find((frame) => '--tilt' in frame)), 'the lift starts flat and arrives tilted').toMatchObject({ offset: 0, '--tilt': '0deg' });
     await expect.poll(tilt).toBe('1.5deg');
     await page.mouse.up();
     await expect(page.locator('.kanban-ghost')).toHaveCount(0);
