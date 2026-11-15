@@ -259,7 +259,7 @@ test('a new card lands in full ink and settles by colour alone, without restarti
       const run = el.getAnimations().find(a => a.id === 'ink');
       if (!run) return null;
       const props = Object.keys(run.effect.getKeyframes()[0]).filter(k => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort();
-      return { at: run.currentTime - run.effect.getTiming().delay, props, ms: run.effect.getTiming().duration };
+      return { at: run.effect.getComputedTiming().localTime - run.effect.getTiming().delay, props, ms: run.effect.getTiming().duration };
     });
     const first = await ink();
     expect(first).toMatchObject({ props: ['backgroundColor', 'color'], ms: 600 });
