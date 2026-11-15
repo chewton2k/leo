@@ -228,8 +228,8 @@ function settingsFrame(section, content) {
   const nav = SETTINGS_SECTIONS.map((group) => `<div class="settings-group"><div class="settings-group-title">${esc(group.group)}</div>${group.items.map(([id, label, icon]) => `<a class="settings-link${id === section ? ' on' : ''}" href="#/settings/${id}"${id === section ? ' aria-current="page"' : ''}>${settingsIcon(icon)}<span>${esc(label)}</span></a>`).join('')}</div>`).join('');
   const found = settingsResults();
   const search = `<div class="settings-search" role="search">${svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>')}<input id="settings-search" type="text" role="combobox" aria-label="Search settings" aria-autocomplete="list" aria-expanded="${found.open}"${found.open ? ` aria-controls="settings-listbox" aria-activedescendant="${found.active}"` : ''} placeholder="Search settings" autocomplete="off" spellcheck="false" value="${esc(settingsFind.query)}"></div>`;
-  // Callers assign the frame to the page right away; once they have, bring the current
-  // section into view in the phone strip, where the list scrolls sideways.
+  // Callers assign the frame to the page right away; once they have, place the current
+  // section's pill.
   if (typeof queueMicrotask === 'function') queueMicrotask(revealSettingsLink);
   if (arrive && shown) overlapOut(shown);
   const lean = arrive && shown && from >= 0 && to >= 0 ? (to > from ? ' style="--arrive-from:6px"' : ' style="--arrive-from:-6px"') : '';
@@ -248,7 +248,6 @@ function placeSettingsPill(nav, on) {
   pill.animate([{ transform: `translateY(${from.top}px)`, height: `${from.height}px` }, { transform: `translateY(${on.offsetTop}px)`, height: `${on.offsetHeight}px` }], { duration: DRAWER_MS, easing: EASE_MOVE });
 }
 
-const settingsRevealed = new WeakMap();
 const settingsWatched = new WeakSet();
 function watchSettingsNav(frame) {
   if (!frame || settingsWatched.has(frame) || typeof ResizeObserver !== 'function') return;
@@ -256,7 +255,6 @@ function watchSettingsNav(frame) {
   const watcher = new ResizeObserver(() => {
     const sections = frame.querySelector('.settings-sections');
     if (!frame.isConnected || !sections) return watcher.disconnect();
-    settingsRevealed.delete(sections);
     revealSettingsLink();
   });
   watcher.observe(frame);
@@ -265,9 +263,6 @@ function revealSettingsLink() {
   const nav = app.querySelector('.settings-sections'), on = nav?.querySelector('.settings-link.on');
   if (nav) placeSettingsPill(nav, on);
   watchSettingsNav(nav?.closest('.settings-nav'));
-  if (!on || settingsRevealed.get(nav) === on.getAttribute('href')) return;
-  settingsRevealed.set(nav, on.getAttribute('href'));
-  if (nav.scrollWidth > nav.clientWidth) nav.scrollLeft = on.offsetLeft - (nav.clientWidth - on.offsetWidth) / 2;
 }
 
 const KNOB_STRETCH = 1.12;
