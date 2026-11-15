@@ -581,7 +581,6 @@ function marginFill(el, t, arriving, changed) {
   more.inert = !open;
   more.setAttribute('aria-hidden', String(!open));
   el.toggleAttribute('data-open', open);
-  for (const block of el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')) block.classList.toggle('margin-cut', !open && block.scrollHeight > block.clientHeight + 1);
   const toggle = $('.margin-toggle', el);
   toggle.setAttribute('aria-expanded', String(open));
   toggle.setAttribute('aria-label', `${open ? 'Close' : 'Open'} Felix’s note on “${t.quote.slice(0, 80)}”`);
@@ -603,6 +602,30 @@ function marginFill(el, t, arriving, changed) {
   else el.removeAttribute('aria-busy');
   $('.margin-send', el).disabled = Boolean(waiting) || !area.value.trim();
   el.toggleAttribute('data-active', marginLit(t.id));
+}
+
+const MARGIN_CUT_LINES = 12;
+
+function marginCuts(boxes) {
+  const notes = boxes.filter(({ el }) => el && !el.hasAttribute('data-open')).map(({ el }) => {
+    const blocks = [...el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')];
+    return { blocks, line: blocks.length ? parseFloat(getComputedStyle(blocks[0]).lineHeight) : NaN, heights: blocks.map((block) => block.scrollHeight) };
+  });
+  for (const { blocks, line, heights } of notes) {
+    let room = MARGIN_CUT_LINES * line;
+    let last = null;
+    blocks.forEach((block, i) => {
+      const fits = !(line > 0) || heights[i] <= room + 1;
+      const allowed = fits ? heights[i] : room >= line ? Math.floor(room / line) * line : 0;
+      if (fits) block.style.removeProperty('--room');
+      else block.style.setProperty('--room', `${allowed}px`);
+      block.classList.toggle('margin-cut', !fits && allowed > 0);
+      block.classList.toggle('margin-over', !fits && allowed === 0);
+      if (!fits && allowed === 0) last?.classList.add('margin-cut');
+      if (fits || allowed > 0) last = block;
+      room = fits ? room - heights[i] : 0;
+    });
+  }
 }
 
 function marginLit(id) {
@@ -761,6 +784,7 @@ function marginDraw() {
     if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how === 'context');
     return { ...box, el };
   });
+  marginCuts(boxes);
   const shown = new Set(boxes.map(({ t }) => t.id));
   for (const [id, el] of marginPage.els) if (!shown.has(id)) el.hidden = true;
   for (const { t } of placed) {

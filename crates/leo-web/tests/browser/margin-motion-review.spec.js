@@ -407,6 +407,22 @@ test.describe('whole notes and pins', () => {
     }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
   });
 
+  test('twelve lines cap the closed note\'s text as a whole across paragraphs, and the figure after them stays whole', async ({ browser }) => {
+    const para = (tag) => Array.from({ length: 70 }, (_, i) => `${tag}${i}`).join(' ');
+    const drawn = `${para('a')}\n\n${para('b')}\n\n${para('c')}\n\n\`\`\`svg\n<svg viewBox="0 0 40 200" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="200"/></svg>\n\`\`\``;
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      const visible = await note.locator('.margin-felix > p').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+      expect(visible[0] + visible[1] + visible[2]).toBeLessThanOrEqual(line * 12 + 1);
+      expect(visible[0]).toBeGreaterThan(line * 3);
+      expect(visible[2]).toBe(0);
+      await expect(note.locator('.margin-felix > p').nth(1)).toHaveClass(/margin-cut/);
+      const figure = note.locator('.margin-felix figure').first();
+      expect(await figure.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && el.getBoundingClientRect().height > 0)).toBe(true);
+    }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
+  });
+
   test('at 1600 px with the comfortable column an open note is wider than 300 px, has no close cross and keeps every action on one row', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');

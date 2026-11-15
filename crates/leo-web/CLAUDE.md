@@ -427,9 +427,10 @@ Felix (2026-10-19).
   the text line so the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
   `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
 - Whole notes (2026-11-15, the user's call, replacing the first-line fold): a
-  closed note shows its whole text and dims to .7 until lit; a text block over
-  12 lines is cut there with a fade (`.margin-cut`, set by `marginFill` only
-  when it overflows); figures always show whole. Pins: `margin_threads.pinned`
+  closed note shows its whole text and dims to .7 until lit; its text as a whole
+  stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
+  the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
+  read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
   (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}`; a pinned or newest read-along note
   (`marginPage.newest`, `data-newest`) stays undimmed. An open thread's

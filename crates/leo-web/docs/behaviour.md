@@ -939,7 +939,7 @@ target. Check the page sequence after loading preferences.
   too narrow. There is no × : Esc (from anywhere on the page, after an open sheet or menu) or a click outside closes it, and a reply typed in it stays for the next opening (an unsent ask only closes by Esc or Cancel while it holds text); `.margin-toggle` stays the closed note's opener, its
   `aria-expanded` and the focus target, and takes no clicks while open. Closed notes show their whole text
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
-  block over 12 lines stops there with a bottom fade (`.margin-cut`, set only when it overflows), figures and drawings
+  text as a whole stops at 12 lines with a bottom fade on the last shown block (`.margin-cut`, set only when it overflows; later text blocks hide), figures and drawings
   always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
   keeps the closed note undimmed with a faint tether. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).

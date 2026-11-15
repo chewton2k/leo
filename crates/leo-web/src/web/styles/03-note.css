@@ -80,7 +80,8 @@
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color .14s ease-out, box-shadow .14s ease-out, opacity .14s ease-out; }
 .margin-note:not([data-open], [data-pinned], [data-newest], [data-active]) { opacity: .7; }
-.margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: calc(15px * var(--read) * 1.46 * 12); overflow: hidden; }
+.margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: var(--room, none); overflow: hidden; }
+.margin-note:not([data-open]) .margin-over { margin-block: 0; }
 .margin-cut { mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent); }
 .margin-note[data-open] :is(.margin-said, .margin-pending) { border-left: 1px solid var(--line); padding-left: 10px; }
 .margin-note[data-active]:not([data-open]) { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent); }
