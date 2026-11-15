@@ -1,7 +1,7 @@
 .kanban-page { min-width: 0; }
 .kanban-none { display: flex; flex-direction: column; align-items: center; padding-bottom: 40px; }
 .kanban-none .empty { padding-bottom: 18px; }
-.kanban-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; height: calc(100dvh - var(--bar-height) - var(--bottom) - 34px); }
+.kanban-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; height: calc(100dvh - var(--bar-height) - var(--bottom) - 20px); }
 .kanban-board { min-width: 0; min-height: 0; }
 .kanban-board > .kanban-page { height: 100%; display: flex; flex-direction: column; }
 .kanban-head { flex: none; display: flex; align-items: center; gap: 6px; min-height: 36px; margin: 14px 0 12px; }
@@ -140,7 +140,7 @@ body.kanban-panel-on .kanban-layout { grid-template-columns: minmax(0, 1fr) min(
 .kanban-sheet .set-row .kanban-status select { padding-left: 28px; }
 @media (max-width: 599px) {
   body.on-boards main { padding-left: 12px; padding-right: 12px; padding-bottom: calc(var(--bottom) + 12px); }
-  .kanban-layout { height: calc(100dvh - var(--bar-height) - var(--bottom) - 26px); }
+  .kanban-layout { height: calc(100dvh - var(--bar-height) - var(--bottom) - 12px); }
   .kanban-cols { scroll-snap-type: x proximity; gap: 10px; }
   .kanban-col { flex: 0 0 min(82vw, 320px); scroll-snap-align: start; }
   .kanban-tab { max-width: 140px; }
