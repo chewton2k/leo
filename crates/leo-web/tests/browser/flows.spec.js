@@ -5228,6 +5228,12 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.goto(`/#/n/${note.id}`);
   const img = page.locator('#doc img.note-img');
   await expect(img).toBeVisible();
+  const beside = await img.boundingBox();
+  await page.mouse.click(beside.x + beside.width + 40, beside.y + beside.height / 2);
+  await expect(img).toHaveClass(/picked/);
+  await expect(page.locator('#doc textarea')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(img).not.toHaveClass(/picked/);
   await img.click();
   await expect(img).toHaveClass(/picked/);
   await expect(page.locator('#doc textarea')).toHaveCount(0);

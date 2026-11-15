@@ -1578,6 +1578,11 @@
         editLine(lines.length - 1, 'end', false);
         return;
       }
+      const lone = !blk.textContent.trim() && blk.querySelector('img.note-img');
+      if (lone) {
+        frame(lone);
+        return;
+      }
       const block = blocks[Number(blk.dataset.i)];
       const prefix = block && block.kind === 'line' ? caretIn(blk, e.clientX, e.clientY) : null;
       const line = shifted(Number(blk.dataset.start));
