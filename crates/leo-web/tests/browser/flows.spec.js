@@ -1105,9 +1105,10 @@ test.describe('Felix', () => {
     await page.waitForTimeout(400);
     const room = () => page.evaluate(() => document.querySelector('main').getBoundingClientRect().width);
     const open = await room();
-    const left = await page.evaluate(() => {
+    const left = await page.evaluate(async () => {
       const panel = document.getElementById('chat');
       panel.querySelector('[data-chat="close"]').click();
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
       return { leaving: panel.classList.contains('chat-leaving'), hidden: panel.hidden, open: document.body.classList.contains('chat-open'), room: document.querySelector('main').getBoundingClientRect().width };
     });
     expect(left.leaving).toBe(true);
