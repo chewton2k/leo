@@ -1039,10 +1039,11 @@ target. Check the page sequence after loading preferences.
   least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins alternates: a
   free note takes the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
-  `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 1,192 px.
+  `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 992 px.
   Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:
-  the room beside the note's own width less the gap and the window padding, 240 to 360 px. Both keeps notes on
-  both sides whenever both fit; it never moves every note right to make them wider. The margin is
+  the room beside the note's own width less the gap and the window padding: 240 to 360 px on the right, 180 to 360 px
+  per side with Both. Both holds on as long as it stays readable: the notes shrink to 180 px first, then the column to
+  520 px; only then does it become Right, and marks below that. It never moves every note right to make them wider. The margin is
   reserved up front on every note, in both modes, whatever its threads
   (2026-11-04, the orchestrator's decision): `.note-columns[data-margin]` pads the
   column, so the note is min(its note width, the room left) and sits left of centre,

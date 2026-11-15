@@ -151,7 +151,8 @@ test('reading dots never move notes: free spot, then the other side, then below 
 });
 
 test('layout: the margin is reserved up front, with or without threads', () => {
-  assert.equal(M.arrangement({ width: 1076 }), 'right');
+  assert.equal(M.arrangement({ width: 960 }), 'right');
+  assert.equal(M.arrangement({ width: 1076 }), 'both');
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT }), 'right');
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1 }), 'marks');
   assert.equal(M.arrangement.length, 1);
@@ -169,16 +170,21 @@ test('layout: marks only by choice, full width or with Felix open', () => {
   assert.equal(M.arrangement({ width: 1600, panel: true }), 'marks');
 });
 
-test('width: notes fill the room beside the column, 240 to 360 px', () => {
+test('width: notes fill the room beside the column, 240 to 360 px on one side and 180 to 360 on both', () => {
   assert.equal(M.marginWidth({ width: 1600, column: 980, layout: 'right' }), M.MOST_MARGIN);
   assert.equal(M.marginWidth({ width: 1200, column: 980, layout: 'right' }), M.MARGIN_WIDTH);
   assert.equal(M.marginWidth({ width: 1400, column: 980, layout: 'right' }), 1400 - 980 - 64 - M.MARGIN_GAP);
   assert.equal(M.marginWidth({ width: 1800, column: 980, layout: 'both' }), Math.floor((1800 - 980 - 64) / 2) - M.MARGIN_GAP);
   assert.equal(M.marginWidth({ width: 2400, column: 980, layout: 'both' }), M.MOST_MARGIN);
+  assert.equal(M.marginWidth({ width: 1440, column: 980, layout: 'both' }), M.LEAST_SHARED);
+  assert.equal(M.marginWidth({ width: 1500, column: 760, layout: 'both' }), Math.floor((1500 - 760 - 64) / 2) - M.MARGIN_GAP);
   assert.equal(M.marginWidth({ width: 1600, layout: 'right' }), M.MARGIN_WIDTH);
 });
 
 test('width: Both keeps notes on both sides whenever both fit, too narrow stays marks', () => {
+  assert.equal(M.ROOM_BOTH, 48 + M.SHARED_COLUMN + 2 * (M.MARGIN_GAP + M.LEAST_SHARED) + 16);
+  assert.equal(M.arrangement({ width: 1100, column: 980 }), 'both');
+  assert.ok(M.ROOM_BOTH > M.ROOM_RIGHT);
   assert.equal(M.arrangement({ width: 1600, column: 980 }), 'both');
   assert.equal(M.arrangement({ width: 1440, column: 980 }), 'both');
   assert.equal(M.arrangement({ width: 1900, column: 980 }), 'both');
@@ -196,9 +202,10 @@ test('width: notes never squeeze the column below its least width', () => {
       const size = M.marginWidth({ width, column, layout });
       const sides = layout === 'both' ? 2 : 1;
       const left = width - 64 - sides * (size + M.MARGIN_GAP);
-      assert.ok(size >= M.MARGIN_WIDTH && size <= M.MOST_MARGIN, `${width} ${column}`);
-      assert.ok(left >= M.LEAST_COLUMN, `${width} ${column} ${layout}`);
-      if (size > M.MARGIN_WIDTH) assert.ok(left >= column, `${width} ${column} ${layout}`);
+      const least = layout === 'both' ? M.LEAST_SHARED : M.MARGIN_WIDTH;
+      assert.ok(size >= least && size <= M.MOST_MARGIN, `${width} ${column}`);
+      assert.ok(left >= (layout === 'both' ? M.SHARED_COLUMN : M.LEAST_COLUMN), `${width} ${column} ${layout}`);
+      if (size > least) assert.ok(left >= column, `${width} ${column} ${layout}`);
     }
   }
 });
@@ -239,7 +246,8 @@ test('drawing: a wave spans its width', () => {
  test('both margins are the default, saved choices and narrow fallback survive', () => {
   assert.equal(M.arrangement({ width: 1800 }), 'both');
   assert.equal(M.arrangement({ width: 1800, setting: 'right' }), 'right');
-  assert.equal(M.arrangement({ width: 1000 }), 'right');
+  assert.equal(M.arrangement({ width: 1000 }), 'both');
+  assert.equal(M.arrangement({ width: 960 }), 'right');
   assert.equal(M.arrangement({ width: 800 }), 'marks');
 });
 

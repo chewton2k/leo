@@ -521,9 +521,13 @@ Felix (2026-10-19).
   row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
   closed opener and focus target and takes no clicks while open.
 - Width: `marginLayout` sets `--margin-w` each pass from `marginKit.arrangement`
-  and `marginWidth` (room beside the note's `max-width`, 240–360 px). Both
-  stays on both sides whenever both fit (`ROOM_BOTH`); it never moves every note right
-  to make them wider (2026-11-15, the user's call).
+  and `marginWidth`: notes autosize to the room beside the note's `max-width`
+  (Right 240–360 px beside a column of at least `LEAST_COLUMN` 600; Both 180–360 px
+  per side). Both holds on as long as it stays readable (2026-11-15, the user's
+  call): notes shrink to `LEAST_SHARED` (180 px, about 22 characters a line) first,
+  then the column to `SHARED_COLUMN` (520 px, about 65 characters), and only below
+  `ROOM_BOTH` (992 px of columns) does it become Right, then marks below
+  `ROOM_RIGHT`. It never moves every note right to make them wider.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`

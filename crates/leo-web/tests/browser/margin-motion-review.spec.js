@@ -382,7 +382,7 @@ test.describe('whole notes and pins', () => {
       await expect(pin).toHaveAttribute('aria-pressed', 'true');
       expect(await pin.evaluate((el) => getComputedStyle(el.querySelectorAll('svg path')[1]).fill)).not.toBe('none');
       expect(await pin.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
-      expect(await page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
+      await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
       await page.mouse.click(5, 5);
       await expect(note).not.toHaveAttribute('data-open', '');
       await expect(note).toHaveAttribute('data-pinned', '');

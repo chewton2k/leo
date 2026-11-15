@@ -3,6 +3,8 @@
 
   const MARGIN_WIDTH = 240;
   const MOST_MARGIN = 360;
+  const LEAST_SHARED = 180;
+  const SHARED_COLUMN = 520;
   const MARGIN_GAP = 24;
   const TICK_GUTTER = 48;
   const END_GUTTER = 16;
@@ -134,7 +136,7 @@
   }
 
   const ROOM_RIGHT = TICK_GUTTER + LEAST_COLUMN + MARGIN_GAP + MARGIN_WIDTH + END_GUTTER;
-  const ROOM_BOTH = ROOM_RIGHT + MARGIN_WIDTH + MARGIN_GAP;
+  const ROOM_BOTH = TICK_GUTTER + SHARED_COLUMN + 2 * (MARGIN_GAP + LEAST_SHARED) + END_GUTTER;
 
   function room(width, column, sides) {
     return Math.floor((width - column - TICK_GUTTER - END_GUTTER) / sides) - MARGIN_GAP;
@@ -146,7 +148,8 @@
   }
 
   function marginWidth({ width, column = Infinity, layout }) {
-    return Math.min(MOST_MARGIN, Math.max(MARGIN_WIDTH, room(width, column, layout === 'both' ? 2 : 1)));
+    const both = layout === 'both';
+    return Math.min(MOST_MARGIN, Math.max(both ? LEAST_SHARED : MARGIN_WIDTH, room(width, column, both ? 2 : 1)));
   }
 
   function wordDelay(index, count) {
@@ -229,7 +232,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);
