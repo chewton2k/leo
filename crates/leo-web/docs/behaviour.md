@@ -125,8 +125,13 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
   Search button, the header search button or the phone menu opens one line
   (`sheets.js` `quickLeo`, toggled by `toggleQuickLeo`). It is also the search
-  bar (2026-11-03, the user's call): every query offers "Search every note",
-  which opens `#/search/<query>`; only that results page shows `#search`. It
+  bar (2026-11-03, the user's call): every query offers "Search every note for
+  “…”", which opens `#/search/<query>`; only that results page shows `#search`.
+  The four action rows read as what Enter does (2026-11-15, the user's call): Ask
+  Felix about “…”, Search every note for “…”, Add “…” to tasks (to today’s tasks, or
+  to tasks for its day and time) and Start a note called “…”, the verb in
+  `--muted` (`.quick-verb`) and the words in ink, with only ↵ on the right; note,
+  folder, chat and place rows keep their name and kind. It
   drops in from the top on desktop. Escape is always `preventDefault`ed in a
   capture listener, so it closes sheets and never leaves macOS full screen. It works like Spotlight
   (2026-10-19, the user's call): no title, modes or buttons, near the top of

@@ -5370,7 +5370,7 @@ test('Quick Leo is one Spotlight-style line that works out what you want: a remi
   const top = box.locator('.quick-row.on');
   await input.fill(`email Bob ${tag} tomorrow at 3pm`);
   await expect(top).toContainText(`email Bob ${tag}`);
-  await expect(top).toContainText('Reminder · Tomorrow, 3');
+  await expect(top).toContainText(`Add “email Bob ${tag}” to tasks for tomorrow, 3`);
   await input.press('Enter');
   await expect(box).toHaveCount(0);
   await expect(page.locator('.toast')).toContainText(`Added “email Bob ${tag}”`);
@@ -5380,17 +5380,19 @@ test('Quick Leo is one Spotlight-style line that works out what you want: a remi
   await page.keyboard.press('ControlOrMeta+k');
   await input.fill(`Pay rent ${tag}`);
   await expect(box.locator('.quick-row')).toHaveCount(4);
-  await expect(top).toContainText('Add to tasks');
+  await expect(top).toContainText(`Add “Pay rent ${tag}” to tasks`);
+  await expect(top.locator('.quick-verb')).toHaveText(['Add', 'to tasks']);
+  await expect(top.locator('.quick-hint')).toHaveCount(0);
   await input.press('ArrowDown');
-  await expect(top).toContainText('Ask Felix');
+  await expect(top).toContainText(`Ask Felix about “Pay rent ${tag}”`);
   await input.press('ArrowUp');
-  await expect(top).toContainText('Add to tasks');
+  await expect(top).toContainText(`Add “Pay rent ${tag}” to tasks`);
   await input.press('Enter');
   await expect(page.locator('.toast')).toContainText(`Added “Pay rent ${tag}”`);
 
   await page.keyboard.press('ControlOrMeta+k');
   await input.fill(`note: Idea ${tag}`);
-  await expect(top).toContainText('New note');
+  await expect(top).toContainText(`Start a note called “Idea ${tag}”`);
   await input.press('Enter');
   await expect(page.locator('.toast')).toContainText(`Saved “Idea ${tag}”`);
 
@@ -5402,7 +5404,7 @@ test('Quick Leo is one Spotlight-style line that works out what you want: a remi
 
   await page.keyboard.press('ControlOrMeta+k');
   await input.fill(`Idea ${tag}`);
-  await box.locator('.quick-row', { hasText: 'Search every note' }).click();
+  await box.locator('.quick-row', { hasText: `Search every note for “Idea ${tag}”` }).click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#/search/Idea ${tag}`);
   await expect(page.locator('.side-note').filter({ hasText: `Idea ${tag}` })).toBeVisible();
   await expect(page.locator('#search-input')).toBeVisible();
