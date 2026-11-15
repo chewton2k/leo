@@ -189,6 +189,53 @@ test('a board shows columns of cards, and cards drag between columns and onto an
   });
 });
 
+test('priority is one to three pencil strokes before the title, with the word kept as hidden text', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const mark = id => page.locator(`[data-card="${id}"] .kanban-priority`);
+    await expect(mark('cessay0001').locator('path')).toHaveCount(3);
+    await expect(mark('cemail0001').locator('path')).toHaveCount(1);
+    await expect(mark('cread00001')).toHaveCount(0);
+    await expect(mark('cessay0001')).toHaveAttribute('title', 'High priority');
+    await expect(mark('cessay0001').locator('.kanban-priority-word')).toHaveText('High priority');
+    await expect(page.locator('[data-card="cessay0001"]')).toContainText('High priority');
+    expect(await titles(page, 'ktodo00001')).toEqual(['Write essay', 'Read chapter 3']);
+    const look = await page.evaluate(() => {
+      const card = document.querySelector('[data-card="cessay0001"]');
+      const strokes = card.querySelector('.kanban-priority svg').getBoundingClientRect();
+      const title = card.querySelector('.kanban-card-title');
+      return { indent: getComputedStyle(title).textIndent, plain: getComputedStyle(document.querySelector('[data-card="cread00001"] .kanban-card-title')).textIndent, strokesRight: strokes.right, titleLeft: title.getBoundingClientRect().left, height: strokes.height, color: getComputedStyle(card.querySelector('.kanban-priority')).color === getComputedStyle(title).color };
+    });
+    expect(look.indent).toBe('24px');
+    expect(look.plain).toBe('0px');
+    expect(look.strokesRight).toBeLessThan(look.titleLeft + 24);
+    expect(look.height).toBe(14);
+    expect(look.color, 'the strokes are ink, not a hue').toBe(true);
+  });
+});
+
+test('a dragged card tilts while lifted and lands flat, never under Reduced Motion', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const lifted = async () => {
+      const card = await page.locator('[data-card="cread00001"]').boundingBox();
+      await page.mouse.move(card.x + 20, card.y + 10);
+      await page.mouse.down();
+      await page.mouse.move(card.x + 120, card.y + 60, { steps: 6 });
+      await expect(page.locator('.kanban-ghost')).toHaveCount(1);
+      await page.waitForTimeout(250);
+      return page.evaluate(() => getComputedStyle(document.querySelector('.kanban-ghost')).getPropertyValue('--tilt'));
+    };
+    expect(await lifted()).toBe('1.5deg');
+    await page.mouse.up();
+    await expect(page.locator('.kanban-ghost')).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => document.getAnimations().length)).toBe(0);
+    expect(await page.evaluate(() => getComputedStyle(document.querySelector('[data-card="cread00001"]')).transform)).toBe('none');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    expect(await lifted()).toBe('0deg');
+    await page.mouse.up();
+    await expect(page.locator('.kanban-ghost')).toHaveCount(0);
+  });
+});
+
 test('cards are added, opened, edited, moved by keyboard and deleted with undo', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     await page.locator('[data-action="kanban-add-card"][data-col="ktodo00001"]').click();

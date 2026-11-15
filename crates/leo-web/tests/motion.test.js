@@ -143,6 +143,20 @@ test('a settling object takes a slight curve and ends exactly in place', () => {
   assert.equal(played[0].at(-1).transform, 'none');
 });
 
+test('a tilted card settles back to flat, and only a drop that was tilted rotates', () => {
+  const played = [];
+  const el = () => ({ dataset: {}, getBoundingClientRect: () => ({ left: 100, top: 100 }), animate: (frames) => { played.push(frames); return {}; } });
+  const m = motion({ performance: { now: () => 0 } });
+  m.settleLater('kanban-card', 'a', { left: 120, top: 90, tilt: 1.5 });
+  m.settleNow('kanban-card', el);
+  assert.equal(played[0][0].transform, 'translate(20px, -10px) scale(1.02) rotate(1.5deg)');
+  assert.match(played[0].at(-2).transform, /rotate\(0\.\d+deg\)$/);
+  assert.equal(played[0].at(-1).transform, 'none');
+  m.settleLater('cal', 'b', { left: 120, top: 90, tilt: 0 });
+  m.settleNow('cal', el);
+  assert.ok(played[1].every((frame) => !frame.transform.includes('rotate')));
+});
+
 test('no two parts of the page script declare the same top-level function', () => {
   const parts = [...fs.readFileSync(path.join(__dirname, '../src/routes/assets.rs'), 'utf8').matchAll(/include_str!\("\.\.\/web\/(app\/[^"]+)"\)/g)].map((m) => m[1]);
   assert.ok(parts.length > 10);

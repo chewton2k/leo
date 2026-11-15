@@ -68,14 +68,17 @@ body.kanban-dragging .kanban-tab.kanban-over { display: inline-flex; }
 .kanban-card.open { box-shadow: 0 0 0 2px var(--text); }
 .kanban-card-sub { margin-top: 2px; font-size: var(--fs-sm); line-height: 1.35; color: var(--muted); overflow-wrap: anywhere; }
 .kanban-has-text { margin-top: 4px; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); overflow-wrap: anywhere; white-space: pre-line; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
-.kanban-priority { float: right; margin: 1px -2px 0 8px; }
-.kanban-priority svg { display: block; width: 16px; height: 16px; }
-.kanban-priority.high { color: var(--hue-red); }
-.kanban-priority.medium { color: var(--hue-amber); }
-.kanban-priority.low { color: var(--hue-0); }
+.kanban-priority { position: absolute; left: 12px; top: calc(12px + (var(--fs-base) * 1.35 - 14px) / 2); line-height: 0; color: var(--text); }
+.kanban-priority svg { display: block; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; opacity: .6; overflow: visible; }
+.kanban-priority-word { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.kanban-priority.low + .kanban-card-title { text-indent: 16px; }
+.kanban-priority.medium + .kanban-card-title { text-indent: 20px; }
+.kanban-priority.high + .kanban-card-title { text-indent: 24px; }
 .kanban-card.kanban-placeholder, .kanban-col.kanban-placeholder { background: color-mix(in srgb, var(--text) 8%, transparent); box-shadow: none; }
 .kanban-placeholder > * { visibility: hidden; }
 .kanban-ghost { position: fixed; left: 0; top: 0; z-index: 1000; margin: 0; pointer-events: none; overflow: hidden; scale: 1.02; box-shadow: var(--shadow-lift); opacity: .96; }
+@property --tilt { syntax: "<angle>"; inherits: false; initial-value: 0deg; }
+@media (prefers-reduced-motion: no-preference) { .kanban-card.kanban-ghost { --tilt: 1.5deg; } }
 body.kanban-dragging, body.kanban-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }
 .kanban-add-card { flex: none; box-sizing: border-box; display: flex; align-items: center; gap: 6px; width: calc(100% - 16px); min-height: 32px; margin: 6px 8px 8px; padding: 4px 12px; border: 0; border-radius: calc(var(--radius) - 8px); background: none; color: var(--lane-ink); font-size: var(--fs-sm); font-weight: 550; text-align: left; }
 .kanban-add-card svg, .kanban-head .btn svg { width: 15px; height: 15px; flex: none; }
