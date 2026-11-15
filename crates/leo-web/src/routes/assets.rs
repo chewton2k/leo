@@ -219,6 +219,11 @@ const FONTS: &[(&str, &[u8], &str)] = &[
         "font/woff2",
     ),
     (
+        "instrument-sans-latin-wght-italic.woff2",
+        include_bytes!("../web/vendor/fonts/instrument-sans-latin-wght-italic.woff2"),
+        "font/woff2",
+    ),
+    (
         "newsreader-latin-opsz-normal.woff2",
         include_bytes!("../web/vendor/fonts/newsreader-latin-opsz-normal.woff2"),
         "font/woff2",

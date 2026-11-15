@@ -57,7 +57,7 @@ This file holds the rules. How each screen behaves, area by area, is in
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
   fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
-  variable fonts Instrument Sans (note titles and text, `--writing-font`) and
+  variable fonts Instrument Sans (note titles and text, `--writing-font`, roman and italic) and
   Newsreader (Felix's margin voice, `--voice`, roman and italic; SIL OFL,
   @fontsource-variable 5.3.0) are vendored under `web/vendor/` (checked against
   npm's sha512, served `immutable`; the fonts at `/vendor/fonts-5.3.0/`, their
