@@ -328,6 +328,22 @@ test('the home dateline shortens titles, skips events made from tasks and keeps 
   }
 });
 
+test('task dates read as words: today, tomorrow, a weekday within a week either way, then the date', () => {
+  const now = new Date(2026, 10, 12, 14, 20);
+  const word = (key) => S.dayWord(key, now, 'en-US');
+  assert.equal(word('2026-11-12'), 'Today');
+  assert.equal(word('2026-11-13'), 'Tomorrow');
+  assert.equal(word('2026-11-17'), 'Tue');
+  assert.equal(word('2026-11-18'), 'Wed');
+  assert.equal(word('2026-11-19'), 'Nov 19');
+  assert.equal(word('2026-11-11'), 'Wed');
+  assert.equal(word('2026-11-10'), 'Tue');
+  assert.equal(word('2026-11-06'), 'Fri');
+  assert.equal(word('2026-11-05'), 'Nov 5');
+  assert.equal(word('2026-11-03'), 'Nov 3');
+  assert.equal(S.dayWord('2026-11-02', new Date(2026, 10, 1, 23, 30), 'en-US'), 'Tomorrow', 'a clock change in between still counts whole days');
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try {

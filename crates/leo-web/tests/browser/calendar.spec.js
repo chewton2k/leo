@@ -170,9 +170,41 @@ test('the calendar fills the room beside the explorer and shows a week of events
     await expect(page.locator('.cal-col[data-day="2026-11-02"] .cal-item', { hasText: 'Gym' })).toHaveCount(1);
     await expect(page.locator('.cal-col[data-day="2026-11-04"] .cal-item', { hasText: 'Gym' })).toHaveCount(1);
     await expect(page.locator('.cal-item[data-id="task-note"] .cal-grip')).toHaveCount(0);
-    await expect(page.locator('.cal-tray-list h2.late')).toContainText('Overdue');
+    await expect(page.locator('.cal-tray-list h2.late')).toContainText('Earlier');
+    await expect(page.locator('.cal-tray-list h2.late')).not.toContainText('Overdue');
+    const rent = page.locator('.cal-tray-row', { hasText: 'Pay rent' }).locator('.cal-sub');
+    await expect(rent, 'an earlier task within the week says its weekday').toHaveText('Sun');
+    await expect(rent).toHaveAttribute('title', 'Sunday, November 1');
     await expect(page.locator('.cal-tray-row', { hasText: 'Draft essay outline' })).toBeVisible();
   }, { width: 1900 });
+});
+
+test('today\'s past hours sit under a faint wash that ends at the now-line, beneath the events, in Week and Day', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const look = () => page.evaluate(() => {
+      const col = document.querySelector('.cal-col[data-day="2026-11-03"]');
+      const past = col.querySelector(':scope > .cal-past');
+      const now = col.querySelector(':scope > .cal-now');
+      const item = col.querySelector('.cal-item');
+      return {
+        washes: document.querySelectorAll('.cal-past').length,
+        height: past.getBoundingClientRect().height,
+        now: now.getBoundingClientRect().top - col.getBoundingClientRect().top,
+        top: past.getBoundingClientRect().top - col.getBoundingClientRect().top,
+        below: Number(getComputedStyle(item).zIndex) > 0 && getComputedStyle(past).zIndex === 'auto',
+        clicks: getComputedStyle(past).pointerEvents,
+        wash: getComputedStyle(past).backgroundColor,
+      };
+    });
+    const week = await look();
+    expect(week).toMatchObject({ washes: 1, top: 0, below: true, clicks: 'none' });
+    expect(week.height).toBeCloseTo((11 * 60 + 40) / 60 * 48, 0);
+    expect(Math.abs(week.height - week.now)).toBeLessThan(1);
+    expect(week.wash).not.toBe('rgba(0, 0, 0, 0)');
+    await page.locator('.cal-views [data-view="day"]').click();
+    await settled(page);
+    expect(await look()).toMatchObject({ washes: 1, top: 0, below: true });
+  });
 });
 
 test('a narrow week column shows one whole tile and a count beside it for overlapping events', async ({ browser }) => {
@@ -244,7 +276,7 @@ test('the task sidebar creates undated tasks from its empty state', async ({ bro
   await calendarFixture(browser, async page => {
     await page.evaluate(async () => { window.db.tasks = []; await loadSchedule(); });
     const side = page.locator('#cal-side');
-    await expect(side).toContainText('Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.');
+    await expect(side).toContainText('Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.');
     await expect(side.locator('svg.drawn-tasks')).toBeVisible();
     await side.getByRole('button', { name: 'New task', exact: true }).click();
     await expect(page.locator('#task-title')).toBeFocused();

@@ -309,6 +309,13 @@
     return at.toLocaleTimeString(locale || undefined, { hour: 'numeric', minute: '2-digit' });
   }
 
+  function dayWord(key, now, locale) {
+    const ahead = Math.round((fromKey(key) - fromKey(dayKey(now))) / 864e5);
+    if (ahead === 0) return 'Today';
+    if (ahead === 1) return 'Tomorrow';
+    return fromKey(key).toLocaleDateString(locale || undefined, Math.abs(ahead) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' });
+  }
+
   const TEXT_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
   const escapeText = (text) => String(text).replace(/[&<>"']/g, (c) => TEXT_ESCAPES[c]);
   const NAMED = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'" };
@@ -600,7 +607,7 @@
     return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
   }
 
-  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, nextWeekday };
+  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, dayWord, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

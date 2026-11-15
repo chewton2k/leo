@@ -362,7 +362,8 @@ function calColumn(key, plan, today, room = Infinity) {
   let now = '';
   if (key === today) {
     const at = new Date();
-    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
+    const top = ((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX;
+    now = `<div class="cal-past" style="height: ${top}px" aria-hidden="true"></div><div class="cal-now" style="top: ${top}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
   }
   const wknd = [0, 6].includes(S.fromKey(key).getDay()) ? ' weekend' : '';
   return `<div class="cal-col${wknd}" data-day="${key}">${blocks}${now}</div>`;
@@ -422,8 +423,8 @@ function calMini(today) {
 }
 
 function calTrayRow(task) {
-  const when = task.date ? S.fromKey(task.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }) : '';
-  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub">${esc(when)}</span>` : ''}</button></div>`;
+  const when = task.date ? S.dayWord(task.date, new Date(), calLocale()) : '';
+  return `<div class="cal-tray-row" data-kind="task" data-id="${esc(task.id)}"${calMovable(task) ? ' data-drag="tray"' : ''} style="--tone: var(${task.date ? '--hue-red' : toneOfTask(task)})">${calCheck(task)}<button type="button" class="cal-open" data-action="cal-open" data-kind="task" data-id="${esc(task.id)}"><span class="cal-title">${esc(task.title)}</span>${when ? `<span class="cal-sub" title="${esc(S.fromKey(task.date).toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${esc(when)}</span>` : ''}</button></div>`;
 }
 
 function calTray(plan, today) {
@@ -433,7 +434,7 @@ function calTray(plan, today) {
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Overdue', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
 }
 
 function drawCalendar() {
@@ -1586,6 +1587,7 @@ async function openTaskAnywhere(id, on = null) {
 
 var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
 const TASKS_AHEAD_DAYS = 7;
+const TASK_GROUP_NAMES = { Overdue: 'Earlier' };
 const TASK_DONE_MS = 1200;
 const TASKS_LEAST_ROOM = 150;
 const MOST_TASK_FEEDBACK = 80;
@@ -1681,22 +1683,22 @@ function tasksDue() {
 function tasksDueBadge() {
   const { late, due } = tasksDue();
   if (!due) return '';
-  return `<span class="due-badge${late ? ' late' : ''}" aria-label="${esc(late ? `${due} due, ${late} overdue` : `${due} due today`)}">${due} due</span>`;
+  return `<span class="due-badge${late ? ' late' : ''}" aria-label="${esc(late ? `${due} due, ${late} from earlier` : `${due} due today`)}">${due} due</span>`;
 }
 
 const tasksAtHome = () => state.view === 'workspace' && /^(?:#\/?)?$/.test(location.hash);
 const tasksHost = () => (tasksAtHome() && document.getElementById('home-today')) || tasksBox;
 
-function tasksRow(t, when) {
+function tasksRow(t) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
     <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when">${esc(when || (t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' })))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+    ${t.date ? `<span class="tasks-when" title="${esc(S.fromKey(t.date).toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${esc(t.date === S.dayKey(new Date()) && t.time ? S.timeLabel(t.time, calLocale()) : S.dayWord(t.date, new Date(), calLocale()))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
 }
 
 function tasksRows(groups) {
-  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
+  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${TASK_GROUP_NAMES[name] || name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
 }
 
 function tasksFocus(host) {
@@ -1725,10 +1727,9 @@ function drawHomeToday() {
   const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
   const day = today.slice(0, HOME_ROWS - early.length);
   const more = earlier.length + today.length - early.length - day.length;
-  const ago = (t) => (S.fromKey(S.dayKey(now)) - S.fromKey(t.date)) / 864e5;
   const focus = tasksFocus(box);
   box.hidden = !early.length && !day.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t, S.fromKey(t.date).toLocaleDateString(calLocale(), ago(t) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }))).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
   const root = side.notes.get('');
@@ -1756,7 +1757,7 @@ function drawTasksWindow() {
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
   const focus = tasksFocus(tasksBox);
-  const label = late ? `${late[1].length} overdue · ${open} to do` : `${open} to do`;
+  const label = late ? `${late[1].length} from earlier · ${open} to do` : `${open} to do`;
   tasksBox.setAttribute('aria-label', `Tasks: ${label}`);
   tasksBox.innerHTML = `<div class="tasks-head">
       <div class="tasks-toggle"><span class="tasks-icon${late ? ' late' : ''}">${ICON.check}</span><span class="tasks-badge${late ? ' late' : ''}">${open > 99 ? '99+' : open}</span><span class="grow">Tasks <span class="tasks-count">${esc(label)}</span></span></div>
