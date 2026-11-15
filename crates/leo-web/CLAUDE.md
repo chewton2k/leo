@@ -199,7 +199,9 @@ Decided: one app, window only (2026-10-31).
   (`.margin-waiting` or the gutter `.margin-mark.reading`) and pencil
   (`path.pencil`), the caret after a
   streaming reply (`.msg.pending`) and the dot on his button
-  (`#chat-toggle.working`, synced with the chat body's `aria-busy`). Never links,
+  (`#chat-toggle.working`, synced with the chat body's `aria-busy`), and while he
+  waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
+  reply's proposals until Apply or Dismiss (no coloured edge). Never links,
   buttons, selection, tags or text.
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at

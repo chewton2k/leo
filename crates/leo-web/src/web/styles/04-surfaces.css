@@ -148,6 +148,8 @@
 @keyframes step-spin { to { transform: rotate(360deg); } }
 .proposal { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: grid; gap: 6px; }
 .proposal-title { font-weight: 650; font-size: var(--fs-base); }
+.proposal-wait { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--felix); }
+.proposal-wait i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .proposal-why, .proposal-note, .proposal-done { font-size: var(--fs-sm); color: var(--muted); }
 .proposal-old, .proposal-new { white-space: pre-wrap; font-size: var(--fs-sm); padding: 6px 8px; border-radius: var(--r-tile); }
 .proposal-old { background: color-mix(in srgb, var(--danger) 12%, transparent); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--danger) 60%, transparent); }

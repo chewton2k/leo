@@ -727,6 +727,10 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   be in the note; Undo is `remove_margin_note`) redraws the open note's margin
   (`MARGIN_KINDS`); it never changes the note. The text manual stays under
   14,500 bytes. `MOST_PROPOSALS` counts every change tool.
+  A proposal still waiting for Apply in Felix's latest reply carries a small
+  "Waiting for you" label with a dot in Felix's blue (no coloured edge; Apply stays an
+  ink button and the diff keeps its red and green); Apply or Dismiss removes it at once,
+  and proposals in older replies never show it (2026-11-15).
 
 - Choosing the model (`routing.rs`, 2026-11-06, the user's call; same shape as Copilot Auto and Cursor Router, with rules instead of a trained classifier because leo has one user and a classifier call would cost tokens): `routing::light` sends only obvious cases (short lookups and greetings, no attachments, files, selection, study or Auto access, at most six turns) to the cheapest model of the chosen AI (`ai::quick_config`, through `Instructions.light` or `Powers.light_chat` when no session opens, as on a Codex without app-server isolation); every doubt stays on the chosen model, and other languages stay there too. `Powers.lighter` turns routing off when the quick tier is the same model and effort, and a failing light writer gives way to the chosen one on the last try, so `Auto` always names who really answered. The tier is part of the warm key, and `Slot::light` keeps a warm full chat from moving down, since a switch loses the cache: a chat moves up once when it needs to, never down while warm. Settings → Felix → Cheaper model for lookups (`Prefs.auto_model`, on by default) turns it off; a routed reply says `Auto` in its usage line.
 

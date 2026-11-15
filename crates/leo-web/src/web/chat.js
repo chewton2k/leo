@@ -2128,13 +2128,14 @@
     function proposalCard(p, i, j) {
       const where = `data-i="${i}" data-j="${j}"`;
       if (retiredPractice(p)) return '<div class="proposal-done">Interview practice is no longer part of leo.</div>';
+      const waiting = p.state !== 'applied' && p.state !== 'dismissed' && state.messages.findLastIndex((m) => m.role === 'assistant') === i ? '<div class="proposal-wait"><i aria-hidden="true"></i>Waiting for you</div>' : '';
       if (p.kind !== 'create' && p.kind !== 'edit') {
         const acts = p.state === 'applied'
           ? `<div class="proposal-done">Done · <button class="msg-act" data-chat="undo" ${where}>Undo</button></div>`
           : p.state === 'dismissed'
             ? '<div class="proposal-done">Dismissed</div>'
             : `<div class="proposal-buttons"><button class="btn primary sm" data-chat="apply" ${where}>${p.kind === 'delete_note' || p.kind === 'delete_folder' ? 'Move to trash' : p.kind === 'delete_card' || p.kind === 'delete_board' ? 'Delete' : p.kind === 'restore_note' || p.kind === 'restore_folder' ? 'Bring it back' : 'Do it'}</button><button class="btn plain sm" data-chat="dismiss" ${where}>Dismiss</button></div>`;
-        return `<div class="proposal organize ${escape(p.kind)}"><div class="proposal-title">${escape(p.summary || 'A change')}</div>${typeof p.description === 'string' && (p.kind === 'update_task' || p.description) ? `<div class="proposal-why">${escape(p.description || 'Clear description')}</div>` : ''}${p.kind === 'add_margin_note' ? `<div class="proposal-why">“${escape(p.quote)}”: ${escape(p.text)}</div>` : ''}${acts}</div>`;
+        return `<div class="proposal organize ${escape(p.kind)}">${waiting}<div class="proposal-title">${escape(p.summary || 'A change')}</div>${typeof p.description === 'string' && (p.kind === 'update_task' || p.description) ? `<div class="proposal-why">${escape(p.description || 'Clear description')}</div>` : ''}${p.kind === 'add_margin_note' ? `<div class="proposal-why">“${escape(p.quote)}”: ${escape(p.text)}</div>` : ''}${acts}</div>`;
       }
       const done = p.state === 'applied'
         ? `<div class="proposal-done">${p.kind === 'create' ? 'Made' : 'Applied'} · <button class="msg-act" data-chat="open" data-id="${escape(p.made || p.note || '')}">Open the note</button><button class="msg-act" data-chat="undo" ${where}>Undo</button></div>`
@@ -2143,11 +2144,11 @@
           : `<div class="proposal-buttons"><button class="btn primary sm" data-chat="apply" ${where}>${p.kind === 'create' ? 'Create' : 'Apply'}</button><button class="btn plain sm" data-chat="dismiss" ${where}>Dismiss</button></div>`;
       if (p.kind === 'create') {
         const body = String(p.body || '');
-        return `<div class="proposal"><div class="proposal-title">New note: “${escape(p.title || 'Untitled')}”${p.folder ? ` in ${escape(p.folder)}` : ''}</div>
+        return `<div class="proposal">${waiting}<div class="proposal-title">New note: “${escape(p.title || 'Untitled')}”${p.folder ? ` in ${escape(p.folder)}` : ''}</div>
           <div class="proposal-body prose">${render(body.length > 900 ? `${body.slice(0, 900)}…` : body)}</div>${done}</div>`;
       }
       const old = p.find ? `<div class="proposal-old">${escape(p.find)}</div>` : '<div class="proposal-note">Added at the end:</div>';
-      return `<div class="proposal"><div class="proposal-title">Change to “${escape(p.title || 'a note')}”</div>${p.why ? `<div class="proposal-why">${escape(p.why)}</div>` : ''}
+      return `<div class="proposal">${waiting}<div class="proposal-title">Change to “${escape(p.title || 'a note')}”</div>${p.why ? `<div class="proposal-why">${escape(p.why)}</div>` : ''}
         ${old}<div class="proposal-new">${escape(p.replace || '')}</div>${done}</div>`;
     }
 

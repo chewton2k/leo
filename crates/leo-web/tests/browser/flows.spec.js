@@ -1479,12 +1479,17 @@ test.describe('Felix', () => {
     await expect(steps.first().locator('li')).toHaveText([note.title, 'Heaps']);
     const cards = answer.locator('.proposal');
     await expect(cards).toHaveCount(2);
+    await expect(cards.locator('.proposal-wait')).toHaveText(['Waiting for you', 'Waiting for you']);
+    const waiting = await cards.first().evaluate((el) => { const s = getComputedStyle(el), probe = document.createElement('i'); probe.style.color = 'var(--felix)'; el.append(probe); const felix = getComputedStyle(probe).color; probe.remove(); return { label: getComputedStyle(el.querySelector('.proposal-wait')).color, felix, left: s.borderLeftColor, top: s.borderTopColor, width: s.borderLeftWidth }; });
+    expect(waiting.label).toBe(waiting.felix);
+    expect([waiting.left, waiting.width], 'no coloured edge, only the label').toEqual([waiting.top, '1px']);
     await expect(cards.first().locator('.proposal-old')).toHaveText('newest');
     await expect(cards.first().locator('.proposal-new')).toHaveText('oldest');
     expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe('BFS takes the newest vertex.');
     await cards.first().locator('[data-chat="apply"]').click();
     await expect(cards.first().locator('.proposal-done')).toContainText('Applied');
     expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe('BFS takes the oldest vertex.');
+    await expect(cards.first().locator('.proposal-wait'), 'the blue leaves once it is applied').toHaveCount(0);
     await cards.nth(1).locator('[data-chat="apply"]').click();
     await expect(cards.nth(1).locator('.proposal-done')).toContainText('Made');
     const made = await (await page.request.get(`/api/search?q=${encodeURIComponent(`Waiting lines ${tag}`)}`)).json();
