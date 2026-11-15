@@ -364,8 +364,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
-- Outline: at most 300 headings (excluding code, maths, quotes, tables); preview
-  ≤24 lines / 800 UTF-16 units, escaped; preview updates never redraw the editor.
+- Outline: at most 300 headings (excluding code, maths, quotes, tables), shown on
+  the rail 24 at a time (`OUTLINE_PAGE`) with Earlier/Later arrows; preview
+  ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
+  never redraw the editor.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens
 (2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags hidden on
