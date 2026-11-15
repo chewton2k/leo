@@ -43,6 +43,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     const saving={unsaved:()=>false};
     const flush=async()=>{};
     const showNote=async()=>{};
+    const drawSide=()=>{};
     window.leoTheme={noteWidth:()=>'wide'};
     window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[]};
     async function api(url,{method='GET',body}={}){

@@ -29,6 +29,7 @@
   --page: #faf9f6;
   --raised: #ffffff;
   --tint: #ece9e2;
+  --menu-hover: var(--tint);
   --voice: "Newsreader", ui-serif, "Iowan Old Style", "New York", Georgia, serif;
   --note-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
   --writing-font: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
@@ -96,6 +97,7 @@
     --page: #1d1c1a;
     --raised: #2b2a27;
     --tint: #252421;
+    --menu-hover: var(--wash);
     --shadow: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px -4px rgba(0, 0, 0, .40), inset 0 1px 0 rgba(255, 255, 255, .04);
     --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .05), 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
     --tone-pdf: #ff7a72;
@@ -138,6 +140,7 @@
   --page: #1d1c1a;
   --raised: #2b2a27;
   --tint: #252421;
+  --menu-hover: var(--wash);
   --shadow: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px -4px rgba(0, 0, 0, .40), inset 0 1px 0 rgba(255, 255, 255, .04);
   --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .05), 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
   --tone-pdf: #ff7a72;
