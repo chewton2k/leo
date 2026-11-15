@@ -188,6 +188,7 @@ test('mode updates retain confirmed state after failure and ignore departed note
     h.context.marginModeMenu = () => {};
     const pending = h.context.marginChangeMode('along');
     if (departed) {
+      h.context.marginLeave();
       h.state.s = h.session();
       h.state.changing = true;
       h.settle().resolve({ mode: 'along' });
@@ -801,4 +802,22 @@ test('read through shows the server sentence for a missing writing AI and passes
     h.settle().reject(Object.assign(new Error(message), { status: 503, data: { why: 'no-ai' } }));
     assert.equal((await pending).say, say);
   }
+});
+
+test('pin and resolve change the margin at once and come back when the save fails', async () => {
+  const h = harness();
+  const t = { id: 't1', quote: 'q', pinned: false };
+  h.state.threads = [t];
+  const pin = h.context.marginPin(t);
+  assert.equal(h.context.marginThread('t1').pinned, true);
+  h.settle().reject(new Error('save failed'));
+  await assert.rejects(pin, /save failed/);
+  assert.equal(h.context.marginThread('t1').pinned, false);
+  const resolve = h.context.marginStatus(t, 'resolved');
+  assert.deepEqual([...h.state.threads.map((x) => x.id)], []);
+  assert.deepEqual([...h.state.resolved.map((x) => x.id)], ['t1']);
+  h.settle().reject(new Error('save failed'));
+  await assert.rejects(resolve, /save failed/);
+  assert.deepEqual([...h.state.threads.map((x) => x.id)], ['t1']);
+  assert.equal(h.state.resolved.length, 0);
 });

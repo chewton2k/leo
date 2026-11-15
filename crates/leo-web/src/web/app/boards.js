@@ -756,14 +756,20 @@ async function kanbanCardPanel(id) {
     if (column) box.dataset.tone = kanbanTone(column);
     kanbanMove(card, { column: status.value }).catch(fail);
   });
+  let priorityLatest = 0;
+  let prioritySaved = card.priority || '';
   $('.kanban-priorities', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-priority]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++priorityLatest;
+    kanbanPriorityPick(chip);
     try {
       const done = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { priority: chip.dataset.priority } });
+      prioritySaved = done.priority || '';
       kanbanUpdate(card, done);
-      kanbanPriorityPick(chip);
     } catch (err) {
+      const saved = $(`.kanban-priorities [data-priority="${CSS.escape(prioritySaved)}"]`, box);
+      if (mine === priorityLatest && saved) kanbanPriorityPick(saved);
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }
@@ -862,9 +868,22 @@ async function kanbanMoveToBoard(card, boardId) {
 }
 
 async function kanbanDeleteCard(card) {
-  await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  const back = { column: card.column, after: kanbanAbove(card) };
+  kanbanMoves.set(card.id, (kanbanMoves.get(card.id) || 0) + 1);
   kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
   drawKanban();
+  try {
+    await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  } catch (e) {
+    if (!kanbanCard(card.id)) kanbanPlace(card, back.column, back.after);
+    drawKanban();
+    await kanbanRefresh().catch(() => {});
+    throw e;
+  }
+  if (kanbanCard(card.id)) {
+    kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
+    drawKanban();
+  }
   toast(`Deleted “${card.title}”`, {
     action: 'Undo',
     run: () => kanbanWrite(`/api/boards/${enc(card.board)}/cards`, { method: 'POST', body: { id: card.id, column: card.column, title: card.title, subheading: card.subheading, description: card.description, priority: card.priority, rank: card.rank } }).then(kanbanRefresh).catch(fail),

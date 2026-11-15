@@ -1095,14 +1095,25 @@ function calPeekTask(side, id, on) {
   for (const sel of ['#cal-peek-date', '#cal-peek-start', '#cal-peek-end']) $(sel, side)?.addEventListener('change', () => Promise.resolve(when()).catch(fail));
   const repeatBox = $('#cal-peek-repeat', side);
   if (repeatBox) repeatPicker(repeatBox, task.repeat || [], (days) => patch({ repeat: days }).catch(fail));
+  let kindLatest = 0;
+  let kindSaved = task.kind;
+  const pickKind = (on) => {
+    if (!on) return;
+    for (const c of side.querySelectorAll('[data-kind]')) {
+      c.classList.toggle('on', c === on);
+      c.setAttribute('aria-pressed', String(c === on));
+    }
+  };
   $('#cal-peek-kinds', side).addEventListener('click', (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip || chip.classList.contains('on')) return;
-    for (const c of side.querySelectorAll('[data-kind]')) {
-      c.classList.toggle('on', c === chip);
-      c.setAttribute('aria-pressed', String(c === chip));
-    }
-    patch({ kind: chip.dataset.kind }).catch(fail);
+    const mine = ++kindLatest;
+    pickKind(chip);
+    const back = () => { if (mine === kindLatest) pickKind(side.querySelector(`[data-kind="${CSS.escape(kindSaved || '')}"]`)); };
+    patch({ kind: chip.dataset.kind }).then((ok) => (ok ? (kindSaved = chip.dataset.kind) : back()), (e) => {
+      back();
+      fail(e);
+    });
   });
 }
 
@@ -1122,6 +1133,11 @@ function markTaskDone(id, done, on) {
   applyTaskDone(calFind(id), done, on);
   finishTaskInWindow(id, done, on);
   drawCalendar();
+  tickTaskBoxes(id, done, on);
+}
+
+function tickTaskBoxes(id, done, on) {
+  for (const box of document.querySelectorAll(`.cal-check[data-id="${CSS.escape(id)}"]${on ? `[data-on="${CSS.escape(on)}"]` : ''}`)) box.checked = done;
 }
 
 const TICK_MS = 160;
@@ -1146,6 +1162,7 @@ async function setTaskDone(id, done, on = null) {
     tasksWin.revision++;
     finishTaskInWindow(id, false, on);
     drawCalendar();
+    tickTaskBoxes(id, task ? taskDoneOn(task, on) : !done, on);
     if (e instanceof Locked) throw e;
     toast(e.message, { bad: true });
     return loadSchedule(seq);
@@ -1156,6 +1173,7 @@ async function setTaskDone(id, done, on = null) {
     applyTaskDone(task, done, on);
     drawTasksWindow();
     drawCalendar();
+    tickTaskBoxes(id, done, on);
   }
   if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
@@ -1433,18 +1451,31 @@ function taskSheet(id, on = null) {
       }
     });
   }
+  let kindLatest = 0;
+  let kindSaved = task.kind;
   $('#task-kinds', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++kindLatest;
+    const pick = (on) => {
+      if (!on) return;
+      for (const c of box.querySelectorAll('[data-kind]')) {
+        c.classList.toggle('on', c === on);
+        c.setAttribute('aria-pressed', String(c === on));
+      }
+    };
+    task.kind = chip.dataset.kind;
+    pick(chip);
+    if (state.view === 'calendar') drawCalendar();
     try {
       await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { kind: chip.dataset.kind } });
-      task.kind = chip.dataset.kind;
-      for (const c of box.querySelectorAll('[data-kind]')) {
-        c.classList.toggle('on', c === chip);
-        c.setAttribute('aria-pressed', String(c === chip));
-      }
-      if (state.view === 'calendar') drawCalendar();
+      kindSaved = chip.dataset.kind;
     } catch (err) {
+      if (mine === kindLatest) {
+        task.kind = kindSaved;
+        pick(box.querySelector(`[data-kind="${CSS.escape(kindSaved || '')}"]`));
+        if (state.view === 'calendar') drawCalendar();
+      }
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }

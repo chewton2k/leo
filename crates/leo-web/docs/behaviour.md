@@ -1006,6 +1006,8 @@ target. Check the page sequence after loading preferences.
   always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
   keeps the closed note undimmed with a faint tether. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).
+  Pin, Resolve, Dismiss and the mode change show at once; a failed save puts them back (only the
+  newest request's answer counts; a resolved note returns to its place, open if it was, with its typed reply).
   Word arrival animates colour only, never opacity (blur on WebKit); positions are rounded. With Felix open, under
   3 or over `MOST_ASKED` (1,000) characters, it goes to the chat as before (2026-11-08; read-along and `add_margin_note` quotes stay at `MOST_QUOTE`, 600). The server anchors on
   prefix + quote + suffix exactly and never falls back to another occurrence. Replies
@@ -1386,7 +1388,9 @@ ISO datetimes as one date/time before removing them from the title.
   puts back the board's own address, not the old one; opening a card re-checks the panel after each
   settle, so quick clicks mount one panel; hiding or quitting flushes the fields (`panel.flush`) and an
   unsaved or over-limit field keeps the close warning (`panel.dirty`). An over-limit card offers Discard these changes, the one way out that drops text (2026-11-06). A board fetched after a change is
-  dropped if a write began meanwhile (`kanbanWrite`, `kanbanRefresh`). When the page is under 800 px wide
+  dropped if a write began meanwhile (`kanbanWrite`, `kanbanRefresh`). Status, priority and Delete show at
+  once and go back with the error when the save fails (only the newest priority choice is put back; a delete
+  ignores the card's earlier pending moves and returns the card to its place). When the page is under 800 px wide
   (Felix or the explorer beside it) an open card panel takes the whole page and the board is hidden
   (container query on `#app`), so no sliver of it shows.
   The card on the board still previews the raw text.

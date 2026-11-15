@@ -57,7 +57,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     async function api(url,options={}){window.pending++;try{return await fakeApi(url,options);}finally{window.pending--;}}
     async function fakeApi(url,{method='GET',body}={}){
       window.calls.push({method,url:url.split('?')[0],body:body?structuredClone(body):null});
-      await new Promise(r=>setTimeout(r,5));
+      await new Promise(r=>setTimeout(r,5+(window.slow||0)));
       if(window.failNext&&method!=='GET'){const e=new Error(window.failNext);window.failNext=null;throw e;}
       let m;
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
@@ -83,7 +83,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${read('app/motion.js')}
     ${read('app/settings-navigation.js')}
     ${page}
-    const actions={${calActions}'task-done':el=>{const id=el.dataset.id,on=el.dataset.on||null;const task=calFind(id);const done=!(task&&taskDoneOn(task,on));return setTaskDone(id,done,on);},'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
+    const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||!actions[el.dataset.action])return;e.preventDefault();Promise.resolve(actions[el.dataset.action](el)).catch(fail);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.scrim'))closeSheet();});
     window.errors=[];window.db=db;
@@ -215,10 +215,13 @@ test('ticking a task leaves the tray at once and returns with the error when the
   await calendarFixture(browser, async page => {
     const row = page.locator('#cal-side .cal-tray-row', { hasText: 'Draft essay outline' });
     await expect(row).toBeVisible();
-    await page.evaluate(() => { window.failNext = 'The disk is full.'; });
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'The disk is full.'; });
     await row.locator('.cal-check').click();
+    expect(await page.evaluate(() => window.pending)).toBeGreaterThan(0);
+    await expect(row).toHaveCount(0, { timeout: 300 });
     await settled(page);
     await expect(row).toBeVisible();
+    await expect(row.locator('.cal-check')).not.toBeChecked();
     expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'The disk is full.', bad: true });
     expect(await page.evaluate(() => window.db.tasks.find(t => t.title === 'Draft essay outline').done)).toBe(false);
   }, { width: 1360 });

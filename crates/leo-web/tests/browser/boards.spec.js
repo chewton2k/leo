@@ -445,6 +445,31 @@ test('a keyboard move shows at once and goes back with the error when the save f
   });
 });
 
+test('a priority and a delete show before leo answers and come back when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-card="cread00001"]').click();
+    const chips = page.locator('#kanban-panel .kanban-priorities');
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'Leo could not save the card.'; });
+    await chips.locator('[data-priority="high"]').click();
+    expect(await page.evaluate(() => [document.querySelector('#kanban-panel [data-priority="high"]').getAttribute('aria-pressed'), window.pending > 0])).toEqual(['true', true]);
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.locator('[data-priority="high"]')).toHaveAttribute('aria-pressed', 'false');
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not save the card.', bad: true });
+    await settled(page);
+
+    await page.evaluate(() => { window.failNext = 'Leo could not delete the card.'; });
+    await page.locator('#kanban-panel [data-kanban="delete"]').click();
+    expect(await page.evaluate(() => [document.querySelectorAll('[data-card="cread00001"]').length, window.pending > 0])).toEqual([0, true]);
+    await expect(page.locator('[data-card="cread00001"]')).toHaveCount(1);
+    expect(await titles(page, 'ktodo00001')).toEqual(['Write essay', 'Read chapter 3']);
+    await expect.poll(() => page.evaluate(() => window.errors)).toContain('Leo could not delete the card.');
+    await settled(page);
+    expect(await page.evaluate(() => window.db.cards.some(c => c.id === 'cread00001'))).toBe(true);
+    await page.evaluate(() => { window.errors.length = 0; });
+  });
+});
+
 test('two quick moves keep the second when the first fails after it was sent, and the board ends as the server has it', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     await page.evaluate(() => { window.slow = 300; window.failNext = 'Leo could not move the card.'; });

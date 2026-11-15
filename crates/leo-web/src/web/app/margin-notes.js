@@ -431,6 +431,9 @@ async function marginChangeMode(mode) {
     marginControl();
     return;
   }
+  const before = { mode: marginPage.mode, baseline: marginPage.baseline };
+  marginPage.mode = mode;
+  marginPage.baseline = marginKit.blocksOf(s.doc.source());
   marginPage.changing = true;
   marginControl();
   try {
@@ -444,6 +447,7 @@ async function marginChangeMode(mode) {
     marginRedraw();
   } catch (e) {
     if (marginPage.s !== s) return;
+    Object.assign(marginPage, before);
     if (e instanceof Locked) throw e;
     marginSetStatus('Could not save this mode. Try again.');
   } finally {
@@ -1223,24 +1227,69 @@ async function marginAskOn(s, t, question) {
   $('textarea', fresh)?.focus();
 }
 
+const marginPins = new Map();
+
 async function marginPin(t) {
   const s = marginPage.s;
-  const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'PATCH', body: { pinned: !t.pinned } });
-  if (marginPage.s !== s) return;
-  marginPage.threads = marginPage.threads.map((old) => (old.id === done.id ? done : old));
+  const pin = marginPins.get(t.id) || { latest: 0, saved: t.pinned };
+  marginPins.set(t.id, pin);
+  const mine = ++pin.latest;
+  const show = (pinned) => {
+    const live = marginThread(t.id);
+    if (mine !== pin.latest || marginPage.s !== s || !live || live.pinned === pinned) return;
+    live.pinned = pinned;
+    marginDraw();
+  };
+  const pinned = !t.pinned;
+  t.pinned = pinned;
   marginDraw();
+  try {
+    const done = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'PATCH', body: { pinned } });
+    pin.saved = done.pinned;
+    show(done.pinned);
+  } catch (e) {
+    show(pin.saved);
+    throw e;
+  } finally {
+    if (mine === pin.latest) marginPins.delete(t.id);
+  }
 }
 
 const marginLight = ({ id, quote, prefix, suffix }) => ({ id, quote, prefix, suffix });
 
 async function marginStatus(t, status) {
   const s = marginPage.s;
-  await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status } });
-  if (marginPage.s !== s) return;
+  const at = marginPage.threads.indexOf(t);
+  const wasOpen = marginPage.open === t.id;
+  const box = marginPage.els.get(t.id);
+  const typed = box ? $('.margin-reply textarea', box)?.value : '';
   marginPage.threads = marginPage.threads.filter((old) => old.id !== t.id);
   marginDropThread(t.id);
   if (status === 'resolved') marginPage.resolved.unshift(marginLight(t));
   marginDraw();
+  try {
+    await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'POST', body: { status } });
+  } catch (e) {
+    if (marginPage.s === s && !marginThread(t.id)) {
+      marginPage.resolved = marginPage.resolved.filter((old) => old.id !== t.id);
+      marginPage.threads.splice(Math.max(at, 0), 0, t);
+      if (wasOpen) marginPage.open = t.id;
+      marginDraw();
+      const area = marginPage.els.get(t.id)?.querySelector('.margin-reply textarea');
+      if (area && typed) {
+        area.value = typed;
+        marginSized(area);
+      }
+    }
+    throw e;
+  }
+  if (marginPage.s !== s) return;
+  if (marginThread(t.id)) {
+    marginPage.threads = marginPage.threads.filter((old) => old.id !== t.id);
+    marginDropThread(t.id);
+    if (status === 'resolved' && !marginPage.resolved.some((old) => old.id === t.id)) marginPage.resolved.unshift(marginLight(t));
+    marginDraw();
+  }
   if (status === 'dismissed') {
     toast('Dismissed Felix’s note', {
       action: 'Undo',

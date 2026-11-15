@@ -106,6 +106,13 @@ Decided: one app, window only (2026-10-31).
   overwrite a newer page (also on a return to the same route).
 - Arriving on a page closes sheets left from before but keeps one opened on the
   new address (`scrim.openedOn`).
+- Cheap toggles change the screen first and put it back if the save fails
+  (2026-11-14): task done and type, card moves, priority and delete, margin pin,
+  resolve, dismiss and mode, calendar drags. Card moves, margin pins, task types
+  and card priorities roll back only for the newest request. Toasts with Undo and
+  note reloads wait for the answer. Version-checked writes, file operations
+  (trash, move, rename, folders), writes whose answer the page needs (new ids)
+  and AI calls wait on purpose.
 - Narrow windows (600–999 px, 2026-11-14, the user's call): the icon rail stays;
   the sidebar button opens the explorer as a drawer over the page (`side-drawer`;
   Esc, a click outside or opening a note closes it; focus goes to Filter and back).
@@ -725,9 +732,9 @@ is hidden or the capture activity gate is busy.
   panel, address and text, so a 400 never costs text; Discard is the only way
   out that drops it. A board fetched after a change is dropped if a write began
   meanwhile.
-  A card move (keyboard, status menu) and ticking a task done apply and redraw
-  first, then save; a failed save puts the card or tick back and shows the error toast.
-  Each move carries a per-card number: only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
+  A card move (keyboard, status menu), a priority, a delete and ticking a task done apply and redraw
+  first, then save; a failed save puts the card, chip or tick back and shows the error toast.
+  Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 
 Decided: Jira-style boards on their own page (2026-11-02); the card panel is not
