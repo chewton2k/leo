@@ -1092,14 +1092,7 @@ function taskDoneOn(task, on) {
   return on ? (task.done_on || []).includes(on) : Boolean(task.done);
 }
 
-async function setTaskDone(id, done, on = null) {
-  try {
-    await api(`/api/tasks/${enc(id)}`, { method: 'PATCH', body: on ? { done, on } : { done } });
-  } catch (e) {
-    if (e instanceof Locked) throw e;
-    toast(e.message, { bad: true });
-    return loadSchedule(seq);
-  }
+function markTaskDone(id, done, on) {
   const task = calFind(id);
   tasksWin.revision++;
   if (task && on) {
@@ -1107,8 +1100,29 @@ async function setTaskDone(id, done, on = null) {
     if (done) task.done_on = [...task.done_on, on].sort();
   } else if (task) task.done = done;
   finishTaskInWindow(id, done, on);
-  if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
   drawCalendar();
+}
+
+async function setTaskDone(id, done, on = null) {
+  const before = calFind(id);
+  const was = before && (on ? before.done_on : before.done);
+  markTaskDone(id, done, on);
+  try {
+    await api(`/api/tasks/${enc(id)}`, { method: 'PATCH', body: on ? { done, on } : { done } });
+  } catch (e) {
+    const task = calFind(id);
+    if (task && on) task.done_on = was;
+    else if (task) task.done = was;
+    tasksWin.revision++;
+    finishTaskInWindow(id, false, on);
+    drawCalendar();
+    if (e instanceof Locked) throw e;
+    toast(e.message, { bad: true });
+    return loadSchedule(seq);
+  }
+  const task = calFind(id);
+  tasksWin.revision++;
+  if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
 

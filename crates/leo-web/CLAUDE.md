@@ -620,6 +620,8 @@ is hidden or the capture activity gate is busy.
   panel, address and text, so a 400 never costs text; Discard is the only way
   out that drops it. A board fetched after a change is dropped if a write began
   meanwhile.
+  A card move (keyboard, status menu) and ticking a task done apply and redraw
+  first, then save; a failed save puts the card or tick back and shows the error toast.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 
 Decided: Jira-style boards on their own page (2026-11-02); the card panel is not

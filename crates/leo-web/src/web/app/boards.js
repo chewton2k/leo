@@ -782,11 +782,35 @@ function kanbanAbove(card) {
   return at > 0 ? list[at - 1].id : null;
 }
 
-async function kanbanMove(card, to) {
+function kanbanPlace(card, column, after) {
+  const live = kanbanCard(card.id) || card;
+  const rest = kanban.cards.filter((c) => c.id !== card.id);
+  const inColumn = rest.filter((c) => c.column === column);
+  let at = rest.length;
+  if (after === null && inColumn.length) at = rest.indexOf(inColumn[0]);
+  else if (after) {
+    const above = rest.findIndex((c) => c.id === after);
+    if (above >= 0) at = above + 1;
+  } else if (inColumn.length) at = rest.indexOf(inColumn.at(-1)) + 1;
+  card.column = column;
+  live.column = column;
+  rest.splice(at, 0, live);
+  kanban.cards = rest;
+}
+
+async function kanbanMove(card, to, back = null) {
+  const drawn = Boolean(back);
+  back = back || { column: card.column, after: kanbanAbove(card) };
+  if (!drawn) {
+    kanbanPlace(card, to.column || card.column, to.after);
+    drawKanban();
+  }
   try {
     const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: to });
     Object.assign(card, saved);
   } catch (e) {
+    kanbanPlace(card, back.column, back.after);
+    drawKanban();
     if (e instanceof Locked) throw e;
     toast(e.message, { bad: true });
   }
@@ -980,11 +1004,12 @@ async function kanbanDrop() {
   const column = d.item.parentElement?.dataset.col;
   if (!column) return kanbanRefresh();
   const after = d.item.previousElementSibling?.dataset.card || null;
-  if (column === card.column && after === kanbanAbove(card)) return;
+  const back = { column: card.column, after: kanbanAbove(card) };
+  if (column === card.column && after === back.after) return;
   card.column = column;
   kanbanCounts();
   d.item.focus({ preventScroll: true });
-  return kanbanMove(card, { column, after });
+  return kanbanMove(card, { column, after }, back);
 }
 
 // Keep the moved card focused after keyboard moves and redraws.

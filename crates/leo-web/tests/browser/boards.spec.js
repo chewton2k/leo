@@ -367,6 +367,24 @@ test('a failed save keeps the card open with its text', async ({ browser }) => {
   });
 });
 
+test('a keyboard move shows at once and goes back with the error when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.slow = 600; });
+    await page.locator('[data-card="cessay0001"]').focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('ktodo00001');
+    await expect(page.locator('[data-card="cessay0001"]')).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('kdoing0001');
+    await page.evaluate(() => { window.slow = 600; window.failNext = 'Leo could not move the card.'; });
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual([]);
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not move the card.', bad: true });
+  });
+});
+
 test('columns are renamed, added, reordered and deleted, and boards are made and deleted', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const name = page.locator('[data-kanban-name="kdoing0001"]');

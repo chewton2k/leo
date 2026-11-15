@@ -210,6 +210,19 @@ test('tasks follow the mini calendar and stay visible above a narrow calendar', 
   }
 });
 
+test('ticking a task leaves the tray at once and returns with the error when the save fails', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const row = page.locator('#cal-side .cal-tray-row', { hasText: 'Draft essay outline' });
+    await expect(row).toBeVisible();
+    await page.evaluate(() => { window.failNext = 'The disk is full.'; });
+    await row.locator('.cal-check').click();
+    await settled(page);
+    await expect(row).toBeVisible();
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'The disk is full.', bad: true });
+    expect(await page.evaluate(() => window.db.tasks.find(t => t.title === 'Draft essay outline').done)).toBe(false);
+  }, { width: 1360 });
+});
+
 test('the calendar status refreshes on click and offers Retry only after a failure', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const status = page.locator('.cal-status');
