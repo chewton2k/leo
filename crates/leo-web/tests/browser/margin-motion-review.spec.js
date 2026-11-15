@@ -585,6 +585,29 @@ test.describe('tether geometry', () => {
     }, { source: LIST, threads: [SPAN] });
   });
 
+  test('the underline and spine wobble slightly, the same on every repaint, and keep their ends', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.spine[data-id="t2"]')).toHaveCount(1);
+      const shape = () => page.evaluate(() => ['solid', 'spine'].map((cls) => document.querySelector(`.margin-ink path.${cls}[data-id="t2"]`).getAttribute('d')));
+      const [solid, spine] = await shape();
+      expect(solid).toMatch(/q/);
+      expect(spine).toMatch(/q/);
+      await page.evaluate(() => { marginRedraw(); window.scrollBy(0, 1); });
+      await page.waitForTimeout(100);
+      expect(await shape()).toEqual([solid, spine]);
+      const rects = await page.evaluate(() => rectsOf('t2'));
+      const run = await page.evaluate(() => {
+        const svg = document.querySelector('.margin-ink').getBoundingClientRect();
+        const p = document.querySelector('.margin-ink path.solid[data-id="t2"]');
+        const first = p.getPointAtLength(0);
+        return { x: first.x + svg.left, y: first.y + svg.top };
+      });
+      expect(Math.abs(run.x - rects[0].left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(run.y - (rects[0].bottom + 4))).toBeLessThanOrEqual(1);
+    }, { source: LIST, threads: [SPAN] });
+  });
+
   test('a one-line passage has a tie and no spine, starting just past its end', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const [r] = await page.evaluate(() => rectsOf('t1'));

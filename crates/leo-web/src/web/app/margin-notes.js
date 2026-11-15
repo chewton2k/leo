@@ -714,7 +714,8 @@ function marginInk(t, rects) {
       marginPage.paths.delete(key);
     }
   }
-  marginPath(id, 'solid').setAttribute('d', rects.map((r) => `M${r.left.toFixed(1)} ${(r.bottom + 4).toFixed(1)} H${r.right.toFixed(1)}`).join(' '));
+  const seed = marginSeed(id);
+  marginPath(id, 'solid').setAttribute('d', rects.map((r, line) => marginWobble(r.left, r.bottom + 4, Math.max(1, r.right - r.left), false, seed + line)).join(' '));
 }
 
 function marginGutter(columns, count) {
@@ -888,7 +889,7 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     const bend = (from + to) / 2;
     marginPage.tethers.set(t.id, {
       tie: `M${from.toFixed(1)} ${mid.toFixed(1)} C${bend.toFixed(1)} ${mid.toFixed(1)} ${bend.toFixed(1)} ${top.toFixed(1)} ${to.toFixed(1)} ${top.toFixed(1)}`,
-      spine: multi ? `M${from.toFixed(1)} ${first.top.toFixed(1)} V${last.bottom.toFixed(1)}` : '',
+      spine: multi ? marginWobble(from, first.top, last.bottom - first.top, true, marginSeed(t.id)) : '',
     });
   }
 }
@@ -1424,13 +1425,17 @@ function marginLines(rects, caret) {
   return out;
 }
 
-function marginWobble(x, y, length, down = false) {
+function marginSeed(id) {
+  return [...id].reduce((sum, ch) => sum + ch.charCodeAt(0), 0);
+}
+
+function marginWobble(x, y, length, down = false, seed = 0) {
   const steps = Math.max(1, Math.round(length / 26));
   const w = (length / steps).toFixed(1);
   const half = (length / steps / 2).toFixed(1);
   let d = `M${x.toFixed(1)} ${y.toFixed(1)}`;
   for (let i = 0; i < steps; i++) {
-    const bend = i % 2 ? 0.7 : -0.7;
+    const bend = (i + seed) % 2 ? 0.7 : -0.7;
     d += down ? ` q${bend} ${half} 0 ${w}` : ` q${half} ${bend} ${w} 0`;
   }
   return d;

@@ -522,6 +522,9 @@ Felix (2026-10-19).
   while the note is hovered, focused or open, and always (fainter) for a pinned note. A newly shown
   tether draws passage to note with `pencil-draw` (`pathLength` 1: tie 450 ms, then spine 350 ms),
   once per light-up; repaints keep the path, so they never restart it; none under `stillMotion()`.
+  The solid underline (one per text line) and the spine are drawn with `marginWobble` (the pencil's jitter), phased by
+  `marginSeed(thread id)` plus the line index, so a repaint, scroll or relayout never reshapes them; their
+  endpoints sit exactly where a straight line's would, and the tie stays a plain cubic.
   `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box).
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
