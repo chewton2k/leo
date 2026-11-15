@@ -58,8 +58,11 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
   .settings-section .segmented { flex: 0 1 auto; min-width: 0; grid-auto-columns: 1fr; }
   .settings-section .segment { padding: 0 14px; }
 }
-.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--raised); }
-.settings-section label.set-row:has(> .switch) + label.set-row:has(> .switch) { margin-top: 8px; }
+.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { position: relative; padding: 12px 14px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):has(+ label.set-row > .switch, + .set-row.column > .set-line > .switch) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) { border-top-left-radius: 0; border-top-right-radius: 0; clip-path: inset(0 -24px -24px); }
+.settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--raised) 14px, var(--line) 14px calc(100% - 14px), var(--raised) calc(100% - 14px)); pointer-events: none; }
+@media (forced-colors: active) { .settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { border-color: CanvasText; } .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { display: none; } }
 .set-desc { display: block; margin-top: 2px; font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; color: var(--muted); }
 .settings-section .set-row.column > .btn { align-self: flex-start; }
 .settings-section .btn { white-space: nowrap; }

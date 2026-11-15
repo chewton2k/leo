@@ -676,3 +676,27 @@ test('Felix activity draws gridlines and colours bars by maker', async ({ page }
   expect(colours).toHaveLength(2);
   expect(colours[0]).not.toBe(colours[1]);
 });
+
+test('switch rows that sit together share one raised panel split by an inset hairline; a hint or other row starts a new panel', async ({ page }) => {
+  const sw = (name) => `<label class="set-row" id="${name}"><span class="grow">${name}<span class="set-desc">About ${name}.</span></span><input type="checkbox" class="switch" role="switch"></label>`;
+  await page.setContent(`<style>${pageCss()}</style><main class="settings-section"><section class="set-card">${sw('a')}${sw('b')}${sw('c')}<p class="hint">A hint between.</p>${sw('lone')}<label class="set-row" id="pick"><span class="set-label">Pick</span><span class="set-value"><select><option>One</option></select></span></label>${sw('d')}<div class="set-row column" id="ai"><label class="set-line"><span class="grow">AI writing</span><input type="checkbox" class="switch" role="switch"></label><span class="hint">Below.</span></div></section></main>`);
+  const look = (id) => page.locator('#' + id).evaluate((el) => {
+    const s = getComputedStyle(el), line = getComputedStyle(el, '::before');
+    const prev = el.previousElementSibling;
+    return { top: s.borderTopLeftRadius, bottom: s.borderBottomRightRadius, shadow: s.boxShadow !== 'none', gap: prev ? Math.round(el.getBoundingClientRect().top - prev.getBoundingClientRect().bottom) : null, line: line.content !== 'none' && line.content !== 'normal' };
+  });
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate((t) => { document.documentElement.dataset.theme = t; }, theme);
+    expect(await look('a')).toEqual({ top: '10px', bottom: '0px', shadow: true, gap: null, line: false });
+    expect(await look('b')).toEqual({ top: '0px', bottom: '0px', shadow: true, gap: 0, line: true });
+    expect(await look('c')).toEqual({ top: '0px', bottom: '10px', shadow: true, gap: 0, line: true });
+    expect(await look('lone')).toMatchObject({ top: '10px', bottom: '10px', shadow: true, line: false });
+    expect(await look('d')).toMatchObject({ top: '10px', bottom: '0px', line: false });
+    expect(await look('ai')).toMatchObject({ top: '0px', bottom: '10px', gap: 0, line: true });
+    expect(await page.locator('#pick').evaluate((el) => getComputedStyle(el).boxShadow)).toBe('none');
+  }
+  expect(await page.locator('#b').evaluate((el) => getComputedStyle(el, '::before').backgroundImage)).toContain('14px');
+  await page.emulateMedia({ forcedColors: 'active' });
+  expect(await page.locator('#b').evaluate((el) => [getComputedStyle(el).borderTopStyle, getComputedStyle(el, '::before').display])).toEqual(['solid', 'none']);
+});
+
