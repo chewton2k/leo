@@ -903,7 +903,7 @@
       <footer class="chat-foot">
         <div class="chat-refs" id="chat-refs"></div>
         <form class="chat-compose" id="chat-form">
-          <span class="chat-perch" id="chat-face">${felix(100, 'idle')}</span>
+          <span class="chat-perch" id="chat-face">${felix(50, 'idle')}</span>
           <div class="chat-pick" id="chat-pick" hidden></div>
           <div class="chat-attach-menu" id="chat-attach-menu" role="menu" hidden><button type="button" role="menuitem" data-chat="attach-note">${icons.note || ''}<span>A note from leo</span></button>${prepare ? `<button type="button" role="menuitem" data-chat="attach-file">${icons.paperclip || ''}<span>A file from this device</span></button>` : ''}</div>
           <input type="file" id="chat-file" multiple accept="${FILE_TYPES}" hidden>
@@ -1275,10 +1275,7 @@
         if (panel.hidden || (history.getAnimations && history.getAnimations().length)) return;
         const width = chatMain.getBoundingClientRect().width;
         if (!width || (width < SLIM_WIDTH) === panel.classList.contains('slim')) return;
-        panel.classList.add('slim-switch');
         panel.classList.toggle('slim', width < SLIM_WIDTH);
-        void panel.offsetWidth;
-        panel.classList.remove('slim-switch');
       };
       new root.ResizeObserver(syncSlim).observe(chatMain, { box: 'border-box' });
       const settled = (e) => {

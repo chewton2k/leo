@@ -107,14 +107,12 @@ body.source-resizing iframe { pointer-events: none; }
 .chat-send.stop { background: var(--text); color: var(--bg); }
 .chat-perch { position: absolute; right: 22px; bottom: 100%; margin-bottom: -3px; }
 .chat.slim .chat-foot:has(.chat-pick:not([hidden])) .chat-perch { visibility: hidden; }
-.chat-refs { padding-right: 104px; }
-.chat.perched .chat-review { padding-right: 116px; }
+.chat-refs { padding-right: 80px; }
+.chat.perched .chat-review { padding-right: 80px; }
 .chat-below:empty { display: none; }
-.chat-perch .felix { display: block; width: 75px; height: auto; }
+.chat-perch .felix { display: block; width: 50px; height: auto; }
 .chat.perched .chat-perch { right: 22px; margin-bottom: -4px; }
-.chat.perched .chat-perch .felix { width: 100px; }
 .chat.perched .chat-perch .felix-hi { opacity: 1; }
-@media (prefers-reduced-motion: no-preference) { .chat-perch .felix { transition: width var(--t-drawer) var(--ease-move); } }
 .chat.perched .chat-main { position: relative; overflow-y: auto; padding: 56px 40px 72px; }
 .chat.perched .chat-main::before, .chat.perched .chat-main::after { content: ''; flex: 1 0 0; }
 .chat.perched .chat-head { position: absolute; inset: 0 0 auto 0; }
@@ -127,13 +125,11 @@ body.source-resizing iframe { pointer-events: none; }
 .chat.slim .chat-hello-lead, .chat.slim .chat-review, .chat.slim .chat-refs, .chat.slim.perched .chat-review { padding-right: 0; }
 .chat.slim .chat-hello-lead b { font-size: 22px; }
 .chat.slim .chat-perch { right: 14px; }
-.chat.slim.perched .chat-perch .felix { width: 64px; }
-.chat.slim-switch .chat-perch .felix { transition: none; }
 .chat.mode-switch .chat-history { transition: none !important; }
-.chat.slim .chat-refs:not(:empty) { padding-right: 97px; }
-.chat.slim.perched .chat-refs:not(:empty) { padding-right: 94px; }
-.chat.slim.perched:has(.chat-refs:empty) .chat-review { padding-right: 94px; }
-.chat.slim.perched:has(.chat-refs:empty):not(:has(.chat-review)) .chat-hello-lead { padding-right: 94px; }
+.chat.slim .chat-refs:not(:empty) { padding-right: 72px; }
+.chat.slim.perched .chat-refs:not(:empty) { padding-right: 72px; }
+.chat.slim.perched:has(.chat-refs:empty) .chat-review { padding-right: 72px; }
+.chat.slim.perched:has(.chat-refs:empty):not(:has(.chat-review)) .chat-hello-lead { padding-right: 72px; }
 .chat .icon-btn svg { width: 20px; height: 20px; }
 .health-fix { white-space: pre-line; }
 .app-update-banner { max-width: 1080px; margin: 8px auto; padding: 10px 16px; display: flex; align-items: center; flex-wrap: wrap; gap: 12px; background: var(--accent-soft); border-radius: var(--radius); }

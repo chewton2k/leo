@@ -38,8 +38,14 @@ html[data-app="mac"]:not([data-fullscreen]) body.side-mini .side-rail { padding-
 .side-rail .side-label { display: none; }
 .side-fold svg { width: 19px; height: 19px; color: var(--muted); }
 .quick-leo { display: flex; flex-direction: column; }
-:is(.sheet, .sheet-gone):has(.quick-leo) { max-width: 640px; padding: 6px; }
+:is(.sheet, .sheet-gone):has(.quick-leo) { max-width: 640px; padding: 6px; position: relative; }
+.quick-perch { position: absolute; right: 28px; bottom: 100%; margin-bottom: -4px; pointer-events: none; }
+@media (max-width: 599px) { .quick-perch { display: none; } }
+.quick-perch .felix { display: block; width: 50px; height: auto; }
+body.chat-open .quick-perch { display: none; }
 @media (min-width: 600px) {
+  :is(.sheet, .sheet-gone):has(.quick-leo) { overflow: visible; }
+  .quick-results { max-height: calc(80vh - 72px); overflow-y: auto; overscroll-behavior: contain; }
   :is(.scrim, .scrim-gone):has(.quick-leo) { align-items: flex-start; padding-top: 14vh; }
   :is(.sheet, .sheet-gone):has(.quick-leo) > .grip { display: none; }
   .sheet:has(.quick-leo) { animation: drop-in var(--t-follow) var(--ease-arrive); }

@@ -195,7 +195,8 @@ Decided: reuse components throughout (2026-11-06).
 ## Motion rules (the single place for these)
 
 Quick and caused: nothing moves without a reason, nothing bounces on everyday UI
-(Felix the mascot keeps his springs), nothing tweens while held. Every scripted
+(Felix the mascot keeps his springs; his cameos sit on the chat composer and
+Quick Leo only, 50 px, whole pixels, never on home), nothing tweens while held. Every scripted
 animation is skipped under `stillMotion()`; CSS motion sits under
 `prefers-reduced-motion: no-preference` or the global reduce rule.
 

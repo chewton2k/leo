@@ -353,6 +353,14 @@ test('on a wide screen the sidebar reaches every place and can be narrowed', asy
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.locator('.scrim:not(.scrim-gone) #quick-input')).toBeFocused();
+  const cameo = page.locator('.scrim:not(.scrim-gone) .quick-perch');
+  await expect(cameo).toHaveAttribute('aria-hidden', 'true');
+  await expect.poll(() => cameo.evaluate((el) => {
+    const face = el.querySelector('svg.felix').getBoundingClientRect();
+    const sheet = el.closest('.sheet').getBoundingClientRect();
+    const box = el.querySelector('svg.felix').viewBox.baseVal;
+    return { scale: face.width / box.width, above: face.top < sheet.top, pointer: getComputedStyle(el).pointerEvents };
+  }), { message: 'Felix sits on the quick bar at whole pixels and takes no clicks' }).toEqual({ scale: 1, above: true, pointer: 'none' });
   await page.evaluate(() => window.addEventListener('keydown', (e) => { window.escaped = e.defaultPrevented; }, { once: true }));
   await page.keyboard.press('Escape');
   expect(await page.evaluate(() => window.escaped), 'Escape stays with the page, so it never leaves full screen').toBe(true);
@@ -1297,6 +1305,7 @@ test.describe('Felix', () => {
     await page.goto('/');
     await page.locator('#chat-toggle').click();
     const face = page.locator('#chat-face .felix');
+    await expect.poll(() => face.evaluate((el) => el.getBoundingClientRect().width / el.viewBox.baseVal.width), { message: 'his composer cameo is drawn at whole pixels' }).toBe(1);
     await page.evaluate(() => { Math.random = () => 0.99; });
     await face.click();
     await expect(face).toHaveClass(/\btickle\b/);

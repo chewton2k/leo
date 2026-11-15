@@ -85,7 +85,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .chat-title.quiet { color: var(--muted); font-weight: 500; }
 .chat.with-history .chat-head [data-chat="new"] { display: none; }
 .chat-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; padding: 12px 24px 48px; display: flex; flex-direction: column; gap: 14px; }
-.chat-hello-lead { padding: 0 116px 18px 6px; }
+.chat-hello-lead { padding: 0 80px 18px 6px; }
 .chat-hello-lead b { display: block; font: 400 27px/1.2 var(--voice); letter-spacing: -.01em; overflow-wrap: break-word; }
 .chat-hello-text { margin: 8px 0 0; font: var(--fs-md)/1.45 var(--voice); color: var(--muted); overflow-wrap: break-word; }
 .word { animation: word-in .5s var(--ease-arrive) both; }
