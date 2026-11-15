@@ -1096,7 +1096,10 @@ test('a long outline shows its ticks a section at a time, with arrows only where
     await expect(page.locator('.outline-ticks [data-tick]')).toHaveCount(30);
     await expect(shown).toHaveCount(24);
     await expect(up).toBeHidden();
-    await down.click();
+    const arrow = await down.boundingBox();
+    await page.mouse.click(arrow.x + arrow.width / 2, arrow.y + arrow.height / 2);
+    await page.mouse.click(arrow.x + arrow.width / 2, arrow.y + arrow.height / 2);
+    expect(await page.evaluate(() => scrollY), 'a second press where the arrow was lands on nothing').toBe(0);
     await expect(shown).toHaveCount(6);
     await expect(shown.first()).toHaveAttribute('data-tick', await page.locator('.outline-ticks [data-tick]').nth(24).getAttribute('data-tick'));
     await expect(down).toBeHidden();

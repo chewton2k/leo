@@ -346,8 +346,10 @@
       outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
       for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
       outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart));
-      outlineUpArrow.hidden = outlineStart === 0;
-      outlineDownArrow.hidden = outlineStart + OUTLINE_PAGE >= outlineRows.length;
+      outlineUpArrow.hidden = outlineDownArrow.hidden = outlineRows.length <= OUTLINE_PAGE;
+      outlineUpArrow.disabled = outlineStart === 0;
+      outlineDownArrow.disabled = outlineStart + OUTLINE_PAGE >= outlineRows.length;
+      if (outlineIndex !== null && (outlineIndex < outlineStart || outlineIndex >= outlineStart + OUTLINE_PAGE)) outlinePeek(null);
     }
 
     function outlineEscape(e) {
@@ -369,8 +371,9 @@
 
     function outlineFocus() {
       if (outlineIndex !== null) return;
-      const current = outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick);
-      outlinePeek(Math.max(0, current));
+      const current = Math.max(0, outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick));
+      if (current < outlineStart || current >= outlineStart + OUTLINE_PAGE) outlinePage(current);
+      outlinePeek(current);
     }
 
     function outlineBlur() {
@@ -490,7 +493,7 @@
       const arrow = e.target.closest('.outline-page');
       if (arrow) {
         outlinePage(outlineStart + (arrow === outlineUpArrow ? -OUTLINE_PAGE : OUTLINE_PAGE));
-        (arrow.hidden ? outlineTicks : arrow).focus({ preventScroll: true });
+        if (arrow.disabled) (arrow === outlineUpArrow ? outlineDownArrow : outlineUpArrow).focus({ preventScroll: true });
         return;
       }
       const button = e.target.closest('button[data-line], .outline-ticks');

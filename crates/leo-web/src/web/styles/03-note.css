@@ -32,6 +32,7 @@
   .note-outline .source-more > summary > svg { display: none; }
   .note-outline .outline-ticks { display: flex; flex-direction: column; width: 100%; height: min(calc(var(--outline-count) * 12px), calc(100dvh - var(--outline-top, 76px) - 160px)); min-height: 12px; padding: 0 0 0 8px; border: 0; background: transparent; cursor: pointer; }
   .note-outline .outline-page { display: grid; place-items: center; width: 36px; height: 22px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); }
+  .note-outline .outline-page:disabled { visibility: hidden; }
   .note-outline .outline-page:hover { color: var(--text); background: var(--tint); }
   .note-outline .outline-page:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
   .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
