@@ -238,6 +238,17 @@ function calTone(item) {
   return toneOfTask(item.task);
 }
 
+const CAL_RINGS = [
+  'M20.3 6.5L21.5 7.7 22.4 9 23.2 10.6 23.6 12.2 23.8 14 23.5 15.7 22.9 17.4 22 18.9 20.8 20.2 19.3 21.3 17.7 22 15.9 22.5 14.1 22.7 12.4 22.7 10.6 22.4 9 21.8 7.4 21.1 6 20.1 4.7 18.9 3.7 17.6 2.8 16.1 2.2 14.4 2 12.7 2.1 10.9 2.6 9.2 3.4 7.5 4.5 6.1 6 4.9 7.6 4 9.3 3.4 11.2 3 13 3 14.8 3.2 16.5 3.7 18.1 4.4 19.7 5.3 21 6.4 22.2 7.8 23.2 9.3 23.9 10.9',
+  'M3.6 16.8L2.9 15.2 2.5 13.6 2.4 11.9 2.6 10.2 3.2 8.5 4.1 7 5.4 5.7 6.8 4.6 8.5 3.8 10.3 3.4 12 3.2 13.8 3.3 15.5 3.7 17.2 4.3 18.7 5.1 20.1 6.1 21.3 7.2 22.3 8.6 23.2 10.1 23.7 11.8 23.9 13.5 23.8 15.3 23.3 17 22.5 18.6 21.3 20 19.9 21.2 18.3 22.1 16.5 22.7 14.7 23 12.8 23 11 22.7 9.3 22.2 7.7 21.5 6.2 20.5 4.9 19.4 3.8 18 2.9 16.6 2.2 14.9 1.8 13.2 1.8 11.3',
+  'M17 4.1L18.5 5 19.8 6 20.9 7.2 21.8 8.6 22.6 10 23.1 11.6 23.3 13.2 23.3 14.9 22.9 16.6 22.3 18.2 21.3 19.7 20 21 18.5 22 16.8 22.7 14.9 23.1 13.1 23.2 11.2 23 9.5 22.4 7.9 21.6 6.5 20.6 5.3 19.4 4.2 18.1 3.4 16.6 2.8 15 2.5 13.4 2.4 11.7 2.6 9.9 3.2 8.3 4.1 6.7 5.3 5.3 6.8 4.1 8.5 3.3 10.3 2.7 12.2 2.5 14.1 2.7 15.9 3.1 17.6 3.8 19.2 4.8 20.5 6 21.6 7.3',
+  'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
+];
+
+function calRing(key) {
+  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
+}
+
 function calCheck(task) {
   const on = task.on ? ` data-on="${esc(task.on)}"` : '';
   return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ' checked' : ''}>`;
@@ -280,7 +291,7 @@ function calWeekHeads(days, today) {
   return days.map((key) => {
     const d = S.fromKey(key);
     const on = key === today ? ' today' : '';
-    return `<button type="button" class="cal-dayhead${on}" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}"><span>${esc(d.toLocaleDateString(calLocale(), { weekday: 'short' }))}</span><b>${d.getDate()}</b></button>`;
+    return `<button type="button" class="cal-dayhead${on}" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}"><span>${esc(d.toLocaleDateString(calLocale(), { weekday: 'short' }))}</span><b>${d.getDate()}${on ? calRing(key) : ''}</b></button>`;
   }).join('');
 }
 
@@ -389,7 +400,7 @@ function calMonth(days, plan, today) {
     }).join('');
     const more = items.length > CAL_MONTH_CHIPS ? `<button type="button" class="link-btn cal-more" data-action="cal-pick" data-day="${key}" data-to="day">${items.length - CAL_MONTH_CHIPS} more</button>` : '';
     const cls = `${d.getMonth() === month ? '' : ' out'}${key === today ? ' today' : ''}`;
-    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}</button>${shown}${more}</div>`;
+    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}${key === today ? calRing(key) : ''}</button>${shown}${more}</div>`;
   }).join('');
   return `<div class="cal-month"><div class="cal-month-names">${names}</div><div class="cal-month-grid">${cells}</div></div>`;
 }
@@ -401,7 +412,7 @@ function calMini(today) {
   const names = grid.slice(0, 7).map((c) => `<span>${esc(S.fromKey(c.key).toLocaleDateString(calLocale(), { weekday: 'narrow' }))}</span>`).join('');
   return `<section class="cal-mini" aria-label="${esc(at.toLocaleDateString(calLocale(), { month: 'long', year: 'numeric' }))}">
     <div class="cal-mini-head"><span>${esc(at.toLocaleDateString(calLocale(), { month: 'long', year: 'numeric' }))}</span><button type="button" class="icon-btn cal-arrow" data-action="cal-mini" data-step="-1" aria-label="Previous month">${ICON.back}</button><button type="button" class="icon-btn cal-arrow next" data-action="cal-mini" data-step="1" aria-label="Next month">${ICON.back}</button></div>
-    <div class="cal-mini-grid">${names}${grid.map((c) => `<button type="button" class="cal-mini-day${c.inMonth ? '' : ' out'}${c.key === today ? ' today' : ''}${cal.view !== 'month' && shown.has(c.key) ? ' shown' : ''}" data-action="cal-pick" data-day="${c.key}">${c.day}</button>`).join('')}</div>
+    <div class="cal-mini-grid">${names}${grid.map((c) => `<button type="button" class="cal-mini-day${c.inMonth ? '' : ' out'}${c.key === today ? ' today' : ''}${cal.view !== 'month' && shown.has(c.key) ? ' shown' : ''}" data-action="cal-pick" data-day="${c.key}">${c.day}${c.key === today ? calRing(c.key) : ''}</button>`).join('')}</div>
   </section>`;
 }
 

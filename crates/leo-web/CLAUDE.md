@@ -147,7 +147,11 @@ Decided: one app, window only (2026-10-31).
   `aria-pressed`; a 4th choice item is the tooltip; `syncSegmented(box, from)`
   after a redraw). Picture choices: `choiceCards()` (same two modes; `columns`).
 - On/off: `settingsSwitch()`; checkboxes only for task completion and picking
-  several items (Trash).
+  several items (Trash). Task checks (`.prose .task input`, `.sched-check`,
+  `.cal-check`) are real checkboxes drawn as a pencil box and tick (masks on
+  `::before`/`::after`, four variants picked by the last digit of `data-box` or
+  `data-id`; the tick takes `--tone`); dark mode breaks the tick with the static
+  `--chalk-break` mask; forced colours get the native box.
 - Dropdowns: a `<select>` inside `.select-control`; select-menu.js turns every
   one into the app's menu (not under forced colours), keeping id, value and
   `change`. Do not hand-build list menus.
@@ -608,8 +612,9 @@ is hidden or the capture activity gate is busy.
 - Task blocks are as tall as their time (min 15 min, 18 px; `calLeast`): 2 to 3 PM
   ends at the 3 PM line and a resize shrinks the block live. Only a task with no end
   keeps a default span (`CAL_DUE_MIN`, 78 min). Under an hour a block takes `inline`:
-  title, time on one line. Today is a filled accent circle in the mini calendar,
-  week header and month.
+  title, time on one line. Today is a pencil ring (`calRing`, inline SVG, one of
+  `CAL_RINGS` by day of month, inside the old 26/24 px circle) in the mini
+  calendar, week header and month.
 - The Tasks card in `#dock` is folded to a badge at every start and opens only
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do

@@ -603,18 +603,50 @@ test('resizing a task smaller shrinks it while the pointer is still down', async
   });
 });
 
-test('today is a filled accent circle in the mini calendar, the week header and the month', async ({ browser }) => {
+test('today is a drawn ring no bigger than the old circle in the mini calendar, the week header and the month', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const mini = page.locator('.cal-mini-day.today');
     await expect(mini).toHaveText('3');
-    const fill = await page.locator('.cal-dayhead.today b').evaluate(el => getComputedStyle(el).backgroundColor);
-    const look = await mini.evaluate(el => { const style = getComputedStyle(el); const box = el.getBoundingClientRect(); return { fill: style.backgroundColor, radius: style.borderRadius, square: Math.abs(box.width - box.height) < 1 }; });
-    expect(look).toEqual({ fill, radius: '50%', square: true });
+    const ring = async (host, most) => {
+      const look = await host.evaluate(el => {
+        const box = el.querySelector(':scope > .cal-ring').getBoundingClientRect();
+        const ink = document.body.appendChild(document.createElement('i'));
+        ink.style.background = 'var(--accent)';
+        const accent = getComputedStyle(ink).backgroundColor;
+        ink.remove();
+        return { filled: getComputedStyle(el).backgroundColor === accent, width: box.width, height: box.height, d: el.querySelector('.cal-ring path').getAttribute('d') };
+      });
+      expect(look.filled).toBe(false);
+      expect(look.width).toBeLessThanOrEqual(most);
+      expect(look.height).toBeLessThanOrEqual(most);
+      return look.d;
+    };
+    const drawn = [await ring(mini, 26), await ring(page.locator('.cal-dayhead.today b'), 26)];
+    await page.evaluate(() => drawCalendar());
+    expect([await ring(mini, 26), await ring(page.locator('.cal-dayhead.today b'), 26)]).toEqual(drawn);
+    expect(drawn[1]).toBe(drawn[0]);
     await page.locator('.cal-views [data-view="month"]').click();
     await settled(page);
-    expect(await page.locator('.cal-cell.today .cal-num').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
-    expect(await page.locator('.cal-mini-day.today').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
+    expect(await ring(page.locator('.cal-cell.today .cal-num'), 24)).toBe(drawn[0]);
+    expect(await ring(page.locator('.cal-mini-day.today'), 26)).toBe(drawn[0]);
   });
+});
+
+test('task boxes are drawn marks whose variant follows the task and survives a redraw', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const marks = () => page.evaluate(() => [...document.querySelectorAll('.cal-check')].map(el => {
+      const style = getComputedStyle(el);
+      return [el.dataset.id, style.appearance, style.getPropertyValue('--tick'), (getComputedStyle(el, '::before').maskImage || getComputedStyle(el, '::before').webkitMaskImage) !== 'none'];
+    }));
+    const before = await marks();
+    expect(before.length).toBeGreaterThan(2);
+    for (const [, appearance, tick, box] of before) expect([appearance, Boolean(tick), box]).toEqual(['none', true, true]);
+    expect(new Set(before.map(([, , tick]) => tick)).size).toBeGreaterThan(1);
+    await page.evaluate(() => drawCalendar());
+    expect(await marks()).toEqual(before);
+    const box = await page.locator('#cal-side .cal-check').first().boundingBox();
+    expect(Math.max(box.width, box.height)).toBeLessThanOrEqual(14);
+  }, { width: 1360 });
 });
 
 test('the hour grid reaches the bottom of the calendar in a tall window', async ({ browser }) => {

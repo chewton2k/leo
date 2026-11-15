@@ -15,7 +15,12 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   `syncSegmented(box, from)` after the redraw; "Multilingual"), Add to note's where, the card panel's priority.
 - Picture choices: `choiceCards()` (the same two modes; `columns` keeps rows aligned).
 - On/off: `settingsSwitch()`; checkboxes stay only for task completion and picking
-  several items (Trash).
+  several items (Trash). Every task check (note tasks, the Tasks list, home,
+  Quick Leo and the calendar) is a real checkbox drawn as a pencil box and tick
+  that never grows past the old box; one of four drawings per row, fixed by the
+  row's box number or task id so a redraw keeps it. Dark mode breaks the tick
+  faintly like chalk. Today in the calendar is a pencil ring of the same size
+  as the old filled circle.
 - Dropdowns: a `<select>` inside `.select-control` with the chevron; select-menu.js
   turns every one into the app's own menu (document-wide, sheets included; not under
   forced colours, where the native select stays), keeping the select's id, value and
