@@ -188,7 +188,14 @@ Decided: one app, window only (2026-10-31).
   when Saved; the words stay as hidden text, "Not saved" stays visible). No other
   spinner or second breathing mark.
 - Colour: ink for actions and selection, `--focus` for focus cues, tone only as
-  dots and ticks (calendar events keep their colour fills).
+  dots and ticks (calendar events keep their colour fills). One exception,
+  Felix's own blue (`--felix`: light #3f6d97, dark #b4cfe7, from his sprite;
+  2026-11-15, the user's call), only while he works: the reading blot
+  (`.margin-waiting` or the gutter `.margin-mark.reading`) and pencil
+  (`path.pencil`), the caret after a
+  streaming reply (`.msg.pending`) and the dot on his button
+  (`#chat-toggle.working`, synced with the chat body's `aria-busy`). Never links,
+  buttons, selection, tags or text.
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
   rest, `--shadow-pop` for menus, toasts and sheets, `--shadow-lift` while

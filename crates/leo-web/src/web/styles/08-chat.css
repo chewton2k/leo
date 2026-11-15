@@ -173,6 +173,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .cite.cite-src b { margin-right: 6px; font-weight: 600; }
 .cite.cite-src:hover, .cite.cite-src:focus-visible { filter: none; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
 .msg-error { margin-top: 6px; font-size: var(--fs-sm); color: var(--danger); }
+.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after { content: ''; display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -.15em; border-radius: 1px; background: var(--felix); }
 .typing { display: inline-flex; gap: 4px; padding: 6px 0; }
 .typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); animation: typing 1s ease-in-out infinite; }
 .typing i:nth-child(2) { animation-delay: .15s; }

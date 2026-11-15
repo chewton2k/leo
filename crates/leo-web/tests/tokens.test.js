@@ -185,3 +185,21 @@ test('ink details: a warm selection wash, a drawn rule with a plain fallback, an
   assert.ok(all.some((r) => r.selector === ':root' && r.at.length === 0 && /scrollbar-color: color-mix\(in srgb, var\(--text\) 24%, transparent\) transparent/.test(r.body)));
   assert.match(at('html.page-bar-on').body, /scrollbar-width: none/);
 });
+
+test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works', () => {
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    assert.match(t['--felix'] || '', /^#[0-9a-f]{6}$/i, `${name} defines --felix`);
+    for (const under of ['--page', '--ground']) assert.ok(contrast(rgb(t['--felix']), rgb(t[under])) >= 4.5, `${name}: --felix on ${under} is ${contrast(rgb(t['--felix']), rgb(t[under])).toFixed(2)}`);
+  }
+  assert.equal(tokens(themes.light)['--felix'], '#3f6d97');
+  assert.equal(tokens(themes['dark media'])['--felix'], '#b4cfe7');
+  assert.equal(tokens(themes['dark theme'])['--felix'], '#b4cfe7');
+  const users = all.filter((r) => /var\(--felix\)/.test(r.body)).map((r) => r.selector).sort();
+  assert.deepEqual(users, [
+    '.chat-btn.working::after',
+    '.margin-ink path.pencil',
+    '.margin-waiting .margin-drop, .margin-mark.reading .margin-drop',
+    '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
+  ]);
+});

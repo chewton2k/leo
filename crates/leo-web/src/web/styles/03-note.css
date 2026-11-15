@@ -65,7 +65,7 @@
 .margin-ink path.wash.on { opacity: .09; }
 .margin-ink path.squiggle.on { opacity: 0; }
 .margin-ink path.squiggle.arriving { animation: margin-wipe var(--wipe-t, .5s) linear var(--wipe-d, 0s) both; }
-.margin-ink path.pencil { stroke: color-mix(in srgb, var(--text) 55%, transparent); stroke-width: 1.2; stroke-linejoin: round; stroke-dasharray: 1; transition: opacity .12s ease-out; }
+.margin-ink path.pencil { stroke: var(--felix); stroke-width: 1.2; stroke-linejoin: round; stroke-dasharray: 1; transition: opacity .12s ease-out; }
 .margin-ink path.pencil.sketching { animation: pencil-draw var(--pencil-t, 650ms) var(--ease-pencil) var(--pencil-d, 0ms) both; }
 .margin-ink path.pencil.leaving { opacity: 0; }
 @keyframes pencil-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
@@ -91,6 +91,7 @@
 .margin-mark.reading { pointer-events: none; }
 .margin-mark .margin-drop { width: 12px; height: 12px; margin: 0; }
 .margin-thinking .margin-drop { margin: 6px 0; }
+.margin-waiting .margin-drop, .margin-mark.reading .margin-drop { color: var(--felix); }
 @media (prefers-reduced-motion: no-preference) { .margin-drop { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }

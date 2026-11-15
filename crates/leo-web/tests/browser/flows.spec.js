@@ -1752,9 +1752,11 @@ test.describe('Felix', () => {
     await expect(chat.locator('#chat-refs .file-card')).toHaveCount(0);
     await expect(chat.locator('.msg.user .file-card.reading')).toContainText('slow.pdf');
     await expect(chat.locator('.msg.leo.pending')).toBeVisible();
+    await expect(page.locator('#chat-toggle'), 'his button carries the blue dot while he works').toHaveClass(/\bworking\b/);
     expect(asked).toHaveLength(0);
     release();
     await expect(chat.locator('.msg.leo').last()).toContainText('It covers graphs.');
+    await expect(page.locator('#chat-toggle')).not.toHaveClass(/\bworking\b/);
     expect(asked[0].files).toEqual(['doc-slow-1']);
     await expect(chat.locator('.msg.user .file-card')).not.toHaveClass(/reading/);
     await expect(chat.locator('.msg.user .file-page')).toContainText('Week 4: Graphs');

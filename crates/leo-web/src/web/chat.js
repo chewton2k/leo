@@ -2699,6 +2699,7 @@
       else body.innerHTML = html;
       panel.classList.toggle('perched', perched);
       body.setAttribute('aria-busy', String(Boolean(state.busy)));
+      document.getElementById('chat-toggle')?.classList.toggle('working', Boolean(state.busy));
       drawBelow();
       if (land) land();
       drawTitle();
