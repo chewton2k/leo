@@ -1093,6 +1093,43 @@ test.describe('Felix', () => {
     await expect.poll(async () => (await (await page.request.get('/api/chats')).json()).some((c) => c.count === 6)).toBe(true);
   });
 
+  test('closing Felix widens the page as the panel starts to leave, and reopening mid-leave keeps it open', async ({ page }) => {
+    const tag = test.info().project.name;
+    const note = await (await page.request.post('/api/notes', { data: { title: `Leaving chat ${tag}`, body: 'Body.' } })).json();
+    await page.setViewportSize({ width: 1400, height: 800 });
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#chat-toggle').click();
+    const chat = page.locator('#chat');
+    await expect(chat).toBeVisible();
+    await expect(page.locator('body')).toHaveClass(/chat-open/);
+    await page.waitForTimeout(400);
+    const room = () => page.evaluate(() => document.querySelector('main').getBoundingClientRect().width);
+    const open = await room();
+    const left = await page.evaluate(() => {
+      const panel = document.getElementById('chat');
+      panel.querySelector('[data-chat="close"]').click();
+      return { leaving: panel.classList.contains('chat-leaving'), hidden: panel.hidden, open: document.body.classList.contains('chat-open'), room: document.querySelector('main').getBoundingClientRect().width };
+    });
+    expect(left.leaving).toBe(true);
+    expect(left.hidden).toBe(false);
+    expect(left.open).toBe(false);
+    expect(left.room).toBeGreaterThan(open + 100);
+    await expect(chat).toBeHidden();
+    expect(await room()).toBe(left.room);
+    await page.locator('#chat-toggle').click();
+    await expect(chat).toBeVisible();
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      document.getElementById('chat').querySelector('[data-chat="close"]').click();
+      document.getElementById('chat-toggle').click();
+    });
+    await page.waitForTimeout(400);
+    await expect(chat).toBeVisible();
+    await expect(chat).not.toHaveClass(/chat-leaving/);
+    await expect(page.locator('body')).toHaveClass(/chat-open/);
+    expect(await room()).toBe(open);
+  });
+
   test('notes are added with @ or the paperclip and go with every message', async ({ page }) => {
     const tag = test.info().project.name;
     const dijkstra = await (await page.request.post('/api/notes', { data: { title: `Dijkstra shortest paths ${tag}`, body: 'Uses a priority queue.' } })).json();

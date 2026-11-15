@@ -157,7 +157,7 @@ let pageBarFrame = 0;
 let pageBarSize = { track: 0, thumb: 0, top: 0, room: 0 };
 
 function pageBarRight() {
-  const panels = [document.querySelector('aside.chat'), document.querySelector('.source-pane')]
+  const panels = [document.body.classList.contains('chat-open') && document.querySelector('aside.chat'), document.querySelector('.source-pane')]
     .filter(panel => panel && !panel.hidden && panel.getClientRects().length);
   if (!panels.length) return 0;
   const left = Math.min(...panels.map(panel => panel.offsetLeft));

@@ -28,7 +28,7 @@ body.source-resizing iframe { pointer-events: none; }
   body.with-source .dock { width: min(320px, calc(100% - var(--side) - var(--right) - 32px)); }
   body.chat-open.with-source { --source-room: calc(100vw - var(--side) - var(--source-chat-w)); --right: calc(var(--source-chat-w) + var(--source-size)); }
   body.chat-open.with-source .source-pane { right: var(--source-chat-w); }
-  body.chat-open.with-source .chat { width: var(--source-chat-w); }
+  body.with-source .chat { width: var(--source-chat-w); }
 }
 @media (max-width: 999px) {
   .source-pane { z-index: 46; width: 100%; right: 0; }

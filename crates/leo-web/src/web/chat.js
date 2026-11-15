@@ -2995,11 +2995,11 @@
         onToggle(true);
       } else if (was && !panel.hidden && !still) {
         panel.classList.add('chat-leaving');
+        document.body.classList.remove('chat-open');
+        onToggle(false);
         leaving = setTimeout(() => {
           panel.hidden = true;
           panel.classList.remove('chat-leaving');
-          document.body.classList.remove('chat-open');
-          onToggle(false);
         }, CHAT_LEAVE_MS);
       } else {
         panel.hidden = true;

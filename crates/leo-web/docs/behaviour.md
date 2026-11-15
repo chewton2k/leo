@@ -729,7 +729,9 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   growing text run and replaces only
   what changed, so finished text, a selection in it and the greeting animation
   survive; the final redraw settles too. The panel slides on `--ease-drawer` /
-  `--t-drawer` and leaves over `CHAT_LEAVE_MS` before `chat-open` is removed.
+  `--t-drawer` and leaves over `CHAT_LEAVE_MS`; `chat-open` is removed as the leave starts, so
+  the page widens at once while the fixed panel slides over it, and reopening
+  mid-leave clears the timer and restores it.
   Hovering or focusing a line-citation chip calls `onCite(id, lines)`; the open
   note's `doc.glow(from, to)` toggles `.blk-glow` on the cited blocks (no
   redraw, no scroll, no timer) and clears on leave, blur and close. Lit blocks are square with a side halo
