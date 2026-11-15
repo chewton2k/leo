@@ -5673,7 +5673,7 @@ test('Usage opens from the rail with remaining limits inside a stable dialog', a
   await expect(page.locator('#side [data-action="usage"]')).toBeFocused();
 });
 
-for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'], [1280, 'marks'], [2200, 'both']]) test(`note search temporarily highlights the match without changing the note at ${width}px with ${layout} margins`, async ({ page }) => {
+for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'], [1280, 'marks'], [1800, 'both']]) test(`note search temporarily highlights the match without changing the note at ${width}px with ${layout} margins`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await page.route('**/api/margin', route => route.fulfill({ json: { layout, pace: 'regular' } }));
   await page.evaluate(() => localStorage.removeItem('leo-margin-layout'));

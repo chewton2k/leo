@@ -2,7 +2,6 @@
   'use strict';
 
   const MARGIN_WIDTH = 240;
-  const ROOMY_MARGIN = 300;
   const MOST_MARGIN = 360;
   const MARGIN_GAP = 24;
   const TICK_GUTTER = 48;
@@ -141,10 +140,9 @@
     return Math.floor((width - column - TICK_GUTTER - END_GUTTER) / sides) - MARGIN_GAP;
   }
 
-  function arrangement({ width, setting = 'both', noteWidth = 'wide', panel = false, column = Infinity }) {
+  function arrangement({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
     if (setting === 'marks' || noteWidth === 'full' || panel || width < ROOM_RIGHT) return 'marks';
-    if (setting !== 'both' || width < ROOM_BOTH) return 'right';
-    return room(width, column, 2) < ROOMY_MARGIN && room(width, column, 1) >= ROOMY_MARGIN ? 'right' : 'both';
+    return setting === 'both' && width >= ROOM_BOTH ? 'both' : 'right';
   }
 
   function marginWidth({ width, column = Infinity, layout }) {

@@ -178,12 +178,13 @@ test('width: notes fill the room beside the column, 240 to 360 px', () => {
   assert.equal(M.marginWidth({ width: 1600, layout: 'right' }), M.MARGIN_WIDTH);
 });
 
-test('width: two cramped sides become one roomy right side, too narrow stays marks', () => {
-  assert.equal(M.arrangement({ width: 1600, column: 980 }), 'right');
+test('width: Both keeps notes on both sides whenever both fit, too narrow stays marks', () => {
+  assert.equal(M.arrangement({ width: 1600, column: 980 }), 'both');
+  assert.equal(M.arrangement({ width: 1440, column: 980 }), 'both');
   assert.equal(M.arrangement({ width: 1900, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: 1500, column: 760 }), 'both');
-  assert.equal(M.arrangement({ width: 1400, column: 760 }), 'right');
+  assert.equal(M.arrangement({ width: 1400, column: 760 }), 'both');
   assert.equal(M.arrangement({ width: M.ROOM_BOTH, column: 980 }), 'both');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, column: 980 }), 'right');
   assert.equal(M.arrangement({ width: 1600, column: 980, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, column: 980 }), 'marks');
 });
