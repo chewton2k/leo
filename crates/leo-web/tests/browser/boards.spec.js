@@ -386,6 +386,29 @@ test('a keyboard move shows at once and goes back with the error when the save f
   });
 });
 
+test('two quick moves keep the second when the first fails after it was sent, and the board ends as the server has it', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.slow = 300; window.failNext = 'Leo could not move the card.'; });
+    const card = page.locator('[data-card="cessay0001"]');
+    await card.focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not move the card.', bad: true });
+    expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
+    expect(await page.evaluate(() => window.pending)).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.pending)).toBe(0);
+    await page.waitForTimeout(400);
+    expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
+    expect(await titles(page, 'ktodo00001')).toEqual(['Read chapter 3']);
+    expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>']);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('kdone00001');
+    expect(await page.evaluate(() => window.calls.filter(c => c === 'GET /api/boards/bwork00001').length)).toBeGreaterThan(0);
+  });
+});
+
 test('columns are renamed, added, reordered and deleted, and boards are made and deleted', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const name = page.locator('[data-kanban-name="kdoing0001"]');

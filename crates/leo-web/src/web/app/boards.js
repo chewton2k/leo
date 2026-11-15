@@ -801,8 +801,15 @@ function kanbanPlace(card, column, after) {
   kanban.cards = rest;
 }
 
+const kanbanMoves = new Map();
+let kanbanSettling = 0;
+
 async function kanbanMove(card, to, back = null) {
   const drawn = Boolean(back);
+  const mine = (kanbanMoves.get(card.id) || 0) + 1;
+  kanbanMoves.set(card.id, mine);
+  kanbanSettling++;
+  const latest = () => kanbanMoves.get(card.id) === mine;
   back = back || { column: card.column, after: kanbanAbove(card) };
   if (!drawn) {
     kanbanPlace(card, to.column || card.column, to.after);
@@ -810,13 +817,20 @@ async function kanbanMove(card, to, back = null) {
   }
   try {
     const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: { ...to, request: requestId() } });
-    Object.assign(card, saved);
+    if (latest()) Object.assign(card, saved);
   } catch (e) {
-    kanbanPlace(card, back.column, back.after);
-    drawKanban();
-    if (e instanceof Locked) throw e;
+    if (latest()) {
+      kanbanPlace(card, back.column, back.after);
+      drawKanban();
+    }
+    if (e instanceof Locked) {
+      kanbanSettling--;
+      throw e;
+    }
     toast(e.message, { bad: true });
   }
+  if (--kanbanSettling) return;
+  kanbanMoves.clear();
   await kanbanRefresh();
 }
 

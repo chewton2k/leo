@@ -646,6 +646,7 @@ is hidden or the capture activity gate is busy.
   meanwhile.
   A card move (keyboard, status menu) and ticking a task done apply and redraw
   first, then save; a failed save puts the card or tick back and shows the error toast.
+  Each move carries a per-card number: only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 
 Decided: Jira-style boards on their own page (2026-11-02); the card panel is not
