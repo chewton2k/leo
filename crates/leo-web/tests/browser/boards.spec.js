@@ -246,6 +246,46 @@ test('cards are added, opened, edited, moved by keyboard and deleted with undo',
   });
 });
 
+test('moves, priorities and deletes show before leo answers and come back when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.slow = 800; });
+    await page.locator('[data-card="cessay0001"]').focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    expect(await page.evaluate(() => window.pending)).toBeGreaterThan(0);
+    expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await saved(page, 'bwork00001')).toContain('ktodo00001:Write essay');
+    await expect(page.locator('[data-card="cessay0001"]')).toBeFocused();
+    await expect.poll(() => saved(page, 'bwork00001')).toContain('kdoing0001:Write essay');
+    await settled(page);
+
+    await page.evaluate(() => { window.failNext = 'Leo could not save the card.'; });
+    await page.keyboard.press('Alt+ArrowRight');
+    expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not save the card.', bad: true });
+    await settled(page);
+
+    await page.evaluate(() => { window.slow = 0; });
+    await page.locator('[data-card="cread00001"]').click();
+    const chips = page.locator('#kanban-panel .kanban-priorities');
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'Leo could not save the card.'; });
+    await chips.locator('[data-priority="high"]').click();
+    expect(await page.evaluate(() => [document.querySelector('#kanban-panel [data-priority="high"]').getAttribute('aria-pressed'), window.pending > 0])).toEqual(['true', true]);
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.locator('[data-priority="high"]')).toHaveAttribute('aria-pressed', 'false');
+    await settled(page);
+
+    await page.evaluate(() => { window.failNext = 'Leo could not delete the card.'; });
+    await page.locator('#kanban-panel [data-kanban="delete"]').click();
+    expect(await page.evaluate(() => [document.querySelectorAll('[data-card="cread00001"]').length, window.pending > 0])).toEqual([0, true]);
+    await expect(page.locator('[data-card="cread00001"]')).toHaveCount(1);
+    expect(await page.evaluate(() => window.errors)).toContain('Leo could not delete the card.');
+    expect(await page.evaluate(() => window.db.cards.some(c => c.id === 'cread00001'))).toBe(true);
+    await page.evaluate(() => { window.errors.length = 0; });
+  });
+});
+
 test('a card\'s details render as Markdown like a note, toggle checkboxes, edit by line and stay plain Markdown', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const markdown = '## Plan\n\nSome **bold** and [a link](https://example.com)\n\n- [ ] first\n\n`code`\n\n<img src=x onerror="window.ran=1"> [bad](javascript:window.ran=2)';

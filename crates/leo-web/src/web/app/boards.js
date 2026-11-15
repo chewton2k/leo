@@ -747,16 +747,24 @@ async function kanbanCardPanel(id) {
   status.addEventListener('change', () => {
     const column = kanbanColumn(status.value);
     if (column) box.dataset.tone = kanbanTone(column);
-    kanbanMove(card, { column: status.value }).catch(fail);
+    const moving = kanbanMove(card, { column: status.value });
+    drawKanban();
+    moving.catch(fail);
   });
+  let priorityLatest = 0;
+  let prioritySaved = card.priority || '';
   $('.kanban-priorities', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-priority]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++priorityLatest;
+    kanbanPriorityPick(chip);
     try {
       const done = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { priority: chip.dataset.priority } });
+      prioritySaved = done.priority || '';
       kanbanUpdate(card, done);
-      kanbanPriorityPick(chip);
     } catch (err) {
+      const saved = $(`.kanban-priorities [data-priority="${CSS.escape(prioritySaved)}"]`, box);
+      if (mine === priorityLatest && saved) kanbanPriorityPick(saved);
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }
@@ -782,11 +790,25 @@ function kanbanAbove(card) {
   return at > 0 ? list[at - 1].id : null;
 }
 
+function kanbanPlace(card, { column = card.column, after } = {}, at = null) {
+  kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
+  card.column = column;
+  if (at !== null) return kanban.cards.splice(Math.min(Math.max(at, 0), kanban.cards.length), 0, card);
+  const list = kanbanCardsIn(column);
+  const anchor = after === null ? null : list.find((c) => c.id === after) || list[list.length - 1];
+  kanban.cards.splice(anchor ? kanban.cards.indexOf(anchor) + 1 : list.length ? kanban.cards.indexOf(list[0]) : kanban.cards.length, 0, card);
+}
+
 async function kanbanMove(card, to) {
+  const back = { column: card.column, at: kanban.cards.findIndex((c) => c.id === card.id) };
+  kanbanPlace(card, to);
+  const writes = kanbanWrites + 1;
   try {
     const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: to });
-    Object.assign(card, saved);
+    if (kanbanWrites === writes) Object.assign(card, saved);
   } catch (e) {
+    kanbanPlace(card, { column: back.column }, back.at);
+    if (!kanban.drag) drawKanban();
     if (e instanceof Locked) throw e;
     toast(e.message, { bad: true });
   }
@@ -817,9 +839,21 @@ async function kanbanMoveToBoard(card, boardId) {
 }
 
 async function kanbanDeleteCard(card) {
-  await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  const at = kanban.cards.findIndex((c) => c.id === card.id);
   kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
   drawKanban();
+  try {
+    await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  } catch (e) {
+    if (!kanbanCard(card.id)) kanbanPlace(card, {}, at);
+    if (!kanban.drag) drawKanban();
+    await kanbanRefresh().catch(() => {});
+    throw e;
+  }
+  if (kanbanCard(card.id)) {
+    kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
+    drawKanban();
+  }
   toast(`Deleted “${card.title}”`, {
     action: 'Undo',
     run: () => kanbanWrite(`/api/boards/${enc(card.board)}/cards`, { method: 'POST', body: { id: card.id, column: card.column, title: card.title, subheading: card.subheading, description: card.description, priority: card.priority, rank: card.rank } }).then(kanbanRefresh).catch(fail),
@@ -981,10 +1015,10 @@ async function kanbanDrop() {
   if (!column) return kanbanRefresh();
   const after = d.item.previousElementSibling?.dataset.card || null;
   if (column === card.column && after === kanbanAbove(card)) return;
-  card.column = column;
+  const moving = kanbanMove(card, { column, after });
   kanbanCounts();
   d.item.focus({ preventScroll: true });
-  return kanbanMove(card, { column, after });
+  return moving;
 }
 
 // Keep the moved card focused after keyboard moves and redraws.
@@ -1000,8 +1034,12 @@ async function kanbanKeyMove(card, key) {
     if (c >= 0 && c < columns.length) to = { column: columns[c].id };
   }
   if (!to) return;
-  await kanbanMove(card, to);
-  app.querySelector(`.kanban-card[data-card="${CSS.escape(card.id)}"]`)?.focus();
+  const focus = () => app.querySelector(`.kanban-card[data-card="${CSS.escape(card.id)}"]`)?.focus();
+  const moving = kanbanMove(card, to);
+  drawKanban();
+  focus();
+  await moving;
+  focus();
 }
 
 document.addEventListener('pointerdown', (e) => {

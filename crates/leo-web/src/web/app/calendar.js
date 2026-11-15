@@ -1093,22 +1093,38 @@ function taskDoneOn(task, on) {
 }
 
 async function setTaskDone(id, done, on = null) {
+  const apply = (now) => {
+    const task = calFind(id);
+    if (task && on) {
+      task.done_on = (task.done_on || []).filter((d) => d !== on);
+      if (now) task.done_on = [...task.done_on, on].sort();
+    } else if (task) task.done = now;
+  };
+  const show = (now) => {
+    apply(now);
+    tasksWin.revision++;
+    for (const box of document.querySelectorAll(`.cal-check[data-id="${CSS.escape(id)}"]${on ? `[data-on="${CSS.escape(on)}"]` : ''}`)) box.checked = now;
+    finishTaskInWindow(id, now, on);
+    drawCalendar();
+  };
+  const was = calFind(id);
+  const before = was ? taskDoneOn(was, on) : !done;
+  show(done);
   try {
     await api(`/api/tasks/${enc(id)}`, { method: 'PATCH', body: on ? { done, on } : { done } });
   } catch (e) {
+    show(before);
     if (e instanceof Locked) throw e;
     toast(e.message, { bad: true });
     return loadSchedule(seq);
   }
   const task = calFind(id);
   tasksWin.revision++;
-  if (task && on) {
-    task.done_on = (task.done_on || []).filter((d) => d !== on);
-    if (done) task.done_on = [...task.done_on, on].sort();
-  } else if (task) task.done = done;
-  finishTaskInWindow(id, done, on);
+  if (task && taskDoneOn(task, on) !== done) {
+    apply(done);
+    drawCalendar();
+  }
   if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
-  drawCalendar();
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
 
@@ -1383,18 +1399,31 @@ function taskSheet(id, on = null) {
       }
     });
   }
+  let kindLatest = 0;
+  let kindSaved = task.kind;
   $('#task-kinds', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++kindLatest;
+    const pick = (on) => {
+      for (const c of box.querySelectorAll('[data-kind]')) {
+        c.classList.toggle('on', c === on);
+        c.setAttribute('aria-pressed', String(c === on));
+      }
+    };
+    task.kind = chip.dataset.kind;
+    pick(chip);
+    if (state.view === 'calendar') drawCalendar();
     try {
       await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { kind: chip.dataset.kind } });
-      task.kind = chip.dataset.kind;
-      for (const c of box.querySelectorAll('[data-kind]')) {
-        c.classList.toggle('on', c === chip);
-        c.setAttribute('aria-pressed', String(c === chip));
-      }
-      if (state.view === 'calendar') drawCalendar();
+      kindSaved = chip.dataset.kind;
     } catch (err) {
+      if (mine === kindLatest) {
+        task.kind = kindSaved;
+        const saved = box.querySelector(`[data-kind="${CSS.escape(kindSaved || '')}"]`);
+        if (saved) pick(saved);
+        if (state.view === 'calendar') drawCalendar();
+      }
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }

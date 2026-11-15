@@ -57,7 +57,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     async function api(url,options={}){window.pending++;try{return await fakeApi(url,options);}finally{window.pending--;}}
     async function fakeApi(url,{method='GET',body}={}){
       window.calls.push({method,url:url.split('?')[0],body:body?structuredClone(body):null});
-      await new Promise(r=>setTimeout(r,5));
+      await new Promise(r=>setTimeout(r,5+(window.slow||0)));
       if(window.failNext&&method!=='GET'){const e=new Error(window.failNext);window.failNext=null;throw e;}
       let m;
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
@@ -208,6 +208,21 @@ test('tasks follow the mini calendar and stay visible above a narrow calendar', 
       await expect(side.locator('.cal-tray-row', { hasText: 'Draft essay outline' })).toHaveCount(0);
     }, { width });
   }
+});
+
+test('ticking a task done shows at once and comes back when the save fails', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const side = page.locator('#cal-side');
+    const row = side.locator('.cal-tray-row', { hasText: 'Draft essay outline' });
+    await expect(row).toBeVisible();
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'The disk is full.'; });
+    await row.locator('.cal-check').click();
+    expect(await page.evaluate(() => window.pending)).toBeGreaterThan(0);
+    await expect(side.locator('.cal-tray-row', { hasText: 'Draft essay outline' })).toHaveCount(0, { timeout: 300 });
+    await expect(side.locator('.cal-tray-row', { hasText: 'Draft essay outline' })).toHaveCount(1);
+    await expect(side.locator('.cal-tray-row', { hasText: 'Draft essay outline' }).locator('.cal-check')).not.toBeChecked();
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'The disk is full.', bad: true });
+  });
 });
 
 test('the calendar status refreshes on click and offers Retry only after a failure', async ({ browser }) => {
