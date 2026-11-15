@@ -126,6 +126,8 @@ const chat = felix.create({
   },
   onToggle: () => { drawSide(); pageBarLater(); marginRedraw(); },
   onOrganized: (proposal) => {
+    const made = proposal.state === 'applied' && FELIX_MAKES[proposal.kind];
+    if (made && proposal.undo?.[made]) inkLand(proposal.undo[made], true);
     if (MARGIN_KINDS.includes(proposal.kind)) {
       if (state.view === 'note' && state.session && state.session.note.id === proposal.note) marginLoad(state.session).catch(fail);
       return;
@@ -349,20 +351,22 @@ function pulse(el, { lift = 1.04, ring = false } = {}) {
 }
 
 const INK_MS = 600;
+const FELIX_MAKES = { add_card: 'card', add_task: 'id', add_margin_note: 'id' };
 const inkedAt = new Map();
 
-function inkLand(id) {
-  if (!stillMotion()) inkedAt.set(id, performance.now());
+function inkLand(id, felix = false) {
+  if (!stillMotion()) inkedAt.set(id, { at: performance.now(), felix });
 }
 
 function inkSettle(find) {
-  for (const [id, at] of inkedAt) {
+  for (const [id, { at, felix }] of inkedAt) {
     const elapsed = performance.now() - at;
     if (elapsed >= INK_MS) { inkedAt.delete(id); continue; }
     for (const el of find(id)) {
       if (typeof el.animate !== 'function' || el.getAnimations().some((run) => run.id === 'ink')) continue;
       const look = getComputedStyle(el);
-      el.animate({ color: ['var(--text)', look.color], backgroundColor: [`color-mix(in srgb, var(--text) 12%, ${look.backgroundColor})`, look.backgroundColor] }, { id: 'ink', duration: INK_MS, delay: -elapsed, easing: EASE_OUT });
+      const frames = felix ? { color: ['var(--felix)', look.color] } : { color: ['var(--text)', look.color], backgroundColor: [`color-mix(in srgb, var(--text) 12%, ${look.backgroundColor})`, look.backgroundColor] };
+      el.animate(frames, { id: 'ink', duration: INK_MS, delay: -elapsed, easing: EASE_OUT });
     }
   }
 }

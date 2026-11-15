@@ -89,7 +89,9 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   redraw in that window carries on from where the stroke was, later redraws show the finished ring.
 - Ink settles (2026-11-15): a card, task or note that leo has just created lands in full ink (`--text`
   and a 12% ink wash) and settles to its own colours over 600 ms (`inkLand` / `inkSettle`, colour
-  only, so board cards still only fade). Redraws during the 600 ms resume it; a note in the explorer
+  only, so board cards still only fade). A card, task or margin note Felix made (Apply or Auto)
+  lands in Felix's blue instead and settles to ink the same way, with no wash and no lasting badge;
+  Undo never replays it. Redraws during the 600 ms resume it; a note in the explorer
   counts as new when a refresh brings an id created in the last minute. Reduced motion shows the end
   frame of all three.
 - Overlap: `overlapOut(el)` clones the old state on the body (`ghostOf`, shared with the sheet close)

@@ -203,7 +203,8 @@ Decided: one app, window only (2026-10-31).
   (`path.pencil`), the caret after a
   streaming reply (`.msg.pending`) and the dot on his button
   (`#chat-toggle.working`, synced with the chat body's `aria-busy`), the chat's
-  working blot (`.msg-step-busy`), and while he
+  working blot (`.msg-step-busy`), the first 600 ms of what he just made
+  (`inkLand(id, true)`), and while he
   waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
   reply's proposals until Apply or Dismiss (no coloured edge). Never links,
   buttons, selection, tags or text.
@@ -259,7 +260,11 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   160 ms (`QUIZ_MARK_MS`, `pencil-draw`, resumed by elapsed time); ink settles, `inkLand(id)` when leo creates a
   card, task or note and `inkSettle(find)` after each redraw: the row starts in
   `--text` with a 12% ink wash and fades to its own colours over 600 ms
-  (`INK_MS`, colour only, resumed by elapsed time). Explorer notes count as new
+  (`INK_MS`, colour only, resumed by elapsed time). `inkLand(id, true)` is
+  Felix's variant: core.js `onOrganized` lands an applied add_card, add_task or
+  add_margin_note (the id read from its `undo`, `FELIX_MAKES`) starting in
+  `--felix` with no wash; the margin settles `.margin-felix` after each
+  `marginDraw`. Explorer notes count as new
   when a refresh brings an id created in the last minute. The explorer fold is the one
   width animation (`--side` as an `@property`).
 - Cancelling a menu animation clears closing state synchronously and detaches its

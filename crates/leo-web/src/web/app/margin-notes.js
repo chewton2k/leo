@@ -814,6 +814,7 @@ function marginDraw() {
   }
   marginRevisits(source, origin);
   marginPaint();
+  inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
     const done = [...marginPage.arriving];
     setTimeout(() => {

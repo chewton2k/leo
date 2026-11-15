@@ -270,6 +270,29 @@ test('a new card lands in full ink and settles by colour alone, without restarti
   });
 });
 
+test('a card Felix made arrives in his blue and settles to ink by colour alone', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const card = page.locator('.kanban-card').first();
+    await expect(card).toBeVisible();
+    const id = await card.getAttribute('data-card');
+    await page.evaluate((made) => { inkLand(made, true); drawKanban(); }, id);
+    const ink = () => card.evaluate(el => {
+      const run = el.getAnimations().find(a => a.id === 'ink');
+      if (!run) return null;
+      const from = run.effect.getKeyframes()[0];
+      const probe = document.createElement('i');
+      probe.style.color = 'var(--felix)';
+      el.append(probe);
+      const felix = getComputedStyle(probe).color;
+      probe.remove();
+      const props = Object.keys(from).filter(k => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort();
+      return { props, felix: from.color === 'var(--felix)' || from.color === felix, ms: run.effect.getTiming().duration };
+    });
+    expect(await ink()).toEqual({ props: ['color'], felix: true, ms: 600 });
+    await expect.poll(ink).toBeNull();
+  });
+});
+
 test('a card\'s details render as Markdown like a note, toggle checkboxes, edit by line and stay plain Markdown', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const markdown = '## Plan\n\nSome **bold** and [a link](https://example.com)\n\n- [ ] first\n\n`code`\n\n<img src=x onerror="window.ran=1"> [bad](javascript:window.ran=2)';
