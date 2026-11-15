@@ -126,7 +126,7 @@
 .field svg { width: 16px; height: 16px; color: var(--faint); flex: none; }
 .field input, .field select { flex: 1; min-width: 0; border: 0; outline: 0; background: none; padding: 10px 0; font-size: var(--fs-md); }
 .field:focus-within { border-color: var(--focus); }
-.hint { color: var(--faint); font-size: var(--fs-xs); }
+.hint { color: var(--faint); font-size: var(--fs-xs); text-wrap: pretty; }
 .badge, .plan-metric strong, .plan-meter, .plan-track > .hint, .activity-step { font-variant-numeric: tabular-nums; }
 .sheet .hint { color: var(--muted); }
 
@@ -201,7 +201,7 @@ label.trash-row { cursor: pointer; }
   position: fixed; left: var(--mid); bottom: calc(var(--bottom) + 96px); transform: translateX(-50%); z-index: 50;
   display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px);
   background: var(--raised); color: var(--text); border-radius: var(--r-lg); padding: 11px 16px; font-size: var(--fs-base);
-  box-shadow: var(--shadow-pop); animation: rise var(--t-open) var(--ease-arrive);
+  box-shadow: var(--shadow-pop); animation: rise var(--t-open) var(--ease-arrive); text-wrap: pretty;
 }
 .toast-gone { pointer-events: none; animation: sink var(--t-open-out) var(--ease-exit) forwards; }
 .toast button, .toast-gone button { border: 0; background: none; color: inherit; font-weight: 700; padding: 0; text-decoration: underline; }
