@@ -117,7 +117,7 @@ pub(crate) async fn create_task(
     writing(move || {
         if let Some(first) = request
             .as_deref()
-            .and_then(|r| insert::remembered("task", r))
+            .and_then(|r| insert::remembered_creation("task", r))
         {
             return Json(first).into_response();
         }
@@ -161,7 +161,7 @@ pub(crate) async fn create_task(
         }
         let made = serde_json::json!(tasks::standalone(&task, None));
         if let Some(request) = &request {
-            insert::remember("task", request, &made);
+            insert::remember_creation("task", request, &made);
         }
         (StatusCode::CREATED, Json(made)).into_response()
     })

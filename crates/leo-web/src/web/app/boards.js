@@ -816,7 +816,7 @@ async function kanbanMove(card, to, back = null) {
     drawKanban();
   }
   try {
-    const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: { ...to, request: requestId() } });
+    const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: to });
     if (latest()) Object.assign(card, saved);
   } catch (e) {
     if (latest()) {

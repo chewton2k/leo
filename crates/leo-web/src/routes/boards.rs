@@ -354,7 +354,7 @@ pub(crate) async fn create_card(
         };
         if let Some(first) = request
             .as_ref()
-            .and_then(|(scope, r)| insert::remembered(scope, r))
+            .and_then(|(scope, r)| insert::remembered_creation(scope, r))
         {
             return Json(first).into_response();
         }
@@ -403,7 +403,7 @@ pub(crate) async fn create_card(
             Ok(card) => {
                 let made = json!(card);
                 if let Some((scope, r)) = &request {
-                    insert::remember(scope, r, &made);
+                    insert::remember_creation(scope, r, &made);
                 }
                 (StatusCode::CREATED, Json(made)).into_response()
             }
@@ -472,8 +472,6 @@ pub(crate) struct MoveCard {
     /// Missing: the end of the column. null: the top. An id: just after that card.
     #[serde(default, deserialize_with = "present")]
     after: Option<Option<String>>,
-    #[serde(default)]
-    request: Option<String>,
 }
 
 pub(crate) async fn move_card(
@@ -481,15 +479,8 @@ pub(crate) async fn move_card(
     Path(id): Path<String>,
     Json(change): Json<MoveCard>,
 ) -> Response {
-    let request = insert::requested(change.request.clone()).map(|r| (format!("move:{id}"), r));
     blocking(&state, move |chats| {
         let _writing = boards::writing();
-        if let Some(first) = request
-            .as_ref()
-            .and_then(|(scope, r)| insert::remembered(scope, r))
-        {
-            return Json(first).into_response();
-        }
         let Some(mut card) = boards::card(chats, &id) else {
             return no_card();
         };
@@ -529,13 +520,7 @@ pub(crate) async fn move_card(
             Some(Some(after)) => Spot::After(after.as_str()),
         };
         match boards::settle(chats, &to, card, spot, Utc::now()) {
-            Ok(card) => {
-                let moved = json!(card);
-                if let Some((scope, r)) = &request {
-                    insert::remember(scope, r, &moved);
-                }
-                Json(moved).into_response()
-            }
+            Ok(card) => Json(json!(card)).into_response(),
             Err(_) => not_saved(),
         }
     })

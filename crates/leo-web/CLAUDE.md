@@ -615,7 +615,7 @@ is hidden or the capture activity gate is busy.
   not take focus). Home draws today's and overdue
   tasks inline under the quick bar (`#home-today`, the same rows) and hides the card.
 - POST `/api/tasks` takes `request` (uuid, kept across a retry of the same quick-add): a
-  repeated one is answered with the first task (`insert::remembered`, scope `task`).
+  repeated one is answered with the first task (`insert::remembered_creation`, scope `task`, a queue of its own beside the margin's `insert::remembered`).
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
   copy is kept).
 
@@ -636,10 +636,10 @@ is hidden or the capture activity gate is busy.
   `{board, cards}`), POST `/api/boards/restore`, POST `/api/boards/{id}/cards`,
   PATCH/DELETE `/api/cards/{id}`, POST `/api/cards/{id}/move`
   `{board?, column?, after?}` (missing = end, null = top). Export adds
-  `leo/boards.json`. Card create and move take `request` (a uuid per user action,
+  `leo/boards.json`. Card create takes `request` (a uuid per user action,
   kept when the same card is submitted again after a failure): a repeated one is
-  answered with the first result (`insert::remembered`, scopes `card:<board>`,
-  `move:<card>`) and applies nothing twice.
+  answered with the first result (`insert::remembered_creation`, scope
+  `card:<board>`) and applies nothing twice. Moves take none (nothing retries them).
 - `description` stays plain Markdown. Leaving the card panel settles every field;
   a failed save or over-limit description (`KANBAN_MOST_DESCRIPTION`) keeps the
   panel, address and text, so a 400 never costs text; Discard is the only way
