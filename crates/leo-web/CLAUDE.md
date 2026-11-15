@@ -334,7 +334,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists at
   most 1000 notes (2026-11-09).
 - Search (`search.rs`): titles and acronyms, text, graph concepts and summaries,
-  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Reading
+  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Result cards
+  mark matches with `<mark>` in ink and a pencil underline (`.card mark::after`,
+  three masks by `nth-of-type`, a plain underline in forced colours); the in-note
+  `::highlight(leo-search)` keeps its strong fill. Reading
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.

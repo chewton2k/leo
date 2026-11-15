@@ -31,7 +31,11 @@
   color: var(--muted); font-size: var(--fs-base); margin-top: 3px; text-wrap: pretty;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
 }
-.card-snippet mark { background: var(--mark); color: inherit; border-radius: var(--r-xs); padding: 0 1px; }
+.card mark { position: relative; background: none; color: var(--text); --pencil-under: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 5' preserveAspectRatio='none'%3E%3Cpath d='M1 2.1 Q8.4 1.4 16.8 2.4 Q25.5 1.9 34.2 1.8 Q44.6 2.6 54.9 3.3 Q67.9 3.9 80.9 3.1 Q90 3.6 99 2.7' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E"); }
+.card mark:nth-of-type(3n+2) { --pencil-under: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 5' preserveAspectRatio='none'%3E%3Cpath d='M1 2.8 Q12.6 3.1 25.2 3.1 Q39.1 3.8 53 3 Q66.8 2.3 80.6 1.8 Q90.3 1.7 99 3.4' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E"); }
+.card mark:nth-of-type(3n) { --pencil-under: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 5' preserveAspectRatio='none'%3E%3Cpath d='M1 3.1 Q13.1 3.7 26.2 2.6 Q35.7 3 45.1 1.7 Q57.2 1.6 69.3 2.6 Q82 2.6 94.7 2.4 Q97.3 2.7 99 2.2' fill='none' stroke='%23000' stroke-width='1.3' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E"); }
+.card mark::after { content: ''; position: absolute; left: -1px; right: -1px; bottom: -2px; height: 4px; background: color-mix(in srgb, currentColor 80%, transparent); -webkit-mask: var(--pencil-under) 0 0 / 100% 100% no-repeat; mask: var(--pencil-under) 0 0 / 100% 100% no-repeat; pointer-events: none; }
+@media (forced-colors: active) { .card mark { text-decoration: underline; } .card mark::after { display: none; } }
 .card-why { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--fs-sm); color: var(--muted); }
 .card-why svg { width: 14px; height: 14px; color: var(--accent); flex: none; stroke: currentColor; fill: none; }
 :is(.sheet, .sheet-gone).viewer { width: calc(100% - 16px); max-width: 1100px; height: 90vh; max-height: 90vh; display: flex; flex-direction: column; padding: 8px; overflow: hidden; }

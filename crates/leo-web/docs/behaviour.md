@@ -211,6 +211,9 @@ The calendar tray puts its mini calendar before tasks, and all-day/timed grids
 share the full width without scrollbar gutters shifting their day boundaries.
 Search-result and Quick Leo note opens carry the query into a bounded CSS Custom
 Highlight, cleared after five seconds or navigation without changing editor DOM.
+On the search results page the matched words in a card's title and text are full ink
+with a pencil underline (one of three drawings in turn), not a highlighter; the opened
+note's strong highlight stays as it is, since it must be spotted while scrolling (2026-11-15).
 
 
 ## Notes, editing and browsing

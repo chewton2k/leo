@@ -847,6 +847,12 @@ test('search finds a note named after a command', async ({ page }) => {
   await openSearchBox(page);
   await page.locator('#search-input').fill('backup');
   await expect(page.locator('.card').filter({ hasText: 'backup checklist' })).toBeVisible();
+  const match = page.locator('.card').filter({ hasText: 'backup checklist' }).locator('.card-title mark');
+  await expect(match).toHaveText('backup');
+  const look = await match.evaluate((el) => { const s = getComputedStyle(el), u = getComputedStyle(el, '::after'); return { bg: s.backgroundColor, ink: s.color, text: getComputedStyle(document.body).color, under: u.maskImage || u.webkitMaskImage }; });
+  expect(look.bg).toBe('rgba(0, 0, 0, 0)');
+  expect(look.ink).toBe(look.text);
+  expect(look.under).toContain('svg');
 });
 
 test('search shows placeholder cards while it waits', async ({ page }) => {
