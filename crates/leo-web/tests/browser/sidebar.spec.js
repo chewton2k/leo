@@ -220,6 +220,9 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
     const folderIcon = await page.locator('.side-tree .side-row[data-dir="Course"] svg').boundingBox();
     const noteIcon = await page.locator('.side-tree .side-note').first().locator('svg').boundingBox();
     expect(Math.abs(noteIcon.x - folderIcon.x - 14)).toBeLessThanOrEqual(14);
+    const guide = await page.locator('.side-kids[data-kids="Course"]').evaluate(el => { const s = getComputedStyle(el, '::before'); return { mask: s.maskImage || s.webkitMaskImage, width: s.width }; });
+    expect(guide.mask.match(/url\(/g)).toHaveLength(2);
+    expect(guide.width).toBe('10px');
   });
 });
 

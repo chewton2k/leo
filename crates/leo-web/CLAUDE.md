@@ -138,7 +138,9 @@ Decided: one app, window only (2026-10-31).
   warm ink wash (`::selection`, `--text` at 22%; leo sets no other selection
   colour). Ink details (2026-11-15): a Markdown `---` (`.prose hr`, also the
   doc's rule block) is a drawn pencil line (an SVG mask, plain 1 px `--line` in
-  print and forced colours); scrollbars are thin and warm (`* { scrollbar-width:
+  print and forced colours); an open folder's guide (`.side-kids::before`) is a
+  pencil stroke with a hook at the bottom (two SVG mask layers, the line stretched,
+  the hook a fixed 10 px); scrollbars are thin and warm (`* { scrollbar-width:
   thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
   page's own bar for `.page-bar`. Focus rings are unchanged.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets

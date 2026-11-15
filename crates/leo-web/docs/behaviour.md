@@ -180,6 +180,8 @@ non-control chrome clears the selection and Ask Felix (`passages.js`), except in
 Selected text shows a warm ink wash (`--text` at 22%), never the system blue. A `---`
 rule in a note is drawn as a slightly wavering pencil line (print and forced colours keep a
 plain line), and scrollbars are thin and warm grey; focus rings stay as they are (2026-11-15).
+The guide under an open explorer folder is one faint pencil stroke that hooks toward its
+last row, the same shape for every folder and never redrawn (2026-11-15).
 
 Arriving on a page closes sheets left from before but keeps one opened on the new
 address (`scrim.openedOn`): input can run ahead of the queued `hashchange`.
