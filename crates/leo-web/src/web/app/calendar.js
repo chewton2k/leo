@@ -1092,13 +1092,16 @@ function taskDoneOn(task, on) {
   return on ? (task.done_on || []).includes(on) : Boolean(task.done);
 }
 
-function markTaskDone(id, done, on) {
-  const task = calFind(id);
-  tasksWin.revision++;
+function applyTaskDone(task, done, on) {
   if (task && on) {
     task.done_on = (task.done_on || []).filter((d) => d !== on);
     if (done) task.done_on = [...task.done_on, on].sort();
   } else if (task) task.done = done;
+}
+
+function markTaskDone(id, done, on) {
+  tasksWin.revision++;
+  applyTaskDone(calFind(id), done, on);
   finishTaskInWindow(id, done, on);
   drawCalendar();
 }
@@ -1122,6 +1125,11 @@ async function setTaskDone(id, done, on = null) {
   }
   const task = calFind(id);
   tasksWin.revision++;
+  if (task && taskDoneOn(task, on) !== done) {
+    applyTaskDone(task, done, on);
+    drawTasksWindow();
+    drawCalendar();
+  }
   if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
