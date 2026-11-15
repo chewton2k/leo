@@ -26,6 +26,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     const chrome=()=>{}, skeleton=n=>'<div class="skeleton"></div>'.repeat(n);
     const empty=(icon,title,text)=>'<div class="empty">'+icon+'<h3>'+esc(title)+'</h3><p>'+esc(text)+'</p></div>';
     const stillMotion=()=>false;
+    const requestId=()=>'r'+Math.random().toString(36).slice(2);
     window.toasts=[];
     function toast(message,{action,run,bad}={}){window.toasts.push({message,bad:Boolean(bad)});document.querySelector('.toast')?.remove();const el=document.createElement('div');el.className='toast';el.innerHTML='<span>'+esc(message)+'</span>'+(action?'<button>'+esc(action)+'</button>':'');if(action)el.querySelector('button').onclick=()=>{el.remove();run();};document.body.appendChild(el);}
     const fail=error=>window.errors.push(error.message);

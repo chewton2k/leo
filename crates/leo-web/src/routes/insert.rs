@@ -51,6 +51,10 @@ pub(crate) fn inserted(body: &str, text: &str, line: Option<usize>) -> String {
     }
 }
 
+pub(crate) fn requested(request: Option<String>) -> Option<String> {
+    request.filter(|r| !r.is_empty() && r.len() <= MOST_REQUEST)
+}
+
 pub(crate) fn remembered(note: &str, request: &str) -> Option<serde_json::Value> {
     let done = DONE.lock().unwrap_or_else(|e| e.into_inner());
     done.iter()
@@ -74,9 +78,7 @@ pub(crate) async fn insert_into_note(
     if body.text.trim().is_empty() || body.text.chars().count() > MOST_INSERT {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let request = body
-        .request
-        .filter(|r| !r.is_empty() && r.len() <= MOST_REQUEST);
+    let request = requested(body.request);
     let key = id.clone();
     if let Some(found) = request.as_deref().and_then(|r| remembered(&key, r)) {
         return Json(found).into_response();

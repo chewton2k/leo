@@ -8,6 +8,7 @@ use leo_core::tasks::{self as core, Located};
 use serde::{Deserialize, Deserializer};
 
 use crate::reply::error;
+use crate::routes::insert;
 use crate::routes::notes::save;
 use crate::tasks::{self, Meta, Task};
 use crate::AppState;
@@ -87,6 +88,8 @@ pub(crate) struct NewTask {
     done: bool,
     #[serde(default)]
     repeat: Vec<u8>,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 pub(crate) async fn create_task(
@@ -110,7 +113,14 @@ pub(crate) async fn create_task(
         None => format!("t{}", uuid::Uuid::new_v4().simple()),
     };
     let chats = state.chats.clone();
+    let request = insert::requested(body.request);
     writing(move || {
+        if let Some(first) = request
+            .as_deref()
+            .and_then(|r| insert::remembered("task", r))
+        {
+            return Json(first).into_response();
+        }
         if let Some(existing) = tasks::load(&chats, &id) {
             return Json(serde_json::json!(tasks::standalone(&existing, None))).into_response();
         }
@@ -149,11 +159,11 @@ pub(crate) async fn create_task(
         if tasks::put(&chats, &task).is_err() {
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-        (
-            StatusCode::CREATED,
-            Json(serde_json::json!(tasks::standalone(&task, None))),
-        )
-            .into_response()
+        let made = serde_json::json!(tasks::standalone(&task, None));
+        if let Some(request) = &request {
+            insert::remember("task", request, &made);
+        }
+        (StatusCode::CREATED, Json(made)).into_response()
     })
     .await
 }

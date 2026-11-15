@@ -10,6 +10,7 @@ use serde_json::json;
 
 use crate::boards::{self, Board, Card, ColumnInput, Spot};
 use crate::reply::error;
+use crate::routes::insert;
 use crate::AppState;
 
 fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
@@ -323,6 +324,8 @@ pub(crate) struct NewCard {
     /// New cards go to the end of the column unless this is set.
     #[serde(default)]
     top: bool,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 pub(crate) async fn create_card(
@@ -343,11 +346,18 @@ pub(crate) async fn create_card(
         Some(_) => return error(StatusCode::BAD_REQUEST, "That card id is not valid."),
         None => boards::new_id('c'),
     };
+    let request = insert::requested(body.request).map(|r| (format!("card:{board_id}"), r));
     blocking(&state, move |chats| {
         let _writing = boards::writing();
         let Some(board) = boards::board(chats, &board_id) else {
             return no_board();
         };
+        if let Some(first) = request
+            .as_ref()
+            .and_then(|(scope, r)| insert::remembered(scope, r))
+        {
+            return Json(first).into_response();
+        }
         if let Some(existing) = boards::card(chats, &id) {
             return Json(json!(existing)).into_response();
         }
@@ -390,7 +400,13 @@ pub(crate) async fn create_card(
             }
         };
         match saved {
-            Ok(card) => (StatusCode::CREATED, Json(json!(card))).into_response(),
+            Ok(card) => {
+                let made = json!(card);
+                if let Some((scope, r)) = &request {
+                    insert::remember(scope, r, &made);
+                }
+                (StatusCode::CREATED, Json(made)).into_response()
+            }
             Err(_) => not_saved(),
         }
     })
@@ -456,6 +472,8 @@ pub(crate) struct MoveCard {
     /// Missing: the end of the column. null: the top. An id: just after that card.
     #[serde(default, deserialize_with = "present")]
     after: Option<Option<String>>,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 pub(crate) async fn move_card(
@@ -463,8 +481,15 @@ pub(crate) async fn move_card(
     Path(id): Path<String>,
     Json(change): Json<MoveCard>,
 ) -> Response {
+    let request = insert::requested(change.request.clone()).map(|r| (format!("move:{id}"), r));
     blocking(&state, move |chats| {
         let _writing = boards::writing();
+        if let Some(first) = request
+            .as_ref()
+            .and_then(|(scope, r)| insert::remembered(scope, r))
+        {
+            return Json(first).into_response();
+        }
         let Some(mut card) = boards::card(chats, &id) else {
             return no_card();
         };
@@ -504,7 +529,13 @@ pub(crate) async fn move_card(
             Some(Some(after)) => Spot::After(after.as_str()),
         };
         match boards::settle(chats, &to, card, spot, Utc::now()) {
-            Ok(card) => Json(json!(card)).into_response(),
+            Ok(card) => {
+                let moved = json!(card);
+                if let Some((scope, r)) = &request {
+                    insert::remember(scope, r, &moved);
+                }
+                Json(moved).into_response()
+            }
             Err(_) => not_saved(),
         }
     })

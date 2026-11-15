@@ -356,7 +356,8 @@ async function quickGo(at) {
   quick.busy = true;
   try {
     if (row.kind === 'task') {
-      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time } });
+      row.request = row.request || requestId();
+      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time, request: row.request } });
       closeSheet();
       loadTasksWindow().catch(() => {});
       toast(`Added “${made.title}” · ${quickWhen(row.date, row.time)}`, {

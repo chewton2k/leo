@@ -326,3 +326,38 @@ fn a_deleted_board_takes_its_cards_and_undo_brings_both_back() {
         "the card's file is reused, not copied"
     );
 }
+
+#[test]
+fn a_repeated_request_id_creates_one_card_and_moves_one_card_once() {
+    let (state, _d, _) = state_with(&[]);
+    let board = new_board(&state, "Coursework");
+    let id = board["id"].as_str().unwrap().to_string();
+    let (todo, doing) = (column(&board, 0), column(&board, 1));
+    let request = uuid::Uuid::new_v4().to_string();
+    let first = json_of(add(
+        &state,
+        &id,
+        serde_json::json!({"title": "Essay", "column": todo, "request": request}),
+    ));
+    let again = json_of(add(
+        &state,
+        &id,
+        serde_json::json!({"title": "Essay", "column": todo, "request": request}),
+    ));
+    assert_eq!(first["id"], again["id"]);
+    assert_eq!(titles_in(&state, &id, &todo), ["Essay"]);
+    json_of(add(
+        &state,
+        &id,
+        serde_json::json!({"title": "Reading", "column": todo}),
+    ));
+    let card = first["id"].as_str().unwrap();
+    let move_request = uuid::Uuid::new_v4().to_string();
+    let to_doing = serde_json::json!({"column": doing, "request": move_request});
+    let one = json_of(moved(&state, card, to_doing.clone()));
+    moved(&state, card, serde_json::json!({"column": todo}));
+    let two = json_of(moved(&state, card, to_doing));
+    assert_eq!(one, two);
+    assert!(titles_in(&state, &id, &doing).is_empty());
+    assert!(titles_in(&state, &id, &todo).contains(&"Essay".to_string()));
+}

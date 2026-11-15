@@ -375,3 +375,33 @@ fn a_task_that_cannot_be_deleted_says_so_instead_of_vanishing_until_the_next_loa
         assert!(crate::tasks::load(&state.chats, &id).is_some());
     }
 }
+
+#[test]
+fn a_repeated_request_id_creates_one_task_and_answers_with_the_first() {
+    let (state, _dir, _) = state_with(&[]);
+    let request = uuid::Uuid::new_v4().to_string();
+    let make = |title: &str| {
+        json_of(run(create_task(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({"title": title, "request": request}))
+                    .unwrap(),
+            ),
+        )))
+    };
+    let first = make("Book dentist");
+    let again = make("Book dentist");
+    assert_eq!(first["id"], again["id"]);
+    assert_eq!(listed(&state).len(), 1);
+    let other = json_of(run(create_task(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({"title": "Book dentist", "request": uuid::Uuid::new_v4().to_string()}),
+            )
+            .unwrap(),
+        ),
+    )));
+    assert_ne!(first["id"], other["id"]);
+    assert_eq!(listed(&state).len(), 2);
+}

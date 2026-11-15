@@ -511,9 +511,12 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
     form.replaceWith(button);
     button.focus({ preventScroll: true });
   };
+  let attempt = null;
   const post = async (title, priority) => {
+    if (!attempt || attempt.title !== title || attempt.priority !== priority) attempt = { title, priority, request: requestId() };
     try {
-      const card = await kanbanWrite(`/api/boards/${enc(boardId)}/cards`, { method: 'POST', body: { title, column: columnId, priority } });
+      const card = await kanbanWrite(`/api/boards/${enc(boardId)}/cards`, { method: 'POST', body: { title, column: columnId, priority, request: attempt.request } });
+      attempt = null;
       const tab = kanban.boards.find((b) => b.id === boardId);
       if (kanban.board?.id !== boardId) { if (tab) tab.cards = (tab.cards || 0) + 1; return; }
       if (kanbanCard(card.id)) return;
@@ -806,7 +809,7 @@ async function kanbanMove(card, to, back = null) {
     drawKanban();
   }
   try {
-    const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: to });
+    const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: { ...to, request: requestId() } });
     Object.assign(card, saved);
   } catch (e) {
     kanbanPlace(card, back.column, back.after);
