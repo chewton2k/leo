@@ -183,6 +183,13 @@ test('About leo ends with a colophon of plain facts', () => {
   assert.ok(colophon.includes('<span class="hint">MIT, fonts under the SIL Open Font License</span><a class="set-link" href="https://github.com/chewton2k/leo-cli/blob/main/NOTICE" target="_blank" rel="noopener noreferrer">NOTICE</a>'));
   assert.doesNotMatch(colophon, /set-path/);
 });
+test('the colophon names the lettering Felix really writes in', () => {
+  const { value } = context();
+  value.window.leoTheme = { felixLetters: () => 'notes' };
+  const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'idle' }, paths: {} });
+  assert.ok(html.includes('Instrument Sans <span>· what Felix says in the margin and chat</span>'));
+  assert.ok(!html.includes('Newsreader'));
+});
 test('the downloading update shows a percent and a bar', () => {
   const { value } = context();
   const html = value.updatesCard({ version: '1.2.3', platform: 'macos', preferences: {}, updates: { state: 'downloading', version: '2.0.0', bytes: 41200000, total: 96500000 }, paths: {} });

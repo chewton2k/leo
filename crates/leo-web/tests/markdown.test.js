@@ -434,6 +434,15 @@ test('an edit reads as kept, removed and added words, and too long an edit gives
   assert.ok(md.wordDiff('word '.repeat(300), 'other '.repeat(300)));
 });
 
+test('an edit whose marks would hide a change of line breaks or indentation gives up, so the card shows both texts', () => {
+  for (const [find, replace] of [['one\ntwo', 'one two'], ['- a\n- b', '- a\n\n- b'], ['  indented', 'indented'], ['alpha beta\ngamma', 'alpha delta gamma']]) {
+    assert.equal(md.wordDiff(find, replace), null, JSON.stringify([find, replace]));
+  }
+  for (const [find, replace] of [['the newest one', 'the oldest one'], ['a b c', 'a c'], ['x', 'x y'], ['x y', 'x']]) {
+    assert.ok(md.wordDiff(find, replace), JSON.stringify([find, replace]));
+  }
+});
+
 test('a long run of unmatched ![[ openers stays fast', () => {
   const started = Date.now();
   render('![['.repeat(7000));

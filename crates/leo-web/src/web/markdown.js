@@ -479,9 +479,13 @@
     };
     let i = 0;
     let j = 0;
+    let hidden = false;
+    const gap = (word) => /^\s*/.exec(word)[0];
     while (i < a.length || j < b.length) {
-      if (i < a.length && j < b.length && a[i].trim() === b[j].trim()) put('same', a[i++], b[j++]);
-      else if (i < a.length && (j === b.length || kept[(i + 1) * width + j] >= kept[i * width + j + 1])) put('del', a[i++], '');
+      if (i < a.length && j < b.length && a[i].trim() === b[j].trim()) {
+        if (gap(a[i]) !== gap(b[j]) && /\n|\t| {2}/.test(gap(a[i]) + gap(b[j]))) hidden = true;
+        put('same', a[i++], b[j++]);
+      } else if (i < a.length && (j === b.length || kept[(i + 1) * width + j] >= kept[i * width + j + 1])) put('del', a[i++], '');
       else put('ins', '', b[j++]);
     }
     const parts = [];
@@ -503,6 +507,7 @@
       part.ins = part.ins.slice(space.length);
       part.del = part.del.slice(space.length);
     });
+    if (hidden) return null;
     return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
   }
 
