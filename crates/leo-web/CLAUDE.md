@@ -435,7 +435,7 @@ Felix (2026-10-19).
   (`marginPage.newest`, `data-newest`) stays undimmed. An open thread's
   messages sit right of a 1 px `--line` rule; its one action row is Resolve,
   Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
-  row's end. No ×: Esc or a click outside closes; `.margin-toggle` is the
+  row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
   closed opener and focus target and takes no clicks while open.
 - Width: `marginLayout` sets `--margin-w` each pass from `marginKit.arrangement`
   and `marginWidth` (room beside the note's `max-width`, 240–360 px; Both

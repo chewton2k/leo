@@ -439,6 +439,26 @@ test.describe('whole notes and pins', () => {
       expect(box.chat.right).toBeGreaterThan(box.acts.right - 4);
     });
   });
+
+  test('an open note closes with Escape while focus is on the page, and with an outside click even when a reply is typed, keeping the text', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note).toHaveAttribute('data-open', '');
+      await page.evaluate(() => document.activeElement.blur());
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.evaluate(() => marginOpen('t1', true));
+      await expect(note).toHaveAttribute('data-open', '');
+      await note.locator('textarea').fill('half a thought');
+      await page.mouse.click(5, 5);
+      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note).toHaveAttribute('data-open', '');
+      await expect(note.locator('textarea')).toHaveValue('half a thought');
+    });
+  });
 });
 
 test.describe('passage states', () => {

@@ -936,7 +936,7 @@ target. Check the page sequence after loading preferences.
   An open thread has one action row (2026-11-15, the user's call): Resolve, Dismiss, Add to note, See it larger (only
   with a drawing), then a pin (Pin open / Unpin, `aria-pressed`; pressed fills the pin's head in full ink, no box) and
   Ask in chat together at the row's end (`.margin-tools`), wrapping together to a second row's end when the note is
-  too narrow. There is no × : Esc or a click outside closes it; `.margin-toggle` stays the closed note's opener, its
+  too narrow. There is no × : Esc (from anywhere on the page, after an open sheet or menu) or a click outside closes it, and a reply typed in it stays for the next opening (an unsent ask only closes by Esc or Cancel while it holds text); `.margin-toggle` stays the closed note's opener, its
   `aria-expanded` and the focus target, and takes no clicks while open. Closed notes show their whole text
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
   block over 12 lines stops there with a bottom fade (`.margin-cut`, set only when it overflows), figures and drawings

@@ -1035,24 +1035,27 @@ function marginClick(e) {
     return;
   }
   if (marginPage.open !== id) marginOpen(id, true);
-  else if (e.target.closest('.margin-toggle')) marginClose();
 }
 
 function marginKey(e) {
-  if (e.key === 'Escape' && marginPage.open) {
-    e.preventDefault();
-    e.stopPropagation();
-    marginClose();
-  } else if (e.key === 'Enter' && !e.shiftKey && e.target.matches('.margin-reply textarea')) {
+  if (e.key === 'Enter' && !e.shiftKey && e.target.matches('.margin-reply textarea')) {
     e.preventDefault();
     e.target.form.requestSubmit();
   }
 }
 
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.isComposing || !marginPage.open || !marginPage.layer?.isConnected) return;
+  if (document.querySelector('.scrim, .popup-menu, .select-menu:not([hidden]), [role="menu"]:not([hidden]), [role="listbox"]:not([hidden])')) return;
+  if (e.target.closest?.('input, textarea, select, [contenteditable]') && !e.target.closest('.margin-note')) return;
+  e.preventDefault();
+  e.stopPropagation();
+  marginClose();
+}, true);
+
 document.addEventListener('pointerdown', (e) => {
   if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .scrim, .scrim-gone')) return;
-  const el = marginPage.els.get(marginPage.open);
-  if ($('textarea', el)?.value.trim()) return;
+  if (marginPage.open === 'draft' && $('textarea', marginPage.els.get('draft'))?.value.trim()) return;
   marginPage.open = null;
   marginPage.draft = null;
   marginRedraw();
