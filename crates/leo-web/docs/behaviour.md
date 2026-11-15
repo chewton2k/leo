@@ -182,6 +182,9 @@ rule in a note is drawn as a slightly wavering pencil line (print and forced col
 plain line), and scrollbars are thin and warm grey; focus rings stay as they are (2026-11-15).
 The guide under an open explorer folder is one faint pencil stroke that hooks toward its
 last row, the same shape for every folder and never redrawn (2026-11-15).
+A note ends with one short pencil stroke centred under its last block, drawn by the
+page (`#doc > .doc-tail::before`) and never written into the Markdown; an empty note
+and a printout have none, and clicking it still adds a line like the rest of the tail.
 
 Arriving on a page closes sheets left from before but keeps one opened on the new
 address (`scrim.openedOn`): input can run ahead of the queued `hashchange`.

@@ -87,6 +87,8 @@
 @media (max-width: 480px) { .plan-window { grid-template-columns: 85px minmax(0, 1fr); gap: 4px 12px; padding: 12px; } .plan-metric strong { font-size: 18px; } }
 @media (prefers-reduced-motion: reduce) { .plan-meter i { transition: none; } }
 .doc-tail { min-height: 40vh; cursor: text; }
+#doc > .doc-tail::before { content: ''; display: block; width: 40px; height: 8px; margin: 22px auto 0; background: var(--muted); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 8'%3E%3Cpath d='M2 4.6 Q11 3.2 20 4.1 T38 3.4' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 8'%3E%3Cpath d='M2 4.6 Q11 3.2 20 4.1 T38 3.4' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+#doc.doc-empty > .doc-tail::before { display: none; }
 
 .actions {
   position: fixed; left: var(--mid); transform: translateX(-50%); bottom: calc(var(--bottom) + 16px); z-index: 25;

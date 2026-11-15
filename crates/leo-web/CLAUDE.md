@@ -140,7 +140,10 @@ Decided: one app, window only (2026-10-31).
   doc's rule block) is a drawn pencil line (an SVG mask, plain 1 px `--line` in
   print and forced colours); an open folder's guide (`.side-kids::before`) is a
   pencil stroke with a hook at the bottom (two SVG mask layers, the line stretched,
-  the hook a fixed 10 px); scrollbars are thin and warm (`* { scrollbar-width:
+  the hook a fixed 10 px); a note ends with a 40 px pencil stroke
+  (`#doc > .doc-tail::before`, hidden in print and while the note is empty,
+  `doc-empty` set by doc.js on every draw and change);
+  scrollbars are thin and warm (`* { scrollbar-width:
   thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
   page's own bar for `.page-bar`. Focus rings are unchanged.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets

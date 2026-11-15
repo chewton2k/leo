@@ -34,6 +34,7 @@
         future.length = 0;
         current = next;
       }
+      container.classList.toggle('doc-empty', !next.trim());
       onChange(next);
       outlineLater();
     }
@@ -151,6 +152,7 @@
       for (const el of container.querySelectorAll('.blk')) {
         if (Number(el.dataset.i) >= blocks.length) el.remove();
       }
+      container.classList.toggle('doc-empty', !lines.join('').trim());
       if (!container.querySelector('.doc-tail')) {
         const tail = document.createElement('div');
         tail.className = 'doc-tail';
