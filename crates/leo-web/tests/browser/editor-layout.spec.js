@@ -1079,9 +1079,35 @@ test('the heading rail keeps clear of the note text and its preview shows at eve
         expect(seen.tip, `the preview shows at ${width}px, over the text if it must`).not.toBeNull();
         expect(seen.tip[0]).toBeGreaterThanOrEqual(0);
         expect(seen.tip[1]).toBeLessThanOrEqual(width);
+        expect(seen.tip[0], `the preview sits beside the ticks at ${width}px`).toBeLessThanOrEqual(seen.bar + 40);
       }
     }
   }, { body });
+});
+
+test('a long outline shows its ticks a section at a time, with arrows only where there is more', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(url);
+    const shown = page.locator('.outline-ticks [data-tick]:not([hidden])');
+    const up = page.getByRole('button', { name: 'Earlier headings' });
+    const down = page.getByRole('button', { name: 'Later headings' });
+    await expect(page.locator('.outline-ticks [data-tick]')).toHaveCount(30);
+    await expect(shown).toHaveCount(24);
+    await expect(up).toBeHidden();
+    await down.click();
+    await expect(shown).toHaveCount(6);
+    await expect(shown.first()).toHaveAttribute('data-tick', await page.locator('.outline-ticks [data-tick]').nth(24).getAttribute('data-tick'));
+    await expect(down).toBeHidden();
+    const tick = await shown.first().boundingBox();
+    await page.mouse.move(tick.x + 3, tick.y + tick.height / 2);
+    await expect(page.locator('.outline-preview')).toContainText('Heading 25');
+    await up.click();
+    await expect(shown).toHaveCount(24);
+    await expect(up).toBeHidden();
+    await expect(down).toBeVisible();
+  }, { body: Array.from({ length: 30 }, (_, i) => `## Heading ${i + 1}\n\nText under heading ${i + 1}.`).join('\n\n') });
 });
 
 test('dragging down through the note never highlights the empty space or the page chrome under it', async ({ browser }) => {

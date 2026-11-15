@@ -173,6 +173,10 @@
     const outlineDetails = outline && outline.querySelector('details');
     const outlineTicks = outlineNav ? document.createElement('button') : null;
     const outlinePreview = outlineNav ? document.createElement('div') : null;
+    const outlineUpArrow = outlineNav ? document.createElement('button') : null;
+    const outlineDownArrow = outlineNav ? document.createElement('button') : null;
+    let outlineStart = 0;
+    let outlineFollowed = null;
     let outlineIndex = null;
     let outlineMotion = null;
     let outlineClosing = false;
@@ -188,9 +192,18 @@
       outlinePreview.className = 'outline-preview';
       outlinePreview.setAttribute('role', 'tooltip');
       outlinePreview.hidden = true;
-      outline.append(outlineTicks, outlinePreview);
+      for (const [arrow, label, path] of [[outlineUpArrow, 'Earlier headings', 'M2.2 8.1 Q5.4 4.6 8.1 2.3 Q10.9 4.9 13.8 7.7'], [outlineDownArrow, 'Later headings', 'M2.1 2.2 Q5.3 5.6 8 7.8 Q10.8 5.2 13.9 2.4']]) {
+        arrow.type = 'button';
+        arrow.className = 'outline-page';
+        arrow.hidden = true;
+        arrow.setAttribute('aria-label', label);
+        arrow.title = label;
+        arrow.innerHTML = `<svg viewBox="0 0 16 10" width="16" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+      }
+      outline.append(outlineUpArrow, outlineTicks, outlineDownArrow, outlinePreview);
     }
     const OUTLINE_PAUSE = 300;
+    const OUTLINE_PAGE = 24;
     const OUTLINE_WIDE = 900;
     const MOST_PREVIEW_LINES = 24;
     const MOST_PREVIEW_CHARS = 800;
@@ -319,18 +332,22 @@
 
     function outlineRoom() {
       const rail = outline.getBoundingClientRect();
-      const text = container.getBoundingClientRect();
       const end = Math.min(root.innerWidth, outline.parentElement.getBoundingClientRect().right) - 12;
-      const before = text.left - rail.right - 24;
-      const after = end - text.right - 12;
-      if (before >= 220) return { left: rail.width + 12, width: Math.min(280, before) };
-      if (after >= 220) return { left: text.right + 12 - rail.left, width: Math.min(280, after) };
       return { left: rail.width + 12, width: Math.min(280, end - rail.right - 12) };
     }
 
     function outlinePointer(y) {
       const rect = outlineTicks.getBoundingClientRect();
-      return Math.max(0, Math.min(outlineRows.length - 1, Math.floor((y - rect.top) / rect.height * outlineRows.length)));
+      const shown = Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart);
+      return Math.max(outlineStart, Math.min(outlineStart + shown - 1, outlineStart + Math.floor((y - rect.top) / rect.height * shown)));
+    }
+
+    function outlinePage(start) {
+      outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
+      for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
+      outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length - outlineStart));
+      outlineUpArrow.hidden = outlineStart === 0;
+      outlineDownArrow.hidden = outlineStart + OUTLINE_PAGE >= outlineRows.length;
     }
 
     function outlineEscape(e) {
@@ -365,6 +382,7 @@
       const next = { ArrowDown: Math.min(outlineRows.length - 1, index + 1), ArrowUp: Math.max(0, index - 1), Home: 0, End: outlineRows.length - 1 }[e.key];
       if (next !== undefined) {
         e.preventDefault();
+        if (next < outlineStart || next >= outlineStart + OUTLINE_PAGE) outlinePage(next);
         outlinePeek(next);
       }
     }
@@ -397,6 +415,11 @@
         else button.removeAttribute('aria-current');
       }
       for (const tick of outlineTicks.children) tick.classList.toggle('on', Boolean(current) && tick.dataset.tick === String(current.line));
+      const at = current ? outlineRows.indexOf(current) : 0;
+      if (current?.line !== outlineFollowed) {
+        outlineFollowed = current?.line;
+        if (at < outlineStart || at >= outlineStart + OUTLINE_PAGE) outlinePage(at);
+      }
       if (outlineIndex !== null) outlinePeek(outlineIndex);
     }
 
@@ -435,8 +458,8 @@
         outlineKey = key;
         outlineNav.innerHTML = outlineList(ed.headingTree(outlineRows));
         outlinePeek(null);
-        outlineTicks.style.setProperty('--outline-count', outlineRows.length);
         outlineTicks.innerHTML = outlineRows.map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+        outlinePage(outlineStart);
         if (focused) {
           const button = outlineNav.querySelector(`[data-${focused.type}="${focused.line}"]`) || outlineNav.querySelector('button[data-line]');
           if (button) button.focus({ preventScroll: true });
@@ -462,6 +485,12 @@
           else outlineFolded.add(row.key);
           outlineDraw(true);
         }
+        return;
+      }
+      const arrow = e.target.closest('.outline-page');
+      if (arrow) {
+        outlinePage(outlineStart + (arrow === outlineUpArrow ? -OUTLINE_PAGE : OUTLINE_PAGE));
+        (arrow.hidden ? outlineTicks : arrow).focus({ preventScroll: true });
         return;
       }
       const button = e.target.closest('button[data-line], .outline-ticks');
@@ -1657,6 +1686,8 @@
           document.removeEventListener('pointerdown', outlineOutside, true);
           outlineTicks.remove();
           outlinePreview.remove();
+          outlineUpArrow.remove();
+          outlineDownArrow.remove();
         }
         root.removeEventListener('scroll', outlineScroll);
         root.removeEventListener('resize', outlineScroll);
