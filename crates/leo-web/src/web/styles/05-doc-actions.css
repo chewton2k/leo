@@ -63,6 +63,7 @@
 .usage-tools .icon-btn svg { width: 18px; height: 18px; }
 .usage-tools .activity-spin { width: 16px; height: 16px; }
 .usage-sheet .usage-content { max-width: 800px; margin: 0 auto; }
+.coding-plan > .skeleton { --sk-base: var(--surface-2); }
 .coding-plan > .skeleton:first-child { width: 34%; height: 22px; margin: 0 0 10px; padding: 0 10px; }
 .coding-plan > .skeleton:first-child > svg + svg, .coding-plan > .skeleton + .skeleton > svg:nth-child(3) { display: none; }
 .coding-plan > .skeleton + .skeleton { height: 56px; margin: 0; border-radius: var(--r-tile); }
