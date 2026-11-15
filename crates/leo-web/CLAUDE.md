@@ -63,7 +63,7 @@ This file holds the rules. How each screen behaves, area by area, is in
   `immutable`; the fonts' npm tarball sha512 and per-file sha256 are recorded in
   NOTICE; the fonts at `/vendor/fonts-5.3.0/`, their
   `@font-face` in `page-head.html`). `margin-notes.js` redraws the margin once
-  both families have loaded, since the swap moves measured text.
+  both families have loaded (Instrument Sans roman and italic, Newsreader roman and italic), since the swap moves measured text.
 - Keys and calendar links are write-only: accepted from the window, never
   returned to the page or put in exports. A stored key shows as a
   `secret::masked` placeholder; nothing changes until Save.
