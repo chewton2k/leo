@@ -398,6 +398,7 @@ test('the facts line counts words outside code and reads at 238 a minute', () =>
   assert.equal(md.facts('word'), '1 word · 1 min read');
   assert.equal(md.facts('w '.repeat(239)), '239 words · 2 min read');
   assert.equal(md.facts('w '.repeat(1200)), '1,200 words · 6 min read');
+});
 
 test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {
   const words = (s) => s.split(/\s+/).filter(Boolean).join(' ');
