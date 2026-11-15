@@ -541,7 +541,8 @@ test('earlier messages fold', async ({ page }) => {
 test('opening the open note again keeps its column still while it loads', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'the margin columns are a wide-window layout');
   await page.setViewportSize({ width: 1600, height: 820 });
-  const note = await (await page.request.post('/api/notes', { data: { title: `Still ${Date.now().toString(36)}`, body: 'One line.\n\nAnother line.' } })).json();
+  const stamp = Date.now().toString(36);
+  const note = await (await page.request.post('/api/notes', { data: { title: `Still ${stamp}`, body: 'One line.\n\nAnother line.', directory: `Still ${stamp}` } })).json();
   await page.goto(`/#/n/${note.id}`);
   const row = page.locator(`#side .side-note[data-id="${note.id}"]`);
   await expect(row).toBeVisible();
@@ -554,7 +555,6 @@ test('opening the open note again keeps its column still while it loads', async 
   await page.waitForTimeout(150);
   const during = await page.locator('#doc').boundingBox();
   release();
-  await page.unroute(`**/api/notes/${note.id}**`);
   expect([during.x, during.width]).toEqual([before.x, before.width]);
   await page.request.delete(`/api/notes/${note.id}`);
 });
