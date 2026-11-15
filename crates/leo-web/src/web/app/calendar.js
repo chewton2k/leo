@@ -1785,26 +1785,46 @@ function drawHomeWeek() {
     const d = S.fromKey(key);
     const name = d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
     const busy = plan.byDay.has(key);
-    return `<button type="button" class="home-wd${key < today ? ' past' : key === today ? ' today' : ''}" data-action="home-day" data-id="${key}" aria-label="${esc(busy ? `${name}, planned` : name)}" title="${esc(name)}"${key === today ? ' aria-current="date"' : ''}><b>${d.getDate()}${key === today ? calRing(key, true) : ''}</b>${busy ? '<i></i>' : ''}</button>`;
+    const stop = focus?.id ? key === focus.id : key === today;
+    return `<button type="button" class="home-wd${key < today ? ' past' : key === today ? ' today' : ''}" data-action="home-day" data-id="${key}" tabindex="${stop ? 0 : -1}" aria-label="${esc(busy ? `${name}, planned` : name)}" title="${esc(name)}"${key === today ? ' aria-current="date"' : ''}><b>${d.getDate()}${key === today ? calRing(key, true) : ''}</b>${busy ? '<i></i>' : ''}</button>`;
   }).join('');
+  box.onkeydown = homeWeekKeys;
   refocusTasks(box, focus);
 }
 
-const homeRecent = { notes: null, load: 0 };
+function homeWeekKeys(e) {
+  const days = [...e.currentTarget.querySelectorAll('.home-wd')];
+  const at = days.indexOf(document.activeElement);
+  const to = { ArrowLeft: at - 1, ArrowRight: at + 1, Home: 0, End: days.length - 1 }[e.key];
+  if (at < 0 || to === undefined || !days[to]) return;
+  e.preventDefault();
+  for (const day of days) day.tabIndex = day === days[to] ? 0 : -1;
+  days[to].focus();
+}
+
+const homeRecent = { notes: null, busy: false, again: false };
 
 async function loadHomeRecent() {
   if (!document.getElementById('home-recent')) return;
-  const mine = ++homeRecent.load;
+  if (homeRecent.busy) {
+    homeRecent.again = true;
+    return;
+  }
+  homeRecent.busy = true;
   try {
     const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
     const notes = await api(`/api/notes?sort=updated&brief=true&limit=${pinned + 3}`);
-    if (mine !== homeRecent.load) return;
     homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
   } catch (e) {
-    if (mine !== homeRecent.load || homeRecent.notes) return;
-    homeRecent.notes = [];
+    if (!homeRecent.notes) homeRecent.notes = [];
+  } finally {
+    homeRecent.busy = false;
   }
   drawHomeRecent();
+  if (homeRecent.again) {
+    homeRecent.again = false;
+    loadHomeRecent();
+  }
 }
 
 function drawHomeRecent() {

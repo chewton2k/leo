@@ -1605,8 +1605,8 @@ async function marginRead(s) {
   if (!marginKit.changedBlocks(marginPage.baseline, s.doc.source()).length) return;
   const reading = {};
   marginPage.reading = reading;
-  drawSide();
   try {
+    sideRedrawSoon();
     await flush(s);
     if (s !== marginPage.s || marginPage.mode !== 'along' || saving.unsaved()) return;
     const source = s.doc.source();
@@ -1660,12 +1660,12 @@ async function marginRead(s) {
   } finally {
     if (s === marginPage.s && marginPage.reading === reading) {
       marginPage.reading = false;
-      drawSide();
       clearTimeout(marginPage.faceTimer);
       if (marginPage.readingAt !== null || marginPage.readingEl) marginReadingDone();
       const again = marginPage.again;
       marginPage.again = false;
       if (again && marginPage.mode === 'along') marginArm(s);
+      sideRedrawSoon();
     }
   }
 }

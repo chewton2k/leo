@@ -390,6 +390,15 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     expect(await week.locator('button:has(i)').evaluateAll(els => els.map(el => el.dataset.id))).toEqual(['2026-11-15', '2026-11-16', '2026-11-18', '2026-11-19']);
     const today = week.locator('button.today');
     await expect(today).toHaveAttribute('aria-current', 'date');
+    await expect(week.locator('button[tabindex="0"]'), 'the week is one Tab stop, on today').toHaveText(['18']);
+    await today.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(week.locator('button[data-id="2026-11-19"]')).toBeFocused();
+    await page.keyboard.press('Home');
+    await expect(week.locator('button[data-id="2026-11-15"]')).toBeFocused();
+    await expect(week.locator('button[tabindex="0"]')).toHaveText(['15']);
+    await page.keyboard.press('End');
+    await today.focus();
     await expect(today).toHaveAttribute('aria-label', 'Wednesday, November 18, planned');
     await expect(today.locator('.cal-ring path')).not.toHaveClass(/inking/);
     expect(await page.evaluate(() => cal.ringAt), 'home never starts the Calendar\'s ring').toBeUndefined();

@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0 };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0 };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -166,7 +166,7 @@ function drawSide() {
   box.querySelector('.side-rail-main').scrollTop = railScroll;
   drawFoldersSheet();
   clearTimeout(side.freshTimer);
-  if (side.freshUntil < Infinity) side.freshTimer = setTimeout(drawSide, side.freshUntil - Date.now());
+  if (side.freshUntil < Infinity) side.freshTimer = setTimeout(sideFreshCheck, side.freshUntil - Date.now());
   if (side.growing) growFolder(high);
   if (focused) {
     const buttons = [...box.querySelectorAll('button[data-action]')];
@@ -489,12 +489,18 @@ function sideNoteMark(note, open) {
   const until = Date.parse(note.updated_at) + SIDE_FRESH_MS;
   const fresh = side.sort !== 'updated' && until > Date.now() && until - Date.now() <= SIDE_FRESH_MS + SIDE_NEW_MS;
   if (fresh) side.freshUntil = Math.min(side.freshUntil, until);
-  if (open && marginPage.reading) return '<i class="side-reading" role="img" aria-label="Felix is reading this note"></i>';
-  return fresh ? '<i class="side-fresh" role="img" aria-label="Edited in the last 30 minutes"></i>' : '';
+  if (open && marginPage.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
+  return fresh ? '<i class="side-fresh" aria-hidden="true" title="Edited in the last 30 minutes"></i>' : '';
+}
+
+function sideRedrawSoon() {
+  clearTimeout(side.quietTimer);
+  if (popup && document.getElementById('side')?.contains(popup.owner)) side.quietTimer = setTimeout(sideRedrawSoon, 500);
+  else drawSide();
 }
 
 function sideFreshCheck() {
-  if (side.freshUntil <= Date.now()) drawSide();
+  if (side.freshUntil <= Date.now()) sideRedrawSoon();
 }
 
 function sideNoteWhen(note) {

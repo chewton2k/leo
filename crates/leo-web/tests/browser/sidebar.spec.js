@@ -974,7 +974,9 @@ test('the Folders label ends in a pencil rule, notes edited in the last 30 minut
     });
     const fresh = page.locator('.side-note[data-id="course-note"] .side-fresh');
     await expect(fresh).toBeVisible();
-    await expect(fresh).toHaveAttribute('aria-label', 'Edited in the last 30 minutes');
+    await expect(fresh).toHaveAttribute('aria-hidden', 'true');
+    await expect(fresh).toHaveAttribute('title', 'Edited in the last 30 minutes');
+    await expect(page.locator('.side-note[data-id="course-note"]')).not.toHaveAccessibleName(/Edited/);
     await expect(page.locator('.side-note[data-id="escaped-note"] .side-fresh')).toHaveCount(0);
     expect(await fresh.evaluate((el) => [el.getBoundingClientRect().width, el.previousElementSibling.className])).toEqual([4, 'side-label']);
     await page.evaluate(() => { window.rel = () => 'just now'; side.sort = 'updated'; drawSide(); });
@@ -987,12 +989,13 @@ test('the Folders label ends in a pencil rule, notes edited in the last 30 minut
     await page.evaluate(() => audit.note('course-note', 'Course'));
     await page.evaluate(() => { marginPage.reading = {}; drawSide(); });
     const reading = page.locator('.side-note[data-id="course-note"] .side-reading');
-    await expect(reading).toHaveAttribute('aria-label', 'Felix is reading this note');
+    await expect(reading).toHaveAttribute('aria-hidden', 'true');
+    await expect(reading).toHaveAttribute('title', 'Felix is reading this note');
     await expect(page.locator('.side-note[data-id="course-note"] .side-fresh')).toHaveCount(0);
     expect(await reading.evaluate((el) => [getComputedStyle(el).backgroundColor, getComputedStyle(el).animationName])).toEqual([await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--felix').trim() === '#3f6d97' ? 'rgb(63, 109, 151)' : 'rgb(180, 207, 231)'), 'none']);
     await expect(page.locator('.side-tree .side-reading')).toHaveCount(1);
     await page.emulateMedia({ forcedColors: 'active' });
-    expect(await reading.evaluate((el) => getComputedStyle(el).forcedColorAdjust)).toBe('none');
+    expect(await reading.evaluate((el) => getComputedStyle(el).forcedColorAdjust ?? 'none')).toBe('none');
     await page.emulateMedia({ forcedColors: 'none' });
     await page.evaluate(() => { marginPage.reading = false; drawSide(); });
     await expect(page.locator('.side-tree .side-reading')).toHaveCount(0);

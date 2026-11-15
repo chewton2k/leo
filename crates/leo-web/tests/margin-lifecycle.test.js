@@ -18,7 +18,7 @@ function harness() {
     flush: async () => {}, api: () => new Promise((resolve, reject) => { settle = { resolve, reject }; }),
     enc: encodeURIComponent, Locked: class extends Error {}, AbortController,
     setTimeout: (fn, delay) => { const id = ++next; fn.delay = delay; timers.set(id, fn); return id; },
-    clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {},
+    clearTimeout: (id) => timers.delete(id), cancelAnimationFrame() {}, drawSide() {}, sideRedrawSoon() {},
     $: () => null, svg: (paths) => paths, ICON: { book: '' }, stillMotion: () => false, fail: (e) => { throw e; }, ON_MAC: true, MOTION_MS: 180, POP_FROM: .95,
     noAi: globalThis.leoChat.noAi, esc: (text) => String(text), choiceCards: (options) => JSON.stringify(options), segmented: () => '', settingsSwitch: () => '',
   };
@@ -56,7 +56,7 @@ test('the explorer redraws when a read along starts and when it ends, so its rea
   for (const failed of [false, true]) {
     const h = harness();
     const seen = [];
-    h.context.drawSide = () => seen.push(Boolean(h.state.reading));
+    h.context.sideRedrawSoon = () => seen.push(Boolean(h.state.reading));
     const pending = h.context.marginRead(h.state.s);
     await new Promise(setImmediate);
     assert.deepEqual(seen, [true]);
