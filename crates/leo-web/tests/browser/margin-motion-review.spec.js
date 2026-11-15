@@ -640,20 +640,64 @@ test.describe('tether geometry', () => {
     }, { source: LIST, threads: [ITEM] });
   });
 
-  test('on the left a list tie ends just before the bullet and a mid-line tie stops outside the text', async ({ browser }) => {
+  const markerLeft = (page, index) => page.evaluate((i) => {
+    const li = document.querySelectorAll('#doc li')[i];
+    const list = li.parentElement.cloneNode(false);
+    const item = li.cloneNode(false);
+    const probe = document.createElement('span');
+    probe.style.cssText = 'display: inline-block; width: 0; height: 0';
+    item.style.cssText = 'margin: 0; padding: 0; list-style-position: inside';
+    list.style.cssText = 'position: absolute; visibility: hidden; margin: 0; padding: 0';
+    item.append(probe);
+    list.append(item);
+    li.parentElement.parentElement.append(list);
+    const width = probe.getBoundingClientRect().left - item.getBoundingClientRect().left;
+    list.remove();
+    return li.getBoundingClientRect().left - width;
+  }, index);
+
+  test('on the left a list tie ends at the measured bullet and a mid-line tie stops outside the text', async ({ browser }) => {
     await fixture(browser, async (page) => {
       await page.evaluate(() => { marginPage.sides = { t1: 'left', t3: 'left' }; marginRedraw(); });
       await expect.poll(async () => (await page.locator('.margin-note[data-id="t1"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
       const line = (await items(page))[1];
       await page.evaluate(() => { marginPage.hover = 't1'; marginPage.focus = 't3'; marginPaint(); });
       const item = (await ends(page, 't1')).tie[0];
-      expect(item.x).toBeLessThanOrEqual(line.left - line.size * 1.03 - 1);
-      expect(item.x).toBeGreaterThanOrEqual(line.left - line.size * 1.03 - 8);
+      const bullet = await markerLeft(page, 1);
+      expect(bullet).toBeLessThan(line.left - 4);
+      expect(Math.abs(item.x - (bullet - 3))).toBeLessThanOrEqual(1);
       expect(Math.abs(item.y - (line.top + line.bottom) / 2)).toBeLessThanOrEqual(2);
       const middle = (await ends(page, 't3')).tie[0];
       const block = await page.locator('#doc .blk').last().boundingBox();
       expect(middle.x).toBeLessThan(block.x - 4);
     }, { width: 1600, height: 900, layout: 'both', source: LIST, threads: [ITEM, MIDDLE] });
+  });
+
+  test('on the left a numbered item ties to its measured number', async ({ browser }) => {
+    const NUMBERED = '1. first thing here\n2. second thing here\n3. third thing here';
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t5: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t5"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      await page.evaluate(() => { marginPage.hover = 't5'; marginPaint(); });
+      await expect(page.locator('.margin-ink path.tie[data-id="t5"]')).toHaveCount(1);
+      const { tie } = await ends(page, 't5');
+      expect(Math.abs(tie[0].x - ((await markerLeft(page, 1)) - 3))).toBeLessThanOrEqual(1);
+    }, { width: 1600, height: 900, layout: 'both', source: NUMBERED, threads: [thread('t5', 'second thing', '2. ', ' here\n3.')] });
+  });
+
+  test('a passage that starts in another block and runs into a list ends its tie at the bullets', async ({ browser }) => {
+    const QUOTED = '> A quoted line before the list.\n\n- a mesh office chair\n- a nice unique and short couch\n\nClosing words.';
+    const ACROSS = thread('t4', 'before the list.\n\n- a mesh office chair\n- a nice unique', 'A quoted line ', ' and short couch');
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t4: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t4"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      await page.evaluate(() => { marginPage.hover = 't4'; marginPaint(); });
+      await expect(page.locator('.margin-ink path.spine[data-id="t4"]')).toHaveCount(1);
+      const { tie, spine } = await ends(page, 't4');
+      const bullet = await markerLeft(page, 0);
+      expect(Math.abs(spine[0].x - (bullet - 3))).toBeLessThanOrEqual(1);
+      expect(Math.abs(tie[0].x - spine[0].x)).toBeLessThanOrEqual(1);
+    }, { width: 1600, height: 900, layout: 'both', source: QUOTED, threads: [ACROSS] });
   });
 
   test('a lit tether draws once, tie then spine, and a repaint never restarts it', async ({ browser }) => {

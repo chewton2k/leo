@@ -890,7 +890,7 @@ target. Check the page sequence after loading preferences.
   full width) and draws a thin tether (`path.tether`, accent at .45 while lit; a pinned note keeps a fainter one at .2, any other
   unlit note has none; Marks only draws none). A passage over more than one line gets a spine (`.spine`) beside it, 8 px outside
   the column on the right, or just left of the list markers on the left (2026-11-15, the user's call: the tie reaches the bullet,
-  about 3 px before it, never crossing it or the text; a line outside a list stops 6 px before its text start). The tie (`.tie`)
+  about 3 px before it, never crossing it or the text; the marker is measured with a hidden probe item in the list's own style, once per layout pass, and every block the passage touches counts; a line outside a list stops 6 px before its text start). The tie (`.tie`)
   runs from the spine's middle, or for one line from 8 px past its end (or that left edge), to the note's first line, and a
   multi-line passage's note aligns its first line with the passage's middle. Newly shown, the tie draws from the passage to the
   note in 450 ms, then the spine in 350 ms (`pencil-draw`), once per light-up: a repaint or scroll while lit keeps it, a pinned

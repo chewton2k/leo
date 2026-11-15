@@ -516,7 +516,7 @@ Felix (2026-10-19).
   an edit and leaving clear them (`marginReadingDone`, `marginPencilGone`). A lit
   note's tether (`path.tether`, 2026-11-15) is a tie (`.tie`) and, for a passage over more than one line, a
   spine (`.spine`): a vertical line 8 px outside the column on the note's side (right) or 3 px left of
-  the list markers (left; `marginMarker` measures the bullet, number or checkbox, else the block's
+  the list markers (left; `marginMarker` measures the bullet, number or checkbox with a hidden probe item, per layout pass, over every block the passage touches, else the block's
   text start −6). The tie runs from the spine's middle (one line: 8 px past its end, or that left edge)
   to the note's first line; a multi-line note aligns its first line with the passage's middle. It shows
   while the note is hovered, focused or open, and always (fainter) for a pinned note. A newly shown

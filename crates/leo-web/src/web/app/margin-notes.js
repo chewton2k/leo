@@ -39,7 +39,7 @@ const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb',
 const LEAST_ASKED = 3;
 const SHOWN_MESSAGES = 6;
 const MARGIN_AREA_MAX = 140;
-const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), newest: null };
+const marginPage = { resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), markers: new Map(), newest: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -736,6 +736,7 @@ function marginDraw() {
   if (!s || !layer) return;
   if (!layer.isConnected) return marginLeave();
   marginPage.tethers = new Map([...marginPage.tethers.keys()].map((id) => [id, '']));
+  marginPage.markers = new Map();
   const columns = layer.parentElement;
   const source = s.doc.source();
   const threads = marginPage.draft ? [...marginPage.threads, marginPage.draft] : marginPage.threads;
@@ -895,27 +896,38 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
 }
 
 function marginMarker(li) {
-  const box = li.getBoundingClientRect();
   const task = li.querySelector(':scope > .task > input');
   if (task) return task.getBoundingClientRect().left;
-  const style = getComputedStyle(li);
-  const size = parseFloat(style.fontSize);
   const list = li.parentElement;
-  if (list.tagName !== 'OL') return box.left - size * 1.05;
-  const type = getComputedStyle(list).listStyleType;
-  let n = li.hasAttribute('value') ? li.value : list.start + [...list.children].indexOf(li);
-  let label = String(n);
-  if (/roman/.test(type)) label = [[1000, 'm'], [900, 'cm'], [500, 'd'], [400, 'cd'], [100, 'c'], [90, 'xc'], [50, 'l'], [40, 'xl'], [10, 'x'], [9, 'ix'], [5, 'v'], [4, 'iv'], [1, 'i']].reduce((out, [v, s]) => { for (; n >= v; n -= v) out += s; return out; }, '');
-  else if (/lower|upper/.test(type)) label = String.fromCharCode((/upper/.test(type) ? 64 : 96) + ((n - 1) % 26) + 1).repeat(Math.ceil(n / 26));
-  const pen = (marginMarker.pen ||= document.createElement('canvas').getContext('2d'));
-  pen.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  return box.left - pen.measureText(`${label}${/paren/.test(type) ? ')' : '.'} `).width - 1;
+  let width = marginPage.markers.get(li);
+  if (width === undefined) {
+    const copy = list.cloneNode(false);
+    const item = li.cloneNode(false);
+    const probe = document.createElement('span');
+    if (list.tagName === 'OL') item.setAttribute('value', li.hasAttribute('value') ? li.value : list.start + [...list.children].indexOf(li));
+    copy.style.cssText = 'position: absolute; visibility: hidden; left: 0; top: 0; margin: 0; padding: 0; width: max-content';
+    item.style.cssText = 'margin: 0; padding: 0; list-style-position: inside';
+    probe.style.cssText = 'display: inline-block; width: 0; height: 0';
+    item.append(probe);
+    copy.append(item);
+    list.parentElement.append(copy);
+    width = probe.getBoundingClientRect().left - item.getBoundingClientRect().left;
+    copy.remove();
+    marginPage.markers.set(li, width);
+  }
+  return li.getBoundingClientRect().left - width;
 }
 
 function marginLeftEdge(at, rects, origin) {
-  const block = marginPage.s.doc.blockAt(at.from);
-  const items = block ? [...block.querySelectorAll('li')] : [];
-  const blockLeft = block ? block.getBoundingClientRect().left - origin.left : rects[0].left;
+  const doc = marginPage.s.doc;
+  const first = doc.blockAt(at.from);
+  const last = doc.blockAt(at.to) || first;
+  const items = [];
+  for (let block = first; block; block = block.nextElementSibling) {
+    items.push(...block.querySelectorAll('li'));
+    if (block === last) break;
+  }
+  const blockLeft = first ? first.getBoundingClientRect().left - origin.left : rects[0].left;
   return Math.min(...rects.map((r) => {
     const y = (r.top + r.bottom) / 2 + origin.top;
     const li = items.findLast((item) => { const b = item.getBoundingClientRect(); return y > b.top && y < b.bottom; });
