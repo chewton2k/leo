@@ -15,7 +15,10 @@ pub(crate) const MOST_INSERT: usize = 200_000;
 const REMEMBERED: usize = 32;
 pub(crate) const MOST_REQUEST: usize = 64;
 
-static DONE: Mutex<VecDeque<(String, String, serde_json::Value)>> = Mutex::new(VecDeque::new());
+type Done = Mutex<VecDeque<(String, String, serde_json::Value)>>;
+
+static DONE: Done = Mutex::new(VecDeque::new());
+static CREATED: Done = Mutex::new(VecDeque::new());
 
 #[derive(Deserialize)]
 pub(crate) struct InsertBody {
@@ -51,19 +54,39 @@ pub(crate) fn inserted(body: &str, text: &str, line: Option<usize>) -> String {
     }
 }
 
-pub(crate) fn remembered(note: &str, request: &str) -> Option<serde_json::Value> {
-    let done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+pub(crate) fn requested(request: Option<String>) -> Option<String> {
+    request.filter(|r| !r.is_empty() && r.len() <= MOST_REQUEST)
+}
+
+fn find(queue: &Done, note: &str, request: &str) -> Option<serde_json::Value> {
+    let done = queue.lock().unwrap_or_else(|e| e.into_inner());
     done.iter()
         .find(|(n, r, _)| n == note && r == request)
         .map(|(_, _, v)| v.clone())
 }
 
-pub(crate) fn remember(note: &str, request: &str, value: &serde_json::Value) {
-    let mut done = DONE.lock().unwrap_or_else(|e| e.into_inner());
+fn push(queue: &Done, note: &str, request: &str, value: &serde_json::Value) {
+    let mut done = queue.lock().unwrap_or_else(|e| e.into_inner());
     done.push_back((note.to_string(), request.to_string(), value.clone()));
     while done.len() > REMEMBERED {
         done.pop_front();
     }
+}
+
+pub(crate) fn remembered(note: &str, request: &str) -> Option<serde_json::Value> {
+    find(&DONE, note, request)
+}
+
+pub(crate) fn remember(note: &str, request: &str, value: &serde_json::Value) {
+    push(&DONE, note, request, value);
+}
+
+pub(crate) fn remembered_creation(scope: &str, request: &str) -> Option<serde_json::Value> {
+    find(&CREATED, scope, request)
+}
+
+pub(crate) fn remember_creation(scope: &str, request: &str, value: &serde_json::Value) {
+    push(&CREATED, scope, request, value);
 }
 
 pub(crate) async fn insert_into_note(
@@ -74,9 +97,7 @@ pub(crate) async fn insert_into_note(
     if body.text.trim().is_empty() || body.text.chars().count() > MOST_INSERT {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let request = body
-        .request
-        .filter(|r| !r.is_empty() && r.len() <= MOST_REQUEST);
+    let request = requested(body.request);
     let key = id.clone();
     if let Some(found) = request.as_deref().and_then(|r| remembered(&key, r)) {
         return Json(found).into_response();
@@ -128,5 +149,21 @@ mod tests {
         assert_eq!(inserted("A\nB", "New", Some(0)), "New\n\nA\nB");
         assert_eq!(inserted("A\nB", "New", Some(99)), "A\nB\n\nNew\n");
         assert_eq!(inserted("A\n\nB", "\n\nNew\n", Some(1)), "A\n\nNew\n\nB");
+    }
+
+    #[test]
+    fn creations_and_margin_requests_never_evict_each_other() {
+        let value = serde_json::json!(1);
+        remember("kept-note", "kept-request", &value);
+        for n in 0..REMEMBERED * 2 {
+            remember_creation("card:board", &format!("made-{n}"), &value);
+        }
+        assert!(remembered("kept-note", "kept-request").is_some());
+        remember_creation("task", "kept-task", &value);
+        for n in 0..REMEMBERED * 2 {
+            remember("note", &format!("reply-{n}"), &value);
+        }
+        assert!(remembered_creation("task", "kept-task").is_some());
+        assert!(remembered_creation("card:board", "made-0").is_none());
     }
 }

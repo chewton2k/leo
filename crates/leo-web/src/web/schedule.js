@@ -502,7 +502,105 @@
   }
 
 
-  const api = { minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, nextWeekday };
+  const COUNTS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine'];
+  const counted = (n) => (n < COUNTS.length ? COUNTS[n] : String(n));
+  const upper = (text) => text.charAt(0).toUpperCase() + text.slice(1);
+
+  function homeDay(tasks, now, keep = new Set()) {
+    const today = dayKey(now);
+    const earlier = [];
+    const day = [];
+    for (const task of tasks) {
+      if (repeats(task)) day.push(...occurrences(task, today, today));
+      else if (task.date === today) day.push(task);
+      else if (task.date && task.date < today && (!task.done || keep.has(task.id))) earlier.push(task);
+    }
+    const at = (t) => (t.time ? minutesOf(t.time) : 24 * 60);
+    earlier.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : at(a) - at(b)));
+    day.sort((a, b) => at(a) - at(b));
+    return { earlier, today: day };
+  }
+
+  function homeItems(tasks, events, now) {
+    const from = dayKey(now);
+    const to = dayKey(addDays(now, 7));
+    const listed = new Set(tasks.map((t) => t.id));
+    const out = [];
+    for (const task of tasks) {
+      for (const t of repeats(task) ? occurrences(task, from, to) : [task]) {
+        if (t.done || !t.date || t.date < from || t.date > to) continue;
+        const at = t.time ? fromKey(t.date) : null;
+        if (at) at.setMinutes(minutesOf(t.time));
+        out.push({ title: t.title, day: t.date, at });
+      }
+    }
+    for (const event of events) {
+      if (event.task && listed.has(event.task)) continue;
+      if (event.all_day) {
+        for (const key of eventDays(event)) if (key >= from && key <= to) out.push({ title: event.title, day: key, at: null, allDay: true });
+        continue;
+      }
+      const start = new Date(event.start);
+      const end = new Date(event.end);
+      if (Number.isNaN(start.getTime()) || dayKey(start) > to) continue;
+      out.push({ title: event.title, day: dayKey(start), at: start, end: Number.isNaN(end.getTime()) ? null : end, event: true });
+    }
+    return out;
+  }
+
+  function dateline({ tasks = [], events = [], now = new Date(), notes = null, locale } = {}) {
+    const time = (d) => timeLabel(`${d.getHours()}:${d.getMinutes()}`, locale);
+    const title = (text) => {
+      const chars = Array.from(String(text || '').trim() || 'Untitled');
+      return { title: chars.length > 40 ? `${chars.slice(0, 40).join('').trimEnd()}…` : chars.join('') };
+    };
+    const starts = (item) => (item.at ? [title(item.title), ` at ${time(item.at)}.`] : [title(item.title), item.allDay ? ' all day.' : '.']);
+    const first = (list) => list.find((item) => item.at) || list[0];
+    const todayKey = dayKey(now);
+    const tomorrow = dayKey(addDays(now, 1));
+    const { earlier, today } = homeDay(tasks, now);
+    const items = homeItems(tasks, events, now);
+    const later = items.filter((item) => item.at && item.at > now && item.day === todayKey).sort((a, b) => a.at - b.at);
+    const open = today.filter((t) => !t.done);
+    const andEarlier = earlier.length ? ` and ${counted(earlier.length)} from earlier` : '';
+    const still = earlier.length === 1 ? 'One from earlier is still open.' : `${upper(counted(earlier.length))} from earlier are still open.`;
+    if (notes === 0 && !tasks.length) return ['Nothing here yet. Type in the bar to jot a note or a task.'];
+    const on = items.filter((item) => item.event && item.at <= now && item.end && item.end > now).sort((a, b) => a.at - b.at)[0];
+    if (on) return [title(on.title), ` until ${time(on.end)}.`, ...(later.length ? [' Then ', ...starts(later[0])] : [])];
+    if (now.getHours() < 4 && later.length) return ['Today starts with ', ...starts(later[0])];
+    if (open.length >= 6) return [`${upper(counted(open.length))} today${andEarlier}.`, ...(later.length ? [' First up is ', ...starts(later[0])] : [])];
+    if (open.length === 1) return [`One left today${andEarlier}: `, title(open[0].title), open[0].time ? ` at ${timeLabel(open[0].time, locale)}.` : '.'];
+    if (open.length) {
+      const head = `${upper(counted(open.length))} left today${andEarlier}`;
+      if (later.length) return [`${head}. `, title(later[0].title), ` is at ${time(later[0].at)}.`];
+      return [open.some((t) => t.time) ? `${head}.` : `${head}, none at a set time.`];
+    }
+    if (today.length) {
+      const done = today.length === 1 ? 'Today’s one task is done.' : `All ${counted(today.length)} done.`;
+      const next = first(items.filter((item) => item.day === tomorrow));
+      if (next) return [`${done} Tomorrow starts with `, ...starts(next)];
+      return [earlier.length ? `${done} ${still}` : done];
+    }
+    const allDay = items.find((item) => item.allDay && item.day === todayKey);
+    if (later.length || allDay) {
+      const lead = later.length ? starts(later[0]) : starts(allDay);
+      if (later.length > 1) return [...lead, ' Then ', ...starts(later[1])];
+      return earlier.length ? [...lead, ` ${still}`] : lead;
+    }
+    if (earlier.length) return [`Nothing new today. ${still}`];
+    const ahead = items.filter((item) => item.day > todayKey);
+    const soonest = ahead.reduce((min, item) => (item.day < min ? item.day : min), '9999');
+    const next = first(ahead.filter((item) => item.day === soonest));
+    if (!next) return ['Nothing scheduled today.'];
+    const weekday = fromKey(next.day).toLocaleDateString(locale || undefined, { weekday: 'long' });
+    const when = `${next.day === tomorrow ? 'tomorrow' : weekday}${next.at ? ` at ${time(next.at)}` : ''}.`;
+    const sunday = dayKey(addDays(now, now.getDay() === 6 ? 1 : 0));
+    if ((now.getDay() === 0 || now.getDay() === 6) && next.day > sunday) return ['Nothing on until ', title(next.title), `, ${weekday}${next.at ? ` at ${time(next.at)}` : ''}.`];
+    if (next.day === tomorrow && now.getHours() >= 17) return ['Nothing scheduled today. Tomorrow starts with ', ...starts(next)];
+    return ['Nothing scheduled today. Next is ', title(next.title), `, ${when}`];
+  }
+
+  const api = { homeDay, dateline, minutesOf, timeOf, snap, daysOf, spanOn, dayColumns, lanes, shiftRepeat, quickParse, quickRank, richText, eventDetails, dayKey, fromKey, addDays, weekStart, monthGrid, weekOf, eventDays, plan, quickDates, weekdayOf, repeats, repeatsOn, occurrences, nextOpen, repeatLabel, rrule, googleLink, googleDay, timeLabel, nextWeekday };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoSchedule = api;
 })(typeof window !== 'undefined' ? window : globalThis);

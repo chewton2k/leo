@@ -209,16 +209,17 @@ test('Settings sections keep drafts and selections across redraws in both themes
       if(url==='/api/calendar') return {calendars:[],events:[]};
       if(url==='/api/speech') return {ready:false,models:[],extra_files:[],disk_bytes:0};
       if(url==='/api/dictation') return {settings:{custom_words:[],shortcut:'Option+Space'},recent:[]};
-      if(url==='/api/health') return {sections:[{title:'This app',checks:[{name:'Speech model',state:'missing',fix:'Choose a model.',section:'models'}]}]};
+      if(url==='/api/health') return {sections:[{title:'This app',checks:[{name:'Speech model',state:'missing',fix:'Choose a model.',section:'models'},{name:'Microphone',state:'ready',detail:'Built-in microphone'}]}]};
       if(url==='/api/app') { appStatusReads++; return {preferences:{onboarding:[true,true,true],automatic_updates:true,install_on_quit:true},version:'1.2.3',updates:{state:'ready',version:'1.2.4'},paths:{}}; }
       if(url==='/api/keep') return {choices:[{days:7,label:'7 days'},{days:30,label:'30 days'},{days:90,label:'90 days'},{days:365,label:'a year'},{days:null,label:'forever'}],trash_days:30,chat_days:null,upload_days:90,transcript_days:null,audio_days:null};
       if(url==='/api/trash') return [];
       throw new Error(url);
     }
     const cascade=()=>{}, pulse=()=>{}, overlapOut=()=>{};
+    ${read('app/core.js').slice(read('app/core.js').indexOf('const lineDrawing'), read('app/core.js').indexOf('\n};\n', read('app/core.js').indexOf('const DRAWN')) + 3)}
     ${read('app/core.js').slice(read('app/core.js').indexOf('const MOTION_MS'), read('app/core.js').indexOf('function stillMotion'))}
     ${read('app/core.js').slice(read('app/core.js').indexOf('const SHORTCUT_KEYS'), read('app/core.js').indexOf('async function dictateHint'))}
-    const unfold=menu=>{menu.hidden=false;}, fold=menu=>{menu.hidden=true;}, floating=document.createElement('div'), plural=(n,w)=>n+' '+w+(n===1?'':'s'), empty=(icon,title,text)=>'<div class="empty"><h2>'+title+'</h2><p>'+text+'</p></div>';
+    const unfold=menu=>{menu.hidden=false;}, fold=menu=>{menu.hidden=true;}, floating=document.createElement('div'), plural=(n,w)=>n+' '+w+(n===1?'':'s'), empty=(icon,title,text)=>'<div class="empty">'+icon+'<h2>'+title+'</h2><p>'+text+'</p></div>';
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action="segment-pick"],[data-action="theme-pick"],[data-action="width-pick"],[data-action="text-size-pick"],[data-action="letters-pick"],[data-action="setting-reset"]'); if(!el) return; const act=el.dataset.action; if(act==='segment-pick') pickSegment(el); else if(act==='theme-pick') pickTheme(el); else if(act==='width-pick') pickWidth(el); else if(act==='text-size-pick') pickTextSize(el); else if(act==='letters-pick') pickLetters(el); else resetSetting(el);});
     ${read('theme.js')}
     ${read('app/refresh.js')}
@@ -382,6 +383,10 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(page.locator('#calendar-link')).toBeVisible();
       await page.getByRole('link',{name:'Health',exact:true}).click();
       await expect(page.getByText('Choose a model.',{exact:true})).toBeVisible();
+      const ready = page.locator('.hc-tile .hc-ts .pencil-tick');
+      await expect(ready, 'a passed check is ticked in pencil').toHaveCount(1);
+      expect(await ready.evaluate(el=>{const s=getComputedStyle(el);return [s.maskImage.includes('url('),s.backgroundColor===getComputedStyle(document.body).color];})).toEqual([true,true]);
+      await expect(page.locator('.hc-fix svg.hc-g.missing'), 'a problem keeps its sign').toHaveCount(1);
       await page.getByRole('link',{name:'Updates & about',exact:true}).click();
       await expect(page.getByRole('heading',{name:'About leo'})).toBeVisible();
       await expect(page.locator('[data-find="updates-check"] h3 .set-version')).toHaveText('1.2.3');
@@ -397,7 +402,8 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(page.locator('select[data-keep="upload_days"]')).toHaveValue('90');
       await page.getByRole('link',{name:'Trash',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/trash');
-      await expect(page.getByText('The trash is empty',{exact:true})).toBeVisible();
+      await expect(page.getByText('Nothing thrown away.',{exact:true})).toBeVisible();
+      await expect(page.locator('.empty svg.drawn-trash')).toBeVisible();
       await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Trash');
       expect(await keptNav.evaluate(el=>el.isConnected)).toBe(true);
       await page.setViewportSize({width:620,height:850});
@@ -502,7 +508,7 @@ test('setup groups permissions with live checkmarks, then offers speech models a
         await expect(row.locator('[role="status"]')).toBeHidden();
         await page.evaluate(permission=>audit.grant(permission,permission==='microphone'?'allowed':true),permission);
         await expect(row.locator('[role="status"]')).toContainText('Allowed');
-        await expect(row.locator('[role="status"] svg')).toHaveCount(1);
+        await expect(row.locator('[role="status"] .pencil-tick.writing'), 'the tick writes on as access flips to allowed').toHaveCount(1);
         await expect(row).toHaveClass(/allowed/);
         await expect(button).toBeHidden();
         expect(Math.abs((await row.locator('.grow').boundingBox()).width-descriptionWidth)).toBeLessThanOrEqual(1);

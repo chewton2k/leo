@@ -104,6 +104,8 @@
   }
 
   const VERDICT_WITHIN = 240;
+  const QUIZ_MARK_MS = 160;
+  const BLOT = '<svg class="msg-step-busy" role="img" aria-label="working"><use href="#leo-mark"/></svg>';
 
   function grade(text) {
     const value = String(text || '');
@@ -871,7 +873,7 @@
 
   const retiredPractice = (p) => typeof p?.kind === 'string' && p.kind.includes('interview');
 
-  function create({ render, escape, icons = {}, onOpen = () => {}, onCite = () => {}, onOriginal = () => {}, storage = root.localStorage, prepare = null, notify = () => {}, onSaved = () => {}, onChanged = () => {}, onUndone = () => {}, onToggle = () => {}, onAdd = () => {}, onOrganized = () => {}, onLocked = () => {} }) {
+  function create({ render, escape, icons = {}, drawings = {}, onOpen = () => {}, onCite = () => {}, onOriginal = () => {}, storage = root.localStorage, prepare = null, notify = () => {}, onSaved = () => {}, onChanged = () => {}, onUndone = () => {}, onToggle = () => {}, onAdd = () => {}, onOrganized = () => {}, onLocked = () => {} }) {
     const request = async (url, init = {}) => {
       const response = await fetch(url, { credentials: 'same-origin', ...init });
       if (response.status === 401) onLocked();
@@ -903,7 +905,7 @@
       <footer class="chat-foot">
         <div class="chat-refs" id="chat-refs"></div>
         <form class="chat-compose" id="chat-form">
-          <span class="chat-perch" id="chat-face">${felix(100, 'idle')}</span>
+          <span class="chat-perch" id="chat-face">${felix(50, 'idle')}</span>
           <div class="chat-pick" id="chat-pick" hidden></div>
           <div class="chat-attach-menu" id="chat-attach-menu" role="menu" hidden><button type="button" role="menuitem" data-chat="attach-note">${icons.note || ''}<span>A note from leo</span></button>${prepare ? `<button type="button" role="menuitem" data-chat="attach-file">${icons.paperclip || ''}<span>A file from this device</span></button>` : ''}</div>
           <input type="file" id="chat-file" multiple accept="${FILE_TYPES}" hidden>
@@ -1275,10 +1277,7 @@
         if (panel.hidden || (history.getAnimations && history.getAnimations().length)) return;
         const width = chatMain.getBoundingClientRect().width;
         if (!width || (width < SLIM_WIDTH) === panel.classList.contains('slim')) return;
-        panel.classList.add('slim-switch');
         panel.classList.toggle('slim', width < SLIM_WIDTH);
-        void panel.offsetWidth;
-        panel.classList.remove('slim-switch');
       };
       new root.ResizeObserver(syncSlim).observe(chatMain, { box: 'border-box' });
       const settled = (e) => {
@@ -1468,7 +1467,7 @@
         : [];
       const list = [...ghost, ...state.chats];
       if (!list.length) {
-        box.innerHTML = '<div class="chat-history-none">Your conversations with Felix are kept here, on this computer.</div>';
+        box.innerHTML = `<div class="chat-history-none">${drawings.chats || ''}Your conversations with Felix are kept here, on this computer.</div>`;
         return;
       }
       box.innerHTML = groups(list)
@@ -2120,8 +2119,8 @@
 
     function stepLine(step, working, times = 1) {
       const item = typeof step === 'string' ? { text: step, tool: '', found: [] } : step;
-      const icon = `<svg class="msg-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[item.tool] || '<circle cx="12" cy="12" r="3"/>'}</svg>`;
-      const label = `${icon}<span>${escape(item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}${working ? '<span class="msg-step-busy" aria-label="working"></span>' : ''}`;
+      const icon = working ? BLOT : `<svg class="msg-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[item.tool] || '<circle cx="12" cy="12" r="3"/>'}</svg>`;
+      const label = `${icon}<span>${escape(item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}`;
       const found = (item.found || []).filter((f) => f && f !== item.text);
       if (!found.length || item.tool === 'open_note') return `<div class="msg-step">${label}</div>`;
       return `<details class="msg-step"><summary>${label}<span class="msg-step-count">${found.length}</span>${stepChevron}</summary><ul>${found.map((f) => `<li>${escape(f)}</li>`).join('')}</ul></details>`;
@@ -2130,13 +2129,14 @@
     function proposalCard(p, i, j) {
       const where = `data-i="${i}" data-j="${j}"`;
       if (retiredPractice(p)) return '<div class="proposal-done">Interview practice is no longer part of leo.</div>';
+      const waiting = p.state !== 'applied' && p.state !== 'dismissed' && state.messages.findLastIndex((m) => m.role === 'assistant') === i ? '<div class="proposal-wait"><i aria-hidden="true"></i>Waiting for you</div>' : '';
       if (p.kind !== 'create' && p.kind !== 'edit') {
         const acts = p.state === 'applied'
           ? `<div class="proposal-done">Done · <button class="msg-act" data-chat="undo" ${where}>Undo</button></div>`
           : p.state === 'dismissed'
             ? '<div class="proposal-done">Dismissed</div>'
             : `<div class="proposal-buttons"><button class="btn primary sm" data-chat="apply" ${where}>${p.kind === 'delete_note' || p.kind === 'delete_folder' ? 'Move to trash' : p.kind === 'delete_card' || p.kind === 'delete_board' ? 'Delete' : p.kind === 'restore_note' || p.kind === 'restore_folder' ? 'Bring it back' : 'Do it'}</button><button class="btn plain sm" data-chat="dismiss" ${where}>Dismiss</button></div>`;
-        return `<div class="proposal organize ${escape(p.kind)}"><div class="proposal-title">${escape(p.summary || 'A change')}</div>${typeof p.description === 'string' && (p.kind === 'update_task' || p.description) ? `<div class="proposal-why">${escape(p.description || 'Clear description')}</div>` : ''}${p.kind === 'add_margin_note' ? `<div class="proposal-why">“${escape(p.quote)}”: ${escape(p.text)}</div>` : ''}${acts}</div>`;
+        return `<div class="proposal organize ${escape(p.kind)}">${waiting}<div class="proposal-title">${escape(p.summary || 'A change')}</div>${typeof p.description === 'string' && (p.kind === 'update_task' || p.description) ? `<div class="proposal-why">${escape(p.description || 'Clear description')}</div>` : ''}${p.kind === 'add_margin_note' ? `<div class="proposal-why">“${escape(p.quote)}”: ${escape(p.text)}</div>` : ''}${acts}</div>`;
       }
       const done = p.state === 'applied'
         ? `<div class="proposal-done">${p.kind === 'create' ? 'Made' : 'Applied'} · <button class="msg-act" data-chat="open" data-id="${escape(p.made || p.note || '')}">Open the note</button><button class="msg-act" data-chat="undo" ${where}>Undo</button></div>`
@@ -2145,11 +2145,11 @@
           : `<div class="proposal-buttons"><button class="btn primary sm" data-chat="apply" ${where}>${p.kind === 'create' ? 'Create' : 'Apply'}</button><button class="btn plain sm" data-chat="dismiss" ${where}>Dismiss</button></div>`;
       if (p.kind === 'create') {
         const body = String(p.body || '');
-        return `<div class="proposal"><div class="proposal-title">New note: “${escape(p.title || 'Untitled')}”${p.folder ? ` in ${escape(p.folder)}` : ''}</div>
+        return `<div class="proposal">${waiting}<div class="proposal-title">New note: “${escape(p.title || 'Untitled')}”${p.folder ? ` in ${escape(p.folder)}` : ''}</div>
           <div class="proposal-body prose">${render(body.length > 900 ? `${body.slice(0, 900)}…` : body)}</div>${done}</div>`;
       }
       const old = p.find ? `<div class="proposal-old">${escape(p.find)}</div>` : '<div class="proposal-note">Added at the end:</div>';
-      return `<div class="proposal"><div class="proposal-title">Change to “${escape(p.title || 'a note')}”</div>${p.why ? `<div class="proposal-why">${escape(p.why)}</div>` : ''}
+      return `<div class="proposal">${waiting}<div class="proposal-title">Change to “${escape(p.title || 'a note')}”</div>${p.why ? `<div class="proposal-why">${escape(p.why)}</div>` : ''}
         ${old}<div class="proposal-new">${escape(p.replace || '')}</div>${done}</div>`;
     }
 
@@ -2166,6 +2166,13 @@
 
     const BLANK = 'QUIZBLANKMARK';
 
+    function quizMark(q, said) {
+      const ago = Date.now() - (markedAt.get(q) ?? 0);
+      const writing = ago < QUIZ_MARK_MS ? ` class="writing" style="animation-delay: ${-ago}ms"` : '';
+      const path = said === 'Your answer, not right' ? 'M4.6 4.2 Q9.4 9.3 14 14.2 M13.8 4.4 Q8.8 9 4.4 13.8' : 'M3.3 8.7 Q4.9 10.1 6.1 12.6 Q8.6 7.9 14 2.5';
+      return `<svg class="quiz-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path pathLength="1"${writing} d="${path}"/></svg>`;
+    }
+
     function quizCard(q, i, k, pending, sources) {
       const where = `data-i="${i}" data-k="${k}"`;
       const done = typeof q.given === 'string';
@@ -2180,14 +2187,14 @@
       if (q.kind === 'multiple_choice') {
         answer = `<div class="quiz-options">${(q.options || []).map((o, n) => {
           const mark = !done ? '' : plainAnswer(o) === plainAnswer(q.answer) ? ' right' : o === q.given ? ' wrong' : '';
-          return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span></button>`;
+          return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span>${mark ? quizMark(q, mark === ' right' ? (o === q.given ? 'Your answer, right' : 'The right answer') : 'Your answer, not right') : ''}</button>`;
         }).join('')}</div>`;
       } else if (q.kind === 'fill_blank') {
         answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       } else {
         answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       }
-      const result = checking.has(q) ? '<div class="quiz-result">Checking your answer…</div>' : marking && !(reply && reply.text) ? '<div class="quiz-result">Felix is reading your answer…</div>' : '';
+      const result = checking.has(q) ? `<div class="quiz-result">${BLOT}Checking your answer…</div>` : marking && !(reply && reply.text) ? `<div class="quiz-result">${BLOT}Felix is reading your answer…</div>` : '';
       const open = !done && !q.predict;
       const writing = thinkingOpen.has(q);
       const thinking = open && writing ? `<textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(state.drafts[`think:${i}:${k}`] || '')}</textarea>` : '';
@@ -2209,7 +2216,7 @@
       const said = reply
         ? (grade(reply.text || '').text
           ? `<div class="quiz-reply prose">${cite(render(grade(reply.text).text), reply.sources || sources, escape, reply.files)}</div>`
-          : reply.pending ? '<div class="quiz-reply"><span class="typing"><i></i><i></i><i></i></span></div>' : '')
+          : '')
         : '';
       const tone = q.correct === true ? ' right' : q.correct === false ? ' wrong' : '';
       return `<div class="quiz-card${done ? ' done' : ''}${marking ? ' marking' : ''}${tone}"><div class="quiz-kind">${q.predict ? 'Predict · a guess, not marked' : escape(QUIZ_KINDS[q.kind] || 'Question')}</div><div class="quiz-q prose">${asked}</div>${hinted}${sure}${answer}${own}${askHint}${result}${why}${said}${onward}</div>`;
@@ -2231,6 +2238,7 @@
 
     const checking = new WeakSet();
     const thinkingOpen = new WeakSet();
+    const markedAt = new WeakMap();
 
     async function answerQuiz(i, k, given) {
       const m = state.messages[i];
@@ -2262,6 +2270,7 @@
       }
       q.given = text;
       q.correct = correct;
+      markedAt.set(q, Date.now());
       if (thinking) q.thinking = thinking;
       scoreSession(currentSession(), q.idea, correct, q.more || q.sure === 'guess');
       delete state.drafts[`${i}:${k}`];
@@ -2702,6 +2711,7 @@
       else body.innerHTML = html;
       panel.classList.toggle('perched', perched);
       body.setAttribute('aria-busy', String(Boolean(state.busy)));
+      document.getElementById('chat-toggle')?.classList.toggle('working', Boolean(state.busy));
       drawBelow();
       if (land) land();
       drawTitle();
@@ -2995,11 +3005,11 @@
         onToggle(true);
       } else if (was && !panel.hidden && !still) {
         panel.classList.add('chat-leaving');
+        document.body.classList.remove('chat-open');
+        onToggle(false);
         leaving = setTimeout(() => {
           panel.hidden = true;
           panel.classList.remove('chat-leaving');
-          document.body.classList.remove('chat-open');
-          onToggle(false);
         }, CHAT_LEAVE_MS);
       } else {
         panel.hidden = true;

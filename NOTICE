@@ -71,3 +71,29 @@ MIT License (same terms as above)
 
 Leo's dictation echo filter (crates/leo-services/src/dictation/text.rs) ports src/utils/dictionaryEchoFilter.js.
 The everyday-word list in Recent dictations (crates/leo-web/src/web/app/dictation.js) ports src/utils/correctionLearner.js.
+
+--------------------------------------------------------------------------------
+
+Instrument Sans and Newsreader (crates/leo-web/src/web/vendor/fonts/)
+
+Instrument Sans: Copyright 2022 The Instrument Sans Project Authors
+(https://github.com/Instrument/instrument-sans)
+Newsreader: Copyright 2020 The Newsreader Project Authors
+(https://github.com/productiontype/Newsreader)
+
+Both are licensed under the SIL Open Font License, Version 1.1 (full text in
+InstrumentSans.LICENSE and Newsreader.LICENSE beside the fonts). The Latin
+subsets are the Fontsource variable builds, @fontsource-variable/instrument-sans
+5.3.0 and @fontsource-variable/newsreader 5.3.0, unmodified.
+
+npm integrity of the two tarballs (registry dist.integrity):
+  @fontsource-variable/instrument-sans 5.3.0
+    sha512-u4gKbDBTNFGkg997tfQn3eHOhHuquWUFTRT/rwzuKtrxX5P2ekfs2x+LgBPP4P32+cC+vUwF1Cr+IdRoPQbrGw==
+  @fontsource-variable/newsreader 5.3.0
+    sha512-rrzYi43qMpbzwuFtf9OkWH8sxAPVPcQQQEwXpPtwaKYeJ8yVg5aLs5kawmo1f2Q1t1M38TLmEKCkGVDsYwgdFw==
+
+SHA-256 of each vendored file (each is byte-identical to its file in the tarball):
+  77210cdde0281b5ecb0d592e063a98656f1bc36993a3b98f506eb91ff4a433a5  instrument-sans-latin-wght-italic.woff2
+  2ee17598a98d8a59e4df8152d015bec9ab8e4d5672cc0ab42bef806b568e3971  instrument-sans-latin-wght-normal.woff2
+  5dfcd10d24af8c82927ba57f7983dd997f7b200594c09c35a1b1ed9fc4597506  newsreader-latin-opsz-italic.woff2
+  6e4f2958c3a7c4a80acde4e5a679abe7e01bc1e30b92be3c7a8b696ef401d101  newsreader-latin-opsz-normal.woff2

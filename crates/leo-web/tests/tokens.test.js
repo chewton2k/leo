@@ -152,7 +152,7 @@ test('sizes and radii come from the scale, and the note title and prose use thei
   assert.equal(t['--fs-title'], '32px');
   assert.equal(t['--r-xl'], '14px');
   const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
-  assert.match(body('.note-head h1'), /font-size: var\(--fs-title\); font-weight: 650;[^}]*letter-spacing: -\.025em/);
+  assert.match(body('.note-head h1'), /font-family: var\(--writing-font\); font-size: var\(--fs-title\); font-weight: 500;[^}]*letter-spacing: -\.032em/);
   assert.match(body('.prose'), /line-height: 1\.72/);
   assert.match(body('.doc .line-edit'), /line-height: 1\.72/);
 });
@@ -166,4 +166,60 @@ test('the paper grain is a data: SVG background layer on the shell surfaces, scr
     assert.ok(rule.at.every((a) => !/forced-colors: active|print/.test(a)), rule.selector);
   }
   assert.doesNotMatch(pageCss(), /mix-blend-mode|background-blend-mode/);
+});
+
+test('ink details: a warm selection wash, a drawn rule with a plain fallback, and thin warm scrollbars that keep the page bar', () => {
+  const at = (selector, media = null) => all.find((r) => r.selector.split(', ').includes(selector) && (media ? r.at.some((a) => a.includes(media)) : r.at.length === 0));
+  assert.match(at('::selection').body, /background: color-mix\(in srgb, var\(--text\) 22%, transparent\)/);
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    const wash = over([...rgb(t['--text']).slice(0, 3), 0.22], rgb(t['--page']));
+    assert.ok(contrast(rgb(t['--text']), wash) >= 4.5, `${name}: selected text is ${contrast(rgb(t['--text']), wash).toFixed(2)}`);
+  }
+  const rule = at('.prose hr').body;
+  assert.match(rule, /mask: url\("data:image\/svg\+xml,[^"]*preserveAspectRatio='none'/);
+  assert.match(rule, /background: color-mix\(in srgb, var\(--text\)/);
+  assert.match(at('.prose hr', 'forced-colors: active').body, /mask: none; border-top: 1px solid var\(--line\)/);
+  assert.ok(at('.prose hr', 'forced-colors: active').at.some((a) => a.includes('print')), 'print keeps the plain rule');
+  assert.ok(all.some((r) => r.selector === '*' && r.at.length === 0 && /scrollbar-width: thin/.test(r.body)));
+  assert.ok(all.some((r) => r.selector === ':root' && r.at.length === 0 && /scrollbar-color: color-mix\(in srgb, var\(--text\) 24%, transparent\) transparent/.test(r.body)));
+  assert.match(at('html.page-bar-on').body, /scrollbar-width: none/);
+});
+
+test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works', () => {
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    assert.match(t['--felix'] || '', /^#[0-9a-f]{6}$/i, `${name} defines --felix`);
+    for (const under of ['--page', '--ground']) assert.ok(contrast(rgb(t['--felix']), rgb(t[under])) >= 4.5, `${name}: --felix on ${under} is ${contrast(rgb(t['--felix']), rgb(t[under])).toFixed(2)}`);
+  }
+  assert.equal(tokens(themes.light)['--felix'], '#3f6d97');
+  assert.equal(tokens(themes['dark media'])['--felix'], '#b4cfe7');
+  assert.equal(tokens(themes['dark theme'])['--felix'], '#b4cfe7');
+  const users = all.filter((r) => /var\(--felix\)/.test(r.body)).map((r) => r.selector).sort();
+  assert.deepEqual(users, [
+    '.chat-btn.working::after',
+    '.margin-ink path.pencil',
+    '.margin-waiting .margin-drop, .margin-mark.reading .margin-drop',
+    '.msg-step-busy',
+    '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
+    '.proposal-wait',
+  ]);
+});
+
+test('quiz chalk tones are one plain token pair per theme, readable as text on every chat surface', () => {
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    for (const tone of ['--chalk-good', '--chalk-bad']) {
+      assert.match(t[tone] || '', /^#[0-9a-f]{6}$/i, `${name} defines ${tone}`);
+      for (const under of ['--page', '--ground', '--surface', '--surface-2', '--bg', '--raised']) assert.ok(contrast(rgb(t[tone]), rgb(t[under])) >= 4.5, `${name}: ${tone} on ${under} is ${contrast(rgb(t[tone]), rgb(t[under])).toFixed(2)}`);
+      for (const under of ['--page', '--surface']) {
+        const badge = over([...rgb(t[tone]).slice(0, 3), 0.14], rgb(t[under]));
+        assert.ok(contrast(rgb(t[tone]), badge) >= 4.5, `${name}: ${tone} on its badge over ${under} is ${contrast(rgb(t[tone]), badge).toFixed(2)}`);
+      }
+    }
+  }
+  const at = (selector) => all.find((r) => r.selector === selector).body;
+  assert.match(at('.quiz-card.right'), /var\(--chalk-good\)/);
+  assert.match(at('.quiz-card.wrong'), /var\(--chalk-bad\)/);
+  assert.match(at('.quiz-mark'), /mask: var\(--chalk-break\)/);
 });

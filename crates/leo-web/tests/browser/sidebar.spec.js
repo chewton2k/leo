@@ -21,7 +21,7 @@ async function sidebarFixture(browser, run) {
     const folderLabel=dir=>dir.split('/').pop()||'Top level', folderHash=dir=>dir?'#/f/'+encodeURIComponent(dir):'#/', noteHash=id=>'#/n/'+encodeURIComponent(id);
     const closeSheet=()=>{}, go=hash=>{location.hash=hash;}, fail=error=>window.errors.push(error.message);
     const stillMotion=()=>matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const moves=[], enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false};
+    const moves=[], tasksAtHome=()=>false, enc=encodeURIComponent, toast=()=>{}, showLatest=async()=>{}, saving={unsaved:()=>false};
     const notes={
       '':[{id:'root-note',title:'Welcome',directory:''}],
       Course:[{id:'course-note',title:'Course overview',directory:'Course'},{id:'escaped-note',title:'<script> stays text',directory:'Course'}],
@@ -220,6 +220,9 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
     const folderIcon = await page.locator('.side-tree .side-row[data-dir="Course"] svg').boundingBox();
     const noteIcon = await page.locator('.side-tree .side-note').first().locator('svg').boundingBox();
     expect(Math.abs(noteIcon.x - folderIcon.x - 14)).toBeLessThanOrEqual(14);
+    const guide = await page.locator('.side-kids[data-kids="Course"]').evaluate(el => { const s = getComputedStyle(el, '::before'); return { mask: s.maskImage || s.webkitMaskImage, width: s.width }; });
+    expect(guide.mask.match(/url\(/g)).toHaveLength(2);
+    expect(guide.width).toBe('10px');
   });
 });
 
@@ -378,6 +381,24 @@ test('explorer refresh keeps file rows and a click in progress intact', async ({
     await page.evaluate(()=>{audit.rename('Renamed 文字');return audit.refresh();});
     await expect(note).toHaveText('Renamed 文字');
     expect(await kept.evaluate(el=>el.isConnected)).toBe(true);
+    expect(await page.evaluate(()=>window.errors)).toEqual([]);
+  });
+});
+
+test('a note just created lands in the explorer in full ink, and one moved in from elsewhere does not', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page=await context.newPage();
+    await page.goto(url);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
+    await page.evaluate(()=>{notes.Course.push({id:'fresh-note',title:'Fresh',directory:'Course',created_at:new Date().toISOString()},{id:'old-note',title:'Old',directory:'Course',created_at:'2020-01-01T00:00:00Z'});return refreshSideTree();});
+    const inked=id=>page.locator(`.side-note[data-id="${id}"]`).evaluate(el=>el.getAnimations().filter(run=>run.id==='ink').length);
+    await expect(page.locator('.side-note[data-id="fresh-note"]')).toBeVisible();
+    expect(await inked('fresh-note')).toBe(1);
+    expect(await inked('old-note')).toBe(0);
+    expect(await inked('course-note')).toBe(0);
+    await page.evaluate(()=>{seq++;drawSide();});
+    expect(await inked('fresh-note')).toBeLessThanOrEqual(1);
     expect(await page.evaluate(()=>window.errors)).toEqual([]);
   });
 });

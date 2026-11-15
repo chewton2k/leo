@@ -360,23 +360,28 @@ test.describe('reading pencil', () => {
   });
 });
 
-test.describe('folding and pins', () => {
+test.describe('whole notes and pins', () => {
   const LONG = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it before you store it. Use a slow hash such as Argon2id with a unique salt for each user, and verify at login by hashing the attempt the same way.' }] };
-  test('a closed unpinned note folds to its first line and dims; opening shows the conversation right of a thin rule, and a pin keeps it unfolded', async ({ browser }) => {
+  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pin stays undimmed', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
       const said = note.locator('.margin-said');
       const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
       const height = () => said.evaluate((el) => el.getBoundingClientRect().height);
       const opacity = () => note.evaluate((el) => Number(getComputedStyle(el).opacity));
-      await expect.poll(height).toBeLessThanOrEqual(line + 1);
+      await expect.poll(height).toBeGreaterThan(line * 2);
+      expect(await note.locator('.margin-felix').evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+      await expect(note.locator('.margin-cut')).toHaveCount(0);
       await expect.poll(opacity).toBeCloseTo(0.7, 2);
       await note.locator('.margin-toggle').click();
       await expect(note).toHaveAttribute('data-open', '');
       expect(await height()).toBeGreaterThan(line * 2);
       expect(await said.evaluate((el) => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).borderLeftStyle])).toEqual(['1px', 'solid']);
       await note.getByRole('button', { name: 'Pin open' }).click();
-      await expect(note.getByRole('button', { name: 'Unpin' })).toHaveAttribute('aria-pressed', 'true');
+      const pin = note.getByRole('button', { name: 'Unpin' });
+      await expect(pin).toHaveAttribute('aria-pressed', 'true');
+      expect(await pin.evaluate((el) => getComputedStyle(el.querySelectorAll('svg path')[1]).fill)).not.toBe('none');
+      expect(await pin.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
       expect(await page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
       await page.mouse.click(5, 5);
       await expect(note).not.toHaveAttribute('data-open', '');
@@ -384,6 +389,91 @@ test.describe('folding and pins', () => {
       expect(await height()).toBeGreaterThan(line * 2);
       await expect.poll(opacity).toBe(1);
     }, { threads: [LONG] });
+  });
+
+  test('a long closed note stops at twelve lines with a fade, and a figure always shows whole', async ({ browser }) => {
+    const words = Array.from({ length: 400 }, (_, i) => `w${i}`).join(' ');
+    const drawn = `${words}\n\n\`\`\`svg\n<svg viewBox="0 0 40 400" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="400"/></svg>\n\`\`\``;
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      const text = note.locator('.margin-felix > p').first();
+      await expect(text).toHaveClass(/margin-cut/);
+      const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect((await text.boundingBox()).height).toBeLessThanOrEqual(line * 12 + 1);
+      const figure = note.locator('.margin-felix figure').first();
+      expect(await figure.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && getComputedStyle(el).maxHeight === 'none')).toBe(true);
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note.locator('.margin-cut')).toHaveCount(0);
+    }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
+  });
+
+  test('twelve lines cap the closed note\'s text as a whole across paragraphs, and the figure after them stays whole', async ({ browser }) => {
+    const para = (tag) => Array.from({ length: 70 }, (_, i) => `${tag}${i}`).join(' ');
+    const drawn = `${para('a')}\n\n${para('b')}\n\n${para('c')}\n\n\`\`\`svg\n<svg viewBox="0 0 40 200" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="200"/></svg>\n\`\`\``;
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      const visible = await note.locator('.margin-felix > p').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+      expect(visible[0] + visible[1] + visible[2]).toBeLessThanOrEqual(line * 12 + 1);
+      expect(visible[0]).toBeGreaterThan(line * 3);
+      expect(visible[2]).toBe(0);
+      await expect(note.locator('.margin-felix > p').nth(1)).toHaveClass(/margin-cut/);
+      const figure = note.locator('.margin-felix figure').first();
+      expect(await figure.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && el.getBoundingClientRect().height > 0)).toBe(true);
+    }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
+  });
+
+  test('at 1600 px with the comfortable column an open note is wider than 300 px, has no close cross and keeps every action on one row', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      await page.evaluate(() => { document.documentElement.dataset.noteWidth = 'comfortable'; marginRedraw(); });
+      await expect.poll(async () => (await note.boundingBox()).width).toBeGreaterThan(300);
+      await page.evaluate(() => marginOpen('t1', true));
+      await expect(note).toHaveAttribute('data-open', '');
+      await expect(note.locator('.margin-toggle svg')).toHaveCount(0);
+      const tops = await note.locator('.margin-acts button:visible').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
+      expect(tops.length).toBe(5);
+      expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2);
+      await page.keyboard.press('Escape');
+      await expect(note).not.toHaveAttribute('data-open', '');
+    }, { width: 1600, height: 900 });
+  });
+
+  test('in a narrow margin only pin and chat wrap, to the end of a second row', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      expect((await note.boundingBox()).width).toBeLessThan(290);
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note).toHaveAttribute('data-open', '');
+      const box = await note.locator('.margin-acts').evaluate((acts) => {
+        const at = (sel) => acts.querySelector(sel).getBoundingClientRect();
+        return { resolve: at('[data-margin-act="resolve"]'), add: at('.margin-add'), pin: at('.margin-pin'), chat: at('.margin-chat'), acts: acts.getBoundingClientRect() };
+      });
+      expect(Math.abs(box.resolve.top - box.add.top)).toBeLessThanOrEqual(2);
+      expect(box.pin.top).toBeGreaterThan(box.add.bottom - 2);
+      expect(Math.abs(box.pin.top - box.chat.top)).toBeLessThanOrEqual(2);
+      expect(box.chat.right).toBeGreaterThan(box.acts.right - 4);
+    });
+  });
+
+  test('an open note closes with Escape while focus is on the page, and with an outside click even when a reply is typed, keeping the text', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const note = page.locator('.margin-note[data-id="t1"]');
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note).toHaveAttribute('data-open', '');
+      await page.evaluate(() => document.activeElement.blur());
+      expect(await page.evaluate(() => document.activeElement === document.body)).toBe(true);
+      await page.keyboard.press('Escape');
+      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.evaluate(() => marginOpen('t1', true));
+      await expect(note).toHaveAttribute('data-open', '');
+      await note.locator('textarea').fill('half a thought');
+      await page.mouse.click(5, 5);
+      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note).toHaveAttribute('data-open', '');
+      await expect(note.locator('textarea')).toHaveValue('half a thought');
+    });
   });
 });
 
@@ -485,6 +575,176 @@ test.describe('passage states', () => {
   });
 });
 
+test.describe('tether geometry', () => {
+  const LIST = 'Opening line of the note.\n\n- a mesh office chair\n- a nice unique and short couch\n- a low futon bed\n\nClosing words that sit in a plain paragraph of the note.';
+  const thread = (id, quote, prefix, suffix) => ({ id, quote, prefix, suffix, status: 'open', messages: [{ from: 'felix', text: 'A note.' }] });
+  const SPAN = thread('t2', 'office chair\n- a nice unique and short couch\n- a low futon bed', '- a mesh ', '\n\nClosing words');
+  const ITEM = thread('t1', 'a nice unique and short couch', 'chair\n- ', '\n- a low');
+  const MIDDLE = thread('t3', 'sit in a plain paragraph', 'Closing words that ', ' of the note.');
+  const ends = (page, id) => page.evaluate((key) => {
+    const svg = document.querySelector('.margin-ink').getBoundingClientRect();
+    const at = (p, n) => { const pt = p.getPointAtLength(n * p.getTotalLength()); return { x: pt.x + svg.left, y: pt.y + svg.top }; };
+    const tie = document.querySelector(`.margin-ink path.tie[data-id="${key}"]`);
+    const spine = document.querySelector(`.margin-ink path.spine[data-id="${key}"]`);
+    return { tie: tie && [at(tie, 0), at(tie, 1)], spine: spine && [at(spine, 0), at(spine, 1)] };
+  }, id);
+  const items = (page) => page.evaluate(() => [...document.querySelectorAll('#doc li')].map((li) => {
+    const range = document.createRange();
+    range.selectNodeContents(li);
+    const text = range.getBoundingClientRect();
+    return { left: text.left, right: text.right, top: text.top, bottom: text.bottom, size: parseFloat(getComputedStyle(li).fontSize) };
+  }));
+
+  test('a list passage washes only its text lines and ties to the note from a spine at its middle', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const rects = await page.evaluate(() => rectsOf('t2'));
+      const lines = await items(page);
+      expect(rects).toHaveLength(3);
+      for (const [i, r] of rects.entries()) {
+        expect(r.left).toBeGreaterThanOrEqual(lines[i].left - 1);
+        expect(r.right).toBeLessThanOrEqual(lines[i].right + 4);
+      }
+      const wash = await page.locator('.margin-ink path.wash[data-id="t2"]').boundingBox();
+      expect(wash.width).toBeLessThanOrEqual(Math.max(...lines.map((l) => l.right - l.left)) + 8);
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.spine[data-id="t2"]')).toHaveCount(1);
+      await page.waitForTimeout(900);
+      const { tie, spine } = await ends(page, 't2');
+      const middle = (rects[0].top + rects[2].bottom) / 2;
+      const column = await page.locator('article.note').boundingBox();
+      expect(Math.abs(tie[0].y - middle)).toBeLessThanOrEqual(2);
+      expect(Math.abs(tie[1].y - middle)).toBeLessThanOrEqual(2);
+      expect(Math.abs(tie[0].x - (column.x + column.width + 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[0].x - tie[0].x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[0].y - rects[0].top)).toBeLessThanOrEqual(1);
+      expect(Math.abs(spine[1].y - rects[2].bottom)).toBeLessThanOrEqual(1);
+    }, { source: LIST, threads: [SPAN] });
+  });
+
+  test('the underline and spine wobble slightly, the same on every repaint, and keep their ends', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.spine[data-id="t2"]')).toHaveCount(1);
+      const shape = () => page.evaluate(() => ['solid', 'spine'].map((cls) => document.querySelector(`.margin-ink path.${cls}[data-id="t2"]`).getAttribute('d')));
+      const [solid, spine] = await shape();
+      expect(solid).toMatch(/q/);
+      expect(spine).toMatch(/q/);
+      await page.evaluate(() => { marginRedraw(); window.scrollBy(0, 1); });
+      await page.waitForTimeout(100);
+      expect(await shape()).toEqual([solid, spine]);
+      const rects = await page.evaluate(() => rectsOf('t2'));
+      const run = await page.evaluate(() => {
+        const svg = document.querySelector('.margin-ink').getBoundingClientRect();
+        const p = document.querySelector('.margin-ink path.solid[data-id="t2"]');
+        const first = p.getPointAtLength(0);
+        return { x: first.x + svg.left, y: first.y + svg.top };
+      });
+      expect(Math.abs(run.x - rects[0].left)).toBeLessThanOrEqual(1);
+      expect(Math.abs(run.y - (rects[0].bottom + 4))).toBeLessThanOrEqual(1);
+    }, { source: LIST, threads: [SPAN] });
+  });
+
+  test('a one-line passage has a tie and no spine, starting just past its end', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const [r] = await page.evaluate(() => rectsOf('t1'));
+      await page.locator('.margin-note[data-id="t1"]').hover();
+      await expect(page.locator('.margin-ink path.tie[data-id="t1"]')).toHaveCount(1);
+      await expect(page.locator('.margin-ink path.spine')).toHaveCount(0);
+      const { tie } = await ends(page, 't1');
+      expect(Math.abs(tie[0].x - (r.right + 8))).toBeLessThanOrEqual(1);
+      expect(Math.abs(tie[0].y - (r.top + r.bottom) / 2)).toBeLessThanOrEqual(2);
+    }, { source: LIST, threads: [ITEM] });
+  });
+
+  const markerLeft = (page, index) => page.evaluate((i) => {
+    const li = document.querySelectorAll('#doc li')[i];
+    const list = li.parentElement.cloneNode(false);
+    const item = li.cloneNode(false);
+    const probe = document.createElement('span');
+    probe.style.cssText = 'display: inline-block; width: 0; height: 0';
+    item.style.cssText = 'margin: 0; padding: 0; list-style-position: inside';
+    list.style.cssText = 'position: absolute; visibility: hidden; margin: 0; padding: 0';
+    item.append(probe);
+    list.append(item);
+    li.parentElement.parentElement.append(list);
+    const width = probe.getBoundingClientRect().left - item.getBoundingClientRect().left;
+    list.remove();
+    return li.getBoundingClientRect().left - width;
+  }, index);
+
+  test('on the left a list tie ends at the measured bullet and a mid-line tie stops outside the text', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t1: 'left', t3: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t1"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      const line = (await items(page))[1];
+      await page.evaluate(() => { marginPage.hover = 't1'; marginPage.focus = 't3'; marginPaint(); });
+      const item = (await ends(page, 't1')).tie[0];
+      const bullet = await markerLeft(page, 1);
+      expect(bullet).toBeLessThan(line.left - 4);
+      expect(Math.abs(item.x - (bullet - 3))).toBeLessThanOrEqual(1);
+      expect(Math.abs(item.y - (line.top + line.bottom) / 2)).toBeLessThanOrEqual(2);
+      const middle = (await ends(page, 't3')).tie[0];
+      const block = await page.locator('#doc .blk').last().boundingBox();
+      expect(middle.x).toBeLessThan(block.x - 4);
+    }, { width: 1600, height: 900, layout: 'both', source: LIST, threads: [ITEM, MIDDLE] });
+  });
+
+  test('on the left a numbered item ties to its measured number', async ({ browser }) => {
+    const NUMBERED = '1. first thing here\n2. second thing here\n3. third thing here';
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t5: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t5"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      await page.evaluate(() => { marginPage.hover = 't5'; marginPaint(); });
+      await expect(page.locator('.margin-ink path.tie[data-id="t5"]')).toHaveCount(1);
+      const { tie } = await ends(page, 't5');
+      expect(Math.abs(tie[0].x - ((await markerLeft(page, 1)) - 3))).toBeLessThanOrEqual(1);
+    }, { width: 1600, height: 900, layout: 'both', source: NUMBERED, threads: [thread('t5', 'second thing', '2. ', ' here\n3.')] });
+  });
+
+  test('a passage that starts in another block and runs into a list ends its tie at the bullets', async ({ browser }) => {
+    const QUOTED = '> A quoted line before the list.\n\n- a mesh office chair\n- a nice unique and short couch\n\nClosing words.';
+    const ACROSS = thread('t4', 'before the list.\n\n- a mesh office chair\n- a nice unique', 'A quoted line ', ' and short couch');
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => { marginPage.sides = { t4: 'left' }; marginRedraw(); });
+      await expect.poll(async () => (await page.locator('.margin-note[data-id="t4"]').boundingBox()).x).toBeLessThan((await page.locator('#doc').boundingBox()).x);
+      await page.evaluate(() => { marginPage.hover = 't4'; marginPaint(); });
+      await expect(page.locator('.margin-ink path.spine[data-id="t4"]')).toHaveCount(1);
+      const { tie, spine } = await ends(page, 't4');
+      const bullet = await markerLeft(page, 0);
+      expect(Math.abs(spine[0].x - (bullet - 3))).toBeLessThanOrEqual(1);
+      expect(Math.abs(tie[0].x - spine[0].x)).toBeLessThanOrEqual(1);
+    }, { width: 1600, height: 900, layout: 'both', source: QUOTED, threads: [ACROSS] });
+  });
+
+  test('a lit tether draws once, tie then spine, and a repaint never restarts it', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      const tie = page.locator('.margin-ink path.tie[data-id="t2"]');
+      const spine = page.locator('.margin-ink path.spine[data-id="t2"]');
+      await expect(tie).toHaveClass(/sketching/);
+      await expect(spine).toHaveClass(/sketching/);
+      expect(await tie.evaluate((p) => [p.getAttribute('pathLength'), getComputedStyle(p).animationName, getComputedStyle(p).animationDuration])).toEqual(['1', 'pencil-draw', '0.45s']);
+      expect(await spine.evaluate((p) => [getComputedStyle(p).animationDuration, getComputedStyle(p).animationDelay])).toEqual(['0.35s', '0.45s']);
+      await tie.evaluate((p) => { p.dataset.probe = 'kept'; });
+      const before = await tie.evaluate((p) => p.getAnimations()[0].currentTime);
+      await page.evaluate(() => { marginRedraw(); window.scrollBy(0, 1); });
+      await page.waitForTimeout(100);
+      await expect(tie).toHaveAttribute('data-probe', 'kept');
+      expect(await tie.evaluate((p) => p.getAnimations().length ? p.getAnimations()[0].currentTime : Infinity)).toBeGreaterThan(before);
+      await page.mouse.move(5, 5);
+      await expect(tie).toHaveCount(0);
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(tie).toHaveClass(/sketching/);
+      await expect(tie).not.toHaveAttribute('data-probe', 'kept');
+    }, { source: LIST, threads: [SPAN] });
+    await fixture(browser, async (page) => {
+      await page.locator('.margin-note[data-id="t2"]').hover();
+      await expect(page.locator('.margin-ink path.tie[data-id="t2"]')).toHaveCount(1);
+      await expect(page.locator('.margin-ink path.tether.sketching')).toHaveCount(0);
+    }, { source: LIST, threads: [SPAN], context: { reducedMotion: 'reduce' } });
+  });
+});
+
 test.describe('compact gutter anchor', () => {
   for (const [name, context] of [['touch', { hasTouch: true, isMobile: true }], ['touch and reduced motion', { hasTouch: true, isMobile: true, reducedMotion: 'reduce' }], ['touch and forced colors', { hasTouch: true, isMobile: true, forcedColors: 'active' }]]) {
     test(`390px ${name}: the 44px target fits the screen, the dot sits outside the text at the passage centre`, async ({ browser }) => {
@@ -574,6 +834,7 @@ test.describe('reading-mode menu', () => {
       await expect(page.locator('#margin-mode')).toHaveAttribute('data-mode', 'along');
       const reading = await icon();
       expect(reading.html).not.toBe(asking.html);
+      expect(reading.html).toContain('#leo-mark');
       expect(reading.turned).toBe('none');
     });
   });
@@ -849,12 +1110,14 @@ test('a fresh margin reply with a sketch draws it instead of showing its source'
   });
 });
 
-test('every open thread offers the chat fallback, Add to note comes last, and an ask answers in place', async ({ browser }) => {
+test('every open thread offers the chat fallback, pin and chat close the action row, and an ask answers in place', async ({ browser }) => {
   await fixture(browser, async page => {
     await page.evaluate(() => marginOpen('t1', true));
     const note = page.locator('.margin-note[data-id="t1"]');
     await expect(note.getByRole('button', { name: 'Ask in chat' })).toBeVisible();
-    await expect(note.locator('.margin-acts button:visible')).toHaveText(['Resolve', 'Dismiss', 'Add to note']);
+    await expect(note.locator('.margin-acts button:visible')).toHaveText(['Resolve', 'Dismiss', 'Add to note', '', '']);
+    await expect(note.locator('.margin-acts > .margin-tools > button:visible')).toHaveCount(2);
+    await expect(note.locator('.margin-tools > :last-child')).toHaveAttribute('aria-label', 'Ask in chat');
     await page.evaluate(() => {
       fake.delay = 300;
       const text = session.doc.source().slice(0, 12);

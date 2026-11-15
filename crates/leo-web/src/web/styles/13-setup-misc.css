@@ -22,6 +22,8 @@
 .onboarding-permission-action .btn { white-space: nowrap; }
 .onboarding-permission [role="status"] { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: var(--fs-sm); }
 .onboarding-permission [role="status"] svg { width: 15px; height: 15px; }
+.onboarding-permission [role="status"].ok { background: none; color: var(--muted); }
+.onboarding-permission [role="status"] .pencil-tick { color: var(--text); }
 .onboarding .onboarding-later, .onboarding .onboarding-dictate { margin: 0 12px 8px; font-size: var(--fs-sm); }
 #onboarding-writing { padding: 12px 12px 4px; }
 .onboarding .onboarding-foot { position: sticky; bottom: calc(-1 * (var(--bottom) + 12px)); margin: 0 -12px calc(-1 * (var(--bottom) + 12px)); padding: 12px 16px calc(var(--bottom) + 14px); background: var(--surface); }

@@ -83,8 +83,8 @@ function updateOnboardingPermissions() {
     status.hidden = !allowed && now !== 'unavailable';
     status.classList.toggle('ok', allowed);
     status.classList.toggle('missing', now === 'unavailable');
-    const text = allowed ? `${ICON.check} Allowed` : now === 'unavailable' ? 'Off in this session' : '';
-    if (status.dataset.shown !== text) { status.innerHTML = text; status.dataset.shown = text; }
+    const text = allowed ? 'Allowed' : now === 'unavailable' ? 'Off in this session' : '';
+    if (status.dataset.shown !== text) { status.innerHTML = allowed ? `<span class="pencil-tick${status.dataset.shown === '' ? ' writing' : ''}" aria-hidden="true"></span>Allowed` : text; status.dataset.shown = text; }
   }
   const next = $('#onboarding-continue');
   if (next) next.disabled = !onboardingCanContinue() || onboardingFinishing;

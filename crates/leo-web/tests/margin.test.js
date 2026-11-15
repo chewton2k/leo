@@ -169,6 +169,39 @@ test('layout: marks only by choice, full width or with Felix open', () => {
   assert.equal(M.arrangement({ width: 1600, panel: true }), 'marks');
 });
 
+test('width: notes fill the room beside the column, 240 to 360 px', () => {
+  assert.equal(M.marginWidth({ width: 1600, column: 980, layout: 'right' }), M.MOST_MARGIN);
+  assert.equal(M.marginWidth({ width: 1200, column: 980, layout: 'right' }), M.MARGIN_WIDTH);
+  assert.equal(M.marginWidth({ width: 1400, column: 980, layout: 'right' }), 1400 - 980 - 64 - M.MARGIN_GAP);
+  assert.equal(M.marginWidth({ width: 1800, column: 980, layout: 'both' }), Math.floor((1800 - 980 - 64) / 2) - M.MARGIN_GAP);
+  assert.equal(M.marginWidth({ width: 2400, column: 980, layout: 'both' }), M.MOST_MARGIN);
+  assert.equal(M.marginWidth({ width: 1600, layout: 'right' }), M.MARGIN_WIDTH);
+});
+
+test('width: two cramped sides become one roomy right side, too narrow stays marks', () => {
+  assert.equal(M.arrangement({ width: 1600, column: 980 }), 'right');
+  assert.equal(M.arrangement({ width: 1900, column: 980 }), 'both');
+  assert.equal(M.arrangement({ width: 1500, column: 760 }), 'both');
+  assert.equal(M.arrangement({ width: 1400, column: 760 }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH, column: 980 }), 'both');
+  assert.equal(M.arrangement({ width: 1600, column: 980, setting: 'right' }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, column: 980 }), 'marks');
+});
+
+test('width: notes never squeeze the column below its least width', () => {
+  for (const column of [760, 980]) {
+    for (let width = M.ROOM_RIGHT; width <= 2600; width += 7) {
+      const layout = M.arrangement({ width, column });
+      const size = M.marginWidth({ width, column, layout });
+      const sides = layout === 'both' ? 2 : 1;
+      const left = width - 64 - sides * (size + M.MARGIN_GAP);
+      assert.ok(size >= M.MARGIN_WIDTH && size <= M.MOST_MARGIN, `${width} ${column}`);
+      assert.ok(left >= M.LEAST_COLUMN, `${width} ${column} ${layout}`);
+      if (size > M.MARGIN_WIDTH) assert.ok(left >= column, `${width} ${column} ${layout}`);
+    }
+  }
+});
+
 test('words: arrive at the usual pace and never take longer than the cap', () => {
   assert.equal(M.wordDelay(0, 1), 0);
   assert.equal(M.wordDelay(3, 5), 186);

@@ -5,7 +5,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 function fixture() {
   const source = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
-  const context = {matchMedia: () => ({matches:false})};
+  const context = {matchMedia: () => ({matches:false}), getComputedStyle: () => ({clipPath:'inset(40% 0px 0px 0px)',opacity:'0.5',transform:'matrix(0.97, 0, 0, 0.97, 0, 0)'})};
   vm.createContext(context);
   vm.runInContext(source.slice(source.indexOf('const LEAVE_MS'), source.indexOf('function rel(')), context);
   const runs = [];
@@ -60,4 +60,16 @@ test('cancelled menu animations cannot clear the state of a newer close', async 
   runs.at(-1).onfinish();
   assert.equal(menu.hidden,true);
   assert.equal(menu.dataset.folding,undefined);
+});
+test('reversing a menu mid-run starts from where it is, not from a snap', () => {
+  const {context,menu} = fixture();
+  const frames = [];
+  menu.animate = (keys) => { frames.push(keys); return {cancel() {}}; };
+  context.unfold(menu);
+  context.fold(menu);
+  assert.equal(frames[1][0].clipPath,'inset(40% 0px 0px 0px)');
+  assert.equal(frames[1][0].opacity,'0.5');
+  context.unfold(menu);
+  assert.equal(frames[2][0].clipPath,'inset(40% 0px 0px 0px)');
+  assert.equal(frames[2][0].transform,'matrix(0.97, 0, 0, 0.97, 0, 0)');
 });

@@ -881,7 +881,7 @@ test('a list pasted into an empty line leaves the caret at its end', async ({ br
   });
 });
 
-test('a checked task strikes only its own text, line by line', async ({ browser }) => {
+test('a checked task draws no strike line through its text', async ({ browser }) => {
   const long = 'wrapped words '.repeat(40).trim();
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
@@ -890,15 +890,8 @@ test('a checked task strikes only its own text, line by line', async ({ browser 
     const spans = page.locator('#doc .task.done > span');
     await expect(spans).toHaveCount(3);
     for (let i = 0; i < 3; i++) {
-      expect(await spans.nth(i).evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+      expect(await spans.nth(i).evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('none');
     }
-    const short = await spans.nth(0).evaluate(el => {
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      return [el.getBoundingClientRect().width, r.getBoundingClientRect().width];
-    });
-    expect(Math.abs(short[0] - short[1])).toBeLessThan(2);
-    expect(await spans.nth(2).evaluate(el => el.textContent)).toBe('');
   }, {body: `- [x] Short\n- [x] ${long}\n- [x]`});
 });
 
@@ -1612,4 +1605,30 @@ test('the title stays put when the original-file chips load below it', async ({ 
     await page.unroute(url);
   }
   await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('a note ends with a short pencil stroke that is not part of its text, and an empty note or a printout has none', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1100, height: 800 });
+    const stroke = () => page.evaluate(() => { const s = getComputedStyle(document.querySelector('#doc > .doc-tail'), '::before'); return { display: s.display, width: s.width, mask: s.maskImage || s.webkitMaskImage }; });
+    await page.goto(url);
+    await expect(page.locator('#doc .blk').first()).toBeVisible();
+    const shown = await stroke();
+    expect(shown.display).toBe('block');
+    expect(shown.width).toBe('40px');
+    expect(shown.mask).toContain('svg');
+    expect(await page.evaluate(() => window.doc.source())).toBe('An ordinary paragraph.');
+    await page.emulateMedia({ media: 'print' });
+    expect(await page.locator('#doc > .doc-tail').evaluate((el) => getComputedStyle(el).display)).toBe('none');
+    await page.emulateMedia({ media: 'screen' });
+    await page.goto(url + '/?body=');
+    await expect(page.locator('#doc .placeholder')).toBeVisible();
+    expect((await stroke()).display).toBe('none');
+    await page.locator('#doc .blk').first().click();
+    await expect(page.locator('#doc .line-edit')).toBeFocused();
+    expect((await stroke()).display, 'an empty note being written in still has no end mark').toBe('none');
+    await page.keyboard.type('Begun');
+    expect((await stroke()).display).toBe('block');
+  });
 });

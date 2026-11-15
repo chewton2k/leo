@@ -80,12 +80,22 @@ const ICON = {
   logoOpenai: '<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z"/></svg>',
   logoClaude: '<svg viewBox="0 0 24 24" fill="#D97757" stroke="none" aria-hidden="true"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z"/></svg>',
 };
+const lineDrawing = (name, box, paths) => `<svg class="drawn drawn-${name}" viewBox="${box}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const DRAWN = {
+  trash: lineDrawing('trash', '0 0 120 92', '<path d="M37 31 Q39 57 41.5 82 Q60.5 83.4 79.5 82 Q82.4 57 84.6 30.4"/><path d="M31 29.23 C35.92 29.32 50.67 29.72 60.5 29.77 C70.33 29.83 85.08 29.6 90 29.56"/><path d="M51.5 40 Q52.2 60 52.8 73 M69 40 Q68.7 58 68.2 73" stroke-width="1.1" opacity=".55"/><path d="M52.5 28.5 Q53 22.5 60.5 22.3 Q68 22.4 68.6 28.6" stroke-width="1.3"/>'),
+  board: lineDrawing('board', '0 0 120 92', '<path d="M31 22.6 Q30.6 49 31.3 76.4 Q37.4 76.8 43.6 76.2 Q44.1 49 43.5 22.2 Q37.2 22.5 31 22.6"/><path d="M53.4 22.3 Q53.1 41 53.6 58.5 Q60 58.9 66.4 58.3 Q66.8 40 66.2 22.1 Q59.7 22.6 53.4 22.3"/><path d="M76.2 22.5 Q76 45 76.5 67.6 Q83 68 89.2 67.4 Q89.5 44 89 22.2 Q82.6 22.6 76.2 22.5"/><path d="M56.5 29.5 Q60 29.2 63.4 29.6 M34.2 29.8 Q37.5 29.5 40.6 29.9 M34.3 36.4 Q37 36.2 39.6 36.5 M79.3 29.7 Q82.6 29.4 86 29.8" stroke-width="1.1" opacity=".55"/>'),
+  tasks: lineDrawing('tasks', '32 20 56 58', '<path d="M38 27.4 Q42.6 27.2 47.3 27.6 Q47.6 32 47.2 36.6 Q42.6 36.9 37.9 36.5 Q37.6 32 38 27.4"/><path d="M39.8 31.8 Q41.2 33 42.3 35.1 Q44.2 30.4 49.4 25.6"/><path d="M38.1 45.3 Q42.7 45.1 47.2 45.5 Q47.5 50 47.1 54.4 Q42.5 54.7 37.8 54.4 Q37.5 49.8 38.1 45.3"/><path d="M38 63.2 Q42.6 63 47.1 63.4 Q47.4 67.9 47 72.3 Q42.4 72.6 37.9 72.2 Q37.6 67.7 38 63.2"/><path d="M55.5 32.2 Q68 31.6 82.3 32.4 M55.4 50.1 Q66 49.6 76.4 50.3 M55.6 67.9 Q69 67.5 84.1 68.2" stroke-width="1.1" opacity=".55"/>'),
+  chats: lineDrawing('chats', '0 0 120 92', '<path d="M34.5 26.2 Q60 24.6 85.4 26.4 Q87.6 41 85.2 55.6 Q70 57 54.6 56.1 Q47.3 62.9 40.8 67.4 Q42.3 61.5 43.1 56 Q38.6 55.8 34.8 55.4 Q32.8 41 34.5 26.2"/><path d="M44.2 36.8 Q60 36.2 75.6 36.9 M44.3 45.6 Q55 45.2 66.2 45.8" stroke-width="1.1" opacity=".55"/>'),
+  search: lineDrawing('search', '0 0 120 92', '<path d="M54.2 22.6 Q67.8 22.1 69.6 36.4 Q70.4 50.2 55.4 51.4 Q41.6 51.8 40.2 37.6 Q39.4 23.4 54.2 22.6"/><path d="M66.3 47.6 Q73.4 56.4 80.6 66.2"/><path d="M48.4 32.6 Q50.6 29.2 54.6 28.9" stroke-width="1.1" opacity=".55"/>'),
+  arrow: lineDrawing('arrow', '0 0 190 150', '<path d="M184 140 C178.33 138.67 164.67 138 150 132 C135.33 126 112.33 115.67 96 104 C79.67 92.33 65.33 75.67 52 62 C38.67 48.33 22 28.67 16 22 M24.49 24.98 Q20.65 23.49 16 22 Q17.26 26.72 18.51 30.64" stroke-width="1.4"/>'),
+};
 
 const recorder = window.leoRecording.create({ encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, noteFields: (options) => noteFields(options), desktop: () => desktopApp, noteReady: () => showLatest().catch(() => {}) });
 const chat = felix.create({
   render: (text, options) => md.render(text, options),
   escape: md.escape,
   icons: ICON,
+  drawings: DRAWN,
   onOpen: (id, lines) => {
     citedLines = lines ? { id, ...lines } : null;
     if (state.view === 'note' && state.session && state.session.note.id === id) showCitedLines();
@@ -116,6 +126,8 @@ const chat = felix.create({
   },
   onToggle: () => { drawSide(); pageBarLater(); marginRedraw(); },
   onOrganized: (proposal) => {
+    const made = proposal.state === 'applied' && FELIX_MAKES[proposal.kind];
+    if (made && proposal.undo?.[made]) inkLand(proposal.undo[made], true);
     if (MARGIN_KINDS.includes(proposal.kind)) {
       if (state.view === 'note' && state.session && state.session.note.id === proposal.note) marginLoad(state.session).catch(fail);
       return;
@@ -157,7 +169,7 @@ let pageBarFrame = 0;
 let pageBarSize = { track: 0, thumb: 0, top: 0, room: 0 };
 
 function pageBarRight() {
-  const panels = [document.querySelector('aside.chat'), document.querySelector('.source-pane')]
+  const panels = [document.body.classList.contains('chat-open') && document.querySelector('aside.chat'), document.querySelector('.source-pane')]
     .filter(panel => panel && !panel.hidden && panel.getClientRects().length);
   if (!panels.length) return 0;
   const left = Math.min(...panels.map(panel => panel.offsetLeft));
@@ -338,6 +350,27 @@ function pulse(el, { lift = 1.04, ring = false } = {}) {
   return el.animate(frames, { duration: PULSE_MS, easing: EASE_MOVE });
 }
 
+const INK_MS = 600;
+const FELIX_MAKES = { add_card: 'card', add_task: 'id', add_margin_note: 'id' };
+const inkedAt = new Map();
+
+function inkLand(id, felix = false) {
+  if (!stillMotion()) inkedAt.set(id, { at: performance.now(), felix });
+}
+
+function inkSettle(find) {
+  for (const [id, { at, felix }] of inkedAt) {
+    const elapsed = performance.now() - at;
+    if (elapsed >= INK_MS) { inkedAt.delete(id); continue; }
+    for (const el of find(id)) {
+      if (typeof el.animate !== 'function' || el.getAnimations().some((run) => run.id === 'ink')) continue;
+      const look = getComputedStyle(el);
+      const frames = felix ? { color: ['var(--felix)', look.color] } : { color: ['var(--text)', look.color], backgroundColor: [`color-mix(in srgb, var(--text) 12%, ${look.backgroundColor})`, look.backgroundColor] };
+      el.animate(frames, { id: 'ink', duration: INK_MS, delay: -elapsed, easing: EASE_OUT });
+    }
+  }
+}
+
 function cascade(el, kind = 'rows-in') {
   if (!el || stillMotion()) return;
   el.classList.add(kind);
@@ -375,14 +408,21 @@ function popEdge(menu, from) {
 
 const popShut = (edge) => (edge.up ? 'inset(100% 0 0 0)' : 'inset(0 0 100% 0)');
 
+function popNow(menu) {
+  if (!moving.has(menu)) return null;
+  const style = getComputedStyle(menu);
+  return { clipPath: style.clipPath, opacity: style.opacity, transform: style.transform };
+}
+
 function unfold(menu, from = null) {
+  const now = popNow(menu);
   stopSlide(menu);
   menu.hidden = false;
   if (stillMotion()) return;
   const edge = from ? popEdge(menu, from) : { origin: '50% 0', up: false };
   popEdges.set(menu, edge);
   menu.style.transformOrigin = edge.origin;
-  const run = menu.animate([{ clipPath: popShut(edge), transform: `scale(${POP_FROM})` }, { clipPath: POP_OPEN, transform: 'none' }], { duration: MOTION_MS, easing: EASE_OUT });
+  const run = menu.animate([now || { clipPath: popShut(edge), opacity: 1, transform: `scale(${POP_FROM})` }, { clipPath: POP_OPEN, opacity: 1, transform: 'none' }], { duration: MOTION_MS, easing: EASE_OUT });
   moving.set(menu, run);
   run.onfinish = () => moving.delete(menu);
 }
@@ -392,6 +432,7 @@ function fold(menu, then = null) {
     if (then && menu.hidden) then();
     return;
   }
+  const now = popNow(menu);
   stopSlide(menu);
   if (stillMotion()) {
     menu.hidden = true;
@@ -400,7 +441,7 @@ function fold(menu, then = null) {
   }
   menu.dataset.folding = '1';
   const edge = popEdges.get(menu) || { up: false };
-  const run = menu.animate([{ clipPath: POP_OPEN, opacity: 1, transform: 'none' }, { clipPath: popShut(edge), opacity: 0, transform: `scale(${POP_FROM})` }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_EXIT });
+  const run = menu.animate([now || { clipPath: POP_OPEN, opacity: 1, transform: 'none' }, { clipPath: popShut(edge), opacity: 0, transform: `scale(${POP_FROM})` }], { duration: MOTION_MS * EXIT_SHARE, easing: EASE_EXIT });
   moving.set(menu, run);
   run.onfinish = () => {
     moving.delete(menu);
@@ -704,9 +745,11 @@ async function showWorkspace(dir = null) {
   document.body.classList.remove('on-note');
   chrome({});
   swap('workspace', () => {
-    app.innerHTML = `<section class="workspace-empty"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Ask Felix, search, or jot something…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Ask Felix, search, or jot something"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section>${sideActive() ? empty('', 'Pick a note on the left', 'Or start a new one. Notes are Markdown files on this computer.') : empty('', 'Choose a note or create one', 'Your folders and notes are in Folders.')}<button class="btn primary" data-action="new">${ICON.filePlus}New note</button>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}</section>`;
+    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Ask Felix, search, or jot something…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Ask Felix, search, or jot something"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
     wireHomeAsk();
     drawTasksWindow();
+    drawHomeToday();
+    if (!(Date.now() - tasksWin.eventsAt < CAL_POLL_MS)) loadTasksWindow().catch(() => {});
     dictateHint($('.home-dictate'));
     scrollToTop();
   });
@@ -780,10 +823,14 @@ async function undoTrashMove(done) {
 
 const cleanTitle = (text) => text.replace(/\s*\n\s*/g, ' ').trim();
 
+const SAVE_INK = { 'Editing…': 'wet', 'Saving…': 'wet', Saved: 'dry' };
 function mark(s, text) {
   if (state.session !== s) return;
   const el = $('#save-state');
-  if (el) el.textContent = text;
+  if (!el) return;
+  const ink = SAVE_INK[text];
+  el.className = ink ? `save-${ink}` : '';
+  el.innerHTML = ink ? `<svg class="save-drop" aria-hidden="true"><use href="#leo-mark"/></svg><span class="said">${esc(text)}</span>` : esc(text);
 }
 
 let local;
@@ -968,7 +1015,7 @@ async function showSearch(query) {
   const count = results.length >= SEARCH_MOST ? `The first ${SEARCH_MOST} notes` : plural(results.length, 'note');
   app.innerHTML = results.length
     ? `<div class="section-title">${count}</div><div class="cards">${draw(results.slice(0, SEARCH_STEP))}</div>${results.length > SEARCH_STEP ? '<div class="more-notes" id="more-notes" aria-hidden="true">Loading more notes…</div>' : ''}`
-    : empty(ICON.search, `No notes match “${query}”`, 'Try fewer words, or ask Felix to look for the idea.', `<button class="btn primary" data-action="search-ask" data-query="${esc(query)}">${ICON.chat}Ask Felix</button><button class="btn plain" data-action="search-new" data-query="${esc(query)}">${ICON.filePlus}New note “${esc(query)}”</button>`);
+    : empty(DRAWN.search, `No notes match “${query}”`, 'Try fewer words, or ask Felix to look for the idea.', `<button class="btn primary" data-action="search-ask" data-query="${esc(query)}">${ICON.chat}Ask Felix</button><button class="btn plain" data-action="search-new" data-query="${esc(query)}">${ICON.filePlus}New note “${esc(query)}”</button>`);
   cascade($('.cards'));
   let shown = SEARCH_STEP;
   if (moreWatch) moreWatch.disconnect();

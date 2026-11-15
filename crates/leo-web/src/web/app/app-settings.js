@@ -38,7 +38,7 @@ function healthCards(view) {
   const glyph = (kind, paths) => `<svg class="hc-g ${kind}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
   const WARN = '<path d="M10.3 4.2 2.6 17.6A2 2 0 0 0 4.3 20.6h15.4a2 2 0 0 0 1.7-3L13.7 4.2a2 2 0 0 0-3.4 0z"/><path d="M12 9.5v4"/><path d="M12 17h.01"/>';
   const MISSING = '<circle cx="12" cy="12" r="8.6"/><path d="M8.2 12h7.6"/>';
-  const TICK = '<path d="M5 12.5l4.5 4.5L19 7.5"/>';
+  const TICKED = '<span class="hc-g ready pencil-tick" aria-hidden="true"></span>';
   const TILE_ICONS = {
     'microphone permission': '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
     'microphone': '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
@@ -72,12 +72,12 @@ function healthCards(view) {
   const kind = problems.length ? (missing ? 'missing' : 'warn') : 'ready';
   const headline = !problems.length ? `All ${checks.length} checks passed` : missing ? `${problems.length} ${problems.length === 1 ? 'check needs' : 'checks need'} you` : `${problems.length} ${problems.length === 1 ? 'check needs' : 'checks need'} a look`;
   const sub = `${problems.length ? `${ready.length} of ${checks.length} passed just now.` : 'Checked just now, on this computer.'} Your microphone stays closed and no AI request is sent.`;
-  const head = `<div class="hc-sum" data-find="health-checks">${glyph(kind, kind === 'ready' ? TICK : kind === 'warn' ? WARN : MISSING)}<div class="hc-sum-text"><b>${esc(headline)}</b><span>${esc(sub)}</span></div><button class="btn plain sm" data-action="health-refresh">${ICON.refresh}Check again</button></div>`;
+  const head = `<div class="hc-sum" data-find="health-checks">${kind === 'ready' ? TICKED : glyph(kind, kind === 'warn' ? WARN : MISSING)}<div class="hc-sum-text"><b>${esc(headline)}</b><span>${esc(sub)}</span></div><button class="btn plain sm" data-action="health-refresh">${ICON.refresh}Check again</button></div>`;
   const rows = problems.map((check) => `<div class="hc-fix ${check.state}">${glyph(check.state === 'warn' ? 'warn' : 'missing', check.state === 'warn' ? WARN : MISSING)}<b class="hc-nm">${esc(name(check.name))}</b><span class="hc-wd">${check.state === 'warn' ? 'Needs a look' : 'Needs setup'}</span>${check.detail && check.detail !== check.fix ? `<span class="hc-dt-line">${esc(check.detail)}</span>` : ''}${check.fix ? `<p class="health-fix">${rich(check.fix)}</p>` : ''}${check.action || check.section ? `<div class="hc-acts">${check.action ? `<button class="btn sm ink" data-action="app-command" data-app-action="${esc(check.action)}">${check.action === 'microphone' && desktopApp?.permissions?.microphone === 'denied' ? (desktopApp.platform === 'windows' ? 'Open Settings' : 'Open System Settings') : 'Allow access'}</button>` : ''}${check.section ? `<a class="btn plain sm" href="#/settings/${esc(check.section)}">Open ${esc(settingsTitle(check.section))}</a>` : ''}</div>` : ''}</div>`).join('');
   const tiles = ready.map((check) => {
     const label = name(check.name), wide = isPath(check.detail);
     const detail = !check.detail ? '<span class="hc-dt">Ready</span>' : wide ? (() => { const text = String(check.detail), tail = text.split(/(?=[\\/])/).slice(-1)[0]; return `<span class="hc-mid" title="${esc(text)}"><span class="h">${esc(text.slice(0, text.length - tail.length))}</span><span class="t">${esc(tail)}</span></span><span class="hc-sr">Ready</span>`; })() : `<span class="hc-dt" title="${esc(check.detail)}">${esc(check.detail)}</span><span class="hc-sr">Ready</span>`;
-    return `<div class="hc-tile${wide ? ' wide' : ''}"><svg class="hc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TILE_ICONS[String(check.name || '').toLowerCase()] || '<path d="M3 12h4l3-8 4 16 3-8h4"/>'}</svg><span class="hc-tn" title="${esc(label)}">${esc(label)}</span><span class="hc-ts">${glyph('ready', TICK)}${detail}</span></div>`;
+    return `<div class="hc-tile${wide ? ' wide' : ''}"><svg class="hc-ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TILE_ICONS[String(check.name || '').toLowerCase()] || '<path d="M3 12h4l3-8 4 16 3-8h4"/>'}</svg><span class="hc-tn" title="${esc(label)}">${esc(label)}</span><span class="hc-ts">${TICKED}${detail}</span></div>`;
   }).join('');
   return `<section class="set-card hc-card">${head}${rows ? `<div class="hc-needs">${rows}</div>` : ''}${tiles ? `<div class="hc-tiles">${tiles}</div>` : ''}</section>`;
 }

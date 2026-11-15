@@ -56,6 +56,7 @@ async function showCalendar() {
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   cal.peek = null;
   cal.scrolled = '';
+  cal.ringAt = null;
   app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>';
   calSized.disconnect();
   calSized.observe($('#cal-main'));
@@ -238,9 +239,24 @@ function calTone(item) {
   return toneOfTask(item.task);
 }
 
+const CAL_RING_MS = 300;
+const CAL_RINGS = [
+  'M20.3 6.5L21.5 7.7 22.4 9 23.2 10.6 23.6 12.2 23.8 14 23.5 15.7 22.9 17.4 22 18.9 20.8 20.2 19.3 21.3 17.7 22 15.9 22.5 14.1 22.7 12.4 22.7 10.6 22.4 9 21.8 7.4 21.1 6 20.1 4.7 18.9 3.7 17.6 2.8 16.1 2.2 14.4 2 12.7 2.1 10.9 2.6 9.2 3.4 7.5 4.5 6.1 6 4.9 7.6 4 9.3 3.4 11.2 3 13 3 14.8 3.2 16.5 3.7 18.1 4.4 19.7 5.3 21 6.4 22.2 7.8 23.2 9.3 23.9 10.9',
+  'M3.6 16.8L2.9 15.2 2.5 13.6 2.4 11.9 2.6 10.2 3.2 8.5 4.1 7 5.4 5.7 6.8 4.6 8.5 3.8 10.3 3.4 12 3.2 13.8 3.3 15.5 3.7 17.2 4.3 18.7 5.1 20.1 6.1 21.3 7.2 22.3 8.6 23.2 10.1 23.7 11.8 23.9 13.5 23.8 15.3 23.3 17 22.5 18.6 21.3 20 19.9 21.2 18.3 22.1 16.5 22.7 14.7 23 12.8 23 11 22.7 9.3 22.2 7.7 21.5 6.2 20.5 4.9 19.4 3.8 18 2.9 16.6 2.2 14.9 1.8 13.2 1.8 11.3',
+  'M17 4.1L18.5 5 19.8 6 20.9 7.2 21.8 8.6 22.6 10 23.1 11.6 23.3 13.2 23.3 14.9 22.9 16.6 22.3 18.2 21.3 19.7 20 21 18.5 22 16.8 22.7 14.9 23.1 13.1 23.2 11.2 23 9.5 22.4 7.9 21.6 6.5 20.6 5.3 19.4 4.2 18.1 3.4 16.6 2.8 15 2.5 13.4 2.4 11.7 2.6 9.9 3.2 8.3 4.1 6.7 5.3 5.3 6.8 4.1 8.5 3.3 10.3 2.7 12.2 2.5 14.1 2.7 15.9 3.1 17.6 3.8 19.2 4.8 20.5 6 21.6 7.3',
+  'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
+];
+
+function calRing(key) {
+  cal.ringAt ??= performance.now();
+  const ago = performance.now() - cal.ringAt;
+  const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
+  return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
+}
+
 function calCheck(task) {
   const on = task.on ? ` data-on="${esc(task.on)}"` : '';
-  return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ' checked' : ''}>`;
+  return `<input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${on} aria-label="Done: ${esc(task.title)}"${task.done ? ` checked${tickWrite(task.id, task.on)}` : ''}>`;
 }
 
 function calChip(item, day, { style = '', sub = '', extra = '', tall = false, inline = false } = {}) {
@@ -280,7 +296,7 @@ function calWeekHeads(days, today) {
   return days.map((key) => {
     const d = S.fromKey(key);
     const on = key === today ? ' today' : '';
-    return `<button type="button" class="cal-dayhead${on}" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}"><span>${esc(d.toLocaleDateString(calLocale(), { weekday: 'short' }))}</span><b>${d.getDate()}</b></button>`;
+    return `<button type="button" class="cal-dayhead${on}" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}"><span>${esc(d.toLocaleDateString(calLocale(), { weekday: 'short' }))}</span><b>${d.getDate()}${on ? calRing(key) : ''}</b></button>`;
   }).join('');
 }
 
@@ -346,7 +362,7 @@ function calColumn(key, plan, today, room = Infinity) {
   let now = '';
   if (key === today) {
     const at = new Date();
-    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"></div>`;
+    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
   }
   const wknd = [0, 6].includes(S.fromKey(key).getDay()) ? ' weekend' : '';
   return `<div class="cal-col${wknd}" data-day="${key}">${blocks}${now}</div>`;
@@ -389,7 +405,7 @@ function calMonth(days, plan, today) {
     }).join('');
     const more = items.length > CAL_MONTH_CHIPS ? `<button type="button" class="link-btn cal-more" data-action="cal-pick" data-day="${key}" data-to="day">${items.length - CAL_MONTH_CHIPS} more</button>` : '';
     const cls = `${d.getMonth() === month ? '' : ' out'}${key === today ? ' today' : ''}`;
-    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}</button>${shown}${more}</div>`;
+    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}${key === today ? calRing(key) : ''}</button>${shown}${more}</div>`;
   }).join('');
   return `<div class="cal-month"><div class="cal-month-names">${names}</div><div class="cal-month-grid">${cells}</div></div>`;
 }
@@ -401,7 +417,7 @@ function calMini(today) {
   const names = grid.slice(0, 7).map((c) => `<span>${esc(S.fromKey(c.key).toLocaleDateString(calLocale(), { weekday: 'narrow' }))}</span>`).join('');
   return `<section class="cal-mini" aria-label="${esc(at.toLocaleDateString(calLocale(), { month: 'long', year: 'numeric' }))}">
     <div class="cal-mini-head"><span>${esc(at.toLocaleDateString(calLocale(), { month: 'long', year: 'numeric' }))}</span><button type="button" class="icon-btn cal-arrow" data-action="cal-mini" data-step="-1" aria-label="Previous month">${ICON.back}</button><button type="button" class="icon-btn cal-arrow next" data-action="cal-mini" data-step="1" aria-label="Next month">${ICON.back}</button></div>
-    <div class="cal-mini-grid">${names}${grid.map((c) => `<button type="button" class="cal-mini-day${c.inMonth ? '' : ' out'}${c.key === today ? ' today' : ''}${cal.view !== 'month' && shown.has(c.key) ? ' shown' : ''}" data-action="cal-pick" data-day="${c.key}">${c.day}</button>`).join('')}</div>
+    <div class="cal-mini-grid">${names}${grid.map((c) => `<button type="button" class="cal-mini-day${c.inMonth ? '' : ' out'}${c.key === today ? ' today' : ''}${cal.view !== 'month' && shown.has(c.key) ? ' shown' : ''}" data-action="cal-pick" data-day="${c.key}">${c.day}${c.key === today ? calRing(c.key) : ''}</button>`).join('')}</div>
   </section>`;
 }
 
@@ -417,7 +433,7 @@ function calTray(plan, today) {
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Overdue', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? '<p class="hint cal-empty">Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.</p>' : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Overdue', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
 }
 
 function drawCalendar() {
@@ -453,6 +469,7 @@ function drawCalendar() {
       side.innerHTML = calTray(plan, today);
     }
   }
+  inkSettle((id) => app.querySelectorAll(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
   requestAnimationFrame(calFit);
 }
 
@@ -800,6 +817,7 @@ function calCompose(day, start, end) {
     const body = { title, date: day, time: timed ? S.timeOf(start) : null, end: timed ? S.timeOf(end) : null, kind: 'other' };
     try {
       const made = await api('/api/tasks', { method: 'POST', body });
+      inkLand(made.id);
       toast(`Added “${made.title}”`, { action: 'Undo', run: () => api(`/api/tasks/${enc(made.id)}`, { method: 'DELETE' }).then(() => loadSchedule(seq)).catch(fail) });
       loadTasksWindow().catch(() => {});
       cal.stale = true;
@@ -1077,14 +1095,25 @@ function calPeekTask(side, id, on) {
   for (const sel of ['#cal-peek-date', '#cal-peek-start', '#cal-peek-end']) $(sel, side)?.addEventListener('change', () => Promise.resolve(when()).catch(fail));
   const repeatBox = $('#cal-peek-repeat', side);
   if (repeatBox) repeatPicker(repeatBox, task.repeat || [], (days) => patch({ repeat: days }).catch(fail));
+  let kindLatest = 0;
+  let kindSaved = task.kind;
+  const pickKind = (on) => {
+    if (!on) return;
+    for (const c of side.querySelectorAll('[data-kind]')) {
+      c.classList.toggle('on', c === on);
+      c.setAttribute('aria-pressed', String(c === on));
+    }
+  };
   $('#cal-peek-kinds', side).addEventListener('click', (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip || chip.classList.contains('on')) return;
-    for (const c of side.querySelectorAll('[data-kind]')) {
-      c.classList.toggle('on', c === chip);
-      c.setAttribute('aria-pressed', String(c === chip));
-    }
-    patch({ kind: chip.dataset.kind }).catch(fail);
+    const mine = ++kindLatest;
+    pickKind(chip);
+    const back = () => { if (mine === kindLatest) pickKind(side.querySelector(`[data-kind="${CSS.escape(kindSaved || '')}"]`)); };
+    patch({ kind: chip.dataset.kind }).then((ok) => (ok ? (kindSaved = chip.dataset.kind) : back()), (e) => {
+      back();
+      fail(e);
+    });
   });
 }
 
@@ -1092,23 +1121,61 @@ function taskDoneOn(task, on) {
   return on ? (task.done_on || []).includes(on) : Boolean(task.done);
 }
 
+function applyTaskDone(task, done, on) {
+  if (task && on) {
+    task.done_on = (task.done_on || []).filter((d) => d !== on);
+    if (done) task.done_on = [...task.done_on, on].sort();
+  } else if (task) task.done = done;
+}
+
+function markTaskDone(id, done, on) {
+  tasksWin.revision++;
+  applyTaskDone(calFind(id), done, on);
+  finishTaskInWindow(id, done, on);
+  drawCalendar();
+  tickTaskBoxes(id, done, on);
+}
+
+function tickTaskBoxes(id, done, on) {
+  for (const box of document.querySelectorAll(`.cal-check[data-id="${CSS.escape(id)}"]${on ? `[data-on="${CSS.escape(on)}"]` : ''}`)) box.checked = done;
+}
+
+const TICK_MS = 160;
+const tickedAt = new Map();
+
+function tickWrite(id, on) {
+  const ago = performance.now() - (tickedAt.get(`${id} ${on || ''}`) ?? -Infinity);
+  return ago < TICK_MS ? ` data-writing style="--tick-at: ${-Math.round(ago)}ms"` : '';
+}
+
 async function setTaskDone(id, done, on = null) {
+  if (done) tickedAt.set(`${id} ${on || ''}`, performance.now());
+  const before = calFind(id);
+  const was = before && (on ? before.done_on : before.done);
+  markTaskDone(id, done, on);
   try {
     await api(`/api/tasks/${enc(id)}`, { method: 'PATCH', body: on ? { done, on } : { done } });
   } catch (e) {
+    const task = calFind(id);
+    if (task && on) task.done_on = was;
+    else if (task) task.done = was;
+    tasksWin.revision++;
+    finishTaskInWindow(id, false, on);
+    drawCalendar();
+    tickTaskBoxes(id, task ? taskDoneOn(task, on) : !done, on);
     if (e instanceof Locked) throw e;
     toast(e.message, { bad: true });
     return loadSchedule(seq);
   }
   const task = calFind(id);
   tasksWin.revision++;
-  if (task && on) {
-    task.done_on = (task.done_on || []).filter((d) => d !== on);
-    if (done) task.done_on = [...task.done_on, on].sort();
-  } else if (task) task.done = done;
-  finishTaskInWindow(id, done, on);
+  if (task && taskDoneOn(task, on) !== done) {
+    applyTaskDone(task, done, on);
+    drawTasksWindow();
+    drawCalendar();
+    tickTaskBoxes(id, done, on);
+  }
   if (done) toast('Done', { action: 'Undo', run: () => setTaskDone(id, false, on) });
-  drawCalendar();
   if (state.view === 'note' && task && task.note && state.session && state.session.note.id === task.note.id && !saving.unsaved()) showNote(task.note.id);
 }
 
@@ -1229,6 +1296,7 @@ function newTaskSheet(day = null) {
     add.disabled = true;
     try {
       const made = await api('/api/tasks', { method: 'POST', body: { title: text, description: $('#task-description', box).value.trim(), date: pick.date, time: pick.time || null, kind, repeat } });
+      inkLand(made.id);
       closeSheet();
       toast(`Added “${made.title}”`);
       loadTasksWindow().catch(() => {});
@@ -1383,18 +1451,31 @@ function taskSheet(id, on = null) {
       }
     });
   }
+  let kindLatest = 0;
+  let kindSaved = task.kind;
   $('#task-kinds', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-kind]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++kindLatest;
+    const pick = (on) => {
+      if (!on) return;
+      for (const c of box.querySelectorAll('[data-kind]')) {
+        c.classList.toggle('on', c === on);
+        c.setAttribute('aria-pressed', String(c === on));
+      }
+    };
+    task.kind = chip.dataset.kind;
+    pick(chip);
+    if (state.view === 'calendar') drawCalendar();
     try {
       await api(`/api/tasks/${enc(task.id)}`, { method: 'PATCH', body: { kind: chip.dataset.kind } });
-      task.kind = chip.dataset.kind;
-      for (const c of box.querySelectorAll('[data-kind]')) {
-        c.classList.toggle('on', c === chip);
-        c.setAttribute('aria-pressed', String(c === chip));
-      }
-      if (state.view === 'calendar') drawCalendar();
+      kindSaved = chip.dataset.kind;
     } catch (err) {
+      if (mine === kindLatest) {
+        task.kind = kindSaved;
+        pick(box.querySelector(`[data-kind="${CSS.escape(kindSaved || '')}"]`));
+        if (state.view === 'calendar') drawCalendar();
+      }
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }
@@ -1503,7 +1584,7 @@ async function openTaskAnywhere(id, on = null) {
   taskSheet(id, on);
 }
 
-var tasksWin = { timer: 0, tasks: null, finished: new Map(), revision: 0, load: 0 };
+var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
 const TASKS_AHEAD_DAYS = 7;
 const TASK_DONE_MS = 1200;
 const TASKS_LEAST_ROOM = 150;
@@ -1563,6 +1644,11 @@ function finishTaskInWindow(id, done, on) {
   const task = calFind(id);
   const row = tasksHost().querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
   if (!done || !task || !row) { drawTasksWindow(); return; }
+  if (tasksAtHome() && (on || task.date) === S.dayKey(new Date())) {
+    drawTasksWindow();
+    pulse(tasksHost().querySelector(`.sched-check[data-id="${CSS.escape(id)}"]`), { lift: 1.18 });
+    return;
+  }
   if (tasksWin.finished.size >= MOST_TASK_FEEDBACK) {
     const oldest = tasksWin.finished.keys().next().value;
     clearTimeout(tasksWin.finished.get(oldest).timer);
@@ -1601,16 +1687,16 @@ function tasksDueBadge() {
 const tasksAtHome = () => state.view === 'workspace' && /^(?:#\/?)?$/.test(location.hash);
 const tasksHost = () => (tasksAtHome() && document.getElementById('home-today')) || tasksBox;
 
-function tasksRow(t) {
+function tasksRow(t, when) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
-    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ' checked' : ''} aria-label="Done: ${esc(t.title)}">
+    <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when">${esc(t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+    ${t.date ? `<span class="tasks-when">${esc(when || (t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' })))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
 }
 
 function tasksRows(groups) {
-  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map(tasksRow).join('')}`).join('');
+  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
 }
 
 function tasksFocus(host) {
@@ -1624,14 +1710,38 @@ function refocusTasks(host, focus) {
   (same || host).focus({ preventScroll: true });
 }
 
-function drawHomeToday(groups) {
+const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
+
+const HOME_ROWS = 6;
+let homeMidnight = 0;
+
+function drawHomeToday() {
   const box = document.getElementById('home-today');
   if (!box) return;
-  const due = groups.filter(([name]) => name === 'Overdue' || name === 'Today');
+  const now = new Date();
+  const known = tasksWin.tasks || (cal.data && cal.data.tasks);
+  const tasks = known || [];
+  const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
+  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
+  const day = today.slice(0, HOME_ROWS - early.length);
+  const more = earlier.length + today.length - early.length - day.length;
+  const ago = (t) => (S.fromKey(S.dayKey(now)) - S.fromKey(t.date)) / 864e5;
   const focus = tasksFocus(box);
-  box.hidden = !due.length;
-  box.innerHTML = tasksRows(due);
-  if (due.length) refocusTasks(box, focus);
+  box.hidden = !early.length && !day.length;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t, S.fromKey(t.date).toLocaleDateString(calLocale(), ago(t) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }))).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  inkSettle(tasksInked);
+  if (!box.hidden) refocusTasks(box, focus);
+  const root = side.notes.get('');
+  const notes = side.loaded && root && root.loaded && !side.tasks ? root.items.length + side.folders.length : null;
+  const ready = known && (notes !== null || !sideActive() || (root && !root.loading));
+  const parts = ready ? S.dateline({ tasks, events: tasksWin.events || [], now, notes, locale: calLocale() }) : [];
+  $('#home-day').textContent = now.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
+  $('#home-line').innerHTML = parts.map((part) => (typeof part === 'string' ? esc(part) : `<b>${esc(part.title)}</b>`)).join('');
+  const first = ready && notes === 0 && !tasks.length;
+  $('.home-foot').classList.toggle('first', Boolean(first));
+  $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : `Open a note${sideActive() ? '' : ' from Folders'}, or start a new one.`;
+  clearTimeout(homeMidnight);
+  homeMidnight = setTimeout(drawTasksWindow, S.addDays(now, 1) - now + 1000);
 }
 
 function drawTasksWindow() {
@@ -1639,7 +1749,7 @@ function drawTasksWindow() {
   const groups = tasksGroups(tasks, true);
   const open = groups.reduce((n, [, list]) => n + list.length, 0);
   const home = tasksAtHome();
-  if (home) drawHomeToday(groups);
+  if (home) drawHomeToday();
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
   const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
   tasksBox.hidden = !open || here || state.view === 'locked';
@@ -1654,6 +1764,7 @@ function drawTasksWindow() {
     </div>
     <div class="tasks-body">${tasksRows(groups)}</div>
     <div class="tasks-foot"><button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
+  inkSettle(tasksInked);
   refocusTasks(tasksBox, focus);
   fitTasksWindow();
 }
@@ -1690,8 +1801,17 @@ async function loadTasksWindow() {
   tasksWin.stale = false;
   const revision = tasksWin.revision;
   try {
-    const tasks = (await api('/api/tasks')).tasks;
+    const home = tasksAtHome();
+    const now = new Date();
+    const data = home
+      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
+      : await api('/api/tasks');
+    const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
+    if (data.events) {
+      tasksWin.events = data.events;
+      tasksWin.eventsAt = Date.now();
+    }
     if (revision === tasksWin.revision) {
       tasksWin.tasks = tasks;
       if (cal.data) cal.data = { ...cal.data, tasks };
@@ -1710,6 +1830,9 @@ async function loadTasksWindow() {
 
 setTimeout(() => loadTasksWindow().catch(() => {}), 0);
 window.addEventListener('hashchange', () => drawTasksWindow());
+const homeShown = () => { if (tasksAtHome()) drawTasksWindow(); };
+window.addEventListener('focus', homeShown);
+window.addEventListener('leo-visibility', homeShown);
 
 const source = { note: null, name: null, seq: 0, returnTo: null, stopResize: null };
 const SOURCE_MIN = 260;

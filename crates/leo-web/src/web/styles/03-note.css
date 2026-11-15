@@ -65,21 +65,24 @@
 .margin-ink path.wash.on { opacity: .09; }
 .margin-ink path.squiggle.on { opacity: 0; }
 .margin-ink path.squiggle.arriving { animation: margin-wipe var(--wipe-t, .5s) linear var(--wipe-d, 0s) both; }
-.margin-ink path.pencil { stroke: color-mix(in srgb, var(--text) 55%, transparent); stroke-width: 1.2; stroke-linejoin: round; stroke-dasharray: 1; transition: opacity .12s ease-out; }
+.margin-ink path.pencil { stroke: var(--felix); stroke-width: 1.2; stroke-linejoin: round; stroke-dasharray: 1; transition: opacity .12s ease-out; }
 .margin-ink path.pencil.sketching { animation: pencil-draw var(--pencil-t, 650ms) var(--ease-pencil) var(--pencil-d, 0ms) both; }
 .margin-ink path.pencil.leaving { opacity: 0; }
 @keyframes pencil-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .margin-ink path.tether { stroke: var(--accent); stroke-width: 1; opacity: 0; transition: opacity .14s ease-out; }
 .margin-ink path.tether.pinned { opacity: .2; }
 .margin-ink path.tether.on { opacity: .45; }
+.margin-ink path.tether.sketching { stroke-dasharray: 1; animation: pencil-draw 450ms var(--ease-pencil) both; }
+.margin-ink path.spine.sketching { animation-duration: 350ms; animation-delay: 450ms; }
 @keyframes margin-wipe { from { clip-path: inset(-4px 100% -4px 0); } to { clip-path: inset(-4px 0 -4px 0); } }
-.margin-said-aloud { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.margin-said-aloud, #save-state .said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .margin-note { position: absolute; left: 0; top: 0; width: var(--margin-w); color: var(--text); border-radius: var(--r-md); }
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color .14s ease-out, box-shadow .14s ease-out, opacity .14s ease-out; }
 .margin-note:not([data-open], [data-pinned], [data-newest], [data-active]) { opacity: .7; }
-.margin-note:not([data-open], [data-pinned], [data-newest], :focus-within) .margin-said { max-height: calc(15px * var(--read) * 1.46); overflow: hidden; }
-.margin-note:not([data-open], [data-pinned], [data-newest], :focus-within) .margin-foot { display: none; }
+.margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: var(--room, none); overflow: hidden; }
+.margin-note:not([data-open]) .margin-over { margin-block: 0; }
+.margin-cut { mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent); }
 .margin-note[data-open] :is(.margin-said, .margin-pending) { border-left: 1px solid var(--line); padding-left: 10px; }
 .margin-note[data-active]:not([data-open]) { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent); }
 .margin-waiting { position: absolute; left: 0; top: 0; pointer-events: none !important; transition: opacity .12s ease-out; }
@@ -88,19 +91,17 @@
 .margin-mark.reading { pointer-events: none; }
 .margin-mark .margin-drop { width: 12px; height: 12px; margin: 0; }
 .margin-thinking .margin-drop { margin: 6px 0; }
+.margin-waiting .margin-drop, .margin-mark.reading .margin-drop { color: var(--felix); }
 @media (prefers-reduced-motion: no-preference) { .margin-drop { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
 .margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-note[data-open] .margin-toggle { z-index: 3; inset: auto -8px -2px auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
-.margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
-.margin-note[data-open] .margin-toggle svg { display: block; }
-.margin-note[data-open] .margin-toggle:hover svg { color: var(--text); }
-.margin-chat, .margin-pin { display: none; }
-.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 3; bottom: -2px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
-.margin-note[data-open] .margin-pin { right: 48px; }
-.margin-chat:hover, .margin-pin:hover { color: var(--text); }
-.margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.margin-note[data-open] .margin-toggle { pointer-events: none; }
+.margin-tools { display: flex; gap: 2px; margin-left: auto; }
+.margin-chat, .margin-pin { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.margin-pin[hidden] { display: none; }
+.margin-chat:hover, .margin-pin:hover, .margin-pin[aria-pressed="true"] { color: var(--text); }
+.margin-pin[aria-pressed="true"] svg path:nth-of-type(2) { fill: currentColor; }
 .margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-chat svg, .margin-pin svg { width: 15px; height: 15px; }
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }
@@ -108,7 +109,7 @@
 .margin-note[data-open] .margin-said { max-height: min(420px, calc(100dvh - 260px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .margin-said { position: relative; display: grid; gap: 7px; }
 .margin-said p, .margin-said > div { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.margin-felix { font-family: var(--felix-letters); font-size: calc(15px * var(--read)); line-height: 1.46; color: var(--text); }
+.margin-felix { font-family: var(--felix-letters); font-variation-settings: "opsz" 14; font-size: calc(15px * var(--read)); line-height: 1.46; color: var(--text); }
 .margin-you { font-size: calc(13.5px * var(--read)); line-height: 1.45; color: var(--muted); }
 .ink-word { display: inline-block; white-space: pre; animation: ink-in .64s ease both; }
 @keyframes ink-in { from { color: transparent; } 45% { color: var(--ink-settling); } to { color: var(--text); } }
@@ -174,7 +175,6 @@ figure.drawing.inked img { filter: none !important; }
 .margin-changed { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
 .margin-problem { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
 .margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 10px; }
-.margin-note[data-open] .margin-acts { padding-right: 84px; min-height: 38px; }
 .margin-add { font-size: var(--fs-xs); font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
 .margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -258,7 +258,7 @@ figure.drawing.inked img { filter: none !important; }
 .choice-diagram .d-mark { fill: var(--accent); }
 .choice-diagram .d-head { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) {
-  .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-drop { animation: none; }
+  .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
   .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit { transition: none; }
 }
 @media (forced-colors: active) {
@@ -270,7 +270,6 @@ figure.drawing.inked img { filter: none !important; }
   .margin-ink path.tether { stroke: Highlight; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
-  .margin-note[data-open] .margin-toggle svg { color: CanvasText; }
   .margin-anchor { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
   .choice-diagram .d-felix, .choice-diagram .d-text, .choice-diagram .d-head { stroke: CanvasText; }

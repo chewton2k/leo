@@ -60,6 +60,7 @@ function placeFloat(el, point) {
 
 function placeAskFloat(has) {
   const s = state.view === 'note' ? state.session : null;
+  if (has) askFloat.querySelector('[data-ask="ask"]').title = `Ask Felix (${shortcutText(shortcutKeys('ask'))})`;
   if (!placeFloat(askFloat, has && s && s.doc ? s.doc.selectionBox() : null)) askFloat.hidden = true;
 }
 

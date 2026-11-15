@@ -185,7 +185,7 @@ const inQuick = (sel) => (quick.root && !quick.root.classList.contains('scrim-go
 
 function quickLeo() {
   Object.assign(quick, { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '' });
-  quick.root = sheet(`<div class="quick-leo">
+  quick.root = sheet(`<div class="quick-leo"><span class="quick-perch" aria-hidden="true">${chat.button(50)}</span>
     <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search, ask, remind or jot anything…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
     <div class="quick-results" id="quick-results" role="listbox" aria-label="Results"></div>
   </div>`);
@@ -250,16 +250,24 @@ function quickWhen(date, time) {
   return time ? `${day}, ${S.timeLabel(time, calLocale())}` : day;
 }
 
+const quickSaid = (...parts) => parts.map((part, i) => (i % 2 ? `<span class="quick-words">“${esc(part)}”</span>` : part && `<span class="quick-verb">${esc(part)}</span>`)).join(' ');
+
+function quickTaskWhen(row) {
+  if (!row.date) return 'to tasks';
+  if (row.date === S.dayKey(new Date())) return `to today’s tasks${row.time ? ` at ${S.timeLabel(row.time, calLocale())}` : ''}`;
+  return `to tasks for ${quickWhen(row.date, row.time).replace(/^Tomorrow/, 'tomorrow')}`;
+}
+
 function quickLook(row) {
   if (row.kind === 'combine') return { icon: ICON.note, label: row.id ? `Combine “${row.title || 'Untitled'}” into…` : 'Open a note to combine it', hint: 'Combine notes' };
-  if (row.kind === 'ask') return { icon: chat.button(20), label: row.text, hint: 'Ask Felix' };
-  if (row.kind === 'task') return { icon: ICON.check, label: row.title, hint: row.date ? `Reminder · ${quickWhen(row.date, row.time)}` : 'Add to tasks' };
+  if (row.kind === 'ask') return { icon: chat.button(20), said: quickSaid('Ask Felix about', row.text) };
+  if (row.kind === 'task') return { icon: ICON.check, said: quickSaid('Add', row.title, quickTaskWhen(row)) };
   if (row.kind === 'open') return { icon: ICON.note, label: row.title, hint: 'Open note' };
   if (row.kind === 'folder') return { icon: ICON.folder, label: row.path.split('/').pop(), hint: row.path.includes('/') ? `Folder in ${row.path.split('/').slice(0, -1).join('/')}` : 'Folder' };
   if (row.kind === 'chat') return { icon: ICON.chat, label: row.title, hint: 'Past chat' };
-  if (row.kind === 'search') return { icon: ICON.search, label: row.text, hint: 'Search every note' };
+  if (row.kind === 'search') return { icon: ICON.search, said: quickSaid('Search every note for', row.text) };
   if (row.kind === 'place') return { icon: ICON[QUICK_PLACES.find((p) => p.hash === row.hash)?.icon] || ICON.folder, label: row.name, hint: 'Go to' };
-  return { icon: ICON.plus, label: row.title, hint: 'New note' };
+  return { icon: ICON.plus, said: quickSaid('Start a note called', row.title) };
 }
 
 function drawQuick() {
@@ -286,7 +294,7 @@ function drawQuick() {
     box.innerHTML = quick.rows.map((row, i) => {
       const look = quickLook(row);
       const on = i === quick.at;
-      return `<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label">${esc(look.label)}</span><span class="quick-hint">${esc(look.hint)}</span>${on ? '<kbd>↵</kbd>' : ''}</button>`;
+      return `<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${on ? '<kbd>↵</kbd>' : ''}</button>`;
     }).join('');
   }, { ms: QUICK_FLIP_MS });
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
@@ -356,7 +364,8 @@ async function quickGo(at) {
   quick.busy = true;
   try {
     if (row.kind === 'task') {
-      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time } });
+      row.request = row.request || requestId();
+      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time, request: row.request } });
       closeSheet();
       loadTasksWindow().catch(() => {});
       toast(`Added “${made.title}” · ${quickWhen(row.date, row.time)}`, {

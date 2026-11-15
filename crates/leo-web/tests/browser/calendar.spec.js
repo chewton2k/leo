@@ -57,7 +57,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     async function api(url,options={}){window.pending++;try{return await fakeApi(url,options);}finally{window.pending--;}}
     async function fakeApi(url,{method='GET',body}={}){
       window.calls.push({method,url:url.split('?')[0],body:body?structuredClone(body):null});
-      await new Promise(r=>setTimeout(r,5));
+      await new Promise(r=>setTimeout(r,5+(window.slow||0)));
       if(window.failNext&&method!=='GET'){const e=new Error(window.failNext);window.failNext=null;throw e;}
       let m;
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
@@ -83,7 +83,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${read('app/motion.js')}
     ${read('app/settings-navigation.js')}
     ${page}
-    const actions={${calActions}'task-done':el=>{const id=el.dataset.id,on=el.dataset.on||null;const task=calFind(id);const done=!(task&&taskDoneOn(task,on));return setTaskDone(id,done,on);},'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
+    const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||!actions[el.dataset.action])return;e.preventDefault();Promise.resolve(actions[el.dataset.action](el)).catch(fail);});
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.scrim'))closeSheet();});
     window.errors=[];window.db=db;
@@ -162,6 +162,7 @@ test('the calendar fills the room beside the explorer and shows a week of events
 
     await expect(page.locator('.cal-dayhead.today')).toContainText('3');
     await expect(page.locator('.cal-col[data-day="2026-11-03"] .cal-now')).toHaveCount(1);
+    await expect(page.locator('.cal-col[data-day="2026-11-03"] .cal-now svg.cal-now-drop use')).toHaveAttribute('href', '#leo-mark');
     await expect(page.locator('.cal-allday .cal-item', { hasText: 'Reading week' })).toHaveCount(1);
     const maya = await page.locator('.cal-item', { hasText: '1:1 Maya' }).boundingBox();
     const ta = await page.locator('.cal-item', { hasText: 'TA hours' }).boundingBox();
@@ -210,6 +211,22 @@ test('tasks follow the mini calendar and stay visible above a narrow calendar', 
   }
 });
 
+test('ticking a task leaves the tray at once and returns with the error when the save fails', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const row = page.locator('#cal-side .cal-tray-row', { hasText: 'Draft essay outline' });
+    await expect(row).toBeVisible();
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'The disk is full.'; });
+    await row.locator('.cal-check').click();
+    expect(await page.evaluate(() => window.pending)).toBeGreaterThan(0);
+    await expect(row).toHaveCount(0, { timeout: 300 });
+    await settled(page);
+    await expect(row).toBeVisible();
+    await expect(row.locator('.cal-check')).not.toBeChecked();
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'The disk is full.', bad: true });
+    expect(await page.evaluate(() => window.db.tasks.find(t => t.title === 'Draft essay outline').done)).toBe(false);
+  }, { width: 1360 });
+});
+
 test('the calendar status refreshes on click and offers Retry only after a failure', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const status = page.locator('.cal-status');
@@ -228,6 +245,7 @@ test('the task sidebar creates undated tasks from its empty state', async ({ bro
     await page.evaluate(async () => { window.db.tasks = []; await loadSchedule(); });
     const side = page.locator('#cal-side');
     await expect(side).toContainText('Nothing overdue. Tasks without a date land here, ready to drag onto the calendar.');
+    await expect(side.locator('svg.drawn-tasks')).toBeVisible();
     await side.getByRole('button', { name: 'New task', exact: true }).click();
     await expect(page.locator('#task-title')).toBeFocused();
     await page.locator('#task-title').fill('Read the next chapter');
@@ -590,18 +608,78 @@ test('resizing a task smaller shrinks it while the pointer is still down', async
   });
 });
 
-test('today is a filled accent circle in the mini calendar, the week header and the month', async ({ browser }) => {
+test('today is a drawn ring no bigger than the old circle in the mini calendar, the week header and the month', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const mini = page.locator('.cal-mini-day.today');
     await expect(mini).toHaveText('3');
-    const fill = await page.locator('.cal-dayhead.today b').evaluate(el => getComputedStyle(el).backgroundColor);
-    const look = await mini.evaluate(el => { const style = getComputedStyle(el); const box = el.getBoundingClientRect(); return { fill: style.backgroundColor, radius: style.borderRadius, square: Math.abs(box.width - box.height) < 1 }; });
-    expect(look).toEqual({ fill, radius: '50%', square: true });
+    const ring = async (host, most) => {
+      const look = await host.evaluate(el => {
+        const box = el.querySelector(':scope > .cal-ring').getBoundingClientRect();
+        const ink = document.body.appendChild(document.createElement('i'));
+        ink.style.background = 'var(--accent)';
+        const accent = getComputedStyle(ink).backgroundColor;
+        ink.remove();
+        return { filled: getComputedStyle(el).backgroundColor === accent, width: box.width, height: box.height, d: el.querySelector('.cal-ring path').getAttribute('d') };
+      });
+      expect(look.filled).toBe(false);
+      expect(look.width).toBeLessThanOrEqual(most);
+      expect(look.height).toBeLessThanOrEqual(most);
+      return look.d;
+    };
+    const drawn = [await ring(mini, 26), await ring(page.locator('.cal-dayhead.today b'), 26)];
+    await page.evaluate(() => drawCalendar());
+    expect([await ring(mini, 26), await ring(page.locator('.cal-dayhead.today b'), 26)]).toEqual(drawn);
+    expect(drawn[1]).toBe(drawn[0]);
     await page.locator('.cal-views [data-view="month"]').click();
     await settled(page);
-    expect(await page.locator('.cal-cell.today .cal-num').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
-    expect(await page.locator('.cal-mini-day.today').evaluate(el => getComputedStyle(el).backgroundColor)).toBe(fill);
+    expect(await ring(page.locator('.cal-cell.today .cal-num'), 24)).toBe(drawn[0]);
+    expect(await ring(page.locator('.cal-mini-day.today'), 26)).toBe(drawn[0]);
   });
+});
+
+test('today\'s ring draws once as the calendar opens, a redraw keeps the end frame, and reduced motion shows only the end frames', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const look = () => page.evaluate(() => {
+      const path = document.querySelector('.cal-dayhead.today .cal-ring path');
+      const tick = document.querySelector('.cal-check');
+      tick.checked = true;
+      const after = getComputedStyle(tick, '::after');
+      return { inking: path.classList.contains('inking'), animation: getComputedStyle(path).animationName, offset: parseFloat(getComputedStyle(path).strokeDashoffset), tick: parseFloat(after.transitionDuration), clip: /^inset\(0(px)?( 0(px)?)*\)$/.test(after.clipPath) };
+    });
+    await page.evaluate(() => { showCalendar(); });
+    expect(await look()).toMatchObject({ inking: true, animation: 'pencil-draw', tick: 0.16 });
+    await page.waitForTimeout(350);
+    await page.evaluate(() => drawCalendar());
+    expect(await look()).toMatchObject({ inking: false, animation: 'none', offset: 0 });
+    await settled(page);
+    expect(await page.evaluate(() => {
+      document.querySelector('.cal-item[data-id="task-study"] .cal-check').click();
+      const box = document.querySelector('.cal-item[data-id="task-study"] .cal-check');
+      return [box.checked, box.hasAttribute('data-writing'), box.getAnimations({ subtree: true }).map(run => run.animationName)];
+    })).toEqual([true, true, ['tick-write']]);
+    await settled(page);
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.evaluate(() => { showCalendar(); });
+    expect(await look()).toEqual({ inking: true, animation: 'none', offset: 0, tick: 0, clip: true });
+    await settled(page);
+  });
+});
+
+test('task boxes are drawn marks whose variant follows the task and survives a redraw', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const marks = () => page.evaluate(() => [...document.querySelectorAll('.cal-check')].map(el => {
+      const style = getComputedStyle(el);
+      return [el.dataset.id, style.appearance, style.getPropertyValue('--tick'), (getComputedStyle(el, '::before').maskImage || getComputedStyle(el, '::before').webkitMaskImage) !== 'none'];
+    }));
+    const before = await marks();
+    expect(before.length).toBeGreaterThan(2);
+    for (const [, appearance, tick, box] of before) expect([appearance, Boolean(tick), box]).toEqual(['none', true, true]);
+    expect(new Set(before.map(([, , tick]) => tick)).size).toBeGreaterThan(1);
+    await page.evaluate(() => drawCalendar());
+    expect(await marks()).toEqual(before);
+    const box = await page.locator('#cal-side .cal-check').first().boundingBox();
+    expect(Math.max(box.width, box.height)).toBeLessThanOrEqual(14);
+  }, { width: 1360 });
 });
 
 test('the hour grid reaches the bottom of the calendar in a tall window', async ({ browser }) => {

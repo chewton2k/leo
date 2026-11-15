@@ -263,6 +263,71 @@ test('moving every day of a repeating task shifts its weekdays', () => {
   assert.deepEqual(S.shiftRepeat([0, 2], -8), [1, 6]);
 });
 
+const said = (parts) => parts.map((p) => (typeof p === 'string' ? p : `**${p.title}**`)).join('');
+const at = (h, m = 0) => S.timeLabel(`${h}:${m}`, 'en-US');
+const iso = (day, h, m = 0) => new Date(2026, 10, day, h, m).toISOString();
+const sunday = (h, m = 0) => new Date(2026, 10, 15, h, m);
+const line = (o) => said(S.dateline({ locale: 'en-US', notes: 4, ...o }));
+
+test('the home dateline: first day, an event on now, and early morning', () => {
+  assert.equal(line({ notes: 0, now: sunday(10) }), 'Nothing here yet. Type in the bar to jot a note or a task.');
+  assert.equal(line({ notes: null, now: sunday(10) }), 'Nothing scheduled today.');
+  const events = [{ title: 'Seminar', start: iso(15, 10), end: iso(15, 11) }];
+  const tasks = [{ id: 'a', title: 'Problem set review', date: '2026-11-15', time: '14:00' }, { id: 'b', title: 'Haircut', date: '2026-11-15', time: '09:00', done: true }, { id: 'c', title: 'Email the dataset authors', date: '2026-11-12' }];
+  assert.equal(line({ tasks, events, now: sunday(10, 20) }), `**Seminar** until ${at(11)}. Then **Problem set review** at ${at(14)}.`);
+  assert.equal(line({ events, now: sunday(10, 20) }), `**Seminar** until ${at(11)}.`);
+  assert.equal(line({ events: [{ title: 'Seminar', start: iso(15, 10), end: iso(15, 11) }], now: sunday(1) }), `Today starts with **Seminar** at ${at(10)}.`);
+});
+
+test('the home dateline counts today’s tasks and adds earlier ones to the first clause', () => {
+  const day = (n, time) => Array.from({ length: n }, (_, i) => ({ id: `t${i}`, title: i ? `Task ${i}` : 'Lab meeting', date: '2026-11-15', time: i ? null : time }));
+  const earlier = [{ id: 'e1', title: 'Return library books', date: '2026-11-14' }, { id: 'e2', title: 'Email', date: '2026-11-12' }];
+  assert.equal(line({ tasks: [...day(8, '09:00'), ...earlier], now: sunday(8, 40) }), `Eight today and two from earlier. First up is **Lab meeting** at ${at(9)}.`);
+  assert.equal(line({ tasks: day(12), now: sunday(8) }), '12 today.');
+  assert.equal(line({ tasks: [{ id: 'h', title: 'Haircut', date: '2026-11-15', time: '11:00' }], now: sunday(9) }), `One left today: **Haircut** at ${at(11)}.`);
+  assert.equal(line({ tasks: [{ id: 's', title: 'Send draft to advisor', date: '2026-11-15' }, earlier[0]], now: sunday(9) }), 'One left today and one from earlier: **Send draft to advisor**.');
+  assert.equal(line({ tasks: [{ id: 'p', title: 'Problem set review', date: '2026-11-15', time: '14:00' }, { id: 's', title: 'Send draft', date: '2026-11-15' }], now: sunday(9) }), `Two left today. **Problem set review** is at ${at(14)}.`);
+  assert.equal(line({ tasks: day(2).map((t) => ({ ...t, time: null })), now: sunday(21) }), 'Two left today, none at a set time.');
+});
+
+test('the home dateline when today is done, quiet or only earlier tasks remain', () => {
+  const done = ['A', 'B', 'C'].map((title) => ({ id: title, title, date: '2026-11-15', done: true }));
+  const seminar = [{ title: 'Seminar', start: iso(16, 10), end: iso(16, 11) }];
+  assert.equal(line({ tasks: done, events: seminar, now: sunday(19) }), `All three done. Tomorrow starts with **Seminar** at ${at(10)}.`);
+  assert.equal(line({ tasks: done, now: sunday(19) }), 'All three done.');
+  assert.equal(line({ tasks: [done[0]], now: sunday(19) }), 'Today’s one task is done.');
+  assert.equal(line({ tasks: [{ id: 'e', title: 'Old', date: '2026-11-10' }, { id: 'f', title: 'Older', date: '2026-11-09' }], now: sunday(9) }), 'Nothing new today. Two from earlier are still open.');
+  assert.equal(line({ tasks: [{ id: 'e', title: 'Old', date: '2026-11-10' }], now: sunday(9) }), 'Nothing new today. One from earlier is still open.');
+  assert.equal(line({ tasks: [{ id: 'e', title: 'Old', date: '2026-11-10', done: true }], now: sunday(9) }), 'Nothing scheduled today.');
+});
+
+test('the home dateline looks ahead a week, past the weekend and into tomorrow evening', () => {
+  const monday = [{ title: 'Seminar', start: iso(16, 10), end: iso(16, 11) }];
+  assert.equal(line({ events: monday, now: sunday(9) }), `Nothing on until **Seminar**, Monday at ${at(10)}.`);
+  assert.equal(line({ events: monday, now: new Date(2026, 10, 14, 9) }), `Nothing on until **Seminar**, Monday at ${at(10)}.`);
+  const friday = new Date(2026, 10, 13, 9);
+  assert.equal(line({ events: [{ title: 'Seminar', start: iso(17, 10), end: iso(17, 11) }], now: new Date(2026, 10, 16, 9) }), `Nothing scheduled today. Next is **Seminar**, tomorrow at ${at(10)}.`);
+  assert.equal(line({ events: [{ title: 'Seminar', start: iso(17, 10), end: iso(17, 11) }], now: new Date(2026, 10, 16, 18) }), `Nothing scheduled today. Tomorrow starts with **Seminar** at ${at(10)}.`);
+  assert.equal(line({ events: [{ title: 'Seminar', start: iso(18, 10), end: iso(18, 11) }], now: new Date(2026, 10, 16, 9) }), `Nothing scheduled today. Next is **Seminar**, Wednesday at ${at(10)}.`);
+  assert.equal(line({ events: [{ title: 'Far', start: iso(25, 10), end: iso(25, 11) }], now: friday }), 'Nothing scheduled today.');
+  assert.equal(line({ events: [{ title: 'Seminar', start: iso(15, 14), end: iso(15, 15) }], now: sunday(9) }), `**Seminar** at ${at(14)}.`);
+  assert.equal(line({ events: [{ title: 'Conference', all_day: true, date: '2026-11-15', end_date: '2026-11-16' }], now: sunday(9) }), '**Conference** all day.');
+});
+
+test('the home dateline shortens titles, skips events made from tasks and keeps done rows for today', () => {
+  const long = 'A very long task title that keeps on going past forty characters';
+  assert.equal(line({ tasks: [{ id: 'l', title: long, date: '2026-11-15' }], now: sunday(9) }), `One left today: **${Array.from(long).slice(0, 40).join('').trimEnd()}…**.`);
+  const tasks = [{ id: 'abc', title: 'Haircut', date: '2026-11-15', time: '11:00' }];
+  assert.equal(line({ tasks, events: [{ title: 'Haircut (calendar copy)', start: iso(15, 9), end: iso(15, 12), task: 'abc' }], now: sunday(10) }), `One left today: **Haircut** at ${at(11)}.`);
+  const { earlier, today } = S.homeDay([{ id: 'x', title: 'Done', date: '2026-11-15', done: true }, { id: 'y', title: 'Open', date: '2026-11-15', time: '08:00' }, { id: 'z', title: 'Old done', date: '2026-11-10', done: true }, { id: 'w', title: 'Old', date: '2026-11-10' }, { id: 'r', title: 'Repeat', repeat: [6], done_on: ['2026-11-15'] }], sunday(9));
+  assert.deepEqual(earlier.map((t) => t.id), ['w']);
+  assert.deepEqual(S.homeDay([{ id: 'z', title: 'Just ticked', date: '2026-11-10', done: true }], sunday(9), new Set(['z'])).earlier.map((t) => t.id), ['z']);
+  assert.deepEqual(today.map((t) => [t.id, Boolean(t.done)]), [['y', false], ['x', true], ['r', true]]);
+  for (const text of [line({ tasks: [{ id: 'e', title: 'Old', date: '2026-11-10' }], now: sunday(9) }), line({ tasks: [{ id: 'q', title: 'Q', date: '2026-11-15' }, { id: 'e', title: 'Old', date: '2026-11-10' }], now: sunday(9) })]) {
+    assert.doesNotMatch(text, /overdue|late|behind|missed|!/i);
+  }
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try {

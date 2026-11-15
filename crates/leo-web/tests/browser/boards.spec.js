@@ -26,6 +26,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     const chrome=()=>{}, skeleton=n=>'<div class="skeleton"></div>'.repeat(n);
     const empty=(icon,title,text)=>'<div class="empty">'+icon+'<h3>'+esc(title)+'</h3><p>'+esc(text)+'</p></div>';
     const stillMotion=()=>false;
+    const requestId=()=>'r'+Math.random().toString(36).slice(2);
     window.toasts=[];
     function toast(message,{action,run,bad}={}){window.toasts.push({message,bad:Boolean(bad)});document.querySelector('.toast')?.remove();const el=document.createElement('div');el.className='toast';el.innerHTML='<span>'+esc(message)+'</span>'+(action?'<button>'+esc(action)+'</button>':'');if(action)el.querySelector('button').onclick=()=>{el.remove();run();};document.body.appendChild(el);}
     const fail=error=>window.errors.push(error.message);
@@ -246,6 +247,52 @@ test('cards are added, opened, edited, moved by keyboard and deleted with undo',
   });
 });
 
+test('a new card lands in full ink and settles by colour alone, without restarting on a redraw', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-action="kanban-add-card"][data-col="ktodo00001"]').click();
+    const composer = page.locator('.kanban-composer textarea');
+    await composer.fill('Fresh ink');
+    await composer.press('Enter');
+    const card = page.locator('.kanban-card', { hasText: 'Fresh ink' });
+    await expect(card).toHaveCount(1);
+    const ink = () => card.evaluate(el => {
+      const run = el.getAnimations().find(a => a.id === 'ink');
+      if (!run) return null;
+      const props = Object.keys(run.effect.getKeyframes()[0]).filter(k => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort();
+      return { at: run.currentTime, props, ms: run.effect.getTiming().duration };
+    });
+    const first = await ink();
+    expect(first).toMatchObject({ props: ['backgroundColor', 'color'], ms: 600 });
+    await page.evaluate(() => drawKanban());
+    const again = await ink();
+    if (again) expect(again.at).toBeGreaterThanOrEqual(first.at);
+    await expect.poll(ink).toBeNull();
+  });
+});
+
+test('a card Felix made arrives in his blue and settles to ink by colour alone', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const card = page.locator('.kanban-card').first();
+    await expect(card).toBeVisible();
+    const id = await card.getAttribute('data-card');
+    await page.evaluate((made) => { inkLand(made, true); drawKanban(); }, id);
+    const ink = () => card.evaluate(el => {
+      const run = el.getAnimations().find(a => a.id === 'ink');
+      if (!run) return null;
+      const from = run.effect.getKeyframes()[0];
+      const probe = document.createElement('i');
+      probe.style.color = 'var(--felix)';
+      el.append(probe);
+      const felix = getComputedStyle(probe).color;
+      probe.remove();
+      const props = Object.keys(from).filter(k => !['offset', 'computedOffset', 'easing', 'composite'].includes(k)).sort();
+      return { props, felix: from.color === 'var(--felix)' || from.color === felix, ms: run.effect.getTiming().duration };
+    });
+    expect(await ink()).toEqual({ props: ['color'], felix: true, ms: 600 });
+    await expect.poll(ink).toBeNull();
+  });
+});
+
 test('a card\'s details render as Markdown like a note, toggle checkboxes, edit by line and stay plain Markdown', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const markdown = '## Plan\n\nSome **bold** and [a link](https://example.com)\n\n- [ ] first\n\n`code`\n\n<img src=x onerror="window.ran=1"> [bad](javascript:window.ran=2)';
@@ -284,6 +331,19 @@ test('a card\'s details render as Markdown like a note, toggle checkboxes, edit 
     await page.keyboard.type('Notes');
     await page.locator('#kanban-panel [data-kanban="close"]').click();
     await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Notes');
+  });
+});
+
+test('no boards shows the drawn empty state with its facts and the New board button', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.db.boards = []; window.db.cards = []; location.hash = '#/elsewhere'; });
+    await expect(page.locator('#elsewhere')).toBeVisible();
+    await page.evaluate(() => { location.hash = '#/boards'; });
+    const none = page.locator('.kanban-none');
+    await expect(none.locator('svg.drawn-board')).toBeVisible();
+    await expect(none.locator('h3')).toHaveText('No boards yet');
+    await expect(none.locator('[data-action="kanban-new-board"]')).toBeVisible();
+    expect(await none.locator('svg.drawn-board').evaluate(el => [el.getAttribute('fill'), el.getAttribute('stroke')])).toEqual(['none', 'currentColor']);
   });
 });
 
@@ -364,6 +424,72 @@ test('a failed save keeps the card open with its text', async ({ browser }) => {
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
     expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Keep me');
+  });
+});
+
+test('a keyboard move shows at once and goes back with the error when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.slow = 600; });
+    await page.locator('[data-card="cessay0001"]').focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('ktodo00001');
+    await expect(page.locator('[data-card="cessay0001"]')).toBeFocused();
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('kdoing0001');
+    await page.evaluate(() => { window.slow = 600; window.failNext = 'Leo could not move the card.'; });
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual([]);
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not move the card.', bad: true });
+  });
+});
+
+test('a priority and a delete show before leo answers and come back when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-card="cread00001"]').click();
+    const chips = page.locator('#kanban-panel .kanban-priorities');
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await page.evaluate(() => { window.slow = 800; window.failNext = 'Leo could not save the card.'; });
+    await chips.locator('[data-priority="high"]').click();
+    expect(await page.evaluate(() => [document.querySelector('#kanban-panel [data-priority="high"]').getAttribute('aria-pressed'), window.pending > 0])).toEqual(['true', true]);
+    await expect(chips.locator('[data-priority=""]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(chips.locator('[data-priority="high"]')).toHaveAttribute('aria-pressed', 'false');
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not save the card.', bad: true });
+    await settled(page);
+
+    await page.evaluate(() => { window.failNext = 'Leo could not delete the card.'; });
+    await page.locator('#kanban-panel [data-kanban="delete"]').click();
+    expect(await page.evaluate(() => [document.querySelectorAll('[data-card="cread00001"]').length, window.pending > 0])).toEqual([0, true]);
+    await expect(page.locator('[data-card="cread00001"]')).toHaveCount(1);
+    expect(await titles(page, 'ktodo00001')).toEqual(['Write essay', 'Read chapter 3']);
+    await expect.poll(() => page.evaluate(() => window.errors)).toContain('Leo could not delete the card.');
+    await settled(page);
+    expect(await page.evaluate(() => window.db.cards.some(c => c.id === 'cread00001'))).toBe(true);
+    await page.evaluate(() => { window.errors.length = 0; });
+  });
+});
+
+test('two quick moves keep the second when the first fails after it was sent, and the board ends as the server has it', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => { window.slow = 300; window.failNext = 'Leo could not move the card.'; });
+    const card = page.locator('[data-card="cessay0001"]');
+    await card.focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    await page.waitForTimeout(200);
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not move the card.', bad: true });
+    expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
+    expect(await page.evaluate(() => window.pending)).toBe(1);
+    await expect.poll(() => page.evaluate(() => window.pending)).toBe(0);
+    await page.waitForTimeout(400);
+    expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
+    expect(await titles(page, 'ktodo00001')).toEqual(['Read chapter 3']);
+    expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>']);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').column)).toBe('kdone00001');
+    expect(await page.evaluate(() => window.calls.filter(c => c === 'GET /api/boards/bwork00001').length)).toBeGreaterThan(0);
   });
 });
 
@@ -608,6 +734,9 @@ test('each column has its own tone dot, cards sit solid, and text stays readable
       await redraw(page);
       const row = await lanes(page);
       expect(new Set(row.map(l => l.color)).size, 'every lane sits on the shelf tone').toBe(1);
+      const edge = await page.locator('.kanban-col').first().evaluate(el => ({ shadow: getComputedStyle(el).boxShadow, lane: getComputedStyle(el).backgroundColor, board: getComputedStyle(document.body).backgroundColor }));
+      expect(edge.shadow, theme + ' lane keeps an outline').not.toBe('none');
+      expect(edge.lane, theme + ' lane tone differs from the board').not.toBe(edge.board);
       const dots = await page.locator('.kanban-col-head').evaluateAll(els => els.map(el => { const dot = getComputedStyle(el, '::before'); return { color: dot.backgroundColor, width: dot.width }; }));
       for (let i = 0; i < dots.length; i++) {
         expect(dots[i].width, 'the tone dot is 7px').toBe('7px');

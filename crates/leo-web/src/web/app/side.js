@@ -16,6 +16,7 @@ const SIDE_NOTES_FOLDERS = 64;
 const SIDE_NOTES_AUTOMATIC = 32;
 const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
+const SIDE_NEW_MS = 60000;
 
 try {
   side.open = new Set(JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) || '[]'));
@@ -142,7 +143,7 @@ function drawSide() {
       </nav>
     </div>
     <div class="side-explorer" id="side-explorer">
-      <button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button>
+      <button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button>
       <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it to the top level"><span>Folders</span><span class="side-group-tools"><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></span></div>
       <div class="side-filter-row"><label class="field side-filter">${ICON.search}<input id="side-filter" type="search" placeholder="Filter" aria-label="Filter loaded notes" autocomplete="off" spellcheck="false" value="${esc(side.filter || '')}"></label><button class="side-add side-sort${side.sort !== 'title' || side.tasks ? ' on' : ''}" data-action="side-sort" aria-label="Sort notes" title="${esc(`Sorted by ${SIDE_SORTS[side.sort].text.toLowerCase()}${side.tasks ? ', open tasks only' : ''}`)}" aria-haspopup="menu" aria-expanded="${Boolean(popup?.owner.matches('[data-action="side-sort"]'))}">${ICON.sort}</button><button class="side-add side-flip${side.flip ? ' on' : ''}" data-action="side-flip" data-way="${SIDE_SORTS[side.sort].icons[side.flip ? 1 : 0]}" aria-label="Reverse order, now ${esc(SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0])}" aria-pressed="${side.flip}" title="${esc(SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0])}">${ICON[SIDE_SORTS[side.sort].icons[side.flip ? 1 : 0]]}</button></div>
       <nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">
@@ -151,6 +152,7 @@ function drawSide() {
     </div>`);
   if (listChanged && !side.twisted && !side.growing && !side.closing.size && sideWide()) flipList(box, '.side-tree .side-folder[data-refresh-key], .side-tree .side-note[data-id]', (el) => (el.dataset.id ? `n:${el.dataset.id}` : `d:${el.dataset.refreshKey}`), paint);
   else paint();
+  inkSettle((id) => box.querySelectorAll(`.side-tree .side-note[data-id="${CSS.escape(id)}"]`));
   applySideFilter(box.querySelector('.side-tree'));
   sideRoving(box.querySelector('.side-tree'));
   const pill = box.querySelector('.side-tree .side-pill');
@@ -457,9 +459,11 @@ async function readSideNotes(path, entry) {
     const page = await api(`/api/notes?${query}`, { total: true, signal: controller.signal });
     if (side.notes.get(path) !== entry || entry.seq !== seq) return;
     if (!Array.isArray(page.items)) throw new Error('Notes could not be opened.');
+    const had = entry.refreshing && new Set(entry.items.map((note) => note.id));
     entry.items = page.items.slice(0, SIDE_NOTES_PAGE).filter((note) => typeof note.id === 'string' && typeof note.title === 'string');
     entry.total = Number.isSafeInteger(page.total) && page.total >= 0 ? page.total : entry.items.length;
     entry.loaded = true;
+    if (had) for (const note of entry.items) if (!had.has(note.id) && Date.now() - Date.parse(note.created_at) < SIDE_NEW_MS) inkLand(note.id);
     if (!entry.items.length && entry.offset && entry.total) setTimeout(() => loadSideNotes(path, Math.floor((entry.total - 1) / SIDE_NOTES_PAGE) * SIDE_NOTES_PAGE, true));
   } catch (e) {
     if (side.notes.get(path) === entry && entry.seq === seq) {
@@ -469,7 +473,10 @@ async function readSideNotes(path, entry) {
   } finally {
     clearTimeout(timeout);
     entry.loading = false;
-    if (side.notes.get(path) === entry && entry.seq === seq) drawSide();
+    if (side.notes.get(path) === entry && entry.seq === seq) {
+      drawSide();
+      if (!path && tasksAtHome()) drawHomeToday();
+    }
   }
 }
 

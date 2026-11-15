@@ -85,9 +85,7 @@ const actions = {
     const task = calFind(id);
     const done = el.dataset.set ? el.dataset.set === '1' : !(task && taskDoneOn(task, on));
     if (el.dataset.set) closeSheet();
-    return setTaskDone(id, done, on).then(() => {
-      for (const box of document.querySelectorAll(`.cal-check[data-id="${CSS.escape(id)}"]${on ? `[data-on="${CSS.escape(on)}"]` : ''}`)) box.checked = done;
-    });
+    return setTaskDone(id, done, on);
   },
   'task-date': (el) => dateSheet(el.dataset.id),
   'task-google': (el) => addToGoogle(el.dataset.id),

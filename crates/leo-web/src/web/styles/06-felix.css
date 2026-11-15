@@ -10,7 +10,8 @@
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; flex: none; margin-top: 5px; }
 .sub.class .dot { margin-top: 0; }
 .dot.idea { background: var(--bg); border: 2px solid var(--accent); }
-.chat-btn { width: 48px; }
+.chat-btn { width: 48px; position: relative; }
+.chat-btn.working::after { content: ''; position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--felix); box-shadow: 0 0 0 2px var(--page); pointer-events: none; }
 .chat-btn .felix { display: block; }
 .felix { overflow: visible; display: inline-block; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .felix .felix-body rect { fill: #b4cfe7; }

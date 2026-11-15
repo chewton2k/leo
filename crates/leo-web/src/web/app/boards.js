@@ -213,7 +213,7 @@ function drawKanban() {
   const board = kanban.board;
   if (!board) {
     kanbanClosePanel(false);
-    app.innerHTML = `<div class="kanban-page kanban-none">${empty(ICON.board, 'No boards yet', 'Columns like To do, In progress and Done. Drag a card along as the work moves.')}<button class="btn primary" data-action="kanban-new-board">${ICON.plus}<span>New board</span></button></div>`;
+    app.innerHTML = `<div class="kanban-page kanban-none">${empty(DRAWN.board, 'No boards yet', 'Columns like To do, In progress and Done. Drag a card along as the work moves.')}<button class="btn primary" data-action="kanban-new-board">${ICON.plus}<span>New board</span></button></div>`;
     return;
   }
   const row = app.querySelector('.kanban-cols');
@@ -254,6 +254,7 @@ function drawKanban() {
   }
   settleNow('kanban-card', (id) => app.querySelector(`.kanban-card[data-card="${CSS.escape(id)}"]`));
   settleNow('kanban-col', (id) => app.querySelector(`.kanban-col[data-col="${CSS.escape(id)}"]`));
+  inkSettle(kanbanInked);
   const again = focus && app.querySelector(focus);
   if (again) {
     if (typing) {
@@ -264,6 +265,8 @@ function drawKanban() {
   }
   kanbanFit();
 }
+
+const kanbanInked = (id) => app.querySelectorAll(`.kanban-card[data-card="${CSS.escape(id)}"]`);
 
 function kanbanCounts() {
   for (const el of app.querySelectorAll('[data-count-col]')) el.textContent = String(kanbanCardsIn(el.dataset.countCol).length);
@@ -511,9 +514,12 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
     form.replaceWith(button);
     button.focus({ preventScroll: true });
   };
+  let attempt = null;
   const post = async (title, priority) => {
+    if (!attempt || attempt.title !== title || attempt.priority !== priority) attempt = { title, priority, request: requestId() };
     try {
-      const card = await kanbanWrite(`/api/boards/${enc(boardId)}/cards`, { method: 'POST', body: { title, column: columnId, priority } });
+      const card = await kanbanWrite(`/api/boards/${enc(boardId)}/cards`, { method: 'POST', body: { title, column: columnId, priority, request: attempt.request } });
+      attempt = null;
       const tab = kanban.boards.find((b) => b.id === boardId);
       if (kanban.board?.id !== boardId) { if (tab) tab.cards = (tab.cards || 0) + 1; return; }
       if (kanbanCard(card.id)) return;
@@ -522,9 +528,10 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
       const list = app.querySelector(`.kanban-cards[data-col="${CSS.escape(columnId)}"]`);
       list?.insertAdjacentHTML('beforeend', kanbanCardHtml(card));
       if (list) list.scrollTop = list.scrollHeight;
+      inkLand(card.id);
+      inkSettle(kanbanInked);
       kanbanCounts();
       kanbanFit();
-      pulse(list?.lastElementChild, { lift: 1.02 });
     } catch (e) {
       if (e instanceof Locked) throw e;
       const open = app.querySelector(`.kanban-composer[data-composer="${CSS.escape(columnId)}"] textarea`);
@@ -749,14 +756,20 @@ async function kanbanCardPanel(id) {
     if (column) box.dataset.tone = kanbanTone(column);
     kanbanMove(card, { column: status.value }).catch(fail);
   });
+  let priorityLatest = 0;
+  let prioritySaved = card.priority || '';
   $('.kanban-priorities', box).addEventListener('click', async (e) => {
     const chip = e.target.closest('[data-priority]');
     if (!chip || chip.classList.contains('on')) return;
+    const mine = ++priorityLatest;
+    kanbanPriorityPick(chip);
     try {
       const done = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { priority: chip.dataset.priority } });
+      prioritySaved = done.priority || '';
       kanbanUpdate(card, done);
-      kanbanPriorityPick(chip);
     } catch (err) {
+      const saved = $(`.kanban-priorities [data-priority="${CSS.escape(prioritySaved)}"]`, box);
+      if (mine === priorityLatest && saved) kanbanPriorityPick(saved);
       if (err instanceof Locked) throw err;
       toast(err.message, { bad: true });
     }
@@ -782,14 +795,52 @@ function kanbanAbove(card) {
   return at > 0 ? list[at - 1].id : null;
 }
 
-async function kanbanMove(card, to) {
+function kanbanPlace(card, column, after) {
+  const live = kanbanCard(card.id) || card;
+  const rest = kanban.cards.filter((c) => c.id !== card.id);
+  const inColumn = rest.filter((c) => c.column === column);
+  let at = rest.length;
+  if (after === null && inColumn.length) at = rest.indexOf(inColumn[0]);
+  else if (after) {
+    const above = rest.findIndex((c) => c.id === after);
+    if (above >= 0) at = above + 1;
+  } else if (inColumn.length) at = rest.indexOf(inColumn.at(-1)) + 1;
+  card.column = column;
+  live.column = column;
+  rest.splice(at, 0, live);
+  kanban.cards = rest;
+}
+
+const kanbanMoves = new Map();
+let kanbanSettling = 0;
+
+async function kanbanMove(card, to, back = null) {
+  const drawn = Boolean(back);
+  const mine = (kanbanMoves.get(card.id) || 0) + 1;
+  kanbanMoves.set(card.id, mine);
+  kanbanSettling++;
+  const latest = () => kanbanMoves.get(card.id) === mine;
+  back = back || { column: card.column, after: kanbanAbove(card) };
+  if (!drawn) {
+    kanbanPlace(card, to.column || card.column, to.after);
+    drawKanban();
+  }
   try {
     const saved = await kanbanWrite(`/api/cards/${enc(card.id)}/move`, { method: 'POST', body: to });
-    Object.assign(card, saved);
+    if (latest()) Object.assign(card, saved);
   } catch (e) {
-    if (e instanceof Locked) throw e;
+    if (latest()) {
+      kanbanPlace(card, back.column, back.after);
+      drawKanban();
+    }
+    if (e instanceof Locked) {
+      kanbanSettling--;
+      throw e;
+    }
     toast(e.message, { bad: true });
   }
+  if (--kanbanSettling) return;
+  kanbanMoves.clear();
   await kanbanRefresh();
 }
 
@@ -817,9 +868,22 @@ async function kanbanMoveToBoard(card, boardId) {
 }
 
 async function kanbanDeleteCard(card) {
-  await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  const back = { column: card.column, after: kanbanAbove(card) };
+  kanbanMoves.set(card.id, (kanbanMoves.get(card.id) || 0) + 1);
   kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
   drawKanban();
+  try {
+    await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'DELETE' });
+  } catch (e) {
+    if (!kanbanCard(card.id)) kanbanPlace(card, back.column, back.after);
+    drawKanban();
+    await kanbanRefresh().catch(() => {});
+    throw e;
+  }
+  if (kanbanCard(card.id)) {
+    kanban.cards = kanban.cards.filter((c) => c.id !== card.id);
+    drawKanban();
+  }
   toast(`Deleted “${card.title}”`, {
     action: 'Undo',
     run: () => kanbanWrite(`/api/boards/${enc(card.board)}/cards`, { method: 'POST', body: { id: card.id, column: card.column, title: card.title, subheading: card.subheading, description: card.description, priority: card.priority, rank: card.rank } }).then(kanbanRefresh).catch(fail),
@@ -980,11 +1044,12 @@ async function kanbanDrop() {
   const column = d.item.parentElement?.dataset.col;
   if (!column) return kanbanRefresh();
   const after = d.item.previousElementSibling?.dataset.card || null;
-  if (column === card.column && after === kanbanAbove(card)) return;
+  const back = { column: card.column, after: kanbanAbove(card) };
+  if (column === card.column && after === back.after) return;
   card.column = column;
   kanbanCounts();
   d.item.focus({ preventScroll: true });
-  return kanbanMove(card, { column, after });
+  return kanbanMove(card, { column, after }, back);
 }
 
 // Keep the moved card focused after keyboard moves and redraws.
