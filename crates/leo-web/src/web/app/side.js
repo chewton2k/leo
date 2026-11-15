@@ -301,6 +301,7 @@ function twistFolder(path, control = null, keep = true) {
 }
 
 async function loadSideFolders() {
+  if (tasksAtHome()) loadHomeRecent();
   if ((!sideWide() && !sideActive()) || state.view === 'locked') return drawSide();
   const mine = seq, generation = ++side.generation;
   try {

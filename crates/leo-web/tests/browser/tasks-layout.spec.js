@@ -267,6 +267,195 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
   }
 });
 
+test('home shows the week as a ribbon, the last three notes written and today\'s done tasks as a tally, and tasks say their dates in words', async ({ browser }) => {
+  const web = path.resolve(__dirname, '../../src/web');
+  const calendar = fs.readFileSync(path.join(web, 'app/calendar.js'), 'utf8');
+  const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
+  const actions = fs.readFileSync(path.join(web, 'app/actions.js'), 'utf8');
+  const fixture = `const S = window.leoSchedule;
+    const $ = (selector, root = document) => root.querySelector(selector);
+    const app = document.querySelector('main');
+    let state = {view: 'workspace'};
+    let seq = 1;
+    const CAL_POLL_MS = 150000;
+    const cal = {view: 'month', selected: null, data: null, showDone: true};
+    const enc = encodeURIComponent;
+    const esc = text => String(text).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const ICON = {check: '', plus: '+', note: '<svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6z"/></svg>'};
+    class Locked extends Error {}
+    const calLocale = () => 'en-US';
+    const toneOfTask = () => '--accent';
+    const drawCalendar = () => {};
+    const loadSchedule = () => {};
+    const calFind = id => cal.data.tasks.find(task => task.id === id);
+    const toast = () => {};
+    const noteHash = id => '#/n/' + encodeURIComponent(id);
+    const go = hash => { window.went = hash; };
+    const side = {loaded: true, folders: [], notes: new Map([['', {loaded: true, loading: false, items: [{id: 'n1'}]}]])};
+    const sideActive = () => true;
+    let rows = [];
+    let events = [];
+    let notes = [];
+    let weekGate = null;
+    window.calls = [];
+    async function api(url, options = {}) {
+      window.calls.push(url);
+      if (options.method === 'PATCH') {
+        const task = rows.find(task => task.id === decodeURIComponent(url.split('/').pop()));
+        task.done = options.body.done;
+        return task;
+      }
+      if (url.startsWith('/api/notes')) {
+        const query = new URL(url, location.origin).searchParams;
+        const list = query.get('show') === 'pinned' ? notes.filter(n => n.pinned) : [...notes].sort((a, b) => (b.pinned - a.pinned) || (b.updated_at < a.updated_at ? -1 : 1));
+        const page = structuredClone(list.slice(0, Number(query.get('limit'))));
+        return options.total ? {items: page, total: list.length} : page;
+      }
+      if (url.startsWith('/api/schedule')) {
+        const from = new URL(url, location.origin).searchParams.get('from');
+        if (from === new Date(2026, 10, 15).toISOString() && weekGate) await weekGate;
+        return {connected: true, events: structuredClone(events), tasks: structuredClone(rows)};
+      }
+      return {tasks: structuredClone(rows)};
+    }
+    ${core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('))}
+    ${core.slice(core.indexOf('function rel('), core.indexOf('const folderLabel'))}
+    ${calendar.slice(calendar.indexOf('const CAL_RING_MS'), calendar.indexOf('function calCheck'))}
+    ${calendar.slice(calendar.indexOf('function taskDoneOn'), calendar.indexOf('function pickerBody'))}
+    ${calendar.slice(calendar.indexOf('var tasksWin'), calendar.indexOf('const source ='))}
+    const actions = {${actions.slice(actions.indexOf("  'home-day':"), actions.indexOf("  'cal-prev':"))}${actions.slice(actions.indexOf("  'task-done':"), actions.indexOf("  'task-date':"))}};
+    document.addEventListener('click', event => {
+      const element = event.target.closest('[data-action]');
+      if (!element || !actions[element.dataset.action]) return;
+      event.preventDefault();
+      actions[element.dataset.action](element);
+    });
+    const home = '<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask"><input id="home-ask"></label><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent" id="home-recent" aria-label="Recently written"></section><div class="home-foot"><p id="home-foot"></p></div></section>';
+    window.audit = {
+      async seed(tasks, seen, written) { rows = tasks; events = seen; notes = written; await loadTasksWindow(); },
+      hold() { weekGate = new Promise(resolve => { window.release = () => { weekGate = null; resolve(); }; }); },
+      async mount() {
+        state = {view: 'workspace'};
+        app.innerHTML = home;
+        drawTasksWindow();
+        drawHomeToday();
+        const week = loadHomeWeek();
+        await Promise.all([loadTasksWindow(), loadHomeRecent(), week]);
+      },
+    };`;
+  const server = http.createServer((request, response) => {
+    if (request.url === '/fixture.js') { response.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return response.end(fixture); }
+    if (request.url === '/schedule.js') { response.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return response.end(fs.readFileSync(path.join(web, 'schedule.js'))); }
+    if (request.url === '/style.css') { response.setHeader('Content-Type', 'text/css; charset=utf-8'); return response.end(pageCss()); }
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><main id="app"></main><script src="/schedule.js"></script><script src="/fixture.js"></script></body></html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const context = await browser.newContext({viewport: {width: 1280, height: 1000}, locale: 'en-US'});
+  try {
+    const page = await context.newPage();
+    const errors = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.clock.setFixedTime(new Date(2026, 10, 18, 10, 20));
+    await page.goto(`http://127.0.0.1:${server.address().port}/#/`);
+    const ago = minutes => new Date(new Date(2026, 10, 18, 10, 20).getTime() - minutes * 60000).toISOString();
+    await page.evaluate(([a, b, c, d, e, f]) => audit.seed([
+      {id: 'late', title: 'Email the TA', date: '2026-11-10'},
+      {id: 'mon', title: 'Haircut', date: '2026-11-16', done: true},
+      {id: 'cut', title: 'Problem set review', date: '2026-11-18', time: '09:00', done: true},
+      {id: 'draft', title: 'Send draft to advisor', date: '2026-11-18'},
+      {id: 'books', title: 'Return library books', date: '2026-11-18'},
+      {id: 'lab', title: 'Lab notes', date: '2026-11-19'},
+      {id: 'flights', title: 'Book flights home', date: '2026-11-23'},
+      {id: 'far', title: 'Apply for summer', date: '2026-11-30'},
+    ], [{id: 'e1', title: 'Seminar', start: new Date(2026, 10, 15, 10).toISOString(), end: new Date(2026, 10, 15, 11).toISOString()}], [
+      {id: 'syllabus', title: 'Syllabus', pinned: true, summary: 'Office hours and grading.', updated_at: a, created_at: a},
+      {id: 'markov', title: 'Markov chains', pinned: false, summary: 'Markov chains model a system that hops between states.', updated_at: b, created_at: b},
+      {id: 'ps4', title: 'Problem set 4', pinned: false, summary: 'Q3: show the chain is irreducible.', updated_at: c, created_at: c},
+      {id: 'plan', title: 'Weekly plan', pinned: false, summary: 'Monday: problem set.', updated_at: d, created_at: d},
+      {id: 'old', title: 'Old note', pinned: false, summary: '', updated_at: e, created_at: f},
+    ]), [ago(120), ago(28), ago(60), ago(13 * 60), ago(5000), ago(9000)]);
+
+    await page.evaluate(() => audit.hold());
+    const mounted = page.evaluate(() => audit.mount());
+    const week = page.locator('#home-week');
+    await expect(week.locator('button')).toHaveText(['15', '16', '17', '18', '19', '20', '21']);
+    const before = await page.evaluate(() => [document.querySelector('.home-rule').getBoundingClientRect().top, document.querySelector('.home-ask').getBoundingClientRect().top]);
+    await expect(week.locator('button.past')).toHaveText(['15', '16', '17']);
+    await expect(week.locator('button[data-id="2026-11-15"] i'), 'the event dot waits for the week read').toHaveCount(0);
+    await page.evaluate(() => window.release());
+    await mounted;
+    await expect(week.locator('button[data-id="2026-11-15"] i'), 'a past day with an event gets its dot').toHaveCount(1);
+    expect(await page.evaluate(() => [document.querySelector('.home-rule').getBoundingClientRect().top, document.querySelector('.home-ask').getBoundingClientRect().top]), 'the ribbon was there from the first paint').toEqual(before);
+    expect(await week.locator('button:has(i)').evaluateAll(els => els.map(el => el.dataset.id))).toEqual(['2026-11-15', '2026-11-16', '2026-11-18', '2026-11-19']);
+    const today = week.locator('button.today');
+    await expect(today).toHaveAttribute('aria-current', 'date');
+    await expect(today).toHaveAttribute('aria-label', 'Wednesday, November 18, planned');
+    await expect(today.locator('.cal-ring path')).not.toHaveClass(/inking/);
+    expect(await page.evaluate(() => cal.ringAt), 'home never starts the Calendar\'s ring').toBeUndefined();
+    const box = await today.locator('.cal-ring').boundingBox();
+    expect(box.width).toBeLessThanOrEqual(26);
+    const weekReads = () => page.evaluate(() => window.calls.filter(url => url.startsWith('/api/schedule') && url.includes(encodeURIComponent(new Date(2026, 10, 15).toISOString()))).length);
+    expect(await weekReads(), 'one week read per home mount').toBe(1);
+
+    const recent = page.locator('#home-recent');
+    await expect(recent.locator('.tasks-group')).toHaveText('Recently written');
+    await expect(recent.locator('.home-recent-row .tasks-title')).toHaveText(['Markov chains', 'Problem set 4', 'Syllabus']);
+    await expect(recent.locator('.home-recent-row .tasks-when')).toHaveText(['28m ago', '1h ago', '2h ago']);
+    await expect(recent.locator('.home-recent-row').first()).toHaveAttribute('href', '#/n/markov');
+    await expect(recent.locator('.home-recent-line').first()).toHaveText('Markov chains model a system that hops between states.');
+    expect(await page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes'))), 'the pinned count, then pinned plus three').toEqual(['/api/notes?show=pinned&limit=1', '/api/notes?sort=updated&brief=true&limit=4']);
+
+    const group = page.locator('#home-today .tasks-group', {hasText: 'Today'});
+    await expect(group).toHaveText('Today1 of 3 done');
+    await expect(group.locator('.home-tally')).toHaveAttribute('title', '1 of 3 done');
+    await expect(group.locator('.home-tally-said')).toHaveText('1 of 3 done');
+    await expect(group.locator('.home-tally-marks path')).toHaveCount(1);
+    expect((await group.locator('.home-tally-marks').boundingBox()).height).toBeLessThanOrEqual(12);
+    await page.locator('#home-today .tasks-row', {hasText: 'Send draft'}).locator('.sched-check').click();
+    await expect(group.locator('.home-tally-marks path')).toHaveCount(2);
+    expect(await group.locator('.home-tally-marks path').last().evaluate(el => [el.classList.contains('inking'), getComputedStyle(el).animationName])).toEqual([true, 'pencil-draw']);
+    await page.waitForTimeout(250);
+    await page.evaluate(() => drawHomeToday());
+    expect(await group.locator('.home-tally-marks path').last().evaluate(el => el.classList.contains('inking')), 'a later redraw keeps the end frame').toBe(false);
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    const draft = page.locator('#home-today .tasks-row', {hasText: 'Send draft'}).locator('.sched-check');
+    await draft.click();
+    await expect(group.locator('.home-tally-marks path'), 'unticking takes its stroke away').toHaveCount(1);
+    await draft.click();
+    await expect(group.locator('.home-tally-marks path')).toHaveCount(2);
+    expect(await group.locator('.home-tally-marks path').last().evaluate(el => getComputedStyle(el).animationName), 'reduced motion draws it at once').toBe('none');
+    await page.emulateMedia({reducedMotion: 'no-preference'});
+    await expect(group).toHaveText('Today2 of 3 done');
+    expect(await weekReads(), 'ticking and redrawing never read the week again').toBe(1);
+    expect(await page.evaluate(() => window.calls.filter(url => url.startsWith('/api/notes')).length), 'redraws paint from the cached notes').toBe(2);
+    await expect(page.locator('#home-today .tasks-row', {hasText: 'Email the TA'}).locator('.tasks-when')).toHaveText('Nov 10');
+
+    await week.locator('button[data-id="2026-11-20"]').click();
+    expect(await page.evaluate(() => [cal.selected, cal.view, window.went])).toEqual(['2026-11-20', 'month', '#/calendar']);
+
+    await page.evaluate(() => { state = {view: 'folder'}; drawTasksWindow(); });
+    const card = page.locator('#tasks-window');
+    await expect(card.locator('.tasks-group')).toHaveText(['Earlier', 'Today', 'Coming up']);
+    await expect(card.locator('.tasks-count')).toHaveText('1 from earlier · 4 to do');
+    await expect(card).toHaveAttribute('aria-label', 'Tasks: 1 from earlier · 4 to do');
+    await expect(card.locator('.tasks-row', {hasText: 'Lab notes'}).locator('.tasks-when')).toHaveText('Tomorrow');
+    await expect(card.locator('.tasks-row', {hasText: 'Lab notes'}).locator('.tasks-when')).toHaveAttribute('title', 'Thursday, November 19');
+    await expect(card.locator('.tasks-row', {hasText: 'Book flights'}).locator('.tasks-when')).toHaveText('Mon');
+    await expect(card.locator('.tasks-row', {hasText: 'Return library books'}).locator('.tasks-when')).toHaveText('Today');
+    await expect(card.locator('.tasks-row', {hasText: 'Email the TA'}).locator('.tasks-when')).toHaveText('Nov 10');
+    expect(await page.evaluate(() => [tasksGroups(tasksWin.tasks).map(([name]) => name), tasksDueBadge()]), 'the group key stays Overdue for Quick Leo').toEqual([['Overdue', 'Today', 'Coming up'], '<span class="due-badge late" aria-label="2 due, 1 from earlier">2 due</span>']);
+
+    await page.evaluate(() => audit.seed([], [], []));
+    await page.evaluate(() => audit.mount());
+    await expect(page.locator('#home-recent'), 'no notes, no group').toBeHidden();
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+    await new Promise(resolve => server.close(resolve));
+  }
+});
+
 test('the Undo countdown is a pencil line rubbed out from the right, and Undo keeps a straight underline', async ({ browser }) => {
   const web = path.resolve(__dirname, '../../src/web');
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');

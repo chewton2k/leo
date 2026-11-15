@@ -247,9 +247,9 @@ const CAL_RINGS = [
   'M7.5 4.3L9.2 3.5 10.9 3 12.8 2.8 14.6 2.9 16.4 3.4 18 4.2 19.5 5.2 20.7 6.5 21.6 7.9 22.4 9.3 22.9 10.9 23.1 12.5 23.1 14.1 22.9 15.8 22.4 17.4 21.6 18.9 20.5 20.3 19.2 21.5 17.6 22.5 15.8 23.1 13.9 23.5 12 23.4 10.2 23 8.4 22.3 6.9 21.4 5.6 20.2 4.5 18.8 3.6 17.3 3 15.8 2.7 14.1 2.6 12.4 2.7 10.8 3.1 9.1 3.9 7.5 4.9 6 6.2 4.7 7.7 3.6 9.4 2.8 11.3 2.4 13.3 2.3',
 ];
 
-function calRing(key) {
-  cal.ringAt ??= performance.now();
-  const ago = performance.now() - cal.ringAt;
+function calRing(key, still = false) {
+  if (!still) cal.ringAt ??= performance.now();
+  const ago = still ? CAL_RING_MS : performance.now() - cal.ringAt;
   const draw = ago < CAL_RING_MS ? ` class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : '';
   return `<svg class="cal-ring" viewBox="0 0 26 26" aria-hidden="true"><path pathLength="1"${draw} d="${CAL_RINGS[S.fromKey(key).getDate() % CAL_RINGS.length]}"/></svg>`;
 }
@@ -1728,8 +1728,9 @@ function drawHomeToday() {
   const day = today.slice(0, HOME_ROWS - early.length);
   const more = earlier.length + today.length - early.length - day.length;
   const focus = tasksFocus(box);
+  const said = `${today.filter((t) => t.done).length} of ${today.length} done`;
   box.hidden = !early.length && !day.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
   const root = side.notes.get('');
@@ -1741,8 +1742,76 @@ function drawHomeToday() {
   const first = ready && notes === 0 && !tasks.length;
   $('.home-foot').classList.toggle('first', Boolean(first));
   $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : `Open a note${sideActive() ? '' : ' from Folders'}, or start a new one.`;
+  drawHomeWeek();
+  drawHomeRecent();
   clearTimeout(homeMidnight);
-  homeMidnight = setTimeout(drawTasksWindow, S.addDays(now, 1) - now + 1000);
+  homeMidnight = setTimeout(() => { drawTasksWindow(); loadHomeWeek(); }, S.addDays(now, 1) - now + 1000);
+}
+
+function homeTally(today) {
+  const done = today.filter((t) => t.done);
+  const { marks, width } = S.tally(done.length);
+  if (!marks.length) return '';
+  const ago = performance.now() - Math.max(...done.map((t) => tickedAt.get(`${t.id} ${t.on || ''}`) ?? -Infinity));
+  return `<svg class="home-tally-marks" width="${width}" height="12" viewBox="0 0 ${width} 12" aria-hidden="true">${marks.map((m, i) => `<path${m.x ? ` transform="translate(${m.x} 0)"` : ''} d="${m.d}"${i === marks.length - 1 && ago < TICK_MS ? ` pathLength="1" class="inking" style="animation-delay: ${-Math.round(ago)}ms"` : ''}/>`).join('')}</svg>`;
+}
+
+const homeWeek = { events: null, load: 0 };
+
+async function loadHomeWeek() {
+  if (!document.getElementById('home-week')) return;
+  const days = S.daysOf('week', S.dayKey(new Date()), S.weekStart(calLocale()));
+  const mine = ++homeWeek.load;
+  try {
+    const data = await api(`/api/schedule?from=${enc(S.fromKey(days[0]).toISOString())}&to=${enc(S.addDays(S.fromKey(days[6]), 1).toISOString())}`);
+    if (mine !== homeWeek.load) return;
+    homeWeek.events = data.events || [];
+  } catch (e) {
+    return;
+  }
+  drawHomeWeek();
+}
+
+function drawHomeWeek() {
+  const box = document.getElementById('home-week');
+  if (!box) return;
+  const today = S.dayKey(new Date());
+  const days = S.daysOf('week', today, S.weekStart(calLocale()));
+  const plan = S.plan(tasksWin.tasks || (cal.data && cal.data.tasks) || [], homeWeek.events || [], today, { from: days[0], to: days[6] });
+  const focus = tasksFocus(box);
+  box.innerHTML = days.map((key) => {
+    const d = S.fromKey(key);
+    const name = d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
+    const busy = plan.byDay.has(key);
+    return `<button type="button" class="home-wd${key < today ? ' past' : key === today ? ' today' : ''}" data-action="home-day" data-id="${key}" aria-label="${esc(busy ? `${name}, planned` : name)}" title="${esc(name)}"${key === today ? ' aria-current="date"' : ''}><b>${d.getDate()}${key === today ? calRing(key, true) : ''}</b>${busy ? '<i></i>' : ''}</button>`;
+  }).join('');
+  refocusTasks(box, focus);
+}
+
+const homeRecent = { notes: null, load: 0 };
+
+async function loadHomeRecent() {
+  if (!document.getElementById('home-recent')) return;
+  const mine = ++homeRecent.load;
+  try {
+    const pinned = (await api('/api/notes?show=pinned&limit=1', { total: true })).total;
+    const notes = await api(`/api/notes?sort=updated&brief=true&limit=${pinned + 3}`);
+    if (mine !== homeRecent.load) return;
+    homeRecent.notes = (Array.isArray(notes) ? notes : []).filter((n) => typeof n.id === 'string').sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at)).slice(0, 3);
+  } catch (e) {
+    if (mine !== homeRecent.load || homeRecent.notes) return;
+    homeRecent.notes = [];
+  }
+  drawHomeRecent();
+}
+
+function drawHomeRecent() {
+  const box = document.getElementById('home-recent');
+  if (!box || !homeRecent.notes) return;
+  const at = box.contains(document.activeElement) ? document.activeElement.getAttribute('href') : null;
+  box.hidden = !homeRecent.notes.length;
+  box.innerHTML = homeRecent.notes.length ? `<div class="tasks-group">Recently written</div>${homeRecent.notes.map((n) => `<a class="tasks-row home-recent-row" href="${noteHash(n.id)}">${ICON.note}<span class="tasks-title">${esc(n.title || 'Untitled')}</span><span class="home-recent-line">${esc(n.summary || '')}</span><span class="tasks-when">${esc(rel(n.updated_at))}</span></a>`).join('')}` : '';
+  if (at) box.querySelector(`[href="${CSS.escape(at)}"]`)?.focus({ preventScroll: true });
 }
 
 function drawTasksWindow() {
@@ -1810,6 +1879,7 @@ async function loadTasksWindow() {
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
     if (data.events) {
+      if (home && tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) loadHomeWeek();
       tasksWin.events = data.events;
       tasksWin.eventsAt = Date.now();
     }

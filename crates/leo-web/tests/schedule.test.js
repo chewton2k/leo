@@ -344,6 +344,23 @@ test('task dates read as words: today, tomorrow, a weekday within a week either 
   assert.equal(S.dayWord('2026-11-02', new Date(2026, 10, 1, 23, 30), 'en-US'), 'Tomorrow', 'a clock change in between still counts whole days');
 });
 
+test('a tally draws one stroke per task, gates every fifth and never re-rolls', () => {
+  assert.deepEqual(S.tally(0), { marks: [], width: 2.5 });
+  assert.equal(S.tally(1).marks.length, 1);
+  assert.equal(S.tally(1).width, 7);
+  assert.equal(S.tally(3).width, 16);
+  assert.equal(S.tally(4).width, 20.5);
+  const five = S.tally(5);
+  assert.equal(five.width, 26);
+  assert.match(five.marks[4].d, /^M1 9\.5/, 'the fifth is the gate across the four');
+  const seven = S.tally(7);
+  assert.equal(seven.width, 35);
+  assert.deepEqual(seven.marks.slice(5).map((m) => m.x), [23.5, 23.5]);
+  assert.deepEqual(seven.marks.slice(0, 5), five.marks);
+  assert.deepEqual(S.tally(7), seven);
+  assert.deepEqual(S.tally(-2).marks, []);
+});
+
 let failed = 0;
 for (const [name, fn] of cases) {
   try {

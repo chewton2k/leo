@@ -678,6 +678,11 @@ test('today\'s ring draws once as the calendar opens, a redraw keeps the end fra
       const after = getComputedStyle(tick, '::after');
       return { inking: path.classList.contains('inking'), animation: getComputedStyle(path).animationName, offset: parseFloat(getComputedStyle(path).strokeDashoffset), tick: parseFloat(after.transitionDuration), clip: /^inset\(0(px)?( 0(px)?)*\)$/.test(after.clipPath) };
     });
+    expect(await page.evaluate(() => {
+      cal.ringAt = null;
+      const still = calRing(S.dayKey(new Date()), true);
+      return [still.includes('inking'), cal.ringAt];
+    }), 'home\'s finished ring never starts the Calendar\'s draw').toEqual([false, null]);
     await page.evaluate(() => { showCalendar(); });
     expect(await look()).toMatchObject({ inking: true, animation: 'pencil-draw', tick: 0.16 });
     await page.waitForTimeout(350);
