@@ -121,6 +121,18 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
     await expect(doc.locator('.editing')).toHaveCount(0);
     await expect(copy).toHaveAttribute('aria-label', 'Copy code', { timeout: 3000 });
     await expect(copy.locator('.pencil-tick')).toHaveCount(0);
+    expect(await code.evaluate(el => {
+      const button = el.querySelector('.code-copy').getBoundingClientRect();
+      const range = document.createRange();
+      range.selectNodeContents(el.querySelector('pre code'));
+      return range.getClientRects()[0].top >= button.bottom;
+    }), 'no code sits under the label or Copy').toBe(true);
+    const source = await page.evaluate(() => window.doc.source());
+    await copy.focus();
+    await page.keyboard.press('Enter');
+    await expect(copy).toHaveAttribute('aria-label', 'Copied');
+    expect(await page.evaluate(() => window.doc.source()), 'Enter on Copy never types into the note').toBe(source);
+    await expect(doc.locator('.editing')).toHaveCount(0);
     const quoted = await page.evaluate(() => {
       const range = document.createRange();
       range.setStart(document.querySelector('#doc p').firstChild, 5);

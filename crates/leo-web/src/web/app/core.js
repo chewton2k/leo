@@ -576,7 +576,7 @@ function highlightSearch(root, query) {
   let node;
   let seen = 0;
   while (ranges.length < SEARCH_HIGHLIGHT_MOST && seen++ < SEARCH_HIGHLIGHT_NODES && (node = walk.nextNode())) {
-    if (node.parentElement.closest('textarea, script, style, .katex-mathml')) continue;
+    if (node.parentElement.closest('textarea, script, style, .katex-mathml, .note-facts')) continue;
     pattern.lastIndex = 0;
     let match;
     while (ranges.length < SEARCH_HIGHLIGHT_MOST && (match = pattern.exec(node.textContent))) {

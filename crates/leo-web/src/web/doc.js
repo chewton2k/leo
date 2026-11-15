@@ -822,6 +822,7 @@
 
     function onDocumentKey(e) {
       if (!container.isConnected || e.isComposing || e.defaultPrevented) return;
+      if (e.target.closest?.('.code-copy')) return;
       if (editing && document.activeElement === editing.area) return;
       const focus = document.activeElement;
       if ((!focus || focus === document.body || container.contains(focus)) && (historyKey(e) || styleKey(e))) return;
