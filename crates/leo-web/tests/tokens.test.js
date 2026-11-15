@@ -167,3 +167,21 @@ test('the paper grain is a data: SVG background layer on the shell surfaces, scr
   }
   assert.doesNotMatch(pageCss(), /mix-blend-mode|background-blend-mode/);
 });
+
+test('ink details: a warm selection wash, a drawn rule with a plain fallback, and thin warm scrollbars that keep the page bar', () => {
+  const at = (selector, media = null) => all.find((r) => r.selector === selector && (media ? r.at.some((a) => a.includes(media)) : r.at.length === 0));
+  assert.match(at('::selection').body, /background: color-mix\(in srgb, var\(--text\) 22%, transparent\)/);
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    const wash = over([...rgb(t['--text']).slice(0, 3), 0.22], rgb(t['--page']));
+    assert.ok(contrast(rgb(t['--text']), wash) >= 4.5, `${name}: selected text is ${contrast(rgb(t['--text']), wash).toFixed(2)}`);
+  }
+  const rule = at('.prose hr').body;
+  assert.match(rule, /mask: url\("data:image\/svg\+xml,[^"]*preserveAspectRatio='none'/);
+  assert.match(rule, /background: color-mix\(in srgb, var\(--text\)/);
+  assert.match(at('.prose hr', 'forced-colors: active').body, /mask: none; border-top: 1px solid var\(--line\)/);
+  assert.ok(at('.prose hr', 'forced-colors: active').at.some((a) => a.includes('print')), 'print keeps the plain rule');
+  assert.ok(all.some((r) => r.selector === '*' && r.at.length === 0 && /scrollbar-width: thin/.test(r.body)));
+  assert.ok(all.some((r) => r.selector === ':root' && r.at.length === 0 && /scrollbar-color: color-mix\(in srgb, var\(--text\) 24%, transparent\) transparent/.test(r.body)));
+  assert.match(at('html.page-bar-on').body, /scrollbar-width: none/);
+});

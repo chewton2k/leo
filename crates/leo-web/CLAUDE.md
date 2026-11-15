@@ -134,7 +134,13 @@ Decided: one app, window only (2026-10-31).
   `web/styles/02-base.css` turns it back on for inputs, `.doc`, `.prose`, chat
   and margin text, errors, transcripts, descriptions and code. New text people
   would copy needs a class on that list; hints and card descriptions are chrome.
-  Native drag starts only from explicit note/folder sources.
+  Native drag starts only from explicit note/folder sources. Selected text is a
+  warm ink wash (`::selection`, `--text` at 22%; leo sets no other selection
+  colour). Ink details (2026-11-15): a Markdown `---` (`.prose hr`, also the
+  doc's rule block) is a drawn pencil line (an SVG mask, plain 1 px `--line` in
+  print and forced colours); scrollbars are thin and warm (`* { scrollbar-width:
+  thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
+  page's own bar for `.page-bar`. Focus rings are unchanged.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.

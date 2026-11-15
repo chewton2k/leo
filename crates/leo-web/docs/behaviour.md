@@ -177,6 +177,9 @@ placeholder; focusing it makes it selectable (2026-11-06). The note's mode butto
 the note stops at its end instead of painting empty space. A press on non-selectable,
 non-control chrome clears the selection and Ask Felix (`passages.js`), except in
 `[data-keep-selection]` (Ask Felix, `.page-bar`) and the resize grips.
+Selected text shows a warm ink wash (`--text` at 22%), never the system blue. A `---`
+rule in a note is drawn as a slightly wavering pencil line (print and forced colours keep a
+plain line), and scrollbars are thin and warm grey; focus rings stay as they are (2026-11-15).
 
 Arriving on a page closes sheets left from before but keeps one opened on the new
 address (`scrim.openedOn`): input can run ahead of the queued `hashchange`.

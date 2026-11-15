@@ -1,6 +1,9 @@
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; }
 @media (min-width: 1000px) { html { scrollbar-gutter: stable; } }
+* { scrollbar-width: thin; }
+:root { scrollbar-color: color-mix(in srgb, var(--text) 24%, transparent) transparent; }
+::selection { background: color-mix(in srgb, var(--text) 22%, transparent); }
 body {
   margin: 0;
   background: var(--page);
