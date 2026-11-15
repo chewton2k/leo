@@ -99,6 +99,7 @@ for (const home of ['root', 'folder']) test(`folder then note: opening a note in
   if (other) await twist(page, other).click();
   await folderRow(page, picked).click();
   await expect(page.locator('#side .side-new')).toHaveAttribute('data-dir', picked);
+  await expect(page.locator('#side .side-new')).toHaveAttribute('title', /\((⌘N|Ctrl\+N)\)$/);
   await noteRow(page, note.id).click();
   await expect(page.locator('#title')).toHaveText(note.title);
   await expect(page.locator('#side [data-action="record"]')).toHaveAttribute('data-dir', other);

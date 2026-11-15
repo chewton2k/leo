@@ -259,7 +259,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   defaults of three customizable page shortcuts (Settings → Shortcuts): `SHORTCUTS`
   in `core.js`, saved per window as `leo-shortcuts` in localStorage (like the
   appearance keys), read with `shortcutKeys`/`pressed`, and shown through
-  `shortcutText`. Every label is built at draw time. While one is being recorded a
+  `shortcutText`. Every label is built at draw time (the New note button titles and
+  the selection toolbar's Ask Felix title carry theirs). While one is being recorded a
   window capture-phase keydown listener swallows every key; reserved keys
   (Cmd/Ctrl + q w r c v x z y a s b i u `,` and Shift+Z), another page shortcut and
   the dictation shortcut are refused with the reason.

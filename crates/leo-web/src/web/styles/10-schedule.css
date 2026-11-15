@@ -229,6 +229,7 @@ h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .tasks-foot { padding: 8px 16px 12px; font-size: var(--fs-sm); }
 .tasks-window:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .tasks-badge { display: none; position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-text); font-size: var(--fs-xs); font-weight: 700; line-height: 19px; text-align: center; font-variant-numeric: tabular-nums; }
+.cal-stack-more::after, .chat-history-x::after, .tasks-badge::after { content: ''; position: absolute; inset: -6px; }
 .tasks-window:not(:hover, :focus-within) { align-self: flex-start; border-radius: 50%; overflow: visible; }
 .tasks-window:not(:hover, :focus-within) :is(.tasks-body, .tasks-foot, .tasks-new, .tasks-toggle .grow) { display: none; }
 .tasks-window:not(:hover, :focus-within) .tasks-toggle { position: relative; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; }
