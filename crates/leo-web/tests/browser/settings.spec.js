@@ -696,6 +696,8 @@ test('switch rows that sit together share one raised panel split by an inset hai
     expect(await page.locator('#pick').evaluate((el) => getComputedStyle(el).boxShadow)).toBe('none');
   }
   expect(await page.locator('#b').evaluate((el) => getComputedStyle(el, '::before').backgroundImage)).toContain('14px');
+  expect(await page.locator('#b').evaluate((el) => { el.dataset.find = 'b'; el.classList.add('found-still'); const s = getComputedStyle(el); return [s.clipPath, s.zIndex, s.outlineStyle]; })).toEqual(['none', '1', 'solid']);
+  await page.locator('#b').evaluate((el) => el.classList.remove('found-still'));
   await page.emulateMedia({ forcedColors: 'active' });
   expect(await page.locator('#b').evaluate((el) => [getComputedStyle(el).borderTopStyle, getComputedStyle(el, '::before').display])).toEqual(['solid', 'none']);
 });
