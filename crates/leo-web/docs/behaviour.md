@@ -924,12 +924,16 @@ target. Check the page sequence after loading preferences.
   shows the problem and lets the user type a question (2026-11-06, the user's call).
   Replies show the sent text and the mark the same way; a failed one restores the text. The box stays editable
   while Felix thinks and only Send waits (2026-11-06).
-  Every open thread has an Ask in chat icon and a pin (Pin open / Unpin, `aria-pressed`) beside ×; actions read Resolve, Dismiss,
-  Add to note. Threads fold unless pinned (2026-11-14): a closed note that is not pinned shows its first line only
-  (no "N more") and dims to .7 until it is hovered, focused or opened; keyboard focus inside unfolds it, hover does not,
-  so nothing restacks under the pointer. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in
-  `margin.json`) keeps the closed note whole and undimmed. Open, its messages and the waiting mark sit right of a 1 px
-  `--line` rule. A pinned closed thread with more messages says "N more" (marks get a ring either way).
+  An open thread has one action row (2026-11-15, the user's call): Resolve, Dismiss, Add to note, See it larger (only
+  with a drawing), then a pin (Pin open / Unpin, `aria-pressed`; pressed fills the pin's head in full ink, no box) and
+  Ask in chat together at the row's end (`.margin-tools`), wrapping together to a second row's end when the note is
+  too narrow. There is no × : Esc or a click outside closes it; `.margin-toggle` stays the closed note's opener, its
+  `aria-expanded` and the focus target, and takes no clicks while open. Closed notes show their whole text
+  (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
+  block over 12 lines stops there with a bottom fade (`.margin-cut`, set only when it overflows), figures and drawings
+  always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
+  keeps the closed note undimmed with a faint tether. Open, its messages and the waiting mark sit right of a 1 px
+  `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).
   Word arrival animates colour only, never opacity (blur on WebKit); positions are rounded. With Felix open, under
   3 or over `MOST_ASKED` (1,000) characters, it goes to the chat as before (2026-11-08; read-along and `add_margin_note` quotes stay at `MOST_QUOTE`, 600). The server anchors on
   prefix + quote + suffix exactly and never falls back to another occurrence. Replies
@@ -961,7 +965,10 @@ target. Check the page sequence after loading preferences.
   least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins alternates: a
   free note takes the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
-  `arrangement`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 1,192 px. The margin is
+  `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 1,192 px.
+  Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:
+  the room beside the note's own width less the gap and the window padding, 240 to 360 px; when Both would leave
+  notes under 300 px but one side gives 300 or more, every note goes right and the column moves left. The margin is
   reserved up front on every note, in both modes, whatever its threads
   (2026-11-04, the orchestrator's decision): `.note-columns[data-margin]` pads the
   column, so the note is min(its note width, the room left) and sits left of centre,

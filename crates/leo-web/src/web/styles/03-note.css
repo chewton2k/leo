@@ -78,8 +78,8 @@
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color .14s ease-out, box-shadow .14s ease-out, opacity .14s ease-out; }
 .margin-note:not([data-open], [data-pinned], [data-newest], [data-active]) { opacity: .7; }
-.margin-note:not([data-open], [data-pinned], [data-newest], :focus-within) .margin-said { max-height: calc(15px * var(--read) * 1.46); overflow: hidden; }
-.margin-note:not([data-open], [data-pinned], [data-newest], :focus-within) .margin-foot { display: none; }
+.margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: calc(15px * var(--read) * 1.46 * 12); overflow: hidden; }
+.margin-cut { mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent); }
 .margin-note[data-open] :is(.margin-said, .margin-pending) { border-left: 1px solid var(--line); padding-left: 10px; }
 .margin-note[data-active]:not([data-open]) { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent); }
 .margin-waiting { position: absolute; left: 0; top: 0; pointer-events: none !important; transition: opacity .12s ease-out; }
@@ -92,15 +92,12 @@
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
 .margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-note[data-open] .margin-toggle { z-index: 3; inset: auto -8px -2px auto; width: 28px; height: 28px; border-radius: var(--r-tile); display: grid; place-items: center; }
-.margin-toggle svg { display: none; width: 16px; height: 16px; color: var(--muted); }
-.margin-note[data-open] .margin-toggle svg { display: block; }
-.margin-note[data-open] .margin-toggle:hover svg { color: var(--text); }
-.margin-chat, .margin-pin { display: none; }
-.margin-note[data-open] :is(.margin-chat, .margin-pin) { position: absolute; z-index: 3; bottom: -2px; right: 20px; width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
-.margin-note[data-open] .margin-pin { right: 48px; }
-.margin-chat:hover, .margin-pin:hover { color: var(--text); }
-.margin-note[data-open] .margin-pin[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+.margin-note[data-open] .margin-toggle { pointer-events: none; }
+.margin-tools { display: flex; gap: 2px; margin-left: auto; }
+.margin-chat, .margin-pin { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.margin-pin[hidden] { display: none; }
+.margin-chat:hover, .margin-pin:hover, .margin-pin[aria-pressed="true"] { color: var(--text); }
+.margin-pin[aria-pressed="true"] svg path:nth-of-type(2) { fill: currentColor; }
 .margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-chat svg, .margin-pin svg { width: 15px; height: 15px; }
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }
@@ -174,7 +171,6 @@ figure.drawing.inked img { filter: none !important; }
 .margin-changed { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
 .margin-problem { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
 .margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 10px; }
-.margin-note[data-open] .margin-acts { padding-right: 84px; min-height: 38px; }
 .margin-add { font-size: var(--fs-xs); font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
 .margin-add:focus-visible, .margin-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
@@ -270,7 +266,6 @@ figure.drawing.inked img { filter: none !important; }
   .margin-ink path.tether { stroke: Highlight; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
-  .margin-note[data-open] .margin-toggle svg { color: CanvasText; }
   .margin-anchor { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
   .choice-diagram .d-felix, .choice-diagram .d-text, .choice-diagram .d-head { stroke: CanvasText; }

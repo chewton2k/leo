@@ -426,13 +426,20 @@ Felix (2026-10-19).
   "Reopen Felix's note", focusable) and aria-hidden spans on the others, a 5 px strip below
   the text line so the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
   `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
-- Fold unless pinned (2026-11-14): `margin_threads.pinned` (guarded `ALTER`,
-  db `VERSION` 4, in `margin.json`), PATCH `.../threads/{id}` `{pinned}`. A
-  closed note that is not pinned or focused shows only its first line and dims
-  to .7 until lit; hover undims but never unfolds (no restack under the
-  pointer). The newest read-along note (`marginPage.newest`, `data-newest`)
-  stays whole until the next read starts. An open thread's messages sit right
-  of a 1 px `--line` rule.
+- Whole notes (2026-11-15, the user's call, replacing the first-line fold): a
+  closed note shows its whole text and dims to .7 until lit; a text block over
+  12 lines is cut there with a fade (`.margin-cut`, set by `marginFill` only
+  when it overflows); figures always show whole. Pins: `margin_threads.pinned`
+  (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
+  `.../threads/{id}` `{pinned}`; a pinned or newest read-along note
+  (`marginPage.newest`, `data-newest`) stays undimmed. An open thread's
+  messages sit right of a 1 px `--line` rule; its one action row is Resolve,
+  Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
+  row's end. No ×: Esc or a click outside closes; `.margin-toggle` is the
+  closed opener and focus target and takes no clicks while open.
+- Width: `marginLayout` sets `--margin-w` each pass from `marginKit.arrangement`
+  and `marginWidth` (room beside the note's `max-width`, 240–360 px; Both
+  becomes Right when it would leave notes under 300 px and one side gives 300).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`

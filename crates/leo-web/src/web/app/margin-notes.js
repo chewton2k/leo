@@ -58,7 +58,13 @@ function marginRemember(prefs) {
 }
 
 function marginLayout(columns) {
-  return marginKit.arrangement({ width: columns.clientWidth, setting: marginPrefs?.layout || marginRemembered() || 'both', noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  const max = getComputedStyle($('article.note', columns)).maxWidth;
+  const column = max.endsWith('px') ? parseFloat(max) : Infinity;
+  const width = columns.clientWidth;
+  const layout = marginKit.arrangement({ width, column, setting: marginPrefs?.layout || marginRemembered() || 'both', noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  const size = `${marginKit.marginWidth({ width, column, layout })}px`;
+  if (columns.style.getPropertyValue('--margin-w') !== size) columns.style.setProperty('--margin-w', size);
+  return layout;
 }
 
 async function marginLoadPrefs() {
@@ -84,6 +90,7 @@ function marginLeave() {
   marginPage.observer = null;
   const columns = marginPage.layer?.parentElement;
   columns?.style.removeProperty('--anchor-gutter');
+  columns?.style.removeProperty('--margin-w');
   marginPage.layer?.remove();
   marginPage.roomy?.classList.remove('margin-room');
   Object.assign(marginPage, { loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
@@ -513,10 +520,10 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}">${ICON.close}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat" title="Ask in chat">${ICON.chat}</button><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
     <form class="margin-reply"><textarea rows="1" maxlength="1000" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
     <p class="margin-problem" role="status" hidden></p>
-    <div class="margin-acts"><button type="button" class="msg-act" data-margin-act="resolve">Resolve</button><button type="button" class="msg-act" data-margin-act="dismiss">Dismiss</button><button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger" title="See it larger">${ICON.expand}</button><button type="button" class="margin-add" data-margin-act="add">Add to note</button></div></div></div>`;
+    <div class="margin-acts"><button type="button" class="msg-act" data-margin-act="resolve">Resolve</button><button type="button" class="msg-act" data-margin-act="dismiss">Dismiss</button><button type="button" class="margin-add" data-margin-act="add">Add to note</button><button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger" title="See it larger">${ICON.expand}</button><span class="margin-tools"><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat" title="Ask in chat">${ICON.chat}</button></span></div></div></div>`;
   marginPage.layer.appendChild(el);
   marginPage.els.set(t.id, el);
   marginPage.observer?.observe(el);
@@ -550,6 +557,7 @@ function marginFill(el, t, arriving, changed) {
       }
     }
   }
+  for (const block of el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')) block.classList.toggle('margin-cut', !open && block.scrollHeight > block.clientHeight + 1);
   $('.margin-changed', el).hidden = !changed;
   const draft = t.id === 'draft';
   const waiting = marginPage.thinking.get(t.id);
@@ -839,6 +847,7 @@ async function marginReopen(id) {
 function marginPlaceInMargin(boxes, layout, page, origin) {
   const left = page.left - origin.left;
   const right = page.right - origin.left;
+  const size = parseFloat(getComputedStyle(marginPage.layer.parentElement).getPropertyValue('--margin-w')) || marginKit.MARGIN_WIDTH;
   const all = boxes.map(({ t, rects, el }) => ({ id: t.id, want: rects[0].top - 2, height: el.offsetHeight }));
   const items = all.filter((i) => i.id !== 'reading');
   const side = layout === 'both' ? marginKit.sides(items, 16, marginPage.sides) : Object.fromEntries(items.map((item) => [item.id, 'right']));
@@ -853,7 +862,7 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
   }
   for (const { t, el, rects } of boxes) {
     const on = side[t.id];
-    const x = on === 'right' ? right + marginKit.MARGIN_GAP : left - marginKit.MARGIN_GAP - marginKit.MARGIN_WIDTH;
+    const x = on === 'right' ? right + marginKit.MARGIN_GAP : left - marginKit.MARGIN_GAP - size;
     el.hidden = false;
     el.removeAttribute('data-inline');
     el.style.transform = `translate(${Math.round(x)}px, ${Math.round(tops[t.id])}px)`;
@@ -865,7 +874,7 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
     const end = on === 'right' ? rects[rects.length - 1] : rects[0];
     const mid = (end.top + end.bottom) / 2;
     const from = on === 'right' ? end.right + 6 : end.left - 6;
-    const to = on === 'right' ? x - 2 : x + marginKit.MARGIN_WIDTH + 2;
+    const to = on === 'right' ? x - 2 : x + size + 2;
     const top = tops[t.id] + 10;
     const bend = (from + to) / 2;
     marginPage.tethers.set(t.id, `M${from.toFixed(1)} ${mid.toFixed(1)} C${bend.toFixed(1)} ${mid.toFixed(1)} ${bend.toFixed(1)} ${top.toFixed(1)} ${to.toFixed(1)} ${top.toFixed(1)}`);

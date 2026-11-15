@@ -49,7 +49,7 @@
 .see-larger:hover { color: var(--text); }
 .icon-act { display: none; margin-left: auto; place-items: center; width: 28px; height: 28px; padding: 0; }
 .icon-act svg { width: 16px; height: 16px; }
-.margin-acts .icon-act + .margin-add { margin-left: 0; }
+.margin-acts .icon-act { margin-left: 0; }
 .msg-acts .icon-act { margin-left: 0; }
 .margin-note:has(.margin-felix :is(figure.diagram[data-drawn="yes"], figure.drawing:not(.pending))) .icon-act, .msg.leo:has(> .prose :is(figure.diagram[data-drawn="yes"], figure.drawing:not(.pending))) .icon-act { display: grid; }
 .margin-note[data-open] .margin-felix:has(figure.diagram[data-drawn="yes"], figure.drawing:not(.pending)) .see-larger, .msg.leo:has(> .prose :is(figure.diagram[data-drawn="yes"], figure.drawing:not(.pending))) > .see-larger { display: block; }
