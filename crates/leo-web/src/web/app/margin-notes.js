@@ -300,7 +300,7 @@ function marginControl() {
   button.dataset.mode = marginPage.mode;
   const icon = $('#margin-mode-icon');
   if (icon && icon.dataset.along !== String(along)) {
-    const paint = () => { icon.innerHTML = along ? ICON.pen : ICON.chat; icon.dataset.along = String(along); };
+    const paint = () => { icon.innerHTML = along ? '<svg><use href="#leo-mark"/></svg>' : ICON.chat; icon.dataset.along = String(along); };
     if (icon.dataset.along) iconSwap(icon, paint);
     else paint();
   }

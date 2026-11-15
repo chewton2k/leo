@@ -817,10 +817,14 @@ async function undoTrashMove(done) {
 
 const cleanTitle = (text) => text.replace(/\s*\n\s*/g, ' ').trim();
 
+const SAVE_INK = { 'Editing…': 'wet', 'Saving…': 'wet', Saved: 'dry' };
 function mark(s, text) {
   if (state.session !== s) return;
   const el = $('#save-state');
-  if (el) el.textContent = text;
+  if (!el) return;
+  const ink = SAVE_INK[text];
+  el.className = ink ? `save-${ink}` : '';
+  el.innerHTML = ink ? `<svg class="save-drop" aria-hidden="true"><use href="#leo-mark"/></svg><span class="said">${esc(text)}</span>` : esc(text);
 }
 
 let local;

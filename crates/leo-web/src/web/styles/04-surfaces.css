@@ -189,6 +189,9 @@ svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
 .note-originals:not(:empty) { margin: 0 0 8px; }
 .note-originals .chip { cursor: pointer; }
 #save-state { color: var(--faint); }
+.save-drop { display: block; width: 12px; height: 12px; color: var(--accent); }
+.save-dry .save-drop { opacity: .45; }
+@media (prefers-reduced-motion: no-preference) { .save-dry .save-drop { animation: margin-breathe 1.6s ease-in-out reverse both; } }
 
 .prose { margin-top: 18px; font-size: calc(16.5px * var(--read)); line-height: 1.72; overflow-wrap: anywhere; }
 .prose > :first-child { margin-top: 0; }

@@ -175,6 +175,12 @@ Decided: one app, window only (2026-10-31).
   `.chat-history-group`, `.pick-head`).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
+- The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
+  (`margin-breathe`) only on `.margin-drop` while Felix reads or thinks, and sits
+  still in the Reads along chip, at the start of the calendar now-line (in place of
+  its dot) and in `#save-state` (full ink while editing or saving, drying once to .45
+  when Saved; the words stay as hidden text, "Not saved" stays visible). No other
+  spinner or second breathing mark.
 - Colour: ink for actions and selection, `--focus` for focus cues, tone only as
   dots and ticks (calendar events keep their colour fills).
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone

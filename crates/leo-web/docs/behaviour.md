@@ -228,6 +228,10 @@ Highlight, cleared after five seconds or navigation without changing editor DOM.
   Autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js`
   keeps edits that did not reach leo and retries them on the next load.
+  The save state (`#save-state`) shows the leo mark, not words, while editing and
+  saving (full ink, still) and once Saved (it dries to .45 once, `margin-breathe`
+  reversed; the end frame under Reduced Motion); the words stay as hidden text, and
+  the "Not saved" lines stay visible text. "Edited …" shows until the first edit.
   Undo: up to `MOST_UNDO` snapshots per note (typing grouped by pauses).
   Lists (2026-11-06, the user's call): `markdown.js` `MARKER` is the one definition of a
   list marker: `-`, `*`, `+`, `1.`, `1)`, `a.`, `a)`, `A)`,
@@ -867,7 +871,7 @@ target. Check the page sequence after loading preferences.
   `Prefs.default_persona`, else Reader; a deleted persona falls back the same way. `margin::voiced` puts the
   style after the prompt's first paragraph, so the note-is-not-instructions and format rules come last; asks
   and replies are told to answer directly first. Page: `#margin-persona` ("Felix as Reader") before the mode menu, whose
-  label drops "Felix:" ("Reads along", "When you ask") (2026-11-09) (rows of icon,
+  label drops "Felix:" ("Reads along", "When you ask") (2026-11-09; Reads along shows the still leo mark, When you ask a chat icon) (rows of icon,
   name, short line; New persona opens Settings → Felix with the form started), Settings → Felix → Who reads
   your notes (icon tiles, one line for the chosen one, See details shows the real instruction text, New/Edit/
   Delete in place).

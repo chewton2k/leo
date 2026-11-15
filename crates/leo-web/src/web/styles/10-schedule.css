@@ -121,7 +121,7 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-item.done .cal-title { color: var(--muted); }
 .cal-grip { position: absolute; left: 0; right: 0; bottom: 0; height: 7px; cursor: ns-resize; }
 .cal-now { position: absolute; left: -1px; right: 0; height: 2px; background: var(--hue-red); z-index: 20; pointer-events: none; }
-.cal-now::before { content: ""; position: absolute; left: -5px; top: -4px; width: 10px; height: 10px; border-radius: 50%; background: var(--hue-red); }
+.cal-now-drop { position: absolute; left: -6px; top: -5px; width: 12px; height: 12px; color: var(--text); }
 .cal-slot { position: absolute; left: 2px; right: 3px; z-index: 30; padding: 3px 7px; border: 1.5px dashed var(--accent); border-radius: var(--r-tile); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; pointer-events: none; font-variant-numeric: tabular-nums; }
 .cal-ghost { position: fixed; left: 0; top: 0; z-index: 90; scale: 1.02; max-width: 220px; padding: 5px 9px; border-radius: var(--r-tile); background: var(--surface); box-shadow: inset 3px 0 0 var(--tone), var(--shadow-lift); font-size: var(--fs-xs); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: none; }
 body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-select: none; -webkit-user-select: none; }

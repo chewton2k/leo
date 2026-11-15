@@ -834,6 +834,7 @@ test.describe('reading-mode menu', () => {
       await expect(page.locator('#margin-mode')).toHaveAttribute('data-mode', 'along');
       const reading = await icon();
       expect(reading.html).not.toBe(asking.html);
+      expect(reading.html).toContain('#leo-mark');
       expect(reading.turned).toBe('none');
     });
   });

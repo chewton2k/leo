@@ -162,6 +162,7 @@ test('the calendar fills the room beside the explorer and shows a week of events
 
     await expect(page.locator('.cal-dayhead.today')).toContainText('3');
     await expect(page.locator('.cal-col[data-day="2026-11-03"] .cal-now')).toHaveCount(1);
+    await expect(page.locator('.cal-col[data-day="2026-11-03"] .cal-now svg.cal-now-drop use')).toHaveAttribute('href', '#leo-mark');
     await expect(page.locator('.cal-allday .cal-item', { hasText: 'Reading week' })).toHaveCount(1);
     const maya = await page.locator('.cal-item', { hasText: '1:1 Maya' }).boundingBox();
     const ta = await page.locator('.cal-item', { hasText: 'TA hours' }).boundingBox();

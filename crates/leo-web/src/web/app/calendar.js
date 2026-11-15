@@ -362,7 +362,7 @@ function calColumn(key, plan, today, room = Infinity) {
   let now = '';
   if (key === today) {
     const at = new Date();
-    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"></div>`;
+    now = `<div class="cal-now" style="top: ${((at.getHours() * 60 + at.getMinutes()) / 60) * CAL_HOUR_PX}px" aria-label="Now"><svg class="cal-now-drop" aria-hidden="true"><use href="#leo-mark"/></svg></div>`;
   }
   const wknd = [0, 6].includes(S.fromKey(key).getDay()) ? ' weekend' : '';
   return `<div class="cal-col${wknd}" data-day="${key}">${blocks}${now}</div>`;

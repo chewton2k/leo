@@ -191,9 +191,12 @@ test('typing during an in-flight save keeps the latest edit', async ({ page }) =
   });
   await page.locator('.line-edit').fill('First edit');
   await expect(page.locator('#save-state')).toHaveText('Saving…');
+  await expect(page.locator('#save-state.save-wet svg.save-drop use')).toHaveAttribute('href', '#leo-mark');
   await page.locator('.line-edit').fill('Latest edit');
   release();
   await expect(page.locator('#save-state')).toHaveText('Saved');
+  await expect(page.locator('#save-state.save-dry svg.save-drop')).toBeVisible();
+  await expect.poll(() => page.locator('#save-state .save-drop').evaluate((el) => getComputedStyle(el).opacity)).toBe('0.45');
   const saved = await (await page.request.get(`/api/notes/${note.id}`)).json();
   expect(saved.body).toBe('Latest edit');
   expect(requests).toBe(2);
