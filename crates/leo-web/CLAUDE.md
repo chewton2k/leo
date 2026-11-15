@@ -171,7 +171,9 @@ Decided: one app, window only (2026-10-31).
   upload sheet and Record page.
 - Confirmations: `confirmSheet({ title, text, yes, action, data, danger, cancel })`
   for permanent losses only. Moving to the trash asks nothing and offers Undo for
-  10 s. Removing a key or speech model is a two-row `popupMenu`.
+  10 s. The time left is a pencil line under the toast (`.toast-time`, the
+  Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
+  Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). `sheet()` focuses the first control and
   traps Tab. Rename and New folder use `inlineEdit` over the tree row.

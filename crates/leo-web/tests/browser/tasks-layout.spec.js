@@ -266,3 +266,42 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     await new Promise(resolve => server.close(resolve));
   }
 });
+
+test('the Undo countdown is a pencil line rubbed out from the right, and Undo keeps a straight underline', async ({ browser }) => {
+  const web = path.resolve(__dirname, '../../src/web');
+  const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
+  const toast = core.slice(core.indexOf('let toastTimer;'), core.indexOf('const MOTION_MS'));
+  const fixture = `const $ = (selector, root = document) => root.querySelector(selector);
+    const esc = text => String(text).replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    ${toast}
+    window.show = () => toast('Moved to the trash', {action: 'Undo', run() { window.undone = true; }});`;
+  const server = http.createServer((request, response) => {
+    if (request.url === '/fixture.js') { response.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return response.end(fixture); }
+    if (request.url === '/style.css') { response.setHeader('Content-Type', 'text/css; charset=utf-8'); return response.end(pageCss()); }
+    response.setHeader('Content-Type', 'text/html; charset=utf-8');
+    response.end('<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><main id="app"></main><script src="/fixture.js"></script></body></html>');
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const context = await browser.newContext({viewport: {width: 1000, height: 700}});
+  try {
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${server.address().port}`);
+    await page.evaluate(() => show());
+    const undo = page.locator('.toast button');
+    const time = page.locator('.toast-time');
+    expect(await undo.evaluate(el => { const s = getComputedStyle(el); return [s.textDecorationLine, s.maskImage, s.textDecorationStyle]; })).toEqual(['underline', 'none', 'solid']);
+    expect(await time.evaluate(el => [getComputedStyle(el).maskImage.startsWith('url('), getComputedStyle(el).animationName, getComputedStyle(el).animationDuration])).toEqual([true, 'toast-time', '10s']);
+    await page.waitForTimeout(1000);
+    const erased = await time.evaluate(el => Number(/inset\(0px ([\d.]+)%/.exec(getComputedStyle(el).clipPath)?.[1]));
+    expect(erased, 'the line is rubbed out from the right as the time runs').toBeGreaterThan(3);
+    expect(erased).toBeLessThan(40);
+    await undo.click();
+    expect(await page.evaluate(() => window.undone)).toBe(true);
+    await page.emulateMedia({reducedMotion: 'reduce'});
+    await page.evaluate(() => show());
+    await expect(page.locator('.toast-time'), 'no countdown line under reduced motion').toBeHidden();
+  } finally {
+    await context.close();
+    await new Promise(resolve => server.close(resolve));
+  }
+});

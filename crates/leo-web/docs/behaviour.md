@@ -31,7 +31,9 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   sheet and the Record page.
 - Confirmations: `confirmSheet({ title, text, yes, action, data, danger, cancel })`
   (sheets.js) for permanent losses. Moving a note or folder to the trash asks nothing and
-  offers Undo for 10 s. Removing a key or speech model is a two-row `popupMenu`.
+  offers Undo for 10 s. The time left is a pencil line under the toast (`.toast-time`, the
+  Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
+  Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` (popup-menu.js) is the one
   dropdown: explorer, ⋯ menus, More from 600 px, and Move with `find`. A row's `next` swaps
   the menu for a second step. `sheet()` itself focuses the first control and traps Tab.
