@@ -56,7 +56,7 @@ async function showBoards(arg) {
   state = { view: 'boards', dir: '' };
   chrome({ showBack: true });
   document.title = 'Boards · leo';
-  if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3)}</div>`;
+  if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3, 'board')}</div>`;
   const { boards } = await api('/api/boards');
   if (mine !== seq) return;
   kanban.boards = boards || [];

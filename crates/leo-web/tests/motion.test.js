@@ -186,3 +186,36 @@ test('opening a note fades only the note text from .6 over 140 ms, never the tit
   assert.match(show, /if \(opened\) arriveOnPage\(\$\('#doc'\)\);/);
   assert.doesNotMatch(show, /title\.animate/);
 });
+
+test('a loader sketch draws once per surface and takes the end frame while one shows or within 400 ms', () => {
+  let now = 1000, showing = null;
+  const context = { performance: { now: () => now }, document: { querySelector: (sel) => (showing && sel.includes(`"${showing}"`) ? {} : null) }, marginWobble: (x, y, length, down, seed) => `M${x} ${y} h${length} s${seed}` };
+  vm.createContext(context);
+  vm.runInContext(core.slice(core.indexOf('const skeletonAt = {};'), core.indexOf('let state = { view: null };')), context);
+  const drawing = (html) => (html.match(/class="skeleton sk-draw"/g) || []).length;
+  const first = context.skeleton(3, 'search');
+  assert.equal((first.match(/class="skeleton/g) || []).length, 3);
+  assert.equal(drawing(first), 3);
+  assert.equal((first.match(/<svg /g) || []).length, 9);
+  assert.match(first, /data-sketch="search"/);
+  now += 200;
+  assert.equal(drawing(context.skeleton(3, 'search')), 0);
+  assert.equal(drawing(context.skeleton(2, 'trash')), 2);
+  now += 1000;
+  showing = 'search';
+  assert.equal(drawing(context.skeleton(3, 'search')), 0);
+  now += 1000;
+  showing = null;
+  const again = context.skeleton(3, 'search');
+  assert.equal(drawing(again), 3);
+  assert.equal(again.replace(/ sk-draw/g, ''), context.skeleton(3, 'search'));
+});
+
+test('loader sketches animate only without reduced motion and never loop', () => {
+  const css = require('./page-source').pageCss();
+  assert.doesNotMatch(css, /shimmer/);
+  const base = css.match(/(^|\n)\.skeleton \{[^}]*\}/)[0];
+  assert.doesNotMatch(base, /animation/);
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{ \.skeleton\.sk-draw > svg \{ animation: tick-write 400ms var\(--ease-pencil\) both; \}/);
+  assert.doesNotMatch(css, /\.skeleton[^{]*\{[^}]*infinite/);
+});

@@ -5,7 +5,7 @@ async function showTrash() {
   chrome({ showBack: true });
   $('#crumbs').innerHTML = settingsCrumbs('trash');
   document.title = 'Trash · leo';
-  if (!before) refreshPanel(app, settingsFrame('trash', skeleton(3)));
+  if (!before) refreshPanel(app, settingsFrame('trash', skeleton(3, 'trash')));
   const [items, keep] = await Promise.all([api('/api/trash'), api('/api/keep').catch(() => null)]);
   if (mine !== seq) return;
   state.items = items;

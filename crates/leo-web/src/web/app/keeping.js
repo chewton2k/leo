@@ -12,7 +12,7 @@ async function showKeeping() {
   chrome({ showBack: true });
   $('#crumbs').innerHTML = settingsCrumbs('keeping');
   document.title = 'Keeping · leo';
-  refreshPanel(app, settingsFrame('keeping', skeleton(4)));
+  refreshPanel(app, settingsFrame('keeping', skeleton(4, 'keeping')));
   let keep;
   try { keep = await api('/api/keep'); }
   catch (error) {

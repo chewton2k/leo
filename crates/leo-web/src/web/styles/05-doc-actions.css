@@ -63,9 +63,10 @@
 .usage-tools .icon-btn svg { width: 18px; height: 18px; }
 .usage-tools .activity-spin { width: 16px; height: 16px; }
 .usage-sheet .usage-content { max-width: 800px; margin: 0 auto; }
-.skeleton.plan-sk-head { width: 34%; height: 22px; margin: 0 0 10px; }
-.skeleton.plan-sk-row { height: 56px; margin: 0; border-radius: var(--r-tile); }
-.skeleton.plan-sk-row + .plan-sk-row { margin-top: 8px; }
+.coding-plan > .skeleton:first-child { width: 34%; height: 22px; margin: 0 0 10px; padding: 0 10px; }
+.coding-plan > .skeleton:first-child > svg + svg, .coding-plan > .skeleton + .skeleton > svg:nth-child(3) { display: none; }
+.coding-plan > .skeleton + .skeleton { height: 56px; margin: 0; border-radius: var(--r-tile); }
+.coding-plan > .skeleton + .skeleton + .skeleton { margin-top: 8px; }
 .usage-sheet .coding-plans { gap: 28px; }
 .usage-sheet .coding-plan header { margin-bottom: 10px; }
 .usage-sheet .coding-plan h4 { font-size: var(--fs-md); font-weight: 600; }
@@ -218,8 +219,15 @@ label.trash-row { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .toast-time { display: none; } }
 
 #app .cards .skeleton { height: 96px; margin: 0; }
-.skeleton { height: 76px; border-radius: var(--radius); background: linear-gradient(90deg, var(--sk-base, var(--surface)) 25%, var(--surface-2) 50%, var(--sk-base, var(--surface)) 75%); background-size: 200% 100%; animation: shimmer 1.2s infinite; margin-bottom: 10px; }
-@keyframes shimmer { to { background-position: -200% 0; } }
+.skeleton { display: flex; flex-direction: column; justify-content: center; height: 76px; padding: 0 20px; border-radius: var(--radius); background: var(--sk-base, var(--surface-2)); margin-bottom: 10px; color: var(--faint); }
+:root[data-theme="dark"] .skeleton { background: var(--sk-base, var(--surface)); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .skeleton { background: var(--sk-base, var(--surface)); } }
+.skeleton > svg { display: block; flex: none; height: 6px; overflow: visible; clip-path: inset(-2px); fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; opacity: .75; }
+.skeleton > svg:first-child { stroke-width: 1.5; }
+.skeleton > svg + svg { margin-top: 12px; }
+.skeleton > svg:first-child + svg { margin-top: 17px; }
+.skeleton path { vector-effect: non-scaling-stroke; }
+@media (prefers-reduced-motion: no-preference) { .skeleton.sk-draw > svg { animation: tick-write 400ms var(--ease-pencil) both; } .skeleton.sk-draw > svg:nth-child(2) { animation-delay: 30ms; } .skeleton.sk-draw > svg:nth-child(3) { animation-delay: 60ms; } }
 @keyframes rise { from { transform: translate(var(--tx, 0), 16px); opacity: 0; } }
 .toast, .toast-gone { --tx: -50%; }
 @keyframes fade { from { opacity: 0; } }
