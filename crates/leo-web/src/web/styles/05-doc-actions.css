@@ -1,4 +1,4 @@
-.doc { margin-top: 14px; position: relative; }
+.doc { margin-top: 14px; position: relative; font-family: var(--writing-font); }
 .doc img.note-img { cursor: pointer; }
 .doc img.note-img.picked { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pic-frame { position: absolute; pointer-events: none; z-index: 3; }

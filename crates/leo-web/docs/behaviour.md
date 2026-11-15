@@ -1350,8 +1350,8 @@ ISO datetimes as one date/time before removing them from the title.
   removed). Small .9, Medium 1, Large 1.12 set `--read`; only reading text
   multiplies it (`.prose`, headings, code, tables, line editor, `.margin-felix`,
   `.margin-you`, Felix's chat answers), so chrome keeps its size and line
-  heights stay unitless. Lettering moves `--felix-letters` (`--voice` or
-  `--note-font`) for answers and margin notes only; the hello text keeps
+  heights stay unitless. Lettering moves `--felix-letters` (`--voice`, Newsreader, or
+  `--writing-font`, Instrument Sans) for answers and margin notes only; the hello text keeps
   `--voice`. Cards are `.read-sample` HTML, really at size. Add one only where the default is real. `/theme.js`
   loads in `<head>` (before any paint, no inline script under the CSP) and
   sets `html[data-theme]`; the dark colours apply under

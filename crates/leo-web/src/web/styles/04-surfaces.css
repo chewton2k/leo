@@ -176,7 +176,7 @@
 .empty .btn svg { width: 16px; height: 16px; color: currentColor; }
 .empty .btn.plain { color: var(--text); }
 
-.note-head h1 { text-wrap: balance; position: relative; min-height: 1.25em; font-size: var(--fs-title); font-weight: 650; line-height: 1.25; letter-spacing: -.025em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
+.note-head h1 { text-wrap: balance; position: relative; min-height: 1.25em; font-family: var(--writing-font); font-size: var(--fs-title); font-weight: 500; line-height: 1.25; letter-spacing: -.032em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
 .note-head h1.blank::before { content: attr(data-placeholder); color: var(--faint); position: absolute; left: 0; top: 0; pointer-events: none; }
 .note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .note-originals { display: flex; flex-wrap: wrap; gap: 6px; }

@@ -55,9 +55,14 @@ This file holds the rules. How each screen behaves, area by area, is in
   `leo_session` cookie (`SameSite=Strict`, 30 days, `serve-sessions.json`). No
   tunnel, Wi-Fi bind, QR, signed-in browsers list or link rotation.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
-  'self'` (original viewer), `font-src 'self'` (KaTeX). Mermaid 11.4.1, KaTeX
-  0.16.11 and CodeMirror parsers are vendored under `web/vendor/` (checked
-  against npm's sha512, served `immutable`).
+  'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
+  fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
+  variable fonts Instrument Sans (note titles and text, `--writing-font`) and
+  Newsreader (Felix's margin voice, `--voice`, roman and italic; SIL OFL,
+  @fontsource-variable 5.3.0) are vendored under `web/vendor/` (checked against
+  npm's sha512, served `immutable`; the fonts at `/vendor/fonts-5.3.0/`, their
+  `@font-face` in `page-head.html`). `margin-notes.js` redraws the margin once
+  both families have loaded, since the swap moves measured text.
 - Keys and calendar links are write-only: accepted from the window, never
   returned to the page or put in exports. A stored key shows as a
   `secret::masked` placeholder; nothing changes until Save.

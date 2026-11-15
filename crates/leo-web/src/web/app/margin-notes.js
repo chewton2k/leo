@@ -454,6 +454,8 @@ function marginRedraw() {
   marginPage.frame = requestAnimationFrame(marginDraw);
 }
 
+if (document.fonts) Promise.all(['500 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
+
 function marginNow(t) {
   const felixSaid = [...(t.messages || [])].reverse().find((m) => m.from === 'felix');
   return felixSaid ? felixSaid.text : '';

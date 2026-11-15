@@ -71,3 +71,17 @@ MIT License (same terms as above)
 
 Leo's dictation echo filter (crates/leo-services/src/dictation/text.rs) ports src/utils/dictionaryEchoFilter.js.
 The everyday-word list in Recent dictations (crates/leo-web/src/web/app/dictation.js) ports src/utils/correctionLearner.js.
+
+--------------------------------------------------------------------------------
+
+Instrument Sans and Newsreader (crates/leo-web/src/web/vendor/fonts/)
+
+Instrument Sans: Copyright 2022 The Instrument Sans Project Authors
+(https://github.com/Instrument/instrument-sans)
+Newsreader: Copyright 2020 The Newsreader Project Authors
+(https://github.com/productiontype/Newsreader)
+
+Both are licensed under the SIL Open Font License, Version 1.1 (full text in
+InstrumentSans.LICENSE and Newsreader.LICENSE beside the fonts). The Latin
+subsets are the Fontsource variable builds, @fontsource-variable/instrument-sans
+5.3.0 and @fontsource-variable/newsreader 5.3.0, unmodified.

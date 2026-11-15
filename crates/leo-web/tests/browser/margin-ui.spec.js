@@ -16,6 +16,23 @@ test('the leo mark is one symbol that the brand uses', async ({ page }) => {
   await expect(page.locator('.side-head .brand')).toHaveAccessibleName('leo');
 });
 
+test('note titles and text are set in Instrument Sans and Felix in the margin in Newsreader, from the bundled fonts', async ({ page }) => {
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Fonts', body: 'Words.' } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  await page.evaluate(() => {
+    const said = document.createElement('div');
+    said.className = 'margin-felix';
+    said.id = 'voice';
+    said.textContent = 'Here it is.';
+    document.querySelector('#app').append(said);
+  });
+  await expect(page.locator('.note-head h1')).toHaveCSS('font-family', /^"?Instrument Sans"?,/);
+  await expect(page.locator('#doc')).toHaveCSS('font-family', /^"?Instrument Sans"?,/);
+  await expect(page.locator('#voice')).toHaveCSS('font-family', /^"?Newsreader"?,/);
+  await expect.poll(() => page.evaluate(() => document.fonts.load('500 1em "Instrument Sans"').then(() => document.fonts.check('500 1em "Instrument Sans"') && document.fonts.check('1em Newsreader') && document.fonts.check('italic 1em Newsreader')))).toBe(true);
+});
+
 test('a stepped drawing steps through its parts with captions and theme colours, and stays an image', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Stepped', body: 'Words.' } })).json();
   await page.goto(`/#/n/${note.id}`);

@@ -108,7 +108,7 @@
 .margin-note[data-open] .margin-said { max-height: min(420px, calc(100dvh - 260px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .margin-said { position: relative; display: grid; gap: 7px; }
 .margin-said p, .margin-said > div { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
-.margin-felix { font-family: var(--felix-letters); font-size: calc(15px * var(--read)); line-height: 1.46; color: var(--text); }
+.margin-felix { font-family: var(--felix-letters); font-variation-settings: "opsz" 14; font-size: calc(15px * var(--read)); line-height: 1.46; color: var(--text); }
 .margin-you { font-size: calc(13.5px * var(--read)); line-height: 1.45; color: var(--muted); }
 .ink-word { display: inline-block; white-space: pre; animation: ink-in .64s ease both; }
 @keyframes ink-in { from { color: transparent; } 45% { color: var(--ink-settling); } to { color: var(--text); } }

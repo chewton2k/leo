@@ -152,7 +152,7 @@ test('sizes and radii come from the scale, and the note title and prose use thei
   assert.equal(t['--fs-title'], '32px');
   assert.equal(t['--r-xl'], '14px');
   const body = (selector) => all.find((r) => r.selector === selector && r.at.length === 0)?.body || '';
-  assert.match(body('.note-head h1'), /font-size: var\(--fs-title\); font-weight: 650;[^}]*letter-spacing: -\.025em/);
+  assert.match(body('.note-head h1'), /font-family: var\(--writing-font\); font-size: var\(--fs-title\); font-weight: 500;[^}]*letter-spacing: -\.032em/);
   assert.match(body('.prose'), /line-height: 1\.72/);
   assert.match(body('.doc .line-edit'), /line-height: 1\.72/);
 });

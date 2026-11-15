@@ -191,8 +191,8 @@ const KATEX: &[(&str, &[u8], &str)] = &[
     ),
 ];
 
-pub(crate) async fn katex_file(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
-    match KATEX.iter().find(|(name, _, _)| *name == path) {
+fn vendored(table: &'static [(&str, &[u8], &str)], path: &str) -> Response {
+    match table.iter().find(|(name, _, _)| *name == path) {
         Some((_, bytes, kind)) => (
             [
                 (header::CONTENT_TYPE, *kind),
@@ -206,6 +206,32 @@ pub(crate) async fn katex_file(axum::extract::Path(path): axum::extract::Path<St
             .into_response(),
         None => axum::http::StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+pub(crate) async fn katex_file(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    vendored(KATEX, &path)
+}
+
+const FONTS: &[(&str, &[u8], &str)] = &[
+    (
+        "instrument-sans-latin-wght-normal.woff2",
+        include_bytes!("../web/vendor/fonts/instrument-sans-latin-wght-normal.woff2"),
+        "font/woff2",
+    ),
+    (
+        "newsreader-latin-opsz-normal.woff2",
+        include_bytes!("../web/vendor/fonts/newsreader-latin-opsz-normal.woff2"),
+        "font/woff2",
+    ),
+    (
+        "newsreader-latin-opsz-italic.woff2",
+        include_bytes!("../web/vendor/fonts/newsreader-latin-opsz-italic.woff2"),
+        "font/woff2",
+    ),
+];
+
+pub(crate) async fn font_file(axum::extract::Path(path): axum::extract::Path<String>) -> Response {
+    vendored(FONTS, &path)
 }
 
 pub(crate) async fn mermaid_js() -> Response {
@@ -296,6 +322,29 @@ mod tests {
             }
         }
         assert!(parts > 0);
+    }
+
+    #[tokio::test]
+    async fn the_bundled_fonts_are_served_immutable() {
+        for (name, bytes, _) in FONTS {
+            let response = font_file(axum::extract::Path(name.to_string())).await;
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+            assert_eq!(response.headers()[header::CONTENT_TYPE], "font/woff2");
+            assert_eq!(
+                response.headers()[header::CACHE_CONTROL],
+                "private, max-age=31536000, immutable"
+            );
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert_eq!(&body[..], *bytes);
+            assert!(
+                HTML.contains(&format!("/vendor/fonts-5.3.0/{name}")),
+                "{name} is not in the page's @font-face rules"
+            );
+        }
+        let missing = font_file(axum::extract::Path("nothing.woff2".into())).await;
+        assert_eq!(missing.status(), axum::http::StatusCode::NOT_FOUND);
     }
 
     #[test]

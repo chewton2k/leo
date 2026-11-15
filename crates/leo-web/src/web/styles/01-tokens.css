@@ -26,8 +26,9 @@
   --page: #faf9f6;
   --raised: #ffffff;
   --tint: #ece9e2;
-  --voice: ui-serif, "Iowan Old Style", "New York", Georgia, serif;
+  --voice: "Newsreader", ui-serif, "Iowan Old Style", "New York", Georgia, serif;
   --note-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
+  --writing-font: "Instrument Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, system-ui, sans-serif;
   --felix-letters: var(--voice);
   --read: 1;
   --ease-arrive: cubic-bezier(.2, .8, .2, 1);

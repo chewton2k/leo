@@ -182,7 +182,7 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
 .choice-diagram > .read-sample { display: grid; place-items: center; min-height: 52px; padding: 6px; text-align: center; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
 .read-sample.size { white-space: nowrap; }
 .read-sample.size { font-size: calc(16.5px * var(--read)); }
-.read-sample.letters { font-size: var(--fs-base); font-family: var(--note-font); }
+.read-sample.letters { font-size: var(--fs-base); font-family: var(--writing-font); }
 .read-sample.letters[data-letters="own"] { font-family: var(--voice); }
 .choice-title { padding: 0 5px; font-size: var(--fs-base); font-weight: 550; line-height: 1.3; color: var(--text); }
 .choice-about { padding: 0 5px; font-size: var(--fs-sm); line-height: 1.35; color: var(--muted); }
