@@ -247,8 +247,7 @@ Highlight, cleared after five seconds or navigation without changing editor DOM.
   Typing a list or checklist marker plus its space (`- `, `1. `, `a) `, `- [ ] `)
   re-renders that line at once with the caret kept (not during IME composition);
   headings restyle live, one Backspace takes a heading's marker off, and Enter on an empty
-  heading clears it. A checked task strikes only its text (`text-decoration`,
-  per wrapped line; an empty one shows none). A box toggles only from a click
+  heading clears it. A checked task only dims its text (no strike line). A box toggles only from a click
   that starts and ends within `DRAG_CLICK_DISTANCE` of one point, so selecting
   text and releasing near the box never ticks it.
   Checkbox clicks update the live input and task style without redrawing the

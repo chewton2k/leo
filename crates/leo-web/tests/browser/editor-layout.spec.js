@@ -881,7 +881,7 @@ test('a list pasted into an empty line leaves the caret at its end', async ({ br
   });
 });
 
-test('a checked task strikes only its own text, line by line', async ({ browser }) => {
+test('a checked task draws no strike line through its text', async ({ browser }) => {
   const long = 'wrapped words '.repeat(40).trim();
   await editorFixture(browser, async (context, url) => {
     const page = await context.newPage();
@@ -890,15 +890,8 @@ test('a checked task strikes only its own text, line by line', async ({ browser 
     const spans = page.locator('#doc .task.done > span');
     await expect(spans).toHaveCount(3);
     for (let i = 0; i < 3; i++) {
-      expect(await spans.nth(i).evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('line-through');
+      expect(await spans.nth(i).evaluate(el => getComputedStyle(el).textDecorationLine)).toBe('none');
     }
-    const short = await spans.nth(0).evaluate(el => {
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      return [el.getBoundingClientRect().width, r.getBoundingClientRect().width];
-    });
-    expect(Math.abs(short[0] - short[1])).toBeLessThan(2);
-    expect(await spans.nth(2).evaluate(el => el.textContent)).toBe('');
   }, {body: `- [x] Short\n- [x] ${long}\n- [x]`});
 });
 

@@ -218,10 +218,8 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 .prose .task input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 @media (prefers-reduced-motion: reduce) { .prose .task input::after { transition: none; } }
 @media (forced-colors: active) { .prose .task input { appearance: auto; -webkit-appearance: auto; } .prose .task input::after { display: none; } }
-.prose .task > span { text-decoration: line-through 1px transparent; transition: text-decoration-color var(--t-follow) var(--ease-arrive), color var(--t-press); }
-.prose .task.done > span { color: var(--muted); text-decoration-color: var(--faint); }
-@media (prefers-reduced-motion: reduce) { .prose .task > span { transition: color var(--t-press); } }
-@media (forced-colors: active) { .prose .task > span { text-decoration: none; } .prose .task.done > span { text-decoration: line-through; } }
+.prose .task > span { transition: color var(--t-press); }
+.prose .task.done > span { color: var(--muted); }
 .prose .task.busy { opacity: .5; }
 .prose code { font: 0.88em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; background: var(--code-bg); padding: .15em .4em; border-radius: var(--r-sm); }
 .prose pre { background: var(--code-bg); border-radius: var(--r-md); padding: 14px 16px; overflow-x: auto; }

@@ -18,8 +18,7 @@
 .doc .blk .task input { width: 22px; height: 22px; margin: 2px 4px 0 -4px; padding: 0; }
 .doc .blk .task { gap: 8px; }
 .doc .blk .task > span { min-width: 0; min-height: 1.72em; flex: 0 1 auto; }
-.doc .blk .task > span:has(.line-edit) { flex: 1; text-decoration: none; }
-.doc .blk .task.done .line-edit { text-decoration: line-through; text-decoration-color: var(--faint); }
+.doc .blk .task > span:has(.line-edit) { flex: 1; }
 .doc .blk .placeholder { color: var(--faint); }
 .doc .line-edit {
   display: block; width: 100%; margin: 0; padding: 0; border: 0; outline: 0; resize: none; overflow: hidden;
