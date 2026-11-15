@@ -532,7 +532,6 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
       inkSettle(kanbanInked);
       kanbanCounts();
       kanbanFit();
-      pulse(list?.lastElementChild, { lift: 1.02 });
     } catch (e) {
       if (e instanceof Locked) throw e;
       const open = app.querySelector(`.kanban-composer[data-composer="${CSS.escape(columnId)}"] textarea`);
