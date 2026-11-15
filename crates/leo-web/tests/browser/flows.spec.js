@@ -5259,7 +5259,7 @@ test("Text size and Felix's lettering change reading text at once, survive a rel
   const read = async () => { await page.goto(`/#/n/${note.id}`); await expect(page.locator('#doc')).toContainText('A line of the note'); };
   const letters = () => page.evaluate(() => {
     const family = (html, pick) => { const box = document.createElement('div'); box.innerHTML = html; document.body.append(box); const found = getComputedStyle(box.querySelector(pick)).fontFamily; box.remove(); return found; };
-    return { chat: family('<div class="msg leo"><div class="prose">x</div></div>', '.prose'), margin: family('<div class="margin-felix">x</div>', '.margin-felix'), notes: getComputedStyle(document.body).fontFamily, hello: family('<div class="chat-hello-lead"><b>x</b></div>', 'b') };
+    return { chat: family('<div class="msg leo"><div class="prose">x</div></div>', '.prose'), margin: family('<div class="margin-felix">x</div>', '.margin-felix'), notes: family('<div class="doc">x</div>', '.doc'), hello: family('<div class="chat-hello-lead"><b>x</b></div>', 'b') };
   });
   await read();
   expect(await px()).toBe(16.5);
