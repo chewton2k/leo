@@ -981,7 +981,7 @@ function answers(messages, { busy = null, send = () => {}, clipboard = null, fet
   const calls = [];
   const input = { value: '', focus() { calls.push('focus'); } };
   const context = {
-    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
+    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
     root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), timed: new Set(), tick() {}, workingFor: () => '', tookFor: () => '', writer: () => '', writerOf: () => '',
     stepChevron: '', MOST_REPLY_STEPS: 64, clipped: (t) => t, stored: () => messages.filter((m) => !m.pending), fit() {}, persist() {}, draw() {}, send,
     notify: (text) => calls.push(`notify:${text}`), setTimeout: () => 0,
@@ -1082,6 +1082,12 @@ test('a writer failure shows the sentence in Felix\u2019s voice with a Set up wr
   assert.match(failed, /<div class="prose"><p>leo can&#39;t write yet|<div class="prose"><p>leo can't write yet/);
   assert.match(failed, /<a class="btn primary sm" href="#\/settings\/writing">Set up writing AI<\/a>/);
   assert.doesNotMatch(failed, /msg-error/);
+  const drawn = answers([{ role: 'user', text: 'Quiz me' }, { role: 'assistant', text: '', error: sentence }]);
+  drawn.context.drawings = { noink: '<svg class="drawn drawn-noink"></svg>' };
+  assert.match(drawn.html()[1], /<svg class="drawn drawn-noink"><\/svg><div class="prose"><p>leo can/);
+  const plain = answers([{ role: 'user', text: 'Hi' }, { role: 'assistant', text: '', error: 'Felix finished without an answer. Try again.' }]);
+  plain.context.drawings = drawn.context.drawings;
+  assert.doesNotMatch(plain.html()[1], /drawn-noink/);
   assert.equal(C.noAi(sentence), true);
   assert.equal(C.noAi('Stopped.'), false);
   assert.equal(C.noAi(undefined), false);

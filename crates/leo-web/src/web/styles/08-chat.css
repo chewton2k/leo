@@ -112,6 +112,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .msg.user { align-self: flex-end; max-width: 86%; }
 .msg.user .bubble { background: var(--raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); padding: 8px 12px; border-radius: var(--r-md); font-size: var(--fs-base); line-height: 1.4; overflow-wrap: anywhere; }
 .msg.leo { align-self: stretch; }
+.msg.leo svg.drawn-noink { width: 72px; height: 55px; margin: 0 0 6px -10px; }
 .msg.leo .prose { margin: 0; font-family: var(--felix-letters); font-size: calc(16px * var(--read)); line-height: 1.55; }
 .msg.leo .prose > :first-child { margin-top: 0; }
 .msg.leo .prose > :last-child { margin-bottom: 0; }

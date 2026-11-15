@@ -1991,7 +1991,7 @@
         ? `<div class="msg-from">${marks.map((x) => `<button class="cite cite-src" data-chat="open" data-id="${escape(x.s.id)}"${x.lines ? ` data-line="${x.lines}"` : ''}><b>${x.n}</b>${escape(x.s.title)}${x.where ? ` · ${escape(x.where)}` : ''}</button>`).join('')}</div>`
         : '';
       const error = noAi(m.error)
-        ? `<div class="prose"><p>${escape(m.error)}</p></div><div class="msg-acts"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a></div>`
+        ? `${drawings.noink || ''}<div class="prose"><p>${escape(m.error)}</p></div><div class="msg-acts"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a></div>`
         : m.error ? `<div class="msg-error">${escape(m.error)}</div>` : '';
       const verdict = grade(m.text).verdict;
       const badge = verdict ? `<span class="verdict ${verdict}">${verdict === 'correct' ? 'Correct' : 'Not quite'}</span>` : '';
