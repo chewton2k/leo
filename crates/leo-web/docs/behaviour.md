@@ -1574,7 +1574,9 @@ purpose keeps `--chart-*`. Running now is one line when empty and otherwise list
 the processes leo owns from `GET /api/processes`, grouped by kind, polled every
 10 s without counting as use, never sending arguments to the page). Health is
 one card: a head sentence, problem rows with their fix and button, then ready
-checks as tiles. "See it larger" opens a reply's figures in the full-window
+checks as tiles; a passed check (and the all-passed head) is ticked with the
+task tick's pencil stroke in ink (`.pencil-tick`, 2026-11-15), while problem rows
+keep their amber or red sign. "See it larger" opens a reply's figures in the full-window
 viewer. Quit leo is gone from Settings on every platform; the tray/menu Quit
 stays.
 
@@ -1613,8 +1615,9 @@ First-launch setup
 (`onboarding.js`, 2026-11-02, the user's request: like other dictation apps) is a
 three-step `modal` sheet (a backdrop click never dismisses it; Escape still does)
 with an Access → Speech model → Writing AI stepper. The Access page lists Microphone and macOS
-Accessibility with icons; each row turns its button into an Allowed checkmark as
-soon as the 1 s poll sees it. Continue needs only the microphone, or a microphone
+Accessibility with icons; each row turns its button into Allowed with a pencil
+tick in ink as soon as the 1 s poll sees it (the tick writes on over 160 ms only
+when the row flips from not allowed, never on first paint or under Reduced Motion). Continue needs only the microphone, or a microphone
 state the system cannot report (Windows often says `unknown`; `unavailable` in
 test sessions); Accessibility is optional. A denied microphone shows Open System
 Settings (macOS ignores a second request). Skip setup finishes all three flags.

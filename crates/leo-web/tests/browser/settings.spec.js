@@ -209,7 +209,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
       if(url==='/api/calendar') return {calendars:[],events:[]};
       if(url==='/api/speech') return {ready:false,models:[],extra_files:[],disk_bytes:0};
       if(url==='/api/dictation') return {settings:{custom_words:[],shortcut:'Option+Space'},recent:[]};
-      if(url==='/api/health') return {sections:[{title:'This app',checks:[{name:'Speech model',state:'missing',fix:'Choose a model.',section:'models'}]}]};
+      if(url==='/api/health') return {sections:[{title:'This app',checks:[{name:'Speech model',state:'missing',fix:'Choose a model.',section:'models'},{name:'Microphone',state:'ready',detail:'Built-in microphone'}]}]};
       if(url==='/api/app') { appStatusReads++; return {preferences:{onboarding:[true,true,true],automatic_updates:true,install_on_quit:true},version:'1.2.3',updates:{state:'ready',version:'1.2.4'},paths:{}}; }
       if(url==='/api/keep') return {choices:[{days:7,label:'7 days'},{days:30,label:'30 days'},{days:90,label:'90 days'},{days:365,label:'a year'},{days:null,label:'forever'}],trash_days:30,chat_days:null,upload_days:90,transcript_days:null,audio_days:null};
       if(url==='/api/trash') return [];
@@ -383,6 +383,10 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(page.locator('#calendar-link')).toBeVisible();
       await page.getByRole('link',{name:'Health',exact:true}).click();
       await expect(page.getByText('Choose a model.',{exact:true})).toBeVisible();
+      const ready = page.locator('.hc-tile .hc-ts .pencil-tick');
+      await expect(ready, 'a passed check is ticked in pencil').toHaveCount(1);
+      expect(await ready.evaluate(el=>{const s=getComputedStyle(el);return [s.maskImage.includes('url('),s.backgroundColor===getComputedStyle(document.body).color];})).toEqual([true,true]);
+      await expect(page.locator('.hc-fix svg.hc-g.missing'), 'a problem keeps its sign').toHaveCount(1);
       await page.getByRole('link',{name:'Updates & about',exact:true}).click();
       await expect(page.getByRole('heading',{name:'About leo'})).toBeVisible();
       await expect(page.locator('[data-find="updates-check"] h3 .set-version')).toHaveText('1.2.3');
@@ -504,7 +508,7 @@ test('setup groups permissions with live checkmarks, then offers speech models a
         await expect(row.locator('[role="status"]')).toBeHidden();
         await page.evaluate(permission=>audit.grant(permission,permission==='microphone'?'allowed':true),permission);
         await expect(row.locator('[role="status"]')).toContainText('Allowed');
-        await expect(row.locator('[role="status"] svg')).toHaveCount(1);
+        await expect(row.locator('[role="status"] .pencil-tick.writing'), 'the tick writes on as access flips to allowed').toHaveCount(1);
         await expect(row).toHaveClass(/allowed/);
         await expect(button).toBeHidden();
         expect(Math.abs((await row.locator('.grow').boundingBox()).width-descriptionWidth)).toBeLessThanOrEqual(1);

@@ -162,7 +162,9 @@ Decided: one app, window only (2026-10-31).
   `.cal-check`) are real checkboxes drawn as a pencil box and tick (masks on
   `::before`/`::after`, four variants picked by the last digit of `data-box` or
   `data-id`; the tick takes `--tone`); dark mode breaks the tick with the static
-  `--chalk-break` mask; forced colours get the native box.
+  `--chalk-break` mask; forced colours get the native box. The same tick stands
+  alone as `.pencil-tick` (ink, `currentColor`) for Health's passed checks and
+  first-run setup's Allowed; `.writing` writes it on with `tick-write`.
 - Dropdowns: a `<select>` inside `.select-control`; select-menu.js turns every
   one into the app's menu (not under forced colours), keeping id, value and
   `change`. Do not hand-build list menus.
