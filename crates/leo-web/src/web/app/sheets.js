@@ -186,7 +186,7 @@ const inQuick = (sel) => (quick.root && !quick.root.classList.contains('scrim-go
 function quickLeo() {
   Object.assign(quick, { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '' });
   quick.root = sheet(`<div class="quick-leo"><span class="quick-perch" aria-hidden="true">${chat.button(50)}</span>
-    <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search, ask, remind or jot anything…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
+    <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
     <div class="quick-results" id="quick-results" role="listbox" aria-label="Results"></div>
   </div>`);
   const input = inQuick('#quick-input');
@@ -478,7 +478,7 @@ async function trashFolder(from) {
   if (side.target === from || side.target?.startsWith(`${from}/`)) side.target = parentOf(from);
   loadSideFolders();
   refocusExplorer({ kind: 'folder', dir: parentOf(from) });
-  toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done) });
+  toast(`Moved “${folderLabel(from)}” to the trash`, { action: 'Undo', run: () => undoTrashMove(done, from) });
 }
 
 async function saveFolder(name, parent) {
@@ -543,7 +543,7 @@ async function trashNote(note = null, at = null) {
   }
   loadSideFolders();
   if (at) refocusExplorer({ kind: 'folder', dir: at.dir });
-  toast('Moved to the trash', { action: 'Undo', run: () => restore(note.id, false) });
+  toast(`Moved “${note.title || 'Untitled'}” to the trash`, { action: 'Undo', run: () => restore(note.id, false) });
 }
 
 async function restore(id, open) {
@@ -565,7 +565,7 @@ async function pinCard(el) {
   el.setAttribute('aria-pressed', String(on));
   try {
     await api(`/api/notes/${enc(el.dataset.id)}`, { method: 'PATCH', body: { pinned: on } });
-    toast(on ? 'Pinned to the top of its folder' : 'Unpinned');
+    toast(on ? 'Pinned to the top of its folder' : `Unpinned “${el.previousElementSibling?.textContent || 'Untitled'}”`);
     await render();
   } catch (e) {
     el.classList.toggle('on', !on);
@@ -589,7 +589,7 @@ async function copyMarkdown() {
   if (!note) return;
   try {
     await navigator.clipboard.writeText(note.text);
-    toast('Copied as Markdown');
+    toast(`Copied “${note.title || 'Untitled'}” as Markdown`);
   } catch (e) {
     toast(`Could not copy: ${e.message || 'the clipboard is not available.'}`, { bad: true });
   }

@@ -3561,7 +3561,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   const hint = (name) => row(name).locator('.hint');
   const search = page.locator('[data-action="quick-leo"]');
   const quick = page.locator('.scrim:not(.scrim-gone) .quick-leo');
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
 
   await change('quick').click();
   await expect(row('quick').locator('.shortcut-field')).toHaveClass(/recording/);
@@ -3579,12 +3579,12 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
   await change('quick').click();
   await page.keyboard.press('j');
   await expect(hint('quick')).toHaveText(`Use ${mac ? '⌘' : 'Ctrl'} with a key.`);
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
 
   await change('quick').click();
   await page.keyboard.press('ControlOrMeta+j');
   await expect(hint('quick')).toHaveText('Saved');
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('J')})`);
+  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('J')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await page.waitForTimeout(300);
   await expect(page.locator('.quick-leo'), 'the old keys no longer open Quick Leo').toHaveCount(0);
@@ -3608,7 +3608,7 @@ test('Settings changes Quick Leo and New note keys, refuses reserved and taken o
 
   await row('quick').getByRole('button', { name: 'Reset' }).click();
   await expect(row('quick').getByRole('button', { name: 'Reset' })).toHaveCount(0);
-  await expect(search).toHaveAttribute('title', `Search, ask, remind or jot anything (${label('K')})`);
+  await expect(search).toHaveAttribute('title', `Search notes, or ask Felix (${label('K')})`);
   await page.keyboard.press('ControlOrMeta+k');
   await expect(quick).toBeVisible();
   await page.keyboard.press('Escape');
@@ -4711,7 +4711,7 @@ test.describe('calendar', () => {
     const sheet = page.locator('.sheet');
     await expect(sheet).toContainText('Book the room');
     await sheet.locator('[data-action="task-promote"]').click();
-    await expect(page.locator('.toast')).toContainText('Added to your tasks');
+    await expect(page.locator('.toast')).toContainText('Added “Book the room” to your tasks');
     await expect(page.locator('.sheet [data-action="task-open-here"]')).toHaveText('In your tasks');
     const tasks = (await (await page.request.get('/api/tasks')).json()).tasks;
     expect(tasks.some((t) => t.title === 'Book the room' && t.note.id === note.id)).toBe(true);

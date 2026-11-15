@@ -113,7 +113,7 @@ test('Copy as Markdown writes the title and body, and says why when it cannot', 
   await log.menus[0][1].rows[0].run();
   assert.equal(log.copied, '# Cell biology\n\nFirst line\n- [ ] one\n');
   assert.equal(log.toasts.length, 1);
-  assert.equal(log.toasts[0][0], 'Copied as Markdown');
+  assert.equal(log.toasts[0][0], 'Copied “Cell biology” as Markdown');
   const refused = shareHarness({ navigator: { clipboard: { writeText: async () => { throw Error('Permission denied'); } } } });
   refused.context.shareMenu({});
   await refused.log.menus[0][1].rows[0].run();
