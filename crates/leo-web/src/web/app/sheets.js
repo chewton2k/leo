@@ -682,10 +682,13 @@ function printNotes(s) {
   notes.dataset.print = '';
   notes.append(list);
   $('#doc').after(notes);
-  const footer = document.createElement('style');
-  footer.dataset.print = '';
-  footer.textContent = `@media print { @page { @bottom-center { content: "${s.note.title.replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ')} · " counter(page) " / " counter(pages); } } }`;
-  document.head.append(footer);
+  const title = (s.note.title || '').trim().replace(/["\\]/g, '\\$&').replace(/[\n\r\f]/g, ' ');
+  if (title) {
+    const footer = document.createElement('style');
+    footer.dataset.print = '';
+    footer.textContent = `@media print { @page { @bottom-center { content: "${title} · " counter(page) " / " counter(pages); } } }`;
+    document.head.append(footer);
+  }
   printingNotes = true;
   window.addEventListener('afterprint', printNotesClear, true);
 }

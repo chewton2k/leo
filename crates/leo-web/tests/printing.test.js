@@ -144,11 +144,11 @@ test('Export as PDF from the menu still prints, and an unsaved note says to writ
   assert.deepEqual(empty.log.toasts.map((t) => t[0]), ['Write something first.', 'Write something first.']);
 });
 
-function notesHarness({ notes = [{ at: { from: 0, to: 9 }, text: 'Rows sum to one.' }, { at: { from: 20, to: 30 }, text: 'Name the damping factor.' }], fails = false } = {}) {
+function notesHarness({ notes = [{ at: { from: 0, to: 9 }, text: 'Rows sum to one.' }, { at: { from: 20, to: 30 }, text: 'Name the damping factor.' }], fails = false, title = 'Markov "chains"' } = {}) {
   const live = [], listeners = new Map(), log = { printed: [], toasts: [], normalized: 0, menus: [] };
   const place = (node) => { live.push(node); node.parentNode = { normalize() { log.normalized++; } }; };
   const element = (tag) => ({ tag, dataset: {}, children: [], hidden: false, textContent: '', get childElementCount() { return this.children.length; }, append(...kids) { this.children.push(...kids); }, after(node) { place(node); }, remove() { live.splice(live.indexOf(this), 1); } });
-  const s = { note: { title: 'Markov "chains"' }, doc: { domPoint: (at) => ({ node: { nodeType: 3 }, offset: at }), blockAt: () => null } };
+  const s = { note: { title }, doc: { domPoint: (at) => ({ node: { nodeType: 3 }, offset: at }), blockAt: () => null } };
   const context = {
     seq: 1, ICON: { note: 'N', download: 'D', share: 'S' }, Node: { TEXT_NODE: 3 }, marginPage: { s },
     marginPrintable: () => notes, marginAnswer: (item, text) => { item.textContent = text; },
@@ -177,7 +177,9 @@ test('Export as PDF with Felix’s notes shows only when the note has open margi
   assert.deepEqual(log.printed[0], ['sup', 'sup', 'section', 'style']);
   assert.deepEqual(live.filter((n) => n.tag === 'sup').map((n) => [n.dataset.print, n.hidden, n.children.length, n.textContent]), [['1', true, 0, ''], ['2', true, 0, '']]);
   assert.deepEqual(live.find((n) => n.tag === 'section').children[0].children.map((li) => li.textContent), ['Rows sum to one.', 'Name the damping factor.']);
-  assert.match(live.find((n) => n.tag === 'style').textContent, /content: "Markov \\"chains\\" · " counter\(page\) " \/ " counter\(pages\)/);
+  assert.match(live.find((n) => n.tag === 'style').textContent, /content: "Markov \\"chains\\" · " counter\(page\) " \/ " counter\(pages\)/);  const untitled = notesHarness({ title: '' });
+  await untitled.context.share(true);
+  assert.deepEqual(untitled.log.printed[0], ['sup', 'sup', 'section'], 'an untitled note keeps the plain page counter');
 });
 
 test('notes printed without an afterprint never reach a later plain export, and clear on the next press, afterprint or a print error', async () => {

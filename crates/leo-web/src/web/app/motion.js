@@ -224,7 +224,7 @@ function lift(el) {
 function liftedRect(el) {
   if (!el) return null;
   const r = el.getBoundingClientRect();
-  return { left: r.left + (r.width - r.width / SETTLE_SCALE) / 2, top: r.top + (r.height - r.height / SETTLE_SCALE) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
+  return { left: r.left + (r.width - el.offsetWidth) / 2, top: r.top + (r.height - el.offsetHeight) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
 }
 
 window.leoMotion = { unfold, fold, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };
