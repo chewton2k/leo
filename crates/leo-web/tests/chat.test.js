@@ -534,7 +534,7 @@ function chatSendFixture(id = 'practice', access = 'ask', before = async () => t
   const input = { value: 'Put the solution in my code area.' };
   const noop = () => {};
   const context = vm.createContext({
-    state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), MOST_REFS: C.MOST_REFS,
+    state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), timed: new Set(), MOST_REFS: C.MOST_REFS,
     historyText: C.historyText, modelHistory: C.modelHistory, historyRequest: C.historyRequest, threadRefs: C.threadRefs, recentNotes: C.recentNotes, sessionBody: C.sessionBody, splitLines: C.splitLines, grade: C.grade, scoreSession: C.scoreSession,
     cardOf: doc => doc, currentSession: () => null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
     pose: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
@@ -775,6 +775,20 @@ test('a finished trace says what was opened, used and changed in one line', () =
   assert.equal(C.traceSummary([{ ...step('open_note', 'Looked for “x”'), failed: true }, step('search_notes', 'Searched')], [], 0), 'Searched your notes');
 });
 
+test('the live step says what Felix is doing now, and anything unknown keeps his words', () => {
+  const step = (tool, text, failed = false) => ({ tool, text, failed, found: [] });
+  assert.equal(C.doing(step('open_note', 'Read “Markov chains”')), 'Reading “Markov chains”…');
+  assert.equal(C.doing(step('open_note', 'Read part 2 of 3 of “B” (lines 40–80)')), 'Reading part 2 of 3 of “B” (lines 40–80)…');
+  assert.equal(C.doing(step('search_notes', 'Searched your notes for “lab safety”')), 'Searching your notes for “lab safety”…');
+  assert.equal(C.doing(step('connected_notes', 'Followed connections from “Heaps”')), 'Following connections from “Heaps”…');
+  assert.equal(C.doing(step('edit_note', 'Suggested a change to “Heaps”')), 'Suggesting a change to “Heaps”…');
+  assert.equal(C.doing(step('read_transcript', 'Looked for “x” in the recording of “T”')), 'Looking for “x” in the recording of “T”…');
+  assert.equal(C.doing(step('calculate', 'Worked out the numbers.')), 'Working out the numbers…');
+  assert.equal(C.doing(step('open_note', 'Looked for “x”', true)), 'Looked for “x”', 'a failed step keeps its words');
+  assert.equal(C.doing(step('quiz', 'Wanted to change a note (read only)')), 'Wanted to change a note (read only)');
+  assert.equal(C.doing(step('', '')), '');
+});
+
 test('only an empty search with nothing cited is marked as not from the notes', () => {
   const empty = [{ tool: 'search_notes', text: 'Searched', found: [] }];
   assert.equal(C.notFromNotes(empty, 'Wear goggles.', 0), true);
@@ -968,7 +982,7 @@ function answers(messages, { busy = null, send = () => {}, clipboard = null, fet
   const input = { value: '', focus() { calls.push('focus'); } };
   const context = {
     ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
-    root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), tick() {}, workingFor: () => '', writer: () => '', writerOf: () => '',
+    root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), timed: new Set(), tick() {}, workingFor: () => '', tookFor: () => '', writer: () => '', writerOf: () => '',
     stepChevron: '', MOST_REPLY_STEPS: 64, clipped: (t) => t, stored: () => messages.filter((m) => !m.pending), fit() {}, persist() {}, draw() {}, send,
     notify: (text) => calls.push(`notify:${text}`), setTimeout: () => 0,
     request: async (url, init) => { calls.push(['fetch', url, JSON.parse(init.body)]); return { ok: fetchOk }; },

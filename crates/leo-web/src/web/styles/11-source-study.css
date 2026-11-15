@@ -49,9 +49,13 @@ body.source-resizing iframe { pointer-events: none; }
 .study-progress[hidden] { display: none; }
 .study-ideas { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 6px; max-height: 3.2em; overflow: hidden; color: var(--muted); }
 .study-idea { white-space: nowrap; max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
-.study-idea.first, .study-idea.done { color: var(--good); }
-.study-idea.review { color: var(--danger); }
-.study-sep { color: var(--faint); }
+.study-idea.now { color: var(--text); }
+.study-mark { width: 15px; height: 15px; margin-right: 4px; vertical-align: -3px; fill: none; stroke-linecap: round; stroke-linejoin: round; overflow: visible; -webkit-mask: var(--chalk-break); mask: var(--chalk-break); }
+.study-ring { stroke: currentColor; stroke-width: 1.1; }
+.study-idea.now .study-ring { stroke-width: 1.6; }
+.study-ok { stroke: var(--chalk-good); stroke-width: 1.8; }
+.study-no { stroke: var(--chalk-bad); stroke-width: 1.7; }
+@media (forced-colors: active) { .study-mark { forced-color-adjust: none; -webkit-mask: none; mask: none; } .study-mark path { stroke: CanvasText; } }
 .study-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
 .session-recap { margin: 6px 0 14px; padding: 14px 16px; border-radius: var(--radius); background: var(--tint); }
 .session-recap h4 { margin: 0 0 4px; font-size: var(--fs-md); }

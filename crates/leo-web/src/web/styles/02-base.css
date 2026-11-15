@@ -24,7 +24,7 @@ button, label, summary, [role="button"], [role="tab"], [draggable="true"], .bar,
   -webkit-user-select: none; user-select: none;
 }
 body { -webkit-user-select: none; user-select: none; }
-input, textarea, [contenteditable], .doc, .prose .task > span, .prose, pre, code, .bubble, .msg-error, .msg-passage-text, .margin-felix, .margin-you, .margin-pending, .margin-problem, .proposal-old, .proposal-new, .msg-step, .set-note.warn, .set-path, .sched-about, .rec-transcript, .rec-points, .rec-error-details, .upload-error, .diagram-error, .toast { -webkit-user-select: text; user-select: text; }
+input, textarea, [contenteditable], .doc, .prose .task > span, .prose, pre, code, .bubble, .msg-error, .msg-passage-text, .margin-felix, .margin-you, .margin-pending, .margin-problem, .proposal-old, .proposal-new, .proposal-marked, .msg-step, .set-note.warn, .set-path, .sched-about, .rec-transcript, .rec-points, .rec-error-details, .upload-error, .diagram-error, .toast { -webkit-user-select: text; user-select: text; }
 input:not(:focus), textarea:not(:focus) { -webkit-user-select: none; user-select: none; }
 .doc-tail, .blk:has(.blank) { -webkit-user-select: none; user-select: none; }
 a, img { -webkit-user-drag: none; }

@@ -456,7 +456,57 @@
     return words ? `${words.toLocaleString('en')} ${words === 1 ? 'word' : 'words'} · ${Math.ceil(words / 238)} min read` : '0 words';
   }
 
-  const api = { render, plain, facts, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon };
+  function wordDiff(before, after, most = 120000) {
+    const split = (text) => String(text || '').match(/\s*(?:[\p{L}\p{N}_'’]+|\S)|\s+/gu) || [];
+    const a = split(before);
+    const b = split(after);
+    if (a.length * b.length > most) return null;
+    const width = b.length + 1;
+    const kept = new Uint16Array((a.length + 1) * width);
+    for (let i = a.length - 1; i >= 0; i--) {
+      for (let j = b.length - 1; j >= 0; j--) {
+        kept[i * width + j] = a[i].trim() === b[j].trim() ? kept[(i + 1) * width + j + 1] + 1 : Math.max(kept[(i + 1) * width + j], kept[i * width + j + 1]);
+      }
+    }
+    const runs = [];
+    const put = (kind, del, ins) => {
+      const last = runs.at(-1);
+      if (last && last.kind === kind) {
+        last.del += del;
+        last.ins += ins;
+        last.words += 1;
+      } else runs.push({ kind, del, ins, words: 1 });
+    };
+    let i = 0;
+    let j = 0;
+    while (i < a.length || j < b.length) {
+      if (i < a.length && j < b.length && a[i].trim() === b[j].trim()) put('same', a[i++], b[j++]);
+      else if (i < a.length && (j === b.length || kept[(i + 1) * width + j] >= kept[i * width + j + 1])) put('del', a[i++], '');
+      else put('ins', '', b[j++]);
+    }
+    const parts = [];
+    runs.forEach((run, k) => {
+      const lone = run.kind === 'same' && run.words === 1 && run.ins.trim().length <= 3 && k > 0 && k < runs.length - 1;
+      if (run.kind === 'same' && !lone) {
+        parts.push({ kind: 'same', text: run.ins });
+        return;
+      }
+      let change = parts.at(-1);
+      if (!change || change.kind === 'same') parts.push((change = { kind: 'change', del: '', ins: '' }));
+      change.del += run.del;
+      change.ins += run.ins;
+    });
+    parts.forEach((part, k) => {
+      const space = part.kind === 'change' && k > 0 ? /^\s*/.exec(part.ins)[0] : '';
+      if (!space || (part.del && !part.del.startsWith(space))) return;
+      parts[k - 1].text += space;
+      part.ins = part.ins.slice(space.length);
+      part.del = part.del.slice(space.length);
+    });
+    return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
+  }
+
+  const api = { render, plain, facts, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

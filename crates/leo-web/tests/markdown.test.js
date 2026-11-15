@@ -398,6 +398,39 @@ test('the facts line counts words outside code and reads at 238 a minute', () =>
   assert.equal(md.facts('word'), '1 word · 1 min read');
   assert.equal(md.facts('w '.repeat(239)), '239 words · 2 min read');
   assert.equal(md.facts('w '.repeat(1200)), '1,200 words · 6 min read');
+
+test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {
+  const words = (s) => s.split(/\s+/).filter(Boolean).join(' ');
+  const pairs = [
+    ['Each row of the matrix sums to one hundred percent.', 'Each row of the matrix sums to one, because it is a probability distribution.'],
+    ['BFS takes the newest vertex.', 'BFS takes the oldest vertex.'],
+    ['the cat sat on a mat', 'the dog lay on a rug'],
+    ['Line one\n\nLine two\n', 'Line one\n\nLine 2 here\n'],
+    ['', 'Ask about mixing time next week.'],
+    ['Gone entirely.', ''],
+    ['café über naïve', 'café unter naïve'],
+  ];
+  for (const [before, after] of pairs) {
+    const parts = md.wordDiff(before, after);
+    assert.equal(parts.filter((p) => p.kind !== 'del').map((p) => p.text).join(''), after);
+    assert.equal(words(parts.filter((p) => p.kind !== 'ins').map((p) => p.text).join('')), words(before));
+    assert.ok(parts.every((p) => p.text && ['same', 'del', 'ins'].includes(p.kind)), JSON.stringify(parts));
+  }
+  assert.deepEqual(md.wordDiff('Each row sums to one hundred percent.', 'Each row sums to one, because it is a distribution.'), [
+    { kind: 'same', text: 'Each row sums to one' },
+    { kind: 'del', text: ' hundred percent' },
+    { kind: 'ins', text: ', because it is a distribution' },
+    { kind: 'same', text: '.' },
+  ]);
+  assert.deepEqual(md.wordDiff('takes the newest vertex', 'takes the oldest vertex'), [
+    { kind: 'same', text: 'takes the ' },
+    { kind: 'del', text: 'newest' },
+    { kind: 'ins', text: 'oldest' },
+    { kind: 'same', text: ' vertex' },
+  ]);
+  assert.deepEqual(md.wordDiff('a b', 'a b'), [{ kind: 'same', text: 'a b' }]);
+  assert.equal(md.wordDiff('word '.repeat(400), 'other '.repeat(400)), null);
+  assert.ok(md.wordDiff('word '.repeat(300), 'other '.repeat(300)));
 });
 
 test('a long run of unmatched ![[ openers stays fast', () => {
