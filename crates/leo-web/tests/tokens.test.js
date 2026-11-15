@@ -169,7 +169,7 @@ test('the paper grain is a data: SVG background layer on the shell surfaces, scr
 });
 
 test('ink details: a warm selection wash, a drawn rule with a plain fallback, and thin warm scrollbars that keep the page bar', () => {
-  const at = (selector, media = null) => all.find((r) => r.selector === selector && (media ? r.at.some((a) => a.includes(media)) : r.at.length === 0));
+  const at = (selector, media = null) => all.find((r) => r.selector.split(', ').includes(selector) && (media ? r.at.some((a) => a.includes(media)) : r.at.length === 0));
   assert.match(at('::selection').body, /background: color-mix\(in srgb, var\(--text\) 22%, transparent\)/);
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);

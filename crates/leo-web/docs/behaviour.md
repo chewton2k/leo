@@ -38,8 +38,8 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
 - Explorer rename and New folder use `inlineEdit` over the tree row (side.js). New folder
   falls back to its sheet when the tree is hidden.
 - Empty pages: `empty(icon, title, text)`. Trash, Boards, calendar Tasks, Chats, Search
-  no-results and home show a small line drawing in the muted ink (home: an arrow toward the
-  open explorer); the empty Trash says "Nothing thrown away." over its facts. Counts: `.badge`. Small uppercase section
+  no-results and home show a small line drawing in the muted ink (home: on the first day
+  only, an arrow toward the open explorer); the empty Trash says "Nothing thrown away." over its facts. Counts: `.badge`. Small uppercase section
   labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`).
 - Kept on purpose: the model picker (a menu of models with effort chips), the margin-mode menu (its own
@@ -357,6 +357,21 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   library grid or list. The explorer owns note and folder navigation. Search and
   Trash retain their result cards; the bounded metadata and notes APIs remain.
   Browsing never calls an AI.
+- Home (`#/`, 2026-11-15, the user's call) opens on the date (`--voice`, 34 px, the
+  window's locale), one plain sans sentence about today (`#home-line`, titles in ink
+  at weight 500), the drawn rule (`.home-rule`, the same pencil line as a Markdown
+  `---`), the quick bar, then the rows: Earlier (open tasks from before today, the
+  weekday on the right, no red) and Today (every task due today, done ones ticked
+  and faint until midnight, "n of m done" on the right), six rows at most, then
+  "N more in Calendar" (`#/calendar`). A group with no rows is left out. The foot
+  says "Open a note, or start a new one." (narrow: "from Folders") beside New note;
+  on the first day (no notes, no tasks) it says "Notes you write appear on the
+  left." with the drawn arrow. The sentence is `schedule.dateline` (pure, tested in
+  schedule.test.js): local tasks, the cached events from `/api/schedule` (the Tasks
+  poll asks for today to a week ahead while home is open, never `live`), the
+  explorer's notes and the clock; no AI, never "overdue", no greeting or praise,
+  and a missing or failing calendar is never mentioned. It redraws on every task
+  redraw, on focus and visibility, and at the next local midnight.
 
 - Folders: captured explorer targets support create, rename, move and trash with
   Undo through POST `/api/trash/move`

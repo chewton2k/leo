@@ -66,13 +66,13 @@ test('a passive folder reveal keeps the explorer hidden and opens no sheet', asy
   await page.evaluate(() => localStorage.setItem('leo-side', 'mini'));
   await page.goto(`/#/f/${encodeURIComponent(dir)}`);
   await page.reload();
-  await expect(page.getByText('Choose a note or create one')).toBeVisible();
+  await expect(page.getByText('Open a note from Folders, or start a new one.')).toBeVisible();
   await expect(page.locator('body')).toHaveClass(/side-mini/);
-  await expect(page.locator('#app .empty svg.drawn-arrow')).toHaveCount(0);
+  await expect(page.locator('.home-foot svg.drawn-arrow')).toBeHidden();
   await page.evaluate(() => localStorage.setItem('leo-side', 'wide'));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`/#/f/${encodeURIComponent(dir)}`);
-  await expect(page.getByText('Choose a note or create one')).toBeVisible();
+  await expect(page.getByText('Open a note from Folders, or start a new one.')).toBeVisible();
   await expect(page.locator('#folders-sheet')).toHaveCount(0);
   await expect(page.locator('.scrim')).toHaveCount(0);
 });

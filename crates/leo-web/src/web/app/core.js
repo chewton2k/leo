@@ -745,9 +745,11 @@ async function showWorkspace(dir = null) {
   document.body.classList.remove('on-note');
   chrome({});
   swap('workspace', () => {
-    app.innerHTML = `<section class="workspace-empty"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Ask Felix, search, or jot something…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Ask Felix, search, or jot something"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section>${sideActive() ? empty(DRAWN.arrow, 'Pick a note on the left', 'Or start a new one and I’ll read along. Notes are Markdown files on this computer.') : empty('', 'Choose a note or create one', 'Your folders and notes are in Folders.')}<button class="btn primary" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}</section>`;
+    app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Ask Felix, search, or jot something…" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Ask Felix, search, or jot something"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
     wireHomeAsk();
     drawTasksWindow();
+    drawHomeToday();
+    if (!(Date.now() - tasksWin.eventsAt < CAL_POLL_MS)) loadTasksWindow().catch(() => {});
     dictateHint($('.home-dictate'));
     scrollToTop();
   });

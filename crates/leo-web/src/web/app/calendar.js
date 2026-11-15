@@ -1553,7 +1553,7 @@ async function openTaskAnywhere(id, on = null) {
   taskSheet(id, on);
 }
 
-var tasksWin = { timer: 0, tasks: null, finished: new Map(), revision: 0, load: 0 };
+var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
 const TASKS_AHEAD_DAYS = 7;
 const TASK_DONE_MS = 1200;
 const TASKS_LEAST_ROOM = 150;
@@ -1613,6 +1613,11 @@ function finishTaskInWindow(id, done, on) {
   const task = calFind(id);
   const row = tasksHost().querySelector(`.tasks-row[data-task="${CSS.escape(id)}"]`);
   if (!done || !task || !row) { drawTasksWindow(); return; }
+  if (tasksAtHome() && (on || task.date) === S.dayKey(new Date())) {
+    drawTasksWindow();
+    pulse(tasksHost().querySelector(`.sched-check[data-id="${CSS.escape(id)}"]`), { lift: 1.18 });
+    return;
+  }
   if (tasksWin.finished.size >= MOST_TASK_FEEDBACK) {
     const oldest = tasksWin.finished.keys().next().value;
     clearTimeout(tasksWin.finished.get(oldest).timer);
@@ -1651,16 +1656,16 @@ function tasksDueBadge() {
 const tasksAtHome = () => state.view === 'workspace' && /^(?:#\/?)?$/.test(location.hash);
 const tasksHost = () => (tasksAtHome() && document.getElementById('home-today')) || tasksBox;
 
-function tasksRow(t) {
+function tasksRow(t, when) {
   return `<div class="tasks-row${t.done ? ' done' : ''}" data-task="${esc(t.id)}" style="--tone: var(${toneOfTask(t)})">
     <input type="checkbox" class="sched-check" data-action="task-done" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}${t.done ? ` checked${tickWrite(t.id, t.on)}` : ''} aria-label="Done: ${esc(t.title)}">
     <button type="button" class="tasks-title" data-action="task-open-here" data-id="${esc(t.id)}"${t.on ? ` data-on="${esc(t.on)}"` : ''}>${esc(t.title)}</button>
-    ${t.date ? `<span class="tasks-when">${esc(t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' }))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
+    ${t.date ? `<span class="tasks-when">${esc(when || (t.date === S.dayKey(new Date()) ? (t.time ? S.timeLabel(t.time, calLocale()) : 'Today') : S.fromKey(t.date).toLocaleDateString(calLocale(), { month: 'short', day: 'numeric' })))}</span>` : `<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(t.id)}">Set date</button>`}
   </div>`;
 }
 
 function tasksRows(groups) {
-  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map(tasksRow).join('')}`).join('');
+  return groups.map(([name, list]) => `<div class="tasks-group${name === 'Overdue' ? ' late' : ''}">${name}</div>${list.slice(0, name === 'No date' ? 5 : 20).map((t) => tasksRow(t)).join('')}`).join('');
 }
 
 function tasksFocus(host) {
@@ -1676,15 +1681,36 @@ function refocusTasks(host, focus) {
 
 const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
 
-function drawHomeToday(groups) {
+const HOME_ROWS = 6;
+let homeMidnight = 0;
+
+function drawHomeToday() {
   const box = document.getElementById('home-today');
   if (!box) return;
-  const due = groups.filter(([name]) => name === 'Overdue' || name === 'Today');
+  const now = new Date();
+  const known = tasksWin.tasks || (cal.data && cal.data.tasks);
+  const tasks = known || [];
+  const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
+  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
+  const day = today.slice(0, HOME_ROWS - early.length);
+  const more = earlier.length + today.length - early.length - day.length;
+  const ago = (t) => (S.fromKey(S.dayKey(now)) - S.fromKey(t.date)) / 864e5;
   const focus = tasksFocus(box);
-  box.hidden = !due.length;
-  box.innerHTML = tasksRows(due);
+  box.hidden = !early.length && !day.length;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t, S.fromKey(t.date).toLocaleDateString(calLocale(), ago(t) < 7 ? { weekday: 'short' } : { month: 'short', day: 'numeric' }))).join('')}` : ''}${day.length ? `<div class="tasks-group">Today<span>${today.filter((t) => t.done).length} of ${today.length} done</span></div>${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
-  if (due.length) refocusTasks(box, focus);
+  if (!box.hidden) refocusTasks(box, focus);
+  const root = side.notes.get('');
+  const notes = side.loaded && root && root.loaded && !side.tasks ? root.items.length + side.folders.length : null;
+  const ready = known && (notes !== null || !sideActive() || (root && !root.loading));
+  const parts = ready ? S.dateline({ tasks, events: tasksWin.events || [], now, notes, locale: calLocale() }) : [];
+  $('#home-day').textContent = now.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' });
+  $('#home-line').innerHTML = parts.map((part) => (typeof part === 'string' ? esc(part) : `<b>${esc(part.title)}</b>`)).join('');
+  const first = ready && notes === 0 && !tasks.length;
+  $('.home-foot').classList.toggle('first', Boolean(first));
+  $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : `Open a note${sideActive() ? '' : ' from Folders'}, or start a new one.`;
+  clearTimeout(homeMidnight);
+  homeMidnight = setTimeout(drawTasksWindow, S.addDays(now, 1) - now + 1000);
 }
 
 function drawTasksWindow() {
@@ -1692,7 +1718,7 @@ function drawTasksWindow() {
   const groups = tasksGroups(tasks, true);
   const open = groups.reduce((n, [, list]) => n + list.length, 0);
   const home = tasksAtHome();
-  if (home) drawHomeToday(groups);
+  if (home) drawHomeToday();
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
   const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
   tasksBox.hidden = !open || here || state.view === 'locked';
@@ -1744,8 +1770,17 @@ async function loadTasksWindow() {
   tasksWin.stale = false;
   const revision = tasksWin.revision;
   try {
-    const tasks = (await api('/api/tasks')).tasks;
+    const home = tasksAtHome();
+    const now = new Date();
+    const data = home
+      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
+      : await api('/api/tasks');
+    const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
+    if (data.events) {
+      tasksWin.events = data.events;
+      tasksWin.eventsAt = Date.now();
+    }
     if (revision === tasksWin.revision) {
       tasksWin.tasks = tasks;
       if (cal.data) cal.data = { ...cal.data, tasks };
@@ -1764,6 +1799,9 @@ async function loadTasksWindow() {
 
 setTimeout(() => loadTasksWindow().catch(() => {}), 0);
 window.addEventListener('hashchange', () => drawTasksWindow());
+const homeShown = () => { if (tasksAtHome()) drawTasksWindow(); };
+window.addEventListener('focus', homeShown);
+window.addEventListener('leo-visibility', homeShown);
 
 const source = { note: null, name: null, seq: 0, returnTo: null, stopResize: null };
 const SOURCE_MIN = 260;

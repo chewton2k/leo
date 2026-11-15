@@ -473,7 +473,10 @@ async function readSideNotes(path, entry) {
   } finally {
     clearTimeout(timeout);
     entry.loading = false;
-    if (side.notes.get(path) === entry && entry.seq === seq) drawSide();
+    if (side.notes.get(path) === entry && entry.seq === seq) {
+      drawSide();
+      if (!path && tasksAtHome()) drawHomeToday();
+    }
   }
 }
 

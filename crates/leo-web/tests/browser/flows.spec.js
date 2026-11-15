@@ -4816,7 +4816,7 @@ test.describe('beside the note', () => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     const today = new Date().toLocaleDateString('en-CA');
-    await page.request.post('/api/tasks', { data: { title: `Home today ${tag}`, date: today } });
+    await page.request.post('/api/tasks', { data: { title: `Home today ${tag}`, date: today, time: '00:00' } });
     await page.request.post('/api/tasks', { data: { title: `Home later ${tag}` } });
     await page.setViewportSize({ width: 1280, height: 1000 });
     await page.goto('/#/');
@@ -4824,7 +4824,7 @@ test.describe('beside the note', () => {
     const list = page.locator('#home-today');
     const row = list.locator('.tasks-row', { hasText: `Home today ${tag}` });
     await expect(row).toBeVisible();
-    await expect(list.locator('.tasks-row', { hasText: `Home later ${tag}` }), 'only today and overdue').toHaveCount(0);
+    await expect(list.locator('.tasks-row', { hasText: `Home later ${tag}` }), 'only today and earlier').toHaveCount(0);
     await expect(page.locator('#tasks-window'), 'the card gives way on Home').toBeHidden();
     const ask = await page.locator('.home-ask').boundingBox();
     const at = await list.boundingBox();
@@ -4832,7 +4832,10 @@ test.describe('beside the note', () => {
     expect(at.x + at.width, 'inside the page').toBeLessThanOrEqual(1280);
     await row.locator('.sched-check').click();
     await expect(row.locator('.sched-check'), 'the box ticks once leo saved it').toBeChecked();
-    await expect(row, 'a finished task leaves the list').toHaveCount(0);
+    await page.waitForTimeout(1500);
+    await expect(row, 'a finished task stays, ticked, until midnight').toHaveClass(/done/);
+    await expect(page.locator('#home-day')).toHaveText(new Date().toLocaleDateString(await page.evaluate(() => navigator.language), { weekday: 'long', month: 'long', day: 'numeric' }));
+    await expect(page.locator('#home-line')).not.toBeEmpty();
     await page.goto('/#/settings');
     await expect(page.locator('#tasks-window')).toBeVisible();
     await expect(page.locator('#home-today')).toHaveCount(0);

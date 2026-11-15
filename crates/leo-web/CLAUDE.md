@@ -180,7 +180,7 @@ Decided: one app, window only (2026-10-31).
   single-stroke line drawing from `DRAWN` (app/core.js; `fill="none"`,
   `currentColor`, shown in `--muted`, no colour) in place of the icon; chat.js
   gets them as `drawings`. Home's arrow points at the explorer and shows only
-  while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
+  on the first day (no notes, no tasks) while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
   (2026-11-15, the user's call); counts `.badge`; small faint
   sentence-case labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`).
@@ -684,8 +684,12 @@ is hidden or the capture activity gate is busy.
 - The Tasks card in `#dock` is folded to a badge at every start and opens only
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
-  not take focus). Home draws today's and overdue
-  tasks inline under the quick bar (`#home-today`, the same rows) and hides the card.
+  not take focus). Home draws the date, one sentence
+  (`schedule.dateline`, local data only, never "overdue") and, under the quick bar,
+  Earlier and Today rows (`#home-today`, the same rows; today's done rows stay until
+  midnight; six at most, then "N more in Calendar") and hides the card. While home is
+  open the Tasks poll reads `/api/schedule` (today to a week ahead, not `live`) for
+  the cached events.
 - POST `/api/tasks` takes `request` (uuid, kept across a retry of the same quick-add): a
   repeated one is answered with the first task (`insert::remembered_creation`, scope `task`, a queue of its own beside the margin's `insert::remembered`).
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
