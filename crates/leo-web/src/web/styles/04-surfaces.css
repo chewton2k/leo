@@ -144,8 +144,8 @@
 .msg-step-times { color: var(--muted); font-size: .92em; font-variant-numeric: tabular-nums; }
 .msg-step ul { margin: 2px 0 4px 20px; padding: 0; list-style: none; }
 .msg-step li { padding: 1px 0; color: var(--text); }
-.msg-step-busy { width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--accent); border-right-color: transparent; animation: step-spin .8s linear infinite; }
-@keyframes step-spin { to { transform: rotate(360deg); } }
+.msg-step-busy { width: 14px; height: 14px; flex: none; color: var(--felix); }
+@media (prefers-reduced-motion: no-preference) { .msg-step-busy { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
 .proposal { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: grid; gap: 6px; }
 .proposal-title { font-weight: 650; font-size: var(--fs-base); }
 .proposal-wait { display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); font-weight: 600; color: var(--felix); }

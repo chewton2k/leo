@@ -153,7 +153,7 @@ body.chat-resizing iframe, body.chat-resizing canvas { pointer-events: none; }
 .quiz-input:disabled { color: var(--text); background: var(--surface); }
 .quiz-reply { font-size: var(--fs-base); line-height: 1.55; padding-top: 10px; }
 .quiz-reply p { margin: 0 0 6px; }
-.quiz-result { font-size: var(--fs-sm); font-weight: 650; color: var(--muted); }
+.quiz-result { display: flex; align-items: center; gap: 6px; font-size: var(--fs-sm); font-weight: 650; color: var(--muted); }
 .quiz-result.right { color: var(--chalk-good); }
 .quiz-result.wrong { color: var(--chalk-bad); }
 .quiz-explain { font-size: var(--fs-sm); color: var(--muted); line-height: 1.5; }

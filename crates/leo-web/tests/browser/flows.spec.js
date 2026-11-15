@@ -5095,6 +5095,11 @@ test('Felix shows one live step, then one line, and marks an answer from outside
   await page.locator('#chat-input').press('Enter');
   const answer = page.locator('.msg.leo').last();
   await expect(answer.locator('.msg-step')).toHaveText(['Searched your notes for “lab safety”']);
+  const blot = answer.locator('.msg-status .msg-step-busy');
+  await expect(blot, 'the live step shows Felix\'s blot, not a spinner').toHaveAttribute('aria-label', 'working');
+  await expect(blot.locator('use')).toHaveAttribute('href', '#leo-mark');
+  expect(await blot.evaluate((el) => { const probe = document.createElement('i'); probe.style.color = 'var(--felix)'; el.parentElement.append(probe); const felix = getComputedStyle(probe).color; probe.remove(); return getComputedStyle(el).color === felix; })).toBe(true);
+  await expect(answer.locator('.msg-status .msg-step-icon'), 'the blot stands in for the tool icon while it works').toHaveCount(0);
   await expect(answer.locator('.msg-step')).toHaveText(['Worked out the numbers']);
   await expect(answer.locator('.msg-trace')).toHaveCount(0);
   await expect(answer.locator('.prose')).toHaveText('Wear goggles.');

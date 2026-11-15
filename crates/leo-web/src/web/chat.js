@@ -105,6 +105,7 @@
 
   const VERDICT_WITHIN = 240;
   const QUIZ_MARK_MS = 160;
+  const BLOT = '<svg class="msg-step-busy" role="img" aria-label="working"><use href="#leo-mark"/></svg>';
 
   function grade(text) {
     const value = String(text || '');
@@ -2118,8 +2119,8 @@
 
     function stepLine(step, working, times = 1) {
       const item = typeof step === 'string' ? { text: step, tool: '', found: [] } : step;
-      const icon = `<svg class="msg-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[item.tool] || '<circle cx="12" cy="12" r="3"/>'}</svg>`;
-      const label = `${icon}<span>${escape(item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}${working ? '<span class="msg-step-busy" aria-label="working"></span>' : ''}`;
+      const icon = working ? BLOT : `<svg class="msg-step-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${TOOL_ICONS[item.tool] || '<circle cx="12" cy="12" r="3"/>'}</svg>`;
+      const label = `${icon}<span>${escape(item.text || '')}</span>${times > 1 ? `<span class="msg-step-times" aria-label="${times} times">×${times}</span>` : ''}`;
       const found = (item.found || []).filter((f) => f && f !== item.text);
       if (!found.length || item.tool === 'open_note') return `<div class="msg-step">${label}</div>`;
       return `<details class="msg-step"><summary>${label}<span class="msg-step-count">${found.length}</span>${stepChevron}</summary><ul>${found.map((f) => `<li>${escape(f)}</li>`).join('')}</ul></details>`;
@@ -2193,7 +2194,7 @@
       } else {
         answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       }
-      const result = checking.has(q) ? '<div class="quiz-result">Checking your answer…</div>' : marking && !(reply && reply.text) ? '<div class="quiz-result">Felix is reading your answer…</div>' : '';
+      const result = checking.has(q) ? `<div class="quiz-result">${BLOT}Checking your answer…</div>` : marking && !(reply && reply.text) ? `<div class="quiz-result">${BLOT}Felix is reading your answer…</div>` : '';
       const open = !done && !q.predict;
       const writing = thinkingOpen.has(q);
       const thinking = open && writing ? `<textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(state.drafts[`think:${i}:${k}`] || '')}</textarea>` : '';
@@ -2215,7 +2216,7 @@
       const said = reply
         ? (grade(reply.text || '').text
           ? `<div class="quiz-reply prose">${cite(render(grade(reply.text).text), reply.sources || sources, escape, reply.files)}</div>`
-          : reply.pending ? '<div class="quiz-reply"><span class="typing"><i></i><i></i><i></i></span></div>' : '')
+          : '')
         : '';
       const tone = q.correct === true ? ' right' : q.correct === false ? ' wrong' : '';
       return `<div class="quiz-card${done ? ' done' : ''}${marking ? ' marking' : ''}${tone}"><div class="quiz-kind">${q.predict ? 'Predict · a guess, not marked' : escape(QUIZ_KINDS[q.kind] || 'Question')}</div><div class="quiz-q prose">${asked}</div>${hinted}${sure}${answer}${own}${askHint}${result}${why}${said}${onward}</div>`;

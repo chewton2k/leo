@@ -187,7 +187,10 @@ Decided: one app, window only (2026-10-31).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
 - The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
-  (`margin-breathe`) only on `.margin-drop` while Felix reads or thinks, and sits
+  (`margin-breathe`) only on `.margin-drop` while Felix reads or thinks and on
+  `.msg-step-busy` (chat.js `BLOT`, in `--felix`) in place of the live step's icon
+  and before a quiz's "Checking your answer…"/"Felix is reading your answer…"
+  (that card shows no typing dots), and sits
   still in the Reads along chip, at the start of the calendar now-line (in place of
   its dot) and in `#save-state` (full ink while editing or saving, drying once to .45
   when Saved; the words stay as hidden text, "Not saved" stays visible). No other
@@ -199,7 +202,8 @@ Decided: one app, window only (2026-10-31).
   (`.margin-waiting` or the gutter `.margin-mark.reading`) and pencil
   (`path.pencil`), the caret after a
   streaming reply (`.msg.pending`) and the dot on his button
-  (`#chat-toggle.working`, synced with the chat body's `aria-busy`), and while he
+  (`#chat-toggle.working`, synced with the chat body's `aria-busy`), the chat's
+  working blot (`.msg-step-busy`), and while he
   waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
   reply's proposals until Apply or Dismiss (no coloured edge). Never links,
   buttons, selection, tags or text.

@@ -693,7 +693,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   unclear). Text written
   before a tool call is kept (a paragraph break, not a restart). A broken
   agent session sends `{"reset"}` and is redone through the text protocol
-  (`FALLBACK_TRIES`). While Felix works the reply shows only his newest step, in one `.msg-status` row at the top of the reply where the summary will be, so the words never move; a refused call that Felix then makes again successfully with the same tool is left out (`fixedSteps`; 2026-11-09, the user's call); a
+  (`FALLBACK_TRIES`). While Felix works the reply shows only his newest step, in one `.msg-status` row at the top of the reply where the summary will be, so the words never move; that step's icon is his breathing blot in his blue, not a spinner, and the same blot stands before a quiz answer being marked (2026-11-15; reduced motion holds it still); a refused call that Felix then makes again successfully with the same tool is left out (`fixedSteps`; 2026-11-09, the user's call); a
   finished reply folds every step into one `.msg-trace` line (`traceSummary`,
   2026-11-06, the user's call from a six-persona simulation: citations and change
   cards are what catch mistakes, and the count must agree with the sources). An
