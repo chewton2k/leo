@@ -212,3 +212,13 @@ test('notes printed without an afterprint never reach a later plain export, and 
   assert.deepEqual(broken.log.printed, [], 'nothing prints half-marked');
   assert.equal(broken.log.toasts.length, 1);
 });
+
+test('a passage that ends outside a text node is numbered at the end of its block, and one with no block is left out', async () => {
+  const h = notesHarness();
+  const blocks = [];
+  h.context.marginPage.s.doc.domPoint = () => ({ node: { nodeType: 1 }, offset: 0 });
+  h.context.marginPage.s.doc.blockAt = (at) => { blocks.push(at); return at < 20 ? {} : null; };
+  await h.context.share(true);
+  assert.deepEqual(blocks, [8, 29]);
+  assert.deepEqual(h.log.printed[0].filter((tag) => tag === 'sup'), ['sup']);
+});

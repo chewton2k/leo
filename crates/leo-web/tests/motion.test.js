@@ -30,7 +30,7 @@ const motionSource = fs.readFileSync(path.resolve(__dirname, '../src/web/app/mot
 function motion(extra = {}) {
   const context = { overlapOut() {}, unfold() {}, fold() {}, cascade() {}, pulse() {}, rubber() {}, iconSwap() {}, stillMotion: () => false, EASE_OUT: 'ease-out', EASE_MOVE: 'ease-in-out', EASE_EXIT: 'ease-in', MOTION_MS: 180, OPEN_MS: 200, DRAWER_MS: 240, EXIT_SHARE: .8, document: { addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], documentElement: { classList: { add() {}, remove() {} } } }, window: { scrollTo() {} }, innerHeight: 800, innerWidth: 1200, performance: { now: () => 0 }, Date, ...extra };
   vm.createContext(context);
-  vm.runInContext(`${motionSource}\nglobalThis.api = { flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
+  vm.runInContext(`${motionSource}\nglobalThis.api = { flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, liftedRect, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
   return context.api;
 }
 
@@ -218,4 +218,18 @@ test('loader sketches animate only without reduced motion and never loop', () =>
   assert.doesNotMatch(base, /animation/);
   assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{ \.skeleton\.sk-draw > svg \{ animation: tick-write 400ms var\(--ease-pencil\) both; \}/);
   assert.doesNotMatch(css, /\.skeleton[^{]*\{[^}]*infinite/);
+});
+
+test('a lifted ghost is measured from its own size and carries its tilt to the settle', () => {
+  const m = motion({ getComputedStyle: () => ({ getPropertyValue: () => '1.5deg' }) });
+  const ghost = { getBoundingClientRect: () => ({ left: 98, top: 47, width: 104, height: 56 }), offsetWidth: 100, offsetHeight: 50 };
+  assert.deepEqual({ ...m.liftedRect(ghost) }, { left: 100, top: 50, tilt: 1.5 });
+  const flat = motion({ getComputedStyle: () => ({ getPropertyValue: () => '' }) });
+  assert.equal(flat.liftedRect(ghost).tilt, 0);
+  assert.equal(flat.liftedRect(null), null);
+});
+
+test('a toast lets a long unbroken title wrap so Undo stays in view', () => {
+  const css = require('./page-source').pageCss();
+  assert.match(css, /:is\(\.toast, \.toast-gone\) > span \{ min-width: 0; overflow-wrap: anywhere; \}/);
 });

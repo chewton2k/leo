@@ -91,3 +91,15 @@ test('a match deep inside a tall paragraph scrolls the range into view', () => {
   assert.equal(value.highlightSearch({}, 'needle'), true);
   assert.ok(top >= 80 && top + 20 <= value.window.innerHeight);
 });
+
+test('the facts line under the title is never searched, so a match lands in the note text', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/core.js'), 'utf8');
+  const skipped = [];
+  const value = fixture([]);
+  const nodes = [{ textContent: '120 words · 1 min read', parentElement: { closest: (q) => { skipped.push(q); return q.includes('.note-facts') ? {} : null; }, scrollIntoView() {} } }, { textContent: 'words in the body', parentElement: { closest: () => null, scrollIntoView() {} } }];
+  value.document.createTreeWalker = () => { let i = 0; return { nextNode: () => nodes[i++] }; };
+  assert.equal(value.highlightSearch({}, 'words'), true);
+  assert.equal(value.registry.get('leo-search').length, 1);
+  assert.equal(value.registry.get('leo-search')[0].node, nodes[1]);
+  assert.match(source, /closest\('textarea, script, style, \.katex-mathml, \.note-facts'\)/);
+});
