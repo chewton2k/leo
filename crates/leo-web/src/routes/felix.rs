@@ -648,7 +648,7 @@ fn interact(
             let unshown = desk
                 .session
                 .as_ref()
-                .map_or_else(String::new, tools::Session::unshown);
+                .map_or_else(String::new, |s| s.unshown(desk.marking));
             return silent(&format!("{}{unshown}", tools::SESSION_DONE));
         }
         let idea = tools::quiz_from(call).ok().and_then(|q| q.idea);
@@ -822,7 +822,7 @@ fn execute_tool(
         let unshown = desk
             .session
             .as_ref()
-            .map_or_else(String::new, tools::Session::unshown);
+            .map_or_else(String::new, |s| s.unshown(desk.marking));
         tools::Done {
             step: "Ended the study session".into(),
             result: format!("{}{unshown}", tools::ENDED),
@@ -2147,11 +2147,11 @@ pub(crate) async fn chat_reply(
     if let Some(line) = body_session
         .as_ref()
         .filter(|s| !s.over())
-        .map(tools::Session::state)
+        .map(|s| s.state(body.mark))
     {
-        user = format!("{line}{user}");
+        user.push_str(&line);
         if let Some(c) = continued.as_mut() {
-            c.text = format!("{line}{}", c.text);
+            c.text.push_str(&line);
         }
     }
     let (tx, rx) = crate::reply::channel();

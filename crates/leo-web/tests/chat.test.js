@@ -369,7 +369,7 @@ test('a hint asks for a nudge without the answer, and every mark explains itself
   const free = C.quizSay({ kind: 'free_response', question: 'Why?', answer: 'Because.' }, 'dunno', null);
   assert.ok(free.includes('intuitive shortcut or tip') && free.includes('praise me briefly'));
   for (const said of [right, free]) assert.ok(said.includes('only for what my answer and thinking show (a guess is not reasoning)'));
-  for (const said of [wrong, right, free]) assert.ok(!said.includes('score'));
+  for (const said of [wrong, right, free]) assert.doesNotMatch(said, /score/i);
 });
 
 test('each further hint knows the hints already given and goes one step further', () => {
@@ -446,7 +446,7 @@ test('a study session closes an idea on two counted right answers or two misses,
   C.scoreSession(saved, { idea: 1 }, true);
   assert.equal(saved.outcomes[0].right, 1, 'a session saved before right counts starts from zero');
   const capped = C.startSession(['A', 'B']);
-  capped.asked = 20;
+  capped.asked = 30;
   C.scoreSession(capped, { idea: 1 }, true);
   assert.equal(capped.state, 'finishing');
 });
@@ -939,10 +939,19 @@ test('an answer Felix marks right counts toward its idea only when it was neithe
   }
 });
 
+test('a question on the idea just missed after Next question still keeps the idea open', async () => {
+  for (const [correct, more] of [[false, true], [true, undefined]]) {
+    const fixture = chatSendFixture('practice', 'ask', undefined, { events: [{ quiz: { kind: 'free_response', question: 'And now?', answer: 'x', idea: 1 } }, { done: true }] });
+    fixture.state.messages.push({ role: 'user', text: 'Practise queues.' }, { role: 'assistant', text: '', quizzes: [{ kind: 'multiple_choice', question: 'What leaves first?', options: ['oldest', 'newest'], answer: 'oldest', idea: 1, given: 'newest', correct }] });
+    await fixture.send('Next question, please.');
+    assert.equal(fixture.state.messages.at(-1).quizzes[0].more, more, String(correct));
+  }
+});
+
 test('a question on the idea just missed comes right after the explanation, so it keeps the idea open', async () => {
   for (const [verdict, idea, more] of [['incorrect', 1, true], ['incorrect', 2, undefined], ['correct', 1, undefined]]) {
     const fixture = chatSendFixture('practice', 'ask', undefined, { events: [{ t: `[[${verdict}]] The oldest item leaves first.` }, { quiz: { kind: 'free_response', question: 'And now?', answer: 'x', idea } }, { done: true }] });
-    const quiz = { kind: 'free_response', question: 'What leaves first?', answer: 'The oldest item.', correct: null, idea: 1 };
+    const quiz = { kind: 'free_response', question: 'What leaves first?', answer: 'The oldest item.', correct: null, idea: 1, given: 'The newest item.' };
     fixture.state.messages.push({ role: 'user', text: 'Practise queues.' }, { role: 'assistant', text: '', quizzes: [quiz] });
     await fixture.send('The newest item.', { card: quiz, say: C.quizSay(quiz, 'The newest item.', null) });
     assert.equal(fixture.state.messages.at(-1).quizzes[0].more, more, `${verdict} ${idea}`);

@@ -636,7 +636,7 @@
   };
 
   const MOST_IDEAS = 12;
-  const MOST_SESSION_QUESTIONS = 20;
+  const MOST_SESSION_QUESTIONS = 30;
 
   function startSession(ideas) {
     const list = (Array.isArray(ideas) ? ideas : []).filter((i) => typeof i === 'string' && i.trim()).slice(0, MOST_IDEAS).map((i) => i.trim().slice(0, 80));
@@ -2929,7 +2929,8 @@
               // A new question moves the practice on: older cards lose Next question.
               for (const m of thread.messages) if (m !== answer) for (const q of m.quizzes || []) if (q.told) q.held = false;
               const idea = Number(e.quiz.idea) || 0;
-              const retold = Boolean(card && card.idea && idea === card.idea && (card.correct === false || grade(answer.text).verdict === 'incorrect'));
+              const last = thread.messages.flatMap((m) => (m === answer ? [] : m.quizzes || [])).findLast((q) => q.idea && !q.predict && typeof q.given === 'string');
+              const retold = Boolean(last && idea === last.idea && (last.correct === false || (last === card && grade(answer.text).verdict === 'incorrect')));
               const s = currentSession();
               if (s && s.state === 'active' && idea && !e.quiz.predict) s.asked += 1;
               answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more || retold ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];

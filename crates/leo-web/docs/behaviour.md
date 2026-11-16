@@ -677,10 +677,12 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   only after two right answers to separate questions (the user's call), so a lesson
   plans at most six ideas, asks what the learner must be able to do, checks code by
   having it written, and comes back once to every open idea before it finishes. Each
-  study turn's prompt starts with `<study_session>` (`Session::state`, from the page's
+  study turn's prompt ends with `<study_session>` (`Session::state`, from the page's
   `sessionBody`: each idea done, right once, open or to look at again, with misses,
-  questions asked and "ask next about an idea still open"; the counts leave out the
-  answer being marked in that reply), so Felix numbers ideas without refused calls;
+  questions asked of `MOST_SESSION_QUESTIONS` (30) and "ask next about an idea still
+  open"; when Felix marks the answer in that reply it says the counts leave it out;
+  a closed idea is "to look at again" only with two misses, so sessions saved before
+  `right` existed read as done), so Felix numbers ideas without refused calls;
   refusals tell him to correct the call without mentioning it, since prose before a
   tool call streams to the page. An answer asked for outright is given and its
   idea retested later with a new case; harder or easier changes the next question,
@@ -703,7 +705,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   first three lines. `scoreSession(session, quiz, correct)` reads `idea`, `more`,
   `sure` and `hints` from the quiz and counts a right answer toward its idea's two
   only when it is not a guess, not after hints and not `more` (a step, or the page's
-  `more` on a question about the idea the same reply marked wrong); each quiz is
+  `more` on a question about the idea whose last answered quiz was wrong, in the
+  marking reply or after Next question); each quiz is
   scored once (`scored`), and a saved outcome without `right` starts from zero. A
   hinted answer's history line says "after hints". The recap card lists "Right once"
   and "Not shown yet", and `quizSay` asks Felix to praise only what the

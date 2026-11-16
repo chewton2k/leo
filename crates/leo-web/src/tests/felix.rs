@@ -2106,6 +2106,10 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         "a finished session refuses quietly: {lines:?}"
     );
     assert!(prompts.lock().unwrap()[1].contains(tools::SESSION_DONE));
+    assert!(
+        !prompts.lock().unwrap()[0].contains("<study_session>"),
+        "a finished session sends no state"
+    );
 
     let (streamer, _) = scripted(vec![
         "<tool>{\"name\": \"quiz\", \"kind\": \"free_response\", \"question\": \"How does it sift down?\", \"answer\": \"swap with the smaller child\"}</tool>",
@@ -2177,6 +2181,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         "{}",
         prompts[0]
     );
+    assert!(!prompts[0].contains("leave out the answer"));
     assert!(prompts[1].contains(tools::ENDED));
     assert!(
         prompts[1].contains("Not shown yet: Root."),

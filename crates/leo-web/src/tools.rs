@@ -1574,7 +1574,7 @@ pub struct Quiz {
 
 pub const MOST_IDEAS: usize = 12;
 pub const MOST_IDEA_CHARS: usize = 80;
-pub const MOST_SESSION_QUESTIONS: usize = 20;
+pub const MOST_SESSION_QUESTIONS: usize = 30;
 
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Session {
@@ -1623,10 +1623,10 @@ impl Session {
     fn how(&self, i: usize) -> &'static str {
         let right = self.right.get(i).copied().unwrap_or(0);
         if self.closed.get(i).copied().unwrap_or(false) {
-            if right >= 2 {
-                "done"
-            } else {
+            if self.misses.get(i).copied().unwrap_or(0) >= 2 {
                 "to look at again"
+            } else {
+                "done"
             }
         } else if right > 0 {
             "right once"
@@ -1635,7 +1635,7 @@ impl Session {
         }
     }
 
-    pub fn state(&self) -> String {
+    pub fn state(&self, marking: bool) -> String {
         let ideas: Vec<String> = (0..self.ideas.len())
             .map(|i| {
                 let missed = self.misses.get(i).copied().unwrap_or(0);
@@ -1648,13 +1648,18 @@ impl Session {
             })
             .collect();
         format!(
-            "<study_session>\nIdeas: {}.\nAsked {} of {MOST_SESSION_QUESTIONS}. leo closes an idea after two right answers to separate questions, not guessed and not after hints. Ask next about an idea still open, by its number. These counts leave out the answer you are marking now.\n</study_session>\n\n",
+            "\n\n<study_session>\nIdeas: {}.\nAsked {} of {MOST_SESSION_QUESTIONS}. leo closes an idea after two right answers to separate questions, not guessed and not after hints. Ask next about an idea still open, by its number.{}\n</study_session>",
             ideas.join("; "),
-            self.asked
+            self.asked,
+            if marking {
+                " These counts leave out the answer you are marking now."
+            } else {
+                ""
+            }
         )
     }
 
-    pub fn unshown(&self) -> String {
+    pub fn unshown(&self, marking: bool) -> String {
         let pick = |how: &str| -> Vec<String> {
             (0..self.ideas.len())
                 .filter(|&i| self.how(i) == how)
@@ -1675,7 +1680,12 @@ impl Session {
         if said.is_empty() {
             said
         } else {
-            format!(" Before the answer just marked, leo's record says:{said} Say so in the recap.")
+            let whose = if marking {
+                "Before the answer just marked, leo's"
+            } else {
+                "leo's"
+            };
+            format!(" {whose} record says:{said} Say so in the recap.")
         }
     }
 }
@@ -1684,7 +1694,7 @@ fn clip_chars(text: &str, most: usize) -> String {
     text.chars().take(most).collect()
 }
 
-pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached 20 questions). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript.";
+pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached its question limit). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript.";
 pub const PLANNED: &str =
     "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz.";
 pub const ENDED: &str = "Ended. Write the recap in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript. Ask nothing more.";
@@ -2918,10 +2928,18 @@ mod tests {
             right: vec![2, 1, 0, 0],
             misses: vec![0, 1, 2, 0],
         };
-        let state = session.state();
+        let state = session.state(false);
         assert!(state.contains("Ideas: 1 Root (done); 2 Sift down (right once, 1 missed); 3 Build (to look at again, 2 missed); 4 Sort (open)."), "{state}");
-        assert!(state.contains("Asked 7 of 20."));
-        let unshown = session.unshown();
+        assert!(state.contains("Asked 7 of 30."));
+        assert!(!state.contains("leave out the answer"));
+        assert!(session
+            .state(true)
+            .contains("These counts leave out the answer you are marking now."));
+        let unshown = session.unshown(false);
+        assert!(unshown.starts_with(" leo's record says:"));
+        assert!(session
+            .unshown(true)
+            .starts_with(" Before the answer just marked, leo's record says:"));
         assert!(
             unshown
                 .contains("Not shown yet: Sort. Right once only: Sift down. Missed twice: Build."),
@@ -2933,7 +2951,24 @@ mod tests {
             right: vec![2],
             ..Default::default()
         };
-        assert_eq!(done.unshown(), "");
+        assert_eq!(done.unshown(false), "");
+        let saved = Session {
+            ideas: vec!["Root".into(), "Build".into()],
+            closed: vec![true, true],
+            misses: vec![0, 2],
+            ..Default::default()
+        };
+        assert!(saved
+            .state(false)
+            .contains("1 Root (done); 2 Build (to look at again, 2 missed)"));
+        let ragged = Session {
+            ideas: vec!["Root".into()],
+            closed: vec![],
+            right: vec![1, 9, 9],
+            misses: vec![],
+            ..Default::default()
+        };
+        assert!(ragged.state(false).contains("1 Root (right once)"));
     }
 
     #[test]

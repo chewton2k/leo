@@ -455,10 +455,12 @@ the web (root CLAUDE.md).
   words, never paste its prompts or code. Jane Street's socratic-tutor (MIT) lent
   the rule that an idea is shown only by two right answers (2026-11-16, the user's
   call): `scoreSession(session, quiz, correct)` counts a right answer that is not a
-  guess, not after hints, not a step with `more` and not a retest right after a miss
-  (the page sets `more` on that one), and closes the idea at two. Each study turn
-  starts with `Session::state` (`<study_session>`: every idea's standing and what to
-  ask next), so Felix picks open ideas without refused calls, and `ENDED` and
+  guess, not after hints, not a step with `more` and not a retest of the idea whose
+  last answer was wrong (the page sets `more` on that one, whether it comes in the
+  marking reply or after Next question), and closes the idea at two; sessions stop
+  at 30 questions. Each study turn ends with `Session::state` (`<study_session>`:
+  every idea's standing and what to ask next, after the conversation so the cached
+  prefix stays), so Felix picks open ideas without refused calls, and `ENDED` and
   `SESSION_DONE` carry `Session::unshown`. Refusals say to correct the call without
   mentioning it. Felix keeps no running score.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
