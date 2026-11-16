@@ -682,7 +682,28 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   per reply (prediction, then teaching, then a check card in the same reply) and
   ends when the goal seems obvious. Practice runs each idea through recall, then
   telling it from its look-alike, then combining, with `more_parts` keeping the
-  idea open; hints go one rung at a time; retests use a new situation. A
+  idea open; hints go one rung at a time; retests use a new situation.
+  From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea closes
+  only after two right answers to separate questions (the user's call), so a lesson
+  plans at most six ideas, asks what the learner must be able to do, checks code by
+  having it written, and comes back once to every open idea before it finishes. Each
+  study turn's prompt ends with `<study_session>` (`Session::state`, from the page's
+  `sessionBody`: each idea done, right once, open or to look at again, with misses,
+  questions asked of `MOST_SESSION_QUESTIONS` (30) and "ask next about an idea still
+  open", mostly as free response or fill in the blank, code by writing it; it is for
+  Felix only, so he never mentions it, idea numbers, counts, scores or closing, and
+  only the record says when an idea is done; when Felix marks the answer in that reply it says the counts leave it out;
+  a closed idea is "to look at again" only with two misses, so sessions saved before
+  `right` existed read as done), so Felix numbers ideas without refused calls;
+  refusals tell him to correct the call without mentioning it, since prose before a
+  tool call streams to the page. An answer asked for outright is given and its
+  idea retested later with a new case; harder or easier changes the next question,
+  never the plan; Practice adds a plausible wrong solution to find the flaw in, a
+  last question that needs earlier ideas and, for a skill, doing it; readiness is
+  judged only from unaided answers; `ENDED` and `SESSION_DONE` end with
+  `Session::unshown` (ideas not shown yet, right once only, missed twice) and ask for
+  no score. Felix
+  keeps no running score (2026-11-16, the user's call). A
   prediction is `quiz` with `predict: yes`: free_response only, shown as Predict,
   never marked (`quizSay` says so, the request sends `mark: false`), never scored,
   not counted in `session.asked` and never a missed question in review. Other
@@ -694,7 +715,15 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   answering the thinking, while the page keeps its own verdict) (2026-11-09, the user's call). Both go to `/api/quiz/mark` (`confidence` is
   validated, `thinking` bounded and sealed) and to Felix inside the answer line
   (`aside`), which must stay one line: `send` folds held results by taking their
-  first three lines. A right guess leaves its idea open for one retest. A typed
+  first three lines. `scoreSession(session, quiz, correct)` reads `idea`, `more`,
+  `sure` and `hints` from the quiz and counts a right answer toward its idea's two
+  only when it is not a guess, not after hints and not `more` (a step, or the page's
+  `more` on a question about the idea whose last answered quiz was wrong, in the
+  marking reply or after Next question); each quiz is
+  scored once (`scored`), and a saved outcome without `right` starts from zero. A
+  hinted answer's history line says "after hints". The recap card lists "Right once"
+  and "Not shown yet", and `quizSay` asks Felix to praise only what the
+  answer and thinking show. A typed
   "I do not know" needs no button: it is marked as a miss and Felix treats it as
   a gap.
 - Quizzes. Marking is critical (a right
@@ -731,7 +760,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   carry `idea`, the page scores ideas and stops at `MOST_SESSION_QUESTIONS`.
   The study strip draws a 15 px pencil circle before each idea (three shapes by
   position): empty until it is right or set aside, holding the quiz's chalk check
-  (right) or × (to look at again), and a heavier ring while the newest quiz on that
+  (right twice), the same check dashed (`.study-once`, "right once, one more to go",
+  so forced colours keep it) or × (to look at again), and a heavier ring while the newest quiz on that
   idea is unanswered; names stay in `--muted`, the ringed one in `--text`, with no
   green or red text (2026-11-15). Each circle has `role="img"` and a label; forced
   colours draw it in CanvasText.

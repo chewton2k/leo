@@ -218,8 +218,8 @@
     if (quiz.predict) return [`Prediction. Question: ${quiz.question}`, `My prediction: ${given}`, 'This was my attempt before you taught the step, so do not mark it and do not write a verdict. Start from what I predicted, say what is actually true and why, teach this one step, then end with a check using the quiz tool.'].join('\n');
     const next = stay
       ? 'Only explain this answer: do not ask a new practice question in this reply. I will press Next question when I am ready.'
-      : 'If we are practising, ask the next question with the quiz tool so it appears as a card, or in a lesson teach the next step and end with one; never ask a practice question in plain text. If you keep a score, give it once, at the very end of your reply.';
-    const right = 'praise me briefly in your own words, then explain why it is right: the idea behind it, and a quick way to see it or remember it next time';
+      : 'If we are practising, ask the next question with the quiz tool so it appears as a card, or in a lesson teach the next step and end with one; never ask a practice question in plain text.';
+    const right = 'praise me briefly in your own words, only for what my answer and thinking show (a guess is not reasoning), then explain why it is right: the idea behind it, and a quick way to see it or remember it next time';
     const lines = [`Quiz answer. Question: ${quiz.question}`, `My answer: ${given}${aside(quiz)}`];
     if (correct === null) {
       const key = quiz.kind === 'fill_blank' ? `Accepted answers: ${accepted(quiz).join(' or ')}.` : `A model answer to compare with: ${quiz.answer}.`;
@@ -634,27 +634,31 @@
   };
 
   const MOST_IDEAS = 12;
-  const MOST_SESSION_QUESTIONS = 20;
+  const MOST_SESSION_QUESTIONS = 30;
 
   function startSession(ideas) {
     const list = (Array.isArray(ideas) ? ideas : []).filter((i) => typeof i === 'string' && i.trim()).slice(0, MOST_IDEAS).map((i) => i.trim().slice(0, 80));
-    return { ideas: list, outcomes: list.map(() => ({ state: 'open', misses: 0 })), asked: 0, state: 'active' };
+    return { ideas: list, outcomes: list.map(() => ({ state: 'open', misses: 0, right: 0 })), asked: 0, state: 'active' };
   }
 
-  function scoreSession(session, idea, correct, more) {
-    if (!session || session.state !== 'active' || !idea || correct === null || correct === undefined) return session;
+  function scoreSession(session, quiz, correct) {
+    const idea = quiz && quiz.idea;
+    if (!session || session.state !== 'active' || !idea || correct === null || correct === undefined || quiz.scored) return session;
+    const keepOpen = Boolean(quiz.more || quiz.sure === 'guess' || hintsOf(quiz).length);
     const outcome = session.outcomes[idea - 1];
     if (!outcome || outcome.state !== 'open') return session;
+    quiz.scored = true;
     if (correct === false) outcome.misses += 1;
+    if (!keepOpen && correct === true) outcome.right = (outcome.right || 0) + 1;
     if (outcome.misses >= 2) outcome.state = 'review';
-    else if (!more && correct === true) outcome.state = outcome.misses ? 'done' : 'first';
+    else if (outcome.right >= 2) outcome.state = outcome.misses ? 'done' : 'first';
     if (session.outcomes.every((o) => o.state !== 'open') || session.asked >= MOST_SESSION_QUESTIONS) session.state = 'finishing';
     return session;
   }
 
   function sessionBody(session) {
     if (!session || (session.state !== 'active' && session.state !== 'finishing')) return null;
-    return { ideas: session.ideas, closed: session.outcomes.map((o) => o.state !== 'open'), asked: session.asked };
+    return { ideas: session.ideas, closed: session.outcomes.map((o) => o.state !== 'open'), asked: session.asked, right: session.outcomes.map((o) => o.right || 0), misses: session.outcomes.map((o) => o.misses || 0) };
   }
 
   function sessionSummary(session) {
@@ -664,7 +668,8 @@
       covered: session.outcomes.filter((o) => o.state !== 'open').length,
       first: pick((o) => o.state === 'first').length,
       review: pick((o) => o.state === 'review'),
-      skipped: pick((o) => o.state === 'open'),
+      once: pick((o) => o.state === 'open' && o.right > 0),
+      skipped: pick((o) => o.state === 'open' && !o.right),
     };
   }
 
@@ -690,7 +695,7 @@
       lines.push(`[Felix asked: ${clipped(a.question, 300)}${(a.options || []).length ? ` (choices: ${a.options.join(' | ')})` : ''}${typeof a.answered === 'string' ? `; the user answered: ${clipped(a.answered, 200)}` : ''}]`);
     }
     for (const q of m.quizzes || []) {
-      const how = typeof q.given !== 'string' ? 'not answered yet' : q.correct === true ? `answered “${clipped(q.given, 120)}”, right` : q.correct === false ? `answered “${clipped(q.given, 120)}”, wrong` : `answered “${clipped(q.given, 200)}”`;
+      const how = typeof q.given !== 'string' ? 'not answered yet' : q.correct === true ? `answered “${clipped(q.given, 120)}”, right${hintsOf(q).length ? ' after hints' : ''}` : q.correct === false ? `answered “${clipped(q.given, 120)}”, wrong` : `answered “${clipped(q.given, 200)}”`;
       const replied = !canonical && q.reply && q.reply.text ? `; Felix replied: ${clipped(grade(q.reply.text).text, 400)}` : '';
       lines.push(`[${q.predict ? 'Prediction' : 'Practice'} question (${(QUIZ_KINDS[q.kind] || 'question').toLowerCase()}): ${clipped(q.question, 300)}${(q.options || []).length ? `; choices: ${q.options.join(' | ')}` : ''}; answer: ${clipped(q.answer, 200)}${canonical ? '' : `; ${how}${replied}`}]`);
     }
@@ -1893,8 +1898,9 @@
       const ideas = s.ideas.map((t, i) => {
         const o = s.outcomes[i];
         const now = o.state === 'open' && asking === i + 1;
-        const mark = o.state === 'first' || o.state === 'done' ? `<path class="study-ok" d="${STUDY_MARKS.ok}"/>` : o.state === 'review' ? `<path class="study-no" d="${STUDY_MARKS.no}"/>` : '';
-        const said = { first: 'right the first time', done: 'right', review: 'to look at again' }[o.state] || (now ? 'asking now' : 'not yet');
+        const once = o.state === 'open' && o.right > 0;
+        const mark = o.state === 'first' || o.state === 'done' ? `<path class="study-ok" d="${STUDY_MARKS.ok}"/>` : once ? `<path class="study-ok study-once" d="${STUDY_MARKS.ok}"/>` : o.state === 'review' ? `<path class="study-no" d="${STUDY_MARKS.no}"/>` : '';
+        const said = { first: 'right twice, never missed', done: 'right twice', review: 'to look at again' }[o.state] || (once ? (now ? 'right once, asking again' : 'right once, one more to go') : now ? 'asking now' : 'not yet');
         return `<span class="study-idea ${o.state}${now ? ' now' : ''}" title="${escape(t)}"><svg class="study-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path class="study-ring" d="${STUDY_MARKS.rings[i % STUDY_MARKS.rings.length]}"/>${mark}</svg>${escape(t)}</span>`;
       }).join('');
       box.hidden = false;
@@ -1904,11 +1910,12 @@
     function recapCard(s) {
       const c = sessionSummary(s);
       const parts = [`${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'} covered`];
-      if (c.first) parts.push(`${c.first} right the first time`);
+      if (c.first) parts.push(`${c.first} without a miss`);
       const lines = [];
       if (c.review.length) lines.push(`<p><b>Look at again:</b> ${c.review.map(escape).join(', ')}</p>`);
-      if (c.skipped.length) lines.push(`<p><b>Not reached:</b> ${c.skipped.map(escape).join(', ')}</p>`);
-      const again = [...c.review, ...c.skipped].length;
+      if (c.once.length) lines.push(`<p><b>Right once:</b> ${c.once.map(escape).join(', ')}</p>`);
+      if (c.skipped.length) lines.push(`<p><b>Not shown yet:</b> ${c.skipped.map(escape).join(', ')}</p>`);
+      const again = [...c.review, ...c.once, ...c.skipped].length;
       return `<div class="session-recap" role="status"><h4>Study session done</h4><p>${parts.join(' · ')}</p>${lines.join('')}<div class="session-acts">${again ? '<button type="button" class="btn primary sm" data-chat="session-again">Study those again</button>' : ''}<button type="button" class="btn plain sm" data-chat="session-done">Done</button></div></div>`;
     }
 
@@ -2300,7 +2307,7 @@
       q.correct = correct;
       markedAt.set(q, Date.now());
       if (thinking) q.thinking = thinking;
-      scoreSession(currentSession(), q.idea, correct, q.more || q.sure === 'guess');
+      scoreSession(currentSession(), q, correct);
       delete state.drafts[`${i}:${k}`];
       delete state.drafts[`think:${i}:${k}`];
       if (correct === true) {
@@ -2920,9 +2927,11 @@
               // A new question moves the practice on: older cards lose Next question.
               for (const m of thread.messages) if (m !== answer) for (const q of m.quizzes || []) if (q.told) q.held = false;
               const idea = Number(e.quiz.idea) || 0;
+              const last = thread.messages.flatMap((m) => (m === answer ? [] : m.quizzes || [])).findLast((q) => q.idea && !q.predict && typeof q.given === 'string');
+              const retold = Boolean(last && idea === last.idea && (last.correct === false || (last === card && grade(answer.text).verdict === 'incorrect')));
               const s = currentSession();
               if (s && s.state === 'active' && idea && !e.quiz.predict) s.asked += 1;
-              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
+              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more || retold ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
             }
             if (e.reset) {
               answer.text = '';
@@ -2990,7 +2999,7 @@
         if (!card.predict && (card.correct === null || card.correct === undefined)) {
           const verdict = answer.verdict || grade(answer.text).verdict;
           card.correct = verdict === 'correct' ? true : verdict === 'incorrect' ? false : null;
-          scoreSession(currentSession(), card.idea, card.correct, card.more);
+          scoreSession(currentSession(), card, card.correct);
         }
       }
       const ending = currentSession();
@@ -3113,7 +3122,7 @@
         if (!s) return;
         const c = sessionSummary(s);
         s.dismissed = true;
-        const ideas = [...c.review, ...c.skipped];
+        const ideas = [...c.review, ...c.once, ...c.skipped];
         send(`Let's do a study session on just these ideas: ${ideas.join('; ')}.`);
       }
       else if (what === 'unselect') {

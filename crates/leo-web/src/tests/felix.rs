@@ -2097,6 +2097,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, true],
         asked: 2,
+        ..Default::default()
     };
     let lines = chat_lines_in(&state, "[[correct]] yes", None, Some(covered), None);
     assert!(lines.iter().all(|l| l.get("quiz").is_none()), "{lines:?}");
@@ -2105,6 +2106,10 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         "a finished session refuses quietly: {lines:?}"
     );
     assert!(prompts.lock().unwrap()[1].contains(tools::SESSION_DONE));
+    assert!(
+        !prompts.lock().unwrap()[0].contains("<study_session>"),
+        "a finished session sends no state"
+    );
 
     let (streamer, _) = scripted(vec![
         "<tool>{\"name\": \"quiz\", \"kind\": \"free_response\", \"question\": \"How does it sift down?\", \"answer\": \"swap with the smaller child\"}</tool>",
@@ -2115,6 +2120,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(
         &state,
@@ -2136,6 +2142,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(
         &state,
@@ -2150,7 +2157,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
     );
     assert!(prompts.lock().unwrap()[1].contains("That did not work"));
 
-    let (streamer, _) = scripted(vec![
+    let (streamer, ended) = scripted(vec![
         "<tool>{\"name\": \"end_session\"}</tool>",
         "Good work today.",
     ]);
@@ -2159,6 +2166,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into()],
         closed: vec![false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(&state, "that's enough for today", None, Some(open), None);
     assert!(
@@ -2166,6 +2174,19 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
             .iter()
             .any(|l| l.get("session_end") == Some(&serde_json::json!(true))),
         "{lines:?}"
+    );
+    let prompts = ended.lock().unwrap();
+    assert!(
+        prompts[0].contains("<study_session>\nIdeas: 1 Root (open)."),
+        "{}",
+        prompts[0]
+    );
+    assert!(!prompts[0].contains("leave out the answer"));
+    assert!(prompts[1].contains(tools::ENDED));
+    assert!(
+        prompts[1].contains("Not shown yet: Root."),
+        "{}",
+        prompts[1]
     );
 }
 
