@@ -173,6 +173,9 @@ pub fn label(
             return Err("Finish now was pressed".into());
         }
         let samples = audio.samples(start_ms, end_ms)?;
+        if crate::ai::live::is_silent(wav::peak(&samples)) {
+            continue;
+        }
         let file = tempfile::Builder::new()
             .prefix(".speaker-")
             .suffix(".wav")
@@ -181,6 +184,11 @@ pub fn label(
         wav::write(file.path(), &samples).map_err(|e| e.to_string())?;
         let text = transcribe(file.path())?;
         let text = text.trim();
+        let text = if crate::ai::live::is_silence_artifact(text) {
+            ""
+        } else {
+            text
+        };
         match spoken.last_mut() {
             _ if text.is_empty() => {}
             Some(last) if last.speaker == speaker => {

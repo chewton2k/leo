@@ -826,7 +826,8 @@ impl Owner {
             Ok(other) => Err(unexpected(&other).into()),
             Err(failure) => {
                 if failure.worker_lost() {
-                    self.worker_lost("speaker detection", &failure);
+                    self.worker = None;
+                    *lock(&self.shared.loaded) = None;
                 }
                 Err(failure.into())
             }

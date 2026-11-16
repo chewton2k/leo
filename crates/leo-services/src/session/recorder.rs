@@ -621,17 +621,21 @@ fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBo
     });
     let parts = session.segments().len() as u32;
     let started = Instant::now();
-    let labelled = session::speakers::label(
-        &session.dir,
-        parts,
-        &|parts| {
-            crate::speech::engine::engine()
-                .diarize(parts)
-                .map_err(|e| e.to_string())
-        },
-        &|path| transcribe_segment()(path),
-        finish_now,
-    );
+    let labelled = if parts > kept_parts(session) {
+        Err("the recording is longer than two hours".to_string())
+    } else {
+        session::speakers::label(
+            &session.dir,
+            parts,
+            &|parts| {
+                crate::speech::engine::engine()
+                    .diarize(parts)
+                    .map_err(|e| e.to_string())
+            },
+            &|path| transcribe_segment()(path),
+            finish_now,
+        )
+    };
     let spoken = labelled.unwrap_or_else(|problem| {
         session.trace("speakers-skipped", &problem);
         emit(Event::Warning(format!(

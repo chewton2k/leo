@@ -51,6 +51,13 @@ struct Job {
 enum Message {
     Run(Job),
     Warm(Selected),
+    Diarize {
+        selected: Selected,
+        speakers: std::path::PathBuf,
+        parts: Vec<(std::path::PathBuf, u64)>,
+        samples: usize,
+        reply: mpsc::SyncSender<Result<Vec<super::Turn>>>,
+    },
     Stream {
         selected: Selected,
         words: Vec<String>,
@@ -192,15 +199,8 @@ impl Engine {
             "The speech engine is stopping."
         );
         let library = super::library::library()?;
-        let model = library.speaker_model()?;
-        if !self.loaded() {
-            self.warm(library.selected()?);
-            let until = Instant::now() + Duration::from_secs(180);
-            while !self.loaded() {
-                ensure!(Instant::now() < until, "The speech model did not load.");
-                std::thread::sleep(Duration::from_millis(50));
-            }
-        }
+        let speakers = library.speaker_model()?;
+        let selected = library.selected()?;
         let samples = parts
             .iter()
             .map(|(path, skip_ms)| {
@@ -209,9 +209,19 @@ impl Engine {
                     .saturating_sub(*skip_ms as usize * 16)
             })
             .sum();
-        self.supervisor
-            .diarize(model, parts, samples)
-            .map_err(|e| anyhow::anyhow!("{e}"))
+        let (reply, answer) = mpsc::sync_channel(1);
+        self.requests
+            .send(Message::Diarize {
+                selected,
+                speakers,
+                parts,
+                samples,
+                reply,
+            })
+            .map_err(|_| anyhow::anyhow!("The speech engine is stopping."))?;
+        answer
+            .recv()
+            .map_err(|_| anyhow::anyhow!("The speech engine is stopping."))?
     }
 
     pub fn warm(&self, selected: Selected) {
@@ -518,6 +528,27 @@ fn run(
         for message in &mut incoming {
             match message {
                 Message::Run(job) => pending.push(job),
+                Message::Diarize {
+                    selected,
+                    speakers,
+                    parts,
+                    samples,
+                    reply,
+                } => {
+                    let result = (|| -> Result<Vec<super::Turn>> {
+                        if model.as_ref() != Some(&selected.path) || supervisor.loaded().is_none() {
+                            supervisor.load(LoadSpec {
+                                path: selected.path.clone(),
+                                backend: Backend::Auto,
+                                device: DeviceSelector::Auto,
+                            })?;
+                            model = Some(selected.path.clone());
+                        }
+                        Ok(supervisor.diarize(speakers, parts, samples)?)
+                    })();
+                    let _ = reply.send(result);
+                    last_work = Instant::now();
+                }
                 Message::Warm(selected) => {
                     let pinned_elsewhere = pins.load(Ordering::Acquire) > 0
                         && model.as_ref().is_some_and(|path| path != &selected.path);
