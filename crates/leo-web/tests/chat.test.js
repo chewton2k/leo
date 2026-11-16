@@ -369,7 +369,7 @@ test('a hint asks for a nudge without the answer, and every mark explains itself
   const free = C.quizSay({ kind: 'free_response', question: 'Why?', answer: 'Because.' }, 'dunno', null);
   assert.ok(free.includes('intuitive shortcut or tip') && free.includes('praise me briefly'));
   for (const said of [right, free]) assert.ok(said.includes('only for what my answer and thinking show (a guess is not reasoning)'));
-  for (const said of [wrong, right, free]) assert.ok(said.includes('give it once, at the very end'));
+  for (const said of [wrong, right, free]) assert.ok(!said.includes('score'));
 });
 
 test('each further hint knows the hints already given and goes one step further', () => {
@@ -408,32 +408,43 @@ test('a selected passage travels with its message into the history Felix reads',
 
 
 
-test('a study session closes ideas on a right answer or two misses, and finishes when all are closed', () => {
+test('a study session closes an idea on two counted right answers or two misses, and finishes when all are closed', () => {
   const s = C.startSession(['Root', 'Sift down', 'Heap sort', '  ']);
   assert.deepEqual(s.ideas, ['Root', 'Sift down', 'Heap sort']);
   C.scoreSession(s, { idea: 1 }, true);
-  assert.equal(s.outcomes[0].state, 'first');
+  assert.equal(s.outcomes[0].state, 'open', 'one right answer is not enough');
+  assert.equal(s.outcomes[0].right, 1);
+  const again = { idea: 1 };
+  C.scoreSession(s, again, true);
+  C.scoreSession(s, again, true);
+  assert.equal(s.outcomes[0].state, 'first', 'a second right answer closes it, and scoring one quiz twice counts once');
+  assert.equal(s.outcomes[0].right, 2);
   C.scoreSession(s, { idea: 2, more: true }, false);
   C.scoreSession(s, { idea: 2, more: true }, true);
-  assert.equal(s.outcomes[1].state, 'open', 'a right step of a multi-part problem does not close it');
   C.scoreSession(s, { idea: 2, sure: 'guess' }, true);
-  assert.equal(s.outcomes[1].state, 'open', 'a right guess does not close it');
   C.scoreSession(s, { idea: 2, hints: [{ text: 'Look at the root.' }] }, true);
-  assert.equal(s.outcomes[1].state, 'open', 'a right answer after hints does not close it');
+  assert.equal(s.outcomes[1].right, 0, 'a step of a worked problem, a guess and a hinted answer never count');
   C.scoreSession(s, { idea: 2, sure: 'sure' }, true);
+  assert.equal(s.outcomes[1].state, 'open');
+  C.scoreSession(s, { idea: 2 }, true);
   assert.equal(s.outcomes[1].state, 'done');
   C.scoreSession(s, { idea: 1 }, false);
   assert.equal(s.outcomes[0].state, 'first', 'a closed idea stays closed');
   C.scoreSession(s, { idea: 3 }, null);
   assert.equal(s.outcomes[2].state, 'open', 'no verdict, no change');
-  assert.deepEqual(C.sessionBody(s), { ideas: ['Root', 'Sift down', 'Heap sort'], closed: [true, true, false], asked: 0 });
+  C.scoreSession(s, { idea: 3 }, true);
+  assert.deepEqual(C.sessionBody(s), { ideas: ['Root', 'Sift down', 'Heap sort'], closed: [true, true, false], asked: 0, right: [2, 2, 1], misses: [0, 1, 0] });
+  assert.deepEqual(C.sessionSummary(s), { total: 3, covered: 2, first: 1, review: [], once: ['Heap sort'], skipped: [] });
   C.scoreSession(s, { idea: 3 }, false);
   C.scoreSession(s, { idea: 3 }, false);
   assert.equal(s.outcomes[2].state, 'review');
   assert.equal(s.state, 'finishing');
-  assert.deepEqual(C.sessionSummary(s), { total: 3, covered: 3, first: 1, review: ['Heap sort'], skipped: [] });
+  assert.deepEqual(C.sessionSummary(s), { total: 3, covered: 3, first: 1, review: ['Heap sort'], once: [], skipped: [] });
   s.state = 'finished';
   assert.equal(C.sessionBody(s), null);
+  const saved = { ideas: ['A'], outcomes: [{ state: 'open', misses: 0 }], asked: 1, state: 'active' };
+  C.scoreSession(saved, { idea: 1 }, true);
+  assert.equal(saved.outcomes[0].right, 1, 'a session saved before right counts starts from zero');
   const capped = C.startSession(['A', 'B']);
   capped.asked = 20;
   C.scoreSession(capped, { idea: 1 }, true);
@@ -916,15 +927,15 @@ test('a confirmed verdict overrides a conflicting hidden marker without changing
   }
 });
 
-test('an answer Felix marks right closes its idea only when it was neither a guess nor one of more parts', async () => {
-  for (const [extra, state] of [[{ sure: 'guess' }, 'open'], [{ more: true }, 'open'], [{ sure: 'sure' }, 'first']]) {
+test('an answer Felix marks right counts toward its idea only when it was neither a guess nor one of more parts', async () => {
+  for (const [extra, right] of [[{ sure: 'guess' }, 0], [{ more: true }, 0], [{ sure: 'sure' }, 1]]) {
     const session = C.startSession(['Queue order', 'Visited nodes']);
     const fixture = chatSendFixture('practice', 'ask', undefined, { session, events: [{ t: '[[correct]] The oldest item leaves first.' }, { done: true }] });
     const quiz = { kind: 'free_response', question: 'What leaves first?', answer: 'The oldest item.', correct: null, idea: 1, ...extra };
     fixture.state.messages.push({ role: 'user', text: 'Practise queues.' }, { role: 'assistant', text: '', quizzes: [quiz] });
     await fixture.send('The oldest item.', { card: quiz, say: C.quizSay(quiz, 'The oldest item.', null) });
     assert.equal(quiz.correct, true);
-    assert.equal(session.outcomes[0].state, state, JSON.stringify(extra));
+    assert.equal(session.outcomes[0].right, right, JSON.stringify(extra));
   }
 });
 
@@ -965,7 +976,6 @@ test('a prediction is an attempt before teaching, so it is never marked', async 
   assert.equal(fixture.requests[0].practice, true);
   assert.equal(quiz.correct, null);
   assert.equal(fixture.state.messages.at(-1).quizzes[0].question, 'Check');
-  assert.equal(fixture.state.messages.at(-1).quizzes[0].more, true, 'the check after a prediction follows teaching, so it keeps the idea open');
 });
 
 test('how sure the user felt and their thinking reach Felix on the answer line', () => {

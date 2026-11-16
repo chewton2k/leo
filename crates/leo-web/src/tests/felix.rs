@@ -2097,6 +2097,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, true],
         asked: 2,
+        ..Default::default()
     };
     let lines = chat_lines_in(&state, "[[correct]] yes", None, Some(covered), None);
     assert!(lines.iter().all(|l| l.get("quiz").is_none()), "{lines:?}");
@@ -2115,6 +2116,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(
         &state,
@@ -2136,6 +2138,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into(), "Sift down".into()],
         closed: vec![true, false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(
         &state,
@@ -2159,6 +2162,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
         ideas: vec!["Root".into()],
         closed: vec![false],
         asked: 1,
+        ..Default::default()
     };
     let lines = chat_lines_in(&state, "that's enough for today", None, Some(open), None);
     assert!(
@@ -2167,7 +2171,18 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
             .any(|l| l.get("session_end") == Some(&serde_json::json!(true))),
         "{lines:?}"
     );
-    assert!(ended.lock().unwrap()[1].contains(tools::ENDED));
+    let prompts = ended.lock().unwrap();
+    assert!(
+        prompts[0].contains("<study_session>\nIdeas: 1 Root (open)."),
+        "{}",
+        prompts[0]
+    );
+    assert!(prompts[1].contains(tools::ENDED));
+    assert!(
+        prompts[1].contains("Not shown yet: Root."),
+        "{}",
+        prompts[1]
+    );
 }
 
 #[test]

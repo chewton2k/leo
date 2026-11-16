@@ -4505,7 +4505,7 @@ test.describe('passages', () => {
 });
 
 test.describe('study sessions', () => {
-  test('a session shows its ideas, ticks one off, and ends with a recap', async ({ page }) => {
+  test('a session shows its ideas, ticks one off after two right answers, and ends with a recap', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: 'Heaps', body: 'A heap keeps the minimum at the root.' } })).json();
     const asked = [];
     await page.route('**/api/chat', async (route) => {
@@ -4513,7 +4513,7 @@ test.describe('study sessions', () => {
       const source = { n: 1, id: note.id, title: 'Heaps', folder: '', why: 'open' };
       const lines = asked.length === 1
         ? [{ sources: [source] }, { step: 'Planned a study session', tool: 'study_plan', found: [] }, { plan: { ideas: ['Root', 'Sift down'] } }, { quiz: { kind: 'multiple_choice', question: 'What sits at the root?', options: ['the minimum', 'the maximum'], answer: 'the minimum', idea: 1 } }, { t: 'First one.' }, { done: true }]
-        : [{ sources: [source] }, { t: '[[correct]] Yes, the minimum.' }, { done: true }];
+        : [{ sources: [source] }, { quiz: { kind: 'multiple_choice', question: 'Where is the smallest key of a min-heap?', options: ['at the root', 'in a leaf'], answer: 'at the root', idea: 1 } }, { done: true }];
       await route.fulfill({ status: 200, headers: { 'content-type': 'application/x-ndjson' }, body: lines.map((l) => JSON.stringify(l)).join('\n') + '\n' });
     });
     await page.goto(`/#/n/${note.id}`);
@@ -4528,15 +4528,18 @@ test.describe('study sessions', () => {
     await expect(progress.locator('.study-idea.now')).toHaveText('Root');
     await expect(progress.locator('.study-mark')).toHaveCount(2);
     await chat.locator('.quiz-card button', { hasText: 'the minimum' }).first().click();
-    await expect(progress).toContainText('1 of 2');
-    await expect(progress.locator('.study-idea.first .study-mark')).toHaveAttribute('aria-label', 'right the first time');
-    await expect(progress.locator('.study-idea.first .study-ok')).toHaveCount(1);
-    await expect(progress.locator('.study-idea.open .study-mark')).toHaveAttribute('aria-label', 'not yet');
-    await expect(progress.locator('.study-idea.now')).toHaveCount(0);
+    await expect(progress).toContainText('0 of 2');
+    await expect(progress.locator('.study-ok.study-once')).toHaveCount(1);
+    await expect(progress.locator('.study-idea').first().locator('.study-mark')).toHaveAttribute('aria-label', 'right once, one more to go');
+    await expect(progress.locator('.study-idea').nth(1).locator('.study-mark')).toHaveAttribute('aria-label', 'not yet');
     await chat.locator('.quiz-card [data-chat="quiz-next"]').click();
     await expect.poll(() => asked.length).toBe(2);
-    expect(asked[1].session).toEqual({ ideas: ['Root', 'Sift down'], closed: [true, false], asked: 1 });
+    expect(asked[1].session).toEqual({ ideas: ['Root', 'Sift down'], closed: [false, false], asked: 1, right: [1, 0], misses: [0, 0] });
+    await chat.locator('.quiz-card button', { hasText: 'at the root' }).first().click();
     await expect(progress).toContainText('1 of 2');
+    await expect(progress.locator('.study-idea.first .study-mark')).toHaveAttribute('aria-label', 'right twice, never missed');
+    await expect(progress.locator('.study-idea.first .study-ok')).toHaveCount(1);
+    await expect(progress.locator('.study-once')).toHaveCount(0);
     await expect(progress.locator('.study-idea.first')).toContainText('Root');
     await progress.locator('[data-chat="session-finish"]').click();
     await expect(progress).toBeHidden();

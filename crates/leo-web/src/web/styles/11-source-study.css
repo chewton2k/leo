@@ -54,6 +54,7 @@ body.source-resizing iframe { pointer-events: none; }
 .study-ring { stroke: currentColor; stroke-width: 1.1; }
 .study-idea.now .study-ring { stroke-width: 1.6; }
 .study-ok { stroke: var(--chalk-good); stroke-width: 1.8; }
+.study-once { stroke-dasharray: 2 2.4; }
 .study-no { stroke: var(--chalk-bad); stroke-width: 1.7; }
 @media (forced-colors: active) { .study-mark { forced-color-adjust: none; -webkit-mask: none; mask: none; } .study-mark path { stroke: CanvasText; } }
 .study-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }

@@ -673,18 +673,22 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   ends when the goal seems obvious. Practice runs each idea through recall, then
   telling it from its look-alike, then combining, with `more_parts` keeping the
   idea open; hints go one rung at a time; retests use a new situation.
-  From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea counts
-  as shown only by a right answer away from the teaching, so a lesson's check right
-  after a step carries `more_parts` (the last step's too; `PLANNED` repeats it, and
-  the page sets `more` itself on a quiz that arrives in the reply to a prediction, and
-  on one about the idea whose answer that reply marks wrong) and
-  the idea closes on a later question with a new case, so a lesson plans at most six
-  ideas and comes back once to every open idea before it finishes; an answer asked for outright is given and its
+  From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea closes
+  only after two right answers to separate questions (the user's call), so a lesson
+  plans at most six ideas, asks what the learner must be able to do, checks code by
+  having it written, and comes back once to every open idea before it finishes. Each
+  study turn's prompt starts with `<study_session>` (`Session::state`, from the page's
+  `sessionBody`: each idea done, right once, open or to look at again, with misses,
+  questions asked and "ask next about an idea still open"; the counts leave out the
+  answer being marked in that reply), so Felix numbers ideas without refused calls;
+  refusals tell him to correct the call without mentioning it, since prose before a
+  tool call streams to the page. An answer asked for outright is given and its
   idea retested later with a new case; harder or easier changes the next question,
   never the plan; Practice adds a plausible wrong solution to find the flaw in, a
   last question that needs earlier ideas and, for a skill, doing it; readiness is
-  judged only from unaided answers; recaps (`ENDED`, `SESSION_DONE`) name ideas
-  still open or only told. A
+  judged only from unaided answers; `ENDED` and `SESSION_DONE` end with
+  `Session::unshown` (ideas not shown yet, right once only, missed twice). Felix
+  keeps no running score (2026-11-16, the user's call). A
   prediction is `quiz` with `predict: yes`: free_response only, shown as Predict,
   never marked (`quizSay` says so, the request sends `mark: false`), never scored,
   not counted in `session.asked` and never a missed question in review. Other
@@ -696,11 +700,13 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   answering the thinking, while the page keeps its own verdict) (2026-11-09, the user's call). Both go to `/api/quiz/mark` (`confidence` is
   validated, `thinking` bounded and sealed) and to Felix inside the answer line
   (`aside`), which must stay one line: `send` folds held results by taking their
-  first three lines. A right guess leaves its idea open for one retest, whether
-  the page or Felix marks it (`scoreSession(session, quiz, correct)` reads `idea`,
-  `more`, `sure` and `hints` from the quiz; a right answer after hints stays open
-  too and its history line says "after hints"), the recap card lists open ideas as
-  "Not shown yet", and `quizSay` asks Felix to praise only what the
+  first three lines. `scoreSession(session, quiz, correct)` reads `idea`, `more`,
+  `sure` and `hints` from the quiz and counts a right answer toward its idea's two
+  only when it is not a guess, not after hints and not `more` (a step, or the page's
+  `more` on a question about the idea the same reply marked wrong); each quiz is
+  scored once (`scored`), and a saved outcome without `right` starts from zero. A
+  hinted answer's history line says "after hints". The recap card lists "Right once"
+  and "Not shown yet", and `quizSay` asks Felix to praise only what the
   answer and thinking show. A typed
   "I do not know" needs no button: it is marked as a miss and Felix treats it as
   a gap.
@@ -738,7 +744,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   carry `idea`, the page scores ideas and stops at `MOST_SESSION_QUESTIONS`.
   The study strip draws a 15 px pencil circle before each idea (three shapes by
   position): empty until it is right or set aside, holding the quiz's chalk check
-  (right) or × (to look at again), and a heavier ring while the newest quiz on that
+  (right twice), the same check dashed (`.study-once`, "right once, one more to go",
+  so forced colours keep it) or × (to look at again), and a heavier ring while the newest quiz on that
   idea is unanswered; names stay in `--muted`, the ringed one in `--text`, with no
   green or red text (2026-11-15). Each circle has `role="img"` and a label; forced
   colours draw it in CanvasText.

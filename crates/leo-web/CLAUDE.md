@@ -453,11 +453,14 @@ the web (root CLAUDE.md).
   `chats.mode` column stays for old rows; request and saved `mode` are ignored.
 - LearnHarness is AGPL-3.0 and leo is MIT: borrow its method only in our own
   words, never paste its prompts or code. Jane Street's socratic-tutor (MIT) lent
-  the rule that an idea is shown only away from its teaching (2026-11-16): a
-  lesson's check after a step carries `more_parts`, so the idea closes on a later
-  question (the page sets `more` itself on the check after a prediction and on a
-  retest of the idea just marked wrong); `scoreSession` takes the quiz, so a right guess or a right answer
-  after hints stays open on both marking paths.
+  the rule that an idea is shown only by two right answers (2026-11-16, the user's
+  call): `scoreSession(session, quiz, correct)` counts a right answer that is not a
+  guess, not after hints, not a step with `more` and not a retest right after a miss
+  (the page sets `more` on that one), and closes the idea at two. Each study turn
+  starts with `Session::state` (`<study_session>`: every idea's standing and what to
+  ask next), so Felix picks open ideas without refused calls, and `ENDED` and
+  `SESSION_DONE` carry `Session::unshown`. Refusals say to correct the call without
+  mentioning it. Felix keeps no running score.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
   ten idle minutes, Settings changes clear all; eviction and process cleanup run
   outside the slot mutex and off async workers. Only unchanged history plus the

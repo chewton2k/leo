@@ -253,7 +253,7 @@ pub const SPECS: [Spec; 32] = [
             Param {
                 name: "more_parts",
                 required: false,
-                about: "yes when another question on this idea must follow: a worked problem's steps but the last, or a check right after you taught the step; leave it out on the question that closes the idea",
+                about: "yes when this is one step of a worked problem and more steps of the same idea follow; leave it out on the last step",
             },
             Param {
                 name: "predict",
@@ -813,7 +813,7 @@ pub fn manual_for(access: Access) -> String {
     };
     let outside = "Your own web search, if you have it, is fine for outside or current facts: use it, and say which parts came from the web. If you cannot search, say so before answering from memory. For anything in the user's notes, use the tools below.";
     format!(
-        "## Your tools\nLeo's tools are always available through this text protocol, even when your CLI tools are disabled. They are not native CLI tools: do not call them through your own tool/function system.\n{outside}\nReply with exactly one line and nothing else: <tool>{{\"name\":\"TOOL\",\"parameter\":\"value\"}}</tool>\nInside is one JSON object: name selects the tool and every value is a string. Optional parameters have ?; others are required. Escape newlines as \\n. A data parameter encodes JSON inside its string, e.g. \"data\":\"{{\\\"field\\\":\\\"value\\\"}}\".\nOne tool per reply. Leo returns <tool_result name=\"TOOL\">...</tool_result>; continue with another tool or answer. If a result starts \"That did not work:\", correct the call. {limits} Discovered notes use ids like n7; cite [n7].\n\n{}\n\n{TOOL_USE}\n{when}",
+        "## Your tools\nLeo's tools are always available through this text protocol, even when your CLI tools are disabled. They are not native CLI tools: do not call them through your own tool/function system.\n{outside}\nReply with exactly one line and nothing else: <tool>{{\"name\":\"TOOL\",\"parameter\":\"value\"}}</tool>\nInside is one JSON object: name selects the tool and every value is a string. Optional parameters have ?; others are required. Escape newlines as \\n. A data parameter encodes JSON inside its string, e.g. \"data\":\"{{\\\"field\\\":\\\"value\\\"}}\".\nOne tool per reply. Leo returns <tool_result name=\"TOOL\">...</tool_result>; continue with another tool or answer. If a result starts \"That did not work:\", correct the call without mentioning it. {limits} Discovered notes use ids like n7; cite [n7].\n\n{}\n\n{TOOL_USE}\n{when}",
         tools.join("\n\n"),
     )
 }
@@ -876,7 +876,7 @@ pub fn guidance_for(access: Access) -> String {
     };
     let outside = "Your own web search, if you have it, is fine for outside or current facts: say which parts came from the web. If you cannot search, say so before answering from memory.";
     format!(
-        "## Your tools\nCall Leo tools, batching independent reads. {outside} A result starting \"That did not work:\" explains how to correct the call. {limits} Discovered notes use ids like n7; cite [n7].\n{TOOL_USE}\n{when}"
+        "## Your tools\nCall Leo tools, batching independent reads. {outside} A result starting \"That did not work:\" explains how to correct the call; correct it without mentioning it. {limits} Discovered notes use ids like n7; cite [n7].\n{TOOL_USE}\n{when}"
     )
 }
 
@@ -1584,6 +1584,10 @@ pub struct Session {
     pub closed: Vec<bool>,
     #[serde(default)]
     pub asked: usize,
+    #[serde(default)]
+    pub right: Vec<usize>,
+    #[serde(default)]
+    pub misses: Vec<usize>,
 }
 
 impl Session {
@@ -1611,13 +1615,78 @@ impl Session {
     }
 }
 
+impl Session {
+    fn named(&self, i: usize) -> String {
+        clip_chars(&self.ideas[i], 40).replace(['<', '>'], "")
+    }
+
+    fn how(&self, i: usize) -> &'static str {
+        let right = self.right.get(i).copied().unwrap_or(0);
+        if self.closed.get(i).copied().unwrap_or(false) {
+            if right >= 2 {
+                "done"
+            } else {
+                "to look at again"
+            }
+        } else if right > 0 {
+            "right once"
+        } else {
+            "open"
+        }
+    }
+
+    pub fn state(&self) -> String {
+        let ideas: Vec<String> = (0..self.ideas.len())
+            .map(|i| {
+                let missed = self.misses.get(i).copied().unwrap_or(0);
+                let missed = if missed > 0 {
+                    format!(", {missed} missed")
+                } else {
+                    String::new()
+                };
+                format!("{} {} ({}{missed})", i + 1, self.named(i), self.how(i))
+            })
+            .collect();
+        format!(
+            "<study_session>\nIdeas: {}.\nAsked {} of {MOST_SESSION_QUESTIONS}. leo closes an idea after two right answers to separate questions, not guessed and not after hints. Ask next about an idea still open, by its number. These counts leave out the answer you are marking now.\n</study_session>\n\n",
+            ideas.join("; "),
+            self.asked
+        )
+    }
+
+    pub fn unshown(&self) -> String {
+        let pick = |how: &str| -> Vec<String> {
+            (0..self.ideas.len())
+                .filter(|&i| self.how(i) == how)
+                .map(|i| self.named(i))
+                .collect()
+        };
+        let mut said = String::new();
+        for (how, label) in [
+            ("open", "Not shown yet"),
+            ("right once", "Right once only"),
+            ("to look at again", "Missed twice"),
+        ] {
+            let ideas = pick(how);
+            if !ideas.is_empty() {
+                said.push_str(&format!(" {label}: {}.", ideas.join("; ")));
+            }
+        }
+        if said.is_empty() {
+            said
+        } else {
+            format!(" Before the answer just marked, leo's record says:{said} Say so in the recap.")
+        }
+    }
+}
+
 fn clip_chars(text: &str, most: usize) -> String {
     text.chars().take(most).collect()
 }
 
 pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached 20 questions). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript.";
 pub const PLANNED: &str =
-    "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz, which takes more_parts because it follows your teaching.";
+    "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz.";
 pub const ENDED: &str = "Ended. Write the recap in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript. Ask nothing more.";
 
 pub fn plan_from(call: &Call) -> Result<Vec<String>, String> {
@@ -2836,6 +2905,38 @@ mod tests {
     }
 
     #[test]
+    fn the_session_state_says_where_each_idea_stands_and_what_is_left() {
+        let session = Session {
+            ideas: vec![
+                "Root".into(),
+                "Sift <down>".into(),
+                "Build".into(),
+                "Sort".into(),
+            ],
+            closed: vec![true, false, true, false],
+            asked: 7,
+            right: vec![2, 1, 0, 0],
+            misses: vec![0, 1, 2, 0],
+        };
+        let state = session.state();
+        assert!(state.contains("Ideas: 1 Root (done); 2 Sift down (right once, 1 missed); 3 Build (to look at again, 2 missed); 4 Sort (open)."), "{state}");
+        assert!(state.contains("Asked 7 of 20."));
+        let unshown = session.unshown();
+        assert!(
+            unshown
+                .contains("Not shown yet: Sort. Right once only: Sift down. Missed twice: Build."),
+            "{unshown}"
+        );
+        let done = Session {
+            ideas: vec!["Root".into()],
+            closed: vec![true],
+            right: vec![2],
+            ..Default::default()
+        };
+        assert_eq!(done.unshown(), "");
+    }
+
+    #[test]
     fn a_recap_names_what_the_user_has_not_shown_yet() {
         for recap in [SESSION_DONE, ENDED] {
             assert!(recap.contains("any idea still open or only told (not shown yet)"));
@@ -2843,13 +2944,7 @@ mod tests {
         let more = spec_of("quiz")
             .and_then(|s| s.params.iter().find(|p| p.name == "more_parts"))
             .unwrap();
-        assert!(more
-            .about
-            .contains("a check right after you taught the step"));
-        assert!(more
-            .about
-            .contains("leave it out on the question that closes the idea"));
-        assert!(PLANNED.contains("which takes more_parts because it follows your teaching"));
+        assert!(more.about.contains("leave it out on the last step"));
     }
 
     #[test]
@@ -2858,6 +2953,7 @@ mod tests {
             ideas: vec!["Heaps".into(), "Sift down".into()],
             closed: vec![true, false],
             asked: 3,
+            ..Default::default()
         };
         assert!(session.check(Some(2)).is_ok());
         let why = session.check(Some(1)).unwrap_err();
@@ -2871,6 +2967,7 @@ mod tests {
             ideas: vec!["A".into()],
             closed: vec![false],
             asked: MOST_SESSION_QUESTIONS,
+            ..Default::default()
         };
         assert!(capped.over());
         let quiz = quiz_from(&call_of(r#"{"name": "quiz", "kind": "free_response", "question": "Next step?", "answer": "x", "idea": "2", "more_parts": "yes"}"#)).unwrap();

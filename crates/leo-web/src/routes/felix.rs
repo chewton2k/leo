@@ -645,7 +645,11 @@ fn interact(
     let mut one_idea = None;
     if call.name == "quiz" && desk.session.is_some() {
         if desk.session_over || desk.session.as_ref().is_some_and(tools::Session::over) {
-            return silent(tools::SESSION_DONE);
+            let unshown = desk
+                .session
+                .as_ref()
+                .map_or_else(String::new, tools::Session::unshown);
+            return silent(&format!("{}{unshown}", tools::SESSION_DONE));
         }
         let idea = tools::quiz_from(call).ok().and_then(|q| q.idea);
         if let Some(session) = desk.session.as_ref() {
@@ -787,6 +791,7 @@ fn execute_tool(
                     closed: vec![false; ideas.len()],
                     ideas,
                     asked: 0,
+                    ..Default::default()
                 });
                 desk.session_over = false;
                 tools::Done {
@@ -814,9 +819,13 @@ fn execute_tool(
             send(serde_json::json!({ "session_end": true }));
         }
         desk.session_over = true;
+        let unshown = desk
+            .session
+            .as_ref()
+            .map_or_else(String::new, tools::Session::unshown);
         tools::Done {
             step: "Ended the study session".into(),
-            result: tools::ENDED.into(),
+            result: format!("{}{unshown}", tools::ENDED),
             proposal: None,
             found: Vec::new(),
         }
@@ -864,7 +873,7 @@ fn execute_tool(
     };
     if desk.marking
         && matches!(call.name.as_str(), "quiz" | "end_session")
-        && matches!(done.result.as_str(), tools::ASKED | tools::ENDED)
+        && (done.result == tools::ASKED || done.result.starts_with(tools::ENDED))
     {
         desk.verdict = match call.text("verdict").as_str() {
             "correct" => Some("correct"),
@@ -2135,6 +2144,16 @@ pub(crate) async fn chat_reply(
                 .iter()
                 .all(|i| i.chars().count() <= tools::MOST_IDEA_CHARS)
     });
+    if let Some(line) = body_session
+        .as_ref()
+        .filter(|s| !s.over())
+        .map(tools::Session::state)
+    {
+        user = format!("{line}{user}");
+        if let Some(c) = continued.as_mut() {
+            c.text = format!("{line}{}", c.text);
+        }
+    }
     let (tx, rx) = crate::reply::channel();
     let steer = state.steering.open();
     let _ = state.steering.set_access(steer.id(), access);
