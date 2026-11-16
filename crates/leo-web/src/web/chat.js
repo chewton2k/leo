@@ -2924,9 +2924,10 @@
               // A new question moves the practice on: older cards lose Next question.
               for (const m of thread.messages) if (m !== answer) for (const q of m.quizzes || []) if (q.told) q.held = false;
               const idea = Number(e.quiz.idea) || 0;
+              const retold = Boolean(card && card.idea && idea === card.idea && (card.correct === false || grade(answer.text).verdict === 'incorrect'));
               const s = currentSession();
               if (s && s.state === 'active' && idea && !e.quiz.predict) s.asked += 1;
-              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more || (card && card.predict && !e.quiz.predict) ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
+              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more || retold || (card && card.predict && !e.quiz.predict) ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
             }
             if (e.reset) {
               answer.text = '';

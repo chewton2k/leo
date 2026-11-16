@@ -928,6 +928,16 @@ test('an answer Felix marks right closes its idea only when it was neither a gue
   }
 });
 
+test('a question on the idea just missed comes right after the explanation, so it keeps the idea open', async () => {
+  for (const [verdict, idea, more] of [['incorrect', 1, true], ['incorrect', 2, undefined], ['correct', 1, undefined]]) {
+    const fixture = chatSendFixture('practice', 'ask', undefined, { events: [{ t: `[[${verdict}]] The oldest item leaves first.` }, { quiz: { kind: 'free_response', question: 'And now?', answer: 'x', idea } }, { done: true }] });
+    const quiz = { kind: 'free_response', question: 'What leaves first?', answer: 'The oldest item.', correct: null, idea: 1 };
+    fixture.state.messages.push({ role: 'user', text: 'Practise queues.' }, { role: 'assistant', text: '', quizzes: [quiz] });
+    await fixture.send('The newest item.', { card: quiz, say: C.quizSay(quiz, 'The newest item.', null) });
+    assert.equal(fixture.state.messages.at(-1).quizzes[0].more, more, `${verdict} ${idea}`);
+  }
+});
+
 test('a quiz answer leo already marked tells Felix not to repeat it, and how to go on', () => {
   const right = C.heldSay({ question: 'What does BFS use?', given: 'a queue', correct: true, answer: 'a queue', kind: 'multiple_choice' }, false);
   assert.match(right, /leo marked it right/);
