@@ -46,7 +46,6 @@ objc2-av-foundation = "0.3"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
-notify-rust = { version = "4.19", features = ["preview-macos-un"] }
 mac-usernotifications = "0.3.1"
 
 [target.'cfg(windows)'.dependencies]

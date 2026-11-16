@@ -23,26 +23,48 @@ pub fn listen(app: &AppHandle) {
 
 pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
     let kind = if event.online { "call" } else { "microphone" };
-    let builder = app
+    let title = format!("{} is starting", event.title);
+    let page = format!("{kind}:{}", event.uid);
+    let until = UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64) + OFFER_FOR;
+    #[cfg(target_os = "macos")]
+    {
+        let app = app.clone();
+        let page = page.clone();
+        std::thread::spawn(move || post(&app, title, &page, until));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app
         .notification()
         .builder()
-        .title(format!("{} is starting", event.title))
-        .body("Click to open Record, ready to record it.")
+        .title(title)
+        .body(BODY)
         .extra("uid", &event.uid)
-        .extra("kind", kind);
-    #[cfg(target_os = "macos")]
-    std::thread::spawn(move || {
-        if let Ok(true) = mac_usernotifications::blocking::request_auth() {
-            let _ = builder.show();
-        }
-    });
-    #[cfg(not(target_os = "macos"))]
-    let _ = builder.show();
-    let start = UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64);
-    crate::tray::offer(
-        app,
-        format!("{kind}:{}", event.uid),
-        event.title,
-        start + OFFER_FOR,
+        .extra("kind", kind)
+        .show();
+    crate::tray::offer(app, page, event.title, until);
+}
+
+const BODY: &str = "Click to open Record, ready to record it.";
+
+#[cfg(target_os = "macos")]
+fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime) {
+    use mac_usernotifications::{block_on, blocking, Notification};
+    if !matches!(blocking::request_auth(), Ok(true)) {
+        return;
+    }
+    let Ok(left) = until.duration_since(std::time::SystemTime::now()) else {
+        return;
+    };
+    let sent = block_on(
+        Notification::new()
+            .title(title)
+            .message(BODY)
+            .timeout(left)
+            .send(),
     );
+    if let Ok(shown) = sent {
+        if block_on(shown.response()).is_ok_and(|response| response.is_default_action()) {
+            crate::tray::page(app, "event", page);
+        }
+    }
 }

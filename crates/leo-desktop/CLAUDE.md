@@ -60,20 +60,23 @@ a test, or leave it unset to see the user's own data.
   per click (`__leoAsked`); copying runs off the main thread. A speech model that
   is chosen but not on disk reads "(not downloaded)".
 - Calendar events (2026-11-09, `notify.rs`): `AppApi::event_starting` posts
-  "<title> is starting" with the event uid and kind in `extra`; a tap (`on_action`, which
-  2.8.0 reports on macOS and Windows) shows the window and navigates to
+  "<title> is starting"; a tap (Windows: the plugin's `on_action` with uid and kind in
+  `extra`; macOS: `post`) shows the window and navigates to
   `#/record?event=<uid>&kind=<call|microphone>` through
   `leoFromApp('event', '<kind>:<uid>')` (`page` JSON-quotes its argument). `call`
   when the event's location or description holds an http(s) link
   (`EventStarting.online`), else `microphone`. The page only opens Record ready;
-  it never starts. macOS (2026-11-16): notify-rust's `preview-macos-un` feature
-  moves the plugin onto `UNUserNotificationCenter`, so leo can read its permission.
-  macOS asks once (a notification of its own, easy to miss); until Allow, usernoted
-  drops every post silently (authorization Denied) and a second ask shows nothing. `starting` asks
-  (`mac_usernotifications::blocking::request_auth`, on its own thread: the first ask
-  waits for the user) and posts once allowed; never during onboarding. An unbundled
-  run has no bundle id, so it posts nothing. Health's Notifications row (macOS only,
-  `permissions::notifications`) asks, or opens System Settings → Notifications once denied. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
+  it never starts. macOS (2026-11-16): `notify::post` sends through
+  `mac-usernotifications` (`UNUserNotificationCenter`) on its own thread, not the
+  plugin, whose post is dropped when the main run loop is busy and whose old
+  `NSUserNotificationCenter` path cannot read permission. macOS asks once (a
+  notification of its own, easy to miss); until Allow, usernoted drops every post
+  silently (authorization Denied) and a second ask shows nothing. `post` asks
+  (`request_auth` waits while the question is open), skips an event past
+  start+10 min, closes the banner then, and a click opens Record. Never asked during
+  onboarding; an unbundled run has no bundle id and posts nothing. Health's
+  Notifications row (macOS only, `permissions::notifications`) asks, or opens
+  System Settings → Notifications once denied. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
   characters with an ellipsis) under Record a call until start+10 min, hidden while a recording is live
   (`Running::recording_live`), so a denied or missed notification still has a way in.
 - The window disables Tauri's drag-drop handler (`disable_drag_drop_handler`):
