@@ -21,10 +21,10 @@ test('Study keeps each quiz kind and follows a marked answer with an explicit ne
 
 test('Study sessions retain score and completion independently of a coding workspace', () => {
   const session = C.startSession(['Queue order', 'Visited nodes']);
-  C.scoreSession(session, 1, true, false);
-  C.scoreSession(session, 2, false, false);
+  C.scoreSession(session, { idea: 1 }, true);
+  C.scoreSession(session, { idea: 2 }, false);
   assert.equal(C.sessionBody(session).closed.every(Boolean), false);
-  C.scoreSession(session, 2, false, false);
+  C.scoreSession(session, { idea: 2 }, false);
   assert.equal(C.sessionBody(session).closed.every(Boolean), true);
   assert.deepEqual(C.sessionSummary(session), { total: 2, covered: 2, first: 1, review: ['Visited nodes'], skipped: [] });
 });

@@ -643,8 +643,10 @@
     return { ideas: list, outcomes: list.map(() => ({ state: 'open', misses: 0 })), asked: 0, state: 'active' };
   }
 
-  function scoreSession(session, idea, correct, more) {
+  function scoreSession(session, quiz, correct) {
+    const idea = quiz && quiz.idea;
     if (!session || session.state !== 'active' || !idea || correct === null || correct === undefined) return session;
+    const more = Boolean(quiz.more || quiz.sure === 'guess');
     const outcome = session.outcomes[idea - 1];
     if (!outcome || outcome.state !== 'open') return session;
     if (correct === false) outcome.misses += 1;
@@ -2302,7 +2304,7 @@
       q.correct = correct;
       markedAt.set(q, Date.now());
       if (thinking) q.thinking = thinking;
-      scoreSession(currentSession(), q.idea, correct, q.more || q.sure === 'guess');
+      scoreSession(currentSession(), q, correct);
       delete state.drafts[`${i}:${k}`];
       delete state.drafts[`think:${i}:${k}`];
       if (correct === true) {
@@ -2992,7 +2994,7 @@
         if (!card.predict && (card.correct === null || card.correct === undefined)) {
           const verdict = answer.verdict || grade(answer.text).verdict;
           card.correct = verdict === 'correct' ? true : verdict === 'incorrect' ? false : null;
-          scoreSession(currentSession(), card.idea, card.correct, card.more);
+          scoreSession(currentSession(), card, card.correct);
         }
       }
       const ending = currentSession();

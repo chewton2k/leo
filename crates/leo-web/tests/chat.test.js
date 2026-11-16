@@ -410,20 +410,22 @@ test('a selected passage travels with its message into the history Felix reads',
 test('a study session closes ideas on a right answer or two misses, and finishes when all are closed', () => {
   const s = C.startSession(['Root', 'Sift down', 'Heap sort', '  ']);
   assert.deepEqual(s.ideas, ['Root', 'Sift down', 'Heap sort']);
-  C.scoreSession(s, 1, true, false);
+  C.scoreSession(s, { idea: 1 }, true);
   assert.equal(s.outcomes[0].state, 'first');
-  C.scoreSession(s, 2, false, true);
-  C.scoreSession(s, 2, true, true);
+  C.scoreSession(s, { idea: 2, more: true }, false);
+  C.scoreSession(s, { idea: 2, more: true }, true);
   assert.equal(s.outcomes[1].state, 'open', 'a right step of a multi-part problem does not close it');
-  C.scoreSession(s, 2, true, false);
+  C.scoreSession(s, { idea: 2, sure: 'guess' }, true);
+  assert.equal(s.outcomes[1].state, 'open', 'a right guess does not close it');
+  C.scoreSession(s, { idea: 2, sure: 'sure' }, true);
   assert.equal(s.outcomes[1].state, 'done');
-  C.scoreSession(s, 1, false, false);
+  C.scoreSession(s, { idea: 1 }, false);
   assert.equal(s.outcomes[0].state, 'first', 'a closed idea stays closed');
-  C.scoreSession(s, 3, null, false);
+  C.scoreSession(s, { idea: 3 }, null);
   assert.equal(s.outcomes[2].state, 'open', 'no verdict, no change');
   assert.deepEqual(C.sessionBody(s), { ideas: ['Root', 'Sift down', 'Heap sort'], closed: [true, true, false], asked: 0 });
-  C.scoreSession(s, 3, false, false);
-  C.scoreSession(s, 3, false, false);
+  C.scoreSession(s, { idea: 3 }, false);
+  C.scoreSession(s, { idea: 3 }, false);
   assert.equal(s.outcomes[2].state, 'review');
   assert.equal(s.state, 'finishing');
   assert.deepEqual(C.sessionSummary(s), { total: 3, covered: 3, first: 1, review: ['Heap sort'], skipped: [] });
@@ -431,7 +433,7 @@ test('a study session closes ideas on a right answer or two misses, and finishes
   assert.equal(C.sessionBody(s), null);
   const capped = C.startSession(['A', 'B']);
   capped.asked = 20;
-  C.scoreSession(capped, 1, true, false);
+  C.scoreSession(capped, { idea: 1 }, true);
   assert.equal(capped.state, 'finishing');
 });
 
@@ -536,7 +538,7 @@ function chatSendFixture(id = 'practice', access = 'ask', before = async () => t
   const context = vm.createContext({
     state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), timed: new Set(), MOST_REFS: C.MOST_REFS,
     historyText: C.historyText, modelHistory: C.modelHistory, historyRequest: C.historyRequest, threadRefs: C.threadRefs, recentNotes: C.recentNotes, sessionBody: C.sessionBody, splitLines: C.splitLines, grade: C.grade, scoreSession: C.scoreSession,
-    cardOf: doc => doc, currentSession: () => null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
+    cardOf: doc => doc, currentSession: () => stream.session || null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
     pose: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
     $: () => contextBox, escape: esc,
     onBeforeSend: async args => { prepared.push(args); return before(args); }, notify: message => notices.push(message),
@@ -908,6 +910,18 @@ test('a confirmed verdict overrides a conflicting hidden marker without changing
     assert.equal(quiz.correct, verdict === 'ungraded' ? null : verdict === 'correct');
     assert.equal(C.grade(quiz.reply.text).verdict, verdict === 'ungraded' ? null : verdict);
     assert.equal(C.grade(quiz.reply.text).text.trim(), 'Review the queue invariant.');
+  }
+});
+
+test('an answer Felix marks right closes its idea only when it was neither a guess nor one of more parts', async () => {
+  for (const [extra, state] of [[{ sure: 'guess' }, 'open'], [{ more: true }, 'open'], [{ sure: 'sure' }, 'first']]) {
+    const session = C.startSession(['Queue order', 'Visited nodes']);
+    const fixture = chatSendFixture('practice', 'ask', undefined, { session, events: [{ t: '[[correct]] The oldest item leaves first.' }, { done: true }] });
+    const quiz = { kind: 'free_response', question: 'What leaves first?', answer: 'The oldest item.', correct: null, idea: 1, ...extra };
+    fixture.state.messages.push({ role: 'user', text: 'Practise queues.' }, { role: 'assistant', text: '', quizzes: [quiz] });
+    await fixture.send('The oldest item.', { card: quiz, say: C.quizSay(quiz, 'The oldest item.', null) });
+    assert.equal(quiz.correct, true);
+    assert.equal(session.outcomes[0].state, state, JSON.stringify(extra));
   }
 });
 
