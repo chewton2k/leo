@@ -366,6 +366,7 @@ test('a hint asks for a nudge without the answer, and every mark explains itself
   assert.ok(wrong.includes('do not give a hint') && wrong.includes('why each of the other choices is wrong'));
   const right = C.quizSay(mc, 'x = 2 sin x', true);
   assert.ok(right.includes('praise me briefly in your own words') && right.includes('explain why it is right'));
+  assert.ok(right.includes('only for what my answer and thinking show (a guess is not reasoning)'));
   const free = C.quizSay({ kind: 'free_response', question: 'Why?', answer: 'Because.' }, 'dunno', null);
   assert.ok(free.includes('intuitive shortcut or tip') && free.includes('praise me briefly'));
   for (const said of [wrong, right, free]) assert.ok(said.includes('give it once, at the very end'));

@@ -221,7 +221,7 @@
     const next = stay
       ? 'Only explain this answer: do not ask a new practice question in this reply. I will press Next question when I am ready.'
       : 'If we are practising, ask the next question with the quiz tool so it appears as a card, or in a lesson teach the next step and end with one; never ask a practice question in plain text. If you keep a score, give it once, at the very end of your reply.';
-    const right = 'praise me briefly in your own words, then explain why it is right: the idea behind it, and a quick way to see it or remember it next time';
+    const right = 'praise me briefly in your own words, only for what my answer and thinking show (a guess is not reasoning), then explain why it is right: the idea behind it, and a quick way to see it or remember it next time';
     const lines = [`Quiz answer. Question: ${quiz.question}`, `My answer: ${given}${aside(quiz)}`];
     if (correct === null) {
       const key = quiz.kind === 'fill_blank' ? `Accepted answers: ${accepted(quiz).join(' or ')}.` : `A model answer to compare with: ${quiz.answer}.`;
