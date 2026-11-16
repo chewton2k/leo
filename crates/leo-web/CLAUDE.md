@@ -119,7 +119,9 @@ Decided: one app, window only (2026-10-31).
   The More sheet (`#menu`) is for phones only (under 600 px).
 - Layout variables on `body`: `--side`, `--right`, `--mid`. Fixed things
   (toolbar, select bar, toasts, FABs, `#dock`) use them so nothing covers
-  anything. Page toolbars share one 760 px maximum width.
+  anything. Page toolbars share one geometry: 760 px at most below 1000 px; from 1000 px
+  the bar spans the page less `min(8%, 128px)` each side, so Felix's button sits in the same
+  spot on every page (2026-11-16, replacing the bar that followed each page's content).
 - UI preferences survive a port change (2026-11-14): localStorage is per origin and
   the engine port drifts when the saved one is busy, so every `leo-*` key (not
   `leo-draft*`, `leo-chat-v1` or `leo-search`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
@@ -189,7 +191,8 @@ Decided: one app, window only (2026-10-31).
   Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
   Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
-  (a row's `next` is a second step). `sheet()` focuses the first control and
+  (a row's `next` is a second step). Clicking its owner again closes it, as does a click
+  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. `sheet()` focuses the first control and
   traps Tab. Rename uses `inlineEdit` over the tree row; New folder opens a real
   row in place (`sideMakingOpen`: `side.making` draws a keyed `.side-making` row at the
   top of its parent, opening over `MOTION_MS` and folding back on Esc, none under
@@ -360,9 +363,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   there is no floating note toolbar, and the Tasks card is hidden on note pages. The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
   spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
-  zero-height sticky overlay holding only Felix's button, level with the chip row, and
-  Back is the chip row's first button (`.note-back`; `#back` stays for narrower widths
-  and other pages). Felix's chat starters are Teach me this note step by step, Quiz me on this
+  zero-height sticky overlay holding only Felix's button, at the same spot as on every other
+  page, and the chip row starts one bar's height below it (`--bar-height` + 8 px), an empty
+  band above the note. There is no Back button anywhere (2026-11-16, the user's call); Escape
+  goes back. Felix's chat starters are Teach me this note step by step, Quiz me on this
   note and Make me a 3-day review plan. A selection over `MOST_ASKED` shows "Select
   less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
@@ -635,9 +639,9 @@ Felix (2026-10-19).
   (Right 240–360 px beside a column of at least `LEAST_COLUMN` 600; Both 180–360 px
   per side). Both holds on as long as it stays readable (2026-11-15, the user's
   call): notes shrink to `LEAST_SHARED` (180 px, about 22 characters a line) first,
-  then the column to `SHARED_COLUMN` (520 px, about 65 characters), and only below
-  `ROOM_BOTH` (992 px of columns) does it become Right, then marks below
-  `ROOM_RIGHT`. It never moves every note right to make them wider. A closed note
+  then the column to `SHARED_COLUMN` (520 px, about 65 characters); below the chosen
+  layout's room (`ROOM_BOTH` 992 px, `ROOM_RIGHT` 928 px of columns) it becomes marks,
+  never one side (2026-11-16, the user's call). It never moves every note right to make them wider. A closed note
   in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
   are a small ink blot just after the passage's last word (`marginPassageEnd`), never
   in a left gutter, side by side when two end together; a read's blot sits there too.
@@ -905,7 +909,8 @@ is hidden or the capture activity gate is busy.
   Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 - Card priority (2026-11-15) is one to three slanted pencil strokes
-  (`KANBAN_STROKES`, ink at 60%, 14 px) before the title, the title indented by
+  (`KANBAN_STROKES`, 14 px) before the title, coloured by level (2026-11-16: low `--hue-0`,
+  medium `--hue-amber`, high `--hue-red`), the title indented by
   `text-indent`; the word stays as hidden text (`.kanban-priority-word`) plus a
   `title`, and the `.kanban-priority.<level>` classes remain.
 
@@ -940,7 +945,7 @@ a modal.
   not. Detect language is hidden for a model that cannot detect language, and
   setup picks the system language, else `en`, for such a model.
 - Settings look (2026-11-14): a choice of two or three that reads better as a
-  picture is `choiceCards` (theme, Felix, width, text size, lettering, margin
+  picture is `choiceCards` (theme, Felix, text size, lettering, margin
   layout, new-note mode, Reading pace); long and numeric lists stay `segmented`.
   A switch row is a bordered box with a one-line `.set-desc`. The Dictation
   shortcut lives only in Settings → Shortcuts (`dictationShortcutRow`, its Change
@@ -978,9 +983,11 @@ a modal.
   only reading text multiplies `--read`. Page width (2026-11-16, the user's call, like the
   reference app): two `.page-mark` separators at the note's top corners (drag.js) set
   `leo-page-width` (480–1600 px, symmetric about the column's centre, live px label, arrows
-  ±20, double-click/Enter resets); `showWidth` writes it as an inline `--note-width` unless
-  the width is Full; picking a Note width card clears it. A dragged width makes the margins
-  give way (`arrangement({dragged})`: Both, then Right, then marks) instead of capping it.
+  ±20, double-click/Enter resets; 2 px marks at 38% ink); `showWidth` writes it as an inline
+  `--note-width` unless the width is Full. A drag stops at `marginKit.mostColumn`, the widest
+  column that leaves the chosen margins their least width, so the margins never give way.
+  Settings → Note width only says the current width with a Reset (`width-reset`; no size
+  cards since 2026-11-16, the user's call); an older Comfortable or Full choice still applies until reset.
 
 Decided: Keeping replaces Storage (2026-11-05); Quit leo is not in Settings; Writing
 AI uses a pen icon, never a sparkle.

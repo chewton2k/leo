@@ -115,9 +115,12 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 
 
 ## Page and navigation
-On note pages at 1000 px and up the top bar takes no room (2026-11-16): Back is the
-first button of the chip row and Felix's button sits level with it at the column's
-right. Home has no footer line once the explorer is showing (New note is in the
+On note pages at 1000 px and up the top bar takes no room (2026-11-16): Felix's button
+stays where it is on every other page and the chip row starts one bar's height below it
+(`main` padded by `--bar-height` + 8 px), leaving an empty band above the note. There is
+no Back button on any page (2026-11-16, the user's call); Escape still goes back. From
+1000 px the top bar spans the page with an inset of `min(8%, 128px)` each side, so Felix
+sits in the same spot on every page, a little in from the right edge. Home has no footer line once the explorer is showing (New note is in the
 explorer and on Cmd/Ctrl+N); the first-day arrow and the narrow-window Folders and
 New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-16).
 
@@ -126,9 +129,11 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   (`events.js`); Updates explains that every successful installation reopens Leo.
 
 - Notes read wide (2026-10-19, the user's call): `.note-columns > .note` uses
-  `--note-width`, 980 px by default; Settings → Appearance → Note width picks
-  Comfortable (760 px), Wide or Full width, kept per browser in
-  `leo-note-width` and set early by `/theme.js` as `html[data-note-width]`.
+  `--note-width`, 980 px by default. Settings → Appearance → Note width only says
+  the current width (the default, a dragged px width, or an older Comfortable or
+  Full width choice still kept in `leo-note-width`) with a Reset button
+  (`width-reset`, disabled at the default); the width is changed by dragging the
+  page marks (2026-11-16, the user's call). `/theme.js` sets `html[data-note-width]`.
   Width checks measure the reading column; its outer wrapper also reserves the
   outline gutter. Full width fills the remaining column. Reading tests scroll
   over a note block, independently of the explorer’s own scroll area.
@@ -169,7 +174,7 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   today with boxes to tick. Lookups are scoped to the open sheet
   (`inQuick`), since a closing one can still be in the page.
 
-- Back from Settings, Keeping or Trash returns to the page before them
+- Escape from Settings, Keeping or Trash returns to the page before them
   (`places.before`, kept on `hashchange`; Keeping opened from Settings goes
   back to Settings), so a note you were reading stays where you left it.
   When the page Back goes to is the previous history entry (each entry keeps
@@ -226,8 +231,9 @@ prose and editable fields remain selectable. The page admits native drag starts
 only from its explicit note/folder sources, preventing accidental link, image and
 selection drags while keeping file drops and pointer-driven board/resize actions.
 
-Page toolbars share the same 760 px maximum width across notes, workspace, recording
-and Settings. Every Settings section uses the same Settings / section breadcrumb;
+Page toolbars share one geometry across notes, workspace, calendar, boards, recording
+and Settings: 760 px at most below 1000 px, the page's width less `min(8%, 128px)` each
+side from 1000 px. Every Settings section uses the same Settings / section breadcrumb;
 Keeping and Trash keep their routes and controllers inside that frame.
 Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
@@ -1147,7 +1153,8 @@ target. Check the page sequence after loading preferences.
   Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:
   the room beside the note's own width less the gap and the window padding: 240 to 360 px on the right, 180 to 360 px
   per side with Both. Both holds on as long as it stays readable: the notes shrink to 180 px first, then the column to
-  520 px; only then does it become Right, and marks below that. It never moves every note right to make them wider. The margin is
+  520 px; below that it becomes marks, never Right (2026-11-16, the user's call: a layout never falls back to one side).
+  Dragging the page marks stops at `marginKit.mostColumn`, the widest column that leaves the chosen margins their least width. It never moves every note right to make them wider. The margin is
   reserved up front on every note, in both modes, whatever its threads
   (2026-11-04, the orchestrator's decision): `.note-columns[data-margin]` pads the
   column, so the note is min(its note width, the room left) and sits left of centre,
@@ -1478,7 +1485,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   (2026-11-07, the user's call), both always on touch.
   Cards show the title (three lines at most), the muted subheading, two lines of the
   description when there is one (`.kanban-has-text`) and the priority as one to three
-  slanted pencil strokes before the title, the word kept as hidden text (2026-11-15). A
+  slanted pencil strokes before the title, the word kept as hidden text (2026-11-15), coloured
+  by level so it reads at a glance (2026-11-16): low `--hue-0` blue, medium `--hue-amber`, high `--hue-red`. A
   dragged card tilts 1.5° while lifted and lands flat (none under Reduced Motion). Add
   card sits directly under the last card; its composer stays open for the next card (adds
   are queued so fast typing loses nothing). A redraw keeps each lane's scroll. ⋯ opens the shared `popupMenu`, the explorer's
@@ -1532,16 +1540,15 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   per AI with prices and effort chips.
 
 - Theme (2026-10-14, the user's request): Settings → Appearance picks Match
-  this device, Light or Dark, kept per browser in `leo-theme`. Theme, Felix and
-  Note width are rows of picture cards (2026-11-06, the owner's screenshots:
+  this device, Light or Dark, kept per browser in `leo-theme`. Theme and Felix
+  are rows of picture cards (2026-11-06, the owner's screenshots:
   `choiceCards` with `action`/`key`, so the buttons keep `theme-pick`,
-  `felix-pick`, `width-pick` and `aria-pressed`): Theme previews are inline SVG in
+  `felix-pick` and `aria-pressed`): Theme previews are inline SVG in
   fixed light and dark surfaces (Match device is split), Felix shows
-  `felix-preview cute-look` / `demon-look` (the mood code skips them), Note width
-  a miniature page per width; Felix's two cards sit in a three-column grid so
-  every row lines up. No footnote. Each has a row reset (`settingReset`,
+  `felix-preview cute-look` / `demon-look` (the mood code skips them); Felix's two cards span the row like the others,
+  their previews a wide, short strip (2026-11-16, the user's call). No footnote. Each has a row reset (`settingReset`,
   a small icon button that shows only while the value differs from
-  `APPEARANCE_DEFAULTS`: Match device, Cute, Wide; `data-action="setting-reset"`,
+  `APPEARANCE_DEFAULTS`: Match device, Cute; `data-action="setting-reset"`,
   named "Reset <setting> to default"). Text size and Felix's lettering
   (2026-11-06, the user's request) are two more rows in `theme.js` (`READING`,
   stored like Note width in `leo-text-size` / `leo-felix-letters`, set as

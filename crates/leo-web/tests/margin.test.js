@@ -156,17 +156,18 @@ test('reading dots never move notes: free spot, then the other side, then below 
 });
 
 test('layout: the margin is reserved up front, with or without threads', () => {
-  assert.equal(M.arrangement({ width: 960 }), 'right');
+  assert.equal(M.arrangement({ width: 960, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: 1076 }), 'both');
-  assert.equal(M.arrangement({ width: M.ROOM_RIGHT }), 'right');
-  assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1 }), 'marks');
+  assert.equal(M.arrangement({ width: M.ROOM_RIGHT, setting: 'right' }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, setting: 'right' }), 'marks');
   assert.equal(M.arrangement.length, 1);
   assert.equal(M.arrangement({ width: 1076, threads: 0, along: false }), M.arrangement({ width: 1076, threads: 3, along: true }));
 });
 
-test('layout: both margins only with room for both', () => {
+test('layout: a chosen layout never falls back to one side, only to marks', () => {
   assert.equal(M.arrangement({ width: M.ROOM_BOTH, setting: 'both' }), 'both');
-  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, setting: 'both' }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, setting: 'both' }), 'marks');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, setting: 'right' }), 'right');
 });
 
 test('layout: marks only by choice, full width or with Felix open', () => {
@@ -195,7 +196,7 @@ test('width: Both keeps notes on both sides whenever both fit, too narrow stays 
   assert.equal(M.arrangement({ width: 1900, column: 980 }), 'both');
   assert.equal(M.arrangement({ width: 1400, column: 760 }), 'both');
   assert.equal(M.arrangement({ width: M.ROOM_BOTH, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, column: 980 }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, column: 980 }), 'marks');
   assert.equal(M.arrangement({ width: 1600, column: 980, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, column: 980 }), 'marks');
 });
@@ -252,7 +253,8 @@ test('drawing: a wave spans its width', () => {
   assert.equal(M.arrangement({ width: 1800 }), 'both');
   assert.equal(M.arrangement({ width: 1800, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: 1000 }), 'both');
-  assert.equal(M.arrangement({ width: 960 }), 'right');
+  assert.equal(M.arrangement({ width: 960 }), 'marks');
+  assert.equal(M.arrangement({ width: 960, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: 800 }), 'marks');
 });
 
@@ -319,11 +321,17 @@ for (const [name, fn] of cases) {
 }
 console.log(`ok ${cases.length}`);
 
-test('a dragged page width makes the margins give way: both, then right, then marks', () => {
+test('a dragged page width stops where the chosen margins still fit', () => {
   const width = 1156;
-  assert.equal(M.arrangement({ width, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width, column: 640, dragged: true }), 'both');
-  assert.equal(M.arrangement({ width, column: 800, dragged: true }), 'right');
-  assert.equal(M.arrangement({ width, column: 1000, dragged: true }), 'marks');
-  assert.equal(M.arrangement({ width, column: 1000, dragged: true, setting: 'right' }), 'marks');
+  for (const setting of ['both', 'right']) {
+    const most = M.mostColumn({ width, setting });
+    const layout = M.arrangement({ width, setting });
+    assert.equal(layout, setting);
+    assert.equal(M.marginWidth({ width, column: most, layout }), setting === 'both' ? M.LEAST_SHARED : M.MARGIN_WIDTH);
+    assert.ok(Math.floor((width - most - 1 - 64) / (setting === 'both' ? 2 : 1)) - M.MARGIN_GAP <= M.marginWidth({ width, column: most + 1, layout }));
+  }
+  assert.equal(M.mostColumn({ width, setting: 'both' }), width - 64 - 2 * (M.LEAST_SHARED + M.MARGIN_GAP));
+  assert.equal(M.mostColumn({ width, setting: 'right' }), width - 64 - M.MARGIN_WIDTH - M.MARGIN_GAP);
+  assert.equal(M.mostColumn({ width, setting: 'marks' }), Infinity);
+  assert.equal(M.mostColumn({ width: M.ROOM_BOTH - 1, setting: 'both' }), Infinity);
 });

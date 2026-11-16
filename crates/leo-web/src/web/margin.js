@@ -142,11 +142,16 @@
     return Math.floor((width - column - TICK_GUTTER - END_GUTTER) / sides) - MARGIN_GAP;
   }
 
-  function arrangement({ width, column = Infinity, dragged = false, setting = 'both', noteWidth = 'wide', panel = false }) {
-    if (setting === 'marks' || noteWidth === 'full' || panel || width < ROOM_RIGHT) return 'marks';
-    const fits = (sides, least) => !dragged || room(width, column, sides) >= least;
-    if (setting === 'both' && width >= ROOM_BOTH && fits(2, LEAST_SHARED)) return 'both';
-    return fits(1, MARGIN_WIDTH) ? 'right' : 'marks';
+  function arrangement({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
+    if (setting === 'marks' || noteWidth === 'full' || panel) return 'marks';
+    return width < (setting === 'both' ? ROOM_BOTH : ROOM_RIGHT) ? 'marks' : setting;
+  }
+
+  function mostColumn({ width, setting = 'both' }) {
+    if (setting === 'marks') return Infinity;
+    const both = setting === 'both';
+    if (width < (both ? ROOM_BOTH : ROOM_RIGHT)) return Infinity;
+    return width - TICK_GUTTER - END_GUTTER - (both ? 2 : 1) * ((both ? LEAST_SHARED : MARGIN_WIDTH) + MARGIN_GAP);
   }
 
   function marginWidth({ width, column = Infinity, layout }) {
@@ -234,7 +239,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);

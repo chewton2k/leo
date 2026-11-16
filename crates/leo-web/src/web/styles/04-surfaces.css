@@ -5,15 +5,13 @@
 .cards { display: flex; flex-direction: column; gap: 10px; }
 @media (min-width: 1000px) {
   body.on-note .bar { height: 0; padding-block: 0; background: none; pointer-events: none; }
-  body.on-note .bar::after, body.on-note #back { display: none; }
+  body.on-note .bar::after { display: none; }
   body.on-note .bar-row { position: relative; top: calc(var(--top) + 10px); }
   body.on-note .bar-row > * { pointer-events: auto; }
   body.on-note .bar::before { content: ''; position: absolute; inset: 0 0 auto; height: calc(var(--top) + 10px); pointer-events: auto; }
-  body.on-note main { padding-top: calc(var(--top) + 10px); }
+  body.on-note main { padding-top: calc(var(--bar-height) + 8px); }
   body.on-note .note-meta { margin-top: 0; min-height: var(--bar-row-height); }
 }
-.note-back { display: none; }
-@media (min-width: 1000px) { .note-back { display: inline-flex; margin-right: -8px; } .margin-mode.note-back > svg { width: 16px; height: 16px; transform: none; } }
 @media (min-width: 640px) and (max-width: 999px) {
   main, .bar { padding-inline: 28px; }
 }

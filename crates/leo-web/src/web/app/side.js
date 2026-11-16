@@ -591,7 +591,6 @@ function explorerTarget(el) {
 }
 
 function explorerMenu(el, event = null) {
-  closePopup(false);
   const target = Object.freeze(explorerTarget(el));
   const owner = el.closest('button') || el.closest('.side-tree, .side-group');
   if (!owner) return;

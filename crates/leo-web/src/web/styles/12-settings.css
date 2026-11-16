@@ -67,6 +67,9 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 @media (forced-colors: active) { .settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { border-color: CanvasText; } .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { display: none; } }
 .set-desc { display: block; margin-top: 2px; font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; color: var(--muted); }
 .settings-section .set-row.column > .btn { align-self: flex-start; }
+.settings-section .set-row.width-row { flex-wrap: nowrap; align-items: center; gap: 16px; padding: 12px 14px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
+.settings-section .set-row.width-row > .btn { flex: none; }
+@media (forced-colors: active) { .settings-section .set-row.width-row { border: 1px solid CanvasText; } }
 .settings-section .btn { white-space: nowrap; }
 .set-shortcut { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; min-width: 0; }
 .shortcut-field { display: flex; align-items: center; gap: 6px; flex: 0 1 220px; min-width: 110px; min-height: 38px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); overflow: hidden; }

@@ -60,11 +60,19 @@ function marginRemember(prefs) {
   } catch (e) {}
 }
 
+function marginSetting() {
+  return marginPrefs?.layout || marginRemembered() || 'both';
+}
+
+function marginMostColumn(width) {
+  return chat.isOpen() || window.leoTheme.noteWidth() === 'full' ? Infinity : marginKit.mostColumn({ width, setting: marginSetting() });
+}
+
 function marginLayout(columns) {
   const max = getComputedStyle($('article.note', columns)).maxWidth;
   const column = max.endsWith('px') ? parseFloat(max) : Infinity;
   const width = columns.clientWidth;
-  const layout = marginKit.arrangement({ width, column, dragged: Boolean(window.leoTheme.pageWidth?.()), setting: marginPrefs?.layout || marginRemembered() || 'both', noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  const layout = marginKit.arrangement({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
   const size = `${marginKit.marginWidth({ width, column, layout })}px`;
   if (columns.style.getPropertyValue('--margin-w') !== size) columns.style.setProperty('--margin-w', size);
   return layout;

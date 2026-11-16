@@ -151,7 +151,6 @@ const chat = felix.create({
   },
 });
 $('#chat-toggle').innerHTML = chat.button(36);
-$('#back').innerHTML = ICON.back;
 $('#search-toggle').innerHTML = ICON.search;
 $('#menu').innerHTML = ICON.more;
 $('#search-icon').innerHTML = ICON.search;
@@ -679,40 +678,10 @@ function back() {
   goBack('#/');
 }
 
-function chrome({ dir = '', showBack = false, actions = null }) {
-  $('#back').hidden = !showBack;
+function chrome({ dir = '', actions = null }) {
   floating.innerHTML = actions || '';
   document.title = dir ? `${folderLabel(dir)} · leo` : 'leo';
 }
-
-const CRUMB_EDGES = ['.note-columns > .note', '.workspace-empty', '.cal-head', '.kanban-head'];
-
-function fitCrumbs() {
-  const body = document.body;
-  const row = $('#bar .bar-row');
-  const target = !body.classList.contains('on-settings') && row ? CRUMB_EDGES.map((selector) => app.querySelector(selector)).find(Boolean) : null;
-  const box = target && target.getBoundingClientRect();
-  if (!box || !box.width) {
-    if (body.classList.contains('crumb-fit')) body.classList.remove('crumb-fit');
-    return;
-  }
-  const edge = getComputedStyle(target);
-  const left = box.left + (parseFloat(edge.paddingLeft) || 0);
-  const right = box.right - (parseFloat(edge.paddingRight) || 0);
-  const bar = $('#bar');
-  const start = bar.getBoundingClientRect().left + (parseFloat(getComputedStyle(bar).paddingLeft) || 0);
-  body.style.setProperty('--crumb-shift', `${Math.max(0, Math.round(left - start))}px`);
-  body.style.setProperty('--crumb-width', `${Math.max(0, Math.round(right - left))}px`);
-  if (!body.classList.contains('crumb-fit')) body.classList.add('crumb-fit');
-}
-
-if (typeof MutationObserver === 'function') {
-  new MutationObserver(fitCrumbs).observe(app, { childList: true });
-  new MutationObserver(fitCrumbs).observe(app, { attributes: true, subtree: true, attributeFilter: ['data-margin'] });
-  new MutationObserver(fitCrumbs).observe(document.body, { attributes: true, attributeFilter: ['class'] });
-}
-if (typeof ResizeObserver === 'function') new ResizeObserver(fitCrumbs).observe(app);
-window.addEventListener('resize', fitCrumbs);
 
 async function showWorkspace(dir = null) {
   const mine = ++seq;
@@ -896,13 +865,13 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     if (side.openedNote !== note.id) side.target = null;
     side.openedNote = note.id;
     state = { view: 'note', dir: note.directory, session: s };
-    chrome({ dir: note.directory, showBack: true });
+    chrome({ dir: note.directory });
     document.title = `${note.title || 'New note'} · leo`;
     chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory } : null);
     const where = `<button class="chip accent" data-action="open-folder" data-dir="${esc(note.directory)}">${ICON.folder} ${esc(folderLabel(note.directory))}</button>`;
     const when = note.id ? `Edited ${rel(note.updated_at)}` : 'New note';
     app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
-    <header class="note-head"><div class="note-context">${where}</div><div class="note-meta" data-tauri-drag-region><button type="button" class="margin-mode note-back" data-action="back" aria-label="Back" title="Back">${ICON.back}</button><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
+    <header class="note-head"><div class="note-context">${where}</div><div class="note-meta" data-tauri-drag-region><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
     <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state">${when}</span></p><div class="note-originals"></div><label id="margin-instructions" class="field margin-instructions" hidden>${ICON.pen}<input maxlength="500" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
     <div class="prose doc" id="doc"></div>
     <section class="related" id="related" hidden aria-label="Related notes"></section>
@@ -1015,7 +984,7 @@ async function showRecord(arg) {
   const asked = new URLSearchParams(location.hash.split('?')[1] || '');
   const mine = ++seq;
   state = { view: 'record', dir: '' };
-  chrome({ showBack: true });
+  chrome({});
   $('#crumbs').innerHTML = '<span class="sep">/</span><button>Record</button>';
   document.title = 'Record · leo';
   app.innerHTML = '<div id="rec-box"></div>';

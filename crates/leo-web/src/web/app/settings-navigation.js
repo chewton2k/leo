@@ -23,7 +23,7 @@ const SETTINGS_SECTIONS = [
 const SETTINGS_INDEX = [
   { section: 'general', id: 'theme', label: 'Theme', keywords: 'appearance dark light match device mode colours colors night' },
   { section: 'general', id: 'felix-look', label: 'Felix look', keywords: 'appearance cute demon character mascot horns' },
-  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance comfortable wide full width reading column margin page' },
+  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance width reading column margin page drag reset' },
   { section: 'general', id: 'text-size', label: 'Text size', keywords: 'appearance small medium large font reading bigger smaller zoom' },
   { section: 'general', id: 'felix-lettering', label: "Felix's lettering", keywords: 'appearance font typeface serif letters notes writing felix own' },
   { section: 'general', id: 'open-at-login', label: 'Open at login', keywords: 'start startup boot launch computer' },
