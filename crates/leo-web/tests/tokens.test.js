@@ -174,6 +174,9 @@ test('the paper grain is a data: SVG background layer on the shell surfaces, scr
 test('ink details: a warm selection wash, a drawn rule with a plain fallback, and thin warm scrollbars that keep the page bar', () => {
   const at = (selector, media = null) => all.find((r) => r.selector.split(', ').includes(selector) && (media ? r.at.some((a) => a.includes(media)) : r.at.length === 0));
   assert.match(at('::selection').body, /background: color-mix\(in srgb, var\(--text\) 22%, transparent\)/);
+  assert.match(at('::highlight(leo-pick)', 'forced-colors: none').body, /background: color-mix\(in srgb, var\(--text\) 22%, transparent\)/);
+  const unpainted = all.find((r) => r.selector.startsWith('.doc.pick-paint') && r.at.some((x) => x.includes('forced-colors: none')));
+  assert.match(unpainted.body, /background: transparent/);
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);
     const wash = over([...rgb(t['--text']).slice(0, 3), 0.22], rgb(t['--page']));
@@ -202,6 +205,9 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
   assert.deepEqual(users, [
     '.chat-btn.working::after',
     '.margin-ink path.pencil',
+    '.margin-ink path.solid[data-id="draft"], .margin-ink path.tether[data-id="draft"]',
+    '.margin-ink path.wash[data-id="draft"]',
+    '.margin-note[data-id="draft"] .margin-reply',
     '.margin-waiting .margin-drop, .margin-mark.reading .margin-drop',
     '.msg-step-busy',
     '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',

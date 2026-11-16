@@ -674,7 +674,7 @@ function passages(room = true) {
     const on = {};
     const node = {
       hidden: false, dataset: {}, style: {}, value: '', offsetWidth: 200, offsetHeight: 30, focused: false,
-      setAttribute() {}, addEventListener: (kind, fn) => { on[kind] = fn; },
+      setAttribute() {}, addEventListener: (kind, fn) => { on[kind] = fn; }, classList: { toggle() {} },
       fire: (kind, extra = {}) => { const e = { stopped: false, preventDefault() {}, stopPropagation() { e.stopped = true; }, ...extra }; on[kind]?.(e); return e; },
       focus() { node.focused = true; },
       querySelector: () => node.child || (node.child = fake()),
@@ -682,29 +682,30 @@ function passages(room = true) {
     return node;
   };
   const picked = { text: 'offices were built for supervision', from: 1, to: 1 };
-  const s = { note: { id: 'n' }, doc: { selection: () => picked, selectionBox: () => ({ x: 100, y: 100 }) }, title: { textContent: 'Essay' } };
+  const s = { note: { id: 'n' }, doc: { selection: () => picked, selectionBox: () => ({ x: 100, y: 100, top: 80 }) }, title: { textContent: 'Essay' } };
   const asked = [];
+  const opened = [];
   const attached = [];
   const context = {
     document: { createElement: fake, body: { appendChild() {} }, addEventListener() {} },
     window: { addEventListener() {}, innerHeight: 800 }, ICON: { chat: '' }, ON_MAC: true, state: { view: 'note', session: s },
     $: () => ({ getBoundingClientRect: () => ({ left: 0, right: 600 }) }), toast() {}, cleanTitle: (t) => t,
-    marginBeside: () => (room ? { prefix: '', suffix: '' } : null), marginAsk: (...args) => (room ? asked.push(args) > 0 : false),
+    marginAsk: (...args) => (room ? asked.push(args) > 0 : false),
+    marginAskFirst: (...args) => opened.push(args) > 0 && room,
     chat: { attachSelection: (x) => attached.push(x) },
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'), context);
   const pill = vm.runInContext('askFloat', context);
-  const field = vm.runInContext('askField', context);
   const press = (ask) => pill.fire('click', { target: { closest: () => ({ dataset: { ask } }) } });
-  return { pill, field, input: field.child, asked, attached, s, picked, press };
+  return { pill, asked, opened, attached, s, picked, press };
 }
 
 test('Felix this and Visualize ask about the selection at once with their own message, and go to the chat without room', () => {
-  for (const [kind, question] of [['this', 'Respond to this passage.'], ['draw', 'Draw this step by step.']]) {
+  for (const [kind, question] of [['this', 'Respond to this passage.'], ['draw', 'Draw this.']]) {
     const p = passages();
     p.press(kind);
-    assert.equal(p.field.hidden, true);
+    assert.equal(p.pill.hidden, true);
     assert.deepEqual([...p.asked[0]], [p.s, p.picked, question]);
     const none = passages(false);
     none.press(kind);
@@ -712,34 +713,19 @@ test('Felix this and Visualize ask about the selection at once with their own me
   }
 });
 
-test('Ask Felix opens a question field: a typed question asks it, an empty Enter asks generally, Escape asks nothing', () => {
-  for (const [typed, question] of [['  Why supervision?  ', 'Why supervision?'], ['', '']]) {
-    const p = passages();
-    p.press('ask');
-    assert.equal(p.field.hidden, false);
-    assert.equal(p.pill.hidden, true);
-    assert.equal(p.input.focused, true);
-    p.input.value = typed;
-    p.field.fire('submit');
-    assert.equal(p.field.hidden, true);
-    assert.equal(p.asked.length, 1);
-    assert.equal(p.asked[0][0], p.s);
-    assert.equal(p.asked[0][1], p.picked);
-    assert.equal(p.asked[0][2], question);
-  }
+test('Ask Felix opens a question box for the passage in the margin and asks nothing yet', () => {
   const p = passages();
   p.press('ask');
-  p.input.value = 'never sent';
-  assert.equal(p.input.fire('keydown', { key: 'Escape' }).stopped, true);
-  assert.equal(p.field.hidden, true);
-  p.field.fire('submit');
+  assert.equal(p.pill.hidden, true);
+  assert.deepEqual([...p.opened[0]], [p.s, p.picked]);
   assert.equal(p.asked.length, 0);
+  assert.equal(p.attached.length, 0);
 });
 
-test('without room in the margin Ask Felix goes straight to the chat with no field', () => {
+test('without room in the margin Ask Felix goes straight to the chat', () => {
   const p = passages(false);
   p.press('ask');
-  assert.equal(p.field.hidden, true);
+  assert.equal(p.opened.length, 1);
   assert.equal(p.attached.length, 1);
   assert.equal(p.attached[0].text, p.picked.text);
 });

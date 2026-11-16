@@ -1157,7 +1157,7 @@
         return;
       }
 
-      if (kind === 'line' && e.key === 'Enter' && !e.shiftKey) {
+      if (kind === 'line' && e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
         enterLine();
         return;
@@ -1767,9 +1767,13 @@
       selectionBox() {
         if (editing && document.activeElement === editing.area && editing.area.selectionStart !== editing.area.selectionEnd) return caretBox(editing.area, editing.area.selectionEnd);
         const picked = root.getSelection ? root.getSelection() : null;
-        if (!picked || picked.isCollapsed || !picked.rangeCount || !selectedSpan()) return null;
+        const span = picked && !picked.isCollapsed && picked.rangeCount ? selectedSpan() : null;
+        if (!span) return null;
+        const [from, to] = span;
+        const first = this.spanRects(from, Math.min(to, from + 120))[0];
+        const last = this.spanRects(Math.max(from, to - 120), to).at(-1);
         const box = picked.getRangeAt(0).getBoundingClientRect();
-        return { x: box.right, y: box.bottom };
+        return { x: last ? last.right : box.right, y: last ? last.bottom : box.bottom, top: first ? first.top : box.top };
       },
       caretLine() {
         if (editing) return lineOf(lineStart(editing.start) + editing.prefix.length + editing.area.selectionEnd);
@@ -1884,6 +1888,24 @@
 
   const CITED_FOR = 4000;
   const MAC = /Mac/.test(root.navigator?.platform || '');
+
+  function paintPick() {
+    const picked = root.document.getSelection();
+    const range = picked && picked.rangeCount && !picked.isCollapsed ? picked.getRangeAt(0) : null;
+    const typing = /^(TEXTAREA|INPUT)$/.test(root.document.activeElement?.tagName || '');
+    const docOf = (node) => (node.nodeType === 1 ? node : node.parentElement)?.closest('.doc');
+    const home = range && !typing ? docOf(range.startContainer) || docOf(range.endContainer) : null;
+    if (!home) return root.CSS.highlights.delete('leo-pick');
+    const span = range.cloneRange();
+    if (!home.contains(span.startContainer)) span.setStart(home, 0);
+    if (!home.contains(span.endContainer)) span.setEnd(home, home.childNodes.length);
+    const paint = new root.Highlight(span);
+    paint.priority = -1;
+    root.CSS.highlights.set('leo-pick', paint);
+    home.classList.add('pick-paint');
+  }
+
+  if (root.CSS?.highlights && typeof root.Highlight === 'function') root.document.addEventListener('selectionchange', paintPick);
 
   root.leoDoc = { mount };
 })(window);

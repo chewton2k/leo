@@ -119,7 +119,7 @@
       const kept = before[item.id];
       const free = (side) => ends[side] <= item.want;
       const sooner = ends.right <= ends.left ? 'right' : 'left';
-      const side = kept && free(kept) ? kept : free('right') && free('left') ? sooner : free('right') ? 'right' : free('left') ? 'left' : sooner;
+      const side = kept && free(kept) ? kept : free('right') ? 'right' : free('left') ? 'left' : sooner;
       out[item.id] = side;
       ends[side] = Math.max(ends[side], item.want) + item.height + gap;
     }

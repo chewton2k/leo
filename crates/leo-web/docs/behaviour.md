@@ -356,7 +356,10 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   `--accent-soft` and `--surface` (anything else becomes `--text`) from the theme, and
   shows it again as an `<img>` data URL (`figure.drawing.inked`, no grayscale filter).
   Outside a note, a drawing with steps gets ‹ k/n › and ↻ with the step's caption
-  (`textContent`); in a note it shows complete. A theme change repaints; See it larger
+  (`textContent`); in a note it shows complete. The step is remembered per thread and drawing
+  (`diagrams.steps`, 60 kept), so folding, opening or redrawing a margin note keeps it, and the
+  step buttons sit above a folded note's `.margin-toggle`, so they step without opening it
+  (2026-11-15, the user's call). A theme change repaints; See it larger
   shows the complete drawing; an svg that does not parse stays the plain image.
 
 - Picture sizes (2026-10-19, the user's request, like Google Docs): a
@@ -599,7 +602,7 @@ list continuation with keydown Enter. Shift+Enter and composition keep their own
 paths. Heading previews and menus use 240 ms motion (192 ms out), a taller hover peak, and
 outside clicks dismiss the heading list without swallowing the destination click.
 
-The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one stepped ```svg (320 wide, theme colour tokens, `data-step` groups), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
+The heading disclosure opens on mouse hover without taking focus, stays open across its summary and menu, and closes on leaving both. Click, keyboard and touch disclosure and outside dismissal remain available. Felix draws only when the user asks to see, draw or visualize something (2026-11-14, the user's call, replacing the 2026-11-09 complexity threshold): one ```svg (320 wide, theme colour tokens): one picture, split into 2 to 5 `data-step` groups only when it unfolds in order (a process, derivation or cycle; 2026-11-15, the user's call), never Mermaid and never text characters. Margin reads never draw; margin replies and asks draw on request (Visualize). The after-reply drawing pass (`drawing::drawn`) runs only when the user's message asks for a drawing (`drawing::asks_to_see`) and keeps only one clean ```svg block (`drawing::picked`); a root without `fill` defaults to `var(--text)`, so unpainted text and shapes follow the theme. User-written ```mermaid in notes and old replies still renders strictly, and SVG stays an inert image. `BASE` stays under 4,500 bytes.
 
 
 ## Felix
@@ -877,7 +880,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   chat), passages (Ask Felix on a selection, ⌘⇧E by default, customizable in Settings → Shortcuts; no bottom Ask button), Add to note
   (`routes/insert.rs`, version-checked, request ids dedupe double presses),
   Save as note, chat history (`chats.rs`, local naming), cost line
-  (`spent`), drawings (stepped SVG, only when asked; old Mermaid replies still render).
+  (`spent`), drawings (one SVG picture, stepped only for a process, only when asked; old Mermaid replies still render).
 
 Successful Felix replies may contain only proposal, ask or quiz cards. Stopped
 means cancellation; normal empty completion offers retry guidance. Saved replies
@@ -1030,11 +1033,18 @@ target. Check the page sequence after loading preferences.
 - Selection: ⌘⇧E (customizable, stored per window in `leo-shortcuts`) opens a draft in the margin and asks at once, POST
   `.../margin/threads` (no read-along needed) with an empty question (`margin::UNSPOKEN`;
   only Felix's message is stored). A selection shows a small toolbar (`.ask-float`, `role=toolbar`, 2026-11-14, no
-  formatting row): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat,
-  a sheet or the ask field) and Visualize ask at once with "Respond to this passage." / "Draw this step by step." through
-  the same POST, so its guards and the chat fallback apply. Ask Felix first opens a one-line field (`.ask-field`, "Ask about this
-  passage…", 2026-11-09): Enter sends the typed question (empty Enter asks generally), Escape or blur closes it;
-  when the margin cannot take the passage (or it is over `MOST_ASKED`) every action goes to the chat as before. The draft shows the breathing leo mark (`.margin-pending .margin-thinking`, `role=status` "Felix is thinking", filled from
+  formatting row): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat
+  or a sheet) and Visualize ask at once with "Respond to this passage." / "Draw this." through
+  the same POST, so its guards and the chat fallback apply. With margin room (Right or Both) the toolbar opens in the
+  right margin level with the selection's first line as a short vertical list (`.ask-float.beside`); otherwise it sits
+  under the selection's last word (`selectionBox` measures text rects, never the full-width block box) (2026-11-15).
+  Ask Felix (button and ⌘⇧E) opens the margin draft beside the passage without asking (`marginAskFirst`, 2026-11-15,
+  the user's call, replacing the floating field): its box has a Felix-blue border and the passage's underline, wash and
+  tether are Felix blue while it is open; Enter sends the typed question, an empty Enter sends nothing, Cancel drops it,
+  and Escape closes it keeping the half-typed question for the next Ask Felix on the same passage (`marginPage.drafted`).
+  Asking (any of the three) about a passage that already has an open thread opens that thread instead (`marginSame`:
+  the same span), and the two quick ones send their message as a reply. ⌘↵ never edits the line being edited (the
+  line editor's Enter ignores ⌘/Ctrl). When the margin cannot take the passage (or it is over `MOST_ASKED`) every action goes to the chat as before. The draft shows the breathing leo mark (`.margin-pending .margin-thinking`, `role=status` "Felix is thinking", filled from
   `marginPage.thinking`, hidden when closed) and becomes the thread in place on success
   (`marginRekey`, no rebuild); a second ask meanwhile toasts. Closing while he thinks
   leaves the thread closed when it lands, and a closed failure toasts. An open failure
@@ -1081,8 +1091,8 @@ target. Check the page sequence after loading preferences.
   so prefix caches still work, and warm sessions get it only when it changes
   (`Warm.margin`).
 - Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
-  least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins alternates: a
-  free note takes the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
+  least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
+  free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
   `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 992 px.
   Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:

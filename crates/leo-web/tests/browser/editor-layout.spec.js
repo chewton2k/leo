@@ -1769,3 +1769,21 @@ test('a note ends with a short pencil stroke that is not part of its text, and a
     expect((await stroke()).display).toBe('block');
   });
 });
+
+test('Cmd or Ctrl+Enter on a selected line never splits or empties it; Enter still does', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.goto(url);
+    await page.locator('#doc .blk').first().click();
+    const editor = page.locator('#doc textarea');
+    for (const keys of ['Meta+Enter', 'Control+Enter']) {
+      await editor.evaluate(el => el.setSelectionRange(0, el.value.length));
+      await page.keyboard.press(keys);
+      await expect(editor).toHaveValue('An ordinary paragraph.');
+      await expect(page.locator('#doc .blk')).toHaveCount(1);
+    }
+    await editor.evaluate(el => el.setSelectionRange(el.value.length, el.value.length));
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#doc .blk')).toHaveCount(2);
+  });
+});

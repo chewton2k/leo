@@ -1,6 +1,6 @@
 const MERMAID_URL = '/vendor/mermaid-11.4.1.js';
 const DIAGRAMS_KEPT = 60;
-const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0, inked: new WeakMap() };
+const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0, inked: new WeakMap(), steps: new Map() };
 const DRAWING_COLOURS = ['--text', '--muted', '--faint', '--line', '--accent', '--accent-soft', '--surface'];
 const DRAWING_URL = 'data:image/svg+xml;charset=utf-8,';
 const MOST_STEPS = 12;
@@ -38,6 +38,9 @@ function paintDrawing(fig, at) {
   const kept = diagrams.inked.get(fig);
   const last = kept.variants.length - 1;
   kept.at = Math.max(0, Math.min(last, at));
+  diagrams.steps.delete(kept.key);
+  diagrams.steps.set(kept.key, kept.at);
+  if (diagrams.steps.size > DIAGRAMS_KEPT) diagrams.steps.delete(diagrams.steps.keys().next().value);
   const step = kept.variants[kept.at];
   fig.querySelector('img').src = inkedUrl(step.svg);
   const bar = fig.querySelector('.drawing-steps');
@@ -64,10 +67,11 @@ function stepDrawings() {
     const variants = drawingSteps(source);
     if (!variants) continue;
     const stepped = variants.length > 1 && !fig.closest('.doc');
-    diagrams.inked.set(fig, { variants, at: 0 });
+    const key = `${fig.closest('[data-id]')?.dataset.id || ''}|${source}`;
+    diagrams.inked.set(fig, { variants, at: 0, key });
     fig.classList.add('inked');
     if (stepped) fig.insertAdjacentHTML('beforeend', '<figcaption class="drawing-steps"><button type="button" data-step-go="-1" aria-label="Previous step">‹</button><span class="drawing-count"></span><button type="button" data-step-go="1" aria-label="Next step">›</button><button type="button" data-step-go="0" aria-label="Start again">↻</button><span class="drawing-caption" aria-live="polite"></span></figcaption>');
-    paintDrawing(fig, stepped ? 0 : variants.length - 1);
+    paintDrawing(fig, stepped ? diagrams.steps.get(key) ?? 0 : variants.length - 1);
   }
 }
 
