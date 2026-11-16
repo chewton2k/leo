@@ -11,7 +11,6 @@
 .kanban-tab.kanban-over { display: none; }
 body.kanban-dragging .kanban-tab.kanban-over { display: inline-flex; }
 .kanban-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.kanban-tab .kanban-count { padding: 0; background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 550; }
 .kanban-tab { --tab-on: color-mix(in srgb, var(--text) 10%, transparent); }
 .kanban-tab.on { background: var(--tab-on); color: var(--text); font-weight: 650; }
 .kanban-tab:hover:not(.on) { background: var(--surface-2); color: var(--text); }

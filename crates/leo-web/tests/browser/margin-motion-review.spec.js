@@ -1167,6 +1167,22 @@ test('a closed thread with replies says how many more and marks-only shows a rin
   }, { threads: [two], layout: 'marks' });
 });
 
+test('an open thread of six messages offers to continue in chat or make it a note, a shorter one does not', async ({ browser }) => {
+  const turns = (n) => Array.from({ length: n }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: `Turn ${i + 1}.` }));
+  await fixture(browser, async page => {
+    await page.evaluate(() => marginOpen('t1', true));
+    const long = page.locator('.margin-note[data-id="t1"] .margin-long');
+    await expect(long).toHaveText('This has turned into its own question. Continue in chat or make it a note.');
+    await expect(long.locator('[data-margin-act="chat"]')).toHaveText('Continue in chat');
+    await expect(long.locator('[data-margin-act="add"]')).toHaveText('make it a note');
+  }, { threads: [{ ...THREADS.short, messages: turns(6) }] });
+  await fixture(browser, async page => {
+    await page.evaluate(() => marginOpen('t1', true));
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-felix').first()).toBeVisible();
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-long')).toHaveCount(0);
+  }, { threads: [{ ...THREADS.short, messages: turns(5) }] });
+});
+
 test('a note in the left margin is right-aligned toward the page while closed and left-aligned when open', async ({ browser }) => {
   await fixture(browser, async (page) => {
     await page.evaluate(() => { marginPage.sides = { t1: 'left' }; marginRedraw(); });

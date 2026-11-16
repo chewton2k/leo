@@ -40,6 +40,7 @@ let personaDetails = false;
 const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb', cap: 'Graduation cap', leaf: 'Leaf', compass: 'Compass', code: 'Code', heart: 'Heart', star: 'Star', pen: 'Pen', target: 'Target', thumb: 'Thumbs up' };
 const LEAST_ASKED = 3;
 const SHOWN_MESSAGES = 6;
+const LONG_THREAD = 6;
 const MARGIN_AREA_MAX = 140;
 const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), markers: new Map(), newest: null };
 let marginPrefs = null;
@@ -569,6 +570,7 @@ function marginFill(el, t, arriving, changed) {
         else line.textContent = message.text;
         said.append(line);
       }
+      if (all.length >= LONG_THREAD && marginNow(t)) said.insertAdjacentHTML('beforeend', '<p class="margin-long">This has turned into its own question. <button type="button" class="link-btn" data-margin-act="chat">Continue in chat</button> or <button type="button" class="link-btn" data-margin-act="add">make it a note</button>.</p>');
     }
   }
   $('.margin-changed', el).hidden = !changed;

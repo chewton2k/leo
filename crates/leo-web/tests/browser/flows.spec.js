@@ -3839,7 +3839,7 @@ test('sidebar folders can move to the top level with their contents and Undo', a
   const where = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).directory;
   await page.goto(`/#/f/${encodeURIComponent(from)}`);
   const target = page.locator('#side .side-group[data-drop-dir=""]');
-  await expect(target).toContainText('Folders');
+  await expect(target).toContainText('New note');
   await dragBetween(page, page.locator(`#side [data-action="open-folder"][data-dir="${from}"]`), target);
   await expect.poll(where).toBe(`${root}/Child`);
   await expect(page).toHaveURL(/\/(?:#\/)?$/);
@@ -5686,14 +5686,14 @@ test('buttons keep room from the text and sections around them', async ({ page }
 
 
 
-test('Usage opens from the rail with remaining limits inside a stable dialog', async ({ page }) => {
+test('Usage opens from Settings with remaining limits inside a stable dialog', async ({ page }) => {
   await page.route(/\/api\/settings(?:\/usage)?$/, route => route.fulfill({ json: {
     tasks: [{ task: 'writing', provider: 'ollama' }],
     plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true,
       limits: { five_hour: { used: .25, resets_at: Date.now() / 1000 + 3600 }, seen_at: new Date().toISOString() } }],
   } }));
-  await page.goto('/');
-  await page.locator('.side-foot [data-action="usage"]').click();
+  await page.goto('/#/settings');
+  await page.locator('.settings-nav [data-action="usage"]').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
@@ -5709,7 +5709,7 @@ test('Usage opens from the rail with remaining limits inside a stable dialog', a
   await expect(page.getByRole('dialog').getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('#side [data-action="usage"]')).toBeFocused();
+  await expect(page.locator('.settings-nav [data-action="usage"]')).toBeFocused();
 });
 
 for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'], [1280, 'marks'], [1800, 'both']]) test(`note search temporarily highlights the match without changing the note at ${width}px with ${layout} margins`, async ({ page }) => {
@@ -5747,7 +5747,8 @@ test('Usage shows saved limits during refresh and keeps them after a refresh fai
       if (outcome === 'failure') return route.fulfill({ status: 503, json: { error: 'Usage could not refresh. Try again in a moment.' } });
       return route.fulfill({ json: { ...saved, plans: [{ ...saved.plans[0], limits: { five_hour: { used: .6 }, seen_at: new Date().toISOString() } }] } });
     });
-    await page.locator('.side-foot [data-action="usage"]').click();
+    await page.goto('/#/settings');
+    await page.locator('.settings-nav [data-action="usage"]').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
     if (outcome === 'closed') {

@@ -64,9 +64,10 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-arrow svg { width: 18px; height: 18px; }
 .cal-arrow.next svg { transform: scaleX(-1); }
 .cal-status { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; overflow: hidden; white-space: nowrap; font-size: var(--fs-xs); color: var(--muted); }
-.cal-status .cal-refresh { color: inherit; text-decoration: none; }
 .cal-status .activity-spin { width: 12px; height: 12px; }
-.cal-head .btn.primary svg { width: 16px; height: 16px; }
+.cal-new { background: transparent; color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
+.cal-new:hover { background: var(--wash); }
+.cal-new svg { width: 16px; height: 16px; }
 .cal-week { flex: 1; min-height: 0; display: flex; flex-direction: column; --gutter: 52px; }
 .cal-dayheads, .cal-allday { display: grid; grid-template-columns: var(--gutter) minmax(0, 1fr); border-bottom: 1px solid var(--cal-line); }
 .cal-dayheads { grid-template-columns: var(--gutter) repeat(var(--cols), minmax(0, 1fr)); }

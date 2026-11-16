@@ -115,7 +115,7 @@ function diagramScheme() {
 function diagramTheme(dark) {
   const css = getComputedStyle(document.documentElement);
   const token = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
-  const accent = token('--accent', '#4f46e5');
+  const accent = token('--accent', '#3f6d97');
   const soft = token('--accent-soft', '#eceafd');
   const text = token('--text', '#1c1c1a');
   const muted = token('--muted', '#6b6a65');

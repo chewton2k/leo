@@ -47,7 +47,7 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   only, an arrow toward the open explorer); the empty Trash says "Nothing thrown away." over its facts. Can't reach leo, the chat's
   no-writing-AI reply and Keeping could not be opened show a drawing too (an unplugged
   cord, a pen with no ink, a broken pencil; 2026-11-15). Counts: `.badge`. Small
-  sentence-case section labels share one rule (`.side-group`, `.source-label`,
+  sentence-case section labels share one rule (`.source-label`,
   `.quick-due-head`, `.chat-history-group`, `.pick-head`) and end in the note rule's
   pencil stroke.
 - Loaders (2026-11-15): wherever `skeleton()` stands in for a list (search, board,
@@ -115,6 +115,12 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 
 
 ## Page and navigation
+On note pages at 1000 px and up the top bar takes no room (2026-11-16): Back is the
+first button of the chip row and Felix's button sits level with it at the column's
+right. Home has no footer line once the explorer is showing (New note is in the
+explorer and on Cmd/Ctrl+N); the first-day arrow and the narrow-window Folders and
+New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-16).
+
 
 - Native quit confirmation keeps the current page and uses its existing toast
   (`events.js`); Updates explains that every successful installation reopens Leo.
@@ -131,8 +137,11 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   one shortcut, the user's call): Cmd/Ctrl+K anywhere opens it, and
   Cmd/Ctrl+N makes a note in the current folder (never inside a sheet, an inline
   edit, while composing or when locked). Both are customizable in Settings →
-  Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with a New note row,
-  has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
+  Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
+  New folder, icons level and no Folders label (2026-11-16); folders show no note count
+  and one sort button's menu holds the sort, its order and open tasks only. New folder
+  opens a row in place that slides the rows below down. The explorer
+  also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
   Search button, the header search button or the phone menu opens one line
   (`sheets.js` `quickLeo`, toggled by `toggleQuickLeo`). It is also the search
@@ -220,7 +229,7 @@ selection drags while keeping file drops and pointer-driven board/resize actions
 Page toolbars share the same 760 px maximum width across notes, workspace, recording
 and Settings. Every Settings section uses the same Settings / section breadcrumb;
 Keeping and Trash keep their routes and controllers inside that frame.
-Usage opens from the rail above Settings and shows remaining subscription windows,
+Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
 Cmd/Ctrl+K (customizable in Settings → Shortcuts) and retains
 task/search/question/navigation ranking. Explicit named
@@ -921,6 +930,10 @@ Escape cancelling delete confirmation stops later same-panel abort handlers.
 
 
 ## Felix in the margin
+An open thread of six or more messages ends with "This has turned into its own
+question. Continue in chat or make it a note." (2026-11-16); the links run the
+thread's chat and Add to note actions.
+
 
 Load margin preferences and reserve their space before positioning search matches
 or restoring reading, so the note's final line wrapping determines the scroll
@@ -1245,6 +1258,10 @@ note. A completed export cannot rename a newer page.
 
 
 ## Calendar and tasks
+The calendar header stays quiet while every calendar reads fine (2026-11-16): no
+"Updated …" line; a failure shows "Couldn't update · Retry" and a calendar that
+could not be read says so with Retry. New task is an outlined button (`.cal-new`).
+
 
 - Task dates read Today, Tomorrow, a weekday within a week, or the date; hovering
   shows the full date. Late tasks are grouped as "Earlier", never "Overdue"
@@ -1379,6 +1396,8 @@ ISO datetimes as one date/time before removing them from the title.
 
 
 ## Boards
+Board tabs show only their names (2026-11-16); columns keep their card counts.
+
 
 - Storage mirrors standalone tasks: `<notes>/.leo/boards/<b…>.json` (name, columns
   `{id, name}`, 1-12) and `<notes>/.leo/cards/<c…>.json` (board, column, `rank`,

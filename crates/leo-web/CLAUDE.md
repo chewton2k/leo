@@ -190,7 +190,10 @@ Decided: one app, window only (2026-10-31).
   Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). `sheet()` focuses the first control and
-  traps Tab. Rename and New folder use `inlineEdit` over the tree row.
+  traps Tab. Rename uses `inlineEdit` over the tree row; New folder opens a real
+  row in place (`sideMakingOpen`: `side.making` draws a keyed `.side-making` row at the
+  top of its parent, opening over `MOTION_MS` and folding back on Esc, none under
+  `stillMotion()`), its name typed on a `--focus` underline (`.inline-edit.making`).
   Rows hover with `--menu-hover` (`--tint` light, `--wash` dark, where `--tint`
   would dip below `--raised`); separators inset 12 px; a faint keycap
   (`.popup-rows kbd`, `aria-hidden`) only where a real shortcut acts: New note
@@ -205,10 +208,9 @@ Decided: one app, window only (2026-10-31).
   and Felix's read-failure status stay text. Home's arrow points at the explorer and shows only
   on the first day (no notes, no tasks) while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
   (2026-11-15, the user's call); counts `.badge`; small faint
-  sentence-case labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
+  sentence-case labels share one rule (`.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`), ending in the note rule's pencil stroke
-  (`::after`, same mask, a plain 1 px line in print and forced colours; the
-  Folders rule stops at New folder).
+  (`::after`, same mask, a plain 1 px line in print and forced colours).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
 - The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
@@ -220,7 +222,10 @@ Decided: one app, window only (2026-10-31).
   its dot) and in `#save-state` (full ink while editing or saving, drying once to .45
   when Saved; the words stay as hidden text, "Not saved" stays visible). No other
   spinner or second breathing mark.
-- Colour: ink for actions and selection, `--focus` for focus cues, tone only as
+- Colour: ink for actions and selection, `--focus` for focus cues (Felix blue since
+  2026-11-16, the user's call: every former purple, `--focus` and the indigo tone
+  `--hue-indigo` used by calendar assignments, callouts and note cards, is #3f6d97 /
+  #b4cfe7; Felix's pixel pen keeps its colours), tone only as
   dots and ticks (calendar events keep their colour fills). One exception,
   Felix's own blue (`--felix`: light #3f6d97, dark #b4cfe7, from his sprite;
   2026-11-15, the user's call), only while he works: the reading blot
@@ -354,7 +359,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js) after Read through;
   there is no floating note toolbar, and the Tasks card is hidden on note pages. The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
-  spacer). Felix's chat starters are Teach me this note step by step, Quiz me on this
+  spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
+  zero-height sticky overlay holding only Felix's button, level with the chip row, and
+  Back is the chip row's first button (`.note-back`; `#back` stays for narrower widths
+  and other pages). Felix's chat starters are Teach me this note step by step, Quiz me on this
   note and Make me a 3-day review plan. A selection over `MOST_ASKED` shows "Select
   less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
@@ -391,10 +399,14 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   fires early, checked again on focus and visibilitychange (2026-11-15). Unprompted
   explorer redraws (expiry, Felix's read starting and ending, queued off the read)
   go through `sideRedrawSoon`, which waits while any menu is open.
-  Beside Filter: a sort menu (Name, Last edited, Created; only open tasks) and a
-  flip button that reverses it (its icon shows the order: a down arrow beside
-  A–Z/Z–A letters or wide/narrow bars, 2026-11-12), both driving `/api/notes` `sort`/`show` for every
+  Beside Filter: one sort button whose menu holds Sort by (Name, Last edited, Created),
+  Order (the sort's two directions, e.g. A to Z / Z to A) and only open tasks
+  (2026-11-16, replacing the flip button), driving `/api/notes` `sort`/`show` for every
   folder's notes (folders stay by name), saved as `leo-side-order` (2026-11-11).
+  The explorer is kept simple (2026-11-16, the user's call): New note (with its
+  shortcut) and New folder share one row (`.side-group`, still the top-level drop
+  target and root context menu, their icons on one level), there is no Folders label,
+  and folders show no note count (the count is in the row's title).
 - Quick Leo opens with Cmd/Ctrl+K only (Cmd/Ctrl+F removed 2026-11-09); Cmd/Ctrl+N
   makes a note in the current folder, never inside a sheet, an inline edit, while
   composing or when locked. These two and Ask Felix (Cmd/Ctrl+Shift+E) are the
@@ -579,7 +591,10 @@ Felix (2026-10-19).
   its note, with one muted line, "The passage changed since Felix wrote this."
   (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
 - An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
-  "Show N earlier" button (`.margin-earlier`) that shows them all for that note.
+  "Show N earlier" button (`.margin-earlier`) that shows them all for that note. From
+  `LONG_THREAD` (6) messages it ends with "This has turned into its own question.
+  Continue in chat or make it a note." (`.margin-long`; the links are the thread's own
+  chat and Add to note actions).
 - Notes the page cannot place do not fill the limit: `marginDraw` collects their ids
   (`marginPage.gone`, by `marginKit.find`) and asks, Read through and reopening send
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
@@ -927,7 +942,9 @@ a modal.
   `settings-navigation.test.js` fails on an unknown section, a duplicate id or
   an id no source draws. Routes stay `#/settings/<section>`; `#/trash` still
   works and a bare `#/settings` never reopens Trash.
-- Usage: ordinary Settings reads never refresh coding-plan limits; POST
+- Usage opens from Settings (a Usage row under This app, `data-action="usage"`, the
+  same sheet; 2026-11-16), not the icon rail or the phone More sheet. Ordinary Settings
+  reads never refresh coding-plan limits; POST
   `/api/settings/usage` (`{}` Codex only, `{ "claude": true }` also Claude)
   behind one refresh slot; a failed refresh keeps saved meters. `usage::Usage`
   keeps content-free counts, `usage_days`, `usage_calls` and `usage_tools` (90 days), never prompt or reply

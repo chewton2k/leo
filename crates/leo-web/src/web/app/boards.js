@@ -150,9 +150,8 @@ function kanbanTabsHtml() {
   const here = kanban.board;
   return kanban.boards.map((b) => {
     const on = b.id === here.id;
-    const count = `<span class="badge kanban-count" data-count-board="${esc(b.id)}">${on ? kanban.cards.length : b.cards || 0}</span>`;
-    if (on) return `<div class="kanban-tab on" data-kanban-drop="${esc(b.id)}" aria-current="page"><input class="kanban-title" data-kanban-name="board" value="${esc(here.name)}" size="${here.name.length + 1}" maxlength="80" aria-label="Board name" spellcheck="false" autocomplete="off">${count}</div>`;
-    return `<a class="kanban-tab" href="#/boards/${enc(b.id)}" data-kanban-drop="${esc(b.id)}"><span class="kanban-tab-name">${esc(b.name)}</span>${count}</a>`;
+    if (on) return `<div class="kanban-tab on" data-kanban-drop="${esc(b.id)}" aria-current="page"><input class="kanban-title" data-kanban-name="board" value="${esc(here.name)}" size="${here.name.length + 1}" maxlength="80" aria-label="Board name" spellcheck="false" autocomplete="off"></div>`;
+    return `<a class="kanban-tab" href="#/boards/${enc(b.id)}" data-kanban-drop="${esc(b.id)}"><span class="kanban-tab-name">${esc(b.name)}</span></a>`;
   }).join('');
 }
 
@@ -270,8 +269,6 @@ const kanbanInked = (id) => app.querySelectorAll(`.kanban-card[data-card="${CSS.
 
 function kanbanCounts() {
   for (const el of app.querySelectorAll('[data-count-col]')) el.textContent = String(kanbanCardsIn(el.dataset.countCol).length);
-  const here = app.querySelector(`[data-count-board="${CSS.escape(kanban.board?.id || '')}"]`);
-  if (here) here.textContent = String(kanban.cards.length);
 }
 
 function kanbanRedrawCard(card) {

@@ -259,16 +259,19 @@ test('ticking a task leaves the tray at once and returns with the error when the
   }, { width: 1360 });
 });
 
-test('the calendar status refreshes on click and offers Retry only after a failure', async ({ browser }) => {
+test('the calendar status stays quiet while calendars are fine and offers Retry only after a failure', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const status = page.locator('.cal-status');
-    await expect(status.locator('.cal-refresh')).toContainText('Updated');
+    await expect(page.locator('.cal-grid, .cal-week, .cal-head').first()).toBeVisible();
+    await expect(status).toHaveText('');
     await expect(status.getByRole('button', { name: 'Retry' })).toHaveCount(0);
-    await page.evaluate(() => { window.failSchedule = true; });
-    await status.locator('.cal-refresh').click();
+    await page.evaluate(() => { window.failSchedule = true; return loadSchedule(seq); });
     await expect(status).toContainText("Couldn't update");
     await status.getByRole('button', { name: 'Retry' }).click();
-    await expect(status.locator('.cal-refresh')).toContainText('Updated');
+    await expect(status).toHaveText('');
+    const add = page.locator('.cal-head [data-action="task-new"]');
+    await expect(add).not.toHaveClass(/primary/);
+    await expect(add).toHaveClass(/cal-new/);
   });
 });
 

@@ -398,7 +398,6 @@ function menu(el) {
     { action: 'new-folder', icon: ICON.folderPlus, text: `New folder${here ? ` in ${folderLabel(here)}` : ''}` },
     { action: 'calendar', icon: ICON.calendar, text: 'Calendar', after: tasksDueBadge() },
     { action: 'boards', icon: ICON.board, text: 'Boards' },
-    { action: 'usage', icon: svg('<path d="M4 19V9m8 10V5m8 14v-7"/>'), text: 'Usage' },
     { action: 'settings', icon: ICON.gear, text: 'Settings' },
     { action: 'trash', icon: ICON.trash, text: 'Trash' },
     { action: 'keeping', icon: ICON.storage, text: 'Keeping' },
@@ -416,15 +415,7 @@ function newFolder(el) {
   const row = parent && [...(tree?.querySelectorAll('.side-folder') || [])].find((folder) => folder.dataset.dropDir === parent);
   if (tree && (row || !parent)) {
     if (parent) revealFolder(parent);
-    const at = (row || tree).getBoundingClientRect();
-    return inlineEdit({ left: at.left + 16, top: row ? at.bottom : at.top, width: at.width - 20, height: 30 }, {
-      id: 'folder-name',
-      value: '',
-      label: 'Folder name',
-      hint: parent ? `New folder in ${folderLabel(parent)}` : 'New folder',
-      at: { kind: 'folder', dir: parent },
-      save: (name) => saveFolder(name, parent),
-    });
+    if (sideMakingOpen(tree, parent, (name) => saveFolder(name, parent))) return;
   }
   const scrim = sheet(`<h3>New folder${parent ? ` in ${esc(folderLabel(parent))}` : ''}</h3>
     <label class="field">${ICON.folder}<input id="folder-name" data-parent="${esc(parent)}" placeholder="${parent ? 'Name, e.g. week 3' : 'Name, e.g. cs130'}" maxlength="120" autocomplete="off"></label>

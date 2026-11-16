@@ -144,6 +144,8 @@
 .margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot svg { width: 13px; height: 13px; flex: none; }
+.margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
+.margin-long .link-btn { font-size: inherit; color: inherit; }
 .margin-more { position: relative; z-index: 2; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-drawer) var(--ease-arrive), opacity var(--t-follow) var(--ease-arrive), visibility 0s var(--t-drawer); }
 .margin-more-body { min-height: 0; overflow: hidden; }
 .margin-note[data-open] .margin-more { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }

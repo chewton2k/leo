@@ -961,17 +961,18 @@ test('explorer blank context menu offers creation and stays inside the viewport'
   });
 });
 
-test('the Folders label ends in a pencil rule, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
+test('New note and New folder share one row with their icons level, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
   await sidebarFixture(browser, async (context, url) => {
     const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(url);
-    const rule = await page.locator('.side-group').evaluate((el) => {
-      const after = getComputedStyle(el, '::after');
-      return { mask: after.maskImage || after.webkitMaskImage, width: parseFloat(after.width), word: el.firstElementChild.getBoundingClientRect().right, tools: el.querySelector('.side-group-tools').getBoundingClientRect().left };
+    const row = await page.locator('.side-group').evaluate((el) => {
+      const middle = (node) => { const box = node.getBoundingClientRect(); return box.top + box.height / 2; };
+      return { label: el.textContent.includes('Folders'), note: middle(el.querySelector('.side-new svg')), folder: middle(el.querySelector('[data-action="new-folder"] svg')), sameRow: el.querySelector('.side-new').getBoundingClientRect().top === el.querySelector('[data-action="new-folder"]').getBoundingClientRect().top || Math.abs(middle(el.querySelector('.side-new')) - middle(el.querySelector('[data-action="new-folder"]'))) < 1 };
     });
-    expect(rule.mask).toContain('url(');
-    expect(rule.width).toBeGreaterThan(40);
-    expect(rule.word + 8 + rule.width).toBeLessThanOrEqual(rule.tools + 0.5);
+    expect(row.label, 'no Folders label').toBe(false);
+    expect(row.sameRow).toBe(true);
+    expect(Math.abs(row.note - row.folder), 'the two icons sit on one level').toBeLessThan(0.6);
+    await expect(page.locator('.side-folder .side-count'), 'folders show no note count').toHaveCount(0);
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
     await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
     await page.evaluate(() => {

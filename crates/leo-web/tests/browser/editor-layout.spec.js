@@ -1477,7 +1477,7 @@ test('heading disclosure closes on outside clicks while the destination keeps it
         button.id = 'outside-outline';
         button.textContent = 'Outside';
         button.onclick = () => { window.outsideClicks = (window.outsideClicks || 0) + 1; };
-        document.querySelector('#bar').append(button);
+        document.querySelector('#bar .bar-row').append(button);
       });
       await summary.focus(); await summary.press('Enter');
       await expect(details).toHaveAttribute('open', '');
