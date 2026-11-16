@@ -3,6 +3,12 @@ name: Speaker labels across models
 on:
   schedule:
     - cron: '17 9 * * 2'
+  pull_request:
+    paths:
+      - crates/leo-services/src/session/speakers.rs
+      - crates/leo-services/src/speech/worker.rs
+      - scripts/speaker_check.py
+      - .github/workflows/speakers.yml
   workflow_dispatch:
     inputs:
       large:
