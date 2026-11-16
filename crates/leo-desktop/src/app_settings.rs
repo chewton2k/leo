@@ -248,7 +248,7 @@ impl AppSettings {
         }
     }
     fn permission_view(&self) -> Value {
-        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility()})
+        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility(),"notifications":crate::permissions::notifications()})
     }
 }
 impl leo_web::app_settings::AppApi for AppSettings {
@@ -286,6 +286,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
             ))?,
             Some("microphone") => crate::permissions::request_microphone(&self.app)?,
             Some("accessibility") => crate::permissions::request_accessibility(&self.app)?,
+            Some("notifications") => crate::permissions::request_notifications(&self.app)?,
             Some("quit") => self.app.exit(0),
             Some("sign_in") => crate::sign_in::start(
                 value["provider"]
@@ -318,6 +319,9 @@ impl leo_web::app_settings::AppApi for AppSettings {
             json!({"name":"Speech model","state":if model {"ready"} else {"missing"},"fix":"Download and use a model in Speech models.","section":"models"}),
             json!({"name":"Dictation shortcut","state":if shortcut["problem"].as_str().is_none_or(str::is_empty) {"ready"} else {"missing"},"fix":shortcut["problem"],"section":"shortcuts"}),
         ];
+        if let Some(state) = permissions["notifications"].as_str() {
+            checks.push(json!({"name":"Notifications","state":if state=="allowed" {"ready"} else {"missing"},"fix":"Allow Leo to show notifications, so it can tell you when a calendar event starts.","action":"notifications"}));
+        }
         if let Some(problem) = self.preferences.problem() {
             checks.push(json!({"name":"App preferences","state":"missing","fix":problem,"section":"general"}));
         }

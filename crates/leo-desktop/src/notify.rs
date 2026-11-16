@@ -23,14 +23,21 @@ pub fn listen(app: &AppHandle) {
 
 pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
     let kind = if event.online { "call" } else { "microphone" };
-    let _ = app
+    let builder = app
         .notification()
         .builder()
         .title(format!("{} is starting", event.title))
         .body("Click to open Record, ready to record it.")
         .extra("uid", &event.uid)
-        .extra("kind", kind)
-        .show();
+        .extra("kind", kind);
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(move || {
+        if let Ok(true) = mac_usernotifications::blocking::request_auth() {
+            let _ = builder.show();
+        }
+    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = builder.show();
     let start = UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64);
     crate::tray::offer(
         app,

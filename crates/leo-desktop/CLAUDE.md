@@ -66,8 +66,14 @@ a test, or leave it unset to see the user's own data.
   `leoFromApp('event', '<kind>:<uid>')` (`page` JSON-quotes its argument). `call`
   when the event's location or description holds an http(s) link
   (`EventStarting.online`), else `microphone`. The page only opens Record ready;
-  it never starts. macOS asks for notification permission on that first
-  post, never during onboarding. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
+  it never starts. macOS (2026-11-16): notify-rust's `preview-macos-un` feature
+  moves the plugin onto `UNUserNotificationCenter`, so leo can read its permission.
+  macOS asks once (a notification of its own, easy to miss); until Allow, usernoted
+  drops every post silently (authorization Denied) and a second ask shows nothing. `starting` asks
+  (`mac_usernotifications::blocking::request_auth`, on its own thread: the first ask
+  waits for the user) and posts once allowed; never during onboarding. An unbundled
+  run has no bundle id, so it posts nothing. Health's Notifications row (macOS only,
+  `permissions::notifications`) asks, or opens System Settings → Notifications once denied. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
   characters with an ellipsis) under Record a call until start+10 min, hidden while a recording is live
   (`Running::recording_live`), so a denied or missed notification still has a way in.
 - The window disables Tauri's drag-drop handler (`disable_drag_drop_handler`):
