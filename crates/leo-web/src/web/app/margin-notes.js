@@ -39,7 +39,7 @@ const PERSONA_ICON_NAMES = { flask: 'Flask', globe: 'Globe', bulb: 'Light bulb',
 const LEAST_ASKED = 3;
 const SHOWN_MESSAGES = 6;
 const MARGIN_AREA_MAX = 140;
-const marginPage = { drafted: null, resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), markers: new Map(), newest: null };
+const marginPage = { drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: null, tethers: new Map(), markers: new Map(), newest: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -89,7 +89,7 @@ function marginLeave() {
   marginPage.observer?.disconnect();
   marginPage.observer = null;
   marginPage.layer?.remove();
-  Object.assign(marginPage, { drafted: null, loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
+  Object.assign(marginPage, { drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, gutter: 0, pointer: 0, changing: false, baseline: [], roomy: null, tethers: new Map() });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.revisits.clear();
@@ -1049,9 +1049,7 @@ function marginClose() {
   if (!id) return;
   marginPage.open = null;
   if (id === 'draft') {
-    const { quote, prefix, suffix } = marginPage.draft || {};
-    const text = $('textarea', marginPage.els.get('draft'))?.value || '';
-    marginPage.drafted = text.trim() ? { quote, prefix, suffix, text } : null;
+    marginStash();
     marginPage.draft = null;
   }
   marginDraw();
@@ -1081,7 +1079,7 @@ function marginClick(e) {
     else if (action.dataset.marginAct === 'resolve') marginStatus(t, 'resolved').catch(fail);
     else if (t.id === 'draft') {
       marginClose();
-      marginPage.drafted = null;
+      marginPage.drafted.delete(marginDraftKey(t));
     }
     else marginStatus(t, 'dismissed').catch(fail);
     return;
@@ -1109,6 +1107,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .scrim, .scrim-gone')) return;
   if (marginPage.open === 'draft' && $('textarea', marginPage.els.get('draft'))?.value.trim()) return;
   marginPage.open = null;
+  marginStash();
   marginPage.draft = null;
   marginRedraw();
 });
@@ -1130,6 +1129,10 @@ async function marginSubmit(e) {
   area.value = '';
   marginSized(area);
   if (t.id === 'draft') return marginAskOn(s, t, text);
+  return marginReply(s, el, t, text, area);
+}
+
+async function marginReply(s, el, t, text, area = null) {
   marginSaying(el, '');
   marginPage.thinking.set(t.id, { text });
   marginDraw();
@@ -1150,8 +1153,10 @@ async function marginSubmit(e) {
     marginDraw();
     if (error instanceof Locked) throw error;
     if (el.isConnected) {
-      area.value = text;
-      marginSized(area);
+      if (area) {
+        area.value = text;
+        marginSized(area);
+      }
       marginSaying(el, error.status === 409 && error.data?.why === 'busy' ? 'Felix is still answering this.' : error.message);
     }
   }
@@ -1191,7 +1196,7 @@ function marginRekey(from, to) {
 }
 
 async function marginAskOn(s, t, question) {
-  marginPage.drafted = null;
+  marginPage.drafted.delete(marginDraftKey(t));
   marginSaying(marginPage.els.get('draft'), '');
   marginPage.thinking.set('draft', { text: question });
   marginDraw();
@@ -1430,6 +1435,25 @@ function marginSame(s, picked, beside) {
   });
 }
 
+function marginDraftKey({ quote, prefix, suffix }) {
+  return `${quote}\u0000${prefix}\u0000${suffix}`;
+}
+
+function marginStash() {
+  const draft = marginPage.draft;
+  if (!draft) return;
+  const key = marginDraftKey(draft);
+  const text = $('textarea', marginPage.els.get('draft'))?.value || '';
+  marginPage.drafted.delete(key);
+  if (text.trim()) marginPage.drafted.set(key, text);
+  if (marginPage.drafted.size > 20) marginPage.drafted.delete(marginPage.drafted.keys().next().value);
+}
+
+function marginTaken(s, picked) {
+  const beside = marginBeside(s, picked);
+  return Boolean(beside && marginSame(s, picked, beside));
+}
+
 function marginAskFirst(s, picked) {
   const beside = marginBeside(s, picked);
   if (!beside) return false;
@@ -1438,18 +1462,24 @@ function marginAskFirst(s, picked) {
     marginOpen(same.id, true);
     return true;
   }
+  const want = { quote: picked.text, prefix: beside.prefix, suffix: beside.suffix };
+  if (marginPage.draft && marginDraftKey(marginPage.draft) === marginDraftKey(want)) {
+    marginOpen('draft', true);
+    return true;
+  }
   if (marginPage.thinking.has('draft')) {
     toast('Felix is still answering the last one.');
     return true;
   }
+  marginStash();
   marginDropThread('draft');
-  marginPage.draft = { id: 'draft', quote: picked.text, prefix: beside.prefix, suffix: beside.suffix, messages: [] };
+  marginPage.draft = { id: 'draft', ...want, messages: [] };
   marginOpen('draft', true);
   const area = $('textarea', marginPage.els.get('draft'));
   if (!area) return false;
-  const kept = marginPage.drafted;
-  if (kept && kept.quote === picked.text && kept.prefix === beside.prefix && kept.suffix === beside.suffix) {
-    area.value = kept.text;
+  const kept = marginPage.drafted.get(marginDraftKey(want));
+  if (kept) {
+    area.value = kept;
     marginSized(area);
   }
   return true;
@@ -1465,17 +1495,16 @@ function marginAsk(s, picked, question = '') {
   if (same) {
     marginOpen(same.id, true);
     const el = marginPage.els.get(same.id);
-    const area = el && $('textarea', el);
-    if (question && area && !marginPage.thinking.has(same.id)) {
-      area.value = question;
-      $('form', el).requestSubmit();
-    }
+    if (!question || !el) return true;
+    if (marginPage.thinking.has(same.id)) toast('Felix is still answering this.');
+    else marginReply(s, el, same, question).catch(fail);
     return true;
   }
   if (marginPage.thinking.has('draft')) {
     toast('Felix is still answering the last one.');
     return true;
   }
+  marginStash();
   marginDropThread('draft');
   const draft = { id: 'draft', quote: picked.text, prefix: beside.prefix, suffix: beside.suffix, messages: [] };
   marginPage.draft = draft;

@@ -9,6 +9,7 @@
     let blocks = [];
     let rendered = [];
     let editing = null;
+    let boxMemo = null;
 
     const MOST_UNDO = 200;
     const TYPING_PAUSE = 1000;
@@ -1157,7 +1158,12 @@
         return;
       }
 
-      if (kind === 'line' && e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      if (kind === 'line' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        return;
+      }
+
+      if (kind === 'line' && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         enterLine();
         return;
@@ -1765,15 +1771,23 @@
         return kept.picked && kept.text === lines.join('\n') ? kept.picked : null;
       },
       selectionBox() {
-        if (editing && document.activeElement === editing.area && editing.area.selectionStart !== editing.area.selectionEnd) return caretBox(editing.area, editing.area.selectionEnd);
+        if (editing && document.activeElement === editing.area && editing.area.selectionStart !== editing.area.selectionEnd) {
+          const { area } = editing;
+          const tall = parseFloat(getComputedStyle(area).lineHeight) || 24;
+          return { ...caretBox(area, area.selectionEnd), top: caretBox(area, area.selectionStart).y - tall };
+        }
         const picked = root.getSelection ? root.getSelection() : null;
         const span = picked && !picked.isCollapsed && picked.rangeCount ? selectedSpan() : null;
         if (!span) return null;
         const [from, to] = span;
+        const key = `${from}:${to}:${window.scrollY}:${window.innerWidth}:${container.offsetHeight}`;
+        if (boxMemo?.key === key) return boxMemo.box;
         const first = this.spanRects(from, Math.min(to, from + 120))[0];
         const last = this.spanRects(Math.max(from, to - 120), to).at(-1);
-        const box = picked.getRangeAt(0).getBoundingClientRect();
-        return { x: last ? last.right : box.right, y: last ? last.bottom : box.bottom, top: first ? first.top : box.top };
+        const range = picked.getRangeAt(0).getBoundingClientRect();
+        const box = { x: last ? last.right : range.right, y: last ? last.bottom : range.bottom, top: first ? first.top : range.top };
+        boxMemo = { key, box };
+        return box;
       },
       caretLine() {
         if (editing) return lineOf(lineStart(editing.start) + editing.prefix.length + editing.area.selectionEnd);

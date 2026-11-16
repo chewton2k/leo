@@ -38,13 +38,15 @@ function paintDrawing(fig, at) {
   const kept = diagrams.inked.get(fig);
   const last = kept.variants.length - 1;
   kept.at = Math.max(0, Math.min(last, at));
-  diagrams.steps.delete(kept.key);
-  diagrams.steps.set(kept.key, kept.at);
-  if (diagrams.steps.size > DIAGRAMS_KEPT) diagrams.steps.delete(diagrams.steps.keys().next().value);
   const step = kept.variants[kept.at];
   fig.querySelector('img').src = inkedUrl(step.svg);
   const bar = fig.querySelector('.drawing-steps');
   if (!bar) return;
+  if (kept.key) {
+    diagrams.steps.delete(kept.key);
+    diagrams.steps.set(kept.key, kept.at);
+    if (diagrams.steps.size > DIAGRAMS_KEPT) diagrams.steps.delete(diagrams.steps.keys().next().value);
+  }
   bar.querySelector('.drawing-count').textContent = `${kept.at + 1}/${last + 1}`;
   bar.querySelector('.drawing-caption').textContent = step.caption;
   bar.querySelector('[data-step-go="-1"]').disabled = kept.at === 0;
@@ -67,11 +69,12 @@ function stepDrawings() {
     const variants = drawingSteps(source);
     if (!variants) continue;
     const stepped = variants.length > 1 && !fig.closest('.doc');
-    const key = `${fig.closest('[data-id]')?.dataset.id || ''}|${source}`;
+    const thread = fig.closest('.margin-note')?.dataset.id;
+    const key = thread ? `${thread}|${source}` : '';
     diagrams.inked.set(fig, { variants, at: 0, key });
     fig.classList.add('inked');
     if (stepped) fig.insertAdjacentHTML('beforeend', '<figcaption class="drawing-steps"><button type="button" data-step-go="-1" aria-label="Previous step">‹</button><span class="drawing-count"></span><button type="button" data-step-go="1" aria-label="Next step">›</button><button type="button" data-step-go="0" aria-label="Start again">↻</button><span class="drawing-caption" aria-live="polite"></span></figcaption>');
-    paintDrawing(fig, stepped ? diagrams.steps.get(key) ?? 0 : variants.length - 1);
+    paintDrawing(fig, stepped ? (key && diagrams.steps.get(key)) || 0 : variants.length - 1);
   }
 }
 

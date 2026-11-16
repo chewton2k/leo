@@ -35,7 +35,7 @@ function placeAskFloat(has) {
   if (has) askFloat.querySelector('[data-ask="ask"]').title = `Ask Felix (${shortcutText(shortcutKeys('ask'))})`;
   const box = has && s && s.doc ? s.doc.selectionBox() : null;
   const columns = $('.note-columns');
-  const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin));
+  const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin) && !marginTaken(s, s.doc.selection()));
   askFloat.classList.toggle('beside', beside);
   if (!beside) {
     if (!placeFloat(askFloat, box)) askFloat.hidden = true;

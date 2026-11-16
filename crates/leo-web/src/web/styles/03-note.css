@@ -275,7 +275,9 @@ figure.drawing.inked img { filter: none !important; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
   .margin-ink path.pencil { stroke: CanvasText; }
-  .margin-ink path.tether { stroke: Highlight; }
+  .margin-ink path.tether, .margin-ink path.solid[data-id="draft"], .margin-ink path.tether[data-id="draft"] { stroke: Highlight; }
+  .margin-ink path.wash[data-id="draft"] { fill: Highlight; }
+  .margin-note[data-id="draft"] .margin-reply { border-color: CanvasText; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
   .margin-anchor { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
