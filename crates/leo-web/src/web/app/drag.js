@@ -346,3 +346,69 @@ async function afterMove(from, to, noteId = null) {
   else await showLatest();
   await loadSideFolders();
 }
+
+const PAGE_STEP = 20;
+
+function pageWidthLive(article, px, edge = 'right') {
+  const [least, most] = window.leoTheme.PAGE_RANGE;
+  const room = article.closest('.note-columns')?.clientWidth || most;
+  const width = Math.round(Math.max(least, Math.min(most, room, px)));
+  document.documentElement.style.setProperty('--note-width', `${width}px`);
+  const label = $('.page-width-label', article);
+  label.textContent = `${width} px`;
+  label.dataset.edge = edge;
+  label.hidden = false;
+  for (const mark of article.querySelectorAll('.page-mark')) mark.setAttribute('aria-valuenow', String(width));
+  marginRedraw();
+  return width;
+}
+
+function pageWidthDone(article, width) {
+  $('.page-width-label', article).hidden = true;
+  window.leoTheme.setPageWidth(width);
+  marginRedraw();
+}
+
+document.addEventListener('pointerdown', (e) => {
+  const mark = e.target.closest?.('.page-mark');
+  if (!mark || e.button !== 0) return;
+  e.preventDefault();
+  const article = mark.closest('article.note');
+  const box = article.getBoundingClientRect();
+  const middle = box.left + box.width / 2;
+  let width = Math.round(box.width);
+  mark.setPointerCapture(e.pointerId);
+  mark.classList.add('dragging');
+  const move = (ev) => { width = pageWidthLive(article, 2 * Math.abs(ev.clientX - middle), mark.dataset.edge); };
+  const up = () => {
+    mark.removeEventListener('pointermove', move);
+    mark.classList.remove('dragging');
+    pageWidthDone(article, width);
+  };
+  mark.addEventListener('pointermove', move);
+  mark.addEventListener('pointerup', up, { once: true });
+  mark.addEventListener('pointercancel', up, { once: true });
+});
+
+document.addEventListener('dblclick', (e) => {
+  if (!e.target.closest?.('.page-mark')) return;
+  window.leoTheme.setPageWidth(null);
+  marginRedraw();
+});
+
+document.addEventListener('keydown', (e) => {
+  const mark = e.target.closest?.('.page-mark');
+  if (!mark) return;
+  const article = mark.closest('article.note');
+  const now = Math.round(article.getBoundingClientRect().width);
+  const grow = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[e.key];
+  if (e.key === 'Enter' || e.key === 'Home') {
+    e.preventDefault();
+    window.leoTheme.setPageWidth(null);
+    return marginRedraw();
+  }
+  if (!grow) return;
+  e.preventDefault();
+  const width = pageWidthLive(article, now + grow * (mark.dataset.edge === 'left' ? -1 : 1) * PAGE_STEP, mark.dataset.edge);
+  pageWidthDone(article, width);
+});

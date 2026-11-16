@@ -359,7 +359,8 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   (`textContent`); in a note it shows complete. The step is remembered per thread and drawing
   (`diagrams.steps`, 60 kept), so folding, opening or redrawing a margin note keeps it, and the
   step buttons sit above a folded note's `.margin-toggle`, so they step without opening it
-  (2026-11-15, the user's call). A theme change repaints; See it larger
+  (2026-11-15, the user's call). A new stepped margin drawing plays its steps once (`playDrawing`; skipped under
+  Reduce Motion or when a step is remembered) and ↻ plays it again (2026-11-16). A theme change repaints; See it larger
   shows the complete drawing; an svg that does not parse stays the plain image.
 
 - Picture sizes (2026-10-19, the user's request, like Google Docs): a
@@ -1090,6 +1091,11 @@ target. Check the page sequence after loading preferences.
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes
   (`Warm.margin`).
+- Round two from the reference app (2026-11-16, the user's call): marks are an ink blot after the passage's last
+  word; closed left-margin notes are right-aligned; a silent read leaves a faint "Nothing to add." after the passage;
+  a draw ask waits with "Sketching it…"; the ask box says "Enter to ask · Esc to close"; Felix this on a passage with a
+  thread only opens it; the open thread offers Copy; a folded thread says "N replies"; a resolved note stays faded with
+  "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
 - Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
   least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's

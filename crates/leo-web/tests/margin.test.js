@@ -318,3 +318,12 @@ for (const [name, fn] of cases) {
   }
 }
 console.log(`ok ${cases.length}`);
+
+test('a dragged page width makes the margins give way: both, then right, then marks', () => {
+  const width = 1156;
+  assert.equal(M.arrangement({ width, column: 980 }), 'both');
+  assert.equal(M.arrangement({ width, column: 640, dragged: true }), 'both');
+  assert.equal(M.arrangement({ width, column: 800, dragged: true }), 'right');
+  assert.equal(M.arrangement({ width, column: 1000, dragged: true }), 'marks');
+  assert.equal(M.arrangement({ width, column: 1000, dragged: true, setting: 'right' }), 'marks');
+});

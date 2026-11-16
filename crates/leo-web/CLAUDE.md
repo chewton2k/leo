@@ -605,7 +605,10 @@ Felix (2026-10-19).
   call): notes shrink to `LEAST_SHARED` (180 px, about 22 characters a line) first,
   then the column to `SHARED_COLUMN` (520 px, about 65 characters), and only below
   `ROOM_BOTH` (992 px of columns) does it become Right, then marks below
-  `ROOM_RIGHT`. It never moves every note right to make them wider.
+  `ROOM_RIGHT`. It never moves every note right to make them wider. A closed note
+  in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
+  are a small ink blot just after the passage's last word (`marginPassageEnd`), never
+  in a left gutter, side by side when two end together; a read's blot sits there too.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
@@ -662,6 +665,14 @@ Felix (2026-10-19).
   that already has an open thread opens it instead (`marginSame`). Both margins puts
   a note on the right whenever the right is free at its height (`marginKit.sides`).
   Margin icon buttons show the `.actions` tooltip (their aria-label), no `title`.
+  Felix this on such a passage only opens it (Visualize still asks in it). The open
+  thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
+  The ask box shows "Enter to ask · Esc to close"; a draw ask waits with "Sketching it…"
+  (`MARGIN_DRAWS`). A silent read leaves a faint aria-hidden "Nothing to add." after the
+  passage for 2.6 s (`marginQuiet`). A resolved note stays faded (.45) with a "Resolved"
+  label until the note is left (`marginPage.faded`); clicking it reopens it. A new stepped
+  drawing plays once (`playDrawing`, 1.1 s a step plus 20 ms a caption character, none
+  under Reduce Motion, never when its step is remembered); ↻ plays it again.
 - Reads use `Powers.toolless`, never `quick` (`no_tools`: `--tools ""`,
   `web_search="disabled"`, chain cut to its first provider, so a read fails
   closed). Replies and asks use `Powers.toolless_chat`. Every read is a fresh
@@ -929,8 +940,13 @@ a modal.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
   Restore tasks refuses a zip or file without task ids.
 - Appearance keys are per browser (`leo-theme`, `leo-note-width`,
-  `leo-text-size`, `leo-felix-letters`) and set before paint by `/theme.js`;
-  only reading text multiplies `--read`.
+  `leo-text-size`, `leo-felix-letters`, `leo-page-width`) and set before paint by `/theme.js`;
+  only reading text multiplies `--read`. Page width (2026-11-16, the user's call, like the
+  reference app): two `.page-mark` separators at the note's top corners (drag.js) set
+  `leo-page-width` (480–1600 px, symmetric about the column's centre, live px label, arrows
+  ±20, double-click/Enter resets); `showWidth` writes it as an inline `--note-width` unless
+  the width is Full; picking a Note width card clears it. A dragged width makes the margins
+  give way (`arrangement({dragged})`: Both, then Right, then marks) instead of capping it.
 
 Decided: Keeping replaces Storage (2026-11-05); Quit leo is not in Settings; Writing
 AI uses a pen icon, never a sparkle.
