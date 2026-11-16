@@ -1652,7 +1652,7 @@ impl Session {
             ideas.join("; "),
             self.asked,
             if marking {
-                " These counts leave out the answer you are marking now."
+                " These counts leave out the answer you are marking now: count it in if it is right and not a guess."
             } else {
                 ""
             }
@@ -1685,7 +1685,12 @@ impl Session {
             } else {
                 "leo's"
             };
-            format!(" {whose} record says:{said} Say so in the recap.")
+            let then = if marking {
+                " Count in the answer just marked if it is right, then say so in the recap."
+            } else {
+                " Say so in the recap."
+            };
+            format!(" {whose} record says:{said}{then}")
         }
     }
 }
@@ -2938,7 +2943,7 @@ mod tests {
         assert!(state.contains("for code, have them write it"));
         assert!(session
             .state(true)
-            .contains("These counts leave out the answer you are marking now."));
+            .contains("leave out the answer you are marking now: count it in if it is right"));
         let unshown = session.unshown(false);
         assert!(unshown.starts_with(" leo's record says:"));
         assert!(session
