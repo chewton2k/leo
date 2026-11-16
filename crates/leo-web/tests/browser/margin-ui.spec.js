@@ -229,9 +229,8 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect(await pickText(page, 'Three short')).toBe(true);
   await expect(menu).toBeVisible();
   const word = await page.locator('#doc .blk', { hasText: 'Three short' }).boundingBox();
-  const bar = await menu.boundingBox();
-  expect(bar.y).toBeGreaterThan(word.y);
-  expect(bar.x).toBeLessThan(word.x + 400);
+  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves under the new selection on the next frame').toBeGreaterThan(word.y);
+  expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 
 test('Ask Felix opens a question box beside the passage, keeps a half-typed question and asks only when sent', async ({ page }) => {
@@ -658,14 +657,14 @@ test('a resolved passage reopens', async ({ page }) => {
   await expect(back).toHaveCount(0);
   expect(await open()).toBe(1);
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toHaveAttribute('data-resolved', /.+/);
   await expect(back).toBeVisible();
   await back.focus();
   await page.keyboard.press('Enter');
   await expect(card).toHaveAttribute('data-open', '');
   await expect(back).toHaveCount(0);
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toHaveAttribute('data-resolved', /.+/);
   await back.focus();
   await page.keyboard.press('Space');
   await expect(card).toHaveAttribute('data-open', '');
