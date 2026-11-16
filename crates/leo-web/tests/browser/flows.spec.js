@@ -4037,7 +4037,10 @@ test.describe('passages', () => {
     const ask = page.locator('.ask-float');
     await expect(ask).toBeVisible();
     await ask.getByRole('button', { name: 'Ask Felix' }).click();
-    await page.getByRole('textbox', { name: 'Ask Felix about this passage' }).press('Enter');
+    const question = page.locator('.margin-note[data-id="draft"]').getByRole('textbox', { name: 'Ask Felix about this passage' });
+    await expect(question).toBeFocused();
+    await question.fill('Why?');
+    await question.press('Enter');
     await page.locator('.margin-note[data-open]').getByRole('button', { name: 'Ask in chat' }).click();
     const chat = page.locator('#chat');
     await expect(chat).toBeVisible();

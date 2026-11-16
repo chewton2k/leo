@@ -127,12 +127,17 @@ test('stacking: nothing goes above the floor, even with an open note', () => {
 
 test('both margins: a crowded right side spills left', () => {
   const on = M.sides([{ id: 'a', want: 0, height: 100 }, { id: 'b', want: 10, height: 100 }, { id: 'c', want: 20, height: 100 }, { id: 'd', want: 400, height: 10 }]);
-  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'left' });
+  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'right' });
 });
 
-test('both margins: spaced notes alternate right, left, right', () => {
+test('both margins: spaced notes all sit on the right while it has room', () => {
   const on = M.sides([{ id: 'a', want: 0, height: 80 }, { id: 'b', want: 300, height: 80 }, { id: 'c', want: 600, height: 80 }, { id: 'd', want: 900, height: 80 }]);
-  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'left' });
+  assert.deepEqual(on, { a: 'right', b: 'right', c: 'right', d: 'right' });
+});
+
+test('both margins: a note goes left only where the right is taken at its height', () => {
+  const on = M.sides([{ id: 'a', want: 100, height: 120 }, { id: 'b', want: 150, height: 60 }, { id: 'c', want: 400, height: 60 }]);
+  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right' });
 });
 
 test('both margins: a new note never moves a placed note whose side is still free', () => {

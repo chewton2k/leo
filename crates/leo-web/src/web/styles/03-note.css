@@ -147,7 +147,7 @@
 :is(.margin-note, .msg.leo > .prose, .viewer-diagram.from-margin, .viewer-diagram.from-chat) .diagram-art .cluster rect { fill: transparent !important; stroke: var(--muted) !important; stroke-width: 1.5px !important; }
 .margin-note .drawing, .viewer-diagram.from-margin .drawing { background: transparent; box-shadow: none; padding: 0; }
 figure.drawing.inked img { filter: none !important; }
-.drawing-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-top: 6px; font-size: var(--fs-xs); color: var(--muted); text-align: left; }
+.drawing-steps { position: relative; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; margin-top: 6px; font-size: var(--fs-xs); color: var(--muted); text-align: left; }
 .drawing-steps button { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--muted); font: inherit; font-size: 15px; line-height: 1; cursor: pointer; }
 .drawing-steps button:hover:not(:disabled) { background: var(--tint); color: var(--text); }
 .drawing-steps button:disabled { opacity: .4; cursor: default; }
@@ -172,6 +172,11 @@ figure.drawing.inked img { filter: none !important; }
 .margin-note .drawing-sub { font-size: calc(12.5px * var(--read)); }
 
 .margin-reply textarea::placeholder { color: var(--muted); }
+.margin-note[data-id="draft"] .margin-reply { padding: 7px 10px; border: 1px solid var(--felix); border-radius: var(--r-md); }
+.margin-note[data-id="draft"] .margin-reply textarea:focus-visible { box-shadow: none; }
+.margin-note[data-id="draft"] .margin-send { right: 6px; bottom: 5px; }
+.margin-ink path.solid[data-id="draft"], .margin-ink path.tether[data-id="draft"] { stroke: var(--felix); }
+.margin-ink path.wash[data-id="draft"] { fill: var(--felix); }
 .margin-earlier { justify-self: start; padding: 3px 6px; margin-left: -6px; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
 .margin-note[data-open] .margin-said > .margin-earlier { padding-right: 6px; }
 .margin-earlier:hover { color: var(--accent); }
@@ -201,7 +206,6 @@ figure.drawing.inked img { filter: none !important; }
 .margin-instructions { margin: 0 0 16px; }
 .writeup-pending { margin: 0 0 16px; }
 .writeup-pending .buttons { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
-.ask-field { position: fixed; z-index: 35; width: min(360px, calc(100vw - 32px)); box-shadow: var(--shadow); }
 .margin-mode-menu { position: absolute; z-index: 12; top: calc(100% + 6px); right: 0; width: min(260px, calc(100vw - 32px)); }
 .margin-mode-menu button { border: 0; border-radius: var(--r-tile); background: none; font: inherit; font-size: var(--fs-sm); cursor: pointer; display: block; width: 100%; padding: 8px 10px; color: var(--text); text-align: left; }
 .margin-mode-menu button[aria-checked="true"], .margin-mode-menu button:hover { background: var(--tint); }
@@ -271,7 +275,9 @@ figure.drawing.inked img { filter: none !important; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
   .margin-ink path.pencil { stroke: CanvasText; }
-  .margin-ink path.tether { stroke: Highlight; }
+  .margin-ink path.tether, .margin-ink path.solid[data-id="draft"], .margin-ink path.tether[data-id="draft"] { stroke: Highlight; }
+  .margin-ink path.wash[data-id="draft"] { fill: Highlight; }
+  .margin-note[data-id="draft"] .margin-reply { border-color: CanvasText; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
   .margin-anchor { background: Highlight; box-shadow: 0 0 0 2px Canvas; }

@@ -143,7 +143,11 @@ Decided: one app, window only (2026-10-31).
   would copy needs a class on that list; hints and card descriptions are chrome.
   Native drag starts only from explicit note/folder sources. Selected text is a
   warm ink wash (`::selection`, `--text` at 22%; leo sets no other selection
-  colour). Ink details (2026-11-15): a Markdown `---` (`.prose hr`, also the
+  colour). Note text (`.doc`) paints that same wash through `::highlight(leo-pick)`
+  (doc.js, one page-wide `selectionchange` listener, priority under search; `pick-paint`
+  on the doc after its first paint makes its native `::selection` transparent), so only
+  the selected text is tinted, never the gaps between blocks (2026-11-15, the user's call);
+  line editors, images and forced colours keep the native selection. Ink details (2026-11-15): a Markdown `---` (`.prose hr`, also the
   doc's rule block) is a drawn pencil line (an SVG mask, plain 1 px `--line` in
   print and forced colours); an open folder's guide (`.side-kids::before`) is a
   pencil stroke with a hook at the bottom (two SVG mask layers, the line stretched,
@@ -227,7 +231,9 @@ Decided: one app, window only (2026-10-31).
   working blot (`.msg-step-busy`), the first 600 ms of what he just made
   (`inkLand(id, true)`), and while he
   waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
-  reply's proposals until Apply or Dismiss (no coloured edge), and the still 6 px
+  reply's proposals until Apply or Dismiss (no coloured edge), the Ask Felix box in the
+  margin (the draft's reply border and its passage's underline, wash and tether, 2026-11-15),
+  and the still 6 px
   dot after the open note's explorer row while he reads along (`.side-reading`,
   from `marginPage.reading`; margin-notes.js redraws the explorer when a read
   starts and ends; 2026-11-15). Never links,
@@ -538,7 +544,7 @@ the web (root CLAUDE.md).
   chat. Add to note (`routes/insert.rs`) is version-checked and request ids
   dedupe. Chat titles are local; history shows titles only.
 - Felix draws only when asked to see, draw or visualize something (2026-11-14,
-  replacing the 2026-11-09 threshold): one stepped ```svg (viewBox 320 wide,
+  replacing the 2026-11-09 threshold): one ```svg, one picture unless it unfolds in order, then 2 to 5 steps (viewBox 320 wide,
   `var(--text|muted|accent|accent-soft)`, top-level `<g data-step data-caption>`),
   never Mermaid or text characters; margin reads never draw; `drawing::drawn`
   runs only when `drawing::asks_to_see` the user's message. `diagrams.js`
@@ -649,7 +655,13 @@ Felix (2026-10-19).
   characters, else the chat; read-along and `add_margin_note` quotes
   `MOST_QUOTE` (600). The selection toolbar (`passages.js`) has Felix this
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
-  with a preset question (`ASK_PRESETS`).
+  with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
+  selection when the layout has one (`.ask-float.beside`), else under its last word.
+  Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
+  Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
+  that already has an open thread opens it instead (`marginSame`). Both margins puts
+  a note on the right whenever the right is free at its height (`marginKit.sides`).
+  Margin icon buttons show the `.actions` tooltip (their aria-label), no `title`.
 - Reads use `Powers.toolless`, never `quick` (`no_tools`: `--tools ""`,
   `web_search="disabled"`, chain cut to its first provider, so a read fails
   closed). Replies and asks use `Powers.toolless_chat`. Every read is a fresh

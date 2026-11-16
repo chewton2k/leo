@@ -4,6 +4,10 @@ html { -webkit-text-size-adjust: 100%; }
 * { scrollbar-width: thin; }
 :root { scrollbar-color: color-mix(in srgb, var(--text) 24%, transparent) transparent; }
 ::selection { background: color-mix(in srgb, var(--text) 22%, transparent); }
+@media (forced-colors: none) {
+  .doc.pick-paint :not(textarea, img, svg, svg *)::selection { background: transparent; }
+  ::highlight(leo-pick) { background: color-mix(in srgb, var(--text) 22%, transparent); }
+}
 body {
   margin: 0;
   background: var(--page);

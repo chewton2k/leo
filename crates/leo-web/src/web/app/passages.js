@@ -1,4 +1,4 @@
-const ASK_PRESETS = { this: 'Respond to this passage.', draw: 'Draw this step by step.' };
+const ASK_PRESETS = { this: 'Respond to this passage.', draw: 'Draw this.' };
 const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
 askFloat.setAttribute('role', 'toolbar');
@@ -14,36 +14,8 @@ askFloat.addEventListener('click', (e) => {
 });
 document.body.appendChild(askFloat);
 
-const askField = document.createElement('form');
-askField.className = 'field ask-field';
-askField.hidden = true;
-askField.innerHTML = `${ICON.chat}<input type="text" maxlength="1000" placeholder="Ask about this passage…" aria-label="Ask Felix about this passage" autocomplete="off" enterkeyhint="send">`;
-const askInput = askField.querySelector('input');
-let askHeld = null;
-askField.addEventListener('submit', (e) => {
-  e.preventDefault();
-  const held = askHeld;
-  const question = askInput.value.trim();
-  closeAskField();
-  if (held && held.s === state.session) askAboutSelection(question, held);
-});
-askInput.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape') return;
-  e.preventDefault();
-  e.stopPropagation();
-  closeAskField();
-});
-askInput.addEventListener('blur', () => closeAskField());
-document.body.appendChild(askField);
-
-function closeAskField() {
-  askHeld = null;
-  askField.hidden = true;
-}
-
 function hideAskFloat() {
   askFloat.hidden = true;
-  closeAskField();
 }
 
 function placeFloat(el, point) {
@@ -61,23 +33,31 @@ function placeFloat(el, point) {
 function placeAskFloat(has) {
   const s = state.view === 'note' ? state.session : null;
   if (has) askFloat.querySelector('[data-ask="ask"]').title = `Ask Felix (${shortcutText(shortcutKeys('ask'))})`;
-  if (!placeFloat(askFloat, has && s && s.doc ? s.doc.selectionBox() : null)) askFloat.hidden = true;
+  const box = has && s && s.doc ? s.doc.selectionBox() : null;
+  const columns = $('.note-columns');
+  const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin) && !marginTaken(s, s.doc.selection()));
+  askFloat.classList.toggle('beside', beside);
+  if (!beside) {
+    if (!placeFloat(askFloat, box)) askFloat.hidden = true;
+    return;
+  }
+  askFloat.hidden = false;
+  const gap = parseFloat(getComputedStyle(columns).getPropertyValue('--margin-gap')) || 24;
+  const left = $('#doc').getBoundingClientRect().right + gap;
+  askFloat.style.left = `${Math.min(left, window.innerWidth - askFloat.offsetWidth - 8)}px`;
+  askFloat.style.top = `${Math.max(8, Math.min(box.top - 4, window.innerHeight - askFloat.offsetHeight - 12))}px`;
 }
 
 function openAskField() {
   const s = state.view === 'note' ? state.session : null;
   const picked = s && s.doc ? s.doc.selection() : null;
-  if (!picked || !s.note.id || !marginBeside(s, picked)) return askAboutSelection();
+  if (!picked || !s.note.id || !marginAskFirst(s, picked)) return askAboutSelection();
   askFloat.hidden = true;
-  askInput.value = '';
-  if (!placeFloat(askField, s.doc.selectionBox())) return askAboutSelection();
-  askHeld = { s, picked };
-  askInput.focus({ preventScroll: true });
 }
 
-function askAboutSelection(question = '', held = null) {
-  const s = held ? held.s : state.view === 'note' ? state.session : null;
-  const picked = held ? held.picked : s && s.doc ? s.doc.selection() : null;
+function askAboutSelection(question = '') {
+  const s = state.view === 'note' ? state.session : null;
+  const picked = s && s.doc ? s.doc.selection() : null;
   hideAskFloat();
   if (!picked) return toast('Select some text in the note first.');
   if (!s.note.id) return toast('Felix can read this note once it has been saved.');
@@ -112,7 +92,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (state.view !== 'note' || e.key !== 'Enter' || !(ON_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || askFloat.hidden || e.target.closest?.('.margin-layer, .chat, .scrim, .ask-field')) return;
+  if (state.view !== 'note' || e.key !== 'Enter' || !(ON_MAC ? e.metaKey : e.ctrlKey) || e.shiftKey || e.altKey || askFloat.hidden || e.target.closest?.('.margin-layer, .chat, .scrim')) return;
   e.preventDefault();
   e.stopPropagation();
   askAboutSelection(ASK_PRESETS.this);

@@ -9,6 +9,7 @@
     let blocks = [];
     let rendered = [];
     let editing = null;
+    let boxMemo = null;
 
     const MOST_UNDO = 200;
     const TYPING_PAUSE = 1000;
@@ -1157,6 +1158,11 @@
         return;
       }
 
+      if (kind === 'line' && e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        return;
+      }
+
       if (kind === 'line' && e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         enterLine();
@@ -1765,11 +1771,23 @@
         return kept.picked && kept.text === lines.join('\n') ? kept.picked : null;
       },
       selectionBox() {
-        if (editing && document.activeElement === editing.area && editing.area.selectionStart !== editing.area.selectionEnd) return caretBox(editing.area, editing.area.selectionEnd);
+        if (editing && document.activeElement === editing.area && editing.area.selectionStart !== editing.area.selectionEnd) {
+          const { area } = editing;
+          const tall = parseFloat(getComputedStyle(area).lineHeight) || 24;
+          return { ...caretBox(area, area.selectionEnd), top: caretBox(area, area.selectionStart).y - tall };
+        }
         const picked = root.getSelection ? root.getSelection() : null;
-        if (!picked || picked.isCollapsed || !picked.rangeCount || !selectedSpan()) return null;
-        const box = picked.getRangeAt(0).getBoundingClientRect();
-        return { x: box.right, y: box.bottom };
+        const span = picked && !picked.isCollapsed && picked.rangeCount ? selectedSpan() : null;
+        if (!span) return null;
+        const [from, to] = span;
+        const key = `${from}:${to}:${window.scrollY}:${window.innerWidth}:${container.offsetHeight}`;
+        if (boxMemo?.key === key) return boxMemo.box;
+        const first = this.spanRects(from, Math.min(to, from + 120))[0];
+        const last = this.spanRects(Math.max(from, to - 120), to).at(-1);
+        const range = picked.getRangeAt(0).getBoundingClientRect();
+        const box = { x: last ? last.right : range.right, y: last ? last.bottom : range.bottom, top: first ? first.top : range.top };
+        boxMemo = { key, box };
+        return box;
       },
       caretLine() {
         if (editing) return lineOf(lineStart(editing.start) + editing.prefix.length + editing.area.selectionEnd);
@@ -1884,6 +1902,24 @@
 
   const CITED_FOR = 4000;
   const MAC = /Mac/.test(root.navigator?.platform || '');
+
+  function paintPick() {
+    const picked = root.document.getSelection();
+    const range = picked && picked.rangeCount && !picked.isCollapsed ? picked.getRangeAt(0) : null;
+    const typing = /^(TEXTAREA|INPUT)$/.test(root.document.activeElement?.tagName || '');
+    const docOf = (node) => (node.nodeType === 1 ? node : node.parentElement)?.closest('.doc');
+    const home = range && !typing ? docOf(range.startContainer) || docOf(range.endContainer) : null;
+    if (!home) return root.CSS.highlights.delete('leo-pick');
+    const span = range.cloneRange();
+    if (!home.contains(span.startContainer)) span.setStart(home, 0);
+    if (!home.contains(span.endContainer)) span.setEnd(home, home.childNodes.length);
+    const paint = new root.Highlight(span);
+    paint.priority = -1;
+    root.CSS.highlights.set('leo-pick', paint);
+    home.classList.add('pick-paint');
+  }
+
+  if (root.CSS?.highlights && typeof root.Highlight === 'function') root.document.addEventListener('selectionchange', paintPick);
 
   root.leoDoc = { mount };
 })(window);
