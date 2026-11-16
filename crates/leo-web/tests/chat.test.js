@@ -366,9 +366,9 @@ test('a hint asks for a nudge without the answer, and every mark explains itself
   assert.ok(wrong.includes('do not give a hint') && wrong.includes('why each of the other choices is wrong'));
   const right = C.quizSay(mc, 'x = 2 sin x', true);
   assert.ok(right.includes('praise me briefly in your own words') && right.includes('explain why it is right'));
-  assert.ok(right.includes('only for what my answer and thinking show (a guess is not reasoning)'));
   const free = C.quizSay({ kind: 'free_response', question: 'Why?', answer: 'Because.' }, 'dunno', null);
   assert.ok(free.includes('intuitive shortcut or tip') && free.includes('praise me briefly'));
+  for (const said of [right, free]) assert.ok(said.includes('only for what my answer and thinking show (a guess is not reasoning)'));
   for (const said of [wrong, right, free]) assert.ok(said.includes('give it once, at the very end'));
 });
 
@@ -418,6 +418,8 @@ test('a study session closes ideas on a right answer or two misses, and finishes
   assert.equal(s.outcomes[1].state, 'open', 'a right step of a multi-part problem does not close it');
   C.scoreSession(s, { idea: 2, sure: 'guess' }, true);
   assert.equal(s.outcomes[1].state, 'open', 'a right guess does not close it');
+  C.scoreSession(s, { idea: 2, hints: [{ text: 'Look at the root.' }] }, true);
+  assert.equal(s.outcomes[1].state, 'open', 'a right answer after hints does not close it');
   C.scoreSession(s, { idea: 2, sure: 'sure' }, true);
   assert.equal(s.outcomes[1].state, 'done');
   C.scoreSession(s, { idea: 1 }, false);

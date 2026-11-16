@@ -253,7 +253,7 @@ pub const SPECS: [Spec; 32] = [
             Param {
                 name: "more_parts",
                 required: false,
-                about: "yes when another question on this idea must follow: a worked problem's steps but the last, or a check right after you taught the step",
+                about: "yes when another question on this idea must follow: a worked problem's steps but the last, or a check right after you taught the step; leave it out on the question that closes the idea",
             },
             Param {
                 name: "predict",
@@ -1617,7 +1617,7 @@ fn clip_chars(text: &str, most: usize) -> String {
 
 pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached 20 questions). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript.";
 pub const PLANNED: &str =
-    "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz.";
+    "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz, which takes more_parts because it follows your teaching.";
 pub const ENDED: &str = "Ended. Write the recap in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript. Ask nothing more.";
 
 pub fn plan_from(call: &Call) -> Result<Vec<String>, String> {
@@ -2840,6 +2840,16 @@ mod tests {
         for recap in [SESSION_DONE, ENDED] {
             assert!(recap.contains("any idea still open or only told (not shown yet)"));
         }
+        let more = spec_of("quiz")
+            .and_then(|s| s.params.iter().find(|p| p.name == "more_parts"))
+            .unwrap();
+        assert!(more
+            .about
+            .contains("a check right after you taught the step"));
+        assert!(more
+            .about
+            .contains("leave it out on the question that closes the idea"));
+        assert!(PLANNED.contains("which takes more_parts because it follows your teaching"));
     }
 
     #[test]

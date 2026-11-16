@@ -675,8 +675,9 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   idea open; hints go one rung at a time; retests use a new situation.
   From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea counts
   as shown only by a right answer away from the teaching, so a lesson's check right
-  after a step carries `more_parts` (the last step's too) and the idea closes on a
-  later question with a new case; an answer asked for outright is given and its
+  after a step carries `more_parts` (the last step's too; `PLANNED` repeats it) and
+  the idea closes on a later question with a new case, so a lesson plans at most six
+  ideas and comes back once to every open idea before it finishes; an answer asked for outright is given and its
   idea retested later with a new case; harder or easier changes the next question,
   never the plan; Practice adds a plausible wrong solution to find the flaw in, a
   last question that needs earlier ideas and, for a skill, doing it; readiness is
@@ -695,7 +696,9 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   (`aside`), which must stay one line: `send` folds held results by taking their
   first three lines. A right guess leaves its idea open for one retest, whether
   the page or Felix marks it (`scoreSession(session, quiz, correct)` reads `idea`,
-  `more` and `sure` from the quiz), and `quizSay` asks Felix to praise only what the
+  `more`, `sure` and `hints` from the quiz; a right answer after hints stays open
+  too and its history line says "after hints"), the recap card lists open ideas as
+  "Not shown yet", and `quizSay` asks Felix to praise only what the
   answer and thinking show. A typed
   "I do not know" needs no button: it is marked as a miss and Felix treats it as
   a gap.

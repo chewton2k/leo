@@ -455,8 +455,8 @@ the web (root CLAUDE.md).
   words, never paste its prompts or code. Jane Street's socratic-tutor (MIT) lent
   the rule that an idea is shown only away from its teaching (2026-11-16): a
   lesson's check after a step carries `more_parts`, so the idea closes on a later
-  question; `scoreSession` takes the quiz, so a right guess stays open on both
-  marking paths.
+  question; `scoreSession` takes the quiz, so a right guess or a right answer
+  after hints stays open on both marking paths.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
   ten idle minutes, Settings changes clear all; eviction and process cleanup run
   outside the slot mutex and off async workers. Only unchanged history plus the

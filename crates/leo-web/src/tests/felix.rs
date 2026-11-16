@@ -2150,7 +2150,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
     );
     assert!(prompts.lock().unwrap()[1].contains("That did not work"));
 
-    let (streamer, _) = scripted(vec![
+    let (streamer, ended) = scripted(vec![
         "<tool>{\"name\": \"end_session\"}</tool>",
         "Good work today.",
     ]);
@@ -2167,6 +2167,7 @@ fn a_study_session_plans_names_ideas_and_refuses_questions_once_covered() {
             .any(|l| l.get("session_end") == Some(&serde_json::json!(true))),
         "{lines:?}"
     );
+    assert!(ended.lock().unwrap()[1].contains(tools::ENDED));
 }
 
 #[test]

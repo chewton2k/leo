@@ -4542,7 +4542,7 @@ test.describe('study sessions', () => {
     await expect(progress).toBeHidden();
     const recap = chat.locator('.session-recap');
     await expect(recap).toContainText('1 of 2 ideas covered');
-    await expect(recap).toContainText('Not reached: Sift down');
+    await expect(recap).toContainText('Not shown yet: Sift down');
     await recap.locator('[data-chat="session-done"]').click();
     await expect(recap).toHaveCount(0);
   });

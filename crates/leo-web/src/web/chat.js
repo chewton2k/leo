@@ -646,12 +646,12 @@
   function scoreSession(session, quiz, correct) {
     const idea = quiz && quiz.idea;
     if (!session || session.state !== 'active' || !idea || correct === null || correct === undefined) return session;
-    const more = Boolean(quiz.more || quiz.sure === 'guess');
+    const keepOpen = Boolean(quiz.more || quiz.sure === 'guess' || hintsOf(quiz).length);
     const outcome = session.outcomes[idea - 1];
     if (!outcome || outcome.state !== 'open') return session;
     if (correct === false) outcome.misses += 1;
     if (outcome.misses >= 2) outcome.state = 'review';
-    else if (!more && correct === true) outcome.state = outcome.misses ? 'done' : 'first';
+    else if (!keepOpen && correct === true) outcome.state = outcome.misses ? 'done' : 'first';
     if (session.outcomes.every((o) => o.state !== 'open') || session.asked >= MOST_SESSION_QUESTIONS) session.state = 'finishing';
     return session;
   }
@@ -694,7 +694,7 @@
       lines.push(`[Felix asked: ${clipped(a.question, 300)}${(a.options || []).length ? ` (choices: ${a.options.join(' | ')})` : ''}${typeof a.answered === 'string' ? `; the user answered: ${clipped(a.answered, 200)}` : ''}]`);
     }
     for (const q of m.quizzes || []) {
-      const how = typeof q.given !== 'string' ? 'not answered yet' : q.correct === true ? `answered “${clipped(q.given, 120)}”, right` : q.correct === false ? `answered “${clipped(q.given, 120)}”, wrong` : `answered “${clipped(q.given, 200)}”`;
+      const how = typeof q.given !== 'string' ? 'not answered yet' : q.correct === true ? `answered “${clipped(q.given, 120)}”, right${hintsOf(q).length ? ' after hints' : ''}` : q.correct === false ? `answered “${clipped(q.given, 120)}”, wrong` : `answered “${clipped(q.given, 200)}”`;
       const replied = !canonical && q.reply && q.reply.text ? `; Felix replied: ${clipped(grade(q.reply.text).text, 400)}` : '';
       lines.push(`[${q.predict ? 'Prediction' : 'Practice'} question (${(QUIZ_KINDS[q.kind] || 'question').toLowerCase()}): ${clipped(q.question, 300)}${(q.options || []).length ? `; choices: ${q.options.join(' | ')}` : ''}; answer: ${clipped(q.answer, 200)}${canonical ? '' : `; ${how}${replied}`}]`);
     }
@@ -1911,7 +1911,7 @@
       if (c.first) parts.push(`${c.first} right the first time`);
       const lines = [];
       if (c.review.length) lines.push(`<p><b>Look at again:</b> ${c.review.map(escape).join(', ')}</p>`);
-      if (c.skipped.length) lines.push(`<p><b>Not reached:</b> ${c.skipped.map(escape).join(', ')}</p>`);
+      if (c.skipped.length) lines.push(`<p><b>Not shown yet:</b> ${c.skipped.map(escape).join(', ')}</p>`);
       const again = [...c.review, ...c.skipped].length;
       return `<div class="session-recap" role="status"><h4>Study session done</h4><p>${parts.join(' · ')}</p>${lines.join('')}<div class="session-acts">${again ? '<button type="button" class="btn primary sm" data-chat="session-again">Study those again</button>' : ''}<button type="button" class="btn plain sm" data-chat="session-done">Done</button></div></div>`;
     }
