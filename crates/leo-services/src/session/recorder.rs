@@ -592,10 +592,72 @@ pub fn finish(
         emit(Event::Failed(silent.to_string()));
         return;
     }
+    label_speakers(&session, emit, finish_now);
+    let assembled = session.assemble();
     emit(Event::Finished {
         transcript: assembled.text(),
         session: session.dir.clone(),
     });
+}
+
+fn kept_parts(session: &Session) -> u32 {
+    if session.manifest.profile.speakers {
+        (session::speakers::MOST_SECS / session.manifest.segment_secs.max(1)) as u32 + 1
+    } else {
+        0
+    }
+}
+
+fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBool) {
+    if !session.manifest.profile.speakers
+        || session.dir.join(session::speakers::FILE).exists()
+        || !session.assemble().failed.is_empty()
+    {
+        return;
+    }
+    emit(Event::Progress {
+        label: "Telling speakers apart".to_string(),
+        steps: None,
+    });
+    let parts = session.segments().len() as u32;
+    let started = Instant::now();
+    let labelled = session::speakers::label(
+        &session.dir,
+        parts,
+        &|parts| {
+            crate::speech::engine::engine()
+                .diarize(parts)
+                .map_err(|e| e.to_string())
+        },
+        &|path| transcribe_segment()(path),
+        finish_now,
+    );
+    let spoken = labelled.unwrap_or_else(|problem| {
+        session.trace("speakers-skipped", &problem);
+        emit(Event::Warning(format!(
+            "Speakers are not labelled: {problem}. The transcript is kept as it is."
+        )));
+        Vec::new()
+    });
+    session.trace(
+        "speakers",
+        &format!(
+            "{} labelled passages in {:.1}s",
+            spoken.len(),
+            started.elapsed().as_secs_f64()
+        ),
+    );
+    if let Err(e) = session::speakers::write(&session.dir, &spoken) {
+        session.trace(
+            "speakers-skipped",
+            &format!("could not save the labels: {e}"),
+        );
+    }
+    for index in 0..parts {
+        if session.dir.join(format!("seg-{index:05}.txt")).exists() {
+            let _ = std::fs::remove_file(session.dir.join(wav::done_name(index)));
+        }
+    }
 }
 
 pub fn resume(dir: &Path, emit: &dyn Fn(Event)) {
@@ -627,6 +689,7 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
         transcribe_segment(),
         Policy {
             workers: crate::ai::parallel_transcriptions(),
+            keep_parts: kept_parts(&session),
             ..Policy::default()
         },
         false,
@@ -676,9 +739,10 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         input,
         draft,
     } = request;
-    let drafting = draft.is_some() && append_to.is_none();
+    let labelled = profile.as_ref().is_some_and(|p| p.speakers);
+    let drafting = draft.is_some() && append_to.is_none() && !labelled;
     let mut drafter = draft
-        .filter(|_| append_to.is_none())
+        .filter(|_| append_to.is_none() && !labelled)
         .map(|chat| Drafter::new(chat, crate::ai::writing_budget()));
     let started = session::root().and_then(|root| {
         let mut manifest = Manifest::new(title, append_to, &dir, screen);
@@ -714,6 +778,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         transcribe_segment(),
         Policy {
             workers: crate::ai::parallel_transcriptions(),
+            keep_parts: kept_parts(&session),
             ..Policy::default()
         },
         true,

@@ -13,6 +13,8 @@ pub const MOST_CONTEXT_CHARS: usize = 8000;
 pub struct Profile {
     pub context: String,
     pub wants: String,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub speakers: bool,
 }
 
 impl Profile {
@@ -28,6 +30,7 @@ impl Profile {
         Ok(Profile {
             context: self.context.trim().to_string(),
             wants: self.wants.trim().to_string(),
+            speakers: self.speakers,
         })
     }
 }
@@ -196,10 +199,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn speaker_labels_are_off_by_default_and_leave_old_profiles_byte_identical() {
+        let old = serde_json::to_string(&Profile {
+            context: "c".into(),
+            wants: "w".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(old, r#"{"context":"c","wants":"w"}"#);
+        let on: Profile = serde_json::from_str(r#"{"speakers":true}"#).unwrap();
+        assert!(on.speakers && on.clone().checked().unwrap().speakers);
+        assert!(!serde_json::from_str::<Profile>("{}").unwrap().speakers);
+    }
+
+    #[test]
     fn what_the_user_wants_is_bounded_and_trimmed() {
         let p = Profile {
             context: " Design review ".into(),
             wants: " Just the decisions ".into(),
+            ..Default::default()
         }
         .checked()
         .unwrap();

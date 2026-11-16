@@ -502,3 +502,29 @@ fn a_choice_the_catalog_no_longer_offers_still_opens_speech_models() {
             .contains("Choose and download"));
     }
 }
+
+#[test]
+fn the_speaker_model_is_listed_apart_and_can_never_become_the_speech_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = Library::with_catalog(
+        dir.path().join("models"),
+        dir.path().join("config"),
+        Arc::new(catalog().clone()),
+    );
+    let speaker = catalog().known(super::catalog::DIARIZER).unwrap();
+    std::fs::create_dir_all(dir.path().join("models")).unwrap();
+    std::fs::write(
+        dir.path().join("models").join(&speaker.file().filename),
+        b"partial",
+    )
+    .unwrap();
+    let view = library.view().unwrap();
+    assert_eq!(view["speakers"]["id"], super::catalog::DIARIZER);
+    assert_eq!(view["speakers"]["size"], speaker.file().size);
+    assert_eq!(view["speakers"]["verified"], false);
+    assert!(view["extra_files"].as_array().unwrap().is_empty());
+    assert!(library.use_model(super::catalog::DIARIZER, "en").is_err());
+    assert!(catalog().get(super::catalog::DIARIZER).is_err());
+    assert!(library.speaker_model().is_err());
+    assert_eq!(catalog().curated().count(), 29);
+}

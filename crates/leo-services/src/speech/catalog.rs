@@ -38,6 +38,8 @@ pub struct ModelFile {
     pub sha256: String,
 }
 
+pub const DIARIZER: &str = "diar_streaming_sortformer_4spk-v2.1";
+
 pub fn catalog() -> &'static Catalog {
     static CATALOG: LazyLock<Catalog> = LazyLock::new(|| {
         serde_json::from_str(include_str!("catalog.json"))
@@ -69,6 +71,21 @@ impl Catalog {
         let model = self.curated().find(|m| m.id == id).context(
             "That speech model is not in the library. Choose one in Settings → Speech models.",
         )?;
+        Self::checked(model)
+    }
+
+    pub fn known(&self, id: &str) -> Result<&Model> {
+        if id == DIARIZER {
+            let model = self
+                .models
+                .iter()
+                .find(|m| m.id == id && m.role == "diarize");
+            return Self::checked(model.context("The speaker model is missing. Update Leo.")?);
+        }
+        self.get(id)
+    }
+
+    fn checked(model: &Model) -> Result<&Model> {
         let file = model
             .files
             .get(&model.quant)

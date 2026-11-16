@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+import hashlib
+import json
+import os
+import sys
+import urllib.request
+import wave
+
+DIARIZER = "diar_streaming_sortformer_4spk-v2.1"
+AUDIO = "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2004a/audio/ES2004a.Mix-Headset.wav"
+TRUTH = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/main/only_words/rttms/test/ES2004a.rttm"
+SECONDS = 420
+
+
+def fetch(url, dest, sha256=None):
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(url, timeout=60) as response, open(dest + ".part", "wb") as out:
+        while True:
+            block = response.read(1 << 20)
+            if not block:
+                break
+            digest.update(block)
+            out.write(block)
+    if sha256 and digest.hexdigest() != sha256:
+        os.remove(dest + ".part")
+        sys.exit(f"{os.path.basename(dest)}: checksum mismatch")
+    os.replace(dest + ".part", dest)
+
+
+def model(catalog, home, wanted):
+    entry = next(m for m in catalog["models"] if m["id"] == wanted)
+    file = entry["files"][entry["quant"]]
+    speech = os.path.join(home, "models", "speech")
+    os.makedirs(speech, exist_ok=True)
+    url = f"https://huggingface.co/{entry['repository']}/resolve/{entry['revision']}/{file['filename']}"
+    fetch(url, os.path.join(speech, file["filename"]), file["sha256"])
+    return entry
+
+
+def main():
+    if len(sys.argv) != 5:
+        sys.exit("usage: speaker_check.py <catalog.json> <leo-home> <model-id> <out-dir>")
+    catalog_path, home, wanted, out = sys.argv[1:5]
+    catalog = json.load(open(catalog_path))
+    entry = model(catalog, home, wanted)
+    model(catalog, home, DIARIZER)
+    language = "en" if "en" in entry["languages"] else next(l for l in entry["languages"] if l.startswith("en"))
+    json.dump({"id": wanted, "language": language}, open(os.path.join(home, "speech-model.json"), "w"))
+    os.makedirs(out, exist_ok=True)
+    whole = os.path.join(out, "whole.wav")
+    fetch(AUDIO, whole)
+    with wave.open(whole) as source:
+        frames = source.readframes(SECONDS * source.getframerate())
+        params = source.getparams()
+    with wave.open(os.path.join(out, "meeting.wav"), "wb") as cut:
+        cut.setparams(params)
+        cut.writeframes(frames)
+    os.remove(whole)
+    fetch(TRUTH, os.path.join(out, "whole.rttm"))
+    rows = []
+    for line in open(os.path.join(out, "whole.rttm")):
+        fields = line.split()
+        start = float(fields[3])
+        if start < SECONDS:
+            fields[4] = f"{min(start + float(fields[4]), SECONDS) - start:.3f}"
+            rows.append(" ".join(fields))
+    open(os.path.join(out, "meeting.rttm"), "w").write("\n".join(rows) + "\n")
+
+
+if __name__ == "__main__":
+    main()

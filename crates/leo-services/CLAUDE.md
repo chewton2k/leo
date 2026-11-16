@@ -77,6 +77,23 @@ fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
 
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
+never for call tracks; omitted from JSON when off, so old cache keys hold):
+`Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
+drafting is off. In `recorder::finish`, once every part is done,
+`label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
+parts (each later part's 1 s lead skipped), `runs` tiles the whole timeline into
+speaker runs (gaps split between neighbours, runs under 1 s merged, over 290 s
+split, numbered by first appearance), and each run is re-transcribed through the
+normal `TranscribeFn`. `speakers.json` holds the result (`[]` when one speaker,
+a failure, Finish now or over two hours: today's output plus a warning, never
+redone on recovery); WAVs of done parts are deleted after. `assemble` prefixes
+`[Speaker N]` per line and `archive` gives one passage per run (raw text); a
+failed part ignores the labels. Measured on AMI meetings: 86–91% of transcribed
+speech gets the right speaker, ≥97% of words kept, Sortformer ~0.5 s per minute
+(Metal). The ignored `speakers_across_models` test and `speakers.yml` (weekly,
+manual; models over 2.2 GB only on demand) run it per curated English model.
+
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s;
 `CLOUD_ROLL_INTERVAL` 8 s) re-transcribe from `settled_at`, at most
 `LIVE_MOST_SECS` (20); at `SETTLE_AFTER_SECS` (12) settle at `live::quietest`
@@ -136,6 +153,14 @@ cannot load. Dictation filters while capturing; the engine only cuts and pads
 clips under a second. Recordings are never trimmed: a chunk goes whole unless
 VAD, on a copy raised to speech level (median frame level to 0.1, gain 1–50),
 hears nothing. Slow catalog models skip live passes.
+
+The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
+License) is found by `Catalog::known`, never `get`: `Library` downloads, verifies
+and lists it under `speakers` (never in `extra_files`) and it can never be
+chosen as the speech model. `Engine::diarize` loads the chosen speech model if
+none is, then sends `Request::Diarize { model, parts }`: the worker reads the
+WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops it, answering
+`Response::Turns`; it shares the worker, so a dictation waits for that pass.
 
 `speech/supervisor.rs` re-executes the binary with `--leo-speech-worker` before
 normal startup. Only the worker initializes GPU backends, loads a speech model

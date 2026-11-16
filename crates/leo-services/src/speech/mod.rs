@@ -4,6 +4,7 @@ pub mod library;
 pub mod chunking;
 pub mod engine;
 mod protocol;
+pub use protocol::Turn;
 pub mod supervisor;
 pub mod vad;
 mod worker;

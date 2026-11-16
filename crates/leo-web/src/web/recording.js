@@ -361,6 +361,57 @@
         .join('')}</div>`;
     }
 
+    function speakersOn() {
+      try {
+        return root.localStorage.getItem('leo-label-speakers') === 'on';
+      } catch (e) {
+        return false;
+      }
+    }
+
+    function speakersRow() {
+      const model = s.speakerModel;
+      const job = model && model.progress;
+      const getting = job && job.state === 'downloading';
+      const missing = speakersOn() && model && !model.verified;
+      const note = !missing ? '' : getting
+        ? `Downloading the speaker model… ${Math.floor((100 * job.bytes) / Math.max(1, job.total))}%`
+        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${Math.round(model.size / 1e6)} MB, stays on this computer).`;
+      return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span><input type="checkbox" class="switch" role="switch" id="rec-speakers"${speakersOn() ? ' checked' : ''}></label>`
+        + (missing ? `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>` : '');
+    }
+
+    async function speakerModel(box) {
+      const view = await api('/api/speech').catch(() => null);
+      s.speakerModel = view && view.speakers ? view.speakers : null;
+      redrawSpeakers(box);
+      const job = s.speakerModel && s.speakerModel.progress;
+      clearTimeout(s.speakerPoll);
+      if (job && job.state === 'downloading') s.speakerPoll = setTimeout(() => { if (box.isConnected && box.querySelector('#rec-speakers-box')) speakerModel(box); }, 1000);
+    }
+
+    function redrawSpeakers(box) {
+      const holder = box.querySelector('#rec-speakers-box');
+      if (!holder) return;
+      holder.innerHTML = speakersRow();
+      const toggle = holder.querySelector('#rec-speakers');
+      toggle.addEventListener('change', () => {
+        try {
+          root.localStorage.setItem('leo-label-speakers', toggle.checked ? 'on' : 'off');
+        } catch (e) {}
+        redrawSpeakers(box);
+        holder.querySelector('#rec-speakers').focus();
+      });
+      const get = holder.querySelector('#rec-speakers-get');
+      if (get) {
+        get.addEventListener('click', async () => {
+          get.disabled = true;
+          await api('/api/speech', { method: 'POST', body: { action: 'download', id: s.speakerModel.id } }).catch((e) => toast(e.message || String(e)));
+          speakerModel(box);
+        });
+      }
+    }
+
     function drawIdle(folders, here) {
       const ov = s.overview || {};
       const upcoming = (s.calendar && s.calendar.events) || [];
@@ -383,6 +434,7 @@
         <section class="set-card rec-card">
           ${kindChoices()}
           ${noteFields({ id: 'rec', folders, here, most: 4000, before: event })}
+          <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
           <div class="rec-start">
@@ -496,6 +548,8 @@
       if (headset) headset.hidden = !picked || picked.value === 'microphone';
       const wants = box.querySelector('#rec-wants');
       if (fill && call && wants && !wants.value.trim()) wants.value = MEETING_WANTS;
+      const speakers = box.querySelector('#rec-speakers-box');
+      if (speakers) speakers.hidden = call;
     }
 
     function preselect(box, asked) {
@@ -618,6 +672,8 @@
         });
       }
       if (form) restoreIdleForm(box, form);
+      redrawSpeakers(box);
+      if (box.querySelector('#rec-speakers-box')) speakerModel(box);
       pickKind(box, false);
       box.querySelectorAll('input[name="rec-kind"]').forEach((radio) => radio.addEventListener('change', () => pickKind(box, true)));
       const event=box.querySelector('#rec-event');
@@ -749,7 +805,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim() });
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() });
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }

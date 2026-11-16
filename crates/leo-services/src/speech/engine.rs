@@ -186,6 +186,34 @@ impl Engine {
         .context("Transcription took too long. Your audio is kept; try a faster speech model.")?
     }
 
+    pub fn diarize(&self, parts: Vec<(std::path::PathBuf, u64)>) -> Result<Vec<super::Turn>> {
+        ensure!(
+            !self.stopped.load(Ordering::Acquire),
+            "The speech engine is stopping."
+        );
+        let library = super::library::library()?;
+        let model = library.speaker_model()?;
+        if !self.loaded() {
+            self.warm(library.selected()?);
+            let until = Instant::now() + Duration::from_secs(180);
+            while !self.loaded() {
+                ensure!(Instant::now() < until, "The speech model did not load.");
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        }
+        let samples = parts
+            .iter()
+            .map(|(path, skip_ms)| {
+                std::fs::metadata(path)
+                    .map_or(0, |m| m.len() as usize / 2)
+                    .saturating_sub(*skip_ms as usize * 16)
+            })
+            .sum();
+        self.supervisor
+            .diarize(model, parts, samples)
+            .map_err(|e| anyhow::anyhow!("{e}"))
+    }
+
     pub fn warm(&self, selected: Selected) {
         if !self.stopped.load(Ordering::Acquire) {
             let _ = self.requests.try_send(Message::Warm(selected));

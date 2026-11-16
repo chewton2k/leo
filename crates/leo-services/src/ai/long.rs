@@ -722,6 +722,7 @@ mod tests {
             &leo_core::recording::Profile {
                 context: "Design review with Sam".into(),
                 wants: "Focus on what will be on the exam".into(),
+                ..Default::default()
             },
         );
         assert!(p.system.contains("<what_the_user_wants>"));
@@ -1547,6 +1548,7 @@ mod tests {
         let profile = leo_core::recording::Profile {
             context: "x".repeat(6_000),
             wants: "w".repeat(600),
+            ..Default::default()
         };
         let room = room_after_profile(TEST, &profile);
         assert!(room.chars() <= TEST.chars() - 7_200 - 600);

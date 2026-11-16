@@ -38,6 +38,7 @@ pub struct Policy {
     pub idle: Duration,
     pub workers: usize,
     pub finish_limit: Duration,
+    pub keep_parts: u32,
 }
 
 impl Default for Policy {
@@ -49,6 +50,7 @@ impl Default for Policy {
             idle: Duration::from_millis(500),
             workers: 3,
             finish_limit: Duration::from_secs(120),
+            keep_parts: 0,
         }
     }
 }
@@ -344,7 +346,9 @@ fn settle(
                 });
                 return;
             }
-            let _ = std::fs::remove_file(&path);
+            if index >= policy.keep_parts {
+                let _ = std::fs::remove_file(&path);
+            }
             work.attempts
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
@@ -516,6 +520,7 @@ mod tests {
             idle: Duration::from_millis(5),
             workers: 3,
             finish_limit: Duration::from_secs(120),
+            keep_parts: 0,
         }
     }
 
@@ -525,6 +530,34 @@ mod tests {
 
     fn named(path: &Path) -> String {
         path.file_name().unwrap().to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn audio_kept_for_speaker_labels_stays_beside_its_text_up_to_the_cap() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..3 {
+            loud(dir.path(), i);
+        }
+        let (tx, _rx) = mpsc::channel();
+        Transcriber::start(
+            dir.path(),
+            Arc::new(|p: &Path| Ok(named(p))),
+            Policy {
+                keep_parts: 2,
+                ..quick()
+            },
+            false,
+            tx,
+        )
+        .wait();
+        for i in 0..3 {
+            assert!(dir.path().join(format!("seg-{i:05}.txt")).exists());
+            assert_eq!(dir.path().join(wav::done_name(i)).exists(), i < 2);
+        }
+        assert!(
+            waiting(dir.path()).is_empty(),
+            "kept audio is never transcribed again"
+        );
     }
 
     #[test]
@@ -774,6 +807,7 @@ mod model_wait_tests {
                 idle: Duration::from_millis(1),
                 workers: 1,
                 finish_limit: Duration::from_millis(50),
+                keep_parts: 0,
             },
             false,
             send,

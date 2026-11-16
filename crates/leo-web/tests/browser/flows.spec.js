@@ -2739,6 +2739,24 @@ test.describe('recording', () => {
     expect(seen.started.source).toBe('nativecall');
   });
 
+  test('Label speakers is chosen per recording, remembered, hidden for calls and sent with Start', async ({ page }) => {
+    const seen = stubRecorder(page, { noteId: 'x', local: false });
+    await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null } } }));
+    await page.goto('/#/record');
+    const toggle = page.locator('#rec-speakers');
+    await expect(toggle, 'off by default, so lectures stay as they are').not.toBeChecked();
+    await toggle.check();
+    await expect(page.locator('#rec-speakers-model')).toContainText('139 MB');
+    expect(await page.evaluate(() => localStorage.getItem('leo-label-speakers'))).toBe('on');
+    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
+    await page.locator('.rec-kind', { hasText: 'Microphone' }).click();
+    await expect(page.locator('#rec-speakers-box')).toBeVisible();
+    await page.locator('[data-action="rec-start"]').click();
+    await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
+    expect(seen.started.profile.speakers).toBe(true);
+  });
+
   test('the class or meeting happening now names the recording and tells the AI who and what, without overwriting a typed title', async ({ page, context }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: true });
     let release;

@@ -157,6 +157,42 @@ fn screen_recordings_are_marked_as_screen_audio() {
 }
 
 #[test]
+fn speaker_labels_ride_the_start_request_and_calls_never_get_them() {
+    for (source, expected) in [
+        ("microphone", true),
+        ("screen", true),
+        ("nativecall", false),
+    ] {
+        let (mut state, _d, _ids) = state_with(&[]);
+        let seen: Arc<Mutex<Option<bool>>> = Default::default();
+        let saw = Arc::clone(&seen);
+        state.listener = Some(Arc::new(
+            move |listening: record::Listening, _: &mut dyn FnMut(record::Heard)| {
+                *saw.lock().unwrap() = Some(listening.profile.speakers);
+                Ok(record::Recorded {
+                    title: "Standup".into(),
+                    body: "notes".into(),
+                    ..Default::default()
+                })
+            },
+        ));
+        let started = run(record::start(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "source": source,
+                    "profile": { "speakers": true },
+                }))
+                .unwrap(),
+            ),
+        ));
+        assert_eq!(started.status(), StatusCode::ACCEPTED);
+        recording_until(&state, |s| s == "done" || s == "failed");
+        assert_eq!(*seen.lock().unwrap(), Some(expected), "{source}");
+    }
+}
+
+#[test]
 fn recording_is_refused_without_a_recorder_or_into_a_folder_outside_the_notes() {
     let (mut state, _d, _ids) = state_with(&[]);
     let none = start_recording(&state, record::Source::Microphone);

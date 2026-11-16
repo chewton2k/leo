@@ -173,7 +173,9 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   in NOTICE); the self-correction rules are leo's own. Robustness details:
   leo-desktop, leo-services and leo-web CLAUDE.md "Dictation".
 - Recording is captured in Rust, including two native tracks for calls; hiding
-  the window cannot stop it. App Nap is held while recording. Missing models
+  the window cannot stop it. Microphone and screen recordings can label who
+  spoke (Record page switch, per recording; leo-services CLAUDE.md "Speaker
+  labels"). App Nap is held while recording. Missing models
   leave audio pending and recoverable; the app can resume native sessions.
   Screenshots are pasted into the Record page with their timestamp.
 - Windows child programs stay quiet. Model and toolchain caches stay under the

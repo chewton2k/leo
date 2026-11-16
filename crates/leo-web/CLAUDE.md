@@ -720,6 +720,12 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `capture_activity` is reserved before a job is created; its lease blocks
   updater installation through the durable save. Recovery lists only what the
   `Housekeeper` lists (`pending_recordings`); a recovery job carries its session id.
+- Label speakers (2026-11-16, the user's call: per recording, for meetings,
+  not lectures): a switch under the note fields, off by default, remembered as
+  `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and
+  `record::start` forces it off for a call. With the speaker model missing it
+  offers Download through `/api/speech` (`speakers` in the view, polled while
+  downloading); recording never waits for it.
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the

@@ -1,5 +1,5 @@
 use super::protocol::{
-    encode_message, read_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response,
+    encode_message, read_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response, Turn,
 };
 use super::worker::LOG_LINE_PREFIX;
 use super::{CPU_ONLY_FLAG, LOG_LEVEL_ENV, WORKER_FLAG};
@@ -156,6 +156,12 @@ enum Command {
     },
     StreamReset {
         id: u64,
+    },
+    Diarize {
+        request: Request,
+        samples: usize,
+        epoch: u64,
+        reply: Reply<Result<Vec<Turn>, EngineError>>,
     },
 }
 
@@ -329,6 +335,22 @@ impl EngineSupervisor {
         self.ask(|reply| Command::Transcribe {
             pcm,
             run,
+            epoch,
+            reply,
+        })
+        .unwrap_or_else(|| Err(engine_stopped()))
+    }
+
+    pub fn diarize(
+        &self,
+        model: PathBuf,
+        parts: Vec<(PathBuf, u64)>,
+        samples: usize,
+    ) -> Result<Vec<Turn>, EngineError> {
+        let epoch = self.cancel_mark().0;
+        self.ask(|reply| Command::Diarize {
+            request: Request::Diarize { model, parts },
+            samples,
             epoch,
             reply,
         })
@@ -552,6 +574,14 @@ impl Owner {
                     reply,
                 } => {
                     let _ = reply.send(self.finalize(id, want_language, epoch));
+                }
+                Command::Diarize {
+                    request,
+                    samples,
+                    epoch,
+                    reply,
+                } => {
+                    let _ = reply.send(self.diarize(&request, samples, epoch));
                 }
                 Command::StreamReset { id } => {
                     if self.stream.as_ref().is_some_and(|s| s.id == id) {
@@ -778,6 +808,27 @@ impl Owner {
                     }
                 }
                 Err(failure) => return Err(failure.into()),
+            }
+        }
+    }
+
+    fn diarize(
+        &mut self,
+        request: &Request,
+        samples: usize,
+        epoch: u64,
+    ) -> Result<Vec<Turn>, EngineError> {
+        self.end_stream();
+        self.ensure_worker()?;
+        let deadline = self.deadlines().run(samples);
+        match self.call_work(request, None, deadline, epoch) {
+            Ok(Response::Turns(turns)) => Ok(turns),
+            Ok(other) => Err(unexpected(&other).into()),
+            Err(failure) => {
+                if failure.worker_lost() {
+                    self.worker_lost("speaker detection", &failure);
+                }
+                Err(failure.into())
             }
         }
     }
@@ -1262,6 +1313,7 @@ fn request_name(request: &Request) -> &'static str {
         Request::Feed => "stream feed",
         Request::Finalize { .. } => "stream finalize",
         Request::StreamReset => "stream reset",
+        Request::Diarize { .. } => "speaker detection",
     }
 }
 

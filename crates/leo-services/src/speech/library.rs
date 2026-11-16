@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
-use super::catalog::{catalog, Catalog, DEFAULT_MODEL};
+use super::catalog::{catalog, Catalog, DEFAULT_MODEL, DIARIZER};
 
 const MOST_DOWNLOADS: usize = 2;
 const PARTIAL: &str = ".leo-download-";
@@ -124,7 +124,7 @@ impl Library {
 
     pub fn model_path(&self, id: &str) -> Result<PathBuf> {
         safe_root(&self.models)?;
-        let model = self.catalog.get(id)?;
+        let model = self.catalog.known(id)?;
         if let Ok(meta) = std::fs::symlink_metadata(&self.models) {
             ensure!(
                 meta.is_dir() && !meta.file_type().is_symlink(),
@@ -186,7 +186,7 @@ impl Library {
     }
 
     fn verify(&self, id: &str) -> Result<PathBuf> {
-        let model = self.catalog.get(id)?;
+        let model = self.catalog.known(id)?;
         let path = self.model_path(id)?;
         let meta = std::fs::symlink_metadata(&path)
             .context("Download a model in Settings → Speech models. Your recorded audio is kept until one is ready.")?;
@@ -300,7 +300,7 @@ impl Library {
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<()> {
-        self.catalog.get(id)?;
+        self.catalog.known(id)?;
         self.folders()?;
         let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
         ensure!(
@@ -332,6 +332,11 @@ impl Library {
             tmp.persist(self.selection_path()?).map_err(|e| e.error)?;
         }
         Ok(())
+    }
+
+    pub fn speaker_model(&self) -> Result<PathBuf> {
+        self.verify(DIARIZER)
+            .context("The speaker model is not downloaded. Turn on Label speakers on the Record page to download it.")
     }
 
     pub fn view(&self) -> Result<Value> {
@@ -368,6 +373,10 @@ impl Library {
                 };
                 if !Self::extra_name(&name)
                     || self.catalog.curated().any(|m| m.file().filename == name)
+                    || self
+                        .catalog
+                        .known(DIARIZER)
+                        .is_ok_and(|m| m.file().filename == name)
                 {
                     continue;
                 }
@@ -380,13 +389,26 @@ impl Library {
             }
             extra_files.sort_by_key(|v| v["name"].as_str().unwrap_or_default().to_owned());
         }
+        let speakers = match (self.catalog.known(DIARIZER), self.model_path(DIARIZER)) {
+            (Ok(model), Ok(path)) => {
+                let bytes = std::fs::symlink_metadata(path)
+                    .ok()
+                    .filter(|m| m.is_file())
+                    .map_or(0, |m| m.len());
+                disk_bytes += bytes;
+                json!({ "id": DIARIZER, "size": model.file().size, "bytes": bytes,
+                    "verified": bytes > 0 && self.verify(DIARIZER).is_ok(),
+                    "progress": jobs.get(DIARIZER).map(|j| json!({ "bytes": j.bytes, "total": j.total, "state": j.state, "error": j.error })) })
+            }
+            _ => Value::Null,
+        };
         Ok(
-            json!({ "selected": selection, "ready": self.selected().is_ok(), "models": models, "extra_files":extra_files,"disk_bytes": disk_bytes }),
+            json!({ "selected": selection, "ready": self.selected().is_ok(), "models": models, "extra_files":extra_files,"disk_bytes": disk_bytes, "speakers": speakers }),
         )
     }
 
     pub fn download(&self, id: &str) -> Result<()> {
-        let model = self.catalog.get(id)?;
+        let model = self.catalog.known(id)?;
         let url = model.url();
         let total = model.file().size;
         let cancel = Arc::new(AtomicBool::new(false));
@@ -444,7 +466,7 @@ impl Library {
     }
 
     pub fn cancel(&self, id: &str) -> Result<()> {
-        self.catalog.get(id)?;
+        self.catalog.known(id)?;
         if let Some(job) = self.jobs.lock().unwrap_or_else(|e| e.into_inner()).get(id) {
             job.cancel.store(true, Ordering::Release);
         }
@@ -458,7 +480,7 @@ impl Library {
         cancel: &AtomicBool,
         progress: &dyn Fn(u64, u64),
     ) -> Result<()> {
-        let model = self.catalog.get(id)?;
+        let model = self.catalog.known(id)?;
         self.folders()?;
         let target = self.model_path(id)?;
         let mut tmp = tempfile::Builder::new()
