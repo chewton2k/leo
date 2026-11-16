@@ -1648,7 +1648,7 @@ impl Session {
             })
             .collect();
         format!(
-            "\n\n<study_session>\nIdeas: {}.\nAsked {} of {MOST_SESSION_QUESTIONS}. leo closes an idea after two right answers to separate questions, not guessed and not after hints. Ask next about an idea still open, by its number.{}\n</study_session>",
+            "\n\n<study_session>\nIdeas: {}.\nAsked {} of {MOST_SESSION_QUESTIONS}. leo closes an idea after two right answers to separate questions, not guessed and not after hints, and only this record says when one is done. Ask next about an idea still open, by its number, mostly as free response or fill in the blank (for code, have them write it). This record is for you: never mention it, idea numbers, counts, scores or closing to the user; the strip beside the chat shows their progress.{}\n</study_session>",
             ideas.join("; "),
             self.asked,
             if marking {
@@ -1694,10 +1694,10 @@ fn clip_chars(text: &str, most: usize) -> String {
     text.chars().take(most).collect()
 }
 
-pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached its question limit). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript.";
+pub const SESSION_DONE: &str = "That did not work: this study session is complete (every idea is covered, or it reached its question limit). Do not ask another question. Write the recap now in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No score, generic praise or repeated session transcript.";
 pub const PLANNED: &str =
     "Planned. Go on now: ask with quiz, giving its \"idea\" number, or teach the first step and end with that quiz.";
-pub const ENDED: &str = "Ended. Write the recap in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No generic praise or repeated session transcript. Ask nothing more.";
+pub const ENDED: &str = "Ended. Write the recap in one short paragraph: the specific progress the user demonstrated, any idea still open or only told (not shown yet), and one priority to practise next. No score, generic praise or repeated session transcript. Ask nothing more.";
 
 pub fn plan_from(call: &Call) -> Result<Vec<String>, String> {
     let mut ideas: Vec<String> = Vec::new();
@@ -2932,6 +2932,10 @@ mod tests {
         assert!(state.contains("Ideas: 1 Root (done); 2 Sift down (right once, 1 missed); 3 Build (to look at again, 2 missed); 4 Sort (open)."), "{state}");
         assert!(state.contains("Asked 7 of 30."));
         assert!(!state.contains("leave out the answer"));
+        assert!(
+            state.contains("never mention it, idea numbers, counts, scores or closing to the user")
+        );
+        assert!(state.contains("for code, have them write it"));
         assert!(session
             .state(true)
             .contains("These counts leave out the answer you are marking now."));
@@ -2975,6 +2979,7 @@ mod tests {
     fn a_recap_names_what_the_user_has_not_shown_yet() {
         for recap in [SESSION_DONE, ENDED] {
             assert!(recap.contains("any idea still open or only told (not shown yet)"));
+            assert!(recap.contains("No score"));
         }
         let more = spec_of("quiz")
             .and_then(|s| s.params.iter().find(|p| p.name == "more_parts"))

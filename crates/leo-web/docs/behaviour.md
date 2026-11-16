@@ -680,7 +680,9 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   study turn's prompt ends with `<study_session>` (`Session::state`, from the page's
   `sessionBody`: each idea done, right once, open or to look at again, with misses,
   questions asked of `MOST_SESSION_QUESTIONS` (30) and "ask next about an idea still
-  open"; when Felix marks the answer in that reply it says the counts leave it out;
+  open", mostly as free response or fill in the blank, code by writing it; it is for
+  Felix only, so he never mentions it, idea numbers, counts, scores or closing, and
+  only the record says when an idea is done; when Felix marks the answer in that reply it says the counts leave it out;
   a closed idea is "to look at again" only with two misses, so sessions saved before
   `right` existed read as done), so Felix numbers ideas without refused calls;
   refusals tell him to correct the call without mentioning it, since prose before a
@@ -689,7 +691,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   never the plan; Practice adds a plausible wrong solution to find the flaw in, a
   last question that needs earlier ideas and, for a skill, doing it; readiness is
   judged only from unaided answers; `ENDED` and `SESSION_DONE` end with
-  `Session::unshown` (ideas not shown yet, right once only, missed twice). Felix
+  `Session::unshown` (ideas not shown yet, right once only, missed twice) and ask for
+  no score. Felix
   keeps no running score (2026-11-16, the user's call). A
   prediction is `quiz` with `predict: yes`: free_response only, shown as Predict,
   never marked (`quizSay` says so, the request sends `mark: false`), never scored,
