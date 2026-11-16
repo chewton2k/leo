@@ -2926,7 +2926,7 @@
               const idea = Number(e.quiz.idea) || 0;
               const s = currentSession();
               if (s && s.state === 'active' && idea && !e.quiz.predict) s.asked += 1;
-              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
+              answer.quizzes = [...(answer.quizzes || []), { kind: String(e.quiz.kind || ''), question: e.quiz.question, options: Array.isArray(e.quiz.options) ? e.quiz.options.filter((o) => typeof o === 'string') : [], answer: String(e.quiz.answer || ''), explain: String(e.quiz.explain || ''), ...(idea ? { idea } : {}), ...(e.quiz.more || (card && card.predict && !e.quiz.predict) ? { more: true } : {}), ...(e.quiz.predict ? { predict: true } : {}) }];
             }
             if (e.reset) {
               answer.text = '';

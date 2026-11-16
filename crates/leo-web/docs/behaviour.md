@@ -675,7 +675,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   idea open; hints go one rung at a time; retests use a new situation.
   From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea counts
   as shown only by a right answer away from the teaching, so a lesson's check right
-  after a step carries `more_parts` (the last step's too; `PLANNED` repeats it) and
+  after a step carries `more_parts` (the last step's too; `PLANNED` repeats it, and
+  the page sets `more` itself on a quiz that arrives in the reply to a prediction) and
   the idea closes on a later question with a new case, so a lesson plans at most six
   ideas and comes back once to every open idea before it finishes; an answer asked for outright is given and its
   idea retested later with a new case; harder or easier changes the next question,

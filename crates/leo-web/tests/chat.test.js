@@ -955,6 +955,7 @@ test('a prediction is an attempt before teaching, so it is never marked', async 
   assert.equal(fixture.requests[0].practice, true);
   assert.equal(quiz.correct, null);
   assert.equal(fixture.state.messages.at(-1).quizzes[0].question, 'Check');
+  assert.equal(fixture.state.messages.at(-1).quizzes[0].more, true, 'the check after a prediction follows teaching, so it keeps the idea open');
 });
 
 test('how sure the user felt and their thinking reach Felix on the answer line', () => {
