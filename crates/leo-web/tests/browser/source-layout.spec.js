@@ -144,7 +144,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
   const style = pageCss();
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
-  const show = core.slice(core.indexOf('function noteActions('), core.indexOf('function newNote('));
+  const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
   const body = '# Introduction to planetary environments\n\nFirst paragraph.\n\n' + 'Reading material.\n\n'.repeat(80) + '## **Sounds**\n\nCompare vowels.\n\n### Vowel examples\n\n' + 'Examples to compare.\n\n'.repeat(30) + '```md\n# Ignore code\n```\n\n## Sounds\n\nLast paragraph.';
   const fixture = `const md = window.leoMarkdown, leoDoc = window.leoDoc;
     const $ = (q, root = document) => root.querySelector(q), app = $('#app');
@@ -184,7 +184,8 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(nav.getByRole('button', {name:'Ignore code'})).toHaveCount(0);
     await expect(page.locator('.note-outline details')).not.toHaveAttribute('open', '');
     const facts = page.locator('#title + #note-facts');
-    await expect(facts).toHaveText(await page.evaluate(text => leoMarkdown.facts(text), body));
+    await expect(facts).toHaveText('Edited now');
+    await expect(page.locator('.note-meta #save-state')).toHaveCount(0);
     expect(await facts.evaluate(el => getComputedStyle(el).fontVariantNumeric)).toBe('tabular-nums');
     await page.emulateMedia({media:'print'});
     await expect(facts).toBeHidden();
@@ -242,7 +243,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(editor).toBeFocused();
     await expect(nested).toHaveAttribute('aria-expanded', 'false');
     expect(await page.evaluate(() => audit.saved())).toContain('## Newly typed heading');
-    await expect(facts).toHaveText(await page.evaluate(() => leoMarkdown.facts(audit.saved())));
+    await expect(facts).not.toContainText('words');
     for (const theme of ['light','dark']) {
       for (const width of [1600, 1100, 390]) {
         await page.setViewportSize({width, height:900});

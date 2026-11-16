@@ -30,10 +30,6 @@ const ICON = {
   list: svg('<path d="M9 6h11M9 12h11M9 18h11M4 6h.1M4 12h.1M4 18h.1"/>'),
   readThrough: svg('<path d="M4 7h9M4 12h9M4 17h6"/><circle class="dot" cx="18.5" cy="12" r="2.6"/>'),
   sort: svg('<path d="M4 6h16M4 12h11M4 18h6"/>'),
-  sortAZ: svg('<path d="m3 16 4 4 4-4M7 20V4M20 8h-5M15 10V6.5a2.5 2.5 0 0 1 5 0V10M15 14h5l-5 6h5"/>'),
-  sortZA: svg('<path d="m3 16 4 4 4-4M7 4v16M15 4h5l-5 6h5M15 20v-3.5a2.5 2.5 0 0 1 5 0V20M20 18h-5"/>'),
-  sortWide: svg('<path d="m3 16 4 4 4-4M7 20V4M11 4h10M11 8h7M11 12h4"/>'),
-  sortNarrow: svg('<path d="m3 16 4 4 4-4M7 20V4M11 4h4M11 8h7M11 12h10"/>'),
   bolt: svg('<path d="M13.5 2.5L5 13.5h6l-1.5 8 8.5-11h-6z"/>'),
   filter: svg('<path d="M4 5h16l-6.2 7.6V18l-3.6 2v-7.4z"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
@@ -683,31 +679,8 @@ function back() {
   goBack('#/');
 }
 
-const PAGE_NAMES = { '': 'Notes', f: 'Notes', search: 'Search', trash: 'Trash', calendar: 'Calendar', boards: 'Boards', settings: 'Settings', record: 'Record', new: 'New note' };
-
-function pageName() {
-  const [, kind = '', rest = ''] = location.hash.match(/^#\/([a-z]*)\/?(.*)$/) || [];
-  if (kind === 'settings') return settingsTitle(settingsSection(rest));
-  return PAGE_NAMES[kind] || '';
-}
-
 function chrome({ dir = '', showBack = false, actions = null }) {
   $('#back').hidden = !showBack;
-  const crumbs = $('#crumbs');
-  let trail;
-  if (dir) {
-    const parts = dir.split('/');
-    trail = `<button data-action="home" title="Top level · Drop a folder here to move it to the top level">Top level</button>` + parts
-      .map((part, i) => {
-        const path = parts.slice(0, i + 1).join('/');
-        return `<span class="sep">/</span><button data-action="open-folder" data-dir="${esc(path)}" draggable="true">${esc(part)}</button>`;
-      })
-      .join('');
-  } else {
-    const name = pageName();
-    trail = name ? `<span class="page-name">${esc(name)}</span>` : '';
-  }
-  if (crumbs.innerHTML !== trail) crumbs.innerHTML = trail;
   floating.innerHTML = actions || '';
   document.title = dir ? `${folderLabel(dir)} · leo` : 'leo';
 }
@@ -904,26 +877,6 @@ async function showPassage(note, name, at) {
   if (open) open.addEventListener('click', () => { closeSheet(true); viewOriginal(note, name, found.page).catch(fail); });
 }
 
-function noteActions(id, recorded = false) {
-  return `<nav class="actions" aria-label="Note">
-      ${id && recorded ? `<button type="button" data-action="note-sources" aria-label="Show transcript">${ICON.mic}</button>` : ''}
-      ${id ? `<button type="button" data-action="note-tasks" aria-label="Show tasks">${ICON.calendar}</button>` : ''}
-      <button type="button" data-action="note-picture" aria-label="Add picture">${ICON.image}</button>
-      <button type="button" data-action="move" aria-label="Move to folder">${ICON.move}</button>
-      <button type="button" data-action="share" aria-label="Share" aria-haspopup="menu" aria-expanded="false">${ICON.share}</button>
-      <button type="button" data-action="delete" class="danger" aria-label="Move to trash">${ICON.trash}</button>
-    </nav>`;
-}
-
-let factsTimer = 0;
-function factsSoon(text) {
-  const line = $('#note-facts');
-  clearTimeout(factsTimer);
-  factsTimer = setTimeout(() => {
-    if (line) line.textContent = md.facts(text);
-  }, 300);
-}
-
 async function showNote(id, { fresh = null, draft = null } = {}) {
   const passage = searchPassage?.hash === noteHash(id) ? searchPassage : null;
   searchPassage = null;
@@ -943,21 +896,21 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     if (side.openedNote !== note.id) side.target = null;
     side.openedNote = note.id;
     state = { view: 'note', dir: note.directory, session: s };
-    chrome({ dir: note.directory, showBack: true, actions: noteActions(note.id, Boolean(note.recorded)) });
+    chrome({ dir: note.directory, showBack: true });
     document.title = `${note.title || 'New note'} · leo`;
     chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory } : null);
     const where = `<button class="chip accent" data-action="open-folder" data-dir="${esc(note.directory)}">${ICON.folder} ${esc(folderLabel(note.directory))}</button>`;
     const when = note.id ? `Edited ${rel(note.updated_at)}` : 'New note';
-    app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note">
-    <header class="note-head"><div class="note-context">${where}</div><div class="note-meta"><span id="save-state">${when}</span><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><span id="margin-status" role="status" class="hint"></span></div>
-    <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts">${esc(md.facts(s.edit.body))}</p><div class="note-originals"></div><label id="margin-instructions" class="field margin-instructions" hidden>${ICON.pen}<input maxlength="500" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
+    app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
+    <header class="note-head"><div class="note-context">${where}</div><div class="note-meta" data-tauri-drag-region><button type="button" class="margin-mode note-back" data-action="back" aria-label="Back" title="Back">${ICON.back}</button><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
+    <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state">${when}</span></p><div class="note-originals"></div><label id="margin-instructions" class="field margin-instructions" hidden>${ICON.pen}<input maxlength="500" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
     <div class="prose doc" id="doc"></div>
     <section class="related" id="related" hidden aria-label="Related notes"></section>
   </article></div></div>`;
     s.title = $('#title');
     drawOriginals(note);
     hideAskFloat();
-    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s); marginEdited(s); factsSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
+    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: () => { changed(s); marginEdited(s); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
     marginMount(s, mine).catch(fail);
     if (citedLines && citedLines.id === note.id) showCitedLines();
     else if (passage && highlightSearch(app.querySelector('article.note'), passage.query)) {

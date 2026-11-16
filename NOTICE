@@ -6,6 +6,16 @@ code or prompt text is included; the method is rewritten in leo's own words.
 
 --------------------------------------------------------------------------------
 
+socratic-tutor (Jane Street agent_skills, MIT)
+https://github.com/janestreet/agent_skills
+
+Felix's study rules borrow ideas from its method (an idea counts as learned only
+when shown away from its teaching, answers given on request are retested later,
+find-the-flaw questions). No socratic-tutor prompt text is included; the ideas are
+rewritten in leo's own words.
+
+--------------------------------------------------------------------------------
+
 Handy
 https://github.com/cjpais/Handy
 Copyright cjpais

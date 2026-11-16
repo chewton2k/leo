@@ -102,7 +102,6 @@ const actions = {
   'set-effort': (el) => changeSetting({ set: 'effort', value: el.dataset.effort === 'default' ? '' : el.dataset.effort }),
   'side-twist': (el) => twistFolder(el.dataset.dir, el),
   'side-sort': sideSortMenu,
-  'side-flip': () => sideOrder({ flip: !side.flip }),
   'side-notes': (el) => loadSideNotes(el.dataset.dir, Number(el.dataset.offset || 0), true),
   'open-title': (el) => openTitle(el.dataset.title || ''),
   'toggle-search': () => toggleQuickLeo(),
@@ -231,6 +230,7 @@ const actions = {
   },
   move: (el) => moveSheet(el),
   share: (el) => shareMenu(el),
+  'note-menu': (el) => noteMenu(el),
   delete: () => trashNote(),
   restore: (el) => restore(el.dataset.id, false),
   'trash-select': () => {

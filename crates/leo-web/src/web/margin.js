@@ -142,9 +142,11 @@
     return Math.floor((width - column - TICK_GUTTER - END_GUTTER) / sides) - MARGIN_GAP;
   }
 
-  function arrangement({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
+  function arrangement({ width, column = Infinity, dragged = false, setting = 'both', noteWidth = 'wide', panel = false }) {
     if (setting === 'marks' || noteWidth === 'full' || panel || width < ROOM_RIGHT) return 'marks';
-    return setting === 'both' && width >= ROOM_BOTH ? 'both' : 'right';
+    const fits = (sides, least) => !dragged || room(width, column, sides) >= least;
+    if (setting === 'both' && width >= ROOM_BOTH && fits(2, LEAST_SHARED)) return 'both';
+    return fits(1, MARGIN_WIDTH) ? 'right' : 'marks';
   }
 
   function marginWidth({ width, column = Infinity, layout }) {

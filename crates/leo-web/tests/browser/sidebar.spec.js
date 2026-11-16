@@ -141,7 +141,7 @@ test('sidebar separates icon actions from the explorer and keeps them reachable 
       expect((await page.locator('.side-fold').boundingBox()).x).toBeLessThan(52);
       await page.getByRole('button',{name:'Show folders',exact:true}).click();
       expect((await page.locator('.side-rail-main').boundingBox()).y).toBeGreaterThanOrEqual(50);
-      await page.setViewportSize({width:1280,height:320});
+      await page.setViewportSize({width:1280,height:260});
       await expect(settings).toBeInViewport();
       const railMain=page.locator('.side-rail-main');
       await railMain.evaluate(el=>el.scrollTop=el.scrollHeight);
@@ -176,8 +176,8 @@ test('sidebar and page header rows align across desktop layouts', async ({ brows
         document.querySelector('.bar').classList.add('scrolled');
       },{theme,mac,full:mode==='mac-full',top,mini});
       const at=JSON.stringify({width,theme,mode,top,mini});
-      const head=await page.locator('.side-head').boundingBox(), bar=await page.locator('.bar').boundingBox();
-      expect(Math.abs(head.y+head.height-bar.y-bar.height),at).toBeLessThanOrEqual(1);
+      const head=await page.locator('.side-head').boundingBox(), row=await page.locator('.bar-row').boundingBox();
+      expect(Math.abs(head.y+head.height-row.y-row.height-11),at,'the header row lines up with the sidebar head, also where the note page bar takes no room').toBeLessThanOrEqual(1);
       const toggle=await page.locator('.side-fold').boundingBox();
       expect(toggle.y).toBeGreaterThanOrEqual(top);
       if(windowed&&mini) {
@@ -195,10 +195,9 @@ test('sidebar and page header rows align across desktop layouts', async ({ brows
           expect(brand.x).toBeGreaterThanOrEqual(toggle.x+toggle.width);
         }
       }
-      const row=await page.locator('.bar-row').boundingBox();
       expect(row.height).toBeGreaterThanOrEqual(40);
       const settings=await page.locator('.settings-nav').evaluate(el=>({top:parseFloat(getComputedStyle(el).top),gap:parseFloat(getComputedStyle(el.parentElement).columnGap)}));
-      expect(settings.top).toBe(bar.height+settings.gap);
+      expect(settings.top).toBe(head.y+head.height+settings.gap);
     }
     await page.setViewportSize({width:390,height:844});
     await expect(page.locator('#side')).toBeHidden();
@@ -961,17 +960,18 @@ test('explorer blank context menu offers creation and stays inside the viewport'
   });
 });
 
-test('the Folders label ends in a pencil rule, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
+test('New note and New folder share one row with their icons level, notes edited in the last 30 minutes carry a dot until then, and the read-along note a Felix dot', async ({ browser, browserName }) => {
   await sidebarFixture(browser, async (context, url) => {
     const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
     await page.goto(url);
-    const rule = await page.locator('.side-group').evaluate((el) => {
-      const after = getComputedStyle(el, '::after');
-      return { mask: after.maskImage || after.webkitMaskImage, width: parseFloat(after.width), word: el.firstElementChild.getBoundingClientRect().right, tools: el.querySelector('.side-group-tools').getBoundingClientRect().left };
+    const row = await page.locator('.side-group').evaluate((el) => {
+      const middle = (node) => { const box = node.getBoundingClientRect(); return box.top + box.height / 2; };
+      return { label: el.textContent.includes('Folders'), note: middle(el.querySelector('.side-new svg')), folder: middle(el.querySelector('[data-action="new-folder"] svg')), sameRow: el.querySelector('.side-new').getBoundingClientRect().top === el.querySelector('[data-action="new-folder"]').getBoundingClientRect().top || Math.abs(middle(el.querySelector('.side-new')) - middle(el.querySelector('[data-action="new-folder"]'))) < 1 };
     });
-    expect(rule.mask).toContain('url(');
-    expect(rule.width).toBeGreaterThan(40);
-    expect(rule.word + 8 + rule.width).toBeLessThanOrEqual(rule.tools + 0.5);
+    expect(row.label, 'no Folders label').toBe(false);
+    expect(row.sameRow).toBe(true);
+    expect(Math.abs(row.note - row.folder), 'the two icons sit on one level').toBeLessThan(0.6);
+    await expect(page.locator('.side-folder .side-count'), 'folders show no note count').toHaveCount(0);
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
     await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
     await page.evaluate(() => {

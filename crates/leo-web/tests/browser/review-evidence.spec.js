@@ -748,10 +748,9 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
   for (const [width, height] of WIDTHS) for (const scheme of SCHEMES) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ colorScheme: scheme });
-    await page.goto('/#/');
+    await page.goto('/#/settings');
     await expect(page.locator('#app')).not.toBeEmpty();
-    if (width >= 600) await page.locator('#side [data-action="usage"]').click();
-    else { await page.locator('#menu').click(); await page.locator(':is(.sheet, .popup-menu) [data-action="usage"]').click(); }
+    await page.locator('.settings-nav [data-action="usage"]').click();
     await expect(page.locator('.usage-sheet .coding-plan')).toHaveCount(2);
     await settle(page);
     const colors = await page.evaluate(() => {

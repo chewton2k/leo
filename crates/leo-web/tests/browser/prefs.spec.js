@@ -32,13 +32,13 @@ test('the explorer sort, order and open-tasks choices survive the engine moving 
     server = await start(home, 31842);
     await page.goto(server.url);
     const sort = page.getByRole('button', { name: 'Sort notes' });
-    const flip = page.getByRole('button', { name: 'Reverse order' });
     const menu = page.getByRole('menu', { name: 'Sort notes' });
     await sort.click();
     await menu.getByRole('menuitemradio', { name: 'Last edited' }).click();
     await sort.click();
     await menu.getByRole('menuitemcheckbox', { name: 'Only notes with open tasks' }).click();
-    await flip.click();
+    await sort.click();
+    await menu.getByRole('menuitemradio', { name: 'Oldest first' }).click();
     await expect.poll(() => {
       try {
         return JSON.parse(JSON.parse(fs.readFileSync(path.join(home, 'ui-prefs.json'), 'utf8'))['leo-side-order']);
@@ -50,9 +50,7 @@ test('the explorer sort, order and open-tasks choices survive the engine moving 
     server = await start(home, 31843);
     await page.goto(server.url);
     await expect(sort).toHaveClass(/\bon\b/);
-    await expect(sort).toHaveAttribute('title', 'Sorted by last edited, open tasks only');
-    await expect(flip).toHaveAttribute('aria-pressed', 'true');
-    await expect(flip).toHaveAttribute('title', 'Oldest first');
+    await expect(sort).toHaveAttribute('title', 'Sorted by last edited, oldest first, open tasks only');
   } finally {
     if (server) await server.stop();
     fs.rmSync(home, { recursive: true, force: true });

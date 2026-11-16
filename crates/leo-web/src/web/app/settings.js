@@ -485,14 +485,14 @@ function themeCard() {
       <header><h3>Appearance</h3></header>
       <div class="set-row column" data-find="theme"><span class="set-label">Theme${settingReset('Theme', 'theme', now !== APPEARANCE_DEFAULTS.theme)}</span>${choiceCards({ label: 'Theme', action: 'theme-pick', key: 'theme', current: now, choices: window.leoTheme.CHOICES.map((choice) => [choice, THEME_LABELS[choice], '', THEME_DIAGRAMS[choice]]) })}</div>
       <div class="set-row column" data-find="felix-look"><span class="set-label">Felix${settingReset('Felix', 'felix', felixNow !== APPEARANCE_DEFAULTS.felix)}</span>${choiceCards({ label: 'Felix', action: 'felix-pick', key: 'felix', current: felixNow, columns: 3, choices: [['cute', 'Cute'], ['demon', 'Demon']].map(([kind, label]) => [kind, label, '', `<svg viewBox="0 0 120 52">${felix.felix(40, `felix-preview ${kind}-look`).replace('<svg ', '<svg x="40" y="10" ')}</svg>`]) })}</div>
-      <div class="set-row column" data-find="note-width"><span class="set-label">Note width${settingReset('Note width', 'width', widthNow !== APPEARANCE_DEFAULTS.width)}</span>${choiceCards({ label: 'Note width', action: 'width-pick', key: 'width', current: widthNow, choices: window.leoTheme.WIDTHS.map((width) => [width, WIDTH_LABELS[width], '', widthDiagram(width)]) })}</div>
+      <div class="set-row column" data-find="note-width"><span class="set-label">Note width${settingReset('Note width', 'width', widthNow !== APPEARANCE_DEFAULTS.width || Boolean(window.leoTheme.pageWidth()))}</span>${choiceCards({ label: 'Note width', action: 'width-pick', key: 'width', current: widthNow, choices: window.leoTheme.WIDTHS.map((width) => [width, WIDTH_LABELS[width], '', widthDiagram(width)]) })}${window.leoTheme.pageWidth() && widthNow !== 'full' ? `<p class="set-desc">Dragged to ${window.leoTheme.pageWidth()} px at the note's top corners. Pick a size to go back.</p>` : ''}</div>
       <div class="set-row column" data-find="text-size"><span class="set-label">Text size${settingReset('Text size', 'size', sizeNow !== APPEARANCE_DEFAULTS.size)}</span>${choiceCards({ label: 'Text size', action: 'text-size-pick', key: 'size', current: sizeNow, choices: window.leoTheme.TEXT_SIZES.map((size) => [size, TEXT_SIZE_LABELS[size], '', `<span class="read-sample size" data-text-size="${size}">Notes</span>`]) })}</div>
       <div class="set-row column" data-find="felix-lettering"><span class="set-label">Felix's lettering${settingReset("Felix's lettering", 'letters', lettersNow !== APPEARANCE_DEFAULTS.letters)}</span>${choiceCards({ label: "Felix's lettering", action: 'letters-pick', key: 'letters', current: lettersNow, choices: window.leoTheme.LETTERINGS.map((letters) => [letters, LETTERING_LABELS[letters], '', `<span class="read-sample letters" data-letters="${letters}">${LETTERING_SAMPLE}</span>`]) })}</div>
     </section>`;
 }
 
 function syncAppearanceResets() {
-  const now = { theme: window.leoTheme.choice(), felix: window.leoTheme.felix(), width: window.leoTheme.noteWidth(), size: window.leoTheme.textSize(), letters: window.leoTheme.felixLetters() };
+  const now = { theme: window.leoTheme.choice(), felix: window.leoTheme.felix(), width: window.leoTheme.pageWidth() ? 'dragged' : window.leoTheme.noteWidth(), size: window.leoTheme.textSize(), letters: window.leoTheme.felixLetters() };
   for (const button of document.querySelectorAll('[data-action="setting-reset"]')) button.toggleAttribute('data-on', now[button.dataset.reset] !== APPEARANCE_DEFAULTS[button.dataset.reset]);
 }
 function resetSetting(el) {
@@ -521,6 +521,7 @@ const WIDTH_LABELS = { comfortable: 'Comfortable', wide: 'Wide', full: 'Full wid
 
 function pickWidth(el) {
   window.leoTheme.setNoteWidth(el.dataset.width);
+  document.querySelector('[data-find="note-width"] .set-desc')?.remove();
   for (const button of document.querySelectorAll('[data-action="width-pick"]')) {
     const on = button.dataset.width === window.leoTheme.noteWidth();
     button.classList.toggle('on', on);

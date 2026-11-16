@@ -182,7 +182,7 @@ test('a board shows columns of cards, and cards drag between columns and onto an
     await expect(page.locator('.toast')).toContainText('Moved “Read chapter 3” to Home');
     await expect.poll(() => saved(page, 'bhome00001')).toEqual(['khdoing001:Read chapter 3']);
     await expect(page.locator('[data-card="cread00001"]')).toHaveCount(0);
-    await expect(page.locator('[data-count-board="bhome00001"]')).toHaveText('1');
+    await expect(page.locator('.kanban-tabs .kanban-count'), 'board tabs show names only').toHaveCount(0);
     await page.locator('.toast button').click();
     await expect(page.locator('[data-card="cread00001"]')).toHaveCount(1);
     expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Read chapter 3']);

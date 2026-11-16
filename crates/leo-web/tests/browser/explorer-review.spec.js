@@ -46,21 +46,6 @@ test.beforeEach(async ({ page }) => {
   await signIn(page);
 });
 
-test('desktop breadcrumb folder click unfolds a hidden explorer', async ({ page }) => {
-  const dir = await createFolder(page);
-  const note = await createNote(page, dir);
-  await openNote(page, note);
-  await page.locator('#side .side-fold').click();
-  await expect(page.locator('body')).toHaveClass(/side-mini/);
-  await expect(page.locator('#side .side-explorer')).toBeHidden();
-  const control = page.locator(`#crumbs [data-action="open-folder"][data-dir="${dir}"]`);
-  await control.click();
-  await expect(page.locator('body')).not.toHaveClass(/side-mini/);
-  await expect(page.locator('#side .side-explorer')).toBeVisible();
-  await expect(folderRow(page, dir)).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('leo-side'))).toBe('wide');
-});
-
 test('a passive folder reveal keeps the explorer hidden and opens no sheet', async ({ page }) => {
   const dir = await createFolder(page);
   await page.evaluate(() => localStorage.setItem('leo-side', 'mini'));

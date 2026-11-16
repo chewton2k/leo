@@ -165,7 +165,7 @@ test('a failed save survives navigation and reload, then saves on reconnection',
   await page.locator('.line-edit').fill('Keep this phone draft');
   await expect(page.locator('#save-state')).toContainText('draft kept');
   const refused = await page.evaluate(() => window.__refusedSaves);
-  await page.locator('#back').click();
+  await page.locator('#back:visible, .note-back:visible').first().click();
   await expect.poll(() => page.evaluate(() => window.__refusedSaves)).toBeGreaterThan(refused);
   await page.reload();
   await expect(page.locator('#save-state')).toContainText('draft kept');
@@ -1638,9 +1638,10 @@ test.describe('Felix', () => {
     await page.locator('#chat-toggle').click();
     await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect.getTiming().iterations === Infinity));
     const chat = await page.locator('#chat').boundingBox();
-    const bar = await page.locator('nav.actions').boundingBox();
+    const bar = await page.locator('#note-more').boundingBox();
     expect(bar.x + bar.width).toBeLessThanOrEqual(chat.x);
-    await page.locator('[data-action="note-tasks"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Tasks' }).click();
     const sheet = await page.locator('.sheet').boundingBox();
     const side = await page.locator('#side').boundingBox();
     expect(sheet.x + sheet.width).toBeLessThanOrEqual(chat.x);
@@ -2003,7 +2004,8 @@ test.describe('pictures', () => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Chosen ${test.info().project.name}`, body: 'x' } })).json();
     await page.goto(`/#/n/${note.id}`);
     const chooser = page.waitForEvent('filechooser');
-    await page.locator('[data-action="note-picture"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Add picture' }).click();
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMAAAAwqAQXxT7KxAAAAAElFTkSuQmCC', 'base64');
     await (await chooser).setFiles({ name: 'Heap diagram.png', mimeType: 'image/png', buffer: png });
     await expect(page.locator('#doc img.note-img')).toHaveAttribute('alt', 'Heap diagram');
@@ -3776,7 +3778,7 @@ test('PDF export leaves out the tasks panel and every overlay, with the same ful
     await page.goto(`/#/n/${note.id}`);
     await page.reload();
     await expect(page.locator('#title, .note-head h1').first()).toContainText(`Print ${tag}`);
-    if (width >= 1000) await expect(page.locator('#tasks-window')).toBeVisible();
+    await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
     await page.emulateMedia({ media: 'print' });
     expect(await covering(), `${width}px`).toEqual([]);
     const shape = await layout();
@@ -3837,7 +3839,7 @@ test('sidebar folders can move to the top level with their contents and Undo', a
   const where = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).directory;
   await page.goto(`/#/f/${encodeURIComponent(from)}`);
   const target = page.locator('#side .side-group[data-drop-dir=""]');
-  await expect(target).toContainText('Folders');
+  await expect(target).toContainText('New note');
   await dragBetween(page, page.locator(`#side [data-action="open-folder"][data-dir="${from}"]`), target);
   await expect.poll(where).toBe(`${root}/Child`);
   await expect(page).toHaveURL(/\/(?:#\/)?$/);
@@ -4505,7 +4507,7 @@ test.describe('passages', () => {
 });
 
 test.describe('study sessions', () => {
-  test('a session shows its ideas, ticks one off, and ends with a recap', async ({ page }) => {
+  test('a session shows its ideas, ticks one off after two right answers, and ends with a recap', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: 'Heaps', body: 'A heap keeps the minimum at the root.' } })).json();
     const asked = [];
     await page.route('**/api/chat', async (route) => {
@@ -4513,7 +4515,7 @@ test.describe('study sessions', () => {
       const source = { n: 1, id: note.id, title: 'Heaps', folder: '', why: 'open' };
       const lines = asked.length === 1
         ? [{ sources: [source] }, { step: 'Planned a study session', tool: 'study_plan', found: [] }, { plan: { ideas: ['Root', 'Sift down'] } }, { quiz: { kind: 'multiple_choice', question: 'What sits at the root?', options: ['the minimum', 'the maximum'], answer: 'the minimum', idea: 1 } }, { t: 'First one.' }, { done: true }]
-        : [{ sources: [source] }, { t: '[[correct]] Yes, the minimum.' }, { done: true }];
+        : [{ sources: [source] }, { quiz: { kind: 'multiple_choice', question: 'Where is the smallest key of a min-heap?', options: ['at the root', 'in a leaf'], answer: 'at the root', idea: 1 } }, { done: true }];
       await route.fulfill({ status: 200, headers: { 'content-type': 'application/x-ndjson' }, body: lines.map((l) => JSON.stringify(l)).join('\n') + '\n' });
     });
     await page.goto(`/#/n/${note.id}`);
@@ -4528,21 +4530,24 @@ test.describe('study sessions', () => {
     await expect(progress.locator('.study-idea.now')).toHaveText('Root');
     await expect(progress.locator('.study-mark')).toHaveCount(2);
     await chat.locator('.quiz-card button', { hasText: 'the minimum' }).first().click();
-    await expect(progress).toContainText('1 of 2');
-    await expect(progress.locator('.study-idea.first .study-mark')).toHaveAttribute('aria-label', 'right the first time');
-    await expect(progress.locator('.study-idea.first .study-ok')).toHaveCount(1);
-    await expect(progress.locator('.study-idea.open .study-mark')).toHaveAttribute('aria-label', 'not yet');
-    await expect(progress.locator('.study-idea.now')).toHaveCount(0);
+    await expect(progress).toContainText('0 of 2');
+    await expect(progress.locator('.study-ok.study-once')).toHaveCount(1);
+    await expect(progress.locator('.study-idea').first().locator('.study-mark')).toHaveAttribute('aria-label', 'right once, one more to go');
+    await expect(progress.locator('.study-idea').nth(1).locator('.study-mark')).toHaveAttribute('aria-label', 'not yet');
     await chat.locator('.quiz-card [data-chat="quiz-next"]').click();
     await expect.poll(() => asked.length).toBe(2);
-    expect(asked[1].session).toEqual({ ideas: ['Root', 'Sift down'], closed: [true, false], asked: 1 });
+    expect(asked[1].session).toEqual({ ideas: ['Root', 'Sift down'], closed: [false, false], asked: 1, right: [1, 0], misses: [0, 0] });
+    await chat.locator('.quiz-card button', { hasText: 'at the root' }).first().click();
     await expect(progress).toContainText('1 of 2');
+    await expect(progress.locator('.study-idea.first .study-mark')).toHaveAttribute('aria-label', 'right twice, never missed');
+    await expect(progress.locator('.study-idea.first .study-ok')).toHaveCount(1);
+    await expect(progress.locator('.study-once')).toHaveCount(0);
     await expect(progress.locator('.study-idea.first')).toContainText('Root');
     await progress.locator('[data-chat="session-finish"]').click();
     await expect(progress).toBeHidden();
     const recap = chat.locator('.session-recap');
     await expect(recap).toContainText('1 of 2 ideas covered');
-    await expect(recap).toContainText('Not reached: Sift down');
+    await expect(recap).toContainText('Not shown yet: Sift down');
     await recap.locator('[data-chat="session-done"]').click();
     await expect(recap).toHaveCount(0);
   });
@@ -4710,7 +4715,8 @@ test.describe('calendar', () => {
     await expect(page.locator('#cal-page .cal-item', { hasText: `Send slides ${tag}` })).toBeVisible();
 
     await page.goto(`/#/n/${note.id}`);
-    await page.locator('[data-action="note-tasks"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Tasks' }).click();
     const sheet = page.locator('.sheet');
     await expect(sheet).toContainText('Book the room');
     await sheet.locator('[data-action="task-promote"]').click();
@@ -4853,7 +4859,7 @@ test.describe('beside the note', () => {
     await expect(page.locator('#home-today')).toHaveCount(0);
   });
 
-  test('tasks window folds while reading', async ({ page }) => {
+  test('tasks window folds while reading and stays off note pages', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}`, date: new Date().toLocaleDateString('en-CA') } });
@@ -4862,7 +4868,12 @@ test.describe('beside the note', () => {
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
     await page.reload();
-    for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
+    for (const hash of [`#/n/${note.id}`, '#/new']) {
+      await page.goto(`/${hash}`);
+      await expect(page.locator('#doc'), hash).toBeVisible();
+      await expect(box, `${hash}: note pages carry no Tasks panel`).toBeHidden();
+    }
+    for (const [hash, content] of [['#/record', '#rec-box']]) {
       await page.goto(`/${hash}`);
       await expect(page.locator(content), hash).toBeVisible();
       await expect(box, hash).toBeVisible();
@@ -5196,13 +5207,14 @@ test('the Tasks panel keeps its own size through page changes and refreshes', as
     await expect(panel.locator('.tasks-body')).toBeVisible();
     expect((await panel.boundingBox()).width).toBeLessThanOrEqual(340);
   };
-  await page.goto(`/#/n/${note.id}`);
+  await page.goto('/#/settings');
   await page.reload();
   await steady();
-  for (const hash of ['#/settings', `#/n/${note.id}`, '#/search/steady', `#/n/${note.id}`]) {
+  for (const hash of [`#/n/${note.id}`, '#/search/steady', '#/record', `#/n/${note.id}`, '#/settings']) {
     await page.evaluate((h) => { location.hash = h; }, hash);
     await page.waitForTimeout(150);
-    await steady();
+    if (hash.startsWith('#/n/')) await expect(panel, 'note pages carry no Tasks panel').toBeHidden();
+    else await steady();
   }
   for (const task of tasks) await page.request.delete(`/api/tasks/${task.id}`);
   await page.request.delete(`/api/notes/${note.id}`);
@@ -5503,17 +5515,16 @@ test('Quick Leo finds folders and past chats and opens them', async ({ page }) =
   await expect(page.locator('.msg.leo').last()).toContainText('A heap keeps the smallest on top.');
 });
 
-test('the Tasks panel stays usable beside a long note on short and tall screens', async ({ page }) => {
+test('a long note reads to its end with no Tasks panel over it on short and tall screens', async ({ page }) => {
   const task = await (await page.request.post('/api/tasks', { data: { title: 'Task beside reading' } })).json();
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long reading', body: ('Reading paragraph.\n\n').repeat(100) } })).json();
   await page.setViewportSize({ width: 1280, height: 600 });
   await page.goto('/#/n/' + note.id);
+  await expect(page.locator('#doc')).toContainText('Reading paragraph.');
   const panel = page.locator('#tasks-window');
-  await expect(panel.locator('.tasks-body')).toBeHidden();
-  await panel.hover();
-  await expect(panel.locator('.tasks-body')).toBeVisible();
+  await expect(panel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(panel.locator('.tasks-body')).toBeVisible();
+  await expect(panel).toBeHidden();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect(page.locator('#doc .blk').last()).toBeInViewport();
   await page.request.delete('/api/tasks/' + task.id);
@@ -5683,14 +5694,14 @@ test('buttons keep room from the text and sections around them', async ({ page }
 
 
 
-test('Usage opens from the rail with remaining limits inside a stable dialog', async ({ page }) => {
+test('Usage opens from Settings with remaining limits inside a stable dialog', async ({ page }) => {
   await page.route(/\/api\/settings(?:\/usage)?$/, route => route.fulfill({ json: {
     tasks: [{ task: 'writing', provider: 'ollama' }],
     plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true,
       limits: { five_hour: { used: .25, resets_at: Date.now() / 1000 + 3600 }, seen_at: new Date().toISOString() } }],
   } }));
-  await page.goto('/');
-  await page.locator('.side-foot [data-action="usage"]').click();
+  await page.goto('/#/settings');
+  await page.locator('.settings-nav [data-action="usage"]').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
@@ -5706,7 +5717,7 @@ test('Usage opens from the rail with remaining limits inside a stable dialog', a
   await expect(page.getByRole('dialog').getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
   await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('#side [data-action="usage"]')).toBeFocused();
+  await expect(page.locator('.settings-nav [data-action="usage"]')).toBeFocused();
 });
 
 for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'], [1280, 'marks'], [1800, 'both']]) test(`note search temporarily highlights the match without changing the note at ${width}px with ${layout} margins`, async ({ page }) => {
@@ -5744,7 +5755,8 @@ test('Usage shows saved limits during refresh and keeps them after a refresh fai
       if (outcome === 'failure') return route.fulfill({ status: 503, json: { error: 'Usage could not refresh. Try again in a moment.' } });
       return route.fulfill({ json: { ...saved, plans: [{ ...saved.plans[0], limits: { five_hour: { used: .6 }, seen_at: new Date().toISOString() } }] } });
     });
-    await page.locator('.side-foot [data-action="usage"]').click();
+    await page.goto('/#/settings');
+    await page.locator('.settings-nav [data-action="usage"]').click();
     const dialog = page.getByRole('dialog');
     await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
     if (outcome === 'closed') {

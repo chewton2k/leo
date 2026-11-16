@@ -47,7 +47,7 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   only, an arrow toward the open explorer); the empty Trash says "Nothing thrown away." over its facts. Can't reach leo, the chat's
   no-writing-AI reply and Keeping could not be opened show a drawing too (an unplugged
   cord, a pen with no ink, a broken pencil; 2026-11-15). Counts: `.badge`. Small
-  sentence-case section labels share one rule (`.side-group`, `.source-label`,
+  sentence-case section labels share one rule (`.source-label`,
   `.quick-due-head`, `.chat-history-group`, `.pick-head`) and end in the note rule's
   pencil stroke.
 - Loaders (2026-11-15): wherever `skeleton()` stands in for a list (search, board,
@@ -115,6 +115,12 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 
 
 ## Page and navigation
+On note pages at 1000 px and up the top bar takes no room (2026-11-16): Back is the
+first button of the chip row and Felix's button sits level with it at the column's
+right. Home has no footer line once the explorer is showing (New note is in the
+explorer and on Cmd/Ctrl+N); the first-day arrow and the narrow-window Folders and
+New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-16).
+
 
 - Native quit confirmation keeps the current page and uses its existing toast
   (`events.js`); Updates explains that every successful installation reopens Leo.
@@ -131,8 +137,11 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   one shortcut, the user's call): Cmd/Ctrl+K anywhere opens it, and
   Cmd/Ctrl+N makes a note in the current folder (never inside a sheet, an inline
   edit, while composing or when locked). Both are customizable in Settings →
-  Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with a New note row,
-  has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
+  Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
+  New folder, icons level and no Folders label (2026-11-16); folders show no note count
+  and one sort button's menu holds the sort, its order and open tasks only. New folder
+  opens a row in place that slides the rows below down. The explorer
+  also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
   Search button, the header search button or the phone menu opens one line
   (`sheets.js` `quickLeo`, toggled by `toggleQuickLeo`). It is also the search
@@ -220,7 +229,7 @@ selection drags while keeping file drops and pointer-driven board/resize actions
 Page toolbars share the same 760 px maximum width across notes, workspace, recording
 and Settings. Every Settings section uses the same Settings / section breadcrumb;
 Keeping and Trash keep their routes and controllers inside that frame.
-Usage opens from the rail above Settings and shows remaining subscription windows,
+Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
 Cmd/Ctrl+K (customizable in Settings → Shortcuts) and retains
 task/search/question/navigation ranking. Explicit named
@@ -359,7 +368,8 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   (`textContent`); in a note it shows complete. The step is remembered per thread and drawing
   (`diagrams.steps`, 60 kept), so folding, opening or redrawing a margin note keeps it, and the
   step buttons sit above a folded note's `.margin-toggle`, so they step without opening it
-  (2026-11-15, the user's call). A theme change repaints; See it larger
+  (2026-11-15, the user's call). A new stepped margin drawing plays its steps once (`playDrawing`; skipped under
+  Reduce Motion or when a step is remembered) and ↻ plays it again (2026-11-16). A theme change repaints; See it larger
   shows the complete drawing; an svg that does not parse stays the plain image.
 
 - Picture sizes (2026-10-19, the user's request, like Google Docs): a
@@ -672,7 +682,28 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   per reply (prediction, then teaching, then a check card in the same reply) and
   ends when the goal seems obvious. Practice runs each idea through recall, then
   telling it from its look-alike, then combining, with `more_parts` keeping the
-  idea open; hints go one rung at a time; retests use a new situation. A
+  idea open; hints go one rung at a time; retests use a new situation.
+  From Jane Street's socratic-tutor (MIT, method only, 2026-11-16): an idea closes
+  only after two right answers to separate questions (the user's call), so a lesson
+  plans at most six ideas, asks what the learner must be able to do, checks code by
+  having it written, and comes back once to every open idea before it finishes. Each
+  study turn's prompt ends with `<study_session>` (`Session::state`, from the page's
+  `sessionBody`: each idea done, right once, open or to look at again, with misses,
+  questions asked of `MOST_SESSION_QUESTIONS` (30) and "ask next about an idea still
+  open", mostly as free response or fill in the blank, code by writing it; it is for
+  Felix only, so he never mentions it, idea numbers, counts, scores or closing, and
+  only the record says when an idea is done; when Felix marks the answer in that reply it says the counts leave it out;
+  a closed idea is "to look at again" only with two misses, so sessions saved before
+  `right` existed read as done), so Felix numbers ideas without refused calls;
+  refusals tell him to correct the call without mentioning it, since prose before a
+  tool call streams to the page. An answer asked for outright is given and its
+  idea retested later with a new case; harder or easier changes the next question,
+  never the plan; Practice adds a plausible wrong solution to find the flaw in, a
+  last question that needs earlier ideas and, for a skill, doing it; readiness is
+  judged only from unaided answers; `ENDED` and `SESSION_DONE` end with
+  `Session::unshown` (ideas not shown yet, right once only, missed twice) and ask for
+  no score. Felix
+  keeps no running score (2026-11-16, the user's call). A
   prediction is `quiz` with `predict: yes`: free_response only, shown as Predict,
   never marked (`quizSay` says so, the request sends `mark: false`), never scored,
   not counted in `session.asked` and never a missed question in review. Other
@@ -684,7 +715,15 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   answering the thinking, while the page keeps its own verdict) (2026-11-09, the user's call). Both go to `/api/quiz/mark` (`confidence` is
   validated, `thinking` bounded and sealed) and to Felix inside the answer line
   (`aside`), which must stay one line: `send` folds held results by taking their
-  first three lines. A right guess leaves its idea open for one retest. A typed
+  first three lines. `scoreSession(session, quiz, correct)` reads `idea`, `more`,
+  `sure` and `hints` from the quiz and counts a right answer toward its idea's two
+  only when it is not a guess, not after hints and not `more` (a step, or the page's
+  `more` on a question about the idea whose last answered quiz was wrong, in the
+  marking reply or after Next question); each quiz is
+  scored once (`scored`), and a saved outcome without `right` starts from zero. A
+  hinted answer's history line says "after hints". The recap card lists "Right once"
+  and "Not shown yet", and `quizSay` asks Felix to praise only what the
+  answer and thinking show. A typed
   "I do not know" needs no button: it is marked as a miss and Felix treats it as
   a gap.
 - Quizzes. Marking is critical (a right
@@ -721,7 +760,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   carry `idea`, the page scores ideas and stops at `MOST_SESSION_QUESTIONS`.
   The study strip draws a 15 px pencil circle before each idea (three shapes by
   position): empty until it is right or set aside, holding the quiz's chalk check
-  (right) or × (to look at again), and a heavier ring while the newest quiz on that
+  (right twice), the same check dashed (`.study-once`, "right once, one more to go",
+  so forced colours keep it) or × (to look at again), and a heavier ring while the newest quiz on that
   idea is unanswered; names stay in `--muted`, the ringed one in `--text`, with no
   green or red text (2026-11-15). Each circle has `role="img"` and a label; forced
   colours draw it in CanvasText.
@@ -920,6 +960,10 @@ Escape cancelling delete confirmation stops later same-panel abort handlers.
 
 
 ## Felix in the margin
+An open thread of six or more messages ends with "This has turned into its own
+question. Continue in chat or make it a note." (2026-11-16); the links run the
+thread's chat and Add to note actions.
+
 
 Load margin preferences and reserve their space before positioning search matches
 or restoring reading, so the note's final line wrapping determines the scroll
@@ -1090,6 +1134,11 @@ target. Check the page sequence after loading preferences.
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes
   (`Warm.margin`).
+- Round two from the reference app (2026-11-16, the user's call): marks are an ink blot after the passage's last
+  word; closed left-margin notes are right-aligned; a silent read leaves a faint "Nothing to add." after the passage;
+  a draw ask waits with "Sketching it…"; the ask box says "Enter to ask · Esc to close"; Felix this on a passage with a
+  thread only opens it; the open thread offers Copy; a folded thread says "N replies"; a resolved note stays faded with
+  "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
 - Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
   least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
@@ -1239,6 +1288,10 @@ note. A completed export cannot rename a newer page.
 
 
 ## Calendar and tasks
+The calendar header stays quiet while every calendar reads fine (2026-11-16): no
+"Updated …" line; a failure shows "Couldn't update · Retry" and a calendar that
+could not be read says so with Retry. New task is an outlined button (`.cal-new`).
+
 
 - Task dates read Today, Tomorrow, a weekday within a week, or the date; hovering
   shows the full date. Late tasks are grouped as "Earlier", never "Overdue"
@@ -1373,6 +1426,8 @@ ISO datetimes as one date/time before removing them from the title.
 
 
 ## Boards
+Board tabs show only their names (2026-11-16); columns keep their card counts.
+
 
 - Storage mirrors standalone tasks: `<notes>/.leo/boards/<b…>.json` (name, columns
   `{id, name}`, 1-12) and `<notes>/.leo/cards/<c…>.json` (board, column, `rank`,

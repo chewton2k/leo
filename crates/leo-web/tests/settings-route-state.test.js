@@ -17,7 +17,7 @@ test('the Settings entry stays selected for Keeping and Trash, which live inside
 });
 test('Back from a remembered Keeping section returns to the note instead of looping', () => {
   const source = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
-  const helper = source.slice(source.indexOf('function back()'), source.indexOf('const PAGE_NAMES'));
+  const helper = source.slice(source.indexOf('function back()'), source.indexOf('function chrome('));
   let target;
   const context = { state:{view:'keeping'},location:{hash:'#/settings'},places:{from:'#/settings/keeping',before:'#/n/note'},asideHash:()=>true,goBack:hash=>{target=hash;} };
   vm.createContext(context);vm.runInContext(helper,context);
