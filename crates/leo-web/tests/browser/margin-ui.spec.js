@@ -173,7 +173,7 @@ test('selected note text is painted as its own text only, clipped to the note, a
     getSelection().addRange(range);
   });
   await expect.poll(painted).toContain('Short');
-  expect(await painted()).toBe(await page.evaluate(() => getSelection().toString()));
+  expect(await painted()).toBe(await page.evaluate(() => getSelection().getRangeAt(0).toString()));
   await expect(page.locator('#doc')).toHaveClass(/pick-paint/);
   await page.evaluate(() => {
     const range = document.createRange();
@@ -198,10 +198,12 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('.note-columns')).toHaveAttribute('data-margin', /right|both/);
   await page.evaluate(() => {
-    const blocks = document.querySelectorAll('#doc .blk p');
+    const texts = [];
+    const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
     const range = document.createRange();
-    range.setStart(blocks[0].firstChild, 0);
-    range.setEnd(blocks[2].firstChild, 5);
+    range.setStart(texts.find((n) => n.data.includes('One')), 0);
+    range.setEnd(texts.find((n) => n.data.includes('Three short')), 5);
     getSelection().removeAllRanges();
     getSelection().addRange(range);
   });
