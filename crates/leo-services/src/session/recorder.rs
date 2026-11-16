@@ -639,7 +639,8 @@ fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBo
     let spoken = labelled.unwrap_or_else(|problem| {
         session.trace("speakers-skipped", &problem);
         emit(Event::Warning(format!(
-            "Speakers are not labelled: {problem}. The transcript is kept as it is."
+            "Speakers are not labelled: {}. The transcript is kept as it is.",
+            problem.trim_end_matches('.')
         )));
         Vec::new()
     });
