@@ -1038,7 +1038,7 @@ target. Check the page sequence after loading preferences.
   the same POST, so its guards and the chat fallback apply. With margin room (Right or Both) the toolbar opens in the
   right margin level with the selection's first line as a short vertical list (`.ask-float.beside`); otherwise it sits
   under the selection's last word (`selectionBox` measures text rects, never the full-width block box) (2026-11-15).
-  Ask Felix (button and ⌘⇧E) opens the margin draft beside the passage without asking (`marginAskFirst`, 2026-11-15,
+  The Ask Felix button opens the margin draft beside the passage without asking (`marginAskFirst`, 2026-11-15,
   the user's call, replacing the floating field): its box has a Felix-blue border and the passage's underline, wash and
   tether are Felix blue while it is open; Enter sends the typed question, an empty Enter sends nothing, Cancel drops it,
   and Escape closes it keeping the half-typed question for the next Ask Felix on the same passage (`marginPage.drafted`).

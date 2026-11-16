@@ -88,7 +88,7 @@ document.addEventListener('pointerdown', (e) => {
 document.addEventListener('keydown', (e) => {
   if (state.view !== 'note' || !pressed(e, 'ask')) return;
   e.preventDefault();
-  openAskField();
+  askAboutSelection();
 });
 
 document.addEventListener('keydown', (e) => {
