@@ -167,7 +167,7 @@ pub fn label(
     if runs.iter().all(|r| r.2 == 1) {
         return Ok(Vec::new());
     }
-    let mut spoken = Vec::new();
+    let mut spoken: Vec<Spoken> = Vec::new();
     for (start_ms, end_ms, speaker) in runs {
         if stop.load(Ordering::Relaxed) {
             return Err("Finish now was pressed".into());
@@ -180,13 +180,19 @@ pub fn label(
             .map_err(|e| e.to_string())?;
         wav::write(file.path(), &samples).map_err(|e| e.to_string())?;
         let text = transcribe(file.path())?;
-        if !text.trim().is_empty() {
-            spoken.push(Spoken {
+        let text = text.trim();
+        match spoken.last_mut() {
+            _ if text.is_empty() => {}
+            Some(last) if last.speaker == speaker => {
+                last.end_ms = end_ms;
+                last.text = format!("{} {text}", last.text);
+            }
+            _ => spoken.push(Spoken {
                 start_ms,
                 end_ms,
                 speaker,
-                text: text.trim().to_string(),
-            });
+                text: text.to_string(),
+            }),
         }
     }
     Ok(spoken)
@@ -325,6 +331,34 @@ mod tests {
         assert_eq!(
             label(dir.path(), 1, &broken, &fine, &AtomicBool::new(false)),
             Err("no model".to_string())
+        );
+    }
+
+    #[test]
+    fn a_silent_run_between_one_speaker_s_runs_leaves_one_passage() {
+        let dir = tempfile::tempdir().unwrap();
+        part(dir.path(), 0, 9);
+        let calls = RefCell::new(0);
+        let three = |_: Vec<(PathBuf, u64)>| {
+            Ok(vec![
+                turn(0, 3_000, 1),
+                turn(3_000, 6_000, 2),
+                turn(6_000, 9_000, 1),
+            ])
+        };
+        let transcribe = |_: &Path| {
+            *calls.borrow_mut() += 1;
+            Ok(["first", " ", "third"][*calls.borrow() - 1].to_string())
+        };
+        let spoken = label(dir.path(), 1, &three, &transcribe, &AtomicBool::new(false)).unwrap();
+        assert_eq!(
+            spoken,
+            vec![Spoken {
+                start_ms: 0,
+                end_ms: 9_000,
+                speaker: 1,
+                text: "first third".into()
+            }]
         );
     }
 
