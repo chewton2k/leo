@@ -1120,7 +1120,7 @@ test('every open thread offers the chat fallback, pin and chat close the action 
     await expect(note.locator('.margin-acts > .margin-tools > button:visible')).toHaveCount(2);
     await expect(note.locator('.margin-tools > :last-child')).toHaveAttribute('aria-label', 'Ask in chat');
     await page.evaluate(() => {
-      fake.delay = 300;
+      fake.delay = 1500;
       const text = session.doc.source().slice(0, 12);
       marginAsk(session, { text, from: 0, to: 12 });
       window.draftEl = document.querySelector('.margin-note[data-id="draft"]');
