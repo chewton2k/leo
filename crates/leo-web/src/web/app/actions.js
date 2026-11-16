@@ -231,6 +231,7 @@ const actions = {
   },
   move: (el) => moveSheet(el),
   share: (el) => shareMenu(el),
+  'note-menu': (el) => noteMenu(el),
   delete: () => trashNote(),
   restore: (el) => restore(el.dataset.id, false),
   'trash-select': () => {

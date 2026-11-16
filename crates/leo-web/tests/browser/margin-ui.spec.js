@@ -545,17 +545,21 @@ test('a narrow Felix panel keeps the placeholder on one line, the note chip read
   expect(fit.inside).toBe(true);
 });
 
-test('the note toolbar moves clear of an overlaying Felix panel instead of hiding behind it', async ({ page }) => {
-  await page.setViewportSize({ width: 760, height: 700 });
-  const note = await (await page.request.post('/api/notes', { data: { title: 'Overlay toolbar', body: 'Hello.' } })).json();
+test('the note tools live in one menu beside the Felix chips, and there is no floating toolbar', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Note menu', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
-  await expect(page.locator('nav.actions')).toBeVisible();
-  await page.locator('#chat-toggle').click();
-  await expect(page.locator('#chat')).toBeVisible();
-  await quiet(page);
-  const gap = await page.evaluate(() => ({ pill: document.querySelector('nav.actions').getBoundingClientRect(), chat: document.querySelector('#chat').getBoundingClientRect() }));
-  expect(gap.pill.left).toBeGreaterThanOrEqual(0);
-  expect(gap.pill.right).toBeLessThanOrEqual(gap.chat.left + 1);
+  await expect(page.locator('nav.actions')).toHaveCount(0);
+  await expect(page.locator('.dock')).toBeHidden();
+  const more = page.locator('.note-meta #note-more');
+  await expect(more).toHaveAccessibleName('More for this note');
+  await more.click();
+  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']);
+  await page.getByRole('menuitem', { name: 'Share' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Copy as Markdown' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#note-facts')).toHaveText(/^Edited /);
+  await expect(page.locator('#crumbs')).toHaveCSS('visibility', 'hidden');
 });
 
 test('the Usage sheet icon buttons name themselves on hover', async ({ page }) => {
@@ -587,11 +591,11 @@ test('turning the eye off hides the starters that need the open note', async ({ 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Starters', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.locator('#chat-toggle').click();
-  await expect(page.locator('.starter')).toHaveCount(5);
+  await expect(page.locator('.starter')).toHaveText(['Teach me this note step by step', 'Quiz me on this note', 'Make me a 3-day review plan']);
   await page.locator('[data-chat="drop"]').click();
-  await expect(page.locator('.starter')).toHaveText(['Quiz me across my classes', 'Make me a 3-day review plan']);
+  await expect(page.locator('.starter')).toHaveText(['Make me a 3-day review plan']);
   await page.locator('[data-chat="drop"]').click();
-  await expect(page.locator('.starter')).toHaveCount(5);
+  await expect(page.locator('.starter')).toHaveCount(3);
 });
 
 test('margin notes on passages inside tables, code and quotes sit beside their passage without overlapping', async ({ page }) => {
@@ -728,7 +732,8 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
   await expect(page.locator('.margin-note')).toHaveCount(2);
   await page.evaluate(() => { window.print = async () => { window.printSaw = document.querySelectorAll('[data-print]').length; }; });
   const text = await page.locator('#doc').textContent();
-  await page.locator('[data-action="share"]').first().click();
+  await page.locator('#note-more').click();
+  await page.getByRole('menuitem', { name: 'Share' }).click();
   await page.getByRole('menuitem', { name: 'Export as PDF with Felix’s notes' }).click();
   await expect.poll(async () => (await page.evaluate(() => window.printSaw)) ?? `no print: ${JSON.stringify({ errors, toasts: await page.locator('.toast').allTextContents() })}`).toBe(4);
   await expect(page.locator('#doc')).toHaveText(text);
@@ -741,7 +746,8 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
   await page.keyboard.press('Shift');
   await expect(page.locator('[data-print]')).toHaveCount(0);
   await expect(page.locator('#doc')).toHaveText(text);
-  await page.locator('[data-action="share"]').first().click();
+  await page.locator('#note-more').click();
+  await page.getByRole('menuitem', { name: 'Share' }).click();
   await page.getByRole('menuitem', { name: 'Export as PDF', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(0);
   expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(body);
@@ -812,4 +818,19 @@ test('dragging a top corner of the note sets its width live, margins give way, a
   await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.round(before) + 20);
   await page.keyboard.press('Enter');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
+});
+
+test('a selection too long for the margin says so inside the Felix bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const long = 'A long sentence about heat moving between two places over time. '.repeat(20);
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Long pick', body: `Short line.\n\n${long}` } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
+  expect(await pickText(page, 'Short line.')).toBe(true);
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.ask-long')).toBeHidden();
+  expect(await pickText(page, long.trim())).toBe(true);
+  await expect(menu.locator('.ask-long')).toHaveText('Select less to ask Felix');
+  await expect(menu.getByRole('button')).toHaveText([/Felix this/, 'Ask Felix', 'Visualize']);
 });

@@ -26,9 +26,7 @@
   const STARTERS = [
     { text: 'Teach me this note step by step', needs: 'note', ask: 'Which note should I teach you?' },
     { text: 'Quiz me on this note', needs: 'note', ask: 'Which note should the quiz cover?' },
-    { text: 'Quiz me across my classes', needs: 'classes', ask: 'Which classes should the quiz cover?' },
     { text: 'Make me a 3-day review plan', needs: 'classes', ask: 'Which classes should the plan cover?' },
-    { text: 'Summarize this meeting and list the action items', needs: 'note', ask: 'Which meeting notes should I summarize?' },
   ];
   const SURE = { sure: 'Sure', think: 'Think so', guess: 'Guessing' };
   const sureOf = (percent) => (percent >= 75 ? 'sure' : percent >= 40 ? 'think' : 'guess');
@@ -802,7 +800,7 @@
   function starterWords(starter, picked) {
     if (starter.needs !== 'classes' || !picked.length) return starter.text;
     const list = picked.length === 1 ? picked[0] : `${picked.slice(0, -1).join(', ')} and ${picked[picked.length - 1]}`;
-    return starter.text === 'Quiz me across my classes' ? `Quiz me across ${list}` : `${starter.text} for ${list}`;
+    return `${starter.text} for ${list}`;
   }
 
   const MOST_FILES = 10;
@@ -2706,7 +2704,7 @@
       if (!a) return;
       const picked = all ? [] : a.picked;
       state.asking = null;
-      send(all ? (a.starter.text === 'Quiz me across my classes' ? 'Quiz me across all my classes' : `${a.starter.text} for all my classes`) : starterWords(a.starter, picked));
+      send(all ? `${a.starter.text} for all my classes` : starterWords(a.starter, picked));
     }
 
     let liveFrame = 0;

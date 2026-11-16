@@ -605,14 +605,31 @@ async function saveMarkdown() {
   setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
+function shareRows() {
+  return [
+    { text: 'Copy as Markdown', icon: ICON.note, run: copyMarkdown },
+    { text: 'Save .md file', icon: ICON.download, run: saveMarkdown },
+    { text: 'Export as PDF', icon: ICON.share, run: share },
+    ...(marginPrintable().length ? [{ text: 'Export as PDF with Felix’s notes', icon: ICON.share, run: () => share(true) }] : []),
+  ];
+}
+
 function shareMenu(owner) {
+  popupMenu(owner, { label: 'Share', rows: shareRows() });
+}
+
+function noteMenu(owner) {
+  const note = state.view === 'note' ? state.session?.note || {} : {};
   popupMenu(owner, {
-    label: 'Share',
+    label: 'This note',
     rows: [
-      { text: 'Copy as Markdown', icon: ICON.note, run: copyMarkdown },
-      { text: 'Save .md file', icon: ICON.download, run: saveMarkdown },
-      { text: 'Export as PDF', icon: ICON.share, run: share },
-      ...(marginPrintable().length ? [{ text: 'Export as PDF with Felix’s notes', icon: ICON.share, run: () => share(true) }] : []),
+      ...(note.id && note.recorded ? [{ text: 'Show transcript', icon: ICON.mic, run: () => showRecordingSources(window.getSelection().toString().trim().slice(0, 200)) }] : []),
+      ...(note.id ? [{ text: 'Tasks', icon: ICON.calendar, run: () => noteTasksSheet() }] : []),
+      { text: 'Add picture', icon: ICON.image, run: () => choosePictures() },
+      { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(owner) },
+      { text: 'Share', icon: ICON.share, next: shareRows() },
+      { line: true },
+      { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },
     ],
   });
 }

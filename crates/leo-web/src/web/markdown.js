@@ -451,14 +451,6 @@
       .trim();
   }
 
-  function facts(markdown) {
-    const text = plain(markdown);
-    const words = typeof Intl === 'object' && Intl.Segmenter
-      ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
-      : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
-    return words ? `${words.toLocaleString('en')} ${words === 1 ? 'word' : 'words'} · ${Math.ceil(words / 238)} min read` : '0 words';
-  }
-
   function wordDiff(before, after, most = 120000) {
     const split = (text) => String(text || '').match(/\s*(?:[\p{L}\p{N}_'’]+|\S)|\s+/gu) || [];
     const a = split(before);
@@ -515,7 +507,7 @@
     return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
   }
 
-  const api = { render, plain, facts, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, plain, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

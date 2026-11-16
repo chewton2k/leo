@@ -346,10 +346,17 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
-  the old look: a plain underline, the 3 px quote bar, row rules. The facts line
-  `#note-facts` (`md.facts`: words outside code by word segmentation, 238 a minute
-  rounded up, "0 words" when empty) sits under the title, updates 300 ms after a
-  change (`factsSoon`), is skipped by search highlights and hidden in print.
+  the old look: a plain underline, the 3 px quote bar, row rules. The line under
+  the title (`#note-facts`) holds only the save state, `#save-state` ("Edited …",
+  Saving, the drying mark); there is no word count or read time (2026-11-16, the
+  user's call). It is skipped by search highlights and hidden in print. The note's
+  tools (transcript, Tasks, Add picture, Move to folder, Share as a second step, Move
+  to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js) after Read through;
+  there is no floating note toolbar, and the Tasks card is hidden on note pages. The
+  top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
+  spacer). Felix's chat starters are Teach me this note step by step, Quiz me on this
+  note and Make me a 3-day review plan. A selection over `MOST_ASKED` shows "Select
+  less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
   `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays

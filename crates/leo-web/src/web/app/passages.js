@@ -3,7 +3,7 @@ const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
 askFloat.setAttribute('role', 'toolbar');
 askFloat.setAttribute('aria-label', 'Felix and this passage');
-askFloat.innerHTML = `<button type="button" data-ask="this">${ICON.chat}<span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
+askFloat.innerHTML = `<p class="ask-long">Select less to ask Felix</p><button type="button" data-ask="this">${ICON.chat}<span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
 askFloat.hidden = true;
 askFloat.dataset.keepSelection = '';
 askFloat.addEventListener('mousedown', (e) => e.preventDefault());
@@ -34,6 +34,7 @@ function placeAskFloat(has) {
   const s = state.view === 'note' ? state.session : null;
   if (has) askFloat.querySelector('[data-ask="ask"]').title = `Ask Felix (${shortcutText(shortcutKeys('ask'))})`;
   const box = has && s && s.doc ? s.doc.selectionBox() : null;
+  askFloat.toggleAttribute('data-long', Boolean(box) && [...(s.doc.selection()?.text || '')].length > MOST_ASKED);
   const columns = $('.note-columns');
   const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin) && !marginTaken(s, s.doc.selection()));
   askFloat.classList.toggle('beside', beside);

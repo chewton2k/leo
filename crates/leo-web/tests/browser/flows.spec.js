@@ -1638,9 +1638,10 @@ test.describe('Felix', () => {
     await page.locator('#chat-toggle').click();
     await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running' || a.effect.getTiming().iterations === Infinity));
     const chat = await page.locator('#chat').boundingBox();
-    const bar = await page.locator('nav.actions').boundingBox();
+    const bar = await page.locator('#note-more').boundingBox();
     expect(bar.x + bar.width).toBeLessThanOrEqual(chat.x);
-    await page.locator('[data-action="note-tasks"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Tasks' }).click();
     const sheet = await page.locator('.sheet').boundingBox();
     const side = await page.locator('#side').boundingBox();
     expect(sheet.x + sheet.width).toBeLessThanOrEqual(chat.x);
@@ -2003,7 +2004,8 @@ test.describe('pictures', () => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Chosen ${test.info().project.name}`, body: 'x' } })).json();
     await page.goto(`/#/n/${note.id}`);
     const chooser = page.waitForEvent('filechooser');
-    await page.locator('[data-action="note-picture"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Add picture' }).click();
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAFklEQVR4nGP8z8DAwMDAxMDAwMAAAAwqAQXxT7KxAAAAAElFTkSuQmCC', 'base64');
     await (await chooser).setFiles({ name: 'Heap diagram.png', mimeType: 'image/png', buffer: png });
     await expect(page.locator('#doc img.note-img')).toHaveAttribute('alt', 'Heap diagram');
@@ -4710,7 +4712,8 @@ test.describe('calendar', () => {
     await expect(page.locator('#cal-page .cal-item', { hasText: `Send slides ${tag}` })).toBeVisible();
 
     await page.goto(`/#/n/${note.id}`);
-    await page.locator('[data-action="note-tasks"]').click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Tasks' }).click();
     const sheet = page.locator('.sheet');
     await expect(sheet).toContainText('Book the room');
     await sheet.locator('[data-action="task-promote"]').click();
