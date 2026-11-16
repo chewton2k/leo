@@ -3778,7 +3778,7 @@ test('PDF export leaves out the tasks panel and every overlay, with the same ful
     await page.goto(`/#/n/${note.id}`);
     await page.reload();
     await expect(page.locator('#title, .note-head h1').first()).toContainText(`Print ${tag}`);
-    if (width >= 1000) await expect(page.locator('#tasks-window')).toBeVisible();
+    await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
     await page.emulateMedia({ media: 'print' });
     expect(await covering(), `${width}px`).toEqual([]);
     const shape = await layout();
@@ -4859,7 +4859,7 @@ test.describe('beside the note', () => {
     await expect(page.locator('#home-today')).toHaveCount(0);
   });
 
-  test('tasks window folds while reading', async ({ page }) => {
+  test('tasks window folds while reading and stays off note pages', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}`, date: new Date().toLocaleDateString('en-CA') } });
@@ -4868,7 +4868,12 @@ test.describe('beside the note', () => {
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
     await page.reload();
-    for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
+    for (const hash of [`#/n/${note.id}`, '#/new']) {
+      await page.goto(`/${hash}`);
+      await expect(page.locator('#doc'), hash).toBeVisible();
+      await expect(box, `${hash}: note pages carry no Tasks panel`).toBeHidden();
+    }
+    for (const [hash, content] of [['#/record', '#rec-box']]) {
       await page.goto(`/${hash}`);
       await expect(page.locator(content), hash).toBeVisible();
       await expect(box, hash).toBeVisible();
@@ -5202,13 +5207,14 @@ test('the Tasks panel keeps its own size through page changes and refreshes', as
     await expect(panel.locator('.tasks-body')).toBeVisible();
     expect((await panel.boundingBox()).width).toBeLessThanOrEqual(340);
   };
-  await page.goto(`/#/n/${note.id}`);
+  await page.goto('/#/settings');
   await page.reload();
   await steady();
-  for (const hash of ['#/settings', `#/n/${note.id}`, '#/search/steady', `#/n/${note.id}`]) {
+  for (const hash of [`#/n/${note.id}`, '#/search/steady', '#/record', `#/n/${note.id}`, '#/settings']) {
     await page.evaluate((h) => { location.hash = h; }, hash);
     await page.waitForTimeout(150);
-    await steady();
+    if (hash.startsWith('#/n/')) await expect(panel, 'note pages carry no Tasks panel').toBeHidden();
+    else await steady();
   }
   for (const task of tasks) await page.request.delete(`/api/tasks/${task.id}`);
   await page.request.delete(`/api/notes/${note.id}`);
@@ -5509,17 +5515,16 @@ test('Quick Leo finds folders and past chats and opens them', async ({ page }) =
   await expect(page.locator('.msg.leo').last()).toContainText('A heap keeps the smallest on top.');
 });
 
-test('the Tasks panel stays usable beside a long note on short and tall screens', async ({ page }) => {
+test('a long note reads to its end with no Tasks panel over it on short and tall screens', async ({ page }) => {
   const task = await (await page.request.post('/api/tasks', { data: { title: 'Task beside reading' } })).json();
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long reading', body: ('Reading paragraph.\n\n').repeat(100) } })).json();
   await page.setViewportSize({ width: 1280, height: 600 });
   await page.goto('/#/n/' + note.id);
+  await expect(page.locator('#doc')).toContainText('Reading paragraph.');
   const panel = page.locator('#tasks-window');
-  await expect(panel.locator('.tasks-body')).toBeHidden();
-  await panel.hover();
-  await expect(panel.locator('.tasks-body')).toBeVisible();
+  await expect(panel).toBeHidden();
   await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(panel.locator('.tasks-body')).toBeVisible();
+  await expect(panel).toBeHidden();
   await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   await expect(page.locator('#doc .blk').last()).toBeInViewport();
   await page.request.delete('/api/tasks/' + task.id);

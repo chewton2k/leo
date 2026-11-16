@@ -228,7 +228,7 @@ test.describe('arriving underline', () => {
   test('reduced motion shows the finished dotted line at once', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const long = { ...THREADS.long, id: 't3', quote: WORDS.slice(0, 200), suffix: WORDS.slice(200, 224) };
-      const timeline = await frames(page, 300, () => ({ dots: window.dots('t3') }), [[20, `window.arrive(${JSON.stringify(long)})`]]);
+      const timeline = await frames(page, 600, () => ({ dots: window.dots('t3') }), [[20, `window.arrive(${JSON.stringify(long)})`]]);
       const seen = timeline.filter((f) => f.dots.length);
       expect(seen.length).toBeGreaterThan(3);
       for (const frame of seen) for (const line of frame.dots) {
