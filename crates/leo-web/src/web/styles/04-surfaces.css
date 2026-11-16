@@ -6,7 +6,7 @@
 @media (min-width: 1000px) {
   body.on-note .bar { height: 0; padding-block: 0; background: none; pointer-events: none; }
   body.on-note .bar::after, body.on-note #back { display: none; }
-  body.on-note .bar-row { padding-top: calc(var(--top) + 10px); }
+  body.on-note .bar-row { position: relative; top: calc(var(--top) + 10px); }
   body.on-note .bar-row > * { pointer-events: auto; }
   body.on-note .bar::before { content: ''; position: absolute; inset: 0 0 auto; height: calc(var(--top) + 10px); pointer-events: auto; }
   body.on-note main { padding-top: calc(var(--top) + 10px); }

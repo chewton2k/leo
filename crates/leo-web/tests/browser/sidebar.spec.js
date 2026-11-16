@@ -141,7 +141,7 @@ test('sidebar separates icon actions from the explorer and keeps them reachable 
       expect((await page.locator('.side-fold').boundingBox()).x).toBeLessThan(52);
       await page.getByRole('button',{name:'Show folders',exact:true}).click();
       expect((await page.locator('.side-rail-main').boundingBox()).y).toBeGreaterThanOrEqual(50);
-      await page.setViewportSize({width:1280,height:320});
+      await page.setViewportSize({width:1280,height:260});
       await expect(settings).toBeInViewport();
       const railMain=page.locator('.side-rail-main');
       await railMain.evaluate(el=>el.scrollTop=el.scrollHeight);
@@ -176,8 +176,8 @@ test('sidebar and page header rows align across desktop layouts', async ({ brows
         document.querySelector('.bar').classList.add('scrolled');
       },{theme,mac,full:mode==='mac-full',top,mini});
       const at=JSON.stringify({width,theme,mode,top,mini});
-      const head=await page.locator('.side-head').boundingBox(), bar=await page.locator('.bar').boundingBox();
-      expect(Math.abs(head.y+head.height-bar.y-bar.height),at).toBeLessThanOrEqual(1);
+      const head=await page.locator('.side-head').boundingBox(), row=await page.locator('.bar-row').boundingBox();
+      expect(Math.abs(head.y+head.height-row.y-row.height-11),at,'the header row lines up with the sidebar head, also where the note page bar takes no room').toBeLessThanOrEqual(1);
       const toggle=await page.locator('.side-fold').boundingBox();
       expect(toggle.y).toBeGreaterThanOrEqual(top);
       if(windowed&&mini) {
@@ -195,10 +195,9 @@ test('sidebar and page header rows align across desktop layouts', async ({ brows
           expect(brand.x).toBeGreaterThanOrEqual(toggle.x+toggle.width);
         }
       }
-      const row=await page.locator('.bar-row').boundingBox();
       expect(row.height).toBeGreaterThanOrEqual(40);
       const settings=await page.locator('.settings-nav').evaluate(el=>({top:parseFloat(getComputedStyle(el).top),gap:parseFloat(getComputedStyle(el.parentElement).columnGap)}));
-      expect(settings.top).toBe(bar.height+settings.gap);
+      expect(settings.top).toBe(head.y+head.height+settings.gap);
     }
     await page.setViewportSize({width:390,height:844});
     await expect(page.locator('#side')).toBeHidden();

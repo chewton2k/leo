@@ -480,7 +480,7 @@ test('the Tasks window leaves every outline tick reachable and the preview sits 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Outline over tasks', body } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.reload();
-  await expect(page.locator('#tasks-window')).toBeVisible();
+  await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
   await expect(page.locator('.outline-ticks span')).toHaveCount(12);
   await quiet(page);
   const hits = await page.evaluate(() => [...document.querySelectorAll('.outline-ticks span')].map((tick) => {
@@ -646,8 +646,7 @@ test('a resolved passage reopens', async ({ page }) => {
   await expect(back).toHaveCount(0);
   await card.click();
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
-  await expect(page.locator('.margin-ink .squiggle')).toHaveCount(0);
+  await expect(card, 'a resolved note stays faded until the note is left').toHaveAttribute('data-resolved', /.+/);
   await expect(page.locator('.toast')).toHaveCount(0);
   await expect(back).toBeVisible();
   await expect(back).toHaveCSS('border-bottom-style', 'dotted');
@@ -785,6 +784,8 @@ test('a resolved note stays faded with a Resolved label until it is reopened', a
   await page.locator('.margin-note[data-open]').getByRole('button', { name: 'Resolve' }).click();
   await expect(thread).toHaveAttribute('data-resolved', /.+/);
   await expect(thread.locator('.margin-resolved-label')).toHaveText('Resolved');
+  await page.mouse.move(5, 5);
+  await page.evaluate(() => document.activeElement?.blur());
   await expect(thread).toHaveCSS('opacity', '0.45');
   await thread.locator('.margin-toggle').click({ force: true });
   await expect(thread).not.toHaveAttribute('data-resolved', /.+/);

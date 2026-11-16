@@ -165,7 +165,7 @@ test('a failed save survives navigation and reload, then saves on reconnection',
   await page.locator('.line-edit').fill('Keep this phone draft');
   await expect(page.locator('#save-state')).toContainText('draft kept');
   const refused = await page.evaluate(() => window.__refusedSaves);
-  await page.locator('#back').click();
+  await page.locator('#back:visible, .note-back:visible').first().click();
   await expect.poll(() => page.evaluate(() => window.__refusedSaves)).toBeGreaterThan(refused);
   await page.reload();
   await expect(page.locator('#save-state')).toContainText('draft kept');
