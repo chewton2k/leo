@@ -414,6 +414,34 @@ test('Settings sections keep drafts and selections across redraws in both themes
   } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
 
+test("Trash's All box keeps focus when toggled with the keyboard", async ({ page }) => {
+  const web = path.resolve(__dirname, '../../src/web/app');
+  const read = name => fs.readFileSync(path.join(web, name), 'utf8');
+  await page.setContent('<div id="app"></div><div id="floating"></div>');
+  await page.addScriptTag({ content: `
+    const app=document.querySelector('#app'), floating=document.querySelector('#floating'), $=selector=>document.querySelector(selector);
+    const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const ICON=new Proxy({}, {get:()=>'<svg></svg>'}), DRAWN=ICON, plural=(n,w)=>n+' '+w+(n===1?'':'s'), rel=()=>'now';
+    const chrome=()=>{}, settingsCrumbs=()=>'', skeleton=()=>'', cascade=()=>{}, pulse=()=>{}, toast=()=>{}, empty=()=>'', confirmSheet=()=>{}, closeSheet=()=>{}, refreshSideTree=async()=>{};
+    const settingsFrame=(section,content)=>content;
+    let seq=0,state={view:'folder'};
+    async function api(url){ if(url==='/api/trash') return [{id:'a',title:'First',directory:'',deleted_at:1,readable:true},{id:'b',title:'Second',directory:'',deleted_at:1,readable:true}]; return null; }
+    ${read('refresh.js')}
+    ${read('trash.js')}
+    document.addEventListener('click',e=>{if(e.target.closest('[data-action="trash-select"]')){state.selecting=!state.selecting;state.picked=new Set();drawTrash();}});
+    window.ready=showTrash();
+  ` });
+  await page.evaluate(() => window.ready);
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  const all = page.locator('[data-trash-all]');
+  await all.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByText('2 selected')).toBeVisible();
+  await expect(all).toBeFocused();
+  await expect(all).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
+});
+
 test('setup groups permissions with live checkmarks, then offers speech models as cards', async ({ browser }, testInfo) => {
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');

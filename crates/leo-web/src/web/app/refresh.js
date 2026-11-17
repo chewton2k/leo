@@ -4,7 +4,7 @@ function appVisible() {
 
 function refreshKey(node) {
   if (node.nodeType !== 1) return null;
-  for (const name of ['id', 'data-refresh-key', 'data-kids', 'data-model-row', 'data-task-card', 'data-settings-section', 'data-dictation', 'data-key-input', 'data-app-pref', 'data-keep', 'data-export']) {
+  for (const name of ['id', 'data-refresh-key', 'data-kids', 'data-model-row', 'data-task-card', 'data-settings-section', 'data-dictation', 'data-key-input', 'data-app-pref', 'data-keep', 'data-export', 'data-trash-all']) {
     if (node.hasAttribute(name)) return `${node.nodeName}:${name}:${node.getAttribute(name)}`;
   }
   if (node.hasAttribute('data-trash-pick')) return JSON.stringify([node.nodeName, node.getAttribute('data-trash-pick'), node.getAttribute('value')]);
