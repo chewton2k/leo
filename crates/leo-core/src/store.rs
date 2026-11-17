@@ -939,6 +939,11 @@ impl Store {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
+            if let Some(old) = &old_path {
+                if old != target && same_file(old, target) {
+                    fs::rename(old, target)?;
+                }
+            }
             write_atomic(target, &content)?;
             if let Some(old_path) = old_path {
                 if !same_file(&old_path, target) {
@@ -2822,6 +2827,23 @@ mod tests {
         let mut pinned = make_note();
         pinned.pinned = true;
         assert!(note_to_markdown(&pinned).unwrap().contains("pinned: true"));
+    }
+
+    #[test]
+    fn a_title_changed_only_in_case_renames_its_file() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("apple", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().title = "Apple".to_string();
+        store.save().unwrap();
+        assert_eq!(note_files(&store), vec!["Apple.md".to_string()]);
+        assert!(!store.changed_on_disk());
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.find_note(&id).unwrap().title, "Apple");
     }
 
     #[test]
