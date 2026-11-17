@@ -417,12 +417,12 @@ impl CodexThread {
                 model: self.model.clone(),
                 effort: self.effort.clone(),
                 input: if estimated {
-                    text.chars().count().div_ceil(4) as u64
+                    super::tokens_of(text.chars().count())
                 } else {
                     used.input
                 },
                 output: if estimated {
-                    answer.chars().count().div_ceil(4) as u64
+                    super::tokens_of(answer.chars().count())
                 } else {
                     used.output
                 },

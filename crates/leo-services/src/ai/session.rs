@@ -6,7 +6,7 @@ use crate::ai::provider::agent_cli::{Agent, AgentCli, ClaudeSession};
 use crate::ai::provider::codex_app::{self, tool_specs, CodexThread, CodexTurn};
 use crate::ai::provider::mcp;
 use crate::ai::provider::openai::{self, OpenAiChat};
-use crate::ai::provider::Spent;
+use crate::ai::provider::{tokens_of, Spent};
 use crate::ai::provider::{ChatProvider, Sink};
 use crate::ai::spend::{answered, Answered};
 use crate::config::provider::ProviderKind;
@@ -214,10 +214,10 @@ impl Session for ApiTalk {
 
     fn context_chars(&self) -> Option<usize> {
         Some(
-            self.system.len().saturating_add(
+            self.system.chars().count().saturating_add(
                 self.history
                     .iter()
-                    .map(|turn| turn.to_string().len())
+                    .map(|turn| turn.to_string().chars().count())
                     .sum::<usize>(),
             ),
         )
@@ -248,11 +248,11 @@ impl Session for ApiTalk {
             effort,
             ..Spent::default()
         };
-        let mut sent_chars = self.system.len()
+        let mut sent_chars = self.system.chars().count()
             + self
                 .history
                 .iter()
-                .map(|m| m.to_string().len())
+                .map(|m| m.to_string().chars().count())
                 .sum::<usize>();
         let mut calls = 0usize;
         for _ in 0..=most_calls {
@@ -274,10 +274,15 @@ impl Session for ApiTalk {
                     }
                     None => {
                         spent.estimated = true;
-                        spent.input += sent_chars.div_ceil(4) as u64;
-                        spent.output += (round.text.len()
-                            + round.calls.iter().map(|c| c.2.len()).sum::<usize>())
-                        .div_ceil(4) as u64;
+                        spent.input += tokens_of(sent_chars);
+                        spent.output += tokens_of(
+                            round.text.chars().count()
+                                + round
+                                    .calls
+                                    .iter()
+                                    .map(|c| c.2.chars().count())
+                                    .sum::<usize>(),
+                        );
                     }
                 }
                 if round.calls.is_empty() {
@@ -329,7 +334,7 @@ impl Session for ApiTalk {
                 }
                 calls += 1;
                 let result = result_for(call, name, args);
-                sent_chars += result.len();
+                sent_chars += result.chars().count();
                 results.push((id.clone(), result));
             }
             for (id, result) in results {
@@ -659,6 +664,49 @@ mod tests {
         };
         assert!(open(&cfg, &MemoryStore::default(), &systems, &[]).is_some());
         assert!(open(&cfg, &MemoryStore::default(), &systems, &tools()).is_some());
+    }
+
+    #[test]
+    fn a_non_ascii_reply_is_estimated_by_characters() {
+        let reply = "日".repeat(300);
+        let (url, _) = serve(vec![sse(&[
+            &format!(r#"{{"choices":[{{"delta":{{"content":"{reply}"}}}}]}}"#),
+            "[DONE]",
+        ])]);
+        let cfg = ProviderConfig {
+            base_url: Some(url),
+            ..ProviderConfig::default()
+        };
+        let mut talk = ApiTalk::new(
+            OpenAiChat::new("ollama".into(), &cfg, None),
+            "ollama",
+            &Config::default(),
+            "",
+            &tools(),
+        );
+        let ran = run(&mut talk, 2);
+        assert_eq!(ran.answered.output, 75);
+        assert!(ran.answered.estimated);
+    }
+
+    #[test]
+    fn context_chars_counts_characters() {
+        let cfg = ProviderConfig::default();
+        let mut talk = ApiTalk::new(
+            OpenAiChat::new("ollama".into(), &cfg, None),
+            "ollama",
+            &Config::default(),
+            "日本語",
+            &tools(),
+        );
+        talk.history
+            .push(json!({ "role": "user", "content": "日本語の質問" }));
+        let from_scratch = 3 + talk
+            .history
+            .iter()
+            .map(|m| m.to_string().chars().count())
+            .sum::<usize>();
+        assert_eq!(talk.context_chars(), Some(from_scratch));
     }
 
     #[test]

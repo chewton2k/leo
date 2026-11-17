@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::process::{self, Process, Watchdog, MOST_OUTPUT, QUEUED_MESSAGES};
 use crate::ai::error::{ProviderError, ProviderResult};
-use crate::ai::provider::{ChatProvider, ChatRequest, Image, Sink, Spent};
+use crate::ai::provider::{tokens_of, ChatProvider, ChatRequest, Image, Sink, Spent};
 use crate::config::provider::{ProviderConfig, ProviderKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -844,8 +844,8 @@ impl ClaudeSession {
         let (input, output, estimated) = match heard.tokens {
             Some((input, output)) => (input, output, false),
             None => (
-                text.chars().count().div_ceil(4) as u64,
-                answer.chars().count().div_ceil(4) as u64,
+                tokens_of(text.chars().count()),
+                tokens_of(answer.chars().count()),
                 true,
             ),
         };
@@ -1133,8 +1133,8 @@ impl AgentCli {
                 .or(banner_model)
                 .or_else(|| self.model.clone()),
             effort: self.effort.clone().or(banner_effort),
-            input: asked.div_ceil(4) as u64,
-            output: answer.chars().count().div_ceil(4) as u64,
+            input: tokens_of(asked),
+            output: tokens_of(answer.chars().count()),
             estimated: true,
             ..Spent::default()
         };
