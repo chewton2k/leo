@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use serde::Deserialize;
 
-use crate::routes::notes::{directory, remove_emptied, save, NoteResponse};
+use crate::routes::notes::{directory, save, NoteResponse};
 use crate::AppState;
 
 #[derive(serde::Serialize)]
@@ -18,7 +18,7 @@ pub(crate) async fn list_trash(
     State(state): State<AppState>,
 ) -> Result<Json<Vec<TrashResponse>>, StatusCode> {
     state
-        .with_store(|store| {
+        .read_store(|store| {
             Ok(Json(
                 store
                     .trashed()
@@ -125,7 +125,9 @@ pub(crate) async fn move_to_trash(
             }
             save(store)?;
             for dir in &body.dirs {
-                remove_emptied(&store.notes_dir.join(dir.trim().trim_matches('/')));
+                leo_core::store::remove_emptied(
+                    &store.notes_dir.join(dir.trim().trim_matches('/')),
+                );
             }
             Ok(Json(serde_json::json!({
                 "notes": notes,
@@ -144,26 +146,16 @@ pub(crate) async fn delete_from_trash(
     let chats = state.chats.clone();
     state
         .with_store(move |store| {
-            let wanted: Vec<String> = if choice.all {
-                store.trashed().into_iter().map(|t| t.id).collect()
-            } else {
-                choice.ids.clone()
-            };
-            let gone = if choice.all {
+            let emptied = if choice.all {
                 store.empty_trash()
             } else {
                 store.delete_from_trash(&choice.ids)
-            }
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let left = store.trashed();
-            let forgotten: Vec<String> = wanted
-                .into_iter()
-                .filter(|id| {
-                    !left.iter().any(|t| &t.id == id) && !store.notes.iter().any(|n| &n.id == id)
-                })
-                .collect();
-            crate::margin::forget_notes(&chats, &forgotten);
-            Ok(Json(serde_json::json!({ "deleted": gone })))
+            };
+            crate::margin::forget_notes(&chats, &emptied.forgotten);
+            Ok(Json(serde_json::json!({
+                "deleted": emptied.deleted,
+                "failed": emptied.failed,
+            })))
         })
         .await
 }
@@ -180,11 +172,7 @@ pub(crate) async fn restore_many(
             for dir in &choice.dirs {
                 store.create_dir(dir);
             }
-            let restored = choice
-                .ids
-                .iter()
-                .filter(|id| store.restore(id).is_some())
-                .count();
+            let restored = store.restore_many(&choice.ids).len();
             save(store)?;
             Ok(Json(serde_json::json!({ "restored": restored })))
         })

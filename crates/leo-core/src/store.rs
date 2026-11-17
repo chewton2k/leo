@@ -400,8 +400,42 @@ pub struct Trashed {
     pub deleted_at: DateTime<Utc>,
 }
 
-fn trash_entries(notes_dir: &Path) -> Vec<(PathBuf, Note, DateTime<Utc>)> {
-    let Ok(trash) = crate::paths::contained_path(notes_dir, Path::new(TRASH)) else {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Head {
+    pub id: String,
+    pub title: String,
+    pub directory: String,
+}
+
+struct TrashEntry {
+    path: PathBuf,
+    relative: PathBuf,
+    deleted_at: DateTime<Utc>,
+    head: Option<Head>,
+}
+
+impl TrashEntry {
+    fn id(&self) -> String {
+        self.head.as_ref().map_or_else(
+            || stable_id(&Path::new(TRASH).join(&self.relative)),
+            |head| head.id.clone(),
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Emptied {
+    pub deleted: usize,
+    pub failed: usize,
+    pub forgotten: Vec<String>,
+}
+
+fn trash_dir(notes_dir: &Path) -> Option<PathBuf> {
+    crate::paths::contained_path(notes_dir, Path::new(TRASH)).ok()
+}
+
+fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
+    let Some(trash) = trash_dir(notes_dir) else {
         return Vec::new();
     };
     let mut paths = Vec::new();
@@ -411,10 +445,22 @@ fn trash_entries(notes_dir: &Path) -> Vec<(PathBuf, Note, DateTime<Utc>)> {
     paths
         .into_iter()
         .filter_map(|(path, meta)| {
-            let at = DateTime::<Utc>::from(meta?.modified().ok()?);
-            let text = fs::read_to_string(&path).ok()?;
-            let note = parse_note_from_markdown(&text, path.strip_prefix(&trash).ok()?, at).ok()?;
-            Some((path, note, at))
+            let deleted_at = DateTime::<Utc>::from(meta?.modified().ok()?);
+            let relative = path.strip_prefix(&trash).ok()?.to_path_buf();
+            let head = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| parse_note_from_markdown(&text, &relative, deleted_at).ok())
+                .map(|note| Head {
+                    id: note.id,
+                    title: note.title,
+                    directory: note.directory,
+                });
+            Some(TrashEntry {
+                path,
+                relative,
+                deleted_at,
+                head,
+            })
         })
         .collect()
 }
@@ -422,20 +468,67 @@ fn trash_entries(notes_dir: &Path) -> Vec<(PathBuf, Note, DateTime<Utc>)> {
 pub fn trashed_ids(notes_dir: &Path) -> HashSet<String> {
     trash_entries(notes_dir)
         .into_iter()
-        .map(|(_, note, _)| note.id)
+        .filter_map(|entry| entry.head.map(|head| head.id))
         .collect()
 }
 
-fn tidy_trash(notes_dir: &Path, live: &HashSet<&str>) {
-    let cutoff = crate::keep::load(notes_dir)
+fn trash_cutoff(notes_dir: &Path) -> Option<DateTime<Utc>> {
+    crate::keep::load(notes_dir)
         .trash_days
-        .map(|days| Utc::now() - chrono::Duration::days(i64::from(days)));
-    for (path, note, deleted_at) in trash_entries(notes_dir) {
-        if live.contains(note.id.as_str()) || cutoff.is_some_and(|c| deleted_at < c) {
-            if let Err(e) = fs::remove_file(&path) {
-                crate::diag::warn(format!("could not tidy the trash: {e}"));
+        .map(|days| Utc::now() - chrono::Duration::days(i64::from(days)))
+}
+
+fn tidy_trash(
+    notes_dir: &Path,
+    live: &HashSet<&str>,
+    cutoff: Option<DateTime<Utc>>,
+) -> Vec<String> {
+    let mut expired = Vec::new();
+    let mut removed = false;
+    for entry in trash_entries(notes_dir) {
+        let id = entry.head.as_ref().map(|head| head.id.as_str());
+        let is_live = id.is_some_and(|id| live.contains(id));
+        if !is_live && !cutoff.is_some_and(|c| entry.deleted_at < c) {
+            continue;
+        }
+        match fs::remove_file(&entry.path) {
+            Ok(()) => {
+                removed = true;
+                if let Some(id) = id.filter(|_| !is_live) {
+                    expired.push(id.to_string());
+                }
+            }
+            Err(e) => crate::diag::warn(format!("could not tidy the trash: {e}")),
+        }
+    }
+    if removed {
+        if let Some(trash) = trash_dir(notes_dir) {
+            remove_emptied(&trash);
+        }
+    }
+    expired
+}
+
+pub const MOST_EMPTY_FOLDERS: usize = 10_000;
+
+pub fn remove_emptied(top: &Path) {
+    let mut found = vec![top.to_path_buf()];
+    let mut i = 0;
+    while i < found.len() && i < MOST_EMPTY_FOLDERS {
+        if let Ok(entries) = std::fs::read_dir(&found[i]) {
+            for entry in entries.take(MOST_EMPTY_FOLDERS).flatten() {
+                if found.len() >= MOST_EMPTY_FOLDERS {
+                    break;
+                }
+                if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                    found.push(entry.path());
+                }
             }
         }
+        i += 1;
+    }
+    for dir in found.iter().rev() {
+        let _ = std::fs::remove_dir(dir);
     }
 }
 
@@ -648,7 +741,11 @@ impl Store {
         let tidied = match tidied {
             Some(at) if !tidy_due(Some(at)) => at,
             _ => {
-                tidy_trash(notes_dir, &notes.iter().map(|n| n.id.as_str()).collect());
+                tidy_trash(
+                    notes_dir,
+                    &notes.iter().map(|n| n.id.as_str()).collect(),
+                    trash_cutoff(notes_dir),
+                );
                 std::time::Instant::now()
             }
         };
@@ -763,7 +860,7 @@ impl Store {
         }
         drop(seen);
         if tidy_due(self.tidied.get()) {
-            tidy_trash(&self.notes_dir, &live);
+            tidy_trash(&self.notes_dir, &live, trash_cutoff(&self.notes_dir));
             self.tidied.set(Some(std::time::Instant::now()));
         }
 
@@ -832,14 +929,17 @@ impl Store {
     }
 
     pub fn trashed(&self) -> Vec<Trashed> {
+        let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
         let mut out: Vec<Trashed> = trash_entries(&self.notes_dir)
             .into_iter()
-            .filter(|(_, note, _)| !self.notes.iter().any(|n| n.id == note.id))
-            .map(|(_, note, deleted_at)| Trashed {
-                id: note.id,
-                title: note.title,
-                directory: note.directory,
-                deleted_at,
+            .filter_map(|entry| {
+                let head = entry.head?;
+                (!live.contains(head.id.as_str())).then_some(Trashed {
+                    id: head.id,
+                    title: head.title,
+                    directory: head.directory,
+                    deleted_at: entry.deleted_at,
+                })
             })
             .collect();
         out.sort_by_key(|t| std::cmp::Reverse(t.deleted_at));
@@ -847,43 +947,107 @@ impl Store {
     }
 
     pub fn restore(&mut self, id: &str) -> Option<String> {
-        if self.notes.iter().any(|n| n.id == id) {
-            return None;
-        }
-        let (_, note, _) = trash_entries(&self.notes_dir)
-            .into_iter()
-            .find(|(_, note, _)| note.id == id)?;
-        add_with_parents(&mut self.directories, &note.directory);
-        let title = note.title.clone();
-        self.notes.push(note);
-        self.notes.sort_by_key(|n| std::cmp::Reverse(n.created_at));
-        Some(title)
+        self.restore_many(&[id.to_string()]).pop()
     }
 
-    pub fn delete_from_trash(&self, ids: &[String]) -> Result<usize> {
-        let mut gone = 0;
-        for (path, note, _) in trash_entries(&self.notes_dir) {
-            if ids.contains(&note.id) {
-                fs::remove_file(path)?;
-                gone += 1;
+    pub fn restore_many(&mut self, ids: &[String]) -> Vec<String> {
+        let entries = trash_entries(&self.notes_dir);
+        let mut by_id: HashMap<&str, &TrashEntry> = HashMap::new();
+        for entry in &entries {
+            if let Some(head) = &entry.head {
+                by_id.entry(head.id.as_str()).or_insert(entry);
             }
         }
-        Ok(gone)
+        let mut taken: HashSet<String> = self.notes.iter().map(|n| n.id.clone()).collect();
+        let mut titles = Vec::new();
+        for id in ids {
+            if taken.contains(id) {
+                continue;
+            }
+            let Some(entry) = by_id.get(id.as_str()) else {
+                continue;
+            };
+            let Ok(text) = fs::read_to_string(&entry.path) else {
+                continue;
+            };
+            let Ok(note) = parse_note_from_markdown(&text, &entry.relative, entry.deleted_at)
+            else {
+                continue;
+            };
+            taken.insert(id.clone());
+            add_with_parents(&mut self.directories, &note.directory);
+            titles.push(note.title.clone());
+            self.notes.push(note);
+        }
+        if !titles.is_empty() {
+            self.notes.sort_by_key(|n| std::cmp::Reverse(n.created_at));
+        }
+        titles
     }
 
-    pub fn tidy_trash_now(&self) {
+    pub fn delete_from_trash(&self, ids: &[String]) -> Emptied {
+        let chosen: HashSet<&str> = ids.iter().map(String::as_str).collect();
+        self.clear_trash(Some(&chosen))
+    }
+
+    pub fn tidy_trash_now(&self) -> Vec<String> {
         tidy_trash(
             &self.notes_dir,
             &self.notes.iter().map(|n| n.id.as_str()).collect(),
-        );
+            trash_cutoff(&self.notes_dir),
+        )
     }
 
-    pub fn empty_trash(&self) -> Result<usize> {
-        let entries = trash_entries(&self.notes_dir);
-        for (path, ..) in &entries {
-            fs::remove_file(path)?;
+    pub fn empty_trash(&self) -> Emptied {
+        self.clear_trash(None)
+    }
+
+    fn clear_trash(&self, chosen: Option<&HashSet<&str>>) -> Emptied {
+        let mut emptied = Emptied::default();
+        let mut removed: Vec<String> = Vec::new();
+        let mut present: HashSet<String> = HashSet::new();
+        let mut any = false;
+        for entry in trash_entries(&self.notes_dir) {
+            let (wanted, counted) = match &entry.head {
+                Some(head) => (chosen.is_none_or(|c| c.contains(head.id.as_str())), true),
+                None => {
+                    let by_id = chosen.is_some_and(|c| c.contains(entry.id().as_str()));
+                    (chosen.is_none() || by_id, by_id)
+                }
+            };
+            if !wanted {
+                continue;
+            }
+            let head_id = entry.head.map(|head| head.id);
+            match fs::remove_file(&entry.path) {
+                Ok(()) => {
+                    any = true;
+                    emptied.deleted += usize::from(counted);
+                    removed.extend(head_id);
+                }
+                Err(e) => {
+                    crate::diag::warn(format!(
+                        "could not delete {} from the trash: {e}",
+                        entry.path.display()
+                    ));
+                    emptied.failed += 1;
+                    present.extend(head_id);
+                }
+            }
         }
-        Ok(entries.len())
+        let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
+        let mut listed = HashSet::new();
+        for id in removed {
+            if !present.contains(&id) && !live.contains(id.as_str()) && listed.insert(id.clone()) {
+                emptied.forgotten.push(id);
+            }
+        }
+        if any {
+            if let Some(trash) = trash_dir(&self.notes_dir) {
+                remove_emptied(&trash);
+            }
+        }
+        emptied
     }
 
     fn assign_paths(&self, seen: &HashMap<String, Seen>) -> HashMap<String, PathBuf> {
@@ -2011,7 +2175,7 @@ mod tests {
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
-        assert_eq!(store.empty_trash().unwrap(), 1);
+        assert_eq!(store.empty_trash().deleted, 1);
         assert!(store.trashed().is_empty());
         assert!(trash_files(&store).is_empty());
     }
@@ -2029,10 +2193,243 @@ mod tests {
         }
         store.save().unwrap();
         let chosen = vec![ids[0].clone(), ids[2].clone(), "not-in-trash".to_string()];
-        assert_eq!(store.delete_from_trash(&chosen).unwrap(), 2);
+        assert_eq!(store.delete_from_trash(&chosen).deleted, 2);
         let left: Vec<String> = store.trashed().into_iter().map(|t| t.title).collect();
         assert_eq!(left, ["B"]);
         assert_eq!(trash_files(&store).len(), 1);
+    }
+
+    fn dirs_under(root: &Path) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                if entry.file_type().unwrap().is_dir() {
+                    out.push(
+                        entry
+                            .path()
+                            .strip_prefix(root)
+                            .unwrap()
+                            .display()
+                            .to_string(),
+                    );
+                    stack.push(entry.path());
+                }
+            }
+        }
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn p02_emptying_the_trash_leaves_no_empty_folders() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Deep", "x", vec![], "a/b").unwrap();
+        store.create_note("Mid", "x", vec![], "a").unwrap();
+        store.save().unwrap();
+        store.delete_dir_recursive("a");
+        store.save().unwrap();
+        let trash = store.notes_dir.join(".trash");
+        assert_eq!(store.empty_trash().deleted, 2);
+        let left = dirs_under(&trash);
+        assert!(left.is_empty(), "folders left under .trash: {left:?}");
+    }
+
+    #[test]
+    fn p02_an_unparseable_trashed_file_is_shown_or_expired() {
+        let (store, _tmp) = temp_store();
+        let trash = store.notes_dir.join(".trash");
+        fs::create_dir_all(&trash).unwrap();
+        let broken = trash.join("Broken.md");
+        fs::write(&broken, "---\ntitle: [unclosed\n---\nbody\n").unwrap();
+        let long_ago =
+            std::time::SystemTime::now() - std::time::Duration::from_secs(400 * 24 * 3600);
+        fs::File::options()
+            .write(true)
+            .open(&broken)
+            .unwrap()
+            .set_modified(long_ago)
+            .unwrap();
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        reloaded.tidy_trash_now();
+        let listed = reloaded.trashed().len();
+        reloaded.empty_trash();
+        assert!(
+            listed == 1 || !broken.exists(),
+            "a 400-day-old unparseable trashed file is neither listed nor expired nor emptied"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn p02_one_failed_delete_does_not_stop_emptying_the_trash() {
+        use std::os::unix::fs::PermissionsExt;
+        let dirs = ["a", "b", "c", "d", "e", "f"];
+        let (mut store, _tmp) = temp_store();
+        for dir in dirs {
+            for n in 0..3 {
+                store
+                    .create_note(format!("{dir}{n}"), "x", vec![], dir)
+                    .unwrap();
+            }
+        }
+        store.save().unwrap();
+        for dir in dirs {
+            store.delete_dir_recursive(dir);
+        }
+        store.save().unwrap();
+        let trash = store.notes_dir.join(".trash");
+        let locked: Vec<PathBuf> = ["b", "d", "f"].iter().map(|d| trash.join(d)).collect();
+        for dir in &locked {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o500)).unwrap();
+        }
+        let result = store.empty_trash();
+        let left: Vec<PathBuf> = trash_files(&store)
+            .into_iter()
+            .filter(|p| !locked.iter().any(|l| p.starts_with(l)))
+            .collect();
+        for dir in &locked {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        assert_eq!(result.failed, 9);
+        assert_eq!(result.deleted, 9);
+        assert!(left.is_empty(), "{} deletable files left", left.len());
+    }
+
+    fn trashed_file(store: &Store, relative: &str, text: &str) -> PathBuf {
+        let path = store.notes_dir.join(".trash").join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, text).unwrap();
+        path
+    }
+
+    #[test]
+    fn a_trashed_file_leo_cannot_read_has_its_own_id() {
+        let (store, _tmp) = temp_store();
+        fs::create_dir_all(store.notes_dir.join("a")).unwrap();
+        fs::write(store.notes_dir.join("a/B.md"), "plain words").unwrap();
+        trashed_file(&store, "a/B.md", "---\ntitle: [unclosed\n---\nbody\n");
+        let store = Store::load_from(&store.notes_dir).unwrap();
+        let live = &store.notes[0].id;
+        let entries = trash_entries(&store.notes_dir);
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].head.is_none());
+        assert_ne!(&entries[0].id(), live);
+    }
+
+    #[test]
+    fn restore_reads_only_the_chosen_files() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Keep", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let path = store.notes_dir.join(".trash").join("Bad.md");
+        let mut bytes =
+            format!("---\nid: {}\ntitle: Bad\n---\n", uuid::Uuid::new_v4()).into_bytes();
+        bytes.extend([0xff, 0xfe, 0xfd]);
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(store.restore_many(std::slice::from_ref(&id)), ["Keep"]);
+        assert!(store.find_note(&id).is_some());
+    }
+
+    #[test]
+    fn deleting_a_deep_note_for_good_leaves_no_folder_in_the_trash() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Deep", "x", vec![], "a/b")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Top", "x", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let trash = store.notes_dir.join(".trash");
+        assert!(trash.join("a/b").is_dir());
+        assert_eq!(
+            store.delete_from_trash(std::slice::from_ref(&id)).deleted,
+            1
+        );
+        assert!(!trash.join("a").exists(), "{:?}", dirs_under(&trash));
+    }
+
+    #[test]
+    fn an_expired_note_takes_its_folder_out_of_the_trash() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Deep", "x", vec![], "a/b")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let trash = store.notes_dir.join(".trash");
+        for path in trash_files(&store) {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 24 * 3600),
+                )
+                .unwrap();
+        }
+        assert_eq!(store.tidy_trash_now(), [id]);
+        assert!(!trash.join("a").exists(), "{:?}", dirs_under(&trash));
+    }
+
+    #[test]
+    fn restoring_many_brings_back_the_trashed_ones_and_skips_the_rest() {
+        let (mut store, _tmp) = temp_store();
+        let ids: Vec<String> = ["A", "B", "C", "D"]
+            .iter()
+            .map(|t| {
+                store
+                    .create_note(*t, "x", vec![], "x/y")
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        store.save().unwrap();
+        store.delete_notes(&ids[..3]);
+        store.save().unwrap();
+        let asked = vec![
+            ids[2].clone(),
+            ids[3].clone(),
+            ids[0].clone(),
+            "unknown".to_string(),
+            ids[1].clone(),
+            ids[0].clone(),
+        ];
+        assert_eq!(store.restore_many(&asked), ["C", "A", "B"]);
+        assert_eq!(store.notes.len(), 4);
+        assert!(store.directories.contains(&"x/y".to_string()));
+    }
+
+    #[test]
+    fn deleting_a_trashed_copy_of_a_live_note_forgets_nothing() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Live", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        trashed_file(
+            &store,
+            "Live.md",
+            &note_to_markdown(&store.notes[0]).unwrap(),
+        );
+        let emptied = store.delete_from_trash(std::slice::from_ref(&id));
+        assert_eq!(emptied.deleted, 1);
+        assert!(emptied.forgotten.is_empty(), "{:?}", emptied.forgotten);
     }
 
     #[test]

@@ -61,7 +61,7 @@ async function trashDeleteNow() {
   if (!pending) return;
   state.trashPending = null;
   const done = await api('/api/trash/delete', { method: 'POST', body: pending });
-  toast(`Deleted ${plural(done.deleted, 'note')} for good`);
+  toast(done.failed ? `Deleted ${plural(done.deleted, 'note')} for good. ${done.failed} could not be deleted: check the permissions of leo's notes folder.` : `Deleted ${plural(done.deleted, 'note')} for good`);
   state.picked = new Set();
   await showTrash();
 }

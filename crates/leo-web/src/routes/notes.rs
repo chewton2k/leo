@@ -4,7 +4,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use leo_core::store::Store;
+use leo_core::store::{Store, MOST_EMPTY_FOLDERS};
 use serde::Deserialize;
 
 use crate::AppState;
@@ -568,7 +568,7 @@ pub(crate) async fn move_dir(
                 .ok_or(StatusCode::CONFLICT)?;
             save(store)?;
             carry_files(&store.notes_dir, body.from.trim_matches('/'), &to);
-            remove_emptied(&store.notes_dir.join(body.from.trim_matches('/')));
+            leo_core::store::remove_emptied(&store.notes_dir.join(body.from.trim_matches('/')));
             Ok(Json(serde_json::json!({ "path": to })))
         })
         .await
@@ -598,13 +598,11 @@ pub(crate) async fn rename_dir(
                 .ok_or(StatusCode::CONFLICT)?;
             save(store)?;
             carry_files(&store.notes_dir, &body.from, &to);
-            remove_emptied(&store.notes_dir.join(&body.from));
+            leo_core::store::remove_emptied(&store.notes_dir.join(&body.from));
             Ok(Json(serde_json::json!({ "path": to })))
         })
         .await
 }
-
-const MOST_EMPTY_FOLDERS: usize = 10_000;
 
 fn carry_files(notes_dir: &std::path::Path, from: &str, to: &str) {
     let top = notes_dir.join(from);
@@ -636,27 +634,6 @@ fn carry_files(notes_dir: &std::path::Path, from: &str, to: &str) {
             }
         }
         i += 1;
-    }
-}
-
-pub(crate) fn remove_emptied(top: &std::path::Path) {
-    let mut found = vec![top.to_path_buf()];
-    let mut i = 0;
-    while i < found.len() && i < MOST_EMPTY_FOLDERS {
-        if let Ok(entries) = std::fs::read_dir(&found[i]) {
-            for entry in entries.take(MOST_EMPTY_FOLDERS).flatten() {
-                if found.len() >= MOST_EMPTY_FOLDERS {
-                    break;
-                }
-                if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                    found.push(entry.path());
-                }
-            }
-        }
-        i += 1;
-    }
-    for dir in found.iter().rev() {
-        let _ = std::fs::remove_dir(dir);
     }
 }
 

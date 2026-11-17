@@ -1612,6 +1612,11 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   skips an item it cannot delete. Trash and chats expire as before.
   `Housekeeper` now lives in `record.rs` (pending and discard only).
 
+Trash: Delete for good and Empty trash skip a trashed file they cannot delete
+and remove the rest; POST `/api/trash/delete` answers `{deleted, failed}` and the
+toast then reads "Deleted N notes for good. M could not be deleted: check the
+permissions of leo's notes folder." Folders left empty inside the trash are removed.
+
 Writing Settings offers Ollama, Codex and Claude Code. Removed AGY/Copilot
 choices and sign-in commands are unavailable; legacy saved profiles stay on disk
 untouched. Speech choices are local only; speech key controls are absent. Credentials never reach the page or note exports.

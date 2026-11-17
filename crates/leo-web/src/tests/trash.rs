@@ -143,3 +143,131 @@ fn a_trashed_folder_leaves_no_empty_directory_to_block_its_name() {
     .unwrap();
     assert_eq!(renamed.0["path"], "Week 1");
 }
+
+#[cfg(unix)]
+#[test]
+fn p02_empty_trash_with_one_locked_folder_reports_what_failed() {
+    use std::os::unix::fs::PermissionsExt;
+    let dirs = ["a", "b", "c", "d", "e", "f"];
+    let spec: Vec<(String, String)> = dirs
+        .iter()
+        .flat_map(|d| (0..2).map(move |n| (format!("{d}{n}"), d.to_string())))
+        .collect();
+    let refs: Vec<(&str, &str)> = spec.iter().map(|(t, d)| (t.as_str(), d.as_str())).collect();
+    let (state, _d, _ids) = state_with(&refs);
+    let moved = run(move_to_trash(
+        State(state.clone()),
+        Json(TrashMove {
+            notes: vec![],
+            dirs: dirs.iter().map(|d| d.to_string()).collect(),
+        }),
+    ))
+    .unwrap();
+    assert_eq!(moved.0["notes"], 12);
+    let trash = state.fresh().notes_dir.join(".trash");
+    let locked: Vec<_> = ["b", "d", "f"].iter().map(|d| trash.join(d)).collect();
+    for dir in &locked {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+    }
+    let result = run(crate::routes::trash::delete_from_trash(
+        State(state.clone()),
+        Json(TrashChoice {
+            ids: vec![],
+            all: true,
+            dirs: vec![],
+        }),
+    ));
+    let left = state.fresh().trashed().len();
+    for dir in &locked {
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let result = result.unwrap();
+    assert_eq!(result.0["deleted"], 6);
+    assert_eq!(result.0["failed"], 6);
+    assert_eq!(left, 6);
+}
+
+#[test]
+#[ignore]
+fn p02_benchmark_trash_requests() {
+    let size: usize = std::env::var("LEO_BENCH_TRASH")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000);
+    let big = std::env::var("LEO_BENCH_BIG").is_ok_and(|v| v == "1");
+    let body = "word ".repeat(1024);
+    let (state, _d, _) = state_with(&[]);
+    let trash = state.fresh().notes_dir.join(".trash");
+    std::fs::create_dir_all(&trash).unwrap();
+    let ids: Vec<String> = (0..size)
+        .map(|_| uuid::Uuid::new_v4().to_string())
+        .collect();
+    for (n, id) in ids.iter().enumerate() {
+        std::fs::write(
+            trash.join(format!("Note {n}.md")),
+            format!("---\nid: {id}\ntitle: Note {n}\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n{body}"),
+        )
+        .unwrap();
+    }
+    if big {
+        std::fs::write(
+            trash.join("Big.md"),
+            format!(
+                "---\nid: {}\ntitle: Big\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n{}",
+                uuid::Uuid::new_v4(),
+                "word ".repeat(4 * 1024 * 1024)
+            ),
+        )
+        .unwrap();
+    }
+    let total = size + usize::from(big);
+    drop(state.fresh());
+    let measure = |label: &str, f: &dyn Fn()| {
+        let started = std::time::Instant::now();
+        f();
+        println!(
+            "trash {total:>6}: {label:<22} {:>10.1} ms",
+            started.elapsed().as_secs_f64() * 1000.0
+        );
+    };
+    measure("list", &|| {
+        let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
+        assert_eq!(listed.len(), total);
+    });
+    measure("restore 50", &|| {
+        let out = run(restore_many(
+            State(state.clone()),
+            Json(TrashChoice {
+                ids: ids[..50].to_vec(),
+                all: false,
+                dirs: vec![],
+            }),
+        ))
+        .unwrap();
+        assert_eq!(out.0["restored"], 50);
+    });
+    measure("delete 50 for good", &|| {
+        let out = run(crate::routes::trash::delete_from_trash(
+            State(state.clone()),
+            Json(TrashChoice {
+                ids: ids[50..100].to_vec(),
+                all: false,
+                dirs: vec![],
+            }),
+        ))
+        .unwrap();
+        assert_eq!(out.0["deleted"], 50);
+    });
+    measure("empty trash", &|| {
+        let out = run(crate::routes::trash::delete_from_trash(
+            State(state.clone()),
+            Json(TrashChoice {
+                ids: vec![],
+                all: true,
+                dirs: vec![],
+            }),
+        ))
+        .unwrap();
+        assert_eq!(out.0["deleted"], total - 100);
+    });
+}
