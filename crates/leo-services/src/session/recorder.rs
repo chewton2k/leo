@@ -760,6 +760,12 @@ fn take_wants(session: &mut Session, controls: &Controls) -> bool {
     true
 }
 
+fn lock_or_remove(session: &Session) -> anyhow::Result<session::Lock> {
+    session.lock().inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&session.dir);
+    })
+}
+
 pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     let _activity = match leo_core::activity::global().begin() {
         Ok(lease) => lease,
@@ -797,7 +803,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         let session = Session::create(&root, manifest)?;
         session.trace("capture", "Recording started");
         session.trace("drafting", if drafting { "on" } else { "off" });
-        let lock = session.lock()?;
+        let lock = lock_or_remove(&session)?;
         let opened = Capture::start(&session.dir, 0, session.manifest.segment_secs, input);
         match opened {
             Ok(capture) => Ok((session, lock, capture)),
@@ -1240,6 +1246,16 @@ mod tests {
             assert!(!controls.pause.load(Ordering::Acquire));
             assert!(!controls.finish_now.load(Ordering::Acquire));
         }
+    }
+
+    #[test]
+    fn a_start_that_cannot_lock_leaves_no_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", true)).unwrap();
+        std::fs::create_dir(session.dir.join("lock")).unwrap();
+        assert!(lock_or_remove(&session).is_err());
+        assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
+        assert!(Session::unfinished(root.path()).is_empty());
     }
 
     #[test]

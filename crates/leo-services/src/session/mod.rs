@@ -246,6 +246,26 @@ pub fn locked(dir: &Path) -> bool {
     }
 }
 
+fn settle_new(dir: PathBuf, manifest: Manifest) -> Result<Session> {
+    let settled = (|| -> Result<Session> {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
+        }
+        let session = Session {
+            dir: dir.clone(),
+            manifest,
+        };
+        session.save()?;
+        Ok(session)
+    })();
+    if settled.is_err() {
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+    settled
+}
+
 impl Session {
     pub fn create(root: &Path, manifest: Manifest) -> Result<Session> {
         if let Ok(meta) = std::fs::symlink_metadata(root) {
@@ -263,16 +283,7 @@ impl Session {
                 format!("{stamp}-{n}")
             });
             match std::fs::create_dir(&dir) {
-                Ok(()) => {
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::fs::PermissionsExt;
-                        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))?;
-                    }
-                    let session = Session { dir, manifest };
-                    session.save()?;
-                    return Ok(session);
-                }
+                Ok(()) => return settle_new(dir, manifest),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(e) => {
                     return Err(e).context(
@@ -576,6 +587,16 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let s = Session::create(tmp.path(), Manifest::new(None, None, "", false)).unwrap();
         (s, tmp)
+    }
+
+    #[test]
+    fn a_session_that_cannot_save_its_manifest_removes_its_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let dir = root.path().join("fresh");
+        std::fs::create_dir(&dir).unwrap();
+        std::fs::create_dir(dir.join("session.json")).unwrap();
+        assert!(settle_new(dir.clone(), Manifest::new(None, None, "", false)).is_err());
+        assert!(!dir.exists());
     }
 
     #[test]
