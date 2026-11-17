@@ -307,7 +307,7 @@ fn why(state: crate::health::WritingState, agent: Option<&str>, text: &str) -> S
         NotChosen => "no writing AI is chosen.".to_string(),
         NotRunning => "no writing AI is ready (Ollama isn't running).".to_string(),
         NoModel => "no writing AI is ready (Ollama has no models yet).".to_string(),
-        NotInstalled => format!("{name} isn't installed."),
+        NotInstalled => format!("{name} is not installed on this computer."),
         SignInNeeded => format!("{name} needs you to sign in."),
         Ready => {
             let lower = text.to_lowercase();

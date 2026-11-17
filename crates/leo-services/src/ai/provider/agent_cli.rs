@@ -53,6 +53,10 @@ impl Agent {
         }
     }
 
+    pub fn missing(self, provider: &str, bin: &str) -> String {
+        format!("{provider}: `{bin}` is not installed; {}", self.install())
+    }
+
     pub fn sign_in(self) -> &'static str {
         match self {
             Agent::ClaudeCode => "run `claude` once and sign in",
@@ -959,9 +963,8 @@ impl AgentCli {
         system: &str,
         tools: Vec<super::mcp::Tool>,
     ) -> ProviderResult<ClaudeSession> {
-        let program = locate(&self.bin).ok_or_else(|| {
-            ProviderError::Retryable(format!("{}: {} is not installed", self.name, self.bin))
-        })?;
+        let program =
+            locate(&self.bin).ok_or_else(|| ProviderError::Retryable(self.unavailable_reason()))?;
         let room = self.room()?;
         let system_file = instructions_file(room.path(), system, ".md")?
             .keep()
@@ -1404,12 +1407,7 @@ impl ChatProvider for AgentCli {
     }
 
     fn unavailable_reason(&self) -> String {
-        format!(
-            "{}: `{}` is not installed; {}",
-            self.name,
-            self.bin,
-            self.agent.install()
-        )
+        self.agent.missing(&self.name, &self.bin)
     }
 }
 
@@ -1534,6 +1532,53 @@ mod tests {
             model: model.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_missing_program_is_worded_one_way() {
+        let gone = "/nonexistent/leo-test/claude";
+        let claude = AgentCli::new(
+            "claude_code".into(),
+            Agent::ClaudeCode,
+            &config(ProviderKind::ClaudeCode, gone, None),
+        );
+        let codex = AgentCli::new(
+            "codex".into(),
+            Agent::Codex,
+            &config(ProviderKind::Codex, gone, None),
+        );
+        let text_run = claude.complete(&request()).unwrap_err().to_string();
+        let session = claude.claude_session("x").err().unwrap().to_string();
+        let thread = super::super::codex_app::CodexThread::start(&codex, "x", &[])
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(text_run, session);
+        assert_eq!(text_run, Agent::ClaudeCode.missing("claude_code", gone));
+        assert_eq!(thread, Agent::Codex.missing("codex", gone));
+        assert_eq!(
+            text_run
+                .replace("claude_code", "codex")
+                .replace(Agent::ClaudeCode.install(), ""),
+            thread.replace(Agent::Codex.install(), "")
+        );
+        let mut cfg = crate::config::Config::default();
+        cfg.chat.chain = vec!["claude_code".into()];
+        cfg.providers.insert(
+            "claude_code".into(),
+            config(ProviderKind::ClaudeCode, gone, None),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let health = crate::health::writing(&cfg, &store, None);
+        let page = crate::ai::why(health.state, Some(Agent::ClaudeCode.kind()), &text_run);
+        assert_eq!(
+            page,
+            "leo can't write yet: Claude Code is not installed on this computer."
+        );
+        assert_eq!(
+            health.fix.unwrap().split(". ").next().unwrap(),
+            "Claude Code is not installed on this computer"
+        );
     }
 
     #[test]
