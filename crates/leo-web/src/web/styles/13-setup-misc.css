@@ -384,8 +384,6 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .cal-row .grow { display: flex; flex-direction: column; gap: 2px; }
 .cal-icon { width: 34px; height: 34px; border-radius: var(--r-md); display: grid; place-items: center; background: var(--surface-2); color: var(--muted); flex: none; }
 .cal-icon svg { width: 18px; height: 18px; }
-.cal-name { font-weight: 600; }
-.cal-sub { font-size: var(--fs-sm); color: var(--muted); }
 .cal-row .set-note { margin: 0; }
 .feed-name { font-size: var(--fs-base); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-sub { font-size: var(--fs-sm); color: var(--muted); }
@@ -396,8 +394,8 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .cal-steps b { color: var(--text); font-weight: 600; }
 .cal-steps a { color: var(--accent); }
 .cal-add { display: flex; gap: 8px; align-items: center; }
-.cal-more { display: flex; align-items: center; gap: 10px; padding-top: 14px; margin-top: 2px; }
-.cal-more svg:first-child { width: 18px; height: 18px; color: var(--accent); }
+.cal-card .cal-more { display: flex; align-items: center; gap: 10px; padding-top: 14px; margin-top: 2px; }
+.cal-card .cal-more svg:first-child { width: 18px; height: 18px; color: var(--accent); }
 .doc .blk-cited, .doc .blk-glow, .doc .blk-cited + .blk:has(.blank):has(+ :is(.blk-cited, .blk-glow)), .doc .blk-glow + .blk:has(.blank):has(+ :is(.blk-cited, .blk-glow)) { --lit: color-mix(in srgb, var(--accent) 14%, transparent); background: var(--lit); border-radius: 0; box-shadow: -4px 0 0 0 var(--lit), 4px 0 0 0 var(--lit); transition: background .6s, box-shadow .6s; }
 .cite .cite-at { margin-left: 5px; font-weight: 500; opacity: .75; }
 .passage-list { max-height: min(56vh, 520px); }

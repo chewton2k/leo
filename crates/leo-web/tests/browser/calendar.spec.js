@@ -782,6 +782,35 @@ test('larger month tasks keep every preview and the more action inside their day
   });
 });
 
+test("month view's more link and task times use the calendar's own styles", async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const task = window.db.tasks.find(task => task.id === 'task-lab');
+      for (let index = 0; index < 4; index++) window.db.tasks.push({ ...task, id: 'month-task-' + index, title: 'Additional homework ' + index });
+    });
+    await page.locator('.cal-views [data-view="month"]').click();
+    await settled(page);
+    const look = await page.evaluate(() => {
+      const size = (el) => getComputedStyle(el).fontSize;
+      const probe = document.createElement('span');
+      probe.style.fontSize = 'var(--fs-xs)';
+      document.body.append(probe);
+      const xs = getComputedStyle(probe).fontSize;
+      probe.remove();
+      return {
+        morePad: getComputedStyle(document.querySelector('.cal-cell .cal-more')).paddingTop,
+        subs: [...document.querySelectorAll('.cal-cell .cal-sub')].map(size),
+        xs,
+        name: getComputedStyle(document.querySelector('.cal-name')).fontWeight,
+      };
+    });
+    expect(look.morePad).toBe('0px');
+    expect(look.subs.length).toBeGreaterThan(0);
+    for (const size of look.subs) expect(size).toBe(look.xs);
+    expect(look.name).toBe('650');
+  });
+});
+
 test('a sideways deadline resize at the scroll edge still preserves its absent end', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await page.evaluate(() => {
