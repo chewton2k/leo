@@ -51,149 +51,15 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![print_page, dictation_popup])
         .setup(move |app| {
-            let config = leo_core::paths::config_dir().ok();
-            let foreground = config.as_deref().is_some_and(update_window::take);
-            let hidden = update_window::hidden(hidden, foreground);
-            #[cfg(target_os = "macos")]
-            app.handle().plugin(tauri_nspanel::init())?;
-            overlay::create(app.handle())?;
-            notify::listen(app.handle());
-            let dictation = dictation::Dictation::new(app.handle().clone())?;
-            let app_settings =
-                app_settings::AppSettings::new(app.handle().clone(), dictation.clone())?;
-            let mut powers = leo_host::powers();
-            powers.dictation = Some(dictation.clone());
-            powers.app_settings = Some(app_settings.clone());
-            let updates = updates::Updates::start(app.handle().clone(), &app_settings);
-            let _ = app_settings.updates.set(updates.clone());
-            app.manage(updates);
-            app.manage(app_settings.clone());
-            app.manage(dictation);
-            let wanted = config
-                .as_deref()
-                .map(port::remembered)
-                .unwrap_or(port::DEFAULT_PORT);
-            let started = tauri::async_runtime::block_on(leo_web::start(
-                leo_web::StartOptions {
-                    port: wanted,
-                    token: leo_web::fresh_token(),
-                },
-                powers,
-            ));
-            let port = started.as_ref().map(|r| r.port()).unwrap_or(0);
-            let address = match &started {
-                Ok(running) => {
-                    running.set_visible(!hidden);
-                    if let Some(config) = &config {
-                        let _ = port::remember(config, running.port());
-                    }
-                    WebviewUrl::External(
-                        running
-                            .sign_in_url()
-                            .parse()
-                            .expect("the sign-in address is a URL"),
-                    )
+            if let Err(error) = set_up(app, hidden) {
+                eprintln!("  leo could not start: {error:#}");
+                if app.get_webview_window(MAIN).is_none() {
+                    WebviewWindowBuilder::new(app, MAIN, problem_address(&format!("{error:#}")))
+                        .title("leo")
+                        .inner_size(1200.0, 800.0)
+                        .build()?;
                 }
-                Err(e) => WebviewUrl::App(
-                    format!("index.html?problem={}", url_text(&format!("{e:#}"))).into(),
-                ),
-            };
-            app.manage(Engine(Mutex::new(started.ok())));
-            let builder = WebviewWindowBuilder::new(app, MAIN, address)
-                .title("leo")
-                .inner_size(1200.0, 800.0)
-                .min_inner_size(480.0, 480.0)
-                .visible(!hidden)
-                .focused(!hidden)
-                .initialization_script(if hidden {
-                    "window.__LEO_VISIBLE__ = false;"
-                } else {
-                    "window.__LEO_VISIBLE__ = true;"
-                })
-                .initialization_script(PRINT)
-                .on_page_load(|window, payload| {
-                    if payload.event() == tauri::webview::PageLoadEvent::Finished {
-                        let visible = window.is_visible().unwrap_or(true)
-                            && !window.is_minimized().unwrap_or(false);
-                        sync_visible(&window, visible, true);
-                        sync_fullscreen(&window, true);
-                    }
-                })
-                // Tauri's own file-drop handler swallows the webview's drag events,
-                // which broke every drag in the page (moving notes and folders,
-                // combining notes). The page handles dropped files itself.
-                .disable_drag_drop_handler()
-                .on_navigation(move |url| {
-                    if links::stays_inside(url, port) {
-                        return true;
-                    }
-                    let _ = leo_core::open::link(url.as_str());
-                    false
-                })
-                .on_new_window(move |url, _| {
-                    if !links::stays_inside(&url, port) {
-                        let _ = leo_core::open::link(url.as_str());
-                    }
-                    tauri::webview::NewWindowResponse::Deny
-                })
-                .on_download(|_, event| {
-                    match event {
-                        tauri::webview::DownloadEvent::Requested { url, destination } => {
-                            let suggested = destination
-                                .file_name()
-                                .map(|n| n.to_string_lossy().into_owned())
-                                .or_else(|| {
-                                    url.path_segments()
-                                        .and_then(|mut s| s.next_back().map(str::to_string))
-                                })
-                                .unwrap_or_default();
-                            if let Some(folder) = downloads_folder() {
-                                *destination = links::download_path(&folder, &suggested);
-                                remember_download(destination.clone());
-                            }
-                        }
-                        tauri::webview::DownloadEvent::Finished { success: true, .. } => {
-                            reveal_last_download();
-                        }
-                        _ => {}
-                    }
-                    true
-                });
-            #[cfg(target_os = "macos")]
-            let builder = builder
-                .title_bar_style(tauri::TitleBarStyle::Overlay)
-                .hidden_title(true)
-                .traffic_light_position(tauri::LogicalPosition::new(18.0, 31.0))
-                .initialization_script("window.__LEO_APP__ = 'mac';");
-            let window = builder.build()?;
-            let handle = window.clone();
-            window.on_window_event(move |event| {
-                if let WindowEvent::CloseRequested { api, .. } = event {
-                    api.prevent_close();
-                    if cfg!(target_os = "macos") && handle.is_fullscreen().unwrap_or(false) {
-                        leave_fullscreen_then_hide(&handle);
-                    } else {
-                        hide_window(&handle);
-                    }
-                }
-                if let WindowEvent::Resized(_) = event {
-                    let closing = CLOSING.load(std::sync::atomic::Ordering::Relaxed);
-                    if closing != 0 && !handle.is_fullscreen().unwrap_or(false) {
-                        finish_close_after(&handle, closing, Duration::from_millis(300));
-                    }
-                }
-                if let WindowEvent::Focused(_) | WindowEvent::Resized(_) = event {
-                    let visible = handle.is_visible().unwrap_or(true)
-                        && !handle.is_minimized().unwrap_or(false);
-                    set_visible(&handle, visible);
-                    sync_fullscreen(&handle, false);
-                }
-            });
-            #[cfg(target_os = "macos")]
-            quit::menu(app.handle())?;
-            tray::build(app.handle())?;
-            open_at_login_once(app.handle(), config.as_deref());
-            app_settings.apply_startup();
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -238,6 +104,184 @@ pub fn run() {
         RunEvent::Exit => stop_engine(app),
         _ => {}
     });
+}
+
+fn set_up(app: &mut tauri::App, hidden: bool) -> anyhow::Result<()> {
+    let config = leo_core::paths::config_dir().ok();
+    let foreground = config.as_deref().is_some_and(update_window::take);
+    let hidden = update_window::hidden(hidden, foreground);
+    let mut parts: Vec<(&str, Option<String>)> = Vec::new();
+    #[cfg(target_os = "macos")]
+    overlay::plugin_registered(app.handle().plugin(tauri_nspanel::init()).is_ok());
+    parts.push((
+        "dictation popup",
+        overlay::create_guarded(app.handle()).err(),
+    ));
+    notify::listen(app.handle());
+    let dictation = dictation::Dictation::new(app.handle().clone())?;
+    let app_settings = app_settings::AppSettings::new(app.handle().clone(), dictation.clone())?;
+    let mut powers = leo_host::powers();
+    powers.dictation = Some(dictation.clone());
+    powers.app_settings = Some(app_settings.clone());
+    let updates = updates::Updates::start(app.handle().clone(), &app_settings);
+    let _ = app_settings.updates.set(updates.clone());
+    app.manage(updates);
+    app.manage(app_settings.clone());
+    app.manage(dictation);
+    let wanted = config
+        .as_deref()
+        .map(port::remembered)
+        .unwrap_or(port::DEFAULT_PORT);
+    let started = tauri::async_runtime::block_on(leo_web::start(
+        leo_web::StartOptions {
+            port: wanted,
+            token: leo_web::fresh_token(),
+        },
+        powers,
+    ));
+    let port = started.as_ref().map(|r| r.port()).unwrap_or(0);
+    let address = match &started {
+        Ok(running) => {
+            running.set_visible(!hidden);
+            if let Some(config) = &config {
+                let _ = port::remember(config, running.port());
+            }
+            WebviewUrl::External(
+                running
+                    .sign_in_url()
+                    .parse()
+                    .expect("the sign-in address is a URL"),
+            )
+        }
+        Err(e) => problem_address(&format!("{e:#}")),
+    };
+    app.manage(Engine(Mutex::new(started.ok())));
+    let builder = WebviewWindowBuilder::new(app, MAIN, address)
+        .title("leo")
+        .inner_size(1200.0, 800.0)
+        .min_inner_size(480.0, 480.0)
+        .visible(!hidden)
+        .focused(!hidden)
+        .initialization_script(if hidden {
+            "window.__LEO_VISIBLE__ = false;"
+        } else {
+            "window.__LEO_VISIBLE__ = true;"
+        })
+        .initialization_script(PRINT)
+        .on_page_load(|window, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                let visible =
+                    window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
+                sync_visible(&window, visible, true);
+                sync_fullscreen(&window, true);
+            }
+        })
+        // Tauri's own file-drop handler swallows the webview's drag events,
+        // which broke every drag in the page (moving notes and folders,
+        // combining notes). The page handles dropped files itself.
+        .disable_drag_drop_handler()
+        .on_navigation(move |url| {
+            if links::stays_inside(url, port) {
+                return true;
+            }
+            let _ = leo_core::open::link(url.as_str());
+            false
+        })
+        .on_new_window(move |url, _| {
+            if !links::stays_inside(&url, port) {
+                let _ = leo_core::open::link(url.as_str());
+            }
+            tauri::webview::NewWindowResponse::Deny
+        })
+        .on_download(|_, event| {
+            match event {
+                tauri::webview::DownloadEvent::Requested { url, destination } => {
+                    let suggested = destination
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .or_else(|| {
+                            url.path_segments()
+                                .and_then(|mut s| s.next_back().map(str::to_string))
+                        })
+                        .unwrap_or_default();
+                    if let Some(folder) = downloads_folder() {
+                        *destination = links::download_path(&folder, &suggested);
+                        remember_download(destination.clone());
+                    }
+                }
+                tauri::webview::DownloadEvent::Finished { success: true, .. } => {
+                    reveal_last_download();
+                }
+                _ => {}
+            }
+            true
+        });
+    #[cfg(target_os = "macos")]
+    let builder = builder
+        .title_bar_style(tauri::TitleBarStyle::Overlay)
+        .hidden_title(true)
+        .traffic_light_position(tauri::LogicalPosition::new(18.0, 31.0))
+        .initialization_script("window.__LEO_APP__ = 'mac';");
+    let window = builder.build()?;
+    let handle = window.clone();
+    window.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            if cfg!(target_os = "macos") && handle.is_fullscreen().unwrap_or(false) {
+                leave_fullscreen_then_hide(&handle);
+            } else {
+                hide_window(&handle);
+            }
+        }
+        if let WindowEvent::Resized(_) = event {
+            let closing = CLOSING.load(std::sync::atomic::Ordering::Relaxed);
+            if closing != 0 && !handle.is_fullscreen().unwrap_or(false) {
+                finish_close_after(&handle, closing, Duration::from_millis(300));
+            }
+        }
+        if let WindowEvent::Focused(_) | WindowEvent::Resized(_) = event {
+            let visible =
+                handle.is_visible().unwrap_or(true) && !handle.is_minimized().unwrap_or(false);
+            set_visible(&handle, visible);
+            sync_fullscreen(&handle, false);
+        }
+    });
+    #[cfg(target_os = "macos")]
+    parts.push((
+        "Quit menu",
+        quit::menu(app.handle()).err().map(|e| format!("{e:#}")),
+    ));
+    parts.push((
+        "menu bar icon",
+        tray::build(app.handle()).err().map(|e| e.to_string()),
+    ));
+    open_at_login_once(app.handle(), config.as_deref());
+    app_settings.apply_startup();
+    if let Some(sentence) = startup_problem(&parts) {
+        eprintln!("  {sentence}");
+        app_settings.note(sentence);
+    }
+    Ok(())
+}
+
+fn problem_address(text: &str) -> WebviewUrl {
+    WebviewUrl::App(format!("index.html?problem={}", url_text(text)).into())
+}
+
+fn startup_problem(parts: &[(&str, Option<String>)]) -> Option<String> {
+    let failed: Vec<String> = parts
+        .iter()
+        .filter_map(|(name, why)| why.as_ref().map(|why| format!("the {name} ({why})")))
+        .collect();
+    let (last, rest) = failed.split_last()?;
+    let named = if rest.is_empty() {
+        last.clone()
+    } else {
+        format!("{} and {last}", rest.join(", "))
+    };
+    Some(format!(
+        "leo could not start {named}. The rest of leo works."
+    ))
 }
 
 const PRINT: &str = "(() => { const nativePrint = window.print.bind(window); window.print = () => window.__LEO_APP__ === 'mac' ? new Promise(done => setTimeout(done)).then(() => window.__TAURI_INTERNALS__.invoke('print_page')) : nativePrint(); })();";
@@ -356,11 +400,14 @@ fn sync_fullscreen(window: &tauri::WebviewWindow, force: bool) {
 fn sync_visible(window: &tauri::WebviewWindow, visible: bool, force: bool) {
     let changed = window
         .app_handle()
-        .state::<Engine>()
-        .0
-        .lock()
-        .ok()
-        .and_then(|held| held.as_ref().map(|running| running.set_visible(visible)))
+        .try_state::<Engine>()
+        .and_then(|engine| {
+            engine
+                .0
+                .lock()
+                .ok()
+                .and_then(|held| held.as_ref().map(|running| running.set_visible(visible)))
+        })
         .unwrap_or(false);
     if changed || force {
         let _ = window.eval(if visible {
@@ -382,11 +429,8 @@ fn stop_engine(app: &AppHandle) {
     sign_in::stop();
     let _ = leo_services::speech::engine::engine().stop();
     let running = app
-        .state::<Engine>()
-        .0
-        .lock()
-        .ok()
-        .and_then(|mut held| held.take());
+        .try_state::<Engine>()
+        .and_then(|engine| engine.0.lock().ok().and_then(|mut held| held.take()));
     leo_host::stop_writing();
     if let Some(running) = running {
         tauri::async_runtime::block_on(async {
@@ -450,5 +494,32 @@ fn dictation_popup(
             Ok(serde_json::json!({"ok":true}))
         }
         _ => Err("Choose an action on the dictation popup.".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failed_part_is_named_in_one_sentence() {
+        let both = [
+            (
+                "dictation popup",
+                Some("its plugin did not start".to_string()),
+            ),
+            ("Quit menu", None),
+            ("menu bar icon", Some("no icon".to_string())),
+        ];
+        assert_eq!(
+            startup_problem(&both).unwrap(),
+            "leo could not start the dictation popup (its plugin did not start) and the menu bar icon (no icon). The rest of leo works."
+        );
+        assert_eq!(
+            startup_problem(&[("Quit menu", Some("bad".to_string()))]).unwrap(),
+            "leo could not start the Quit menu (bad). The rest of leo works."
+        );
+        assert_eq!(startup_problem(&[("Quit menu", None)]), None);
+        assert_eq!(startup_problem(&[]), None);
     }
 }

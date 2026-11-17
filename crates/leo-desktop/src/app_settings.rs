@@ -70,6 +70,12 @@ enum PreferenceChange {
     Set(String, bool),
     Finish(usize),
 }
+fn joined(existing: Option<String>, text: String) -> String {
+    match existing {
+        Some(existing) => format!("{existing} {text}"),
+        None => text,
+    }
+}
 type NativePreferences = Arc<dyn Fn(&Preferences, &Preferences) -> Result<()> + Send + Sync>;
 struct PreferenceStore {
     tx: std::sync::mpsc::SyncSender<(PreferenceChange, std::sync::mpsc::SyncSender<Result<()>>)>,
@@ -169,6 +175,10 @@ impl PreferenceStore {
                 .get_or_insert_with(|| format!("Leo could not apply a startup setting: {error:#}"));
         }
     }
+    fn note(&self, text: String) {
+        let mut problem = self.problem.lock().unwrap_or_else(|e| e.into_inner());
+        *problem = Some(joined(problem.take(), text));
+    }
     fn change(&self, change: PreferenceChange) -> Result<()> {
         let (done, answer) = std::sync::mpsc::sync_channel(1);
         self.tx
@@ -219,6 +229,9 @@ impl AppSettings {
     }
     pub fn preferences(&self) -> Preferences {
         self.preferences.view()
+    }
+    pub fn note(&self, text: String) {
+        self.preferences.note(text);
     }
     pub fn apply_startup(&self) {
         let preferences = self.preferences();
@@ -383,6 +396,19 @@ mod tests {
         assert!(store.problem().unwrap().contains("login item blocked"));
         store.record(|| anyhow::bail!("tray blocked"));
         assert!(store.problem().unwrap().contains("login item blocked"));
+    }
+    #[test]
+    fn a_startup_problem_is_added_to_an_existing_one() {
+        assert_eq!(joined(None, "a".into()), "a");
+        assert_eq!(joined(Some("a".into()), "b".into()), "a b");
+        let dir = tempfile::tempdir().unwrap();
+        let store = PreferenceStore::new(
+            dir.path().join("app-settings.json"),
+            std::sync::Arc::new(|_, _| Ok(())),
+        );
+        store.note("first.".into());
+        store.note("second.".into());
+        assert_eq!(store.problem().unwrap(), "first. second.");
     }
     #[test]
     fn app_preferences_default_to_safe_updates_and_independent_onboarding_steps() {

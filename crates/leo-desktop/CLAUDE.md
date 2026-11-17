@@ -29,6 +29,9 @@ a test, or leave it unset to see the user's own data.
    header row: to the right of the window controls when windowed, flush left in
    full screen (`lib.rs` tells the page on load and on every resize). Folded on
    a windowed Mac, the toggle drops into the rail below the window controls.
+5. A part that cannot start (the menu bar icon, the Quit menu, the dictation popup)
+   is named in Health under App preferences and the window still opens; a failure
+   of dictation, app settings or the main window opens `index.html?problem=…`.
 
 ## Behaviour
 

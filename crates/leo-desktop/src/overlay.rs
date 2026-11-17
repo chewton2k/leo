@@ -5,9 +5,37 @@ use tauri::{AppHandle, Manager};
 use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelBuilder, PanelLevel, StyleMask};
 #[cfg(target_os = "macos")]
 tauri_panel! { panel!(DictationPanel { config: { can_become_key_window: false, is_floating_panel: true } }) }
+#[cfg(target_os = "macos")]
+static PLUGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 const WIDTH: f64 = 400.0;
 const HEIGHT: f64 = 132.0;
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+#[cfg(target_os = "macos")]
+pub fn plugin_registered(ok: bool) {
+    PLUGIN.store(ok, std::sync::atomic::Ordering::Relaxed);
+}
+fn available() -> bool {
+    #[cfg(target_os = "macos")]
+    return PLUGIN.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+fn guarded<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("the popup could not be built".into()))
+}
+pub fn create_guarded(app: &AppHandle) -> Result<(), String> {
+    if !available() {
+        return Err("its plugin did not start".into());
+    }
+    let made = guarded(|| create(app).map_err(|e| e.to_string()));
+    if made.is_err() {
+        if let Some(window) = app.get_webview_window("dictation") {
+            let _ = window.destroy();
+        }
+    }
+    made
+}
+fn create(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let panel = PanelBuilder::<_, DictationPanel>::new(app, "dictation")
@@ -57,7 +85,7 @@ pub fn show(
     settings: &Settings,
     current: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 ) {
-    if settings.popup == Popup::Off {
+    if settings.popup == Popup::Off || !available() {
         return;
     }
     let app = app.clone();
@@ -204,6 +232,9 @@ fn place(window: &tauri::WebviewWindow, monitor: &tauri::Monitor, top: bool) {
     }
 }
 pub fn hide(app: &AppHandle) {
+    if !available() {
+        return;
+    }
     let app = app.clone();
     let caller = app.clone();
     let _ = caller.run_on_main_thread(move || {
@@ -230,6 +261,13 @@ pub fn tokens() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_panic_while_building_the_popup_becomes_an_error() {
+        let failed: Result<(), String> = guarded(|| panic!("no plugin"));
+        assert_eq!(failed, Err("the popup could not be built".to_string()));
+        assert_eq!(guarded(|| Ok(7)), Ok(7));
+    }
 
     #[test]
     fn windows_bounds_use_the_destination_monitor_in_physical_pixels() {
