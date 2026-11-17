@@ -170,14 +170,7 @@ fn decoded(link: &str) -> Option<String> {
 }
 
 fn inside(notes_dir: &Path, relative: &str) -> Option<PathBuf> {
-    if relative.is_empty()
-        || relative.starts_with('/')
-        || relative.contains('\\')
-        || relative.contains(':')
-        || relative
-            .split('/')
-            .any(|part| part.is_empty() || part.starts_with('.'))
-    {
+    if relative.is_empty() || crate::paths::validate_directory(relative).is_err() {
         return None;
     }
     let path = crate::paths::contained_path(notes_dir, Path::new(relative)).ok()?;
@@ -332,6 +325,20 @@ mod tests {
         ] {
             assert_eq!(at("cs130", bad), None, "{bad}");
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_with_a_control_character_finds_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("attachments")).unwrap();
+        std::fs::write(dir.path().join("attachments/a.png"), PNG).unwrap();
+        std::fs::write(dir.path().join("attachments/a\nb.png"), PNG).unwrap();
+        assert_eq!(resolve(dir.path(), "", "attachments/a%0Ab.png"), None);
+        assert_eq!(
+            resolve(dir.path(), "", "attachments/a.png"),
+            Some(dir.path().join("attachments/a.png"))
+        );
     }
 
     #[test]
