@@ -6,6 +6,7 @@ use std::time::SystemTime;
 use anyhow::{bail, Result};
 
 const KEPT: usize = 12;
+const KEPT_BYTES: usize = 16_000_000;
 const MOST_BYTES: u64 = 60_000_000;
 
 type Key = (PathBuf, u64, Option<SystemTime>);
@@ -108,7 +109,9 @@ impl Originals {
         let mut kept = self.read.lock().unwrap_or_else(|e| e.into_inner());
         kept.retain(|(k, _)| k.0 != key.0);
         kept.push_back((key, Arc::clone(&text)));
-        while kept.len() > KEPT {
+        while kept.len() > KEPT
+            || (kept.len() > 1 && kept.iter().map(|(_, t)| t.len()).sum::<usize>() > KEPT_BYTES)
+        {
             kept.pop_front();
         }
         Ok(text)
@@ -244,5 +247,37 @@ mod tests {
             std::fs::read_to_string(target).unwrap(),
             "EXAMPLE PRIVATE CONTENT"
         );
+    }
+
+    fn held(originals: &Originals) -> usize {
+        let kept = originals.read.lock().unwrap();
+        kept.iter().map(|(_, t)| t.len()).sum()
+    }
+
+    #[test]
+    fn large_texts_are_held_up_to_a_size() {
+        let dir = tempfile::tempdir().unwrap();
+        let reader: crate::Reader = Arc::new(|file: crate::UploadFile, _: &mut dyn FnMut(&str)| {
+            let size = if file.name == "big.txt" {
+                20_000_000
+            } else {
+                1_000_000
+            };
+            Ok(" ".repeat(size))
+        });
+        let originals = Originals::default();
+        for n in 0..13 {
+            let name = format!("f{n:02}.txt");
+            let path = dir.path().join(&name);
+            std::fs::write(&path, b"tiny").unwrap();
+            originals.text(&reader, &path, &name).unwrap();
+        }
+        assert!(held(&originals) <= KEPT_BYTES);
+        let path = dir.path().join("big.txt");
+        std::fs::write(&path, b"tiny").unwrap();
+        let big = originals.text(&reader, &path, "big.txt").unwrap();
+        assert_eq!(big.len(), 20_000_000);
+        assert_eq!(originals.read.lock().unwrap().len(), 1);
+        assert_eq!(held(&originals), 20_000_000);
     }
 }
