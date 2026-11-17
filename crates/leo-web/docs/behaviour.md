@@ -460,7 +460,10 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   keyboard-accessible resize handle; `leo-side-width` remembers the expanded
   width while the 52 px rail stays fixed. `pane-resize.js` shares bounded sizing,
   32/96 px arrow steps, Home/double-click reset and drag cleanup with Felix's
-  Chats divider (`leo-chat-history-width`); shrinking a window clamps the visible
+  Chats divider (`leo-chat-history-width`), Felix's width grip (`leo-chat-width`) and the
+  original-file grip (`leo-source-width`), both docked right (dragged left or ArrowLeft
+  widens; End goes to the widest; Home and double-click reset); the width is saved on
+  release; shrinking a window clamps the visible
   width without replacing the saved preference. Overlay chat lists have no grip. Crossing the overlay width while resizing swaps modes under `.chat.mode-switch` (no transition), so the list never slides over the chat (2026-11-08).
   There is no Top level row (2026-11-02, the user's call: the tree already lists
   top-level notes); the pinned Folders heading is the top-level drop target, and

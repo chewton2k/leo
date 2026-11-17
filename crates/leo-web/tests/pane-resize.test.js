@@ -14,7 +14,7 @@ class Handle extends EventTarget {
   releasePointerCapture(id) { this.captured.delete(id); }
 }
 
-function fixture(saved = null, broken = false) {
+function fixture(saved = null, broken = false, docked = 'left') {
   const values = new Map(saved === null ? [] : [['width', saved]]);
   const storage = {
     getItem(key) { if (broken) throw new Error('Storage unavailable'); return values.get(key) ?? null; },
@@ -28,7 +28,7 @@ function fixture(saved = null, broken = false) {
   vm.runInNewContext(fs.readFileSync(file,'utf8'),{ window:root, document:{body} },{filename:file});
   const handle = new Handle();
   let width=280, max=520, enabled=true, changes=0;
-  const options = {handle,key:'width',measure:()=>width,limits:()=>[220,max],apply:value=>{width=value??280;},enabled:()=>enabled,onChange:()=>{changes++;}};
+  const options = {handle,key:'width',measure:()=>width,limits:()=>[220,max],apply:value=>{width=value??280;},enabled:()=>enabled,docked,onChange:()=>{changes++;}};
   const control=root.leoPaneResize.create(options);
   const emit=(type,values={},target=handle)=>{const event=new Event(type,{cancelable:true});Object.assign(event,values);target.dispatchEvent(event);return event;};
   return {root,handle,control,classes,values,emit,options,width:()=>width,changes:()=>changes,limit:value=>{max=value;},enable:value=>{enabled=value;}};
@@ -121,5 +121,16 @@ test('starting another resize ends the first, and disabled drags end on movement
 test('blocked storage does not prevent resizing or resetting',()=>{
   const f=fixture(null,true);
   f.emit('keydown',{key:'ArrowRight'});assert.equal(f.width(),312);
+  f.emit('keydown',{key:'Home'});assert.equal(f.width(),280);
+});
+
+test('a right-docked pane grows when dragged left and with ArrowLeft',()=>{
+  const f=fixture(null,false,'right');
+  down(f);move(f,{clientX:230});assert.equal(f.width(),330);
+  f.emit('pointerup',{pointerId:1,clientX:230});
+  assert.equal(f.values.get('width'),'330');
+  f.emit('keydown',{key:'ArrowLeft'});assert.equal(f.width(),362);
+  f.emit('keydown',{key:'ArrowRight',shiftKey:true});assert.equal(f.width(),266);
+  f.emit('keydown',{key:'End'});assert.equal(f.width(),520);
   f.emit('keydown',{key:'Home'});assert.equal(f.width(),280);
 });

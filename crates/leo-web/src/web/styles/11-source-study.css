@@ -5,9 +5,7 @@
 .source-pane[hidden] { display: none; }
 .source-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
 .source-grip::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; transition: opacity var(--t-press); }
-.source-grip:hover::after, .source-grip:focus-visible::after, body.source-resizing .source-grip::after { opacity: 1; }
-body.source-resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
-body.source-resizing iframe { pointer-events: none; }
+.source-grip:hover::after, .source-grip:focus-visible::after, body.pane-resizing .source-grip:focus::after { opacity: 1; }
 .source-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 16px; }
 .source-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); }
 .source-files { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }

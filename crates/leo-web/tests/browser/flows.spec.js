@@ -1704,7 +1704,7 @@ test.describe('Felix', () => {
     const held = (await chat.boundingBox()).width;
     const cdp = await page.context().newCDPSession(page);
     for (const dx of [80, 120, 160]) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - dx, y: 300, button: 'none', buttons: 0 });
-    await expect(page.locator('body')).not.toHaveClass(/chat-resizing/);
+    await expect(page.locator('body')).not.toHaveClass(/pane-resizing/);
     expect(Math.abs((await chat.boundingBox()).width - held)).toBeLessThan(2);
     expect(Math.abs(Number(await page.evaluate(() => localStorage.getItem('leo-chat-width'))) - held)).toBeLessThan(2);
   });

@@ -1145,95 +1145,24 @@
     grip.setAttribute('aria-label', 'Felix width');
     panel.prepend(grip);
 
-    function keptWidth() {
-      try {
-        const kept = Number(storage.getItem(WIDTH));
-        return kept > 0 ? kept : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
     function widest() {
       const beside = parseFloat(root.getComputedStyle(document.body).paddingLeft) || 0;
       const room = root.innerWidth >= 1200 ? 380 : 120;
       return Math.max(LEAST_WIDTH, root.innerWidth - beside - room);
     }
 
-    function setWidth(px, keep) {
-      const style = document.documentElement.style;
-      if (px === null) {
-        style.removeProperty('--chat-w');
-        grip.removeAttribute('aria-valuenow');
-        if (keep) {
-          try {
-            storage.removeItem(WIDTH);
-          } catch (e) {}
-        }
-        return;
-      }
-      const width = Math.round(Math.min(widest(), Math.max(LEAST_WIDTH, px)));
-      style.setProperty('--chat-w', `${width}px`);
-      grip.setAttribute('aria-valuenow', String(width));
-      grip.setAttribute('aria-valuemin', String(LEAST_WIDTH));
-      grip.setAttribute('aria-valuemax', String(widest()));
-      if (keep) {
-        try {
-          storage.setItem(WIDTH, String(width));
-        } catch (e) {}
-      }
-    }
-
-    const fitWidth = () => setWidth(keptWidth(), false);
-    fitWidth();
-    root.addEventListener('resize', fitWidth);
-
-    let dragFrom = null;
-    let gripTap = null;
-    const stretchWidth = (px) => document.documentElement.style.setProperty('--chat-w', `${px}px`);
-    grip.addEventListener('pointerdown', (e) => {
-      if (!wide() || e.button !== 0) return;
-      e.preventDefault();
-      if (gripTap && e.timeStamp - gripTap.at < 400 && Math.abs(e.clientX - gripTap.x) < 6) {
-        gripTap = null;
-        setWidth(null, true);
-        return;
-      }
-      dragFrom = { x: e.clientX, width: panel.getBoundingClientRect().width };
-      grip.setPointerCapture(e.pointerId);
-      document.body.classList.add('chat-resizing');
-    });
-    grip.addEventListener('pointermove', (e) => {
-      if (!dragFrom) return;
-      if (!(e.buttons & 1)) return letGo(e);
-      if (!grip.hasPointerCapture(e.pointerId)) return;
-      const wanted = dragFrom.width + dragFrom.x - e.clientX;
-      setWidth(wanted, false);
-      dragFrom.back = root.leoPaneResize.stretched(wanted, wanted < LEAST_WIDTH ? LEAST_WIDTH : wanted > widest() ? widest() : null);
-      if (dragFrom.back) stretchWidth(dragFrom.back.limit + dragFrom.back.over);
-    });
-    const letGo = (e) => {
-      if (!dragFrom) return;
-      const tapped = e.type === 'pointerup' && Math.abs(e.clientX - dragFrom.x) < 4;
-      const back = dragFrom.back;
-      dragFrom = null;
-      if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId);
-      document.body.classList.remove('chat-resizing');
-      gripTap = tapped ? { at: e.timeStamp, x: e.clientX } : null;
-      if (!tapped) setWidth(panel.getBoundingClientRect().width, true);
-      if (!tapped && back) root.leoPaneResize.bounceBack(back, stretchWidth, () => Boolean(dragFrom), () => setWidth(back.limit, false));
-    };
-    grip.addEventListener('pointerup', letGo);
-    grip.addEventListener('pointercancel', letGo);
-    grip.addEventListener('lostpointercapture', letGo);
-    grip.addEventListener('keydown', (e) => {
-      const step = e.shiftKey ? 96 : 32;
-      const now = panel.getBoundingClientRect().width;
-      if (e.key === 'ArrowLeft') setWidth(now + step, true);
-      else if (e.key === 'ArrowRight') setWidth(now - step, true);
-      else if (e.key === 'Home') setWidth(null, true);
-      else return;
-      e.preventDefault();
+    const chatResize = root.leoPaneResize.create({
+      handle: grip,
+      key: WIDTH,
+      storage,
+      docked: 'right',
+      measure: () => panel.getBoundingClientRect().width,
+      limits: () => [LEAST_WIDTH, widest()],
+      apply: (width) => {
+        if (width === null) document.documentElement.style.removeProperty('--chat-w');
+        else document.documentElement.style.setProperty('--chat-w', `${width}px`);
+      },
+      enabled: () => wide() && !panel.hidden,
     });
 
     const HISTORY_OVERLAY_WIDTH = 490;
@@ -3056,6 +2985,7 @@
       }
       if (state.open) {
         syncSidebar(sidebarOpen());
+        chatResize.fit();
         historyResize.fit();
         if (sidebarOpen()) loadChats();
         drawContext();

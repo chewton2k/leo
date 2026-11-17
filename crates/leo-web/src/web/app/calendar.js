@@ -1941,9 +1941,8 @@ const homeShown = () => { if (tasksAtHome()) drawTasksWindow(); };
 window.addEventListener('focus', homeShown);
 window.addEventListener('leo-visibility', homeShown);
 
-const source = { note: null, name: null, seq: 0, returnTo: null, stopResize: null };
+const source = { note: null, name: null, seq: 0, returnTo: null };
 const SOURCE_MIN = 260;
-const SOURCE_STEP = 32;
 const SOURCE_KEY = 'leo-source-width';
 
 const sourcePane = document.createElement('aside');
@@ -1953,15 +1952,8 @@ sourcePane.hidden = true;
 sourcePane.setAttribute('aria-label', 'Original file');
 document.body.appendChild(sourcePane);
 
-function sourceWidth() {
-  let kept = 0;
-  try {
-    kept = Number(localStorage.getItem(SOURCE_KEY)) || 0;
-  } catch (e) {
-    kept = 0;
-  }
-  return Number.isFinite(kept) && kept >= SOURCE_MIN && kept <= 4000
-    ? kept : Math.round(Math.min(640, Math.max(420, window.innerWidth * 0.38)));
+function sourceDefault() {
+  return Math.round(Math.min(640, Math.max(420, window.innerWidth * 0.38)));
 }
 
 function sourceFits() {
@@ -1974,28 +1966,27 @@ function sourceLimit() {
   return Math.max(SOURCE_MIN, Math.floor((window.innerWidth - side - chat) * 0.52));
 }
 
-function sourceSizeLabel() {
-  const grip = sourcePane.querySelector('.source-grip');
-  if (!grip || !sourceFits()) return;
-  grip.setAttribute('aria-valuemin', String(SOURCE_MIN));
-  grip.setAttribute('aria-valuemax', String(sourceLimit()));
-  grip.setAttribute('aria-valuenow', String(Math.round(sourcePane.getBoundingClientRect().width)));
-}
-
-function setSourceWidth(width) {
-  const bounded = Math.round(Math.min(sourceLimit(), Math.max(SOURCE_MIN, width)));
-  document.body.style.setProperty('--source-w', `${bounded}px`);
-  try {
-    localStorage.setItem(SOURCE_KEY, String(bounded));
-  } catch (e) {}
-  sourceSizeLabel();
-}
+const sourceGrip = document.createElement('div');
+sourceGrip.className = 'source-grip';
+sourceGrip.tabIndex = 0;
+sourceGrip.setAttribute('role', 'separator');
+sourceGrip.setAttribute('aria-orientation', 'vertical');
+sourceGrip.setAttribute('aria-label', 'Drag to resize the original');
+const sourceResize = window.leoPaneResize.create({
+  handle: sourceGrip,
+  key: SOURCE_KEY,
+  docked: 'right',
+  measure: () => sourcePane.getBoundingClientRect().width,
+  limits: () => [SOURCE_MIN, sourceLimit()],
+  apply: (width) => document.body.style.setProperty('--source-w', `${width ?? sourceDefault()}px`),
+  enabled: () => sourceFits() && !sourcePane.hidden,
+});
 
 function closeSource(control = null) {
   if (!source.note) return;
   if (control) control.focus({ preventScroll: true });
   const restore = sourcePane.contains(document.activeElement) ? source.returnTo : null;
-  source.stopResize?.();
+  sourceResize.stop();
   source.seq++;
   source.note = null;
   source.name = null;
@@ -2013,7 +2004,6 @@ async function openSource(id, name, page = null) {
   if (!source.note) source.returnTo = document.activeElement;
   source.note = id;
   source.name = name;
-  document.body.style.setProperty('--source-w', `${sourceWidth()}px`);
   document.body.classList.add('with-source');
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
   let files = [];
@@ -2032,50 +2022,12 @@ async function openSource(id, name, page = null) {
       ? `<div class="source-scroll"><img class="source-img" src="${url}?view=1" alt="${esc(name)}"></div>`
       : '<div class="source-scroll prose source-text">Loading…</div>';
   sourcePane.hidden = false;
-  sourcePane.innerHTML = `<div class="source-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize the original" tabindex="0"></div>
-    <header class="source-head">${picker}<span class="source-tools"><a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a><button type="button" class="icon-btn" data-action="source-close" aria-label="Close the original">${ICON.close}</button></span></header>
+  sourcePane.innerHTML = `<header class="source-head">${picker}<span class="source-tools"><a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a><button type="button" class="icon-btn" data-action="source-close" aria-label="Close the original">${ICON.close}</button></span></header>
     <div class="source-body">${body}</div>`;
-  sourceSizeLabel();
+  sourcePane.prepend(sourceGrip);
+  sourceResize.fit();
   if (kind === 'text') {
     await fillTextFile(sourcePane.querySelector('.source-text'), url, name);
   }
 }
 
-sourcePane.addEventListener('keydown', (e) => {
-  if (!e.target.matches('.source-grip') || !sourceFits()) return;
-  const width = sourcePane.getBoundingClientRect().width;
-  const next = { ArrowLeft: width + SOURCE_STEP, ArrowRight: width - SOURCE_STEP, Home: SOURCE_MIN, End: sourceLimit() }[e.key];
-  if (next === undefined) return;
-  e.preventDefault();
-  setSourceWidth(next);
-});
-
-sourcePane.addEventListener('pointerdown', (e) => {
-  const grip = e.target.closest('.source-grip');
-  if (!grip || e.button !== 0 || !sourceFits()) return;
-  e.preventDefault();
-  source.stopResize?.();
-  const startX = e.clientX;
-  const start = sourcePane.getBoundingClientRect().width;
-  document.body.classList.add('source-resizing');
-  const move = (ev) => {
-    if (!sourceFits() || !(ev.buttons & 1)) return up();
-    setSourceWidth(start + startX - ev.clientX);
-  };
-  const up = () => {
-    document.body.classList.remove('source-resizing');
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', up);
-    window.removeEventListener('blur', up);
-    source.stopResize = null;
-  };
-  source.stopResize = up;
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', up);
-  window.addEventListener('blur', up);
-});
-
-const sourceSizer = new ResizeObserver(sourceSizeLabel);
-sourceSizer.observe(sourcePane);

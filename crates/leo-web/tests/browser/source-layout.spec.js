@@ -114,7 +114,7 @@ test('documents split notes and keep Felix at the right without losing drafts', 
     await page.mouse.move(divider.x + 36, divider.y + 200);
     await expect.poll(async () => (await page.locator('#source-pane').boundingBox()).width).toBeLessThan(startWidth - 20);
     await page.evaluate(() => audit.close());
-    await expect(page.locator('body')).not.toHaveClass(/source-resizing/);
+    await expect(page.locator('body')).not.toHaveClass(/pane-resizing/);
     await page.mouse.up();
     await page.evaluate(() => { audit.wait(); audit.open('paper.pdf'); audit.close(); release(); });
     await expect(page.locator('#source-pane')).toBeHidden();
