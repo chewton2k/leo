@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import sys
+import time
+import urllib.error
 import urllib.request
 import wave
 import xml.etree.ElementTree as ET
@@ -18,15 +20,22 @@ WORDS_SHA = "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d"
 SECONDS = 420
 
 
-def fetch(url, dest, sha256=None):
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(url, timeout=60) as response, open(dest + ".part", "wb") as out:
-        while True:
-            block = response.read(1 << 20)
-            if not block:
-                break
-            digest.update(block)
-            out.write(block)
+def fetch(url, dest, sha256=None, tries=4):
+    for attempt in range(tries):
+        digest = hashlib.sha256()
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response, open(dest + ".part", "wb") as out:
+                while True:
+                    block = response.read(1 << 20)
+                    if not block:
+                        break
+                    digest.update(block)
+                    out.write(block)
+            break
+        except (OSError, urllib.error.URLError):
+            if attempt == tries - 1:
+                raise
+            time.sleep(5 * (attempt + 1))
     if sha256 and digest.hexdigest() != sha256:
         os.remove(dest + ".part")
         sys.exit(f"{os.path.basename(dest)}: checksum mismatch")

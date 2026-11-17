@@ -195,8 +195,8 @@ function revealNoteRow(tree) {
   side.shownNote = id;
   const at = row.getBoundingClientRect();
   const view = tree.getBoundingClientRect();
-  if (at.top < view.top) tree.scrollTop -= view.top - at.top;
-  else if (at.bottom > view.bottom) tree.scrollTop += at.bottom - view.bottom;
+  if (at.top < view.top) tree.scrollTop -= Math.ceil(view.top - at.top);
+  else if (at.bottom > view.bottom) tree.scrollTop += Math.ceil(at.bottom - view.bottom);
 }
 
 function keepOpenFolders() {
