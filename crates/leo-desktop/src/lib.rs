@@ -225,11 +225,14 @@ fn set_up(
                         .unwrap_or_default();
                     if let Some(folder) = downloads_folder() {
                         *destination = links::download_path(&folder, &suggested);
-                        remember_download(destination.clone());
+                        remember_download(&url, destination.clone());
                     }
                 }
-                tauri::webview::DownloadEvent::Finished { success: true, .. } => {
-                    reveal_last_download();
+                tauri::webview::DownloadEvent::Finished { url, path, success } => {
+                    let finished = take_download(&url, path);
+                    if let (true, Some(path)) = (success, finished) {
+                        reveal(path);
+                    }
                 }
                 _ => {}
             }
@@ -319,7 +322,8 @@ fn print_page(window: tauri::WebviewWindow) -> Result<(), String> {
         .map_err(|_| "Could not open the print dialog. Try exporting the note again.".into())
 }
 
-static LAST_DOWNLOAD: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+const MOST_DOWNLOADS: usize = 8;
+static DOWNLOADS: Mutex<Vec<(String, std::path::PathBuf)>> = Mutex::new(Vec::new());
 
 fn downloads_folder() -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))?;
@@ -327,17 +331,27 @@ fn downloads_folder() -> Option<std::path::PathBuf> {
     folder.is_dir().then_some(folder)
 }
 
-fn remember_download(path: std::path::PathBuf) {
-    if let Ok(mut last) = LAST_DOWNLOAD.lock() {
-        *last = Some(path);
+fn remember_download(url: &url::Url, path: std::path::PathBuf) {
+    if let Ok(mut all) = DOWNLOADS.lock() {
+        if all.len() >= MOST_DOWNLOADS {
+            all.remove(0);
+        }
+        all.push((url.as_str().to_string(), path));
     }
 }
 
-fn reveal_last_download() {
-    let path = LAST_DOWNLOAD.lock().ok().and_then(|mut last| last.take());
-    let Some(path) = path else {
-        return;
-    };
+fn take_download(
+    url: &url::Url,
+    reported: Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    let remembered = DOWNLOADS.lock().ok().and_then(|mut all| {
+        let at = all.iter().position(|(held, _)| held == url.as_str())?;
+        Some(all.remove(at).1)
+    });
+    reported.or(remembered)
+}
+
+fn reveal(path: std::path::PathBuf) {
     #[cfg(target_os = "macos")]
     std::thread::spawn(move || {
         let _ = leo_core::children::quiet_command("open")
@@ -565,5 +579,28 @@ mod tests {
         );
         assert_eq!(startup_problem(&[("Quit menu", None)]), None);
         assert_eq!(startup_problem(&[]), None);
+    }
+
+    #[test]
+    fn two_overlapping_downloads_each_reveal_their_own_file() {
+        let address = |name: &str| url::Url::parse(&format!("http://127.0.0.1:1/{name}")).unwrap();
+        remember_download(&address("a"), "/d/a.md".into());
+        remember_download(&address("b"), "/d/b.md".into());
+        assert_eq!(take_download(&address("b"), None), Some("/d/b.md".into()));
+        assert_eq!(take_download(&address("a"), None), Some("/d/a.md".into()));
+        assert_eq!(take_download(&address("a"), None), None);
+        assert_eq!(
+            take_download(&address("unknown"), Some("/reported.md".into())),
+            Some("/reported.md".into())
+        );
+        for n in 0..12 {
+            remember_download(&address(&format!("many{n}")), format!("/d/{n}.md").into());
+        }
+        assert_eq!(DOWNLOADS.lock().unwrap().len(), MOST_DOWNLOADS);
+        assert_eq!(take_download(&address("many3"), None), None);
+        assert_eq!(
+            take_download(&address("many11"), None),
+            Some("/d/11.md".into())
+        );
     }
 }
