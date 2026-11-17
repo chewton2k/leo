@@ -1,21 +1,21 @@
-pub fn allowed(enabled: bool, recording: bool) -> bool {
-    enabled && !recording
+pub fn allowed(recording: bool) -> bool {
+    !recording
 }
-pub fn play(enabled: bool, start: bool) {
-    if !allowed(enabled, leo_services::speech::engine::engine().recording()) {
+pub fn play(start: bool) {
+    if !allowed(leo_services::speech::engine::engine().recording()) {
         return;
     }
     let Some(_audio) = leo_services::dictation::audio_gate::gate().sound() else {
         return;
     };
+    let bytes = if start {
+        include_bytes!("../sounds/start.wav").as_slice()
+    } else {
+        include_bytes!("../sounds/stop.wav").as_slice()
+    };
     #[cfg(target_os = "macos")]
     {
         use std::io::Write;
-        let bytes = if start {
-            include_bytes!("../sounds/start.wav").as_slice()
-        } else {
-            include_bytes!("../sounds/stop.wav").as_slice()
-        };
         let Ok(mut file) = tempfile::NamedTempFile::new() else {
             return;
         };
@@ -48,11 +48,6 @@ pub fn play(enabled: bool, start: bool) {
             core::PCWSTR,
             Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_SYNC},
         };
-        let bytes = if start {
-            include_bytes!("../sounds/start.wav").as_slice()
-        } else {
-            include_bytes!("../sounds/stop.wav").as_slice()
-        };
         let _ = PlaySoundW(PCWSTR(bytes.as_ptr().cast()), None, SND_MEMORY | SND_SYNC);
     }
 }
@@ -60,8 +55,7 @@ pub fn play(enabled: bool, start: bool) {
 mod tests {
     #[test]
     fn feedback_never_enters_a_lecture_recording() {
-        assert!(!super::allowed(true, true));
-        assert!(!super::allowed(false, false));
-        assert!(super::allowed(true, false));
+        assert!(!super::allowed(true));
+        assert!(super::allowed(false));
     }
 }

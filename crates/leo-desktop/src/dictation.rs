@@ -732,7 +732,7 @@ fn chime(enabled: bool, start: bool, current: impl Fn() -> bool + Send + 'static
             static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
             let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
             if current() {
-                crate::audio_feedback::play(true, start);
+                crate::audio_feedback::play(start);
             }
         });
     }
