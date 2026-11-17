@@ -705,3 +705,28 @@ fn a_speaker_model_download_waiting_for_a_slot_stops_when_asked() {
         "Stopped while the speaker model was downloading"
     );
 }
+
+#[test]
+#[ignore = "downloads the 133 MiB speaker model from Hugging Face"]
+fn the_real_speaker_model_downloads_from_hugging_face_and_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let l = Library::new(dir.path().join("models"), dir.path().join("config"));
+    let seen = std::sync::Mutex::new(Vec::new());
+    let started = std::time::Instant::now();
+    let path = l
+        .ensure_speaker_model(&|| l.download(DIARIZER), &|| false, &|done, total| {
+            seen.lock().unwrap().push((done, total))
+        })
+        .unwrap();
+    let size = catalog().known(DIARIZER).unwrap().file().size;
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), size);
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.last(), Some(&(size, size)));
+    assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0));
+    println!(
+        "downloaded {} MiB in {:.1}s with {} progress reports",
+        size >> 20,
+        started.elapsed().as_secs_f64(),
+        seen.len()
+    );
+}
