@@ -718,7 +718,9 @@ test('task boxes are drawn marks whose variant follows the task and survives a r
     await page.evaluate(() => drawCalendar());
     expect(await marks()).toEqual(before);
     const box = await page.locator('#cal-side .cal-check').first().boundingBox();
-    expect(Math.max(box.width, box.height)).toBeLessThanOrEqual(14);
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
+    const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('cal-check'), { x: box.x + box.width / 2 + 10, y: box.y + box.height / 2 });
+    expect(hit).toBe(true);
   }, { width: 1360 });
 });
 

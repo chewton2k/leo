@@ -99,7 +99,7 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-item.task { background: var(--raised); box-shadow: var(--shadow-sm); }
 .cal-allday-grid .cal-item.task, .cal-cell .cal-item.task { background: color-mix(in srgb, var(--tone) 8%, var(--surface)); box-shadow: none; }
 .cal-item.task { padding: 5px 8px; font-size: var(--fs-sm); line-height: 1.3; }
-.cal-item.task .cal-check { position: absolute; top: 6px; left: 8px; margin: 0; }
+.cal-item.task .cal-check { position: absolute; top: 1px; left: 3px; margin: 0; }
 .cal-item.task .cal-title { text-indent: 20px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .cal-col { container: calcol / inline-size; }
 @container calcol (max-width: 140px) { .cal-item.task .cal-title { text-indent: 0; padding-top: 18px; } }
@@ -113,7 +113,8 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-cell .cal-item.task .cal-open { flex-direction: column; align-items: flex-start; gap: 2px; }
 .cal-item.peeked { outline: 2px solid var(--accent); outline-offset: -1px; }
 .cal-item.lifted, .cal-tray-row.lifted { opacity: .4; }
-.cal-check { flex: none; width: 14px; height: 14px; margin: 1px 0 0; }
+.cal-check { flex: none; width: 24px; height: 24px; margin: -4px -5px -5px; }
+:is(.cal-item, .cal-tray-row) input.cal-check::before, :is(.cal-item, .cal-tray-row) input.cal-check::after { inset: 5px; }
 .cal-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 0; border: 0; background: none; font: inherit; color: var(--text); text-align: left; cursor: inherit; }
 .cal-title { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cal-sub { max-width: 100%; font-size: var(--fs-xs); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
@@ -187,7 +188,7 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-peek-title { margin: 0 0 0 -9px; font-size: var(--fs-xl); font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 h2.cal-peek-title { margin-left: 0; padding: 4px 0; }
 .cal-peek-done { justify-content: space-between; cursor: pointer; }
-.cal-peek-done .cal-check { width: 18px; height: 18px; }
+.cal-peek-done .cal-check { width: 18px; height: 18px; margin: 0; }
 .cal-side a.btn { text-decoration: none; }
 .cal-peek-times { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .cal-peek-times input[type="date"] { flex: 1 1 100%; }
