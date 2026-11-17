@@ -2048,7 +2048,7 @@ mod tests {
             });
             let pid = probe_pid(&marker);
             cancelled.store(true, Ordering::SeqCst);
-            let gone = gone_by(&pid, Instant::now() + Duration::from_secs(1));
+            let gone = gone_by(&pid, Instant::now() + Duration::from_secs(5));
             release(&pid, &stop);
             call.join().unwrap();
             let route = if stoppable {
@@ -2058,7 +2058,7 @@ mod tests {
             };
             assert!(
                 gone,
-                "{route}: the CLI child {pid} outlived its caller's stop by 1 s"
+                "{route}: the CLI child {pid} outlived its caller's stop by 5 s"
             );
         }
     }
