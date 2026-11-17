@@ -169,9 +169,22 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/cards/{id}/move", post(boards::move_card))
         .route("/api/schedule", get(crate::calendar::schedule))
         .route("/api/search", get(search_notes))
-        .route("/api/dirs", get(list_dirs).post(create_dir))
-        .route("/api/dirs/move", post(move_dir))
-        .route("/api/dirs/rename", post(rename_dir))
+        .route(
+            "/api/dirs",
+            get(list_dirs).post(|state, body| async {
+                crate::reply::folder_worded(create_dir(state, body).await)
+            }),
+        )
+        .route(
+            "/api/dirs/move",
+            post(|state, body| async { crate::reply::folder_worded(move_dir(state, body).await) }),
+        )
+        .route(
+            "/api/dirs/rename",
+            post(|state, body| async {
+                crate::reply::folder_worded(rename_dir(state, body).await)
+            }),
+        )
         .route("/api/folders", get(list_folders))
         .route("/api/trash", get(list_trash))
         .route("/api/trash/{id}/restore", post(restore_note))
@@ -319,6 +332,7 @@ pub(crate) fn router(state: AppState) -> Router {
             crate::note_activity,
         ))
         .route("/favicon.svg", get(favicon))
+        .layer(axum::middleware::from_fn(crate::reply::worded))
         .layer(axum::middleware::from_fn(security_headers))
         .layer(axum::middleware::from_fn(note_peer))
         .with_state(state)

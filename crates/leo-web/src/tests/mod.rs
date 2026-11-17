@@ -3,6 +3,7 @@ mod boards;
 mod calendar;
 mod combine;
 mod dictation;
+mod errors;
 mod felix;
 mod housekeeping;
 mod margin;

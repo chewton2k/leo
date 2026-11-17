@@ -70,7 +70,9 @@ This file holds the rules. How each screen behaves, area by area, is in
   returned to the page or put in exports. A stored key shows as a
   `secret::masked` placeholder; nothing changes until Save.
 - Every success is JSON or a bodiless 204 (`api()` treats an empty body as
-  `null`; a browser test sweeps the API). Session-gated JSON inputs are bounded.
+  `null`; a browser test sweeps the API); every `/api/` refusal is JSON `{error}`
+  (`reply::worded` words a bare one by its status; the folder routes say the folder
+  sentence). Session-gated JSON inputs are bounded.
 
 Decided: one app, window only (2026-10-31).
 

@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use axum::http::StatusCode;
+use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
@@ -17,6 +17,54 @@ pub(crate) fn error(status: StatusCode, message: impl ToString) -> Response {
         Json(serde_json::json!({ "error": message.to_string() })),
     )
         .into_response()
+}
+
+pub(crate) const FOLDER_REFUSED: &str = "Use a folder name inside your notes, without . or ..";
+
+pub(crate) fn sentence(status: StatusCode) -> &'static str {
+    match status {
+        StatusCode::NOT_FOUND => "That is not there any more.",
+        StatusCode::CONFLICT => "It changed since you opened it. Reload it and try again.",
+        StatusCode::PAYLOAD_TOO_LARGE => "That is too large to send.",
+        StatusCode::UNAUTHORIZED => "Open leo from its window to sign in again.",
+        StatusCode::FORBIDDEN => "leo does not allow that here.",
+        StatusCode::TOO_MANY_REQUESTS => {
+            "That is happening too often. Wait a moment and try again."
+        }
+        status if status.is_server_error() => "leo could not do that. Try again.",
+        _ => "leo could not use that request. Reload the page and try again.",
+    }
+}
+
+pub(crate) async fn worded(
+    request: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let api = request.uri().path().starts_with("/api/");
+    let response = next.run(request).await;
+    let status = response.status();
+    let json = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|kind| kind.starts_with("application/json"));
+    if !api || status.as_u16() < 400 || json {
+        return response;
+    }
+    let (mut parts, _) = response.into_parts();
+    parts.headers.remove(header::CONTENT_TYPE);
+    parts.headers.remove(header::CONTENT_LENGTH);
+    let (fresh, body) = error(status, sentence(status)).into_parts();
+    parts.headers.extend(fresh.headers);
+    Response::from_parts(parts, body)
+}
+
+pub(crate) fn folder_worded<T: IntoResponse>(result: Result<T, StatusCode>) -> Response {
+    match result {
+        Ok(done) => done.into_response(),
+        Err(StatusCode::BAD_REQUEST) => error(StatusCode::BAD_REQUEST, FOLDER_REFUSED),
+        Err(status) => status.into_response(),
+    }
 }
 
 #[derive(Clone)]
