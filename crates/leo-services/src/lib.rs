@@ -14,7 +14,6 @@ pub mod ollama;
 pub mod providers;
 pub mod session;
 pub mod speech;
-pub mod update;
 pub mod usage;
 pub mod web;
 pub mod web_settings;

@@ -109,14 +109,14 @@ fn meaning_check(state: crate::providers::ModelState) -> Check {
             what,
             needed_for,
             format!(
-                "the model ({} MB) downloads the next time leo opens, or with `leo update`; until then search matches words only",
+                "the model ({} MB) downloads the next time leo opens; until then search matches words only",
                 crate::meaning::MODEL_MB
             ),
         ),
         ModelState::Damaged => warn(
             what,
             needed_for,
-            "the model is damaged: `leo update` downloads the damaged parts again".into(),
+            "the model is damaged: leo downloads the damaged parts again the next time it opens".into(),
         ),
     }
 }
@@ -311,8 +311,14 @@ mod tests {
         assert_eq!(speech, 1);
         assert!(matches!(
             meaning_check(crate::providers::ModelState::Missing).state,
-            State::Warn { ref note } if note.contains("leo update")
+            State::Warn { ref note } if note.contains("next time leo opens")
         ));
+        for state in [
+            crate::providers::ModelState::Missing,
+            crate::providers::ModelState::Damaged,
+        ] {
+            assert!(!format!("{:?}", meaning_check(state)).contains("leo update"));
+        }
         assert!(matches!(
             meaning_check(crate::providers::ModelState::Ready).state,
             State::Ready

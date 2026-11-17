@@ -19,8 +19,8 @@ const MOST_TOKENS: usize = 512;
 const BATCH: usize = 16;
 
 pub fn manifest() -> Vec<(String, String)> {
-    let text = std::env::var("LEO_MEANING_MANIFEST").unwrap_or_else(|_| MODEL_MANIFEST.to_string());
-    text.split_whitespace()
+    MODEL_MANIFEST
+        .split_whitespace()
         .filter_map(|pair| pair.split_once('='))
         .map(|(name, sha)| (name.to_string(), sha.to_string()))
         .collect()
@@ -62,19 +62,18 @@ pub fn wanted() -> bool {
         && state() != ModelState::Ready
 }
 
-pub fn fetch(quiet: bool) -> Result<PathBuf> {
-    let base = std::env::var("LEO_MEANING_URL").unwrap_or_else(|_| MODEL_URL.to_string());
-    let dir = dir();
-    for (name, sha) in manifest() {
-        if model_state(&dir.join(&name), &sha) == ModelState::Ready {
+pub fn fetch() -> Result<PathBuf> {
+    fetch_from(MODEL_URL, &dir(), &manifest())
+}
+
+pub(crate) fn fetch_from(base: &str, dir: &Path, manifest: &[(String, String)]) -> Result<PathBuf> {
+    for (name, sha) in manifest {
+        if model_state(&dir.join(name), sha) == ModelState::Ready {
             continue;
         }
-        if !quiet {
-            println!("  {name}");
-        }
-        download_verified(&format!("{base}/{name}"), &sha, &dir, &name, quiet)?;
+        download_verified(&format!("{base}/{name}"), sha, dir, name)?;
     }
-    Ok(dir)
+    Ok(dir.to_path_buf())
 }
 
 pub struct Model {
@@ -336,7 +335,26 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs the downloaded model: leo update fetches it"]
+    fn the_meaning_model_is_fetched_once_and_then_kept() {
+        let scratch = tempfile::tempdir().unwrap();
+        let source = scratch.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("config.json"), b"{}").unwrap();
+        let manifest = vec![(
+            "config.json".to_string(),
+            crate::providers::sha256_of(&source.join("config.json")).unwrap(),
+        )];
+        let dest = scratch.path().join("models");
+        let base = format!("file://{}", source.display());
+        assert_eq!(fetch_from(&base, &dest, &manifest).unwrap(), dest);
+        assert_eq!(std::fs::read(dest.join("config.json")).unwrap(), b"{}");
+        std::fs::remove_dir_all(&source).unwrap();
+        assert_eq!(fetch_from(&base, &dest, &manifest).unwrap(), dest);
+        assert_eq!(std::fs::read(dest.join("config.json")).unwrap(), b"{}");
+    }
+
+    #[test]
+    #[ignore = "needs the downloaded model: the app fetches it when it opens"]
     fn sentences_that_mean_the_same_are_closer_than_ones_that_do_not() {
         let model = Model::load(&dir()).unwrap();
         let v = model

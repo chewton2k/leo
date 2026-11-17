@@ -428,11 +428,11 @@ candle (`candle-transformers` BERT, `tokenizers` without onig): CLS pooling,
 unit length, queries prefixed with `QUERY`. Files pinned to a Hugging Face
 commit with SHA-256s (`MODEL_MANIFEST`), kept in
 `models_dir()/bge-small-en-v1.5`, loaded on demand (`model()`) and unloaded
-after 60 seconds idle once callers release their model handles. `leo update`
-fetches it (`ensure_meaning_model`), and the app fetches it quietly in
-the background when missing (`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL`
-or `LEO_NO_MEANING_MODEL` turns that off (e2e and Playwright set them);
-`LEO_MEANING_URL` / `LEO_MEANING_MANIFEST` point tests at file:// stand-ins.
+after 60 seconds idle once callers release their model handles. The app
+fetches it in the background at launch when it is missing or damaged
+(`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL` or `LEO_NO_MEANING_MODEL`
+turns that off (e2e and Playwright set them); tests call `fetch_from` with a
+file:// source.
 Doctor's notes section says whether it is ready. The real-model test is
 `#[ignore]`d.
 
@@ -598,10 +598,8 @@ resume transcription. Native recording holds a core activity lease until finishe
 The model library lists damaged catalog files and uncatalogued regular GGUF files
 with disk totals; deletion stays contained and never follows links.
 
-The terminal update command fetches the published release installer with HTTPS,
-time/size limits and explicit failure handling before executing it. It never
-pipes a failed curl into an empty successful shell. Model checking still goes
-through the shared catalog library; legacy ONNX installer fixtures are retired.
+Model checks go through the shared catalog library; legacy ONNX installer
+fixtures are retired.
 
 ### Recording energy
 

@@ -347,9 +347,10 @@ BAAI bge-small-en-v1.5 on CPU via candle (all three Candle crates pinned to
 tokenizer and pooling unchanged). Files pinned by commit and SHA-256
 (`MODEL_MANIFEST`) in `models_dir()/bge-small-en-v1.5`, re-hashed only when they
 change, unloaded after 60 s idle once no caller holds them (loading outside the
-cache mutex). `leo update` fetches it (`ensure_meaning_model`); the app fetches
-it quietly when missing. `LEO_INSTALL_NO_MODEL` / `LEO_NO_MEANING_MODEL` turn
-that off; `LEO_MEANING_URL` / `LEO_MEANING_MANIFEST` point tests at file://.
+cache mutex). The app fetches it in the background at launch when it is
+missing or damaged (`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL` /
+`LEO_NO_MEANING_MODEL` turn that off; tests call `fetch_from` with a file://
+source.
 
 ### Durable recording workflows
 
@@ -467,6 +468,4 @@ through dictation.
 The model library lists damaged and uncatalogued GGUF files; deletion stays
 contained and never follows links.
 
-`leo update` fetches the release installer over HTTPS with time/size limits and
-never pipes a failed curl into an empty successful shell. Git backup settings and
-Health checks are retired.
+Git backup settings and Health checks are retired.

@@ -103,13 +103,6 @@ pub fn worst_state(states: impl IntoIterator<Item = ModelState>) -> ModelState {
     }
 }
 
-pub fn speech_model_state() -> ModelState {
-    match crate::speech::library::library().and_then(|l| l.selected()) {
-        Ok(_) => ModelState::Ready,
-        Err(_) => ModelState::Missing,
-    }
-}
-
 pub(crate) fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
@@ -130,30 +123,11 @@ pub fn sha256_of(path: &std::path::Path) -> Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
-pub fn download_speech_model() -> Result<std::path::PathBuf> {
-    fetch_speech_model()
-}
-
-fn fetch_speech_model() -> Result<std::path::PathBuf> {
-    let library = crate::speech::library::library()?;
-    let selection = library.selection()?;
-    let model = crate::speech::catalog::catalog().get(&selection.id)?;
-    library.fetch(
-        &selection.id,
-        &model.url(),
-        &std::sync::atomic::AtomicBool::new(false),
-        &|_, _| {},
-    )?;
-    library.use_model(&selection.id, &selection.language)?;
-    Ok(library.selected()?.path)
-}
-
 pub fn download_verified(
     url: &str,
     sha256: &str,
     dir: &std::path::Path,
     name: &str,
-    quiet: bool,
 ) -> Result<std::path::PathBuf> {
     anyhow::ensure!(
         !name.is_empty()
@@ -190,15 +164,10 @@ pub fn download_verified(
     if !url.starts_with("file://") {
         curl.args(["--proto", "=https", "--proto-redir", "=https"]);
     }
-    curl.args(["--max-filesize", "1073741824"]);
-    if quiet {
-        curl.arg("-sS")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-    } else {
-        curl.arg("--progress-bar");
-    }
+    curl.args(["--max-filesize", "1073741824", "-sS"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     let curl = ai::provider::process::Process::new(
         curl.spawn()
             .map_err(|e| anyhow::anyhow!("could not run curl: {e}"))?,
@@ -264,7 +233,7 @@ mod tests {
     fn model_download_names_stay_inside_the_model_folder() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["../outside", "/outside", "a/b", "a\\b", ".", "..", "a:b"] {
-            assert!(download_verified("file:///unused", "00", dir.path(), name, true).is_err());
+            assert!(download_verified("file:///unused", "00", dir.path(), name).is_err());
         }
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
@@ -279,12 +248,11 @@ mod tests {
         std::fs::create_dir(&models).unwrap();
         let good = sha256_of(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, models.join("weights.part")).unwrap();
-        let saved =
-            download_verified(&file_url(&outside), &good, &models, "weights", true).unwrap();
+        let saved = download_verified(&file_url(&outside), &good, &models, "weights").unwrap();
         assert_eq!(std::fs::read_to_string(saved).unwrap(), "keep");
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         std::os::unix::fs::symlink(&outside, models.join("linked")).unwrap();
-        assert!(download_verified(&file_url(&outside), &good, &models, "linked", true).is_err());
+        assert!(download_verified(&file_url(&outside), &good, &models, "linked").is_err());
     }
 
     #[test]
@@ -307,21 +275,14 @@ mod tests {
             .unwrap()
             .set_modified(std::time::SystemTime::now() - STALE_DOWNLOAD * 2)
             .unwrap();
-        let saved =
-            download_verified(&file_url(&source), &good, &models, "ggml-x.bin", true).unwrap();
+        let saved = download_verified(&file_url(&source), &good, &models, "ggml-x.bin").unwrap();
         assert_eq!(std::fs::read(&saved).unwrap(), b"pretend model");
         assert!(!stale.exists());
         assert!(fresh.exists());
         assert!(!models.join("ggml-x.bin.part").exists());
 
-        let err = download_verified(
-            &file_url(&source),
-            &"0".repeat(64),
-            &models,
-            "ggml-y.bin",
-            true,
-        )
-        .unwrap_err();
+        let err = download_verified(&file_url(&source), &"0".repeat(64), &models, "ggml-y.bin")
+            .unwrap_err();
         assert!(err.to_string().contains("damaged"), "{err}");
         assert!(!models.join("ggml-y.bin").exists());
         assert!(!models.join("ggml-y.bin.part").exists());
@@ -331,7 +292,6 @@ mod tests {
             &good,
             &models,
             "ggml-z.bin",
-            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("failed"), "{err}");
