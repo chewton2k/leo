@@ -127,18 +127,16 @@ fn text_from(value: Option<serde_yaml::Value>) -> Option<String> {
         .filter(|s| !s.trim().is_empty())
 }
 
-fn parse_note_from_markdown(
-    content: &str,
-    relative_path: &Path,
-    modified: DateTime<Utc>,
-) -> Result<Note> {
-    let text = content
-        .strip_prefix('\u{feff}')
-        .unwrap_or(content)
-        .replace("\r\n", "\n");
-    let (front, body) = split_front_matter(&text)?;
-    let mut props = front.unwrap_or_default();
+fn normalised(text: &str) -> std::borrow::Cow<'_, str> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    if text.contains("\r\n") {
+        std::borrow::Cow::Owned(text.replace("\r\n", "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
+}
 
+fn head_of(props: &mut serde_yaml::Mapping, relative_path: &Path) -> Head {
     let directory = relative_path
         .parent()
         .map(|p| {
@@ -169,6 +167,86 @@ fn parse_note_from_markdown(
         } else {
             stem.clone()
         };
+    Head {
+        id,
+        title,
+        directory,
+    }
+}
+
+fn marker_end(bytes: &[u8]) -> Option<usize> {
+    (0..bytes.len()).find_map(|at| {
+        let rest = &bytes[at..];
+        if rest.starts_with(b"\n---\n") {
+            Some(at + 5)
+        } else if rest.starts_with(b"\n---\r\n") {
+            Some(at + 6)
+        } else {
+            None
+        }
+    })
+}
+
+fn read_more(file: &mut fs::File, bytes: &mut Vec<u8>) -> Option<bool> {
+    use std::io::Read;
+    let mut chunk = [0u8; 8 * 1024];
+    loop {
+        match file.read(&mut chunk) {
+            Ok(n) => {
+                bytes.extend_from_slice(&chunk[..n]);
+                return Some(n > 0);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+            Err(_) => return None,
+        }
+    }
+}
+
+fn read_head(path: &Path, relative: &Path) -> Option<Head> {
+    let mut file = fs::File::open(path).ok()?;
+    let mut bytes = Vec::new();
+    while bytes.len() < 8 && read_more(&mut file, &mut bytes)? {}
+    let start = if bytes.starts_with(b"\xef\xbb\xbf") {
+        3
+    } else {
+        0
+    };
+    let first = if bytes[start..].starts_with(b"---\n") {
+        start + 3
+    } else if bytes[start..].starts_with(b"---\r\n") {
+        start + 4
+    } else {
+        return Some(head_of(&mut serde_yaml::Mapping::new(), relative));
+    };
+    let mut from = first;
+    loop {
+        if let Some(end) = marker_end(&bytes[from..]) {
+            bytes.truncate(from + end);
+            break;
+        }
+        from = bytes.len().saturating_sub(5).max(first);
+        if !read_more(&mut file, &mut bytes)? {
+            break;
+        }
+    }
+    let text = String::from_utf8(bytes).ok()?;
+    let (front, _) = split_front_matter(&normalised(&text)).ok()?;
+    Some(head_of(&mut front.unwrap_or_default(), relative))
+}
+
+fn parse_note_from_markdown(
+    content: &str,
+    relative_path: &Path,
+    modified: DateTime<Utc>,
+) -> Result<Note> {
+    let text = normalised(content);
+    let (front, body) = split_front_matter(&text)?;
+    let mut props = front.unwrap_or_default();
+    let Head {
+        id,
+        title,
+        directory,
+    } = head_of(&mut props, relative_path);
     let tags = props.remove("tags").map(tags_from).unwrap_or_default();
     let created_at = props
         .remove("created_at")
@@ -447,14 +525,7 @@ fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
         .filter_map(|(path, meta)| {
             let deleted_at = DateTime::<Utc>::from(meta?.modified().ok()?);
             let relative = path.strip_prefix(&trash).ok()?.to_path_buf();
-            let head = fs::read_to_string(&path)
-                .ok()
-                .and_then(|text| parse_note_from_markdown(&text, &relative, deleted_at).ok())
-                .map(|note| Head {
-                    id: note.id,
-                    title: note.title,
-                    directory: note.directory,
-                });
+            let head = read_head(&path, &relative);
             Some(TrashEntry {
                 path,
                 relative,
@@ -2993,6 +3064,104 @@ mod tests {
             chrono::Utc::now(),
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_header_reader_agrees_with_the_note_parser() {
+        let tmp = tempfile::tempdir().unwrap();
+        let big = "x".repeat(70 * 1024);
+        let near = format!(
+            "---\nid: abc\ntitle: {}é\n---\nbody",
+            "t".repeat(8 * 1024 - 20)
+        );
+        let mut shapes: Vec<(&str, String)> = vec![
+            ("cs130/Office hours.md", "Tuesday 3-5pm\n".into()),
+            (
+                "Notes.md",
+                "---\ntags:\n  - '#exam'\n  - graphs\npinned: true\n---\nBody\n".into(),
+            ),
+            ("A.md", "---\ntags: \"exam, graphs #bfs\"\n---\nx".into()),
+            ("Real title.md", "---\ntitle: Real title\n---\nx".into()),
+            ("Notes.md", "---\ntitle: Real title\n---\nx".into()),
+            ("A.md", "---\n---\nbody".into()),
+            ("B.md", "---\ntitle: T\n---".into()),
+            (
+                "Hello.md",
+                "\u{feff}---\r\nid: abc\r\ntitle: Hello\r\n---\r\n\r\nline one\r\n".into(),
+            ),
+            ("Hello.md", "\u{feff}plain".into()),
+            ("Rule.md", "---\nnot a header\n".into()),
+            ("A.md", "---\ntitle: [unclosed\n---\nx".into()),
+            ("A.md", "---\njust words\n---\nx".into()),
+            ("A.md", "---\n- a\n- b\n---\nx".into()),
+            ("A.md", "---\nid: 42\ntitle: A\n---\nx".into()),
+            ("Renamed.md", "---\nid: abc\ntitle: Old name\n---\nx".into()),
+            (
+                "d/e/5d8f8c3e-9a4b-4c1e-8f7a-2b3c4d5e6f70.md",
+                "---\ntitle: Old style\n---\nx".into(),
+            ),
+            ("A.md", "---\n---\n".into()),
+            ("A.md", "---\n---".into()),
+            ("A.md", "---\ntitle: A\n---\n---\nmore\n---\n".into()),
+            ("A.md", "---\r\ntitle: A\r\n---\r\nbody".into()),
+            ("A.md", "---\r\n---\r\nbody".into()),
+            ("A.md", "---\ntitle: A\r\r\n---\r\r\nbody\n---\n".into()),
+            ("A.md", "--".into()),
+            ("A.md", "".into()),
+            ("A.md", "-- -\n---\n".into()),
+            ("A.md", format!("---\ntitle: A\nlong: {big}\n---\nbody")),
+            (
+                "A.md",
+                format!("---\ntitle: A\nlong: {}\n---\nbody", "y".repeat(9 * 1024)),
+            ),
+            ("A.md", format!("---\ntitle: A\nlong: {big}\n")),
+            ("A.md", near),
+        ];
+        for n in 8 * 1024 - 8..8 * 1024 + 8 {
+            shapes.push((
+                "A.md",
+                format!("---\ntitle: A\nlong: {}\n---\nbody", "z".repeat(n - 21)),
+            ));
+            shapes.push((
+                "A.md",
+                format!(
+                    "---\r\ntitle: A\r\nlong: {}\r\n---\r\nbody",
+                    "z".repeat(n - 24)
+                ),
+            ));
+        }
+        for (n, (relative, text)) in shapes.iter().enumerate() {
+            let path = tmp.path().join(n.to_string()).join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, text).unwrap();
+            let parsed = parse_note_from_markdown(text, Path::new(relative), Utc::now())
+                .ok()
+                .map(|note| (note.id, note.title, note.directory));
+            let read = read_head(&path, Path::new(relative))
+                .map(|head| (head.id, head.title, head.directory));
+            let shown: String = text.chars().take(60).collect();
+            assert_eq!(read, parsed, "{relative} {shown:?}");
+        }
+    }
+
+    #[test]
+    fn a_trashed_note_is_listed_without_reading_its_body() {
+        let (mut store, _tmp) = temp_store();
+        let id = uuid::Uuid::new_v4().to_string();
+        let path = store.notes_dir.join(".trash").join("Big.md");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = format!("---\nid: {id}\ntitle: Big\n---\n").into_bytes();
+        bytes.extend([0xff, 0xfe]);
+        bytes.extend(std::iter::repeat_n(b'w', 20 * 1024 * 1024));
+        fs::write(&path, bytes).unwrap();
+        let head = read_head(&path, Path::new("Big.md")).unwrap();
+        assert_eq!(
+            (head.id.as_str(), head.title.as_str()),
+            (id.as_str(), "Big")
+        );
+        assert_eq!(store.trashed().len(), 1);
+        assert!(store.restore_many(std::slice::from_ref(&id)).is_empty());
+        assert!(store.notes.is_empty());
     }
 
     #[test]
