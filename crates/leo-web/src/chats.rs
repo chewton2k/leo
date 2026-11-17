@@ -335,6 +335,18 @@ fn summary_of(row: &rusqlite::Row) -> rusqlite::Result<Summary> {
     })
 }
 
+pub(crate) fn with_misses(dir: &Path) -> Vec<Chat> {
+    db_of(dir)
+        .with(|c| {
+            let mut found = c.prepare(&format!(
+                "SELECT {CHAT_COLUMNS} FROM chats WHERE messages LIKE '%[[incorrect]]%' OR messages LIKE '%\"quizzes\"%'"
+            ))?;
+            let rows = found.query_map([], chat_of)?;
+            rows.collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn list(dir: &Path) -> Vec<Summary> {
     db_of(dir)
         .with(|c| {

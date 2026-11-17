@@ -273,10 +273,9 @@ fn reviewed(dir: &Path) -> BTreeSet<String> {
 
 pub fn missed(dir: &Path, now: DateTime<Utc>) -> Vec<Missed> {
     let done = reviewed(dir);
-    let mut out: Vec<Missed> = chats::list(dir)
+    let mut out: Vec<Missed> = chats::with_misses(dir)
         .iter()
-        .filter_map(|summary| chats::load(dir, &summary.id))
-        .flat_map(|chat| missed_in(&chat, now))
+        .flat_map(|chat| missed_in(chat, now))
         .filter(|m| !done.contains(&m.key) && !m.question.is_empty())
         .collect();
     out.sort_by(|a, b| a.at.cmp(&b.at).then(a.key.cmp(&b.key)));
@@ -512,5 +511,84 @@ mod tests {
         assert!(!missed(dir.path(), at(7, 9))[0].due);
         assert!(!valid_key("chat-00000002:xyz"));
         assert_eq!(key_of("chat-00000002", "a"), key_of("chat-00000002", "a"));
+    }
+
+    #[test]
+    fn review_finds_every_kind_of_miss_and_skips_plain_chats() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut shouted = quiz();
+        shouted[3]["text"] = serde_json::json!("[[Incorrect]] Not quite: BFS uses a queue.");
+        study(dir.path(), "chat-reply-0001", shouted, at(1, 9));
+        study(
+            dir.path(),
+            "chat-card-00001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "Try this.",
+                    "quizzes": [
+                        { "question": "What does DFS use?", "answer": "a stack", "given": "a queue", "correct": false }
+                    ]
+                }),
+            ],
+            at(1, 10),
+        );
+        study(
+            dir.path(),
+            "chat-graded-001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "Try this.",
+                    "quizzes": [
+                        { "question": "Why a queue?", "answer": "oldest first", "given": "dunno", "correct": null, "reply": { "text": "[[INCORRECT]] It takes the oldest first." } }
+                    ]
+                }),
+            ],
+            at(1, 11),
+        );
+        study(
+            dir.path(),
+            "chat-plain-0001",
+            vec![
+                said("user", "hello"),
+                said("assistant", "Hi, what are we reading?"),
+            ],
+            at(1, 12),
+        );
+        study(
+            dir.path(),
+            "chat-right-0001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "[[correct]] Yes.",
+                    "quizzes": [
+                        { "question": "Right one?", "answer": "a", "given": "a", "correct": true }
+                    ]
+                }),
+            ],
+            at(1, 13),
+        );
+        let found = missed(dir.path(), at(3, 9));
+        let seen: Vec<(&str, &str, &str)> = found
+            .iter()
+            .map(|m| (m.chat.as_str(), m.question.as_str(), m.answer.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("chat-card-00001", "What does DFS use?", "a queue"),
+                ("chat-graded-001", "Why a queue?", "dunno"),
+                (
+                    "chat-reply-0001",
+                    "Which data structure does BFS use to pick the next vertex?",
+                    "a stack"
+                ),
+            ]
+        );
     }
 }
