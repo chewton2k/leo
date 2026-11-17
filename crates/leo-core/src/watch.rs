@@ -19,6 +19,7 @@ impl Watch {
         let mut watcher = RecommendedWatcher::new(
             move |event: notify::Result<notify::Event>| match event {
                 Ok(event) => {
+                    failed.store(false, Ordering::Relaxed);
                     if event.need_rescan() || event.paths.iter().any(|path| counts(&root, path)) {
                         seen.store(true, Ordering::Relaxed);
                     }
@@ -61,6 +62,25 @@ fn counts(root: &Path, path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_watcher_error_clears_once_events_flow_again() {
+        let root = tempfile::tempdir().unwrap();
+        let watch = Watch::start(root.path()).unwrap();
+        watch.broken.store(true, Ordering::Relaxed);
+        watch.touched.store(true, Ordering::Relaxed);
+        assert!(watch.take());
+        std::fs::write(root.path().join("After.md"), "x").unwrap();
+        let start = std::time::Instant::now();
+        while !watch.take() {
+            assert!(start.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(
+            !watch.broken(),
+            "after one Err the watch stays broken through later events and takes"
+        );
+    }
 
     #[test]
     fn hidden_folders_inside_the_notes_do_not_count_and_everything_else_does() {
