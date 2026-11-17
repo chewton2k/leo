@@ -223,52 +223,16 @@ impl Db {
         conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
         conn.execute_batch(SCHEMA)?;
         let tx = conn.transaction()?;
-        let has_description: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('note_tasks') WHERE name = 'description')",
-            [],
-            |r| r.get(0),
+        add_column(&tx, "note_tasks", "description", "TEXT NOT NULL DEFAULT ''")?;
+        add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
+        add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
+        add_column(&tx, "dictations", "original", "TEXT")?;
+        add_column(
+            &tx,
+            "margin_threads",
+            "pinned",
+            "INTEGER NOT NULL DEFAULT 0",
         )?;
-        if !has_description {
-            tx.execute_batch(
-                "ALTER TABLE note_tasks ADD COLUMN description TEXT NOT NULL DEFAULT '';",
-            )?;
-        }
-        let has_piece: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('vectors') WHERE name = 'piece')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !has_piece {
-            tx.execute_batch("ALTER TABLE vectors ADD COLUMN piece TEXT NOT NULL DEFAULT '';")?;
-        }
-        let has_edited: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('dictations') WHERE name = 'edited')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !has_edited {
-            tx.execute_batch(
-                "ALTER TABLE dictations ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;",
-            )?;
-        }
-        let has_original: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('dictations') WHERE name = 'original')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !has_original {
-            tx.execute_batch("ALTER TABLE dictations ADD COLUMN original TEXT;")?;
-        }
-        let has_pinned: bool = tx.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('margin_threads') WHERE name = 'pinned')",
-            [],
-            |r| r.get(0),
-        )?;
-        if !has_pinned {
-            tx.execute_batch(
-                "ALTER TABLE margin_threads ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;",
-            )?;
-        }
         tx.pragma_update(None, "user_version", VERSION)?;
         tx.commit()?;
         #[cfg(unix)]
@@ -310,6 +274,25 @@ impl Db {
     pub fn tidy(&self) -> Result<()> {
         self.with(|c| c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;"))
     }
+}
+
+fn add_column(
+    conn: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> rusqlite::Result<()> {
+    let present: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
+        [table, column],
+        |r| r.get(0),
+    )?;
+    if !present {
+        conn.execute_batch(&format!(
+            "ALTER TABLE {table} ADD COLUMN {column} {definition};"
+        ))?;
+    }
+    Ok(())
 }
 
 const MOST_OPEN: usize = 32;
