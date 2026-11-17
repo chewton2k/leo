@@ -1411,8 +1411,8 @@
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(sending),
-          });
-          if (!response.ok) {
+          }).catch(() => null);
+          if (!response || !response.ok) {
             if (!unsaved.has(id)) {
               unsaved.add(id);
               notify('Felix could not save this chat, so it may be missing from your history.');

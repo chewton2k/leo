@@ -1095,6 +1095,36 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   assert.equal(told.length, 1);
 });
 
+test('a history save that cannot reach leo warns once', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const from = source.indexOf('    let upload = Promise.resolve();');
+  const code = source.slice(from, source.indexOf('    async function loadChats()', from));
+  const told = [];
+  let reachable = false;
+  const messages = [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }];
+  const context = {
+    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    NAME_CHECKS: [], notify: (t) => told.push(t),
+    request: async () => {
+      if (!reachable) throw new TypeError('Failed to fetch');
+      return { ok: true, json: async () => ({ id: 'chat-1', named: true, count: 2, updated_at: '2026-11-17T00:00:00Z' }) };
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.__remember = remember;`, context);
+  await context.__remember();
+  await context.__remember();
+  assert.equal(told.length, 1);
+  reachable = true;
+  await context.__remember();
+  reachable = false;
+  await context.__remember();
+  assert.equal(told.length, 2);
+});
+
 const pair = () => [{ role: 'user', text: 'What is a heap?' }, { role: 'assistant', text: '[n1] A heap keeps the minimum on top.', sources: [{ n: 1, id: 'a', title: 'Heaps' }] }];
 
 test('every answer offers Copy, the last one Retry, and the last question Edit', () => {
