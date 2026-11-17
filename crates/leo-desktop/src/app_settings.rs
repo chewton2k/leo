@@ -259,8 +259,13 @@ impl AppSettings {
             });
         }
     }
-    fn permission_view(&self) -> Value {
-        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility(),"notifications":crate::permissions::notifications()})
+    fn permission_view(&self, fresh: bool) -> Value {
+        let notifications = if fresh {
+            crate::permissions::notifications()
+        } else {
+            crate::permissions::notifications_soon()
+        };
+        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility(),"notifications":notifications})
     }
 }
 impl leo_web::app_settings::AppApi for AppSettings {
@@ -268,7 +273,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
         let preferences = self.preferences();
         let mut preferences_view = serde_json::to_value(&preferences)?;
         preferences_view["writing_done"] = preferences.writing_done().into();
-        let permissions = self.permission_view();
+        let permissions = self.permission_view(false);
         let updates = self
             .updates
             .get()
@@ -321,7 +326,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
     fn health(&self, notes: &Path) -> Result<Value> {
         use leo_web::dictation::DictationApi;
         let mut view = leo_host::health::scan(notes)?;
-        let permissions = self.permission_view();
+        let permissions = self.permission_view(true);
         let model = leo_services::speech::library::library()?.selected().is_ok();
         let dictation = self.dictation.view()?;
         let shortcut = dictation["shortcut"].clone();

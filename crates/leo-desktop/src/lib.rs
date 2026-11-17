@@ -271,6 +271,9 @@ fn set_up(
                 finish_close_after(&handle, closing, Duration::from_millis(300));
             }
         }
+        if let WindowEvent::Focused(true) = event {
+            permissions::forget_notifications();
+        }
         if let WindowEvent::Focused(_) | WindowEvent::Resized(_) = event {
             let visible =
                 handle.is_visible().unwrap_or(true) && !handle.is_minimized().unwrap_or(false);
