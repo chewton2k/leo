@@ -128,7 +128,7 @@ Decided: one app, window only (2026-10-31).
   spot on every page (2026-11-16, replacing the bar that followed each page's content).
 - UI preferences survive a port change (2026-11-14): localStorage is per origin and
   the engine port drifts when the saved one is busy, so every `leo-*` key (not
-  `leo-draft*`, `leo-chat-v1` or `leo-search`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
+  `leo-draft*` or `leo-chat-v1`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
   `^leo-[a-z0-9-]{1,48}$`, 16 KB per value, 128 KB total, temp file + rename,
   merged per key under a lock). `/prefs.js` (behind the session gate, `no-store`,
   loads before `/theme.js`) seeds localStorage from the file (the file's keys win; keys it lacks are

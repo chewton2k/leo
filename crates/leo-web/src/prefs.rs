@@ -11,7 +11,7 @@ use serde::Deserialize;
 use crate::AppState;
 
 const FILE: &str = "ui-prefs.json";
-const CONTENT: [&str; 2] = ["leo-chat-v1", "leo-search"];
+const CONTENT: [&str; 1] = ["leo-chat-v1"];
 const MOST_VALUE: usize = 16 * 1024;
 const MOST_TOTAL: usize = 128 * 1024;
 pub(crate) const BODY_BYTES: usize = MOST_TOTAL + 64 * 1024;
@@ -165,7 +165,6 @@ mod tests {
             "leo-draft-v1",
             "leo-draft",
             "leo-chat-v1",
-            "leo-search",
             &format!("leo-{}", "a".repeat(49)),
         ] {
             assert!(!key_ok(bad), "{bad}");
