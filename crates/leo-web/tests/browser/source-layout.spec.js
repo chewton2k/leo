@@ -144,7 +144,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
   const style = pageCss();
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
-  const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
+  const show = core.slice(core.indexOf('function readLine('), core.indexOf('function newNote('));
   const body = '# Introduction to planetary environments\n\nFirst paragraph.\n\n' + 'Reading material.\n\n'.repeat(80) + '## **Sounds**\n\nCompare vowels.\n\n### Vowel examples\n\n' + 'Examples to compare.\n\n'.repeat(30) + '```md\n# Ignore code\n```\n\n## Sounds\n\nLast paragraph.';
   const fixture = `const md = window.leoMarkdown, leoDoc = window.leoDoc;
     const $ = (q, root = document) => root.querySelector(q), app = $('#app');
