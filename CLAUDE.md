@@ -10,7 +10,7 @@ the compiler enforces it — do not add an upward dependency:
 
 | Crate | Holds | Depends on |
 |-------|-------|------------|
-| `crates/leo-core` | `notes`, `store`, `filename`, `open` (opens a link with the system), `children` (stops a process tree, lists the processes leo owns for Felix activity's Running now; `quiet_command` starts every helper program without a console window on Windows), `diag`, `keep` (retention choices), `paths`, `recording`, `activity` | — |
+| `crates/leo-core` | `notes`, `store`, `filename`, `open` (opens a link with the system), `children` (stops a process tree, runs a bounded helper, lists the processes leo owns for Felix activity's Running now; `quiet_command` starts every helper program without a console window on Windows), `diag`, `keep` (retention choices), `paths`, `recording`, `activity` | — |
 | `crates/leo-services` | `ai/` (chains, prompts, live transcription), `config/` (providers, credentials), `health`, `providers`, `speech`, `dictation`, `session`, `update`, `usage`, `import` | core |
 | `crates/leo-web` | leo's engine and pages: `lib.rs` (`start` → `Running`, router), `routes/` (handlers by area), `token.rs`, and the page in `src/web/` (`page-head.html` + `styles/*.css` + `page-tail.html` joined at compile time, `app/*.js` served as `/app.js`, `markdown.js`, …) | core |
 | `crates/leo-host` | `powers()` (the AI, speech, settings, recording housekeeping and import powers handed to the engine) and `leo-test-server` (Playwright's engine) | core, services, web |
