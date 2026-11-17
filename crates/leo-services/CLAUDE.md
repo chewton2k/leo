@@ -101,8 +101,9 @@ retry. `assemble` prefixes `[Speaker N]` per line (`live::stitch` keeps those
 lines) and `archive` gives one passage per run (raw text). Measured on AMI
 meetings: 86–91% of transcribed speech gets the right speaker, Sortformer
 ~0.5 s per minute on Metal, ~1.6 s per minute on CPU. The ignored
-`speakers_across_models` test and `speakers.yml` (weekly, manual, PRs touching
-labelling; models over 2.2 GB only on demand) run it per curated English model
+`speakers_across_models` test and `speakers.yml` (weekly and manual: every curated
+English model; PRs touching labelling: three models; models over 2.2 GB only on
+demand; the test is built once per run) run it per model
 on a pinned, checksummed AMI excerpt: right speaker ≥ 80%, speech with text
 ≥ 75%, and word error rate against AMI's manual words (fillers and cut-off words
 left out) at most 5 points above the same model's plain transcript. Words kept

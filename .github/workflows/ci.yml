@@ -7,7 +7,7 @@ on:
   merge_group:
   workflow_dispatch:
   schedule:
-    - cron: '23 9 * * *'
+    - cron: '23 9 * * 1'
 
 permissions:
   contents: read
@@ -167,35 +167,23 @@ jobs:
           - project: desktop
             browser: chromium
             shard: 1
-            shards: 4
+            shards: 3
           - project: desktop
             browser: chromium
             shard: 2
-            shards: 4
+            shards: 3
           - project: desktop
             browser: chromium
             shard: 3
-            shards: 4
-          - project: desktop
-            browser: chromium
-            shard: 4
-            shards: 4
+            shards: 3
           - project: webkit
             browser: webkit
             shard: 1
-            shards: 3
+            shards: 2
           - project: webkit
             browser: webkit
             shard: 2
-            shards: 3
-          - project: webkit
-            browser: webkit
-            shard: 3
-            shards: 3
-          - project: phone
-            browser: chromium
-            shard: 1
-            shards: 1
+            shards: 2
     runs-on: macos-latest
     timeout-minutes: 25
     steps:
@@ -220,12 +208,17 @@ jobs:
       - name: Install browser test dependencies
         run: pnpm --dir crates/leo-web/tests/browser install --frozen-lockfile
       - name: Check browser shard coverage
-        if: matrix.shard == 1 && (matrix.project == 'desktop' || matrix.project == 'webkit')
+        if: matrix.shard == 1
         run: pnpm --dir crates/leo-web/tests/browser run test:shards
       - name: Browser integration tests (${{ matrix.project }}, ${{ matrix.shard }}/${{ matrix.shards }})
         run: |
           pnpm --dir crates/leo-web/tests/browser exec playwright install ${{ matrix.browser }}
           pnpm --dir crates/leo-web/tests/browser exec playwright test --project=${{ matrix.project }} --shard=${{ matrix.shard }}/${{ matrix.shards }}
+      - name: Browser integration tests (phone)
+        if: ${{ !cancelled() && matrix.project == 'desktop' && matrix.shard == 1 }}
+        env:
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report-phone
+        run: pnpm --dir crates/leo-web/tests/browser exec playwright test --project=phone --output=test-results-phone
       - name: Browser previews and failure traces
         if: always()
         uses: actions/upload-artifact@v6
@@ -234,68 +227,45 @@ jobs:
           path: |
             crates/leo-web/tests/browser/test-results/
             crates/leo-web/tests/browser/playwright-report/
+            crates/leo-web/tests/browser/test-results-phone/
+            crates/leo-web/tests/browser/playwright-report-phone/
           if-no-files-found: ignore
           retention-days: 14
 
-  lint:
+  checks:
+    name: clippy, Rust 1.88, Intel Mac
     needs: changes
     if: needs.changes.outputs.rust == 'true'
-    runs-on: macos-latest
-    timeout-minutes: 20
     concurrency:
-      group: ci-lint-${{ github.ref }}
+      group: ci-checks-${{ github.ref }}
       cancel-in-progress: true
+    runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: x86_64-apple-darwin
       - uses: Swatinem/rust-cache@v2
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy
         run: cargo clippy --workspace --exclude leo-desktop --all-targets --locked -- -D warnings
-
-  msrv:
-    name: minimum Rust version (1.88)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    concurrency:
-      group: ci-msrv-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: macos-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88
-      - uses: Swatinem/rust-cache@v2
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo check --workspace --exclude leo-desktop --all-targets --locked
-
-  targets:
-    name: build (x86_64-apple-darwin)
-    needs: changes
-    if: needs.changes.outputs.rust == 'true'
-    concurrency:
-      group: ci-build-x86_64-apple-darwin-${{ github.ref }}
-      cancel-in-progress: true
-    runs-on: macos-latest
-    timeout-minutes: 25
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: x86_64-apple-darwin
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: cargo build --release --locked --target x86_64-apple-darwin
+      - name: Minimum Rust version (1.88)
+        if: ${{ !cancelled() }}
+        run: cargo +1.88 check --workspace --exclude leo-desktop --all-targets --locked
+      - name: Compile for Intel Macs
+        if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+        run: cargo check --locked --target x86_64-apple-darwin
+      - name: Build the release for Intel Macs
+        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        run: cargo build --release --locked --target x86_64-apple-darwin
 
   ci:
     name: CI passed
-    needs: [changes, format, node, test, browser-server, browser, lint, msrv, targets]
+    needs: [changes, format, node, test, browser-server, browser, checks]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5

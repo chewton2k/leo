@@ -32,7 +32,7 @@ test's run, a single Playwright `-g` test, one node test file), then commit,
 push, and let CI run the full suite. Check CI once; fix a red run with a
 follow-up push. CI compares main with the newest verified ancestor (a successful
 CI push or a newer release), and pull requests with their base. Unknown inputs
-and nightly/manual runs test everything; failed and cancelled pushes never
+and weekly/manual runs test everything; failed and cancelled pushes never
 advance the baseline. `scripts/ci-scope.sh` selects independent Rust, browser,
 Node checks; CONTRIBUTING.md describes the selection.
 
