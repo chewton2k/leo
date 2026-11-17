@@ -1021,7 +1021,8 @@ a modal.
   Unfinished recording audio. Shortening asks first with a count from POST
   `/api/keep/preview` (`keeping::would_delete`, deletes nothing); one save at a
   time. Forever deletes nothing. Expiry runs at `start_in`, daily and after POST
-  `/api/keep` (`keeping::expire_now`): uploads by file mtime (the folder and note
+  `/api/keep` (`keeping::expire_now`): chats past the choice and orphan chat
+  documents, uploads by file mtime (the folder and note
   never touched), transcripts in `recording-sources/`, unfinished audio through
   `Housekeeper::pending_recordings` + `discard_recording` and
   `expire_kept_audio`, skipping the session in use (`RecordJob::session_id`) and

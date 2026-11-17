@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 
-use crate::{chats, keeping, AppState};
+use crate::{keeping, AppState};
 
 fn keep_page(keep: leo_core::keep::Keep) -> serde_json::Value {
     let choices = leo_core::keep::CHOICES
@@ -49,12 +49,10 @@ pub(crate) async fn set_keep(
     State(state): State<AppState>,
     Json(keep): Json<leo_core::keep::Keep>,
 ) -> Response {
-    let chats_dir = state.chats.clone();
     let done = state
         .with_store(move |store| {
             leo_core::keep::save(&store.notes_dir, &keep).map_err(|_| StatusCode::BAD_REQUEST)?;
             store.tidy_trash_now();
-            chats::tidy(&chats_dir, keep.chat_days, chrono::Utc::now());
             Ok(keep_page(keep))
         })
         .await;

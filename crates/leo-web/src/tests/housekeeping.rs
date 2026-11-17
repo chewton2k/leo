@@ -103,3 +103,63 @@ fn a_shorter_upload_period_deletes_old_uploads_at_once_and_forever_deletes_nothi
     assert_eq!(json_of(shorter)["upload_days"], 30);
     assert!(!file.exists());
 }
+
+#[test]
+fn the_daily_expiry_removes_an_old_chat_and_its_documents() {
+    let (state, dir, _) = state_with(&[]);
+    let old = chrono::Utc::now() - chrono::Duration::days(45);
+    chats::save(
+        &state.chats,
+        "chat-old-audit1",
+        chats::Saving {
+            title: String::new(),
+            refs: vec![],
+            messages: vec![serde_json::json!({"role": "user", "text": "photosynthesis in leaves"})],
+        },
+        old,
+    )
+    .unwrap();
+    chat_files::add(
+        &state.chats,
+        "chat-old-audit1",
+        "notes.pdf",
+        "chlorophyll",
+        old,
+    )
+    .unwrap();
+    chat_files::add(
+        &state.chats,
+        "chat-never-saved",
+        "orphan.pdf",
+        "an orphan",
+        chrono::Utc::now() - chrono::Duration::days(2),
+    )
+    .unwrap();
+    leo_core::keep::save(
+        &dir.path().join("notes"),
+        &leo_core::keep::Keep {
+            trash_days: Some(30),
+            chat_days: Some(30),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(chats::search(&state.chats, "photosynthesis").len(), 1);
+    assert_eq!(chat_files::list(&state.chats, "chat-old-audit1").len(), 1);
+    run(keeping::expire_now(&state));
+    assert!(
+        chats::load(&state.chats, "chat-old-audit1").is_none(),
+        "the daily expiry left a 45-day-old chat with chat_days = 30"
+    );
+    assert_eq!(chats::search(&state.chats, "photosynthesis").len(), 0);
+    assert_eq!(
+        chat_files::list(&state.chats, "chat-old-audit1").len(),
+        0,
+        "its document was left"
+    );
+    assert_eq!(
+        chat_files::list(&state.chats, "chat-never-saved").len(),
+        0,
+        "the orphan document was left"
+    );
+}

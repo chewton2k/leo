@@ -1614,7 +1614,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   locked sessions are skipped). DELETE `/api/record/{id}` also deletes a
   waiting recording that has no job; the Record page offers it on each row.
   Every pass is bounded, never follows symlinks, stays in its folder and
-  skips an item it cannot delete. Trash and chats expire as before.
+  skips an item it cannot delete. Trash expires as before; chats expire in the daily pass.
   `Housekeeper` now lives in `record.rs` (pending and discard only).
 
 Trash: Delete for good and Empty trash skip a trashed file they cannot delete
