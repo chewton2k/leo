@@ -11,6 +11,7 @@ try {
   cal.showDone = true;
 }
 const CAL_POLL_MS = 150000;
+const CAL_TASKS_GRACE_MS = 5000;
 const CAL_TILE_PX = 64;
 const CAL_MORE_PX = 30;
 const CAL_HOUR_PX = 48;
@@ -101,6 +102,8 @@ async function loadSchedule(mine = seq) {
   cal.failed = false;
   cal.data = data;
   tasksWin.tasks = data.tasks || tasksWin.tasks;
+  tasksWin.at = Date.now();
+  tasksWin.stale = false;
   cal.loadedAt = Date.now();
   drawCalendar();
   drawTasksWindow();
@@ -119,7 +122,12 @@ function calendarShown() {
     cal.loadedAt = Date.now();
     loadSchedule(seq);
   }
-  if (tasksWin.stale) loadTasksWindow().catch(() => {});
+  if (tasksWin.stale) {
+    if (state.view === 'calendar') {
+      tasksWin.stale = false;
+      tasksWin.timer = setTimeout(tasksTick, CAL_POLL_MS);
+    } else loadTasksWindow().catch(() => {});
+  }
 }
 document.addEventListener('visibilitychange', calendarShown);
 window.addEventListener('leo-visibility', calendarShown);
@@ -1589,7 +1597,7 @@ async function openTaskAnywhere(id, on = null) {
   taskSheet(id, on);
 }
 
-var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
+var tasksWin = { timer: 0, at: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
 const TASKS_AHEAD_DAYS = 7;
 const TASK_GROUP_NAMES = { Overdue: 'Earlier' };
 const TASK_DONE_MS = 1200;
@@ -1925,16 +1933,27 @@ async function loadTasksWindow() {
       tasksWin.tasks = tasks;
       if (cal.data) cal.data = { ...cal.data, tasks };
       else cal.data = { events: [], tasks };
+      tasksWin.at = Date.now();
     }
   } catch (e) {
     if (e instanceof Locked) return;
   }
   if (mine !== tasksWin.load) return;
   drawTasksWindow();
-  tasksWin.timer = setTimeout(() => {
-    if (appVisible()) loadTasksWindow().catch(() => {});
-    else tasksWin.stale = true;
-  }, CAL_POLL_MS);
+  tasksWin.timer = setTimeout(tasksTick, CAL_POLL_MS);
+}
+
+function tasksTick() {
+  if (!appVisible()) {
+    tasksWin.stale = true;
+    return;
+  }
+  const left = CAL_POLL_MS + CAL_TASKS_GRACE_MS - (Date.now() - tasksWin.at);
+  if (state.view === 'calendar' && left > 0) {
+    tasksWin.timer = setTimeout(tasksTick, left);
+    return;
+  }
+  loadTasksWindow().catch(() => {});
 }
 
 setTimeout(() => loadTasksWindow().catch(() => {}), 0);

@@ -1053,6 +1053,10 @@ AI uses a pen icon, never a sparkle.
   responses on visibility changes; return refreshes once. Automatic status GETs
   do not reset user-idle time. Dictation, model-download and recording display
   polls pause while hidden.
+- On the Calendar the Tasks card does not poll `/api/tasks`: the schedule answer
+  carries the tasks and stamps `tasksWin.at`; the tasks timer only re-arms (with a
+  5 s grace so it never races the schedule poll) and loads again once the person
+  leaves the Calendar.
 
 ## Retired interview practice
 
