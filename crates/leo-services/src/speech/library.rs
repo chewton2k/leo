@@ -226,13 +226,10 @@ impl Library {
     fn change_verified(&self, change: impl FnOnce(&mut Verified)) {
         let mut verified = self.verified.lock().unwrap_or_else(|e| e.into_inner());
         change(&mut verified);
-        let saved = tempfile::NamedTempFile::new_in(&self.config)
+        let saved = serde_json::to_vec(&*verified)
             .map_err(anyhow::Error::from)
-            .and_then(|mut tmp| {
-                serde_json::to_writer(&mut tmp, &*verified)?;
-                tmp.persist(self.config.join(VERIFIED_FILE))
-                    .map_err(|e| e.error)?;
-                Ok(())
+            .and_then(|bytes| {
+                leo_core::paths::write_atomic(&self.config.join(VERIFIED_FILE), bytes)
             });
         if let Err(error) = saved {
             log::warn!("Could not remember the verified speech models: {error}");
@@ -292,11 +289,7 @@ impl Library {
             id: id.into(),
             language: language.into(),
         };
-        let mut tmp = tempfile::NamedTempFile::new_in(&self.config)?;
-        serde_json::to_writer(&mut tmp, &selection)?;
-        tmp.as_file().sync_all()?;
-        tmp.persist(self.selection_path()?).map_err(|e| e.error)?;
-        Ok(())
+        leo_core::paths::write_atomic(&self.selection_path()?, serde_json::to_vec(&selection)?)
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<()> {
@@ -320,16 +313,13 @@ impl Library {
             verified.remove(&path);
         });
         if self.selection()?.id == id {
-            let mut tmp = tempfile::NamedTempFile::new_in(&self.config)?;
-            serde_json::to_writer(
-                &mut tmp,
-                &Selection {
+            leo_core::paths::write_atomic(
+                &self.selection_path()?,
+                serde_json::to_vec(&Selection {
                     id: String::new(),
                     language: "auto".into(),
-                },
+                })?,
             )?;
-            tmp.as_file().sync_all()?;
-            tmp.persist(self.selection_path()?).map_err(|e| e.error)?;
         }
         Ok(())
     }

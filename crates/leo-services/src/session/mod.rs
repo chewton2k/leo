@@ -8,7 +8,6 @@ mod stress;
 pub mod transcriber;
 pub mod wav;
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -19,6 +18,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::ai::chat::{clock, Jotted};
+use leo_core::paths::write_atomic;
 
 pub const SEGMENT_SECS: u64 = 300;
 pub const OVERLAP_SECS: u64 = 1;
@@ -202,17 +202,6 @@ pub fn root() -> Result<PathBuf> {
     leo_core::paths::contained_path(&leo_core::paths::data_dir()?, Path::new("recordings"))
 }
 
-fn write_atomic(path: &Path, text: &str) -> Result<()> {
-    let parent = path.parent().context("Missing recording folder")?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(text.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path).map_err(|e| e.error)?;
-    #[cfg(unix)]
-    std::fs::File::open(parent)?.sync_all()?;
-    Ok(())
-}
-
 fn process_alive(pid: u32) -> bool {
     if pid == std::process::id() {
         return true;
@@ -324,7 +313,7 @@ impl Session {
 
     pub fn lock(&self) -> Result<Lock> {
         let path = self.dir.join("lock");
-        write_atomic(&path, &std::process::id().to_string())?;
+        write_atomic(&path, std::process::id().to_string())?;
         let mut options = std::fs::OpenOptions::new();
         options.read(true).write(true);
         #[cfg(unix)]

@@ -124,17 +124,7 @@ fn write_atomic(path: &Path, text: &str) -> std::io::Result<()> {
             hook();
         }
     });
-    use std::io::Write;
-    let parent = path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("Missing transcript directory"))?;
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    file.write_all(text.as_bytes())?;
-    file.as_file().sync_all()?;
-    file.persist(path).map_err(|e| e.error)?;
-    #[cfg(unix)]
-    std::fs::File::open(parent)?.sync_all()?;
-    Ok(())
+    leo_core::paths::write_atomic(path, text).map_err(std::io::Error::other)
 }
 
 fn text_path(dir: &Path, index: u32) -> PathBuf {

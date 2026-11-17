@@ -148,12 +148,7 @@ pub fn save_to(path: &Path, provider: &str, usage: Usage) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let Ok(mut temp) = tempfile::NamedTempFile::new_in(dir) else {
-        return;
-    };
-    if temp.write_all(text.as_bytes()).is_ok() && temp.as_file().sync_all().is_ok() {
-        let _ = temp.persist(path);
-    }
+    let _ = leo_core::paths::write_atomic(path, text);
 }
 
 pub fn load() -> Seen {
