@@ -51,6 +51,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       let early=null;
       if(window.early&&method==='GET'){const found=url.match(/^\\/api\\/boards\\/([^/]+)$/);const b=found&&db.boards.find(x=>x.id===found[1]);if(b)early={board:structuredClone(b),cards:ranked(b.id)};}
       await new Promise(r=>setTimeout(r,5+window.slow));
+      const held=method!=='GET'&&window.holds&&window.holds.shift();if(held)await held;
       if(early)return early;
       if(window.failNext&&method!=='GET'){const e=new Error(window.failNext);window.failNext=null;throw e;}
       let m;
@@ -540,17 +541,23 @@ test('a priority and a delete show before leo answers and come back when the sav
 
 test('two quick moves keep the second when the first fails after it was sent, and the board ends as the server has it', async ({ browser }) => {
   await boardsFixture(browser, async page => {
-    await page.evaluate(() => { window.slow = 300; window.failNext = 'Leo could not move the card.'; });
+    await page.evaluate(() => {
+      window.failNext = 'Leo could not move the card.';
+      window.release = [];
+      window.holds = [0, 1].map(() => new Promise(done => window.release.push(done)));
+    });
     const card = page.locator('[data-card="cessay0001"]');
     await card.focus();
     await page.keyboard.press('Alt+ArrowRight');
     await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
-    await page.waitForTimeout(200);
     await page.keyboard.press('Alt+ArrowRight');
     await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Write essay']);
+    await expect.poll(() => page.evaluate(() => window.holds.length)).toBe(0);
+    await page.evaluate(() => window.release[0]());
     await expect.poll(() => page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not move the card.', bad: true });
     expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
     expect(await page.evaluate(() => window.pending)).toBe(1);
+    await page.evaluate(() => window.release[1]());
     await expect.poll(() => page.evaluate(() => window.pending)).toBe(0);
     await page.waitForTimeout(400);
     expect(await titles(page, 'kdone00001')).toEqual(['Write essay']);
