@@ -986,7 +986,8 @@ target. Check the page sequence after loading preferences.
   sent as `gone` with an ask, a Read through part or a reopening, and each of this
   note's open ids in it raises the open limit by one, up to twice `MOST_OPEN`
   (`margin::room`); other ids are ignored.
-  A note whose passage the page finds only by its context (`how: 'context'`) shows one muted
+  A note whose passage the page finds only by its context (`how: 'context'`), or on one of
+  several copies its context cannot tell apart (`how: 'guess'`), shows one muted
   line, "The passage changed since Felix wrote this."; an exact match shows nothing.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
@@ -1148,7 +1149,7 @@ target. Check the page sequence after loading preferences.
   "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
   In Marks the blot takes its own room in the line, so it never covers the next word; the open note is a raised
   card under the paragraph that unfolds and folds away (none under Reduce Motion).
-- Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
+- Layout (`margin.js`, pure): `find` (exact when unique or when 6 units of context pick one copy, a guess otherwise, then between prefix and suffix of at
   least 6 UTF-16 units, as the server's `margin::by_context` counts, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),

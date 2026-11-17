@@ -65,9 +65,16 @@
     const hits = occurrences(source, quote);
     if (hits.length === 1) return { from: hits[0], to: hits[0] + quote.length, how: 'exact' };
     if (hits.length) {
-      const score = (at) => sharedEnd(source.slice(Math.max(0, at - prefix.length), at), prefix) + sharedStart(source.slice(at + quote.length, at + quote.length + suffix.length), suffix);
-      const best = hits.reduce((a, b) => (score(b) > score(a) ? b : a));
-      return { from: best, to: best + quote.length, how: 'exact' };
+      const read = (at) => {
+        const before = sharedEnd(source.slice(Math.max(0, at - prefix.length), at), prefix);
+        const after = sharedStart(source.slice(at + quote.length, at + quote.length + suffix.length), suffix);
+        const sure = (prefix ? before >= Math.min(LEAST_TAIL, prefix.length) : at === 0) || (suffix ? after >= Math.min(LEAST_TAIL, suffix.length) : at + quote.length === source.length);
+        return { at, score: before + after, sure };
+      };
+      const reads = hits.map(read);
+      const best = reads.reduce((a, b) => (b.score > a.score ? b : a));
+      const alone = reads.every((one) => one === best || one.score < best.score);
+      return { from: best.at, to: best.at + quote.length, how: best.sure && alone ? 'exact' : 'guess' };
     }
     return byContext(source, quote, prefix, suffix);
   }

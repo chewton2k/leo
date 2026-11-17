@@ -819,7 +819,7 @@ function marginDraw() {
   const page = $('article.note', columns).getBoundingClientRect();
   const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginIsOpen(box.t) ? marginElement(box.t) : null);
-    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how === 'context');
+    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact');
     return { ...box, el };
   });
   marginCuts(boxes);

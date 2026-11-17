@@ -609,9 +609,12 @@ Felix (2026-10-19).
   so a resent reply gets the first answer; a resend while it runs is 409 `busy`.
 - A thread whose passage is gone is not shown (2026-11-09; there is no lost-place
   box).
-- A passage found only by its context (`marginKit.find` answers `how: 'context'`) keeps
-  its note, with one muted line, "The passage changed since Felix wrote this."
-  (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
+- A passage found only by its context (`marginKit.find` answers `how: 'context'`), or on
+  one of several copies its stored context cannot tell apart (`how: 'guess'`: no copy has 6
+  characters of its old surroundings matching, or another copy matches as well), keeps its
+  note, with one muted line, "The passage changed since Felix wrote this."
+  (`.margin-changed`, set by `marginFill`); an exact match shows nothing. A guess is never
+  sent as reworded text.
 - An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
   "Show N earlier" button (`.margin-earlier`) that shows them all for that note. From
   `LONG_THREAD` (6) messages it ends with "This has turned into its own question.

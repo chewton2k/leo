@@ -333,6 +333,37 @@ test('a dragged page width stops where the chosen margins still fit', () => {
   assert.equal(M.mostColumn({ width, setting: 'right', panel: true }), Infinity);
 });
 
+const copies = 'alpha one. beta gamma. delta two. beta gamma. epsilon three.';
+
+test('anchor: two copies whose context matches neither are a guess on the first', () => {
+  const got = M.find(copies, { quote: 'beta gamma', prefix: 'zzzzzzzz yyyyyy ', suffix: ' qqqqqq wwwww' });
+  assert.equal(got.from, copies.indexOf('beta gamma'));
+  assert.equal(got.how, 'guess');
+});
+
+test('anchor: two copies, the context picks the second', () => {
+  const got = M.find(copies, { quote: 'beta gamma', prefix: 'delta two. ', suffix: '. epsilon three.' });
+  assert.equal(got.from, copies.lastIndexOf('beta gamma'));
+  assert.equal(got.how, 'exact');
+});
+
+test('anchor: one copy is exact whatever its context', () => {
+  const got = M.find('alpha one. beta gamma. delta two.', { quote: 'beta gamma', prefix: 'zzzzzzzz', suffix: 'qqqqqqqq' });
+  assert.deepEqual(got, { from: 11, to: 21, how: 'exact' });
+});
+
+test('anchor: two copies with the same context are a guess', () => {
+  const got = M.find('x beta gamma y. x beta gamma y.', { quote: 'beta gamma', prefix: 'x ', suffix: ' y.' });
+  assert.equal(got.from, 2);
+  assert.equal(got.how, 'guess');
+});
+
+test('anchor: an empty prefix confirms only a copy at the very start', () => {
+  const side = { quote: 'beta gamma', prefix: '', suffix: ' qqqqqq' };
+  assert.equal(M.find('beta gamma one. alpha beta gamma.', side).how, 'exact');
+  assert.equal(M.find('a beta gamma one. alpha beta gamma.', side).how, 'guess');
+});
+
 for (const [name, fn] of cases) {
   try {
     fn();
