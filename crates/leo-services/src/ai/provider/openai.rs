@@ -87,12 +87,13 @@ impl OpenAiChat {
             .any(|host| self.base_url.contains(host))
     }
 
-    fn note_spent(&self, req: &ChatRequest, answer: &str, usage: Option<(u64, u64)>) {
+    fn note_spent(&self, req: &ChatRequest, answer: &str, usage: Option<(u64, u64, u64)>) {
         let mut spent = Spent::guessed(Some(self.model.clone()), req, answer);
         spent.effort = self.effort.clone();
-        if let Some((input, output)) = usage {
+        if let Some((input, output, cached)) = usage {
             spent.input = input;
             spent.output = output;
+            spent.cached = cached;
             spent.estimated = false;
         }
         if let Ok(mut slot) = self.spent.lock() {
@@ -104,6 +105,7 @@ impl OpenAiChat {
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Round {
     pub text: String,
+    pub reasoning: String,
     pub calls: Vec<(String, String, String)>,
     pub usage: Option<(u64, u64, u64)>,
     pub finish: String,
@@ -128,10 +130,14 @@ pub fn read_round(
     reader: impl std::io::BufRead,
     name: &str,
     sink: Sink<'_>,
+    stopped: &dyn Fn() -> bool,
 ) -> ProviderResult<Round> {
     let mut round = Round::default();
     let mut calls: Vec<(String, String, String)> = Vec::new();
     for line in capped_lines(reader) {
+        if stopped() {
+            return Err(ProviderError::Fatal("The answer was stopped.".into()));
+        }
         let line =
             line.map_err(|e| ProviderError::Retryable(format!("{name}: stream ended early: {e}")))?;
         let Some(payload) = line.strip_prefix("data:") else {
@@ -159,6 +165,8 @@ pub fn read_round(
         if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {
             round.text.push_str(text);
             sink(text);
+        } else if let Some(text) = delta["reasoning"].as_str().filter(|t| !t.is_empty()) {
+            round.reasoning.push_str(text);
         }
         for call in delta["tool_calls"].as_array().into_iter().flatten() {
             let id = call["id"].as_str().unwrap_or("");
@@ -242,7 +250,12 @@ impl OpenAiChat {
         body
     }
 
-    pub fn stream_round(&self, body: &serde_json::Value, sink: Sink<'_>) -> ProviderResult<Round> {
+    pub fn stream_round(
+        &self,
+        body: &serde_json::Value,
+        sink: Sink<'_>,
+        stopped: &dyn Fn() -> bool,
+    ) -> ProviderResult<Round> {
         let client = self.client(&CLIENT_600)?;
         let resp = self
             .authorized(client.post(self.endpoint()))
@@ -252,7 +265,7 @@ impl OpenAiChat {
         if !resp.status().is_success() {
             return Err(self.refused(resp));
         }
-        read_round(std::io::BufReader::new(resp), &self.name, sink)
+        read_round(std::io::BufReader::new(resp), &self.name, sink, stopped)
     }
 }
 
@@ -331,26 +344,6 @@ impl OpenAiChat {
     }
 }
 
-/// The two kinds of text a delta can carry.
-///
-/// Kept apart because they are not interchangeable: `content` is the answer,
-/// while `reasoning` is the model thinking aloud. Merging them streamed a
-/// model's deliberations into the user's note, which is the bug this split fixes.
-#[derive(Debug, PartialEq, Eq)]
-enum Delta {
-    Content(String),
-    Reasoning(String),
-}
-
-/// Why a streamed answer ended, from the chunk that says so.
-fn finish_reason(payload: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(payload.trim()).ok()?;
-    json["choices"][0]["finish_reason"]
-        .as_str()
-        .filter(|r| !r.is_empty())
-        .map(str::to_string)
-}
-
 /// What to tell the user when an answer stopped at the token limit. The text
 /// is still used — most of a note beats none — but it is cut off, and the fix
 /// is a setting they can change.
@@ -361,28 +354,6 @@ fn cut_off_warning(name: &str, finish: &str, max_tokens: u32) -> Option<String> 
              raise max_tokens for {name} in config.toml"
         )
     })
-}
-
-/// Pull the text out of one SSE `data:` payload.
-///
-/// Returns `None` for anything that is not text — keep-alives, the terminating
-/// `[DONE]`, role-only first chunks — so the caller can ignore them without
-/// knowing the shape of the protocol.
-fn delta_text(payload: &str) -> Option<Delta> {
-    let payload = payload.trim();
-    if payload.is_empty() || payload == "[DONE]" {
-        return None;
-    }
-    let json: serde_json::Value = serde_json::from_str(payload).ok()?;
-    let delta = &json["choices"][0]["delta"];
-
-    if let Some(text) = delta["content"].as_str().filter(|s| !s.is_empty()) {
-        return Some(Delta::Content(text.to_string()));
-    }
-    delta["reasoning"]
-        .as_str()
-        .filter(|s| !s.is_empty())
-        .map(|text| Delta::Reasoning(text.to_string()))
 }
 
 impl OpenAiChat {
@@ -432,7 +403,11 @@ impl OpenAiChat {
                 if let Some(note) = cut_off_warning(&self.name, finish, req.max_tokens) {
                     leo_core::diag::warn(note);
                 }
-                self.note_spent(req, t, usage_of(&json));
+                self.note_spent(
+                    req,
+                    t,
+                    usage_of(&json).map(|(input, output)| (input, output, cached_of(&json))),
+                );
                 Ok(t.to_string())
             }
             // Retryable, not fatal: an empty completion is this provider
@@ -470,57 +445,18 @@ impl OpenAiChat {
             return Err(self.refused(resp));
         }
 
-        let mut answer = String::new();
-        // Held back rather than shown: only used if no content ever arrives,
-        // which is how a reasoning model on a free tier sometimes replies.
-        let mut reasoning = String::new();
-        let mut finish = String::new();
-        let mut usage = None;
-
-        let reader = std::io::BufReader::new(resp);
-        for line in capped_lines(reader) {
-            if stopped() {
-                return Err(ProviderError::Fatal("The answer was stopped.".into()));
-            }
-            let line = line.map_err(|e| {
-                // A stream that dies partway is retryable: the next provider may
-                // manage it, and any text already delivered is still useful.
-                ProviderError::Retryable(format!("{}: stream ended early: {e}", self.name))
-            })?;
-            let Some(payload) = line.strip_prefix("data:") else {
-                continue;
-            };
-            if let Some(reason) = finish_reason(payload) {
-                finish = reason;
-            }
-            if payload.contains("\"usage\"") {
-                if let Ok(json) = serde_json::from_str::<serde_json::Value>(payload.trim()) {
-                    usage = usage_of(&json).or(usage);
-                }
-            }
-            match delta_text(payload) {
-                Some(Delta::Content(fragment)) => {
-                    answer.push_str(&fragment);
-                    sink(&fragment);
-                }
-                Some(Delta::Reasoning(fragment)) => reasoning.push_str(&fragment),
-                None => {}
-            }
-        }
-
-        if !answer.trim().is_empty() {
-            if let Some(note) = cut_off_warning(&self.name, &finish, req.max_tokens) {
+        let round = read_round(std::io::BufReader::new(resp), &self.name, sink, stopped)?;
+        if !round.text.trim().is_empty() {
+            if let Some(note) = cut_off_warning(&self.name, &round.finish, req.max_tokens) {
                 leo_core::diag::warn(note);
             }
-            self.note_spent(req, &answer, usage);
-            return Ok(answer);
+            self.note_spent(req, &round.text, round.usage);
+            return Ok(round.text);
         }
-        // No answer, but the model said something: better than nothing, and the
-        // non-streaming path makes the same choice.
-        if !reasoning.trim().is_empty() {
-            sink(&reasoning);
-            self.note_spent(req, &reasoning, usage);
-            return Ok(reasoning);
+        if !round.reasoning.trim().is_empty() {
+            sink(&round.reasoning);
+            self.note_spent(req, &round.reasoning, round.usage);
+            return Ok(round.reasoning);
         }
         Err(ProviderError::Retryable(format!(
             "{}: streamed an empty response",
@@ -615,7 +551,13 @@ mod tests {
         ]
         .join("\n\n");
         let mut shown = String::new();
-        let round = read_round(stream.as_bytes(), "OpenAI", &mut |t| shown.push_str(t)).unwrap();
+        let round = read_round(
+            stream.as_bytes(),
+            "OpenAI",
+            &mut |t| shown.push_str(t),
+            &|| false,
+        )
+        .unwrap();
         assert_eq!(shown, "Let me look.");
         assert_eq!(round.finish, "tool_calls");
         assert_eq!(
@@ -639,7 +581,7 @@ mod tests {
     #[test]
     fn whole_tool_calls_without_an_index_are_each_kept() {
         let stream = r#"data: {"choices":[{"delta":{"tool_calls":[{"id":"g1","function":{"name":"search_notes","arguments":"{}"}},{"id":"g2","function":{"name":"open_note","arguments":"{}"}}]}}]}"#;
-        let round = read_round(stream.as_bytes(), "Gemini", &mut |_| {}).unwrap();
+        let round = read_round(stream.as_bytes(), "Gemini", &mut |_| {}, &|| false).unwrap();
         let names: Vec<&str> = round.calls.iter().map(|c| c.1.as_str()).collect();
         assert_eq!(names, ["search_notes", "open_note"]);
     }
@@ -730,6 +672,86 @@ mod tests {
             prompt: "hi".to_string(),
             temperature: 0.0,
             max_tokens: 16,
+        }
+    }
+
+    fn serve_stream(body: String) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let body = body.clone();
+                std::thread::spawn(move || {
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(300)));
+                    let mut buffer = [0u8; 65536];
+                    let _ = stream.read(&mut buffer);
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                });
+            }
+        });
+        format!("http://127.0.0.1:{port}/v1")
+    }
+
+    #[test]
+    fn both_stream_paths_read_a_body_the_same_way() {
+        let bodies = [
+            ("reasoning only", "data: {\"choices\":[{\"delta\":{\"reasoning\":\"The minimum is at the root.\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"),
+            ("error object after text", "data: {\"choices\":[{\"delta\":{\"content\":\"Heaps\"}}]}\n\ndata: {\"error\":{\"message\":\"model crashed\"}}\n\ndata: [DONE]\n\n"),
+            ("cut off at the limit", "data: {\"choices\":[{\"delta\":{\"content\":\"Heaps keep\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":16,\"prompt_tokens_details\":{\"cached_tokens\":32}}}\n\ndata: [DONE]\n\n"),
+        ];
+        let mut differ = 0;
+        for (label, body) in bodies {
+            let round = read_round(body.as_bytes(), "ollama", &mut |_| {}, &|| false)
+                .map(|r| {
+                    if r.text.trim().is_empty() {
+                        r.reasoning
+                    } else {
+                        r.text
+                    }
+                })
+                .map_err(|e| e.to_string());
+            let plain = local(serve_stream(body.to_string()));
+            let streamed = plain
+                .stream_until(&ask(), &mut |_| {}, &|| false)
+                .map_err(|e| e.to_string());
+            if round.is_err() != streamed.is_err()
+                || round.clone().unwrap_or_default() != streamed.clone().unwrap_or_default()
+            {
+                differ += 1;
+                eprintln!("{label}: read_round={round:?} stream_until={streamed:?}");
+            }
+        }
+        assert_eq!(differ, 0, "{differ} of 3 bodies read differently");
+    }
+
+    #[test]
+    fn a_good_stream_answers_byte_for_byte_and_counts_cached_tokens() {
+        let body = "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"reasoning\":\"thinking\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"Own\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"ership \\u00e9 \"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"moves.\\n\"}}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":9,\"prompt_tokens_details\":{\"cached_tokens\":32}}}\n\ndata: [DONE]\n\n";
+        let provider = local(serve_stream(body.to_string()));
+        let mut shown = String::new();
+        let answer = provider
+            .stream_until(&ask(), &mut |t| shown.push_str(t), &|| false)
+            .unwrap();
+        assert_eq!(answer, "Ownership \u{e9} moves.\n");
+        assert_eq!(shown, answer);
+        let spent = provider.spent().unwrap();
+        assert_eq!((spent.input, spent.output, spent.cached), (50, 9, 32));
+        assert!(!spent.estimated);
+    }
+
+    #[test]
+    fn a_stream_that_reports_an_error_after_text_fails_so_the_next_writer_is_tried() {
+        let body = "data: {\"choices\":[{\"delta\":{\"content\":\"Heaps\"}}]}\n\ndata: {\"error\":{\"message\":\"model crashed\"}}\n\n";
+        let provider = local(serve_stream(body.to_string()));
+        match provider.complete(&ask()) {
+            Err(ProviderError::Retryable(message)) => assert!(message.contains("model crashed")),
+            other => panic!("expected a retryable failure, got {other:?}"),
         }
     }
 
@@ -851,18 +873,18 @@ mod tests {
         assert_eq!(cut_off_warning("openrouter", "", 4096), None);
     }
 
-    /// Streaming reports why it ended in the last chunk, not in the text.
     #[test]
     fn the_finish_reason_is_read_from_a_stream_chunk() {
+        let read = |body: &str| read_round(body.as_bytes(), "p", &mut |_| {}, &|| false).unwrap();
         assert_eq!(
-            finish_reason(r#"{"choices":[{"delta":{},"finish_reason":"length"}]}"#).as_deref(),
-            Some("length")
+            read(r#"data: {"choices":[{"delta":{},"finish_reason":"length"}]}"#).finish,
+            "length"
         );
         assert_eq!(
-            finish_reason(r#"{"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#),
-            None
+            read(r#"data: {"choices":[{"delta":{"content":"hi"},"finish_reason":null}]}"#).finish,
+            ""
         );
-        assert_eq!(finish_reason("[DONE]"), None);
+        assert_eq!(read("data: [DONE]").finish, "");
     }
 
     /// leo speaks HTTPS through rustls with bundled root certificates, so a
@@ -948,103 +970,93 @@ mod tests {
 
 #[cfg(test)]
 mod streaming_tests {
-    use super::{capped_lines, delta_text};
+    use super::{capped_lines, read_round, Round};
 
-    use super::Delta;
+    fn read(lines: &[&str]) -> (Round, String) {
+        let body: String = lines.iter().map(|l| format!("data: {l}\n\n")).collect();
+        let mut shown = String::new();
+        let round =
+            read_round(body.as_bytes(), "p", &mut |t| shown.push_str(t), &|| false).unwrap();
+        (round, shown)
+    }
 
     #[test]
     fn a_content_delta_yields_its_text() {
-        let payload = r#"{"choices":[{"delta":{"content":"Hello"}}]}"#;
-        assert_eq!(delta_text(payload), Some(Delta::Content("Hello".into())));
+        let (round, shown) = read(&[r#"{"choices":[{"delta":{"content":"Hello"}}]}"#]);
+        assert_eq!((round.text.as_str(), shown.as_str()), ("Hello", "Hello"));
     }
 
-    /// The bug this guards: reasoning and content were merged, so a model's
-    /// thinking-aloud was streamed into the user's note.
     #[test]
     fn reasoning_is_kept_separate_from_the_answer() {
-        let payload = r#"{"choices":[{"delta":{"reasoning":"let me think"}}]}"#;
-        assert_eq!(
-            delta_text(payload),
-            Some(Delta::Reasoning("let me think".into())),
-            "reasoning was reported as answer text"
-        );
+        let (round, shown) = read(&[r#"{"choices":[{"delta":{"reasoning":"let me think"}}]}"#]);
+        assert_eq!(round.text, "");
+        assert_eq!(round.reasoning, "let me think");
+        assert_eq!(shown, "", "reasoning was reported as answer text");
     }
 
-    /// Everything else in the protocol must be ignored rather than misread as
-    /// text: keep-alives, the terminator, and the role-only opening chunk.
     #[test]
     fn protocol_noise_yields_nothing() {
         for payload in [
             "[DONE]",
             "",
-            "   ",
             r#"{"choices":[{"delta":{"role":"assistant"}}]}"#,
             r#"{"choices":[{"delta":{}}]}"#,
             r#"{"choices":[{"delta":{"content":""}}]}"#,
             r#"{"choices":[]}"#,
             "not json at all",
         ] {
-            assert_eq!(delta_text(payload), None, "misread {payload:?}");
+            let (round, shown) = read(&[payload]);
+            assert_eq!(
+                (round.text, round.reasoning, shown),
+                (String::new(), String::new(), String::new()),
+                "misread {payload:?}"
+            );
         }
     }
 
-    /// Content wins when both are present in one delta.
     #[test]
     fn content_wins_over_reasoning_in_the_same_delta() {
-        let payload = r#"{"choices":[{"delta":{"content":"answer","reasoning":"thinking"}}]}"#;
-        assert_eq!(delta_text(payload), Some(Delta::Content("answer".into())));
+        let (round, _) =
+            read(&[r#"{"choices":[{"delta":{"content":"answer","reasoning":"thinking"}}]}"#]);
+        assert_eq!(
+            (round.text.as_str(), round.reasoning.as_str()),
+            ("answer", "")
+        );
     }
 
     #[test]
     fn whitespace_only_content_is_kept_since_it_is_part_of_the_text() {
-        let payload = r#"{"choices":[{"delta":{"content":" "}}]}"#;
-        assert_eq!(delta_text(payload), Some(Delta::Content(" ".into())));
+        let (round, _) = read(&[r#"{"choices":[{"delta":{"content":" "}}]}"#]);
+        assert_eq!(round.text, " ");
     }
 
-    /// Only content reassembles into the answer; reasoning is discarded when
-    /// there is an answer to give.
     #[test]
     fn only_content_deltas_form_the_answer() {
-        let stream = [
+        let (round, shown) = read(&[
             r#"{"choices":[{"delta":{"reasoning":"The user asks about moves."}}]}"#,
             r#"{"choices":[{"delta":{"reasoning":" I should be brief."}}]}"#,
             r#"{"choices":[{"delta":{"content":"Ownership"}}]}"#,
             r#"{"choices":[{"delta":{"content":" transfers."}}]}"#,
             "[DONE]",
-        ];
-        let answer: String = stream
-            .iter()
-            .filter_map(|p| match delta_text(p) {
-                Some(Delta::Content(t)) => Some(t),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(answer, "Ownership transfers.");
-        assert!(
-            !answer.contains("user asks"),
-            "reasoning leaked into the answer"
+        ]);
+        assert_eq!(round.text, "Ownership transfers.");
+        assert_eq!(shown, "Ownership transfers.");
+        assert_eq!(
+            round.reasoning,
+            "The user asks about moves. I should be brief."
         );
     }
 
-    /// Fragments must concatenate into the whole answer, which is what the
-    /// non-streaming path would have returned.
     #[test]
     fn fragments_reassemble_into_the_answer() {
-        let stream = [
+        let (round, _) = read(&[
             r#"{"choices":[{"delta":{"role":"assistant"}}]}"#,
             r#"{"choices":[{"delta":{"content":"Own"}}]}"#,
             r#"{"choices":[{"delta":{"content":"ership"}}]}"#,
             r#"{"choices":[{"delta":{"content":" moves."}}]}"#,
             "[DONE]",
-        ];
-        let whole: String = stream
-            .iter()
-            .filter_map(|p| match delta_text(p) {
-                Some(Delta::Content(t)) => Some(t),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(whole, "Ownership moves.");
+        ]);
+        assert_eq!(round.text, "Ownership moves.");
     }
 
     #[test]

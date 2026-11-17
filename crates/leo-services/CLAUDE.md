@@ -12,7 +12,9 @@ drift on which errors are fatal. The streaming chain takes an `on_restart`
 callback: text from a provider that then failed is discarded, or a fallback
 would glue half of one reply to all of another. OpenAI-compatible streams have
 the agent CLIs' caps (`process::MOST_LINE` per line, `process::MOST_OUTPUT` in
-total).
+total). OpenAI-compatible streams, plain and tool, are read by one `read_round`
+(an `error` object fails the round; reasoning is the answer only when no content
+came; every line checks for a stop).
 
 ### AI pipeline
 

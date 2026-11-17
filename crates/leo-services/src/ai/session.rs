@@ -264,7 +264,7 @@ impl Session for ApiTalk {
                     .tool_body(&self.history, &self.tools, max_tokens, no_tools);
                 let round = self
                     .chat
-                    .stream_round(&body, sink)
+                    .stream_round(&body, sink, stopped)
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 match round.usage {
                     Some((input, output, cached)) => {
@@ -281,9 +281,15 @@ impl Session for ApiTalk {
                     }
                 }
                 if round.calls.is_empty() {
+                    let text = if round.text.trim().is_empty() {
+                        sink(&round.reasoning);
+                        round.reasoning
+                    } else {
+                        round.text
+                    };
                     self.history
-                        .push(json!({ "role": "assistant", "content": round.text }));
-                    (round.text, Vec::new())
+                        .push(json!({ "role": "assistant", "content": text }));
+                    (text, Vec::new())
                 } else {
                     let listed: Vec<Value> = round
                     .calls
@@ -613,6 +619,69 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("That did not work: the arguments were not a JSON object"));
+    }
+
+    #[test]
+    fn a_reasoning_only_reply_answers_in_the_native_session() {
+        let (url, _) = serve(vec![sse(&[
+            r#"{"choices":[{"delta":{"reasoning":"The minimum sits at the root."}}]}"#,
+            r#"{"choices":[{"delta":{},"finish_reason":"stop"}]}"#,
+            "[DONE]",
+        ])]);
+        let cfg = ProviderConfig {
+            kind: Some(ProviderKind::Openai),
+            base_url: Some(url),
+            model: Some("qwen3".into()),
+            ..Default::default()
+        };
+        let mut talk = ApiTalk::new(
+            OpenAiChat::new("ollama".into(), &cfg, None),
+            "ollama",
+            &Config::default(),
+            "system",
+            &tools(),
+        );
+        let ran = run(&mut talk, 2);
+        assert_eq!(ran.answer, "The minimum sits at the root.");
+        assert_eq!(ran.shown, "The minimum sits at the root.");
+    }
+
+    #[test]
+    fn a_stop_during_a_streamed_round_ends_the_session_answer() {
+        let (url, _) = serve(vec![sse(&[
+            r#"{"choices":[{"delta":{"content":"Heaps"}}]}"#,
+            r#"{"choices":[{"delta":{"content":" stay"}}]}"#,
+            "[DONE]",
+        ])]);
+        let cfg = ProviderConfig {
+            base_url: Some(url),
+            ..ProviderConfig::default()
+        };
+        let mut talk = ApiTalk::new(
+            OpenAiChat::new("ollama".into(), &cfg, None),
+            "ollama",
+            &Config::default(),
+            "",
+            &tools(),
+        );
+        let asked = std::cell::Cell::new(0);
+        let result = talk.say(
+            "What is a heap?",
+            Turn {
+                tail: "",
+                max_tokens: 100,
+                most_calls: 2,
+                sink: &mut |_| {},
+                restart: &mut || {},
+                call: &mut |_, _| String::new(),
+                stopped: &|| {
+                    asked.set(asked.get() + 1);
+                    asked.get() > 2
+                },
+                tools_done: &|| false,
+            },
+        );
+        assert!(result.unwrap_err().to_string().contains("stopped"));
     }
 
     #[test]
