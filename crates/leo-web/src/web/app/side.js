@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0 };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -455,6 +455,10 @@ function pumpSideNotes() {
   }
 }
 
+function sideDrawSoon() {
+  if (!side.frame) side.frame = requestAnimationFrame(() => { side.frame = 0; drawSide(); });
+}
+
 async function readSideNotes(path, entry) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SIDE_NOTES_TIMEOUT);
@@ -465,8 +469,10 @@ async function readSideNotes(path, entry) {
     if (side.notes.get(path) !== entry || entry.seq !== seq) return;
     if (!Array.isArray(page.items)) throw new Error('Notes could not be opened.');
     const had = entry.refreshing && new Set(entry.items.map((note) => note.id));
+    const before = entry.refreshing ? JSON.stringify([entry.items, entry.total]) : null;
     entry.items = page.items.slice(0, SIDE_NOTES_PAGE).filter((note) => typeof note.id === 'string' && typeof note.title === 'string');
     entry.total = Number.isSafeInteger(page.total) && page.total >= 0 ? page.total : entry.items.length;
+    entry.quiet = before !== null && before === JSON.stringify([entry.items, entry.total]);
     entry.loaded = true;
     if (had) for (const note of entry.items) if (!had.has(note.id) && Date.now() - Date.parse(note.created_at) < SIDE_NEW_MS) inkLand(note.id);
     if (!entry.items.length && entry.offset && entry.total) setTimeout(() => loadSideNotes(path, Math.floor((entry.total - 1) / SIDE_NOTES_PAGE) * SIDE_NOTES_PAGE, true));
@@ -479,7 +485,7 @@ async function readSideNotes(path, entry) {
     clearTimeout(timeout);
     entry.loading = false;
     if (side.notes.get(path) === entry && entry.seq === seq) {
-      drawSide();
+      if (!entry.quiet || entry.error) sideDrawSoon();
       if (!path && tasksAtHome()) drawHomeToday();
     }
   }
