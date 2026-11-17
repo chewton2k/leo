@@ -593,6 +593,10 @@ fn label_for(uploads: &[Upload], material: &Material) -> Option<String> {
     }
 }
 
+fn said(e: anyhow::Error) -> anyhow::Error {
+    anyhow::anyhow!(crate::ai::writing_error(&e))
+}
+
 pub fn import(
     uploads: &[Upload],
     wants: &str,
@@ -602,9 +606,13 @@ pub fn import(
     let material = gather(uploads)?;
     let name = uploads.first().map(|u| u.name.as_str()).unwrap_or("upload");
     let write = |prompt: Prompt, most: u32| -> Result<String> {
-        Ok(crate::ai::chat_outcome(prompt, most)?.value)
+        crate::ai::chat_outcome(prompt, most)
+            .map(|outcome| outcome.value)
+            .map_err(said)
     };
-    let see = |prompt: Prompt, images: &[Image], most: u32| crate::ai::see(prompt, images, most);
+    let see = |prompt: Prompt, images: &[Image], most: u32| {
+        crate::ai::see(prompt, images, most).map_err(said)
+    };
     let budget = crate::ai::writing_budget();
     let label = label_for(uploads, &material);
     let (title, body) = write_note(
@@ -784,6 +792,94 @@ mod tests {
             bytes: b"   ".to_vec(),
         };
         assert!(read_for_chat(&blank, &never, &mut |_| {}).is_err());
+    }
+
+    #[test]
+    fn a_provider_rejection_reaches_import_and_the_reader_in_the_shared_words() {
+        use std::io::Read;
+        const SENTINEL: &str = "SENTINEL-reflected-source-excerpt";
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                std::thread::spawn(move || {
+                    let _ = stream.set_read_timeout(Some(std::time::Duration::from_millis(300)));
+                    let mut buffer = [0u8; 65536];
+                    let _ = stream.read(&mut buffer);
+                    let body =
+                        format!("{{\"error\":{{\"message\":\"bad request near: {SENTINEL}\"}}}}");
+                    let _ = write!(
+                        stream,
+                        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                });
+            }
+        });
+        let mut cfg = crate::config::Config::default();
+        cfg.chat.chain = vec!["ollama".into()];
+        cfg.providers.insert(
+            "ollama".into(),
+            crate::config::provider::ProviderConfig {
+                kind: Some(crate::config::provider::ProviderKind::Openai),
+                base_url: Some(format!("http://127.0.0.1:{port}/v1")),
+                model: Some("llama3.2".into()),
+                ..Default::default()
+            },
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let write = |prompt: Prompt, most: u32| -> Result<String> {
+            crate::ai::chat::complete(&cfg, &store, prompt, most)
+                .map(|outcome| outcome.value)
+                .map_err(said)
+        };
+        let see = |prompt: Prompt, images: &[Image], most: u32| -> Result<String> {
+            let req = crate::ai::provider::ChatRequest {
+                system: Some(prompt.system),
+                prompt: prompt.user,
+                temperature: 0.2,
+                max_tokens: most,
+            };
+            let providers = crate::ai::provider::build_chat_chain(&cfg, &store);
+            crate::ai::chain::run_vision_chain(providers, &req, images)
+                .map(|outcome| outcome.value)
+                .map_err(said)
+        };
+        let ask = Prompt {
+            system: "s".into(),
+            user: "u".into(),
+        };
+        let shared = write(ask, 10).unwrap_err().to_string();
+        let text = Upload {
+            name: "notes.md".into(),
+            mime: "text/markdown".into(),
+            bytes: b"# Heaps\nThe minimum sits at the root.".to_vec(),
+        };
+        let material = gather(&[text]).unwrap();
+        let imported = write_note(
+            &material,
+            "notes.md",
+            None,
+            "",
+            &write,
+            &see,
+            &mut |_, _, _| {},
+            crate::ai::budget::writing_budget(&cfg),
+        )
+        .unwrap_err()
+        .to_string();
+        let photo = Upload {
+            name: "board.jpg".into(),
+            mime: "image/jpeg".into(),
+            bytes: vec![0xff, 0xd8, 0xff],
+        };
+        let read = read_for_chat(&photo, &see, &mut |_| {})
+            .unwrap_err()
+            .to_string();
+        assert!(!shared.contains(SENTINEL), "{shared}");
+        assert_eq!(imported, shared);
+        assert_eq!(read, shared);
     }
 
     #[test]
