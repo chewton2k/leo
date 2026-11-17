@@ -30,7 +30,13 @@ pub fn writer(
             user: user.into(),
         };
         let result = match route_of(purpose) {
-            Route::Toolless => leo_services::ai::toolless_outcome(prompt, most),
+            Route::Toolless => leo_core::children::with_stop(
+                leo_core::children::Stop {
+                    deadline: Some(started + leo_web::margin::READ_LIMIT),
+                    ..Default::default()
+                },
+                || leo_services::ai::toolless_outcome(prompt, most),
+            ),
             Route::Quick => leo_services::ai::quick_outcome(prompt, most),
             Route::Full => leo_services::ai::chat_outcome(prompt, most),
         };
