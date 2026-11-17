@@ -22,7 +22,7 @@ const KANBAN_TONES = [
   [/\b(to do|todo|tasks?|backlog|ideas?|next|planned|new)\b/i, 'todo'],
 ];
 const KANBAN_NEAR = ['todo hue0', 'done hue1', 'blocked hue2', 'hue1 hue3'];
-const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null };
+const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null, drawnHtml: null };
 
 const kanbanClash = (a, b) => a === b || KANBAN_NEAR.includes(`${a} ${b}`) || KANBAN_NEAR.includes(`${b} ${a}`);
 
@@ -104,6 +104,7 @@ async function kanbanRefresh() {
   if (mine !== seq || kanban.board?.id !== board.id || kanban.drag || kanbanWrites !== writes) return;
   kanban.board = data.board;
   kanban.cards = data.cards || [];
+  if (app.querySelector('.kanban-board') && kanban.drawnHtml !== null && kanbanBoardHtml() === kanban.drawnHtml) return;
   drawKanban();
 }
 
@@ -207,11 +208,17 @@ document.addEventListener('scroll', (e) => {
   if (e.target.matches?.('.kanban-cols, .kanban-tabs')) kanbanFade(e.target);
 }, true);
 
+function kanbanBoardHtml() {
+  const board = kanban.board;
+  return `<div class="kanban-page">${kanbanHeadHtml()}<div class="kanban-cols" data-board="${esc(board.id)}">${board.columns.map(kanbanColumnHtml).join('')}</div></div>`;
+}
+
 function drawKanban() {
   if (state.view !== 'boards') return;
   const board = kanban.board;
   if (!board) {
     kanbanClosePanel(false);
+    kanban.drawnHtml = null;
     app.innerHTML = `<div class="kanban-page kanban-none">${empty(DRAWN.board, 'No boards yet', 'Columns like To do, In progress and Done. Drag a card along as the work moves.')}<button class="btn primary" data-action="kanban-new-board">${ICON.plus}<span>New board</span></button></div>`;
     return;
   }
@@ -238,7 +245,7 @@ function drawKanban() {
   }
   kanban.redrawing = true;
   try {
-    host.innerHTML = `<div class="kanban-page">${kanbanHeadHtml()}<div class="kanban-cols" data-board="${esc(board.id)}">${board.columns.map(kanbanColumnHtml).join('')}</div></div>`;
+    host.innerHTML = kanban.drawnHtml = kanbanBoardHtml();
   } finally {
     kanban.redrawing = false;
   }
@@ -275,6 +282,7 @@ function kanbanRedrawCard(card) {
   const el = app.querySelector(`.kanban-card[data-card="${CSS.escape(card.id)}"]`);
   if (!el) return;
   const focused = document.activeElement === el;
+  kanban.drawnHtml = null;
   el.outerHTML = kanbanCardHtml(card);
   if (focused) app.querySelector(`.kanban-card[data-card="${CSS.escape(card.id)}"]`)?.focus({ preventScroll: true });
   kanbanRebind();
@@ -295,6 +303,7 @@ function kanbanSyncTab() {
   if (tab) { tab.name = kanban.board.name; tab.columns = kanban.board.columns; tab.cards = kanban.cards.length; }
   const nav = app.querySelector('.kanban-tabs');
   if (nav && !nav.contains(document.activeElement)) {
+    kanban.drawnHtml = null;
     nav.innerHTML = kanbanTabsHtml();
     kanbanFit();
   }
@@ -1076,6 +1085,7 @@ document.addEventListener('pointerdown', (e) => {
   if (!onName && e.target.closest('input, textarea, select, button, a')) return;
   const item = card || head.closest('.kanban-col');
   const touch = e.pointerType === 'touch';
+  kanban.drawnHtml = null;
   kanban.drag = { kind: card ? 'card' : 'col', item, id: card ? card.dataset.card : item.dataset.col, pointer: e.pointerId, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, live: false, timer: 0, touch };
   if (touch) kanban.drag.timer = setTimeout(kanbanLift, KANBAN_HOLD_MS);
   else if (!onName) {

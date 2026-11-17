@@ -514,6 +514,42 @@ test('a keyboard move shows at once and goes back with the error when the save f
   });
 });
 
+test('a keyboard move the server agrees with redraws the board once', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => {
+      const draw = window.drawKanban;
+      window.drawn = 0;
+      window.drawKanban = function () { window.drawn++; return draw.apply(this, arguments); };
+      window.fetched = window.calls.filter(c => c === 'GET /api/boards/bwork00001').length;
+    });
+    await page.locator('[data-card="cessay0001"]').focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => page.evaluate(() => window.calls.filter(c => c === 'GET /api/boards/bwork00001').length > window.fetched)).toBe(true);
+    await settled(page);
+    await page.waitForTimeout(200);
+    expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write essay']);
+    expect(await page.evaluate(() => window.drawn)).toBe(1);
+  });
+});
+
+test('a move whose answer renames the card shows the new title', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.evaluate(() => {
+      const write = window.kanbanWrite;
+      window.kanbanWrite = async function (path, options) {
+        const answer = await write.call(this, path, options);
+        if (!/\/move$/.test(path)) return answer;
+        window.db.cards.find(c => c.id === 'cessay0001').title = 'Write the essay';
+        return { ...answer, title: 'Write the essay' };
+      };
+    });
+    await page.locator('[data-card="cessay0001"]').focus();
+    await page.keyboard.press('Alt+ArrowRight');
+    await expect.poll(() => titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>', 'Write the essay']);
+    await settled(page);
+  });
+});
+
 test('a priority and a delete show before leo answers and come back when the save fails', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     await page.locator('[data-card="cread00001"]').click();
