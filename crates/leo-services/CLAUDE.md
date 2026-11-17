@@ -238,7 +238,10 @@ including `memories` and `daemon_auto_start`. Never disable `code_mode_host`,
 `unified_exec` or `shell_snapshot` (every reply came back empty). Watchdog:
 Claude Code stops after `QUIET_LIMIT` (180 s) silent, either CLI after
 `TOTAL_LIMIT` (15 min); the whole process group is killed and the run tried once
-more. `Process::stop` reaps children after killing the group.
+more. `Process::stop` reaps children after killing the group. A caller's stop
+(`leo_core::children::with_stop`: a flag and/or deadline, re-entered on the
+long-recording and import worker threads) reaches every launch; the margin read
+runs under `READ_LIMIT`.
 
 Usable = program on PATH (`locate`, `.cmd` on Windows); failures are retryable and
 name the sign-in step. `health::writing` is SignInNeeded only from the last

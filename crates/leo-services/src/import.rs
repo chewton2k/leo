@@ -528,26 +528,30 @@ pub fn write_note(
         );
     };
     step(0);
+    let stop = leo_core::children::current_stop();
     std::thread::scope(|scope| {
         let (tx, rx) = std::sync::mpsc::channel::<()>();
         for _ in 0..budget.at_once.max(1).min(jobs) {
             let tx = tx.clone();
             let (next, results, run) = (&next, &results, &run);
-            scope.spawn(move || loop {
-                let i = next.fetch_add(1, Ordering::Relaxed);
-                if i >= jobs {
-                    return;
-                }
-                let written = run(i);
-                let failed = written.is_err();
-                if let Ok(mut slot) = results[i].lock() {
-                    *slot = Some(written);
-                }
-                if failed {
-                    next.store(jobs, Ordering::Relaxed);
-                    return;
-                }
-                let _ = tx.send(());
+            let stop = stop.clone().unwrap_or_default();
+            scope.spawn(move || {
+                leo_core::children::with_stop(stop, || loop {
+                    let i = next.fetch_add(1, Ordering::Relaxed);
+                    if i >= jobs {
+                        return;
+                    }
+                    let written = run(i);
+                    let failed = written.is_err();
+                    if let Ok(mut slot) = results[i].lock() {
+                        *slot = Some(written);
+                    }
+                    if failed {
+                        next.store(jobs, Ordering::Relaxed);
+                        return;
+                    }
+                    let _ = tx.send(());
+                })
             });
         }
         drop(tx);
@@ -624,6 +628,55 @@ pub fn import(
 mod tests {
     use super::*;
     use std::io::Write as _;
+
+    #[test]
+    fn a_stop_reaches_the_import_workers() {
+        use std::sync::atomic::AtomicUsize;
+        let caller = std::thread::current().id();
+        let on_workers = AtomicUsize::new(0);
+        let unstopped = AtomicUsize::new(0);
+        let count = || {
+            if std::thread::current().id() != caller {
+                on_workers.fetch_add(1, Ordering::SeqCst);
+            }
+            if leo_core::children::current_stop().is_none() {
+                unstopped.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+        let write = |_: Prompt, _: u32| -> Result<String> {
+            count();
+            Ok("Heaps\n\nHow heaps work.".into())
+        };
+        let see = |_: Prompt, _: &[Image], _: u32| -> Result<String> {
+            count();
+            Ok("## Whiteboard\n- drawing".into())
+        };
+        let long = Material {
+            text: vec!["word ".repeat(1000); 10].join("\n\n"),
+            images: (0..8)
+                .map(|i| Image {
+                    mime: "image/jpeg".into(),
+                    bytes: vec![i],
+                })
+                .collect(),
+            figures: vec![],
+        };
+        leo_core::children::with_stop(leo_core::children::Stop::default(), || {
+            write_note(
+                &long,
+                "handout.pdf",
+                None,
+                "",
+                &write,
+                &see,
+                &mut |_, _, _| {},
+                Budget::FREE,
+            )
+        })
+        .unwrap();
+        assert!(on_workers.load(Ordering::SeqCst) > 1);
+        assert_eq!(unstopped.load(Ordering::SeqCst), 0);
+    }
 
     fn never(_: Prompt, _: &[Image], _: u32) -> Result<String> {
         panic!("there are no images here")

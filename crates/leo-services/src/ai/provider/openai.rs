@@ -531,7 +531,10 @@ impl OpenAiChat {
 
 impl ChatProvider for OpenAiChat {
     fn complete_streaming(&self, req: &ChatRequest, sink: Sink<'_>) -> ProviderResult<String> {
-        self.stream_until(req, sink, &|| false)
+        let stop = leo_core::children::current_stop();
+        self.stream_until(req, sink, &|| {
+            stop.as_ref().is_some_and(leo_core::children::Stop::asked)
+        })
     }
 
     fn complete_until(
