@@ -355,9 +355,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The line under
-  the title (`#note-facts`) holds only the save state, `#save-state` ("Edited …",
-  Saving, the drying mark); there is no word count or read time (2026-11-16, the
-  user's call). It is skipped by search highlights and hidden in print. The note's
+  the title (`#note-facts`) holds the save state, `#save-state` ("Edited …",
+  Saving, the drying mark), then the read time (`#note-read`, " · N min read" from
+  `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
+  edit); there is no word count (2026-11-16, the user's call). It is skipped by search highlights and hidden in print. The note's
   tools (transcript, Tasks, Add picture, Move to folder, Share as a second step, Move
   to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js) after Read through;
   there is no floating note toolbar, and the Tasks card is hidden on note pages. The
@@ -628,8 +629,10 @@ Felix (2026-10-19).
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
   (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
-  `.../threads/{id}` `{pinned}`; a pinned or newest read-along note
-  (`marginPage.newest`, `data-newest`) stays undimmed. An open thread's
+  `.../threads/{id}` `{pinned}`; a pinned note stays open in every layout
+  (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
+  unpinning folds it unless it is the one open) and a newest read-along note
+  (`marginPage.newest`, `data-newest`) stays undimmed (2026-11-16, the user's call). An open thread's
   messages sit right of a 1 px `--line` rule; its one action row is Resolve,
   Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
   row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
@@ -643,8 +646,16 @@ Felix (2026-10-19).
   layout's room (`ROOM_BOTH` 992 px, `ROOM_RIGHT` 928 px of columns) it becomes marks,
   never one side (2026-11-16, the user's call). It never moves every note right to make them wider. A closed note
   in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
-  are a small ink blot just after the passage's last word (`marginPassageEnd`), never
-  in a left gutter, side by side when two end together; a read's blot sits there too.
+  are a 13 px ink blot just after the passage's last word, never over the text: `marginSlots`
+  puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
+  the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
+  editor or a code, table or maths block) before anything is measured, and the blot sits on
+  it; side by side when two end together. A read's blot, and any passage without a slot,
+  sits just after the last word instead (`marginPassageEnd`). An open or pinned note sits
+  under its block as a raised card (`--raised`, `--shadow`), the block's `--margin-room`
+  holding its height (pinned cards stack); it unfolds with a clip and the room over
+  `OPEN_MS` and folds away over `OPEN_MS × EXIT_SHARE` before it closes
+  (`marginFoldAway`, inert while leaving), none under `stillMotion()`.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
@@ -980,8 +991,7 @@ a modal.
   Restore tasks refuses a zip or file without task ids.
 - Appearance keys are per browser (`leo-theme`, `leo-note-width`,
   `leo-text-size`, `leo-felix-letters`, `leo-page-width`) and set before paint by `/theme.js`;
-  only reading text multiplies `--read`. Page width (2026-11-16, the user's call, like the
-  reference app): two `.page-mark` separators at the note's top corners (drag.js) set
+  only reading text multiplies `--read`. Page width (2026-11-16, the user's call): two `.page-mark` separators at the note's top corners (drag.js) set
   `leo-page-width` (480–1600 px, symmetric about the column's centre, live px label, arrows
   ±20, double-click/Enter resets; 2 px marks at 38% ink); `showWidth` writes it as an inline
   `--note-width` unless the width is Full. A drag stops at `marginKit.mostColumn`, the widest

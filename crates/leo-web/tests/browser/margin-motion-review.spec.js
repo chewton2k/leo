@@ -379,7 +379,7 @@ test.describe('reading pencil', () => {
 
 test.describe('whole notes and pins', () => {
   const LONG = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it before you store it. Use a slow hash such as Argon2id with a unique salt for each user, and verify at login by hashing the attempt the same way.' }] };
-  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pin stays undimmed', async ({ browser }) => {
+  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pinned note stays open', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
       const said = note.locator('.margin-said');
@@ -401,10 +401,13 @@ test.describe('whole notes and pins', () => {
       expect(await pin.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
       await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
       await page.mouse.click(5, 5);
-      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.keyboard.press('Escape');
+      await expect(note).toHaveAttribute('data-open', '');
       await expect(note).toHaveAttribute('data-pinned', '');
-      expect(await height()).toBeGreaterThan(line * 2);
+      await expect(note.locator('.margin-reply textarea')).toBeVisible();
       await expect.poll(opacity).toBe(1);
+      await pin.click();
+      await expect(note).not.toHaveAttribute('data-open', '');
     }, { threads: [LONG] });
   });
 

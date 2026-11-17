@@ -184,7 +184,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(nav.getByRole('button', {name:'Ignore code'})).toHaveCount(0);
     await expect(page.locator('.note-outline details')).not.toHaveAttribute('open', '');
     const facts = page.locator('#title + #note-facts');
-    await expect(facts).toHaveText('Edited now');
+    await expect(facts).toHaveText(/^Edited now( · \d+ min read)?$/);
     await expect(page.locator('.note-meta #save-state')).toHaveCount(0);
     expect(await facts.evaluate(el => getComputedStyle(el).fontVariantNumeric)).toBe('tabular-nums');
     await page.emulateMedia({media:'print'});

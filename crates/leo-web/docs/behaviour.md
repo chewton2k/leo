@@ -255,8 +255,8 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   beside a pencil bracket; tables have a pencil double rule under the header running
   edge to edge, banded rows and right-aligned number columns; code blocks show their
   language and a Copy button on hover or keyboard focus. Chat, margin notes, previews
-  and board cards keep plain styling. A faint "N words · M min read" line sits under
-  the title. Note rows in the explorer edited in the last 30 minutes carry a small
+  and board cards keep plain styling. A faint line under the title says when the
+  note was edited and its read time ("M min read"; no word count). Note rows in the explorer edited in the last 30 minutes carry a small
   dot (not when sorted by Last edited).
 
 - No editor view: `editing.js` splits the body into blocks; `doc.js` renders
@@ -599,8 +599,8 @@ Reading-position anchors skip blank editor blocks and zero-width placeholders, s
 
 Explorer revisions: opening a different note clears the prior folder creation
 scope; selecting a folder afterwards deliberately sets the creation destination.
-Explicit chips and breadcrumbs reveal Folders on compact windows or unfold the
-desktop explorer; passive reveals never open a sheet. Loaded metadata stays
+Explorer rows reveal Folders on compact windows or unfold the desktop explorer (the
+note page has no folder chip and the bar no breadcrumbs since 2026-11-16); passive reveals never open a sheet. Loaded metadata stays
 visible during refresh, including empty folders, while generation and entry
 guards reject stale reads. The rail omits Felix and the explorer has no Collapse
 all control. Heading context uses creation scope, blank tree context uses root,
@@ -1109,7 +1109,8 @@ target. Check the page sequence after loading preferences.
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
   text as a whole stops at 12 lines with a bottom fade on the last shown block (`.margin-cut`, set only when it overflows; later text blocks hide), figures and drawings
   always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
-  keeps the closed note undimmed with a faint tether. Open, its messages and the waiting mark sit right of a 1 px
+  keeps the note open with its reply box in every layout (2026-11-16, the user's call): Escape and a
+  click outside leave it, several can stay open, unpinning folds it; a faint tether shows at rest. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).
   Pin, Resolve, Dismiss and the mode change show at once; a failed save puts them back (only the
   newest request's answer counts; a resolved note returns to its place, open if it was, with its typed reply).
@@ -1140,11 +1141,13 @@ target. Check the page sequence after loading preferences.
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes
   (`Warm.margin`).
-- Round two from the reference app (2026-11-16, the user's call): marks are an ink blot after the passage's last
+- Margin polish (2026-11-16, the user's call): marks are an ink blot after the passage's last
   word; closed left-margin notes are right-aligned; a silent read leaves a faint "Nothing to add." after the passage;
   a draw ask waits with "Sketching it…"; the ask box says "Enter to ask · Esc to close"; Felix this on a passage with a
   thread only opens it; the open thread offers Copy; a folded thread says "N replies"; a resolved note stays faded with
   "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
+  In Marks the blot takes its own room in the line, so it never covers the next word; the open note is a raised
+  card under the paragraph that unfolds and folds away (none under Reduce Motion).
 - Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
   least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's

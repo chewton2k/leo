@@ -216,16 +216,17 @@ figure.drawing.inked img { filter: none !important; }
 .margin-revisit:hover, .margin-revisit:focus-visible { border-bottom-color: color-mix(in srgb, var(--text) 60%, transparent); }
 .margin-revisit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center; cursor: pointer; }
-.margin-anchor { display: grid; width: 11px; height: 11px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
+.margin-anchor { display: grid; width: 13px; height: 13px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
+.margin-slot { display: inline; padding-left: 21px; }
+@media print { .margin-slot { display: none; } }
+.margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow); }
 .margin-anchor svg { width: 100%; height: 100%; }
 .margin-mark:hover .margin-anchor, .margin-mark[data-active] .margin-anchor { color: var(--text); }
-.margin-mark[data-active] .margin-anchor { transform: scale(1.35); }
+.margin-mark[data-active] .margin-anchor { transform: scale(1.2); }
 .margin-mark[data-more] .margin-anchor { color: var(--text); }
 @media (pointer: coarse) { .margin-mark { width: 44px; height: 44px; } }
 @container note (min-width: 900px) { .note-columns[data-margin="marks"] { padding-left: 48px; } }
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
-.note-context { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 12px; min-height: 24px; }
-@media (min-width: 1000px) { .note-context { display: none; } }
 .note-meta .margin-mode { font-size: var(--fs-sm); padding: 2px 6px; margin-left: -2px; }
 #margin-status { margin-left: auto; }
 .margin-mode-wrap { position: relative; flex: none; }
@@ -297,6 +298,7 @@ figure.drawing.inked img { filter: none !important; }
 }
 @media (forced-colors: active) {
   .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-note[data-inline] { outline: 1px solid CanvasText; }
   .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
