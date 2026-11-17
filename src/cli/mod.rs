@@ -2,7 +2,6 @@ mod installation;
 mod open_app;
 mod prompt;
 mod uninstall;
-mod update;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -16,12 +15,6 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    #[command(about = "Update leo to the latest release")]
-    Update {
-        #[arg(long, help = "Reinstall even when already on the latest version")]
-        force: bool,
-    },
-
     #[command(about = "Remove leo and everything it made from this computer. Your notes stay")]
     Uninstall {
         #[arg(short, long, help = "Do not ask first")]
@@ -44,7 +37,6 @@ where
 
 pub fn run(cli: Cli) -> Result<()> {
     match cli.command {
-        Some(Commands::Update { force }) => update::run(force),
         Some(Commands::Uninstall { yes }) => uninstall::run(yes),
         None => open_app::open(),
     }
@@ -61,17 +53,19 @@ mod cli_tests {
     }
 
     #[test]
-    fn only_update_and_uninstall_remain() {
-        assert!(matches!(
-            parse_from(["leo", "update"]).command,
-            Some(Commands::Update { force: false })
-        ));
+    fn only_uninstall_remains() {
         assert!(matches!(
             parse_from(["leo", "uninstall", "--yes"]).command,
             Some(Commands::Uninstall { yes: true })
         ));
+        for args in [&["leo", "update"][..], &["leo", "update", "--force"]] {
+            assert_eq!(
+                Cli::try_parse_from(args).err().map(|e| e.kind()),
+                Some(clap::error::ErrorKind::InvalidSubcommand)
+            );
+        }
         for gone in [
-            "serve", "doctor", "new", "list", "backup", "trash", "record", "ask", "help",
+            "serve", "doctor", "new", "list", "backup", "trash", "record", "ask", "help", "update",
         ] {
             assert!(
                 Cli::try_parse_from(["leo", gone]).is_err(),

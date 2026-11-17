@@ -19,7 +19,6 @@ base64 = "0.22"
 chrono = { version = "0.4", features = ["serde"] }
 chrono-tz = "0.10"
 clap = { version = "4", features = ["derive"] }
-colored = "3"
 cpal = "0.18"
 dirs = "6"
 dotenvy = "0.15"
@@ -54,7 +53,7 @@ zeroize = "1"
 
 [package]
 name = "leo"
-description = "Opens, updates or uninstalls the leo app"
+description = "Opens or uninstalls the leo app"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -69,7 +68,6 @@ leo-core.workspace = true
 leo-services.workspace = true
 anyhow.workspace = true
 clap.workspace = true
-colored.workspace = true
 dirs.workspace = true
 dotenvy.workspace = true
 tempfile.workspace = true

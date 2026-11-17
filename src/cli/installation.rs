@@ -354,7 +354,7 @@ mod tests {
         assert!(!file.exists());
     }
     #[test]
-    fn bundle_updates_use_the_saved_terminal_folder_and_never_the_bundle() {
+    fn uninstall_uses_the_saved_terminal_folder_and_never_the_bundle() {
         let dir = tempfile::tempdir().unwrap();
         let exe = dir.path().join("Leo.app/Contents/MacOS/leo");
         let record = dir.path().join("app-cli-dir");

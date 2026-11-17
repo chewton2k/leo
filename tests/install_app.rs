@@ -208,37 +208,6 @@ fn uninstall_removes_the_app_and_cli_link_but_preserves_notes() {
 }
 
 #[test]
-fn updating_through_the_app_link_keeps_the_custom_terminal_directory() {
-    let dir = fixture();
-    assert!(install(dir.path(), Some("/bin/zsh"), false)
-        .status
-        .success());
-    let script = dir.path().join("installer.sh");
-    std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n%s' \"$LEO_INSTALL_DIR\" \"$LEO_INSTALL_SKIP_PATH\" > \"$LEO_UPDATE_RESULT\"\n").unwrap();
-    let output = dir.path().join("installer-result");
-    let cli = dir.path().join("bin with 'quote' and $dollar/leo");
-    let out = Command::new(&cli)
-        .args(["update", "--force"])
-        .env("LEO_HOME", dir.path().join("config"))
-        .env("HOME", dir.path().join("home"))
-        .env("LEO_UPDATE_SCRIPT", &script)
-        .env("LEO_UPDATE_RESULT", &output)
-        .env("LEO_INSTALL_NO_MODEL", "1")
-        .env("LEO_NO_MEANING_MODEL", "1")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(output).unwrap(),
-        format!("{}\n1", cli.parent().unwrap().display())
-    );
-}
-
-#[test]
 fn an_archive_listing_is_stopped_when_it_exceeds_the_entry_limit() {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture();

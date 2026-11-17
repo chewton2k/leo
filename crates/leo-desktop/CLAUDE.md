@@ -260,7 +260,7 @@ and scripts/set-version.sh remain authoritative.
 
 Release assets are macOS arm64/x64 app archives and DMGs plus Windows x64 NSIS.
 CI uses one stable self-signed identity and verifies both bundle and CLI signatures;
-updater signatures cover the same app archive or NSIS used by terminal installation.
+updater signatures cover the same app archive or NSIS used by the install scripts.
 Windows builds set `TRANSCRIBE_CMAKE_ARGS` to an AVX2 floor (2026-11-04): transcribe.cpp
 otherwise tunes to the build machine, which crashed with an illegal instruction when CI
 reused a cache from another runner and would on users' processors too. Handy picks

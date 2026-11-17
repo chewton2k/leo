@@ -59,8 +59,6 @@ only if you turn on its AI writing switch.
 
 Settings → Updates & about checks for updates, shows what changed, and installs
 when you quit by default. Updates wait for recording and dictation to finish.
-`leo update` uses the same download; quit Leo before using the terminal
-installer.
 
 `leo uninstall` removes the app, its login item and its local settings and
 models, and keeps your notes.
@@ -70,9 +68,10 @@ Settings → Health lists setup problems and how to fix each one.
 ## Moving from the terminal version
 
 macOS users with a standard installation can quit their old Leo session, run
-`leo update`, then open Leo in Applications. The installer replaces the terminal
-command with the app launcher, so typing `leo` opens the app. The terminal
-interface and browser-server workflow are replaced by the desktop window.
+the install command above (an older copy's `leo update` does the same), then
+open Leo in Applications. The installer replaces the terminal command with the
+app launcher, so typing `leo` opens the app. The terminal interface and
+browser-server workflow are replaced by the desktop window.
 
 Your notes stay in the same folder. Leo reads the existing database and writing
 settings; there is no export or import step. Built-in GitHub backup is retired;
@@ -86,7 +85,7 @@ credentials file.
 
 Two cases are not automatic yet:
 
-- **Windows:** the old `leo update` command keeps its executable running while
+- **Windows:** an older copy's `leo update` command keeps its executable running while
   the installer tries to replace it. Quit old Leo, run the downloaded Windows
   installer, then open the app from Start. An existing terminal command may
   still point to the old version.

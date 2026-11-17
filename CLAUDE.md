@@ -15,7 +15,7 @@ the compiler enforces it — do not add an upward dependency:
 | `crates/leo-web` | leo's engine and pages: `lib.rs` (`start` → `Running`, router), `routes/` (handlers by area), `token.rs`, and the page in `src/web/` (`page-head.html` + `styles/*.css` + `page-tail.html` joined at compile time, `app/*.js` served as `/app.js`, `markdown.js`, …) | core |
 | `crates/leo-host` | `powers()` (the AI, speech, settings, recording housekeeping and import powers handed to the engine) and `leo-test-server` (Playwright's engine) | core, services, web |
 | `crates/leo-desktop` | The Tauri app `leo-app`: window, menu bar icon, single instance, open at login, PATH from the login shell, links/downloads/print | core, services, host, web |
-| root `leo` | `main.rs` and `cli/`: `leo` opens the app, `leo update`, `leo uninstall`, `--version` | core, services |
+| root `leo` | `main.rs` and `cli/`: `leo` opens the app, `leo uninstall`, `--version` | core, services |
 
 Verify with `cargo test` at the root (runs every crate but `leo-desktop`, which
 is outside `default-members`) and `cargo clippy --workspace --all-targets`. Do not
@@ -48,7 +48,10 @@ window shows the website, served by leo-web's engine started inside the app on
 signs in with). Nothing else can reach it: a Host check refuses any other host
 (421) and the cookie is `SameSite=Strict`. There is no `leo serve`, no tunnel,
 no phone or other-browser access, and no terminal interface; the terminal keeps
-`leo` (opens the app), `leo update`, `leo uninstall` and `--version`. Plans and
+`leo` (opens the app), `leo uninstall` and `--version`; `leo update` was removed
+on 2026-11-17 (the user's call: "get rid of leo update terminal commands only
+keep leo uninstall", and "yes keep leo and leo --version"), so updates come only
+from the app's own signed updater. Plans and
 the design live in `docs/superpowers/` (gitignored, local).
 
 Subsystem notes load only when working in that crate:
@@ -110,15 +113,16 @@ settings and credentials are excluded from note exports.
   its id is not live) to `<notes>/.trash/<same relative path>`, mtime = when
   deleted. `tidy_trash` (load, a save that writes a new id, and hourly on save) drops live ids and ones past
   the Keeping choice (`keep::DEFAULT_TRASH_DAYS`, 30); it also expires trashed files it cannot parse (by mtime) and removes folders left empty; Empty trash and delete for good skip a file they cannot delete and report it; the list and the tidy read only each trashed file's header; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
-- Updates: `LEO_NO_UPDATE_CHECK=1` disables the app's automatic update check
-  (`crates/leo-desktop/src/updates.rs`; e2e and the browser tests set it).
-  `leo update` reads the latest tag with `update::latest_release()` from the
-  `releases/latest` redirect (not the API: rate limits; `LEO_LATEST_RELEASE`
-  pins it), then runs the release's app installer with a bounded checked download; script-download
-  failures cannot become successful empty shell pipelines. `LEO_INSTALL_DIR`
-  comes from private atomic `app-cli-dir` outside the app, preserving a custom
-  shim directory across in-app updates. `LEO_UPDATE_SCRIPT` injects a local
-  installer in tests. Windows defers installation until the CLI exits.
+- Updates: the app's signed updater is the only update path
+  (`crates/leo-desktop/src/updates.rs`; `leo update` removed 2026-11-17).
+  `LEO_NO_UPDATE_CHECK=1` disables its automatic check (e2e and the browser
+  tests set it). The install scripts take `LEO_INSTALL_DIR`, recorded in private
+  atomic `app-cli-dir` outside the app so `leo uninstall` finds a custom shim
+  directory, and `LEO_INSTALL_SKIP_PATH`; an older copy's `leo update` still
+  runs the latest release's install script. `scripts/install-app.ps1` keeps its
+  `LEO_UPDATE_PARENT_PID` wait (2026-11-17, the orchestrator's call under the
+  owner's principles): Windows builds from before that date still set it from
+  their own `leo update`, and it can go once no supported build sets it.
 - Note files are `<title>.md` (`filename::file_name`: FS-illegal chars to
   `-`, ≤100 chars and ≤200 bytes; same title in a folder → `Title (2).md`,
   oldest first, compared case-insensitively; `Store::assign_paths`). Windows
@@ -180,8 +184,8 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   Screenshots are pasted into the Record page with their timestamp.
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
-  described by their scripts and workflow; updates check the selected catalog
-  speech model, and uninstall retains the existing data-removal controls.
+  described by their scripts and workflow, and uninstall retains the existing
+  data-removal controls.
 - Note connections (cache code still says `graph`): see crates/leo-web/CLAUDE.md.
 - Tasks (`<notes>/.leo/tasks/`), boards and cards (`.leo/boards/`, `.leo/cards/`)
   are one-JSON-line-per-save files (newest line wins, tombstone deletes); boards
