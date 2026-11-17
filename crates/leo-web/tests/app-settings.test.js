@@ -93,7 +93,7 @@ test('Updates renders ready, busy and release notes safely with independent defa
   assert.equal((html.match(/role="switch"/g) || []).length, 2);
   assert.ok(!html.includes('<script>'));
   assert.ok(html.includes('Accessibility'));
-  assert.ok(html.includes('leo update') && html.includes('leo uninstall'));
+  assert.ok(!html.includes('leo update') && html.includes('leo uninstall'));
   assert.ok(html.includes('your notes stay') && html.includes('title="/notes"'));
 });
 

@@ -1581,8 +1581,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   updates wait for recording and dictation, then Leo reopens. About Leo lists the
   notes and speech-model folders as rows whose path is truncated in the middle
   (selectable, full path on hover; the app has no reveal or copy action), the
-  unsigned-copy warning as a compact amber notice, `leo update` and
-  `leo uninstall` as two rows, and Release notes in the card header. The card ends
+  unsigned-copy warning as a compact amber notice, `leo uninstall` as
+  one row (`leo update` removed 2026-11-17), and Release notes in the card header. The card ends
   with a colophon (2026-11-15): "Your notes are Markdown files on this computer.",
   Version, Note text (Instrument Sans), Felix's voice (his current lettering: Newsreader, or Instrument Sans when Felix writes in the notes' letters) and Licences with a
   NOTICE link, all in the system sans.
