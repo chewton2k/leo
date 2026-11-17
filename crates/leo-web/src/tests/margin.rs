@@ -578,6 +578,48 @@ async fn a_reworded_sentence_trades_its_untouched_note_for_the_new_one() {
     engine.stop().await;
 }
 
+#[test]
+fn one_sentence_means_no_sentence_ends_before_the_last_word() {
+    for (body, one) in [
+        ("then login just checks if it matches.", true),
+        ("  no full stop yet  ", true),
+        ("Version 1.2 is out!", true),
+        ("Two here. And here.", false),
+        ("A line\nand another", false),
+        ("", false),
+        (" . ", false),
+    ] {
+        assert_eq!(margin::one_sentence(body), one, "{body:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_one_sentence_note_s_lost_whole_note_comment_gives_way_to_the_next_read() {
+    for (said, replaced) in [(untouched(), true), (answered(), false)] {
+        let (engine, _) = reading(SAYS).await;
+        let now = "then login just checks if it matches.";
+        let (id, version) = engine.note("One sentence", now).await;
+        let was = "then login simply checks if it matches.";
+        let old = old_note(&engine, &id, was, was, "read", said);
+        let reply = read_changed(
+            &engine,
+            &id,
+            serde_json::json!({ "version": version, "blocks": [now] }),
+        )
+        .await;
+        let fresh = reply["note"]["id"].as_str().unwrap().to_string();
+        let open = open_ids(&engine, &id).await;
+        if replaced {
+            assert_eq!(reply["resolved"], serde_json::json!([old]));
+            assert_eq!(open, [fresh]);
+        } else {
+            assert_eq!(reply["resolved"], serde_json::json!([]));
+            assert_eq!(open.len(), 2);
+        }
+        engine.stop().await;
+    }
+}
+
 #[tokio::test]
 async fn a_reworded_sentence_keeps_a_note_you_answered() {
     let (engine, id, old, reply) = reworded(answered()).await;
@@ -2624,7 +2666,11 @@ fn seeded(engine: &Engine, id: &str, source: &str, said: bool, quote: &str) -> S
     if said {
         messages.push(margin::you_say("Why?"));
     }
-    let thread = margin::new_thread(id, source, nowhere(), quote, messages);
+    let place = margin::Place {
+        prefix: "Earlier words ".into(),
+        suffix: " later words.".into(),
+    };
+    let thread = margin::new_thread(id, source, place, quote, messages);
     assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
     thread.id
 }
@@ -2729,7 +2775,7 @@ async fn the_margin_lists_resolved_passages_without_their_messages_and_never_dis
     assert_eq!(view["threads"][0]["id"], open);
     assert_eq!(
         view["resolved"],
-        serde_json::json!([{ "id": resolved, "quote": "resolved one", "prefix": "", "suffix": "" }])
+        serde_json::json!([{ "id": resolved, "quote": "resolved one", "prefix": "Earlier words ", "suffix": " later words." }])
     );
     let path = format!("/api/notes/{id}/margin/threads/{resolved}");
     let (status, reopened) = engine

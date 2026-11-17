@@ -645,6 +645,22 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             Some((c.id.as_str(), at, c.text.len()))
         })
         .collect();
+    let mut stranded: Vec<String> = facts
+        .open
+        .iter()
+        .filter(|t| {
+            !through
+                && t.source == "read"
+                && t.prefix.is_empty()
+                && t.suffix.is_empty()
+                && !t.pinned
+                && !body.keep.contains(&t.id)
+                && t.messages.iter().all(|m| m.from == "felix")
+                && !now.body.contains(t.quote.as_str())
+                && margin::one_sentence(&now.body)
+        })
+        .map(|t| t.id.clone())
+        .collect();
     let mut saved = Vec::new();
     let mut resolved = Vec::new();
     let mut stopped = false;
@@ -667,6 +683,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             .iter()
             .filter(|(_, at, length)| margin::crowds_at(&now.body, &quote, &blocks, *at, *length))
             .map(|(old, _, _)| old.to_string())
+            .chain(stranded.iter().cloned())
             .collect();
         if through && !olds.is_empty() {
             continue;
@@ -705,6 +722,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                         quotes.remove(at);
                     }
                     changed.retain(|(id, _, _)| *id != old.id);
+                    stranded.retain(|id| *id != old.id);
                     resolved.push(old.id);
                 }
             }

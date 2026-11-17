@@ -1012,6 +1012,15 @@ pub fn placed(body: &str, quote: &str, within: &[String]) -> Option<Place> {
     context_around(body, found_at(body, quote, within)?, quote.len())
 }
 
+pub fn one_sentence(body: &str) -> bool {
+    let text = body.trim();
+    let lead = body.len() - body.trim_start().len();
+    let words = text
+        .trim_end_matches(['.', '!', '?', '。', '！', '？'])
+        .len();
+    words > 0 && sentence_at(body, lead, 0).1 >= lead + words
+}
+
 fn sentence_at(body: &str, at: usize, length: usize) -> (usize, usize) {
     let stops = |i: usize, c: char| {
         matches!(c, '\n' | '。' | '！' | '？')

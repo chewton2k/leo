@@ -719,7 +719,10 @@ Felix (2026-10-19).
   the oldest free note too when the margin is still full, listed in
   `resolved`, only if each is a read-along note, not pinned, not in `keep`, not being answered and
   has no message from you); else, and always in Read through, the new note is dropped and the
-  old ones keep the sentence. `marginRevisits` draws no reopen
+  old ones keep the sentence. A note that is still one sentence (`margin::one_sentence`) has no
+  context to place a reworded comment by, so a read-along note there also replaces any open
+  read-along comment whose passage was the whole note and is gone (no stored context, untouched,
+  not pinned, not in `keep`); the page could only hide it. `marginRevisits` draws no reopen
   underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
   never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
   characters, else the chat; read-along and `add_margin_note` quotes
