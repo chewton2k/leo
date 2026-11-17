@@ -37,7 +37,9 @@ This file holds the rules. How each screen behaves, area by area, is in
   reading positions, margin threads, dictations, usage days, recordings whose
   notes are not written yet. Old caption, graph and meaning JSON files are
   brought in on first open and renamed `*.before-database` (browser tests seed
-  note connections this way). Writes touch only what changed.
+  note connections this way). Writes touch only what changed. A damaged leo.db
+  is set aside as `leo.db.damaged-<stamp>` (Health says where); one from a
+  newer leo is refused before it is opened.
 
 ## Serving and security
 
@@ -630,7 +632,7 @@ Felix (2026-10-19).
   stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
-  (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
+  (guarded `ALTER`, db `VERSION` 4; a revert never lowers `VERSION`, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}`; a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
   unpinning folds it unless it is the one open) and a newest read-along note

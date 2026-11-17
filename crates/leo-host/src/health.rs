@@ -38,6 +38,9 @@ pub fn scan(notes: &Path) -> Result<Value> {
     {
         sections.insert(0, json!({"title":"Felix and Codex","checks":[{"name":"Codex native session","state":"warn","fix":problem,"section":"writing"}]}));
     }
+    if let Some(path) = leo_web::db::set_aside() {
+        sections.insert(0, json!({"title":"leo","checks":[{"name":"leo's database","state":"missing","fix":format!("leo's database was damaged and set aside at {}. Chats and margin notes from before are in that file.", path.display())}]}));
+    }
     Ok(json!({"sections":sections}))
 }
 

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use anyhow::{Context, Result};
-use rusqlite::Connection;
+use anyhow::{anyhow, Context, Result};
+use rusqlite::{Connection, ErrorCode};
 
 pub const FILE: &str = "leo.db";
 pub const BEFORE: &str = ".before-database";
@@ -203,6 +203,11 @@ impl Db {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("could not make {}", parent.display()))?;
         }
+        match header(path).with_context(|| format!("could not read {}", path.display()))? {
+            Header::Damaged => return Err(anyhow::Error::new(Damaged)),
+            Header::Version(n) if i64::from(n) > VERSION => return Err(newer(n.into())),
+            _ => {}
+        }
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
@@ -214,27 +219,19 @@ impl Db {
                 .open(path)
                 .with_context(|| format!("could not open {}", path.display()))?;
         }
-        let mut conn =
-            Connection::open(path).with_context(|| format!("could not open {}", path.display()))?;
-        conn.busy_timeout(std::time::Duration::from_secs(10))?;
-        conn.pragma_update(None, "journal_mode", "WAL")?;
-        conn.pragma_update(None, "synchronous", "NORMAL")?;
-        conn.pragma_update(None, "foreign_keys", "ON")?;
-        conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
-        conn.execute_batch(SCHEMA)?;
-        let tx = conn.transaction()?;
-        add_column(&tx, "note_tasks", "description", "TEXT NOT NULL DEFAULT ''")?;
-        add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
-        add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
-        add_column(&tx, "dictations", "original", "TEXT")?;
-        add_column(
-            &tx,
-            "margin_threads",
-            "pinned",
-            "INTEGER NOT NULL DEFAULT 0",
-        )?;
-        tx.pragma_update(None, "user_version", VERSION)?;
-        tx.commit()?;
+        let mut conn = Connection::open(path)
+            .map_err(classify)
+            .with_context(|| format!("could not open {}", path.display()))?;
+        conn.busy_timeout(std::time::Duration::from_secs(10))
+            .map_err(classify)?;
+        let stored: i64 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .map_err(classify)?;
+        if stored > VERSION {
+            drop(conn);
+            return Err(newer(stored));
+        }
+        set_up(&mut conn, stored).map_err(classify)?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -274,6 +271,82 @@ impl Db {
     pub fn tidy(&self) -> Result<()> {
         self.with(|c| c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;"))
     }
+}
+
+enum Header {
+    New,
+    Damaged,
+    Version(u32),
+}
+
+fn header(path: &Path) -> std::io::Result<Header> {
+    use std::io::Read;
+    let file = match std::fs::File::open(path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Header::New),
+        Err(e) => return Err(e),
+    };
+    let mut bytes = Vec::with_capacity(100);
+    file.take(100).read_to_end(&mut bytes)?;
+    Ok(if bytes.is_empty() {
+        Header::New
+    } else if bytes.len() < 100 || !bytes.starts_with(b"SQLite format 3\0") {
+        Header::Damaged
+    } else {
+        Header::Version(u32::from_be_bytes([
+            bytes[60], bytes[61], bytes[62], bytes[63],
+        ]))
+    })
+}
+
+#[derive(Debug)]
+pub struct Damaged;
+
+impl std::fmt::Display for Damaged {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("the file is not a database")
+    }
+}
+
+impl std::error::Error for Damaged {}
+
+fn newer(stored: i64) -> anyhow::Error {
+    anyhow!("{FILE} was written by a newer version of leo (version {stored}; this leo reads up to {VERSION}). Update leo to open it.")
+}
+
+fn classify(e: rusqlite::Error) -> anyhow::Error {
+    match e {
+        rusqlite::Error::SqliteFailure(f, _)
+            if f.code == ErrorCode::NotADatabase || f.code == ErrorCode::DatabaseCorrupt =>
+        {
+            anyhow::Error::new(Damaged)
+        }
+        rusqlite::Error::SqlInputError { msg, .. } => {
+            anyhow!("its tables do not match this version of leo ({msg})")
+        }
+        e => e.into(),
+    }
+}
+
+fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
+    conn.pragma_update(None, "journal_mode", "WAL")?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
+    let tx = conn.transaction()?;
+    tx.execute_batch(SCHEMA)?;
+    add_column(&tx, "note_tasks", "description", "TEXT NOT NULL DEFAULT ''")?;
+    add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
+    add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column(&tx, "dictations", "original", "TEXT")?;
+    add_column(
+        &tx,
+        "margin_threads",
+        "pinned",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    tx.pragma_update(None, "user_version", VERSION.max(stored))?;
+    tx.commit()
 }
 
 fn add_column(
@@ -316,10 +389,21 @@ pub fn try_at(path: &Path) -> Result<Arc<Db>> {
             return Ok(Arc::clone(db));
         }
     }
-    let db = Arc::new(
-        Db::open(&key)
-            .with_context(|| format!("leo could not open its database at {}", key.display()))?,
-    );
+    let db = match Db::open(&key) {
+        Err(e) if e.downcast_ref::<Damaged>().is_some() => {
+            let _one = RECOVERING.lock().unwrap_or_else(|e| e.into_inner());
+            match Db::open(&key) {
+                Err(e) if e.downcast_ref::<Damaged>().is_some() => {
+                    put_damaged_aside(&key)?;
+                    Db::open(&key)
+                }
+                opened => opened,
+            }
+        }
+        opened => opened,
+    }
+    .with_context(|| format!("leo could not open its database at {}", key.display()))?;
+    let db = Arc::new(db);
     let mut held = all.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(current) = held.get(&key) {
         if cached.as_ref().is_none_or(|old| !Arc::ptr_eq(old, current)) {
@@ -348,6 +432,52 @@ pub fn try_at(path: &Path) -> Result<Arc<Db>> {
     drop(held);
     drop(removed);
     Ok(db)
+}
+
+static RECOVERING: Mutex<()> = Mutex::new(());
+
+static SET_ASIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+pub fn set_aside() -> Option<PathBuf> {
+    SET_ASIDE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
+fn put_damaged_aside(path: &Path) -> Result<()> {
+    let named = |base: &std::ffi::OsStr, end: &str| {
+        let mut name = base.to_owned();
+        name.push(end);
+        PathBuf::from(name)
+    };
+    let mut stamp = path.as_os_str().to_owned();
+    stamp.push(format!(
+        ".damaged-{}",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    ));
+    let ends = ["", "-wal", "-shm"];
+    let base = (1..)
+        .map(|n| {
+            if n == 1 {
+                stamp.clone()
+            } else {
+                named(&stamp, &format!("-{n}")).into_os_string()
+            }
+        })
+        .find(|base| ends.iter().all(|end| !named(base, end).exists()))
+        .unwrap_or(stamp);
+    for end in ends {
+        let from = named(path.as_os_str(), end);
+        if from.exists() {
+            let to = named(&base, end);
+            std::fs::rename(&from, &to).with_context(|| {
+                format!(
+                    "leo could not set its damaged database aside at {}",
+                    to.display()
+                )
+            })?;
+        }
+    }
+    *SET_ASIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(base));
+    Ok(())
 }
 
 pub fn beside(file: &Path) -> Arc<Db> {
@@ -458,6 +588,182 @@ mod tests {
             .with(|c| c.query_row("PRAGMA user_version", [], |r| r.get(0)))
             .unwrap();
         assert_eq!(version, VERSION);
+    }
+}
+
+#[cfg(test)]
+mod opening_trouble {
+    use super::*;
+
+    static SERIAL: Mutex<()> = Mutex::new(());
+
+    fn future_db(path: &Path, matching: bool) {
+        if matching {
+            drop(Db::open(path).unwrap());
+        }
+        let conn = Connection::open(path).unwrap();
+        if matching {
+            conn.execute_batch("ALTER TABLE chats ADD COLUMN pinned_in_v9 INTEGER NOT NULL DEFAULT 0; CREATE TABLE added_in_v9 (x TEXT);").unwrap();
+        } else {
+            conn.execute_batch(
+                "CREATE TABLE chats (id TEXT PRIMARY KEY, body TEXT); CREATE TABLE added_in_v9 (x TEXT);",
+            )
+            .unwrap();
+        }
+        conn.pragma_update(None, "user_version", 9).unwrap();
+    }
+
+    fn tables(path: &Path) -> Vec<String> {
+        let conn = Connection::open(path).unwrap();
+        let mut found = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+            .unwrap();
+        found
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .flatten()
+            .collect()
+    }
+
+    fn user_version(path: &Path) -> i64 {
+        Connection::open(path)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn with_end(path: &Path, end: &str) -> PathBuf {
+        let mut name = path.as_os_str().to_owned();
+        name.push(end);
+        PathBuf::from(name)
+    }
+
+    fn damaged_beside(dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("leo.db.damaged-"))
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_damaged_database_does_not_stop_leo() {
+        let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let small = tempfile::tempdir().unwrap();
+        let path = small.path().join(FILE);
+        std::fs::write(&path, b"not a database!!").unwrap();
+        let db = try_at(&path).unwrap();
+        let aside = damaged_beside(small.path());
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(set_aside(), Some(small.path().join(&aside[0])));
+        assert_eq!(
+            std::fs::read(small.path().join(&aside[0])).unwrap(),
+            b"not a database!!"
+        );
+        assert_eq!(user_version(db.path()), VERSION);
+        drop(db);
+
+        let large = tempfile::tempdir().unwrap();
+        let path = large.path().join(FILE);
+        std::fs::write(&path, vec![0xa5u8; 8192]).unwrap();
+        std::fs::write(with_end(&path, "-wal"), b"stale").unwrap();
+        let db = try_at(&path).unwrap();
+        let aside = damaged_beside(large.path());
+        assert_eq!(aside.len(), 2, "{aside:?}");
+        let main = large.path().join(&aside[0]);
+        assert_eq!(set_aside(), Some(main.clone()));
+        assert_eq!(std::fs::read(&main).unwrap(), vec![0xa5u8; 8192]);
+        assert_eq!(std::fs::read(with_end(&main, "-wal")).unwrap(), b"stale");
+        assert_eq!(user_version(db.path()), VERSION);
+    }
+
+    #[test]
+    fn two_openers_of_one_damaged_database_set_it_aside_once() {
+        let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        std::fs::write(&path, vec![0xa5u8; 8192]).unwrap();
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            for _ in 0..8 {
+                scope.spawn(|| {
+                    start.wait();
+                    try_at(&path).unwrap();
+                });
+            }
+        });
+        let aside = damaged_beside(dir.path());
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(
+            std::fs::read(dir.path().join(&aside[0])).unwrap(),
+            vec![0xa5u8; 8192]
+        );
+    }
+
+    #[test]
+    fn corruption_found_after_the_version_read_is_set_aside() {
+        let _one = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        drop(Db::open(&path).unwrap());
+        let mut bytes = std::fs::read(&path).unwrap();
+        let size = usize::from(u16::from_be_bytes([bytes[16], bytes[17]]));
+        assert_eq!(bytes[100], 0x05, "the schema spans more than one page");
+        let last = u32::from_be_bytes([bytes[108], bytes[109], bytes[110], bytes[111]]);
+        let start = (usize::try_from(last).unwrap() - 1) * size;
+        bytes[start..start + size].fill(0xa5);
+        std::fs::write(&path, &bytes).unwrap();
+        let db = try_at(&path).unwrap();
+        let aside = damaged_beside(dir.path());
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(set_aside(), Some(dir.path().join(&aside[0])));
+        assert_eq!(user_version(db.path()), VERSION);
+    }
+
+    #[test]
+    fn a_database_from_a_newer_leo_is_left_untouched() {
+        for matching in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join(FILE);
+            future_db(&path, matching);
+            std::fs::write(with_end(&path, "-wal"), b"from the newer leo").unwrap();
+            let before = std::fs::read(&path).unwrap();
+            let said = format!("{:#}", try_at(&path).err().unwrap());
+            assert!(said.contains("newer version"), "{said}");
+            assert!(
+                said.contains(&format!("version 9; this leo reads up to {VERSION}")),
+                "{said}"
+            );
+            assert!(said.chars().count() < 300, "{said}");
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert_eq!(
+                std::fs::read(with_end(&path, "-wal")).unwrap(),
+                b"from the newer leo"
+            );
+            assert!(!with_end(&path, "-shm").exists());
+            assert!(damaged_beside(dir.path()).is_empty());
+        }
+    }
+
+    #[test]
+    fn a_clashing_schema_rolls_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch("CREATE TABLE chats (id TEXT PRIMARY KEY, data TEXT NOT NULL);")
+            .unwrap();
+        old.pragma_update(None, "user_version", VERSION).unwrap();
+        drop(old);
+        let before = tables(&path);
+        let said = format!("{:#}", try_at(&path).err().unwrap());
+        assert!(said.contains("its tables do not match"), "{said}");
+        assert!(!said.contains("CREATE"), "{said}");
+        assert_eq!(tables(&path), before);
+        assert_eq!(user_version(&path), VERSION);
+        assert!(damaged_beside(dir.path()).is_empty());
     }
 }
 
