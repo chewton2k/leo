@@ -122,6 +122,7 @@
       event.preventDefault();
       keep();
     });
+    if (preferred !== null && !enabled()) apply(preferred);
     fit();
     return { fit, stop };
   }

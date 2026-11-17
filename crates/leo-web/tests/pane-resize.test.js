@@ -134,3 +134,10 @@ test('a right-docked pane grows when dragged left and with ArrowLeft',()=>{
   f.emit('keydown',{key:'End'});assert.equal(f.width(),520);
   f.emit('keydown',{key:'Home'});assert.equal(f.width(),280);
 });
+
+test('a pane that is hidden at start still takes its saved width, so it does not jump when shown',()=>{
+  const f=fixture('400');
+  let applied=null;
+  f.root.leoPaneResize.create({...f.options,enabled:()=>false,apply:value=>{applied=value;}});
+  assert.equal(applied,400);
+});
