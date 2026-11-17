@@ -102,6 +102,18 @@ pub fn paste(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn the_clipboard_limits_have_one_wording() {
+        assert_eq!(
+            super::paste_error(crate::paste_tx::TOO_LARGE),
+            "The clipboard is too large to preserve. Copy your text from Recent dictations."
+        );
+        assert_eq!(
+            super::paste_error(crate::paste_tx::TOO_MANY),
+            "The clipboard cannot be preserved automatically. Copy your text from Recent dictations."
+        );
+    }
+
+    #[test]
     fn clipboard_problems_keep_their_words_and_others_read_the_same() {
         assert_eq!(
             super::paste_error("The clipboard is too large to preserve."),

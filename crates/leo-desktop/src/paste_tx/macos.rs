@@ -248,15 +248,13 @@ pub(super) fn run(
     let mut items = Vec::new();
     let mut bytes = 0usize;
     if let Some(all) = pasteboard.pasteboardItems() {
-        if all.len() > 256 {
-            return Err(
-                "The clipboard has too many items to preserve. Copy them elsewhere first.".into(),
-            );
+        if all.len() > super::MOST_ENTRIES {
+            return Err(super::TOO_MANY.into());
         }
         for item in all {
             let types = item.types();
-            if types.len() > 256 {
-                return Err("The clipboard has too many formats to preserve.".into());
+            if types.len() > super::MOST_ENTRIES {
+                return Err(super::TOO_MANY.into());
             }
             let mut formats = Vec::new();
             for kind in types {
@@ -264,15 +262,15 @@ pub(super) fn run(
                     "A clipboard format could not be preserved. Copy its contents elsewhere first.",
                 )?;
                 bytes = bytes.saturating_add(data.len());
-                if bytes > 64 * 1024 * 1024 {
-                    return Err("The clipboard is too large to preserve. Copy its contents elsewhere first.".into());
+                if bytes > super::MAX_CLIPBOARD_BYTES {
+                    return Err(super::TOO_LARGE.into());
                 }
                 formats.push((kind.to_string(), data.to_vec()));
             }
             items.push(formats);
         }
     }
-    let snapshot = super::Snapshot::new(items)?;
+    let snapshot = super::Snapshot(items);
     if pasteboard.changeCount() != before {
         return Err("The clipboard changed while preparing to paste. Try again.".into());
     }
