@@ -288,6 +288,7 @@ struct Seen {
     disk: u64,
     model: u64,
     fields: u64,
+    copy: Option<(PathBuf, u64)>,
 }
 
 const TIDY_TRASH_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -758,6 +759,7 @@ fn index_notes(
                 disk: hash_str(&content),
                 model,
                 fields: hash_note(&note),
+                copy: None,
             },
         );
         notes.push(note);
@@ -859,6 +861,7 @@ impl Store {
         let mut seen = self.seen.borrow_mut();
         let targets = self.assign_paths(&seen);
         let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
+        let mut conflicted = false;
 
         for note in &self.notes {
             let target = &targets[&note.id];
@@ -880,11 +883,13 @@ impl Store {
                 let old = crate::paths::contained_path(&self.notes_dir, &previous.path)?;
                 if !is_clean(&old, previous.disk) {
                     if previous.model != model {
-                        self.conflict_copy(note)?;
+                        let copy = self.conflict_copy(note, previous.copy.as_ref())?;
                         if let Some(entry) = seen.get_mut(&note.id) {
                             entry.model = model;
                             entry.fields = fields;
+                            entry.copy = Some(copy);
                         }
+                        conflicted = true;
                     }
                     continue;
                 }
@@ -917,6 +922,7 @@ impl Store {
                     disk: model,
                     model,
                     fields,
+                    copy: previous.and_then(|previous| previous.copy),
                 },
             );
         }
@@ -943,7 +949,9 @@ impl Store {
         }
 
         save_directories(&self.notes_dir, &self.directories)?;
-        self.fingerprint.set(fingerprint_of(&self.notes_dir));
+        if !conflicted {
+            self.fingerprint.set(fingerprint_of(&self.notes_dir));
+        }
         Ok(())
     }
 
@@ -960,24 +968,51 @@ impl Store {
         Ok(())
     }
 
-    fn conflict_copy(&self, note: &Note) -> Result<()> {
+    fn conflict_copy(&self, note: &Note, again: Option<&(PathBuf, u64)>) -> Result<(PathBuf, u64)> {
         self.validate_directory(&note.directory)?;
         let mut copy = note.clone();
-        copy.id = uuid::Uuid::new_v4().to_string();
         copy.title = format!("{}{CONFLICT_SUFFIX}", note.title);
         copy.pinned = false;
-        let dir = if copy.directory.is_empty() {
-            self.notes_dir.clone()
-        } else {
-            self.notes_dir.join(&copy.directory)
+        let earlier = again.and_then(|(relative, hash)| {
+            let path = crate::paths::contained_path(&self.notes_dir, relative).ok()?;
+            if !is_clean(&path, *hash) {
+                return None;
+            }
+            let text = fs::read_to_string(&path).ok()?;
+            let id = parse_note_from_markdown(&text, relative, Utc::now())
+                .ok()?
+                .id;
+            Some((path, id))
+        });
+        let fresh = earlier.is_none();
+        let path = match earlier {
+            Some((path, id)) => {
+                copy.id = id;
+                path
+            }
+            None => {
+                copy.id = uuid::Uuid::new_v4().to_string();
+                let dir = if copy.directory.is_empty() {
+                    self.notes_dir.clone()
+                } else {
+                    self.notes_dir.join(&copy.directory)
+                };
+                unique_path(&dir.join(format!("{}.md", filename::file_name(&copy.title))))
+            }
         };
-        let path = unique_path(&dir.join(format!("{}.md", filename::file_name(&copy.title))));
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        write_atomic(&path, &note_to_markdown(&copy)?)?;
-        crate::diag::warn(conflict_notice(&note.title));
-        Ok(())
+        let text = note_to_markdown(&copy)?;
+        write_atomic(&path, &text)?;
+        if fresh {
+            crate::diag::warn(conflict_notice(&note.title));
+        }
+        let relative = path
+            .strip_prefix(&self.notes_dir)
+            .context("path outside notes_dir")?
+            .to_path_buf();
+        Ok((relative, hash_str(&text)))
     }
 
     fn move_to_trash(&self, path: &Path, id: &str) -> Result<()> {
@@ -3738,6 +3773,41 @@ mod tests {
         store.save().unwrap();
         store.save().unwrap();
         assert_eq!(note_files(&store).len(), 2, "{:?}", note_files(&store));
+    }
+
+    #[test]
+    fn saving_after_a_conflict_keeps_one_copy_and_the_outside_edit() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Shared", "one", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let file = store.notes_dir.join("Shared.md");
+        fs::write(
+            &file,
+            fs::read_to_string(&file)
+                .unwrap()
+                .replace("one", "one, from another program"),
+        )
+        .unwrap();
+        for n in 1..=3 {
+            store.find_note_mut(&id).unwrap().body = format!("edited here {n}");
+            store.save().unwrap();
+        }
+        let files = note_files(&store);
+        let changed = store.changed_on_disk();
+        assert!(
+            files.len() == 2 && changed,
+            "files={files:?} changed_on_disk={changed}"
+        );
+        assert!(fs::read_to_string(&file)
+            .unwrap()
+            .contains("one, from another program"));
+        let copy =
+            fs::read_to_string(store.notes_dir.join("Shared (conflict from leo).md")).unwrap();
+        assert!(copy.contains("edited here 3"), "{copy}");
     }
 
     #[test]

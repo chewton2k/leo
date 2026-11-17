@@ -138,8 +138,9 @@ settings and credentials are excluded from note exports.
 - `Store.seen: id → Seen { path, disk, model }`: save writes only notes whose
   rendered hash changed; if the file on disk no longer matches `disk`
   (edited/renamed/deleted elsewhere) and leo changed the note too, it writes
-  `<title> (conflict from leo)` with a new id (`CONFLICT_SUFFIX`, listed by
-  doctor) instead of overwriting; deleted notes are trashed only if their file
+  `<title> (conflict from leo)` with a new id (one copy per note, rewritten
+  by later saves until the store reloads; the outside edit is then loaded)
+  (`CONFLICT_SUFFIX`, listed by doctor) instead of overwriting; deleted notes are trashed only if their file
   is still what leo saw. Writes are temp-file + rename.
 - `Store::changed_on_disk`/`refresh` (fingerprint of paths, sizes, mtimes).
   Engine mutations reconcile before writing; hot read-only
