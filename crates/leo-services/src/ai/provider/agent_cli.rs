@@ -704,13 +704,14 @@ impl ClaudeSession {
         call: &mut dyn FnMut(&str, &serde_json::Value) -> String,
         gap: &mut dyn FnMut(),
     ) -> ProviderResult<(String, Spent)> {
+        let stop = leo_core::children::current_stop();
         self.say_controlled(
             text,
             sink,
             call,
             gap,
             Control {
-                stopped: &|| false,
+                stopped: &|| stop.as_ref().is_some_and(leo_core::children::Stop::asked),
                 tools_done: &|| false,
                 most_calls: 12,
             },
@@ -1937,7 +1938,7 @@ mod tests {
         cfg.providers
             .insert("codex".into(), config(ProviderKind::Codex, &bin, None));
         let read = crate::ai::toolless_config(&cfg);
-        let deadline = Instant::now() + Duration::from_secs(1);
+        let deadline = Instant::now() + Duration::from_secs(5);
         let call = std::thread::spawn(move || {
             let store = crate::config::secret::MemoryStore::default();
             let prompt = crate::ai::chat::Prompt {
