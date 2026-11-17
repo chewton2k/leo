@@ -492,15 +492,15 @@ pub struct Head {
     pub directory: String,
 }
 
-struct TrashEntry {
-    path: PathBuf,
-    relative: PathBuf,
-    deleted_at: DateTime<Utc>,
-    head: Option<Head>,
+pub struct TrashEntry {
+    pub path: PathBuf,
+    pub relative: PathBuf,
+    pub deleted_at: DateTime<Utc>,
+    pub head: Option<Head>,
 }
 
 impl TrashEntry {
-    fn id(&self) -> String {
+    pub fn id(&self) -> String {
         self.head.as_ref().map_or_else(
             || stable_id(&Path::new(TRASH).join(&self.relative)),
             |head| head.id.clone(),
@@ -519,7 +519,7 @@ fn trash_dir(notes_dir: &Path) -> Option<PathBuf> {
     crate::paths::contained_path(notes_dir, Path::new(TRASH)).ok()
 }
 
-fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
+pub fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
     let Some(trash) = trash_dir(notes_dir) else {
         return Vec::new();
     };
