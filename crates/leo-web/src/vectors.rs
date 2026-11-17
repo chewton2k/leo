@@ -24,6 +24,7 @@ pub struct Entry {
     pub hash: String,
     pub pieces: Vec<(usize, Vec<f32>)>,
     pub marks: BTreeMap<usize, String>,
+    pub whole: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -207,6 +208,7 @@ impl Vectors {
                 hash: hash.clone(),
                 pieces: Vec::new(),
                 marks: BTreeMap::new(),
+                whole: false,
             });
             entry.pieces.push((at, v));
             if !mark.is_empty() {
@@ -306,7 +308,7 @@ impl Vectors {
     }
 
     pub fn stale(&self, store: &Store, most_pieces: usize) -> Vec<Work> {
-        let Ok(known) = self.known.lock() else {
+        let Ok(mut known) = self.known.lock() else {
             return Vec::new();
         };
         let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
@@ -314,8 +316,17 @@ impl Vectors {
         let mut out = Vec::new();
         let mut pieces = 0;
         for note in &store.notes {
+            if pieces >= most_pieces {
+                break;
+            }
             let hash = hash_of(note);
             if failed.get(&note.id).is_some_and(|(was, _)| *was == hash) {
+                continue;
+            }
+            if known
+                .get(&note.id)
+                .is_some_and(|e| e.whole && e.hash == hash)
+            {
                 continue;
             }
             let entry = known.get(&note.id);
@@ -340,6 +351,11 @@ impl Vectors {
                             None => true,
                         }
                     });
+                }
+            }
+            if current && found.is_empty() {
+                if let Some(entry) = known.get_mut(&note.id) {
+                    entry.whole = true;
                 }
             }
             found.truncate(most_pieces.saturating_sub(pieces));
@@ -425,7 +441,9 @@ impl Vectors {
                     hash: item.hash.clone(),
                     pieces: Vec::new(),
                     marks: BTreeMap::new(),
+                    whole: false,
                 });
+            entry.whole = false;
             for (at, mark, v) in fresh {
                 entry.marks.insert(at, mark);
                 entry.pieces.push((at, v));
@@ -663,6 +681,32 @@ mod tests {
         assert_eq!(work.len(), 1, "an edited note is tried again at once");
         read_in(&vectors, &failing, &work);
         assert_eq!(vectors.len(), 100);
+    }
+
+    #[test]
+    fn a_fully_indexed_library_is_not_split_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let ids: Vec<String> = ["One", "Two", "Three"]
+            .iter()
+            .map(|title| {
+                store
+                    .create_note(*title, format!("{title} text"), vec![], "")
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        catch_up(&store, &vectors, &fake(), 100);
+        assert!(vectors.stale(&store, 100).is_empty());
+        assert!(vectors.stale(&store, 100).is_empty());
+        assert!(vectors.known.lock().unwrap().values().all(|e| e.whole));
+
+        store.find_note_mut(&ids[1]).unwrap().body = "changed".into();
+        let work = vectors.stale(&store, 100);
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].id, ids[1]);
     }
 
     #[test]
