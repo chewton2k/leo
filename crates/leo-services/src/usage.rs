@@ -155,8 +155,29 @@ pub fn load() -> Seen {
     file().map(|path| load_from(&path)).unwrap_or_default()
 }
 
+static REPORTED: std::sync::Mutex<std::collections::BTreeMap<String, u64>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn count_report(provider: &str) {
+    *REPORTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(provider.to_string())
+        .or_default() += 1;
+}
+
+fn reported(provider: &str) -> u64 {
+    REPORTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(provider)
+        .copied()
+        .unwrap_or(0)
+}
+
 pub fn save(provider: &str, usage: Usage) {
     if let Some(path) = file() {
+        count_report(provider);
         save_to(&path, provider, usage);
     }
 }
@@ -389,7 +410,7 @@ pub fn refresh_claude(cfg: &crate::config::Config) -> Option<String> {
     if !claude_plan(bin) {
         return Some("Claude limits need Claude Code signed in with your Claude plan.".into());
     }
-    let before = load().get("claude_code").map(|u| u.seen_at);
+    let before = reported("claude_code");
     let limit = Duration::from_secs(20);
     let agent = AgentCli::new(
         "claude_code".into(),
@@ -406,8 +427,7 @@ pub fn refresh_claude(cfg: &crate::config::Config) -> Option<String> {
     if read.is_err() {
         return Some("Claude Code could not be reached. Try Refresh again.".into());
     }
-    let after = load().get("claude_code").map(|u| u.seen_at);
-    (after.is_none() || after == before).then(|| "Claude Code reported no limits.".into())
+    (reported("claude_code") == before).then(|| "Claude Code reported no limits.".into())
 }
 
 #[cfg(test)]
@@ -547,6 +567,24 @@ mod tests {
             label(&usage, at(1000 + 3 * 3600)),
             "5h: 0%, 7d: 50%, 3 h ago"
         );
+    }
+
+    #[test]
+    fn a_report_is_counted_even_when_its_save_is_skipped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("usage.json");
+        let usage = |seen_at| Usage {
+            five_hour: None,
+            seven_day: None,
+            seen_at,
+        };
+        let before = reported("refresh-probe");
+        for seen in [at(1000), at(1010)] {
+            count_report("refresh-probe");
+            save_to(&path, "refresh-probe", usage(seen));
+        }
+        assert_eq!(load_from(&path)["refresh-probe"].seen_at, at(1000));
+        assert_eq!(reported("refresh-probe"), before + 2);
     }
 
     #[cfg(unix)]
