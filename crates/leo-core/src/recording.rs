@@ -173,9 +173,16 @@ pub fn load(notes: &Path, note: &str) -> Result<Vec<Archive>> {
                 bytes <= MOST_SOURCE_BYTES,
                 "This note's recording sources exceed the size limit"
             );
-            let source: Archive = serde_json::from_slice(&std::fs::read(entry.path())?)?;
-            anyhow::ensure!(valid_id(&source.id), "Invalid saved recording id");
-            out.push(source);
+            match std::fs::read(entry.path())
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Archive>(&bytes).ok())
+            {
+                Some(source) if valid_id(&source.id) => out.push(source),
+                _ => crate::diag::warn(format!(
+                    "skipped an unreadable recording source: {}",
+                    entry.path().display()
+                )),
+            }
         }
     }
     out.sort_by_key(|s| s.started);
@@ -278,6 +285,34 @@ mod tests {
         assert_eq!(load(&notes, "note-1234").unwrap().len(), 1);
         assert!(remove(&notes, "note-1234", &["../x".into()]).is_err());
     }
+    #[test]
+    fn a_damaged_source_file_is_skipped_and_the_others_load() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let good = Archive {
+            id: "good-0001".into(),
+            started: Utc::now(),
+            passages: vec![],
+            points: vec![],
+            context: String::new(),
+            wants: String::new(),
+            warnings: vec![],
+            trace: vec![],
+            from: String::new(),
+        };
+        save(&notes, "note-0001", &good).unwrap();
+        let broken = folder(&notes, "note-0001")
+            .unwrap()
+            .join("broken-0001.json");
+        std::fs::write(&broken, "{").unwrap();
+        let loaded = load(&notes, "note-0001").unwrap();
+        assert_eq!(
+            loaded.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(),
+            ["good-0001"]
+        );
+        assert_eq!(std::fs::read_to_string(&broken).unwrap(), "{");
+    }
+
     #[cfg(unix)]
     #[test]
     fn recording_roots_and_writers_reject_user_controlled_symlinks() {
