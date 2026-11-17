@@ -516,16 +516,20 @@ pub fn structure_recording(
                     let prompt =
                         chat::build_part_prompt(&g.text, &own, i + 1, groups.len(), &span(g));
                     let outcome = match chat_fn(prompt, super::STRUCTURE_MAX_TOKENS) {
-                        Ok(reply) if !chat::clean_reply(&reply).trim().is_empty() => {
-                            (chat::clean_reply(&reply), None)
+                        Ok(reply) => {
+                            let cleaned = chat::clean_reply(&reply);
+                            if cleaned.trim().is_empty() {
+                                (
+                                    raw(&own, "Transcript", &g.text),
+                                    Some(format!(
+                                        "part {} came back empty; its transcript is included instead",
+                                        i + 1
+                                    )),
+                                )
+                            } else {
+                                (cleaned, None)
+                            }
                         }
-                        Ok(_) => (
-                            raw(&own, "Transcript", &g.text),
-                            Some(format!(
-                                "part {} came back empty; its transcript is included instead",
-                                i + 1
-                            )),
-                        ),
                         Err(e) => (
                             raw(&own, "Transcript", &g.text),
                             Some(format!(

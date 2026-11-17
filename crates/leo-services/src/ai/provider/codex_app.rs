@@ -356,7 +356,7 @@ impl CodexThread {
                 }
                 if tool && (calls >= most_calls || tools_done()) {
                     limited = true;
-                    self.answer_server(&message, &mut |_, _| "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.".into())?;
+                    self.answer_server(&message, &mut |_, _| super::NO_MORE_TOOLS.into())?;
                 } else {
                     if tool {
                         calls += 1;

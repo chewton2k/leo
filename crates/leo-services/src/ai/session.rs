@@ -6,7 +6,7 @@ use crate::ai::provider::agent_cli::{Agent, AgentCli, ClaudeSession};
 use crate::ai::provider::codex_app::{self, tool_specs, CodexThread, CodexTurn};
 use crate::ai::provider::mcp;
 use crate::ai::provider::openai::{self, OpenAiChat};
-use crate::ai::provider::{tokens_of, Spent};
+use crate::ai::provider::{tokens_of, Spent, NO_MORE_TOOLS};
 use crate::ai::provider::{ChatProvider, Sink};
 use crate::ai::spend::{answered, Answered};
 use crate::config::provider::ProviderKind;
@@ -154,6 +154,7 @@ struct ApiTalk {
     system: String,
     tools: Vec<Value>,
     history: Vec<Value>,
+    sent: usize,
     max_tokens: u32,
 }
 
@@ -187,6 +188,7 @@ impl ApiTalk {
             .map(|t| openai::function_of(&t.name, &t.description, &t.schema))
             .collect();
         let history = vec![json!({ "role": "system", "content": system })];
+        let sent = history[0].to_string().chars().count();
         let max_tokens = ChatProvider::max_tokens(&chat).unwrap_or(0);
         ApiTalk {
             chat,
@@ -195,8 +197,14 @@ impl ApiTalk {
             system: system.to_string(),
             tools,
             history,
+            sent,
             max_tokens,
         }
+    }
+
+    fn push(&mut self, message: Value) {
+        self.sent += message.to_string().chars().count();
+        self.history.push(message);
     }
 
     fn model_and_effort(&self) -> (String, Option<String>) {
@@ -213,14 +221,7 @@ impl Session for ApiTalk {
     }
 
     fn context_chars(&self) -> Option<usize> {
-        Some(
-            self.system.chars().count().saturating_add(
-                self.history
-                    .iter()
-                    .map(|turn| turn.to_string().chars().count())
-                    .sum::<usize>(),
-            ),
-        )
+        Some(self.system.chars().count().saturating_add(self.sent))
     }
 
     fn say(&mut self, text: &str, turn: Turn<'_>) -> Result<(String, Option<Answered>)> {
@@ -239,8 +240,7 @@ impl Session for ApiTalk {
         } else {
             format!("{text}\n\n{tail}")
         };
-        self.history
-            .push(json!({ "role": "user", "content": message }));
+        self.push(json!({ "role": "user", "content": message }));
         let max_tokens = max_tokens.max(self.max_tokens);
         let (model, effort) = self.model_and_effort();
         let mut spent = Spent {
@@ -248,12 +248,7 @@ impl Session for ApiTalk {
             effort,
             ..Spent::default()
         };
-        let mut sent_chars = self.system.chars().count()
-            + self
-                .history
-                .iter()
-                .map(|m| m.to_string().chars().count())
-                .sum::<usize>();
+        let mut sent_chars = self.system.chars().count() + self.sent;
         let mut calls = 0usize;
         for _ in 0..=most_calls {
             anyhow::ensure!(!stopped(), "The answer was stopped.");
@@ -292,8 +287,7 @@ impl Session for ApiTalk {
                     } else {
                         round.text
                     };
-                    self.history
-                        .push(json!({ "role": "assistant", "content": text }));
+                    self.push(json!({ "role": "assistant", "content": text }));
                     (text, Vec::new())
                 } else {
                     let listed: Vec<Value> = round
@@ -303,7 +297,7 @@ impl Session for ApiTalk {
                         json!({ "id": id, "type": "function", "function": { "name": name, "arguments": args } })
                     })
                     .collect();
-                    self.history.push(json!({
+                    self.push(json!({
                     "role": "assistant",
                     "content": if round.text.is_empty() { Value::Null } else { Value::String(round.text.clone()) },
                     "tool_calls": listed,
@@ -329,7 +323,7 @@ impl Session for ApiTalk {
             for (id, name, args) in &asked {
                 anyhow::ensure!(!stopped(), "The answer was stopped.");
                 if calls >= most_calls || tools_done() {
-                    results.push((id.clone(), "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.".to_string()));
+                    results.push((id.clone(), NO_MORE_TOOLS.to_string()));
                     continue;
                 }
                 calls += 1;
@@ -338,8 +332,7 @@ impl Session for ApiTalk {
                 results.push((id.clone(), result));
             }
             for (id, result) in results {
-                self.history
-                    .push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
+                self.push(json!({ "role": "tool", "tool_call_id": id, "content": result }));
             }
         }
         anyhow::bail!(
@@ -690,6 +683,51 @@ mod tests {
     }
 
     #[test]
+    fn the_running_count_matches_a_full_count() {
+        let (url, _) = serve(vec![
+            sse(&[
+                r#"{"choices":[{"delta":{"content":"Checking."}}]}"#,
+                r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"search_notes","arguments":"{\"query\":\"heap\"}"}}]}}]}"#,
+                "[DONE]",
+            ]),
+            sse(&[
+                r#"{"choices":[{"delta":{"content":"The minimum is at the root."}}]}"#,
+                "[DONE]",
+            ]),
+            sse(&[
+                r#"{"choices":[{"delta":{"content":"日本語の答え。"}}]}"#,
+                "[DONE]",
+            ]),
+        ]);
+        let cfg = ProviderConfig {
+            base_url: Some(url),
+            ..ProviderConfig::default()
+        };
+        let mut talk = ApiTalk::new(
+            OpenAiChat::new("ollama".into(), &cfg, None),
+            "ollama",
+            &Config::default(),
+            "Be Felix 日本語.",
+            &tools(),
+        );
+        let full = |talk: &ApiTalk| {
+            talk.system.chars().count()
+                + talk
+                    .history
+                    .iter()
+                    .map(|m| m.to_string().chars().count())
+                    .sum::<usize>()
+        };
+        assert_eq!(talk.context_chars(), Some(full(&talk)));
+        run(&mut talk, 12);
+        assert_eq!(talk.context_chars(), Some(full(&talk)));
+        let ran = run(&mut talk, 12);
+        assert_eq!(ran.answer, "日本語の答え。");
+        assert_eq!(talk.context_chars(), Some(full(&talk)));
+        assert!(talk.history.len() > 5);
+    }
+
+    #[test]
     fn context_chars_counts_characters() {
         let cfg = ProviderConfig::default();
         let mut talk = ApiTalk::new(
@@ -699,14 +737,43 @@ mod tests {
             "日本語",
             &tools(),
         );
-        talk.history
-            .push(json!({ "role": "user", "content": "日本語の質問" }));
+        talk.push(json!({ "role": "user", "content": "日本語の質問" }));
         let from_scratch = 3 + talk
             .history
             .iter()
             .map(|m| m.to_string().chars().count())
             .sum::<usize>();
         assert_eq!(talk.context_chars(), Some(from_scratch));
+    }
+
+    #[test]
+    #[ignore = "benchmark; run by hand"]
+    fn benchmark_history_count() {
+        for chars in [40_000usize, 400_000] {
+            let mut talk = ApiTalk::new(
+                OpenAiChat::new("ollama".into(), &ProviderConfig::default(), None),
+                "ollama",
+                &Config::default(),
+                "system",
+                &tools(),
+            );
+            let piece = "Heaps keep the minimum at the root. ".repeat(56);
+            for i in 0..chars / piece.len() {
+                let role = if i % 2 == 0 { "user" } else { "assistant" };
+                talk.push(json!({ "role": role, "content": piece.clone() }));
+            }
+            let runs = 2000u32;
+            let started = std::time::Instant::now();
+            let mut total = 0usize;
+            for _ in 0..runs {
+                total = total.wrapping_add(talk.context_chars().unwrap());
+            }
+            println!(
+                "history {chars} chars: {} messages, context_chars() = {:?} per count ({total})",
+                talk.history.len(),
+                started.elapsed() / runs
+            );
+        }
     }
 
     #[test]

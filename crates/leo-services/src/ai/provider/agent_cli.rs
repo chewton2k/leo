@@ -789,7 +789,7 @@ impl ClaudeSession {
                     }
                     let result = if calls >= control.most_calls || (control.tools_done)() {
                         limited = true;
-                        "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.".to_string()
+                        super::NO_MORE_TOOLS.to_string()
                     } else {
                         calls += 1;
                         call(&name, &args)

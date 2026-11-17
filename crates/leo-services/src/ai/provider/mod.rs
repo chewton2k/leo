@@ -31,6 +31,8 @@ pub struct Spent {
     pub cache_written: u64,
 }
 
+pub(crate) const NO_MORE_TOOLS: &str = "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.";
+
 pub(crate) fn tokens_of(chars: usize) -> u64 {
     chars.div_ceil(4) as u64
 }
