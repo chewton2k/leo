@@ -411,6 +411,27 @@ test('the read time of a note with a long run of blank lines comes back quickly'
   assert.equal(md.plain(`a${' \n'.repeat(3000)}---${' \n'.repeat(3000)}b`), 'a b');
 });
 
+test('plain on a long run of blank lines grows linearly', () => {
+  for (const gap of ['\n', ' \n', '\r\n', '\t\n']) {
+    const time = (n) => {
+      const started = performance.now();
+      md.plain(`start${gap.repeat(n)}| a |${gap.repeat(n)}end`);
+      return performance.now() - started;
+    };
+    const small = time(20000);
+    const large = time(40000);
+    assert.ok(large < 1000 && large <= Math.max(small * 3, 20), `${JSON.stringify(gap)} ${small} ${large}`);
+  }
+});
+
+test('plain turns table pipes into spaces exactly as the old pattern did', () => {
+  for (const text of ['', '|', '||', 'a||b', 'a | | b', '| a', 'a |', '| a |', '|a|b|', 'a\r\n|\r\nb', 'a\t|\tb', 'a | b', 'a \n | \n b', 'no pipes here', ' | ']) {
+    const old = text.replace(/\s*\|\s*/g, ' ');
+    const now = text.split('|').map((part, i) => (i ? part.trimStart() : part)).map((part, i, all) => (i < all.length - 1 ? part.trimEnd() : part)).join(' ');
+    assert.equal(now, old, JSON.stringify(text));
+  }
+});
+
 test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {
   const words = (s) => s.split(/\s+/).filter(Boolean).join(' ');
   const pairs = [

@@ -439,7 +439,7 @@
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/^[^\S\n]*(?:-{3,}|\*{3,}|_{3,})[^\S\n]*$/gm, ' ')
       .replace(/^[^\S\n]*\|?[^\S\n]*:?-+:?[^\S\n]*(\|[^\S\n]*:?-+:?[^\S\n]*)*\|?[^\S\n]*$/gm, ' ')
-      .replace(/\s*\|\s*/g, ' ')
+      .split('|').map((part, i) => (i ? part.trimStart() : part)).map((part, i, all) => (i < all.length - 1 ? part.trimEnd() : part)).join(' ')
       .replace(new RegExp(String.raw`^[^\S\n]*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
       .replace(/\[( |x|X)\]\s+/g, '')
       .replace(/!\[\[[^\]]*\]\]/g, ' ')
