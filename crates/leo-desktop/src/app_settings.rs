@@ -233,6 +233,13 @@ impl AppSettings {
     pub fn note(&self, text: String) {
         self.preferences.note(text);
     }
+    pub fn record(&self, what: &str, apply: impl FnOnce() -> Result<()>) {
+        if let Err(error) = apply() {
+            let text = format!("leo could not {what}: {error:#}");
+            eprintln!("  {text}");
+            self.note(text);
+        }
+    }
     pub fn apply_startup(&self) {
         let preferences = self.preferences();
         self.preferences.record(|| {

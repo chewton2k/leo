@@ -157,7 +157,13 @@ fn set_up(
         Ok(running) => {
             running.set_visible(!hidden);
             if let Some(config) = &config {
-                let _ = port::remember(config, running.port());
+                if let Err(error) = port::remember(config, running.port()) {
+                    let text = format!(
+                        "leo could not save its port ({error}), so its saved window data may not carry over to the next launch."
+                    );
+                    eprintln!("  {text}");
+                    app_settings.note(text);
+                }
             }
             WebviewUrl::External(
                 running
@@ -268,7 +274,7 @@ fn set_up(
         "menu bar icon",
         tray::build(app.handle()).err().map(|e| e.to_string()),
     ));
-    open_at_login_once(app.handle(), config.as_deref());
+    open_at_login_once(app.handle(), config.as_deref(), &app_settings);
     app_settings.apply_startup();
     if let Some(sentence) = startup_problem(&parts) {
         eprintln!("  {sentence}");
@@ -459,7 +465,11 @@ fn stop_engine(app: &AppHandle) {
     }
 }
 
-fn open_at_login_once(app: &AppHandle, config: Option<&std::path::Path>) {
+fn open_at_login_once(
+    app: &AppHandle,
+    config: Option<&std::path::Path>,
+    app_settings: &app_settings::AppSettings,
+) {
     let Some(config) = config.filter(|_| !cfg!(debug_assertions)) else {
         return;
     };
@@ -467,9 +477,11 @@ fn open_at_login_once(app: &AppHandle, config: Option<&std::path::Path>) {
     if marker.exists() {
         return;
     }
-    if app.autolaunch().enable().is_ok() {
-        let _ = std::fs::write(marker, "");
-    }
+    app_settings.record("start at login", || {
+        app.autolaunch().enable()?;
+        std::fs::write(&marker, "")?;
+        Ok(())
+    });
 }
 
 fn login_shell() -> std::path::PathBuf {
