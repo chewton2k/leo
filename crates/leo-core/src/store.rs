@@ -343,26 +343,38 @@ fn is_clean(path: &Path, expected: u64) -> bool {
     fs::read_to_string(path).is_ok_and(|text| hash_str(&text) == expected)
 }
 
+const FOLDER_LIST: &str = "directories.json";
+
+fn stamp_term(relative: &Path, meta: Option<&fs::Metadata>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    for part in relative.components() {
+        if let std::path::Component::Normal(part) = part {
+            part.to_string_lossy().hash(&mut hasher);
+        }
+    }
+    let (len, nanos) = meta.map_or((0, 0), |m| {
+        let nanos = m
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_nanos());
+        (m.len(), nanos)
+    });
+    (len, nanos).hash(&mut hasher);
+    hasher.finish()
+}
+
 fn fingerprint_of(notes_dir: &Path) -> u64 {
     let mut paths = Vec::new();
     let _ = collect_md_paths(notes_dir, &mut paths);
-    let directories = notes_dir.join("directories.json");
+    let directories = notes_dir.join(FOLDER_LIST);
     if let Ok(meta) = fs::metadata(&directories) {
         paths.push((directories, Some(meta)));
     }
     paths.iter().fold(0u64, |sum, (path, meta)| {
-        let (len, nanos) = meta
-            .as_ref()
-            .map(|m| {
-                let nanos = m
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map_or(0, |d| d.as_nanos());
-                (m.len(), nanos)
-            })
-            .unwrap_or((0, 0));
-        sum.wrapping_add(hash_str(&format!("{}|{len}|{nanos}", path.display())))
+        let relative = path.strip_prefix(notes_dir).unwrap_or(path);
+        sum.wrapping_add(stamp_term(relative, meta.as_ref()))
     })
 }
 
@@ -395,11 +407,15 @@ fn notes_dir_path() -> Result<PathBuf> {
     crate::paths::contained_path(&crate::paths::data_dir()?, Path::new("notes"))
 }
 
-fn load_directories(notes_dir: &Path) -> Result<Vec<String>> {
-    let path = crate::paths::contained_path(notes_dir, Path::new("directories.json"))?;
-    if path.exists() {
-        let raw = fs::read(&path)?;
-        Ok(serde_json::from_slice(&raw).unwrap_or_else(|e| {
+fn load_directories(notes_dir: &Path) -> Result<(Vec<String>, u64)> {
+    let path = crate::paths::contained_path(notes_dir, Path::new(FOLDER_LIST))?;
+    if !path.exists() {
+        return Ok((Vec::new(), hash_str("")));
+    }
+    let raw = fs::read(&path)?;
+    match serde_json::from_slice(&raw) {
+        Ok(list) => Ok((list, hash_str(&String::from_utf8_lossy(&raw)))),
+        Err(e) => {
             let kept = path.with_extension("json.corrupt");
             match fs::rename(&path, &kept) {
                 Ok(()) => crate::diag::warn(format!(
@@ -412,21 +428,25 @@ fn load_directories(notes_dir: &Path) -> Result<Vec<String>> {
                     path.display()
                 )),
             }
-            Vec::new()
-        }))
-    } else {
-        Ok(Vec::new())
+            Ok((Vec::new(), hash_str("")))
+        }
     }
 }
 
-fn save_directories(notes_dir: &Path, directories: &[String]) -> Result<()> {
-    let path = crate::paths::contained_path(notes_dir, Path::new("directories.json"))?;
-    let text = serde_json::to_string_pretty(directories)?;
-    if fs::read_to_string(&path).is_ok_and(|saved| saved == text) {
-        return Ok(());
+fn merged_folders(disk: Vec<String>, current: &[String], base: &[String]) -> Vec<String> {
+    let current_set: HashSet<&str> = current.iter().map(String::as_str).collect();
+    let base_set: HashSet<&str> = base.iter().map(String::as_str).collect();
+    let mut out: Vec<String> = disk
+        .into_iter()
+        .filter(|dir| !base_set.contains(dir.as_str()) || current_set.contains(dir.as_str()))
+        .collect();
+    let mut have: HashSet<String> = out.iter().cloned().collect();
+    for dir in current {
+        if !base_set.contains(dir.as_str()) && have.insert(dir.clone()) {
+            out.push(dir.clone());
+        }
     }
-    write_atomic(&path, &text)?;
-    Ok(())
+    out
 }
 
 fn check_notes_root(notes_dir: &Path) -> Result<()> {
@@ -818,6 +838,8 @@ pub struct Store {
     seen: std::cell::RefCell<HashMap<String, Seen>>,
     fingerprint: std::cell::Cell<u64>,
     tidied: std::cell::Cell<Option<std::time::Instant>>,
+    dirs_seen: std::cell::Cell<u64>,
+    dirs_base: std::cell::RefCell<Vec<String>>,
 }
 
 impl Store {
@@ -841,7 +863,8 @@ impl Store {
         check_notes_root(notes_dir)?;
         fs::create_dir_all(notes_dir)?;
         let fingerprint = fingerprint_of(notes_dir);
-        let mut directories = load_directories(notes_dir)?;
+        let (mut directories, dirs_seen) = load_directories(notes_dir)?;
+        let dirs_base = directories.clone();
         directories.retain(|dir| crate::paths::validate_directory(dir).is_ok());
         let mut found = Vec::new();
         let mut unreadable = Vec::new();
@@ -868,6 +891,8 @@ impl Store {
             seen: std::cell::RefCell::new(seen),
             fingerprint: std::cell::Cell::new(fingerprint),
             tidied: std::cell::Cell::new(Some(tidied)),
+            dirs_seen: std::cell::Cell::new(dirs_seen),
+            dirs_base: std::cell::RefCell::new(dirs_base),
             unreadable,
             notes,
             directories,
@@ -896,8 +921,8 @@ impl Store {
         let mut seen = self.seen.borrow_mut();
         let targets = self.assign_paths(&seen);
         let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
-        let mut conflicted = false;
         let mut failed: Option<anyhow::Error> = None;
+        let mut fp = self.fingerprint.get();
 
         for note in &self.notes {
             let target = &targets[&note.id];
@@ -925,7 +950,6 @@ impl Store {
                             entry.fields = fields;
                             entry.copy = Some(copy);
                         }
-                        conflicted = true;
                     }
                     continue;
                 }
@@ -935,23 +959,46 @@ impl Store {
                 self.tidied.set(None);
             }
 
-            crate::paths::contained_path(&self.notes_dir, target.strip_prefix(&self.notes_dir)?)?;
+            let relative = target
+                .strip_prefix(&self.notes_dir)
+                .context("path outside notes_dir")?
+                .to_path_buf();
+            crate::paths::contained_path(&self.notes_dir, &relative)?;
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
-            if let Some(old) = &old_path {
-                if old != target && same_file(old, target) {
+            let same = old_path.as_ref().is_some_and(|old| same_file(old, target));
+            let replaced = match (&previous, &old_path) {
+                (Some(previous), Some(old)) if same => fs::metadata(old)
+                    .ok()
+                    .map(|m| stamp_term(&previous.path, Some(&m))),
+                _ => fs::metadata(target)
+                    .ok()
+                    .map(|m| stamp_term(&relative, Some(&m))),
+            };
+            if let (true, Some(old)) = (same, &old_path) {
+                if old != target {
                     fs::rename(old, target)?;
                 }
             }
             write_atomic(target, &content)?;
-            if let Some(old_path) = old_path {
-                if !same_file(&old_path, target) {
+            if let Some(term) = replaced {
+                fp = fp.wrapping_sub(term);
+            }
+            let added = stamp_term(&relative, Some(&fs::metadata(target)?));
+            fp = fp.wrapping_add(added);
+            if let (Some(previous), Some(old_path)) = (&previous, old_path) {
+                if !same {
+                    let old_term = fs::metadata(&old_path)
+                        .ok()
+                        .map(|m| stamp_term(&previous.path, Some(&m)));
                     if let Err(e) = fs::remove_file(&old_path) {
-                        let _ = fs::remove_file(target);
+                        if fs::remove_file(target).is_ok() {
+                            fp = fp.wrapping_sub(added);
+                        }
                         let folder = previous
-                            .as_ref()
-                            .and_then(|previous| previous.path.parent())
+                            .path
+                            .parent()
                             .map(|parent| parent.display().to_string())
                             .filter(|parent| !parent.is_empty())
                             .unwrap_or_else(|| "the notes folder".to_string());
@@ -961,12 +1008,11 @@ impl Store {
                         failed.get_or_insert(anyhow::anyhow!(said));
                         continue;
                     }
+                    if let Some(term) = old_term {
+                        fp = fp.wrapping_sub(term);
+                    }
                 }
             }
-            let relative = target
-                .strip_prefix(&self.notes_dir)
-                .context("path outside notes_dir")?
-                .to_path_buf();
             seen.insert(
                 note.id.clone(),
                 Seen {
@@ -990,7 +1036,13 @@ impl Store {
             };
             let path = crate::paths::contained_path(&self.notes_dir, &entry.path)?;
             if is_clean(&path, entry.disk) {
+                let term = fs::metadata(&path)
+                    .ok()
+                    .map(|m| stamp_term(&entry.path, Some(&m)));
                 self.move_to_trash(&path, &id)?;
+                if let Some(term) = term {
+                    fp = fp.wrapping_sub(term);
+                }
             }
             seen.remove(&id);
         }
@@ -1000,12 +1052,40 @@ impl Store {
             self.tidied.set(Some(std::time::Instant::now()));
         }
 
-        save_directories(&self.notes_dir, &self.directories)?;
-        if !conflicted {
-            self.fingerprint.set(fingerprint_of(&self.notes_dir));
-        }
+        self.save_directories(&mut fp)?;
+        self.fingerprint.set(fp);
         if let Some(e) = failed {
             return Err(e);
+        }
+        Ok(())
+    }
+
+    fn save_directories(&self, fp: &mut u64) -> Result<()> {
+        let relative = Path::new(FOLDER_LIST);
+        let path = crate::paths::contained_path(&self.notes_dir, relative)?;
+        let disk = fs::read_to_string(&path).ok();
+        let disk_text = disk.as_deref().unwrap_or("");
+        let unread = hash_str(disk_text) != self.dirs_seen.get();
+        let list = if unread {
+            let base = self.dirs_base.borrow();
+            let on_disk = serde_json::from_str(disk_text).unwrap_or_else(|_| base.clone());
+            merged_folders(on_disk, &self.directories, &base)
+        } else {
+            self.directories.clone()
+        };
+        let text = serde_json::to_string_pretty(&list)?;
+        if disk.as_deref() == Some(text.as_str()) {
+            return Ok(());
+        }
+        let before = fs::metadata(&path).ok();
+        write_atomic(&path, &text)?;
+        if !unread {
+            if let Some(m) = before {
+                *fp = fp.wrapping_sub(stamp_term(relative, Some(&m)));
+            }
+            *fp = fp.wrapping_add(stamp_term(relative, Some(&fs::metadata(&path)?)));
+            self.dirs_seen.set(hash_str(&text));
+            *self.dirs_base.borrow_mut() = list;
         }
         Ok(())
     }
@@ -1992,6 +2072,8 @@ mod tests {
             seen: Default::default(),
             fingerprint: Default::default(),
             tidied: Default::default(),
+            dirs_seen: Default::default(),
+            dirs_base: Default::default(),
             notes: vec![make_note()],
             directories: vec![],
             notes_dir: notes_dir.clone(),
@@ -2830,6 +2912,66 @@ mod tests {
     }
 
     #[test]
+    fn a_save_leaves_an_unread_outside_edit_visible() {
+        let (mut store, _tmp) = temp_store();
+        let a = store
+            .create_note("A", "one", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("B", "two", vec![], "").unwrap();
+        store.save().unwrap();
+        let b = store.notes_dir.join("B.md");
+        fs::write(
+            &b,
+            fs::read_to_string(&b)
+                .unwrap()
+                .replace("two", "two, edited elsewhere"),
+        )
+        .unwrap();
+        store.find_note_mut(&a).unwrap().body = "one, edited here".to_string();
+        store.save().unwrap();
+        assert!(store.changed_on_disk());
+    }
+
+    #[test]
+    fn a_save_that_writes_moves_and_trashes_notes_records_what_it_wrote() {
+        let (mut store, _tmp) = temp_store();
+        let edited = store
+            .create_note("Edited", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        let renamed = store
+            .create_note("Renamed", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        let moved = store
+            .create_note("Moved", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        let trashed = store
+            .create_note("Trashed", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        assert!(!store.changed_on_disk());
+        store.find_note_mut(&edited).unwrap().body = "y".to_string();
+        store.find_note_mut(&renamed).unwrap().title = "Renamed again".to_string();
+        store.create_dir("Inner");
+        store.move_note(&moved, "Inner").unwrap();
+        store.delete_notes(std::slice::from_ref(&trashed));
+        store.create_note("Fresh", "x", vec![], "Inner").unwrap();
+        store.save().unwrap();
+        assert!(!store.changed_on_disk(), "{:?}", note_files(&store));
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.notes.len(), 4);
+    }
+
+    #[test]
     fn a_title_changed_only_in_case_renames_its_file() {
         let (mut store, _tmp) = temp_store();
         let id = store
@@ -2844,6 +2986,84 @@ mod tests {
         assert!(!store.changed_on_disk());
         let reloaded = Store::load_from(&store.notes_dir).unwrap();
         assert_eq!(reloaded.find_note(&id).unwrap().title, "Apple");
+    }
+
+    #[test]
+    fn a_save_that_rewrites_only_the_folder_list_records_it() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Note", "x", vec![], "").unwrap();
+        store.save().unwrap();
+        store.create_dir("Empty");
+        store.save().unwrap();
+        assert!(!store.changed_on_disk());
+        store.create_dir("Another");
+        store.save().unwrap();
+        assert!(!store.changed_on_disk());
+    }
+
+    fn folder_list(store: &Store) -> Vec<String> {
+        serde_json::from_str(&fs::read_to_string(store.notes_dir.join("directories.json")).unwrap())
+            .unwrap()
+    }
+
+    fn change_folder_list(store: &Store, add: &str, remove: &str) {
+        let mut list = folder_list(store);
+        list.retain(|dir| dir != remove);
+        if !add.is_empty() {
+            list.push(add.to_string());
+        }
+        fs::write(
+            store.notes_dir.join("directories.json"),
+            serde_json::to_string(&list).unwrap(),
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn an_unread_outside_edit_to_the_folder_list_survives_a_save() {
+        for outside_first in [true, false] {
+            let (mut store, _tmp) = temp_store();
+            store.create_dir("Kept");
+            store.save().unwrap();
+            if outside_first {
+                change_folder_list(&store, "Outside", "");
+                store.create_dir("Inside");
+            } else {
+                store.create_dir("Inside");
+                change_folder_list(&store, "Outside", "");
+            }
+            store.save().unwrap();
+            let list = folder_list(&store);
+            for dir in ["Kept", "Outside", "Inside"] {
+                assert!(list.contains(&dir.to_string()), "{outside_first} {list:?}");
+            }
+            assert!(store.changed_on_disk());
+            store.refresh().unwrap();
+            assert!(store.dir_exists("Outside") && store.dir_exists("Inside"));
+
+            let (mut store, _tmp) = temp_store();
+            for dir in ["Kept", "Theirs", "Mine"] {
+                store.create_dir(dir);
+            }
+            store.save().unwrap();
+            if outside_first {
+                change_folder_list(&store, "", "Theirs");
+                store.delete_dir_recursive("Mine");
+            } else {
+                store.delete_dir_recursive("Mine");
+                change_folder_list(&store, "", "Theirs");
+            }
+            store.save().unwrap();
+            assert_eq!(
+                folder_list(&store),
+                vec!["Kept".to_string()],
+                "{outside_first}"
+            );
+            assert!(store.changed_on_disk());
+            store.refresh().unwrap();
+            assert!(!store.dir_exists("Theirs") && !store.dir_exists("Mine"));
+            assert!(store.dir_exists("Kept"));
+        }
     }
 
     #[test]
