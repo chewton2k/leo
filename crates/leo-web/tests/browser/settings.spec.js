@@ -220,7 +220,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
     ${read('app/core.js').slice(read('app/core.js').indexOf('const MOTION_MS'), read('app/core.js').indexOf('function stillMotion'))}
     ${read('app/core.js').slice(read('app/core.js').indexOf('const SHORTCUT_KEYS'), read('app/core.js').indexOf('async function dictateHint'))}
     const unfold=menu=>{menu.hidden=false;}, fold=menu=>{menu.hidden=true;}, floating=document.createElement('div'), plural=(n,w)=>n+' '+w+(n===1?'':'s'), empty=(icon,title,text)=>'<div class="empty">'+icon+'<h2>'+title+'</h2><p>'+text+'</p></div>';
-    document.addEventListener('click',e=>{const el=e.target.closest('[data-action="segment-pick"],[data-action="theme-pick"],[data-action="width-pick"],[data-action="text-size-pick"],[data-action="letters-pick"],[data-action="setting-reset"]'); if(!el) return; const act=el.dataset.action; if(act==='segment-pick') pickSegment(el); else if(act==='theme-pick') pickTheme(el); else if(act==='width-pick') pickWidth(el); else if(act==='text-size-pick') pickTextSize(el); else if(act==='letters-pick') pickLetters(el); else resetSetting(el);});
+    document.addEventListener('click',e=>{const el=e.target.closest('[data-action="segment-pick"],[data-action="theme-pick"],[data-action="width-reset"],[data-action="text-size-pick"],[data-action="letters-pick"],[data-action="setting-reset"]'); if(!el) return; const act=el.dataset.action; if(act==='segment-pick') pickSegment(el); else if(act==='theme-pick') pickTheme(el); else if(act==='width-reset') resetWidth(); else if(act==='text-size-pick') pickTextSize(el); else if(act==='letters-pick') pickLetters(el); else resetSetting(el);});
     ${read('theme.js')}
     ${read('app/refresh.js')}
     ${read('app/trash.js')}
@@ -364,11 +364,11 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await themeReset.click();
       await expect(themeReset).toBeHidden();
       await expect(page.getByRole('button',{name:'Match device',exact:true})).toHaveAttribute('aria-pressed','true');
-      for(const [find,count] of [['theme',3],['felix-look',2],['note-width',3]]) await expect(page.locator(`[data-find="${find}"] .choice-cards button.choice-pick:has(.choice-diagram svg)`),`${find} is a row of picture cards`).toHaveCount(count);
-      await page.getByRole('button',{name:'Full width',exact:true}).click();
-      await expect(page.locator('html')).toHaveAttribute('data-note-width','full');
-      await page.getByRole('button',{name:'Reset Note width to default'}).click();
-      await expect(page.getByRole('button',{name:'Wide',exact:true})).toHaveAttribute('aria-pressed','true');
+      for(const [find,count] of [['theme',3],['felix-look',2]]) await expect(page.locator(`[data-find="${find}"] .choice-cards button.choice-pick:has(.choice-diagram svg)`),`${find} is a row of picture cards`).toHaveCount(count);
+      const widthRow=page.locator('[data-find="note-width"]');
+      await expect(widthRow.locator('.choice-cards'),'note width is not a choice').toHaveCount(0);
+      await expect(widthRow).toContainText('The default.');
+      await expect(widthRow.getByRole('button',{name:'Reset'})).toBeDisabled();
       for(const [find,count] of [['text-size',3],['felix-lettering',2]]) await expect(page.locator(`[data-find="${find}"] .choice-cards button.choice-pick:has(.read-sample)`),`${find} is a row of sample cards`).toHaveCount(count);
       await page.getByRole('button',{name:'Large',exact:true}).click();
       await expect(page.locator('html')).toHaveAttribute('data-text-size','large');
@@ -626,7 +626,7 @@ test('page toolbars share geometry', async ({ page }) => {
       const box = await page.locator('.bar-row').boundingBox();
       if (!baseline) baseline = box;
       expect(box).toEqual(baseline);
-      expect(box.width).toBeLessThanOrEqual(760);
+      if (width < 1000) expect(box.width).toBeLessThanOrEqual(760);
     }
   }
 });

@@ -39,27 +39,28 @@ test('workspace and legacy folder links reveal folders without a library or a cr
   const note = await createNote(page, nested);
   const before = await (await page.request.get('/api/notes?limit=1')).headers();
   await page.goto('/#/');
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await expect(page.locator('.home-foot svg.drawn-arrow'), 'the arrow shows on the first day only').toBeHidden();
+  await expect(page.locator('.home-foot'), 'with the explorer open, home has no New note footer').toBeHidden();
   await expect(page.locator('.library-tools, .library-cards, #app .cards')).toHaveCount(0);
   for (const target of [dir, nested]) {
     await page.goto(`/#/f/${encodeURIComponent(target)}`);
     await expect(page).toHaveURL(/\/#\/$/);
     await expect(folderRow(page, target)).toHaveAttribute('aria-current', 'page');
-    await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+    await expect(page.locator('#app .workspace-empty')).toBeVisible();
   }
   await expect(noteRow(page, note.id)).toBeVisible();
   await noteRow(page, note.id).click();
   await expect(page.locator('#title')).toHaveText(note.title);
   await page.goBack();
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await page.goForward();
   await expect(page.locator('#title')).toHaveText(note.title);
   const after = await (await page.request.get('/api/notes?limit=1')).headers();
   expect(after['x-total']).toBe(before['x-total']);
   await page.goto('/#/f/no-such-explorer-folder');
   await expect(page.locator('.toast')).toContainText('That folder is not there');
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
 });
 
 test('a note and a folder never both look selected', async ({ page }) => {
@@ -255,7 +256,7 @@ test('startup restores one remembered note or legacy folder and missing notes re
   await page.reload();
   await expect(page.locator('#title')).toHaveText(note.title);
   await page.goto('/#/');
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await page.addInitScript(dir => {
     if (sessionStorage.getItem('explorer-folder-seeded')) return;
     localStorage.setItem('leo-last-place', `#/f/${encodeURIComponent(dir)}`);
@@ -266,7 +267,7 @@ test('startup restores one remembered note or legacy folder and missing notes re
   await expect(folderRow(page, dir)).toHaveAttribute('aria-current', 'page');
   await expect(page).toHaveURL(/\/#\/$/);
   await page.goto('/#/n/no-such-explorer-note');
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await expect(page.locator('.toast')).toContainText('not there any more');
 });
 
@@ -283,7 +284,7 @@ test('folder move and Undo retain the current note, and trashing its ancestor sa
   await expect(folderRow(page, dir)).toBeVisible();
   await page.locator('#title').fill('The latest unsaved title');
   await options(page, folderRow(page, dir), 'Move to trash');
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
   await expect(folderRow(page, dir)).toBeVisible();
   expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).title).toBe('The latest unsaved title');
@@ -417,12 +418,12 @@ for (const failure of ['server', 'offline']) test(`legacy folder ${failure} erro
   expect(new URL(page.url()).hash).toBe(hash);
   await page.unroute('**/api/folders');
   await page.reload();
-  await expect(page.getByText('Open a note, or start a new one.')).toBeVisible();
+  await expect(page.locator('#app .workspace-empty')).toBeVisible();
   await expect(folderRow(page, dir)).toHaveAttribute('aria-current', 'page');
   await expect(page).toHaveURL(/\/#\/$/);
 });
 
-test('the explorer sorts notes by name or edit date, flips the order, shows only open tasks, and remembers the choice', async ({ page }) => {
+test('the explorer sorts notes by name or edit date, reverses the order from the sort menu, shows only open tasks, and remembers the choice', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   const dir = await createFolder(page);
   const alpha = await createNote(page, dir, 'Alpha');
@@ -434,51 +435,40 @@ test('the explorer sorts notes by name or edit date, flips the order, shows only
   const rows = page.locator(`#side .side-note[data-from="${dir}"] .side-label:not(.side-count)`);
   await expect(rows).toHaveText(['Alpha', 'Bravo', 'Charlie']);
   const sort = page.getByRole('button', { name: 'Sort notes' });
-  const flip = page.getByRole('button', { name: 'Reverse order' });
-  await expect(sort).not.toHaveClass(/\bon\b/);
-  await expect(flip).toHaveAttribute('aria-pressed', 'false');
-  await expect(flip).toHaveAttribute('title', 'A to Z');
-  await expect(flip).toHaveAttribute('data-way', 'sortAZ');
-  await expect(flip).toHaveAccessibleName('Reverse order, now A to Z');
-  const glyph = () => flip.locator('svg path').getAttribute('d');
-  const az = await glyph();
-  await flip.click();
-  await expect(rows).toHaveText(['Charlie', 'Bravo', 'Alpha']);
-  await expect(flip).toHaveAttribute('aria-pressed', 'true');
-  await expect(flip).toHaveAttribute('title', 'Z to A');
-  await expect(flip).toHaveAttribute('data-way', 'sortZA');
-  await expect(flip).toHaveAccessibleName('Reverse order, now Z to A');
-  expect(await glyph()).not.toBe(az);
-  await sort.click();
   const menu = page.getByRole('menu', { name: 'Sort notes' });
-  await expect(menu.getByRole('menuitemradio')).toHaveText(['Name', 'Last edited', 'Created']);
+  const pick = async (name) => { await sort.click(); await menu.getByRole('menuitemradio', { name, exact: true }).click(); };
+  await expect(page.getByRole('button', { name: /^Reverse order/ })).toHaveCount(0);
+  await expect(sort).not.toHaveClass(/\bon\b/);
+  await expect(sort).toHaveAttribute('title', 'Sorted by name, a to z');
+  await pick('Z to A');
+  await expect(rows).toHaveText(['Charlie', 'Bravo', 'Alpha']);
+  await expect(sort).toHaveClass(/\bon\b/);
+  await expect(sort).toHaveAttribute('title', 'Sorted by name, z to a');
+  await sort.click();
+  await expect(menu.getByRole('menuitemradio')).toHaveText(['Name', 'Last edited', 'Created', 'A to Z', 'Z to A']);
   await expect(menu.getByRole('menuitemradio', { name: 'Name' })).toHaveAttribute('aria-checked', 'true');
+  await expect(menu.getByRole('menuitemradio', { name: 'Z to A' })).toHaveAttribute('aria-checked', 'true');
   await menu.getByRole('menuitemradio', { name: 'Last edited' }).click();
   await expect(rows).toHaveText(['Alpha', 'Charlie', 'Bravo']);
-  await expect(flip).toHaveAttribute('aria-pressed', 'false');
-  await expect(flip).toHaveAttribute('title', 'Newest first');
-  await expect(flip).toHaveAttribute('data-way', 'sortWide');
+  await expect(sort).toHaveAttribute('title', 'Sorted by last edited, newest first');
   await expect(page.locator(`#side .side-note[data-id="${alpha.id}"] .side-count`)).toHaveText('just now');
   await expect(sort).toHaveClass(/\bon\b/);
-  await flip.click();
+  await pick('Oldest first');
   await expect(rows).toHaveText(['Bravo', 'Charlie', 'Alpha']);
-  await expect(flip).toHaveAttribute('data-way', 'sortNarrow');
   await sort.click();
   await menu.getByRole('menuitemcheckbox', { name: 'Only notes with open tasks' }).click();
   await expect(rows).toHaveText(['Alpha']);
   await page.reload();
   await expect(rows).toHaveText(['Alpha']);
-  await expect(flip).toHaveAttribute('title', 'Oldest first');
+  await expect(sort).toHaveAttribute('title', 'Sorted by last edited, oldest first, open tasks only');
   await sort.click();
   await expect(menu.getByRole('menuitemcheckbox', { name: 'Only notes with open tasks' })).toHaveAttribute('aria-checked', 'true');
   await menu.getByRole('menuitemcheckbox', { name: 'Only notes with open tasks' }).click();
-  await sort.click();
-  await menu.getByRole('menuitemradio', { name: 'Created' }).click();
+  await pick('Created');
   await expect(rows).toHaveText(['Charlie', 'Bravo', 'Alpha']);
-  await flip.click();
+  await pick('Oldest first');
   await expect(rows).toHaveText(['Alpha', 'Bravo', 'Charlie']);
-  await sort.click();
-  await menu.getByRole('menuitemradio', { name: 'Name' }).click();
+  await pick('Name');
   await expect(rows).toHaveText(['Alpha', 'Bravo', 'Charlie']);
   await expect(page.locator(`#side .side-note[data-from="${dir}"] .side-count`)).toHaveCount(0);
   await expect(sort).not.toHaveClass(/\bon\b/);

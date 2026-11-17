@@ -119,7 +119,9 @@ Decided: one app, window only (2026-10-31).
   The More sheet (`#menu`) is for phones only (under 600 px).
 - Layout variables on `body`: `--side`, `--right`, `--mid`. Fixed things
   (toolbar, select bar, toasts, FABs, `#dock`) use them so nothing covers
-  anything. Page toolbars share one 760 px maximum width.
+  anything. Page toolbars share one geometry: 760 px at most below 1000 px; from 1000 px
+  the bar spans the page less `min(8%, 128px)` each side, so Felix's button sits in the same
+  spot on every page (2026-11-16, replacing the bar that followed each page's content).
 - UI preferences survive a port change (2026-11-14): localStorage is per origin and
   the engine port drifts when the saved one is busy, so every `leo-*` key (not
   `leo-draft*`, `leo-chat-v1` or `leo-search`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
@@ -189,8 +191,12 @@ Decided: one app, window only (2026-10-31).
   Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
   Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
-  (a row's `next` is a second step). `sheet()` focuses the first control and
-  traps Tab. Rename and New folder use `inlineEdit` over the tree row.
+  (a row's `next` is a second step). Clicking its owner again closes it, as does a click
+  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. `sheet()` focuses the first control and
+  traps Tab. Rename uses `inlineEdit` over the tree row; New folder opens a real
+  row in place (`sideMakingOpen`: `side.making` draws a keyed `.side-making` row at the
+  top of its parent, opening over `MOTION_MS` and folding back on Esc, none under
+  `stillMotion()`), its name typed on a `--focus` underline (`.inline-edit.making`).
   Rows hover with `--menu-hover` (`--tint` light, `--wash` dark, where `--tint`
   would dip below `--raised`); separators inset 12 px; a faint keycap
   (`.popup-rows kbd`, `aria-hidden`) only where a real shortcut acts: New note
@@ -205,10 +211,9 @@ Decided: one app, window only (2026-10-31).
   and Felix's read-failure status stay text. Home's arrow points at the explorer and shows only
   on the first day (no notes, no tasks) while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
   (2026-11-15, the user's call); counts `.badge`; small faint
-  sentence-case labels share one rule (`.side-group`, `.source-label`, `.quick-due-head`,
+  sentence-case labels share one rule (`.source-label`, `.quick-due-head`,
   `.chat-history-group`, `.pick-head`), ending in the note rule's pencil stroke
-  (`::after`, same mask, a plain 1 px line in print and forced colours; the
-  Folders rule stops at New folder).
+  (`::after`, same mask, a plain 1 px line in print and forced colours).
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
 - The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
@@ -220,7 +225,10 @@ Decided: one app, window only (2026-10-31).
   its dot) and in `#save-state` (full ink while editing or saving, drying once to .45
   when Saved; the words stay as hidden text, "Not saved" stays visible). No other
   spinner or second breathing mark.
-- Colour: ink for actions and selection, `--focus` for focus cues, tone only as
+- Colour: ink for actions and selection, `--focus` for focus cues (Felix blue since
+  2026-11-16, the user's call: every former purple, `--focus` and the indigo tone
+  `--hue-indigo` used by calendar assignments, callouts and note cards, is #3f6d97 /
+  #b4cfe7; Felix's pixel pen keeps its colours), tone only as
   dots and ticks (calendar events keep their colour fills). One exception,
   Felix's own blue (`--felix`: light #3f6d97, dark #b4cfe7, from his sprite;
   2026-11-15, the user's call), only while he works: the reading blot
@@ -240,7 +248,8 @@ Decided: one app, window only (2026-10-31).
   buttons, selection, tags or text.
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
-  rest, `--shadow-pop` for menus, toasts and sheets, `--shadow-lift` while
+  rest, `--shadow-pop` for menus, toasts, sheets and the open note in Marks, with no
+  hairline ring since 2026-11-16, `--shadow-lift` while
   dragging); dark mode lifts with lighter surfaces and a faint top highlight.
   Inputs, tables, code and focus rings keep a clear edge; so do board lanes, one
   step off the board's tone with a 1px inset edge (they vanish otherwise).
@@ -346,10 +355,23 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
-  the old look: a plain underline, the 3 px quote bar, row rules. The facts line
-  `#note-facts` (`md.facts`: words outside code by word segmentation, 238 a minute
-  rounded up, "0 words" when empty) sits under the title, updates 300 ms after a
-  change (`factsSoon`), is skipped by search highlights and hidden in print.
+  the old look: a plain underline, the 3 px quote bar, row rules. The line under
+  the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
+  words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
+  "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
+  `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
+  edit); there is no word count (2026-11-16, the user's call). It is skipped by search highlights and hidden in print. The note's
+  tools (transcript, Tasks, Add picture, Move to folder, Share as a second step, Move
+  to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js) after Read through;
+  there is no floating note toolbar, and the Tasks card is hidden on note pages. The
+  top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
+  spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
+  zero-height sticky overlay holding only Felix's button, at the same spot as on every other
+  page, and the chip row starts one bar's height below it (`--bar-height` + 8 px), an empty
+  band above the note. There is no Back button anywhere (2026-11-16, the user's call); Escape
+  goes back. Felix's chat starters are Teach me this note step by step, Quiz me on this
+  note and Make me a 3-day review plan. A selection over `MOST_ASKED` shows "Select
+  less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
   `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays
@@ -384,10 +406,14 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   fires early, checked again on focus and visibilitychange (2026-11-15). Unprompted
   explorer redraws (expiry, Felix's read starting and ending, queued off the read)
   go through `sideRedrawSoon`, which waits while any menu is open.
-  Beside Filter: a sort menu (Name, Last edited, Created; only open tasks) and a
-  flip button that reverses it (its icon shows the order: a down arrow beside
-  A–Z/Z–A letters or wide/narrow bars, 2026-11-12), both driving `/api/notes` `sort`/`show` for every
+  Beside Filter: one sort button whose menu holds Sort by (Name, Last edited, Created),
+  Order (the sort's two directions, e.g. A to Z / Z to A) and only open tasks
+  (2026-11-16, replacing the flip button), driving `/api/notes` `sort`/`show` for every
   folder's notes (folders stay by name), saved as `leo-side-order` (2026-11-11).
+  The explorer is kept simple (2026-11-16, the user's call): New note (with its
+  shortcut) and New folder share one row (`.side-group`, still the top-level drop
+  target and root context menu, their icons on one level), there is no Folders label,
+  and folders show no note count (the count is in the row's title).
 - Quick Leo opens with Cmd/Ctrl+K only (Cmd/Ctrl+F removed 2026-11-09); Cmd/Ctrl+N
   makes a note in the current folder, never inside a sheet, an inline edit, while
   composing or when locked. These two and Ask Felix (Cmd/Ctrl+Shift+E) are the
@@ -452,7 +478,17 @@ the web (root CLAUDE.md).
   running session send `<study_rules>` (`Reads.study_rules` sends it once). The
   `chats.mode` column stays for old rows; request and saved `mode` are ignored.
 - LearnHarness is AGPL-3.0 and leo is MIT: borrow its method only in our own
-  words, never paste its prompts or code.
+  words, never paste its prompts or code. Jane Street's socratic-tutor (MIT) lent
+  the rule that an idea is shown only by two right answers (2026-11-16, the user's
+  call): `scoreSession(session, quiz, correct)` counts a right answer that is not a
+  guess, not after hints, not a step with `more` and not a retest of the idea whose
+  last answer was wrong (the page sets `more` on that one, whether it comes in the
+  marking reply or after Next question), and closes the idea at two; sessions stop
+  at 30 questions. Each study turn ends with `Session::state` (`<study_session>`:
+  every idea's standing and what to ask next, after the conversation so the cached
+  prefix stays), so Felix picks open ideas without refused calls, and `ENDED` and
+  `SESSION_DONE` carry `Session::unshown`. Refusals say to correct the call without
+  mentioning it. Felix keeps no running score.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
   ten idle minutes, Settings changes clear all; eviction and process cleanup run
   outside the slot mutex and off async workers. Only unchanged history plus the
@@ -572,7 +608,10 @@ Felix (2026-10-19).
   its note, with one muted line, "The passage changed since Felix wrote this."
   (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
 - An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
-  "Show N earlier" button (`.margin-earlier`) that shows them all for that note.
+  "Show N earlier" button (`.margin-earlier`) that shows them all for that note. From
+  `LONG_THREAD` (6) messages it ends with "This has turned into its own question.
+  Continue in chat or make it a note." (`.margin-long`; the links are the thread's own
+  chat and Add to note actions).
 - Notes the page cannot place do not fill the limit: `marginDraw` collects their ids
   (`marginPage.gone`, by `marginKit.find`) and asks, Read through and reopening send
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
@@ -592,8 +631,10 @@ Felix (2026-10-19).
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
   (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
-  `.../threads/{id}` `{pinned}`; a pinned or newest read-along note
-  (`marginPage.newest`, `data-newest`) stays undimmed. An open thread's
+  `.../threads/{id}` `{pinned}`; a pinned note stays open in every layout
+  (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
+  unpinning folds it unless it is the one open) and a newest read-along note
+  (`marginPage.newest`, `data-newest`) stays undimmed (2026-11-16, the user's call). An open thread's
   messages sit right of a 1 px `--line` rule; its one action row is Resolve,
   Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
   row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
@@ -603,9 +644,20 @@ Felix (2026-10-19).
   (Right 240–360 px beside a column of at least `LEAST_COLUMN` 600; Both 180–360 px
   per side). Both holds on as long as it stays readable (2026-11-15, the user's
   call): notes shrink to `LEAST_SHARED` (180 px, about 22 characters a line) first,
-  then the column to `SHARED_COLUMN` (520 px, about 65 characters), and only below
-  `ROOM_BOTH` (992 px of columns) does it become Right, then marks below
-  `ROOM_RIGHT`. It never moves every note right to make them wider.
+  then the column to `SHARED_COLUMN` (520 px, about 65 characters); below the chosen
+  layout's room (`ROOM_BOTH` 992 px, `ROOM_RIGHT` 928 px of columns) it becomes marks,
+  never one side (2026-11-16, the user's call). It never moves every note right to make them wider. A closed note
+  in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
+  are a 13 px ink blot just after the passage's last word, never over the text: `marginSlots`
+  puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
+  the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
+  editor or a code, table or maths block) before anything is measured, and the blot sits on
+  it; side by side when two end together. A read's blot, and any passage without a slot,
+  sits just after the last word instead (`marginPassageEnd`). An open or pinned note sits
+  under its block as a raised card (`--raised`, `--shadow`), the block's `--margin-room`
+  holding its height (pinned cards stack); it unfolds with a clip and the room over
+  `OPEN_MS` and folds away over `OPEN_MS × EXIT_SHARE` before it closes
+  (`marginFoldAway`, inert while leaving), none under `stillMotion()`.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
@@ -650,7 +702,14 @@ Felix (2026-10-19).
 - A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent. Read through sends none.
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
-  then `margin::crowded` allows one open note per sentence. The server anchors on prefix + quote + suffix exactly and
+  then `margin::crowded` allows one open note per sentence. A reworded passage still counts
+  (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
+  open thread the page places only by context, as `{id, text}` of its current wording, at most
+  2 × `MOST_OPEN`, each ≤ 2 × `MOST_QUOTE` and in the note). A read-along note landing on such
+  a sentence replaces the old one (`margin::replace_changed`: resolved and listed in `resolved`,
+  only if it is not pinned, not `keep`, not being answered and has no message from you); else,
+  and always in Read through, the new note is dropped. `marginRevisits` draws no reopen
+  underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
   never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
   characters, else the chat; read-along and `add_margin_note` quotes
   `MOST_QUOTE` (600). The selection toolbar (`passages.js`) has Felix this
@@ -662,6 +721,14 @@ Felix (2026-10-19).
   that already has an open thread opens it instead (`marginSame`). Both margins puts
   a note on the right whenever the right is free at its height (`marginKit.sides`).
   Margin icon buttons show the `.actions` tooltip (their aria-label), no `title`.
+  Felix this on such a passage only opens it (Visualize still asks in it). The open
+  thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
+  The ask box shows "Enter to ask · Esc to close"; a draw ask waits with "Sketching it…"
+  (`MARGIN_DRAWS`). A silent read leaves a faint aria-hidden "Nothing to add." after the
+  passage for 2.6 s (`marginQuiet`). A resolved note stays faded (.45) with a "Resolved"
+  label until the note is left (`marginPage.faded`); clicking it reopens it. A new stepped
+  drawing plays once (`playDrawing`, 1.1 s a step plus 20 ms a caption character, none
+  under Reduce Motion, never when its step is remembered); ↻ plays it again.
 - Reads use `Powers.toolless`, never `quick` (`no_tools`: `--tools ""`,
   `web_search="disabled"`, chain cut to its first provider, so a read fails
   closed). Replies and asks use `Powers.toolless_chat`. Every read is a fresh
@@ -871,7 +938,8 @@ is hidden or the capture activity gate is busy.
   Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 - Card priority (2026-11-15) is one to three slanted pencil strokes
-  (`KANBAN_STROKES`, ink at 60%, 14 px) before the title, the title indented by
+  (`KANBAN_STROKES`, 14 px) before the title, coloured by level (2026-11-16: low `--hue-0`,
+  medium `--hue-amber`, high `--hue-red`), the title indented by
   `text-indent`; the word stays as hidden text (`.kanban-priority-word`) plus a
   `title`, and the `.kanban-priority.<level>` classes remain.
 
@@ -906,7 +974,7 @@ a modal.
   not. Detect language is hidden for a model that cannot detect language, and
   setup picks the system language, else `en`, for such a model.
 - Settings look (2026-11-14): a choice of two or three that reads better as a
-  picture is `choiceCards` (theme, Felix, width, text size, lettering, margin
+  picture is `choiceCards` (theme, Felix, text size, lettering, margin
   layout, new-note mode, Reading pace); long and numeric lists stay `segmented`.
   A switch row is a bordered box with a one-line `.set-desc`. The Dictation
   shortcut lives only in Settings → Shortcuts (`dictationShortcutRow`, its Change
@@ -918,7 +986,9 @@ a modal.
   `settings-navigation.test.js` fails on an unknown section, a duplicate id or
   an id no source draws. Routes stay `#/settings/<section>`; `#/trash` still
   works and a bare `#/settings` never reopens Trash.
-- Usage: ordinary Settings reads never refresh coding-plan limits; POST
+- Usage opens from Settings (a Usage row under This app, `data-action="usage"`, the
+  same sheet; 2026-11-16), not the icon rail or the phone More sheet. Ordinary Settings
+  reads never refresh coding-plan limits; POST
   `/api/settings/usage` (`{}` Codex only, `{ "claude": true }` also Claude)
   behind one refresh slot; a failed refresh keeps saved meters. `usage::Usage`
   keeps content-free counts, `usage_days`, `usage_calls` and `usage_tools` (90 days), never prompt or reply
@@ -938,8 +1008,14 @@ a modal.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
   Restore tasks refuses a zip or file without task ids.
 - Appearance keys are per browser (`leo-theme`, `leo-note-width`,
-  `leo-text-size`, `leo-felix-letters`) and set before paint by `/theme.js`;
-  only reading text multiplies `--read`.
+  `leo-text-size`, `leo-felix-letters`, `leo-page-width`) and set before paint by `/theme.js`;
+  only reading text multiplies `--read`. Page width (2026-11-16, the user's call): two `.page-mark` separators at the note's top corners (drag.js) set
+  `leo-page-width` (480–1600 px, symmetric about the column's centre, live px label, arrows
+  ±20, double-click/Enter resets; 2 px marks at 38% ink); `showWidth` writes it as an inline
+  `--note-width` unless the width is Full. A drag stops at `marginKit.mostColumn`, the widest
+  column that leaves the chosen margins their least width, so the margins never give way.
+  Settings → Note width only says the current width with a Reset (`width-reset`; no size
+  cards since 2026-11-16, the user's call); an older Comfortable or Full choice still applies until reset.
 
 Decided: Keeping replaces Storage (2026-11-05); Quit leo is not in Settings; Writing
 AI uses a pen icon, never a sparkle.

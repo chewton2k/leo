@@ -21,7 +21,9 @@ function popupRow(row, index) {
 }
 
 function popupMenu(owner, { label, rows, point = null, find = '' }) {
+  const again = !point && popup && !popup.point && popup.owner === owner;
   closePopup(false);
+  if (again) return;
   const box = document.createElement('div');
   box.className = 'popup-menu';
   box.setAttribute('role', 'menu');
@@ -44,7 +46,7 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
   if (owner.hasAttribute('aria-haspopup')) owner.setAttribute('aria-expanded', 'true');
   draw(rows);
   place();
-  popup = { box, owner };
+  popup = { box, owner, point };
   unfold(box, point || owner);
   first();
   input?.addEventListener('input', () => {
@@ -77,6 +79,6 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
 }
 
 document.addEventListener('pointerdown', (event) => {
-  if (popup && !popup.box.contains(event.target)) closePopup(false);
+  if (popup && !popup.box.contains(event.target) && (popup.point || !popup.owner.contains(event.target))) closePopup(false);
 });
 addEventListener('hashchange', () => closePopup(false));

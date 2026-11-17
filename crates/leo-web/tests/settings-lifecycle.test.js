@@ -51,15 +51,17 @@ test('late onboarding completion cannot close a newer sheet', async () => {
   assert.equal(closed, 0);
 });
 
-test('the note footer keeps its note tools without the bottom Ask button', () => {
-  const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
-  const script = core.slice(core.indexOf('function noteActions('), core.indexOf('async function showNote('));
-  const context = { ON_MAC: true, ICON: new Proxy({}, {get: () => '<svg></svg>'}), esc: text => String(text) };
+test('the note menu keeps every note tool, with Share as a second step and trash last', () => {
+  const sheets = fs.readFileSync(path.join(__dirname, '../src/web/app/sheets.js'), 'utf8');
+  const script = sheets.slice(sheets.indexOf('function shareRows('), sheets.indexOf('async function share('));
+  const shown = [];
+  const context = { ICON: new Proxy({}, { get: () => '<svg></svg>' }), state: { view: 'note', session: { note: { id: 'note-id', recorded: true } } }, popupMenu: (owner, { rows }) => shown.push(rows), marginPrintable: () => [], copyMarkdown() {}, saveMarkdown() {}, share() {} };
   vm.createContext(context);
   vm.runInContext(script, context);
-  const html = context.noteActions('note-id', true);
-  assert.doesNotMatch(html, /data-action="(?:ask-selection|note-map)"/);
-  for (const name of ['Show transcript', 'Show tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']) assert.ok(html.includes('aria-label="' + name + '"'));
+  context.noteMenu({});
+  assert.equal(JSON.stringify(shown[0].filter((row) => row.text).map((row) => row.text)), JSON.stringify(['Show transcript', 'Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']));
+  assert.equal(JSON.stringify(shown[0][4].next.map((row) => row.text)), JSON.stringify(['Copy as Markdown', 'Save .md file', 'Export as PDF']));
+  assert.ok(shown[0].at(-1).danger);
 });
 
 test('Codex and Claude Code models list newest release first, then by power', () => {

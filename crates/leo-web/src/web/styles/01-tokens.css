@@ -16,7 +16,7 @@
   --accent-soft: rgba(28, 28, 26, .09);
   --accent-text: #faf9f6;
   --wash: rgba(28, 28, 26, .05);
-  --focus: #4f46e5;
+  --focus: #3f6d97;
   --scrim: rgba(28, 28, 26, .22);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --chalk-break: linear-gradient(#000 0 0);
@@ -49,7 +49,7 @@
   --shadow: 0 0 0 1px rgba(60, 50, 35, .04), 0 1px 2px rgba(60, 50, 35, .06), 0 3px 10px -3px rgba(60, 50, 35, .10);
   --radius: 14px;
   --shadow-sm: 0 0 0 1px rgba(60, 50, 35, .04), 0 1px 2px rgba(60, 50, 35, .07);
-  --shadow-pop: 0 0 0 1px rgba(60, 50, 35, .05), 0 2px 4px rgba(60, 50, 35, .06), 0 14px 36px -10px rgba(60, 50, 35, .24);
+  --shadow-pop: 0 2px 4px rgba(60, 50, 35, .06), 0 14px 36px -10px rgba(60, 50, 35, .24);
   --shadow-lift: 0 0 0 1px rgba(60, 50, 35, .05), 0 4px 8px rgba(60, 50, 35, .08), 0 22px 48px -12px rgba(60, 50, 35, .30);
   --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-md: 15px; --fs-lg: 17px; --fs-xl: 20px; --fs-2xl: 26px; --fs-title: 32px;
   --fw-medium: 500; --fw-semibold: 600; --fw-bold: 700;
@@ -61,7 +61,7 @@
   --tone-image: #7337e0;
   --tone-text: #5b5f66;
   --hue-0: #3b6fe0; --hue-1: #0e9483; --hue-2: #3d9140; --hue-3: #b7790a; --hue-4: #db5f22; --hue-5: #cc3f74; --hue-6: #8455e8; --hue-7: #0a8bb0;
-  --hue-red: #d6383f; --hue-indigo: #4f46e5; --hue-violet: #8455e8; --hue-teal: #0e9483; --hue-amber: #b7790a; --hue-slate: #6f6e69;
+  --hue-red: #d6383f; --hue-indigo: #3f6d97; --hue-violet: #8455e8; --hue-teal: #0e9483; --hue-amber: #b7790a; --hue-slate: #6f6e69;
   --top: env(safe-area-inset-top, 0px);
   --bottom: env(safe-area-inset-bottom, 0px);
   color-scheme: light dark;
@@ -84,7 +84,7 @@
     --accent-soft: rgba(233, 231, 226, .11);
     --accent-text: #1d1c1a;
     --wash: rgba(233, 231, 226, .06);
-    --focus: #8b85ff;
+    --focus: #b4cfe7;
     --scrim: rgba(0, 0, 0, .55);
     --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
     --chalk-break: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cfilter id='c' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.6' numOctaves='2' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -3 2.6'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23c)'/%3E%3C/svg%3E");
@@ -99,7 +99,7 @@
     --tint: #252421;
     --menu-hover: var(--wash);
     --shadow: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px -4px rgba(0, 0, 0, .40), inset 0 1px 0 rgba(255, 255, 255, .04);
-    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .05), 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
+    --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
     --tone-pdf: #ff7a72;
     --tone-doc: #79abff;
     --tone-slides: #ff9b52;
@@ -107,7 +107,7 @@
     --tone-image: #b597ff;
     --tone-text: #b3b2ad;
     --hue-0: #7aa2ff; --hue-1: #3fcdb8; --hue-2: #72cc72; --hue-3: #eab54a; --hue-4: #ff9663; --hue-5: #ff7eb0; --hue-6: #b59bff; --hue-7: #4cc6e6;
-    --hue-red: #ff6b6b; --hue-indigo: #8b85ff; --hue-violet: #b59bff; --hue-teal: #3fcdb8; --hue-amber: #eab54a; --hue-slate: #a3a29c;
+    --hue-red: #ff6b6b; --hue-indigo: #b4cfe7; --hue-violet: #b59bff; --hue-teal: #3fcdb8; --hue-amber: #eab54a; --hue-slate: #a3a29c;
   }
 }
 :root[data-theme="dark"] {
@@ -127,7 +127,7 @@
   --accent-soft: rgba(233, 231, 226, .11);
   --accent-text: #1d1c1a;
   --wash: rgba(233, 231, 226, .06);
-  --focus: #8b85ff;
+  --focus: #b4cfe7;
   --scrim: rgba(0, 0, 0, .55);
   --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .3 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   --chalk-break: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Cfilter id='c' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.6' numOctaves='2' seed='4' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -3 2.6'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23c)'/%3E%3C/svg%3E");
@@ -142,7 +142,7 @@
   --tint: #252421;
   --menu-hover: var(--wash);
   --shadow: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .40), 0 4px 12px -4px rgba(0, 0, 0, .40), inset 0 1px 0 rgba(255, 255, 255, .04);
-  --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .05), 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
+  --shadow-sm: 0 0 0 1px rgba(255, 255, 255, .03), 0 1px 2px rgba(0, 0, 0, .45), inset 0 1px 0 rgba(255, 255, 255, .04); --shadow-pop: 0 2px 6px rgba(0, 0, 0, .45), 0 18px 44px -10px rgba(0, 0, 0, .65), inset 0 1px 0 rgba(255, 255, 255, .06); --shadow-lift: 0 10px 28px -6px rgba(0, 0, 0, .5), 0 2px 6px rgba(0, 0, 0, .3);
   --tone-pdf: #ff7a72;
   --tone-doc: #79abff;
   --tone-slides: #ff9b52;
@@ -150,7 +150,7 @@
   --tone-image: #b597ff;
   --tone-text: #b3b2ad;
   --hue-0: #7aa2ff; --hue-1: #3fcdb8; --hue-2: #72cc72; --hue-3: #eab54a; --hue-4: #ff9663; --hue-5: #ff7eb0; --hue-6: #b59bff; --hue-7: #4cc6e6;
-  --hue-red: #ff6b6b; --hue-indigo: #8b85ff; --hue-violet: #b59bff; --hue-teal: #3fcdb8; --hue-amber: #eab54a; --hue-slate: #a3a29c;
+  --hue-red: #ff6b6b; --hue-indigo: #b4cfe7; --hue-violet: #b59bff; --hue-teal: #3fcdb8; --hue-amber: #eab54a; --hue-slate: #a3a29c;
   color-scheme: dark;
 }
 :root[data-theme="light"] { color-scheme: light; }

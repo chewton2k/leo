@@ -50,7 +50,7 @@ function calWindow() {
 async function showCalendar() {
   const mine = ++seq;
   state = { view: 'calendar', dir: '' };
-  chrome({ showBack: true });
+  chrome({});
   $('#crumbs').innerHTML = '<span class="sep">/</span><button>Calendar</button>';
   document.title = 'Calendar · leo';
   if (!cal.selected) cal.selected = S.dayKey(new Date());
@@ -130,9 +130,8 @@ function calStatus() {
   if (!d) return '<span>Loading…</span>';
   if (!d.connected) return '';
   if (d.refreshing) return `<span class="activity-spin" aria-hidden="true"></span><span>Updating…</span>`;
-  const problem = (d.calendars || []).some((c) => c.problem);
-  const when = d.synced ? rel(d.synced) : 'not yet';
-  return `<button type="button" class="link-btn cal-refresh" data-action="cal-retry" title="Refresh now">${problem ? 'A calendar could not be read' : `Updated ${esc(when)}`}</button>${problem ? ' · <button type="button" class="link-btn" data-action="cal-retry">Retry</button>' : ''}`;
+  if (!(d.calendars || []).some((c) => c.problem)) return '';
+  return '<span>A calendar could not be read</span> · <button type="button" class="link-btn" data-action="cal-retry">Retry</button>';
 }
 
 const EVENT_HUES = [0, 1, 2, 3, 6, 7];
@@ -288,7 +287,7 @@ function calHead(days) {
     </div>
     <div class="cal-status" role="status">${calStatus()}</div>
     <div class="cal-views">${segmented({ label: 'View', action: 'cal-view', key: 'view', current: cal.view, choices: CAL_VIEWS.map(([v, label]) => [v, label, '', `${label} (${label[0]})`]) })}</div>
-    <button type="button" class="btn primary sm" data-action="task-new" data-day="${esc(cal.selected)}">${ICON.plus}<span>New task</span></button>
+    <button type="button" class="btn sm cal-new" data-action="task-new" data-day="${esc(cal.selected)}">${ICON.plus}<span>New task</span></button>
   </header>`;
 }
 
@@ -1745,7 +1744,8 @@ function drawHomeToday() {
   $('#home-line').innerHTML = parts.map((part) => (typeof part === 'string' ? esc(part) : `<b>${esc(part.title)}</b>`)).join('');
   const first = ready && notes === 0 && !tasks.length;
   $('.home-foot').classList.toggle('first', Boolean(first));
-  $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : `Open a note${sideActive() ? '' : ' from Folders'}, or start a new one.`;
+  $('.home-foot').hidden = !first && sideActive();
+  $('#home-foot').textContent = first ? `Notes you write appear ${sideActive() ? 'on the left' : 'in Folders'}.` : 'Open a note from Folders, or start a new one.';
   drawHomeWeek();
   drawHomeRecent();
   clearTimeout(homeMidnight);

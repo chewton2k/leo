@@ -2,7 +2,7 @@ async function showTrash() {
   const mine = ++seq;
   const before = state.view === 'trash' ? state : null;
   state = { view: 'trash', dir: '', selecting: before ? before.selecting : false, picked: new Set() };
-  chrome({ showBack: true });
+  chrome({});
   $('#crumbs').innerHTML = settingsCrumbs('trash');
   document.title = 'Trash · leo';
   if (!before) refreshPanel(app, settingsFrame('trash', skeleton(3, 'trash')));

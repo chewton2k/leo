@@ -107,8 +107,15 @@ test('the selection menu offers Felix this, Ask Felix and Visualize, and the two
   await select();
   await expect(menu).toBeVisible();
   await page.keyboard.press('ControlOrMeta+Enter');
+  await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-open', '');
+  await page.waitForTimeout(300);
+  expect(replied.length).toBe(0);
+  expect(asked.length).toBe(1);
+  await page.keyboard.press('Escape');
+  await select();
+  await menu.getByRole('button', { name: 'Visualize' }).click();
   await expect.poll(() => replied.length).toBe(1);
-  expect(replied[0]).toMatchObject({ text: 'Respond to this passage.' });
+  expect(replied[0]).toMatchObject({ text: 'Draw this.' });
   expect(asked.length).toBe(1);
   await expect(page.locator('.margin-note')).toHaveCount(1);
 });
@@ -131,20 +138,27 @@ const pickText = (page, words) => page.evaluate((words) => {
   return false;
 }, words);
 
-test('a drawing in a folded margin note steps without opening it and keeps its step through open and close', async ({ page }) => {
+test('a new stepped drawing plays once, then steps on a folded note without opening it and keeps its step', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: 'Folded steps', body: 'Intro line\n\nHeat flows from the hot side to the cold side.\n\nLast line' } })).json();
   const svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80"><title>Heat</title><g data-step="1" data-caption="Hot side"><circle cx="40" cy="40" r="20" style="stroke: var(--text); fill: none"/></g><g data-step="2" data-caption="It moves"><path d="M60 40h80" style="stroke: var(--text)"/></g><g data-step="3" data-caption="Cold side"><circle cx="160" cy="40" r="20" style="stroke: var(--text); fill: none"/></g></svg>';
-  await page.route(`**/api/notes/${note.id}/margin/threads`, (route) => route.fulfill({ json: answered(note.id, route.request().postDataJSON(), 'Like this.\n\n```svg\n' + svg + '\n```') }));
+  let release;
+  const held = new Promise((r) => { release = r; });
+  await page.route(`**/api/notes/${note.id}/margin/threads`, async (route) => { await held; await route.fulfill({ json: answered(note.id, route.request().postDataJSON(), 'Like this.\n\n```svg\n' + svg + '\n```') }); });
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('#doc')).toBeVisible();
   expect(await pickText(page, 'the hot side')).toBe(true);
   await page.getByRole('toolbar', { name: 'Felix and this passage' }).getByRole('button', { name: 'Visualize' }).click();
+  await expect(page.getByRole('status', { name: 'Felix is sketching' })).toContainText('Sketching it…');
+  release();
   const thread = page.locator('.margin-note[data-id="t1"]');
   await expect(thread.locator('.drawing-count')).toHaveText('1/3');
+  await expect(thread.locator('.drawing-count')).toHaveText('3/3', { timeout: 8000 });
   await page.keyboard.press('Escape');
   await expect(thread).not.toHaveAttribute('data-open', '');
-  await thread.getByRole('button', { name: 'Next step' }).click();
+  await thread.getByRole('button', { name: 'Previous step' }).click();
+  await expect(thread.locator('.drawing-count')).toHaveText('2/3');
+  await page.waitForTimeout(1500);
   await expect(thread.locator('.drawing-count')).toHaveText('2/3');
   await expect(thread).not.toHaveAttribute('data-open', '');
   await thread.locator('.margin-toggle').click({ force: true });
@@ -215,9 +229,8 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect(await pickText(page, 'Three short')).toBe(true);
   await expect(menu).toBeVisible();
   const word = await page.locator('#doc .blk', { hasText: 'Three short' }).boundingBox();
-  const bar = await menu.boundingBox();
-  expect(bar.y).toBeGreaterThan(word.y);
-  expect(bar.x).toBeLessThan(word.x + 400);
+  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves under the new selection on the next frame').toBeGreaterThan(word.y);
+  expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 
 test('Ask Felix opens a question box beside the passage, keeps a half-typed question and asks only when sent', async ({ page }) => {
@@ -237,6 +250,7 @@ test('Ask Felix opens a question box beside the passage, keeps a half-typed ques
   await menu.getByRole('button', { name: 'Ask Felix' }).click();
   await expect(draft).toHaveAttribute('data-open', '');
   await expect(question).toBeFocused();
+  await expect(draft.locator('.margin-hint')).toHaveText('Enter to ask · Esc to close');
   await expect(draft.locator('.margin-reply')).toHaveCSS('border-top-style', 'solid');
   await expect(page.locator('.margin-ink path.solid[data-id="draft"]')).toHaveClass(/on/);
   expect(asked.length).toBe(0);
@@ -257,6 +271,7 @@ test('Ask Felix opens a question box beside the passage, keeps a half-typed ques
   await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-open', '');
   await expect(draft).toHaveCount(0);
   await expect(page.locator('.margin-note[data-id="t1"]').getByRole('button', { name: 'Pin open' })).toBeVisible();
+  await expect(page.locator('.margin-note[data-id="t1"]').getByRole('button', { name: 'Copy' })).toBeVisible();
   expect(await page.locator('.margin-note[data-id="t1"] .margin-pin').evaluate((el) => getComputedStyle(el, '::after').content)).toBe('"Pin open"');
   expect(await page.locator('.margin-note[data-id="t1"] .margin-chat').evaluate((el) => getComputedStyle(el, '::after').content)).toBe('"Ask in chat"');
 });
@@ -378,7 +393,9 @@ test('compact margin anchors stay outside the passage and open real persisted re
   await expect(mark.locator('.felix')).toHaveCount(0);
   const anchor = await mark.locator('.margin-anchor').boundingBox();
   const paragraph = await page.locator('#doc .blk').first().boundingBox();
-  expect(anchor.x + anchor.width).toBeLessThanOrEqual(paragraph.x);
+  expect(anchor.x).toBeGreaterThan(paragraph.x);
+  expect(anchor.y + anchor.height / 2).toBeGreaterThan(paragraph.y);
+  expect(anchor.y + anchor.height / 2).toBeLessThan(paragraph.y + paragraph.height);
   const stroke = page.locator('.margin-ink .squiggle');
   const dashes = await stroke.evaluateAll(lines => lines.map(el => {
     const length = el.getTotalLength();
@@ -462,7 +479,7 @@ test('the Tasks window leaves every outline tick reachable and the preview sits 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Outline over tasks', body } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.reload();
-  await expect(page.locator('#tasks-window')).toBeVisible();
+  await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
   await expect(page.locator('.outline-ticks span')).toHaveCount(12);
   await quiet(page);
   const hits = await page.evaluate(() => [...document.querySelectorAll('.outline-ticks span')].map((tick) => {
@@ -527,22 +544,27 @@ test('a narrow Felix panel keeps the placeholder on one line, the note chip read
   expect(fit.inside).toBe(true);
 });
 
-test('the note toolbar moves clear of an overlaying Felix panel instead of hiding behind it', async ({ page }) => {
-  await page.setViewportSize({ width: 760, height: 700 });
-  const note = await (await page.request.post('/api/notes', { data: { title: 'Overlay toolbar', body: 'Hello.' } })).json();
+test('the note tools live in one menu beside the Felix chips, and there is no floating toolbar', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Note menu', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
-  await expect(page.locator('nav.actions')).toBeVisible();
-  await page.locator('#chat-toggle').click();
-  await expect(page.locator('#chat')).toBeVisible();
-  await quiet(page);
-  const gap = await page.evaluate(() => ({ pill: document.querySelector('nav.actions').getBoundingClientRect(), chat: document.querySelector('#chat').getBoundingClientRect() }));
-  expect(gap.pill.left).toBeGreaterThanOrEqual(0);
-  expect(gap.pill.right).toBeLessThanOrEqual(gap.chat.left + 1);
+  await expect(page.locator('nav.actions')).toHaveCount(0);
+  await expect(page.locator('.dock')).toBeHidden();
+  const more = page.locator('.note-meta #note-more');
+  await expect(more).toHaveAccessibleName('More for this note');
+  await more.click();
+  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']);
+  await page.getByRole('menuitem', { name: 'Share' }).click();
+  await expect(page.getByRole('menuitem', { name: 'Copy as Markdown' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#note-facts')).toHaveText(/^Edited /);
+  await expect(page.locator('#crumbs')).toHaveCSS('visibility', 'hidden');
 });
 
 test('the Usage sheet icon buttons name themselves on hover', async ({ page }) => {
-  await page.goto('/');
-  await page.locator('#side [data-action="usage"]').click();
+  await page.goto('/#/settings');
+  await expect(page.locator('#side [data-action="usage"]'), 'Usage lives in Settings, not the rail').toHaveCount(0);
+  await page.locator('.settings-nav [data-action="usage"]').click();
   const tools = page.locator('.usage-tools .icon-btn');
   await expect(tools).toHaveCount(2);
   for (const button of await tools.all()) expect(await button.getAttribute('title')).toBe(await button.getAttribute('aria-label'));
@@ -569,11 +591,11 @@ test('turning the eye off hides the starters that need the open note', async ({ 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Starters', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.locator('#chat-toggle').click();
-  await expect(page.locator('.starter')).toHaveCount(5);
+  await expect(page.locator('.starter')).toHaveText(['Teach me this note step by step', 'Quiz me on this note', 'Make me a 3-day review plan']);
   await page.locator('[data-chat="drop"]').click();
-  await expect(page.locator('.starter')).toHaveText(['Quiz me across my classes', 'Make me a 3-day review plan']);
+  await expect(page.locator('.starter')).toHaveText(['Make me a 3-day review plan']);
   await page.locator('[data-chat="drop"]').click();
-  await expect(page.locator('.starter')).toHaveCount(5);
+  await expect(page.locator('.starter')).toHaveCount(3);
 });
 
 test('margin notes on passages inside tables, code and quotes sit beside their passage without overlapping', async ({ page }) => {
@@ -623,8 +645,7 @@ test('a resolved passage reopens', async ({ page }) => {
   await expect(back).toHaveCount(0);
   await card.click();
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
-  await expect(page.locator('.margin-ink .squiggle')).toHaveCount(0);
+  await expect(card, 'a resolved note stays faded until the note is left').toHaveAttribute('data-resolved', /.+/);
   await expect(page.locator('.toast')).toHaveCount(0);
   await expect(back).toBeVisible();
   await expect(back).toHaveCSS('border-bottom-style', 'dotted');
@@ -636,14 +657,14 @@ test('a resolved passage reopens', async ({ page }) => {
   await expect(back).toHaveCount(0);
   expect(await open()).toBe(1);
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toHaveAttribute('data-resolved', /.+/);
   await expect(back).toBeVisible();
   await back.focus();
   await page.keyboard.press('Enter');
   await expect(card).toHaveAttribute('data-open', '');
   await expect(back).toHaveCount(0);
   await card.getByRole('button', { name: 'Resolve' }).click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toHaveAttribute('data-resolved', /.+/);
   await back.focus();
   await page.keyboard.press('Space');
   await expect(card).toHaveAttribute('data-open', '');
@@ -710,7 +731,8 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
   await expect(page.locator('.margin-note')).toHaveCount(2);
   await page.evaluate(() => { window.print = async () => { window.printSaw = document.querySelectorAll('[data-print]').length; }; });
   const text = await page.locator('#doc').textContent();
-  await page.locator('[data-action="share"]').first().click();
+  await page.locator('#note-more').click();
+  await page.getByRole('menuitem', { name: 'Share' }).click();
   await page.getByRole('menuitem', { name: 'Export as PDF with Felix’s notes' }).click();
   await expect.poll(async () => (await page.evaluate(() => window.printSaw)) ?? `no print: ${JSON.stringify({ errors, toasts: await page.locator('.toast').allTextContents() })}`).toBe(4);
   await expect(page.locator('#doc')).toHaveText(text);
@@ -723,7 +745,8 @@ test('Export as PDF with Felix’s notes prints numbered notes and leaves the no
   await page.keyboard.press('Shift');
   await expect(page.locator('[data-print]')).toHaveCount(0);
   await expect(page.locator('#doc')).toHaveText(text);
-  await page.locator('[data-action="share"]').first().click();
+  await page.locator('#note-more').click();
+  await page.getByRole('menuitem', { name: 'Share' }).click();
   await page.getByRole('menuitem', { name: 'Export as PDF', exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.printSaw)).toBe(0);
   expect((await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toBe(body);
@@ -747,4 +770,79 @@ test('opening the open note again keeps its column still while it loads', async 
   release();
   expect([during.x, during.width]).toEqual([before.x, before.width]);
   await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('a resolved note stays faded with a Resolved label until it is reopened', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Faded', body: 'Intro line\n\nHeat flows from the hot side to the cold side.\n\nLast line' } })).json();
+  await page.request.post(`/api/notes/${note.id}/margin/threads`, { data: { version: note.version, quote: 'the hot side', question: 'Why?' } });
+  await page.goto(`/#/n/${note.id}`);
+  const thread = page.locator('.margin-note').first();
+  await expect(thread).toBeVisible();
+  await thread.locator('.margin-toggle').click({ force: true });
+  await page.locator('.margin-note[data-open]').getByRole('button', { name: 'Resolve' }).click();
+  await expect(thread).toHaveAttribute('data-resolved', /.+/);
+  await expect(thread.locator('.margin-resolved-label')).toHaveText('Resolved');
+  await page.mouse.move(5, 5);
+  await page.evaluate(() => document.activeElement?.blur());
+  await expect(thread).toHaveCSS('opacity', '0.45');
+  await thread.locator('.margin-toggle').click({ force: true });
+  await expect(thread).not.toHaveAttribute('data-resolved', /.+/);
+  await expect(thread).toHaveAttribute('data-open', '');
+});
+
+test('dragging a top corner of the note sets its width live, never past the room its margins need, and a double-click resets it', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Wide page', body: 'Words.' } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  const article = page.locator('article.note');
+  await expect(article).toBeVisible();
+  const before = (await article.boundingBox()).width;
+  const mark = page.locator('.page-mark[data-edge="right"]');
+  await expect(mark).toHaveAttribute('role', 'separator');
+  const box = await mark.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2 + 160, box.y + box.height / 2, { steps: 6 });
+  await expect(page.locator('.page-width-label')).toHaveText(/^\d+ px$/);
+  await page.mouse.up();
+  await expect(page.locator('.page-width-label')).toBeHidden();
+  const columns = page.locator('.note-columns');
+  const most = await columns.evaluate((el) => window.leoMargin.mostColumn({ width: el.clientWidth, setting: 'both' }));
+  const wide = Number(await page.evaluate(() => localStorage.getItem('leo-page-width')));
+  expect(wide, 'a drag stops where both margins still fit').toBeLessThanOrEqual(most);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
+  const held = await mark.boundingBox();
+  await page.mouse.move(held.x + held.width / 2, held.y + held.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(held.x + held.width / 2 - 100, held.y + held.height / 2, { steps: 6 });
+  await page.mouse.up();
+  const saved = Number(await page.evaluate(() => localStorage.getItem('leo-page-width')));
+  expect(saved).toBeLessThan(wide);
+  await expect.poll(async () => Math.round((await article.boundingBox()).width)).toBe(saved);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
+  const after = await mark.boundingBox();
+  await page.mouse.dblclick(after.x + after.width / 2, after.y + after.height / 2);
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
+  await expect.poll(async () => Math.round((await article.boundingBox()).width)).toBe(Math.round(before));
+  await mark.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.round(before) - 20);
+  await page.keyboard.press('Enter');
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
+});
+
+test('a selection too long for the margin says so inside the Felix bar', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const long = 'A long sentence about heat moving between two places over time. '.repeat(20);
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Long pick', body: `Short line.\n\n${long}` } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc')).toBeVisible();
+  const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
+  expect(await pickText(page, 'Short line.')).toBe(true);
+  await expect(menu).toBeVisible();
+  await expect(menu.locator('.ask-long')).toBeHidden();
+  expect(await pickText(page, long.trim())).toBe(true);
+  await expect(menu.locator('.ask-long')).toHaveText('Select less to ask Felix');
+  await expect(menu.getByRole('button')).toHaveText([/Felix this/, 'Ask Felix', 'Visualize']);
 });

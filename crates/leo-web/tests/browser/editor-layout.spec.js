@@ -9,16 +9,12 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
-  const settings = read('app/settings.js');
-  const pickWidth = settings.slice(settings.indexOf('function pickWidth('), settings.indexOf('function pickFelix('));
   const passages = read('app/passages.js');
   const source = body ?? (remember ? Array.from({ length: 160 }, (_, i) => `Paragraph number ${i + 1} about reading.`).join('\n\n') : 'An ordinary paragraph.');
   const fixture = `window.doc = leoDoc.mount(document.querySelector('#doc'), {
     source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {}, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
   });
-  const syncSegmented = () => {}, syncAppearanceResets = () => {};
-  ${pickWidth}
-  window.audit = { pick: width => pickWidth({dataset:{width}}), anchor: () => JSON.parse(localStorage.getItem('fixture-reading') || 'null') };
+  window.audit = { pick: width => leoTheme.setNoteWidth(width), anchor: () => JSON.parse(localStorage.getItem('fixture-reading') || 'null') };
   ${related ? `const hideAskFloat = () => {};
   ${passages.slice(passages.indexOf('const KEEP_SELECTION'), passages.indexOf("document.addEventListener('keydown'"))}` : ''}
   ${remember ? `const $ = selector => document.querySelector(selector), enc = encodeURIComponent;
@@ -1477,7 +1473,7 @@ test('heading disclosure closes on outside clicks while the destination keeps it
         button.id = 'outside-outline';
         button.textContent = 'Outside';
         button.onclick = () => { window.outsideClicks = (window.outsideClicks || 0) + 1; };
-        document.querySelector('#bar').append(button);
+        document.querySelector('#bar .bar-row').append(button);
       });
       await summary.focus(); await summary.press('Enter');
       await expect(details).toHaveAttribute('open', '');

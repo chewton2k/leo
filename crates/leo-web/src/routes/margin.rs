@@ -24,6 +24,14 @@ pub(crate) struct ReadBody {
     gone: Vec<String>,
     #[serde(default)]
     keep: Option<String>,
+    #[serde(default)]
+    changed: Vec<Changed>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Changed {
+    id: String,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -611,10 +619,20 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         2 * margin::MOST_OPEN
     };
     let mut quotes = facts.quotes;
+    let mut changed: Vec<&Changed> = body
+        .changed
+        .iter()
+        .take(2 * margin::MOST_OPEN)
+        .filter(|c| {
+            !c.text.trim().is_empty()
+                && c.text.chars().count() <= 2 * margin::MOST_QUOTE
+                && now.body.contains(c.text.as_str())
+        })
+        .collect();
     let mut saved = Vec::new();
     let mut resolved = Vec::new();
     let mut stopped = false;
-    for found in founds {
+    'found: for found in founds {
         if !through
             && !blocks
                 .iter()
@@ -629,6 +647,35 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let Some(place) = margin::placed(&now.body, &quote, &blocks) else {
             continue;
         };
+        while let Some(at) = changed.iter().position(|c| {
+            margin::crowded(&now.body, &quote, &blocks, std::slice::from_ref(&c.text))
+        }) {
+            let old = changed.remove(at);
+            if through {
+                continue 'found;
+            }
+            let (held, reads, noted, gone) = (
+                chats.clone(),
+                state.margin.clone(),
+                id.clone(),
+                old.id.clone(),
+            );
+            let keep = body.keep.clone();
+            let swap = blocking(move || {
+                margin::replace_changed(&held, &reads, &noted, &gone, keep.as_deref())
+            })
+            .await;
+            match swap {
+                Ok(margin::Swap::Replaced(gone)) => {
+                    if let Some(at) = quotes.iter().position(|q| *q == gone.quote) {
+                        quotes.remove(at);
+                    }
+                    resolved.push(gone.id);
+                }
+                Ok(margin::Swap::Missing) => {}
+                _ => continue 'found,
+            }
+        }
         let thread = margin::new_thread(
             &id,
             if through { "through" } else { "read" },

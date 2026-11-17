@@ -23,7 +23,7 @@ const SETTINGS_SECTIONS = [
 const SETTINGS_INDEX = [
   { section: 'general', id: 'theme', label: 'Theme', keywords: 'appearance dark light match device mode colours colors night' },
   { section: 'general', id: 'felix-look', label: 'Felix look', keywords: 'appearance cute demon character mascot horns' },
-  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance comfortable wide full width reading column margin page' },
+  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance width reading column margin page drag reset' },
   { section: 'general', id: 'text-size', label: 'Text size', keywords: 'appearance small medium large font reading bigger smaller zoom' },
   { section: 'general', id: 'felix-lettering', label: "Felix's lettering", keywords: 'appearance font typeface serif letters notes writing felix own' },
   { section: 'general', id: 'open-at-login', label: 'Open at login', keywords: 'start startup boot launch computer' },
@@ -225,7 +225,7 @@ function settingsFrame(section, content) {
   } else settingsPillFrom = null;
   settingsDrawn = section;
   const [, title, , about] = settingsItems().find(([id]) => id === section) || settingsItems()[0];
-  const nav = SETTINGS_SECTIONS.map((group) => `<div class="settings-group"><div class="settings-group-title">${esc(group.group)}</div>${group.items.map(([id, label, icon]) => `<a class="settings-link${id === section ? ' on' : ''}" href="#/settings/${id}"${id === section ? ' aria-current="page"' : ''}>${settingsIcon(icon)}<span>${esc(label)}</span></a>`).join('')}</div>`).join('');
+  const nav = SETTINGS_SECTIONS.map((group) => `<div class="settings-group"><div class="settings-group-title">${esc(group.group)}</div>${group.items.map(([id, label, icon]) => `<a class="settings-link${id === section ? ' on' : ''}" href="#/settings/${id}"${id === section ? ' aria-current="page"' : ''}>${settingsIcon(icon)}<span>${esc(label)}</span></a>`).join('')}${group.group === 'This app' ? `<button type="button" class="settings-link" data-action="usage">${svg('<path d="M4 19V9m8 10V5m8 14v-7"/>')}<span>Usage</span></button>` : ''}</div>`).join('');
   const found = settingsResults();
   const search = `<div class="settings-search" role="search">${svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>')}<input id="settings-search" type="text" role="combobox" aria-label="Search settings" aria-autocomplete="list" aria-expanded="${found.open}"${found.open ? ` aria-controls="settings-listbox" aria-activedescendant="${found.active}"` : ''} placeholder="Search settings" autocomplete="off" spellcheck="false" value="${esc(settingsFind.query)}"></div>`;
   // Callers assign the frame to the page right away; once they have, place the current

@@ -229,7 +229,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     await expect(list.locator('.tasks-group.late')).toHaveCount(0);
     await expect(list.locator('.tasks-row').first().locator('.tasks-when')).toHaveText('Thu');
     await expect(list.locator('.tasks-row.done')).toHaveText(/Haircut/);
-    await expect(page.locator('#home-foot')).toHaveText('Open a note, or start a new one.');
+    await expect(page.locator('.home-foot'), 'the explorer already offers New note, so home has no footer line').toBeHidden();
     await list.locator('.tasks-row', {hasText: 'Send draft'}).locator('.sched-check').click();
     await page.waitForTimeout(1500);
     await expect(list.locator('.tasks-row', {hasText: 'Send draft'}), 'a finished row stays until midnight').toHaveClass(/done/);

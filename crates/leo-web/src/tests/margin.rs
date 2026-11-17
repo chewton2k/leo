@@ -495,6 +495,52 @@ async fn a_sentence_with_a_margin_note_gets_no_second_one() {
     engine.stop().await;
 }
 
+async fn reworded(said: Vec<margin::Message>) -> (Engine, String, String, serde_json::Value) {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Reworded", PASSAGE).await;
+    let before = "then login simply checks if it matches";
+    let held = margin::new_thread(
+        &id,
+        "read",
+        margin::placed(before, before, &[]).unwrap(),
+        before,
+        said,
+    );
+    assert!(margin::put(&engine.chats(), &held, margin::MOST_OPEN));
+    let (status, reply) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "changed": [{ "id": held.id, "text": PASSAGE }] }),
+        )
+        .await;
+    assert_eq!(status, 200);
+    (engine, id, held.id, reply)
+}
+
+#[tokio::test]
+async fn a_reworded_sentence_trades_its_untouched_note_for_the_new_one() {
+    let (engine, id, old, reply) = reworded(vec![margin::felix_says("Hm.")]).await;
+    assert!(reply["note"].is_object());
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
+    let open = view["threads"].as_array().unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0]["id"], reply["note"]["id"]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_reworded_sentence_keeps_a_note_you_answered() {
+    let (engine, id, old, reply) =
+        reworded(vec![margin::felix_says("Hm."), margin::you_say("Why?")]).await;
+    assert!(reply["note"].is_null());
+    let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
+    let open = view["threads"].as_array().unwrap();
+    assert_eq!(open.len(), 1);
+    assert_eq!(open[0]["id"], old);
+    engine.stop().await;
+}
+
 #[tokio::test]
 async fn a_useful_diagram_survives_the_read_and_saved_thread() {
     let text = "Chloroplasts make sugar; mitochondria release its energy.\n\n```mermaid\nflowchart TD\n Sun-->Sugar\n Sugar-->Energy\n```";

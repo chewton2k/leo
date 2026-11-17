@@ -5,6 +5,8 @@
   const FELIX_KEY = 'leo-felix';
   const WIDTH_KEY = 'leo-note-width';
   const WIDTHS = ['comfortable', 'wide', 'full'];
+  const PAGE_KEY = 'leo-page-width';
+  const PAGE_RANGE = [480, 1600];
   const READING = {
     size: { key: 'leo-text-size', attr: 'data-text-size', choices: ['small', 'medium', 'large'], fallback: 'medium' },
     letters: { key: 'leo-felix-letters', attr: 'data-felix-letters', choices: ['own', 'notes'], fallback: 'own' },
@@ -90,12 +92,38 @@
     }
   }
 
+  function pageWidth() {
+    try {
+      const value = Number(root.localStorage.getItem(PAGE_KEY));
+      return Number.isInteger(value) && value >= PAGE_RANGE[0] && value <= PAGE_RANGE[1] ? value : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function showWidth(width) {
-    root.document.documentElement.setAttribute('data-note-width', WIDTHS.includes(width) ? width : 'wide');
+    const html = root.document.documentElement;
+    const chosen = WIDTHS.includes(width) ? width : 'wide';
+    const page = chosen === 'full' ? null : pageWidth();
+    html.setAttribute('data-note-width', chosen);
+    if (page) html.style.setProperty('--note-width', `${page}px`);
+    else html.style.removeProperty('--note-width');
+  }
+
+  function setPageWidth(px) {
+    const value = Math.round(Number(px));
+    try {
+      if (px === null || !(value >= PAGE_RANGE[0] && value <= PAGE_RANGE[1])) root.localStorage.removeItem(PAGE_KEY);
+      else root.localStorage.setItem(PAGE_KEY, String(value));
+    } catch (e) {}
+    showWidth(noteWidth());
   }
 
   function setNoteWidth(width) {
     const chosen = WIDTHS.includes(width) ? width : 'wide';
+    try {
+      root.localStorage.removeItem(PAGE_KEY);
+    } catch (e) {}
     showWidth(chosen);
     try {
       if (chosen === 'wide') root.localStorage.removeItem(WIDTH_KEY);
@@ -145,7 +173,7 @@
   }
   root.addEventListener('storage', (e) => {
     if (e.key === FELIX_KEY || e.key === null) showFelix(felix());
-    if (e.key === WIDTH_KEY || e.key === null) showWidth(noteWidth());
+    if (e.key === WIDTH_KEY || e.key === PAGE_KEY || e.key === null) showWidth(noteWidth());
     for (const name of Object.keys(READING)) if (e.key === READING[name].key || e.key === null) showReading(name, reading(name));
     if (e.key !== KEY && e.key !== null) return;
     const was = dark();
@@ -156,7 +184,7 @@
     root.document.addEventListener('DOMContentLoaded', () => apply(current), { once: true });
   }
 
-  root.leoTheme = { KEY, CHOICES, choice: () => current, dark, set, onChange, felix, setFelix, WIDTHS, noteWidth, setNoteWidth,
+  root.leoTheme = { KEY, CHOICES, choice: () => current, dark, set, onChange, felix, setFelix, WIDTHS, noteWidth, setNoteWidth, PAGE_RANGE, pageWidth, setPageWidth,
     TEXT_SIZES: READING.size.choices, textSize: () => reading('size'), setTextSize: (value) => setReading('size', value),
     LETTERINGS: READING.letters.choices, felixLetters: () => reading('letters'), setFelixLetters: (value) => setReading('letters', value) };
 })(window);

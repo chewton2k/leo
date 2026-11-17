@@ -46,21 +46,6 @@ test.beforeEach(async ({ page }) => {
   await signIn(page);
 });
 
-test('desktop breadcrumb folder click unfolds a hidden explorer', async ({ page }) => {
-  const dir = await createFolder(page);
-  const note = await createNote(page, dir);
-  await openNote(page, note);
-  await page.locator('#side .side-fold').click();
-  await expect(page.locator('body')).toHaveClass(/side-mini/);
-  await expect(page.locator('#side .side-explorer')).toBeHidden();
-  const control = page.locator(`#crumbs [data-action="open-folder"][data-dir="${dir}"]`);
-  await control.click();
-  await expect(page.locator('body')).not.toHaveClass(/side-mini/);
-  await expect(page.locator('#side .side-explorer')).toBeVisible();
-  await expect(folderRow(page, dir)).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('leo-side'))).toBe('wide');
-});
-
 test('a passive folder reveal keeps the explorer hidden and opens no sheet', async ({ page }) => {
   const dir = await createFolder(page);
   await page.evaluate(() => localStorage.setItem('leo-side', 'mini'));
@@ -75,21 +60,6 @@ test('a passive folder reveal keeps the explorer hidden and opens no sheet', asy
   await expect(page.getByText('Open a note from Folders, or start a new one.')).toBeVisible();
   await expect(page.locator('#folders-sheet')).toHaveCount(0);
   await expect(page.locator('.scrim')).toHaveCount(0);
-});
-
-test('compact folder chip opens Folders with that folder revealed and Escape returns to More', async ({ page }) => {
-  const dir = await createFolder(page);
-  const note = await createNote(page, dir);
-  await openNote(page, note);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator(`#app [data-action="open-folder"][data-dir="${dir}"]`).click();
-  await expect(page.locator('#folders-sheet')).toBeVisible();
-  await expect(folderRow(page, dir, '#folders-sheet')).toBeVisible();
-  await expect(folderRow(page, dir, '#folders-sheet')).toHaveAttribute('aria-expanded', 'true');
-  await expect(noteRow(page, note.id, '#folders-sheet')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#folders-sheet')).toHaveCount(0);
-  await expect(page.locator('#menu')).toBeFocused();
 });
 
 for (const home of ['root', 'folder']) test(`folder then note: opening a note in the ${home} replaces the folder scope for New, Record and Upload`, async ({ page }) => {

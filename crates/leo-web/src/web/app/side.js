@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0 };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -30,7 +30,7 @@ try {
 } catch (e) {}
 
 const SIDE_ORDER_KEY = 'leo-side-order';
-const SIDE_SORTS = { title: { text: 'Name', orders: ['title', 'title-desc'], ways: ['A to Z', 'Z to A'], icons: ['sortAZ', 'sortZA'] }, updated: { text: 'Last edited', orders: ['updated', 'oldest'], ways: ['Newest first', 'Oldest first'], icons: ['sortWide', 'sortNarrow'] }, created: { text: 'Created', orders: ['created', 'created-asc'], ways: ['Newest first', 'Oldest first'], icons: ['sortWide', 'sortNarrow'] } };
+const SIDE_SORTS = { title: { text: 'Name', orders: ['title', 'title-desc'], ways: ['A to Z', 'Z to A'] }, updated: { text: 'Last edited', orders: ['updated', 'oldest'], ways: ['Newest first', 'Oldest first'] }, created: { text: 'Created', orders: ['created', 'created-asc'], ways: ['Newest first', 'Oldest first'] } };
 
 try {
   const kept = JSON.parse(localStorage.getItem(SIDE_ORDER_KEY) || '{}');
@@ -140,14 +140,12 @@ function drawSide() {
         ${sideRow('upload', ICON.upload, 'Note from a file', { attrs: ` data-dir="${esc(actionDir)}"` })}
       </nav>
       <nav class="side-foot" aria-label="This app">
-        ${sideRow('usage', svg('<path d="M4 19V9m8 10V5m8 14v-7"/>'), 'Usage', { hint: 'Coding accounts and remaining usage' })}
         ${sideRow('settings', ICON.gear, 'Settings', { on: here === 'settings' })}
       </nav>
     </div>
     <div class="side-explorer" id="side-explorer">
-      <button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button>
-      <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it to the top level"><span>Folders</span><span class="side-group-tools"><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></span></div>
-      <div class="side-filter-row"><label class="field side-filter">${ICON.search}<input id="side-filter" type="search" placeholder="Filter" aria-label="Filter loaded notes" autocomplete="off" spellcheck="false" value="${esc(side.filter || '')}"></label><button class="side-add side-sort${side.sort !== 'title' || side.tasks ? ' on' : ''}" data-action="side-sort" aria-label="Sort notes" title="${esc(`Sorted by ${SIDE_SORTS[side.sort].text.toLowerCase()}${side.tasks ? ', open tasks only' : ''}`)}" aria-haspopup="menu" aria-expanded="${Boolean(popup?.owner.matches('[data-action="side-sort"]'))}">${ICON.sort}</button><button class="side-add side-flip${side.flip ? ' on' : ''}" data-action="side-flip" data-way="${SIDE_SORTS[side.sort].icons[side.flip ? 1 : 0]}" aria-label="Reverse order, now ${esc(SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0])}" aria-pressed="${side.flip}" title="${esc(SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0])}">${ICON[SIDE_SORTS[side.sort].icons[side.flip ? 1 : 0]]}</button></div>
+      <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it to the top level"><button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></div>
+      <div class="side-filter-row"><label class="field side-filter">${ICON.search}<input id="side-filter" type="search" placeholder="Filter" aria-label="Filter loaded notes" autocomplete="off" spellcheck="false" value="${esc(side.filter || '')}"></label><button class="side-add side-sort${side.sort !== 'title' || side.flip || side.tasks ? ' on' : ''}" data-action="side-sort" aria-label="Sort notes" title="${esc(`Sorted by ${SIDE_SORTS[side.sort].text.toLowerCase()}, ${SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0].toLowerCase()}${side.tasks ? ', open tasks only' : ''}`)}" aria-haspopup="menu" aria-expanded="${Boolean(popup?.owner.matches('[data-action="side-sort"]'))}">${ICON.sort}</button></div>
       <nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">
         ${folders || '<p class="side-none">Folders you make show up here.</p>'}
       </nav>
@@ -218,6 +216,7 @@ function folderTree(here) {
   const rows = [];
   const twisted = side.twisted;
   const walk = (parent, depth) => {
+    if (side.making && side.making.parent === parent) rows.push(`<div class="side-making" data-refresh-key="side-making" style="--depth:${depth}" aria-hidden="true">${ICON.folder}</div>`);
     for (const d of children(parent)) {
       const open = folderShown(d.name);
       const name = d.name.split('/').pop();
@@ -226,7 +225,7 @@ function folderTree(here) {
       const shown = twisted && twisted.path === d.name ? twisted.was : open;
       const toggle = `<button class="side-twist${shown ? ' open' : ''}" data-action="side-twist" data-dir="${esc(d.name)}" aria-expanded="${open}" aria-label="${open ? 'Close' : 'Open'} ${esc(name)}">${ICON.chevron}</button>`;
       side.sig.push(`d:${d.name}`);
-      rows.push(`<div data-refresh-key="${esc(d.name)}" class="side-folder${on ? ' on' : ''}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">${on ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${toggle}<button class="side-row" tabindex="-1" data-action="open-folder" data-dir="${esc(d.name)}" draggable="true" title="${esc(d.name)}" aria-expanded="${open}"${current ? ' aria-current="page"' : ''}>${ICON.folder}<span class="side-label">${esc(name)}</span>${d.notes ? `<span class="side-count side-label">${esc(String(d.notes))}</span>` : ''}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="folder" data-dir="${esc(d.name)}" aria-label="Options for ${esc(name)}" title="Folder options" aria-haspopup="menu">${ICON.more}</button></div>`);
+      rows.push(`<div data-refresh-key="${esc(d.name)}" class="side-folder${on ? ' on' : ''}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">${on ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${toggle}<button class="side-row" tabindex="-1" data-action="open-folder" data-dir="${esc(d.name)}" draggable="true" title="${esc(d.notes ? `${d.name} · ${d.notes} ${d.notes === 1 ? 'note' : 'notes'}` : d.name)}" aria-expanded="${open}"${current ? ' aria-current="page"' : ''}>${ICON.folder}<span class="side-label">${esc(name)}</span></button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="folder" data-dir="${esc(d.name)}" aria-label="Options for ${esc(name)}" title="Folder options" aria-haspopup="menu">${ICON.more}</button></div>`);
       if (open || side.closing.has(d.name)) {
         if (open) side.visible.push(d.name);
         rows.push(`<div class="side-kids" data-kids="${esc(d.name)}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">`);
@@ -526,6 +525,9 @@ function sideSortMenu(el) {
       { note: 'Sort by' },
       ...Object.entries(SIDE_SORTS).map(([sort, { text }]) => ({ text, checked: side.sort === sort, run: () => sideOrder({ sort, flip: false }) })),
       { line: true },
+      { note: 'Order' },
+      ...SIDE_SORTS[side.sort].ways.map((text, i) => ({ text, checked: side.flip === Boolean(i), run: () => sideOrder({ flip: Boolean(i) }) })),
+      { line: true },
       { text: 'Only notes with open tasks', checked: side.tasks, toggle: true, run: () => sideOrder({ tasks: !side.tasks }) },
     ],
   });
@@ -589,7 +591,6 @@ function explorerTarget(el) {
 }
 
 function explorerMenu(el, event = null) {
-  closePopup(false);
   const target = Object.freeze(explorerTarget(el));
   const owner = el.closest('button') || el.closest('.side-tree, .side-group');
   if (!owner) return;
@@ -659,9 +660,9 @@ async function explorerAction(action, target) {
   if (action === 'combine') return explorerCombineMenu(note, explorerFocus(target) || $('#title') || document.activeElement);
 }
 
-function inlineEdit(where, { id, value, label, hint = '', at, save }) {
+function inlineEdit(where, { id, value, label, hint = '', at, save, end = null }) {
   const input = document.createElement('input');
-  input.className = 'inline-edit';
+  input.className = end ? 'inline-edit making' : 'inline-edit';
   input.id = id;
   input.value = value;
   input.maxLength = 120;
@@ -673,9 +674,10 @@ function inlineEdit(where, { id, value, label, hint = '', at, save }) {
   input.focus();
   input.select();
   let busy = false;
-  const finish = (back = at) => {
+  const finish = (back = at, made = false) => {
     busy = true;
     input.remove();
+    end?.(!made);
     explorerFocus(back)?.focus({ preventScroll: true });
   };
   const commit = async () => {
@@ -687,7 +689,7 @@ function inlineEdit(where, { id, value, label, hint = '', at, save }) {
     const done = await save(text);
     busy = false;
     input.readOnly = false;
-    if (done) finish(done === true ? at : done);
+    if (done) finish(done === true ? at : done, true);
     else input.focus();
   };
   input.addEventListener('keydown', (e) => {
@@ -696,6 +698,37 @@ function inlineEdit(where, { id, value, label, hint = '', at, save }) {
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); finish(); }
   });
   input.addEventListener('blur', () => { commit().catch(fail); });
+}
+
+function sideMakingOpen(tree, parent, save) {
+  const making = { parent };
+  side.making = making;
+  drawSide();
+  drawFoldersSheet();
+  const row = tree.querySelector('.side-making');
+  if (!row) { side.making = null; return false; }
+  for (const run of row.getAnimations()) run.cancel();
+  const box = row.getBoundingClientRect();
+  const left = row.querySelector('svg').getBoundingClientRect().right + 7;
+  if (!stillMotion()) row.animate([{ height: '0px', opacity: 0 }, { height: `${box.height}px`, opacity: 1 }], { duration: MOTION_MS, easing: EASE_OUT });
+  inlineEdit({ left, top: box.top + 3, width: Math.max(120, box.right - left - 8), height: box.height - 6 }, {
+    id: 'folder-name',
+    value: '',
+    label: 'Folder name',
+    hint: parent ? `New folder in ${folderLabel(parent)}` : 'New folder',
+    at: { kind: 'folder', dir: parent },
+    save,
+    end: (cancelled) => {
+      if (side.making !== making) return;
+      const shown = tree.querySelector('.side-making');
+      const gone = () => { if (side.making !== making) return; side.making = null; drawSide(); drawFoldersSheet(); };
+      if (!cancelled || !shown || stillMotion()) return gone();
+      shown.animate([{ height: `${shown.offsetHeight}px`, opacity: 1 }, { height: '0px', opacity: 0 }], { duration: LEAVE_MS, easing: EASE_EXIT, fill: 'forwards' }).finished.then(gone, gone);
+    },
+  });
+  const input = $('#folder-name');
+  if (!stillMotion()) input?.animate([{ opacity: 0 }, { opacity: 1 }], { duration: MOTION_MS, easing: EASE_OUT });
+  return true;
 }
 
 function renameExplorerNote(note) {

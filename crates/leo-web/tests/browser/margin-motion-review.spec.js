@@ -228,7 +228,7 @@ test.describe('arriving underline', () => {
   test('reduced motion shows the finished dotted line at once', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const long = { ...THREADS.long, id: 't3', quote: WORDS.slice(0, 200), suffix: WORDS.slice(200, 224) };
-      const timeline = await frames(page, 300, () => ({ dots: window.dots('t3') }), [[20, `window.arrive(${JSON.stringify(long)})`]]);
+      const timeline = await frames(page, 600, () => ({ dots: window.dots('t3') }), [[20, `window.arrive(${JSON.stringify(long)})`]]);
       const seen = timeline.filter((f) => f.dots.length);
       expect(seen.length).toBeGreaterThan(3);
       for (const frame of seen) for (const line of frame.dots) {
@@ -286,6 +286,22 @@ test.describe('reading pencil', () => {
       await page.evaluate(() => fake.answer({ note: null }));
       await expect(pencil(page)).toHaveCount(0);
       await expect(page.locator('.margin-waiting')).toHaveCount(0);
+    }, { mode: 'along', threads: [] });
+  });
+
+  test('a read that finds nothing leaves a faint Nothing to add. after the passage, then it fades', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await startRead(page, 'plain text');
+      await expect(pencil(page).first()).toBeAttached();
+      await page.evaluate(() => fake.answer({ note: null }));
+      const quiet = page.locator('.margin-quiet');
+      await expect(quiet).toHaveText('Nothing to add.');
+      await expect(quiet).toHaveAttribute('aria-hidden', 'true');
+      const box = await quiet.boundingBox();
+      const doc = await page.locator('#doc').boundingBox();
+      expect(box.x).toBeGreaterThan(doc.x);
+      await expect(quiet).toHaveCount(0, { timeout: 5000 });
+      await expect(page.locator('.margin-note')).toHaveCount(0);
     }, { mode: 'along', threads: [] });
   });
 
@@ -363,7 +379,7 @@ test.describe('reading pencil', () => {
 
 test.describe('whole notes and pins', () => {
   const LONG = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it before you store it. Use a slow hash such as Argon2id with a unique salt for each user, and verify at login by hashing the attempt the same way.' }] };
-  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pin stays undimmed', async ({ browser }) => {
+  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pinned note stays open', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
       const said = note.locator('.margin-said');
@@ -385,10 +401,13 @@ test.describe('whole notes and pins', () => {
       expect(await pin.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
       await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
       await page.mouse.click(5, 5);
-      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.keyboard.press('Escape');
+      await expect(note).toHaveAttribute('data-open', '');
       await expect(note).toHaveAttribute('data-pinned', '');
-      expect(await height()).toBeGreaterThan(line * 2);
+      await expect(note.locator('.margin-reply textarea')).toBeVisible();
       await expect.poll(opacity).toBe(1);
+      await pin.click();
+      await expect(note).not.toHaveAttribute('data-open', '');
     }, { threads: [LONG] });
   });
 
@@ -433,7 +452,7 @@ test.describe('whole notes and pins', () => {
       await expect(note).toHaveAttribute('data-open', '');
       await expect(note.locator('.margin-toggle svg')).toHaveCount(0);
       const tops = await note.locator('.margin-acts button:visible').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().top));
-      expect(tops.length).toBe(5);
+      expect(tops.length).toBe(6);
       expect(Math.max(...tops) - Math.min(...tops)).toBeLessThanOrEqual(2);
       await page.keyboard.press('Escape');
       await expect(note).not.toHaveAttribute('data-open', '');
@@ -748,7 +767,7 @@ test.describe('tether geometry', () => {
 
 test.describe('compact gutter anchor', () => {
   for (const [name, context] of [['touch', { hasTouch: true, isMobile: true }], ['touch and reduced motion', { hasTouch: true, isMobile: true, reducedMotion: 'reduce' }], ['touch and forced colors', { hasTouch: true, isMobile: true, forcedColors: 'active' }]]) {
-    test(`390px ${name}: the 44px target fits the screen, the dot sits outside the text at the passage centre`, async ({ browser }) => {
+    test(`390px ${name}: the 44px target fits the screen and the blot sits just after the passage's last word`, async ({ browser }) => {
       await fixture(browser, async (page) => {
         expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
         for (const id of ['t1', 't2']) {
@@ -762,14 +781,12 @@ test.describe('compact gutter anchor', () => {
           expect(hit.height).toBeGreaterThanOrEqual(44);
           expect(hit.x).toBeGreaterThanOrEqual(0);
           expect(hit.x + hit.width).toBeLessThanOrEqual(390);
-          expect(hit.x + hit.width).toBeLessThanOrEqual(text.x + 0.5);
-          expect(dot.x + dot.width).toBeLessThanOrEqual(text.x);
-          const top = Math.min(...rects.map((r) => r.top));
-          const bottom = Math.max(...rects.map((r) => r.bottom));
+          const last = rects.reduce((a, b) => (b.bottom > a.bottom || (b.bottom === a.bottom && b.right > a.right) ? b : a));
+          expect(dot.x).toBeGreaterThanOrEqual(Math.min(last.right - 1, 390 - hit.width));
           const middle = dot.y + dot.height / 2;
-          expect(middle).toBeGreaterThanOrEqual(top - 2);
-          expect(middle).toBeLessThanOrEqual(bottom + 2);
-          if (rects.length === 1) expect(Math.abs(middle - (top + bottom) / 2)).toBeLessThan(10);
+          expect(middle).toBeGreaterThanOrEqual(last.top - 2);
+          expect(middle).toBeLessThanOrEqual(last.bottom + 2);
+          expect(text.x).toBeGreaterThanOrEqual(0);
         }
         const overlap = await page.evaluate(() => {
           const [a, b] = ['t1', 't2'].map((id) => document.querySelector(`.margin-mark[data-id="${id}"]`).getBoundingClientRect());
@@ -786,12 +803,15 @@ test.describe('compact gutter anchor', () => {
     });
   }
 
-  test('desktop marks keep a 24px target inside the window and outside the text', async ({ browser }) => {
+  test('desktop marks keep a 24px target inside the window, just after the passage', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const mark = await page.locator('.margin-mark[data-id="t1"]').boundingBox();
-      const text = await page.locator('#doc .blk').nth(1).boundingBox();
-      expect(mark.x).toBeGreaterThanOrEqual(0);
-      expect(mark.x + mark.width).toBeLessThanOrEqual(text.x + 0.5);
+      const rects = await page.evaluate(() => rectsOf('t1'));
+      const last = rects[rects.length - 1];
+      expect(mark.width).toBeGreaterThanOrEqual(24);
+      expect(mark.x + mark.width).toBeLessThanOrEqual(600);
+      expect(mark.x + mark.width / 2).toBeGreaterThanOrEqual(last.right);
+      expect(Math.abs(mark.y + mark.height / 2 - (last.top + last.bottom) / 2)).toBeLessThan(4);
     }, { width: 600, height: 800, layout: 'marks' });
   });
 });
@@ -1116,8 +1136,8 @@ test('every open thread offers the chat fallback, pin and chat close the action 
     await page.evaluate(() => marginOpen('t1', true));
     const note = page.locator('.margin-note[data-id="t1"]');
     await expect(note.getByRole('button', { name: 'Ask in chat' })).toBeVisible();
-    await expect(note.locator('.margin-acts button:visible')).toHaveText(['Resolve', 'Dismiss', 'Add to note', '', '']);
-    await expect(note.locator('.margin-acts > .margin-tools > button:visible')).toHaveCount(2);
+    await expect(note.locator('.margin-acts button:visible')).toHaveText(['Resolve', 'Dismiss', 'Add to note', '', '', '']);
+    await expect(note.locator('.margin-acts > .margin-tools > button:visible')).toHaveCount(3);
     await expect(note.locator('.margin-tools > :last-child')).toHaveAttribute('aria-label', 'Ask in chat');
     await page.evaluate(() => {
       fake.delay = 1500;
@@ -1142,10 +1162,39 @@ test('every open thread offers the chat fallback, pin and chat close the action 
 test('a closed thread with replies says how many more and marks-only shows a ring', async ({ browser }) => {
   const two = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it.' }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Salt it too.' }] };
   await fixture(browser, async page => {
-    await expect(page.locator('.margin-note[data-id="t1"] .margin-foot')).toHaveText('2 more');
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-foot')).toHaveText('2 replies');
     await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Salt it too.');
   }, { threads: [two] });
   await fixture(browser, async page => {
     await expect(page.locator('.margin-mark[data-id="t1"]')).toHaveAttribute('data-more', '');
   }, { threads: [two], layout: 'marks' });
+});
+
+test('an open thread of six messages offers to continue in chat or make it a note, a shorter one does not', async ({ browser }) => {
+  const turns = (n) => Array.from({ length: n }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: `Turn ${i + 1}.` }));
+  await fixture(browser, async page => {
+    await page.evaluate(() => marginOpen('t1', true));
+    const long = page.locator('.margin-note[data-id="t1"] .margin-long');
+    await expect(long).toHaveText('This has turned into its own question. Continue in chat or make it a note.');
+    await expect(long.locator('[data-margin-act="chat"]')).toHaveText('Continue in chat');
+    await expect(long.locator('[data-margin-act="add"]')).toHaveText('make it a note');
+  }, { threads: [{ ...THREADS.short, messages: turns(6) }] });
+  await fixture(browser, async page => {
+    await page.evaluate(() => marginOpen('t1', true));
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-felix').first()).toBeVisible();
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-long')).toHaveCount(0);
+  }, { threads: [{ ...THREADS.short, messages: turns(5) }] });
+});
+
+test('a note in the left margin is right-aligned toward the page while closed and left-aligned when open', async ({ browser }) => {
+  await fixture(browser, async (page) => {
+    await page.evaluate(() => { marginPage.sides = { t1: 'left' }; marginRedraw(); });
+    const note = page.locator('.margin-note[data-id="t1"]');
+    await expect(note).toHaveAttribute('data-side', 'left');
+    expect(await note.locator('.margin-said').evaluate((el) => getComputedStyle(el).textAlign)).toBe('right');
+    await page.evaluate(() => marginOpen('t1', true));
+    await expect(note).toHaveAttribute('data-open', '');
+    expect(await note.locator('.margin-said').evaluate((el) => getComputedStyle(el).textAlign)).not.toBe('right');
+    expect(await page.locator('.margin-note[data-id="t2"]').getAttribute('data-side')).toBe('right');
+  }, { width: 1600, height: 900, layout: 'both' });
 });

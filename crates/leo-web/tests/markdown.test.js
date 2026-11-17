@@ -392,12 +392,12 @@ test('without the note page option every other reader gets the same markup as be
   assert.equal(render(body, { noteTools: false }), render(body));
 });
 
-test('the facts line counts words outside code and reads at 238 a minute', () => {
-  assert.equal(md.facts(''), '0 words');
-  assert.equal(md.facts('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '7 words · 1 min read');
-  assert.equal(md.facts('word'), '1 word · 1 min read');
-  assert.equal(md.facts('w '.repeat(239)), '239 words · 2 min read');
-  assert.equal(md.facts('w '.repeat(1200)), '1,200 words · 6 min read');
+test('the read time counts words outside code at 238 a minute', () => {
+  assert.equal(md.readTime(''), '');
+  assert.equal(md.readTime('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '1 min read');
+  assert.equal(md.readTime('w '.repeat(238)), '1 min read');
+  assert.equal(md.readTime('w '.repeat(239)), '2 min read');
+  assert.equal(md.readTime('w '.repeat(1200)), '6 min read');
 });
 
 test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {

@@ -4,6 +4,8 @@ const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0
 const DRAWING_COLOURS = ['--text', '--muted', '--faint', '--line', '--accent', '--accent-soft', '--surface'];
 const DRAWING_URL = 'data:image/svg+xml;charset=utf-8,';
 const MOST_STEPS = 12;
+const STEP_MS = 1100;
+const STEP_CHAR_MS = 20;
 
 function inked(svg, colour) {
   return svg.replace(/var\(\s*(--[\w-]+)\s*(?:,[^()]*)?\)/g, (all, name) => colour(DRAWING_COLOURS.includes(name) ? name : '--text'));
@@ -74,7 +76,23 @@ function stepDrawings() {
     diagrams.inked.set(fig, { variants, at: 0, key });
     fig.classList.add('inked');
     if (stepped) fig.insertAdjacentHTML('beforeend', '<figcaption class="drawing-steps"><button type="button" data-step-go="-1" aria-label="Previous step">‹</button><span class="drawing-count"></span><button type="button" data-step-go="1" aria-label="Next step">›</button><button type="button" data-step-go="0" aria-label="Start again">↻</button><span class="drawing-caption" aria-live="polite"></span></figcaption>');
+    const play = stepped && 'play' in fig.dataset && !(key && diagrams.steps.has(key));
+    delete fig.dataset.play;
     paintDrawing(fig, stepped ? (key && diagrams.steps.get(key)) || 0 : variants.length - 1);
+    if (play) playDrawing(fig);
+  }
+}
+
+function playDrawing(fig) {
+  const kept = diagrams.inked.get(fig);
+  for (const timer of kept.timers || []) clearTimeout(timer);
+  kept.timers = [];
+  paintDrawing(fig, 0);
+  if (stillMotion()) return paintDrawing(fig, kept.variants.length - 1);
+  let wait = 0;
+  for (let at = 1; at < kept.variants.length; at++) {
+    wait += STEP_MS + kept.variants[at - 1].caption.length * STEP_CHAR_MS;
+    kept.timers.push(setTimeout(() => fig.isConnected && paintDrawing(fig, at), wait));
   }
 }
 
@@ -84,7 +102,10 @@ document.addEventListener('click', (e) => {
   const kept = fig && diagrams.inked.get(fig);
   if (!kept) return;
   const step = Number(go.dataset.stepGo);
-  paintDrawing(fig, step ? kept.at + step : 0);
+  for (const timer of kept.timers || []) clearTimeout(timer);
+  kept.timers = [];
+  if (step) paintDrawing(fig, kept.at + step);
+  else playDrawing(fig);
 });
 
 function diagramScheme() {
@@ -94,7 +115,7 @@ function diagramScheme() {
 function diagramTheme(dark) {
   const css = getComputedStyle(document.documentElement);
   const token = (name, fallback) => css.getPropertyValue(name).trim() || fallback;
-  const accent = token('--accent', '#4f46e5');
+  const accent = token('--accent', '#3f6d97');
   const soft = token('--accent-soft', '#eceafd');
   const text = token('--text', '#1c1c1a');
   const muted = token('--muted', '#6b6a65');

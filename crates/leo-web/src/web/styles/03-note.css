@@ -1,6 +1,19 @@
 .note-layout { container: note / inline-size; }
 .note-columns { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 48px auto; }
-.note-columns > .note { grid-area: 2 / 1; min-width: 0; width: 100%; max-width: var(--note-width); margin-inline: auto; }
+.note-columns > .note { position: relative; grid-area: 2 / 1; min-width: 0; width: 100%; max-width: var(--note-width); margin-inline: auto; }
+.page-marks { position: absolute; left: 0; right: 0; top: 0; height: 0; z-index: 3; }
+.page-mark { position: absolute; top: 2px; width: 24px; height: 28px; display: grid; place-items: center; cursor: col-resize; border-radius: var(--r-xs); touch-action: none; }
+.page-mark[data-edge="left"] { left: -28px; }
+.page-mark[data-edge="right"] { right: -28px; }
+.page-mark::before { content: ''; width: 2px; height: 18px; border-radius: 1px; background: color-mix(in srgb, var(--text) 38%, transparent); transition: background-color var(--t-press), height var(--t-press); }
+.page-mark:hover::before, .page-mark.dragging::before, .page-mark:focus-visible::before { height: 22px; background: color-mix(in srgb, var(--text) 70%, transparent); }
+.page-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+.page-width-label { position: absolute; top: 32px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--text); color: var(--page); font-size: var(--fs-xs); font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
+.page-width-label[data-edge="left"] { left: -40px; }
+.page-width-label[data-edge="right"] { right: -40px; }
+:root[data-note-width="full"] .page-marks { display: none; }
+@container note (max-width: 899px) { .page-marks { display: none; } }
+@media (pointer: coarse), print { .page-marks { display: none; } }
 .note-outline { grid-area: 1 / 1; position: sticky; top: var(--outline-top, 76px); align-self: start; min-width: 0; z-index: 27; }
 .note-outline .source-more { margin: 0; border: 0; padding: 0; }
 .note-outline .source-more > summary { display: flex; gap: 8px; padding: 10px 8px; border: 0; color: var(--muted); }
@@ -95,6 +108,8 @@
 .margin-mark.reading { pointer-events: none; }
 .margin-mark .margin-drop { width: 12px; height: 12px; margin: 0; }
 .margin-thinking .margin-drop { margin: 6px 0; }
+.margin-thinking:has(.margin-sketching) { display: flex; align-items: center; gap: 6px; }
+.margin-sketching { font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); }
 .margin-waiting .margin-drop, .margin-mark.reading .margin-drop { color: var(--felix); }
 @media (prefers-reduced-motion: no-preference) { .margin-drop { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
@@ -102,12 +117,12 @@
 .margin-toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-note[data-open] .margin-toggle { pointer-events: none; }
 .margin-tools { display: flex; gap: 2px; margin-left: auto; }
-.margin-chat, .margin-pin { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
-.margin-pin[hidden] { display: none; }
-.margin-chat:hover, .margin-pin:hover, .margin-pin[aria-pressed="true"] { color: var(--text); }
+.margin-chat, .margin-pin, .margin-copy { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
+.margin-pin[hidden], .margin-copy[hidden] { display: none; }
+.margin-chat:hover, .margin-pin:hover, .margin-copy:hover, .margin-pin[aria-pressed="true"] { color: var(--text); }
 .margin-pin[aria-pressed="true"] svg path:nth-of-type(2) { fill: currentColor; }
-.margin-chat:focus-visible, .margin-pin:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-chat svg, .margin-pin svg { width: 15px; height: 15px; }
+.margin-chat:focus-visible, .margin-pin:focus-visible, .margin-copy:focus-visible, .margin-send:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.margin-chat svg, .margin-pin svg, .margin-copy svg { width: 15px; height: 15px; }
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }
 .margin-note[data-open] { z-index: 2; }
 .margin-note[data-open] .margin-said { max-height: min(420px, calc(100dvh - 260px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
@@ -119,8 +134,17 @@
 @keyframes ink-in { from { color: transparent; } 45% { color: var(--ink-settling); } to { color: var(--text); } }
 .margin-pending { display: grid; gap: 7px; margin-top: 7px; }
 .margin-pending[hidden] { display: none; }
+.margin-note[data-side="left"]:not([data-open]) .margin-said { text-align: right; }
+.margin-note[data-side="left"]:not([data-open]) .margin-foot { justify-content: flex-end; }
+.margin-quiet { position: absolute; left: 0; top: 0; display: flex; align-items: center; white-space: nowrap; pointer-events: none; font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); animation: fade .3s var(--ease-arrive) both; transition: opacity .5s var(--ease-exit); }
+.margin-quiet.leaving { opacity: 0; }
+.margin-note[data-resolved] { opacity: .45; }
+.margin-note[data-resolved]:hover, .margin-note[data-resolved]:focus-within { opacity: .7; }
+.margin-resolved-label { font-size: var(--fs-xs); color: var(--faint); }
+.margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); }
-.margin-foot svg { width: 13px; height: 13px; flex: none; }
+.margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
+.margin-long .link-btn { font-size: inherit; color: inherit; }
 .margin-more { position: relative; z-index: 2; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-drawer) var(--ease-arrive), opacity var(--t-follow) var(--ease-arrive), visibility 0s var(--t-drawer); }
 .margin-more-body { min-height: 0; overflow: hidden; }
 .margin-note[data-open] .margin-more { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
@@ -190,16 +214,18 @@ figure.drawing.inked img { filter: none !important; }
 .margin-revisit { position: absolute; left: 0; top: 0; height: 5px; box-sizing: border-box; padding: 0; border: 0; border-bottom: 1px dotted color-mix(in srgb, var(--text) 20%, transparent); border-radius: 0; background: none; cursor: pointer; transition: border-color .14s ease-out; }
 .margin-revisit:hover, .margin-revisit:focus-visible { border-bottom-color: color-mix(in srgb, var(--text) 60%, transparent); }
 .margin-revisit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
-.margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0 6px 0 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center end; cursor: pointer; }
-.margin-anchor { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 2px var(--page); transition: transform .14s ease-out; }
-.margin-mark[data-active] .margin-anchor { transform: scale(1.35); }
-.margin-mark[data-more] .margin-anchor { box-shadow: 0 0 0 2px var(--page), 0 0 0 3.5px color-mix(in srgb, var(--accent) 55%, transparent); }
-@media (pointer: coarse) { .margin-mark { width: 44px; height: 44px; padding-right: 10px; } }
-.note-columns[data-margin="marks"] { padding-left: var(--anchor-gutter, 0px); }
-@container note (min-width: 900px) { .note-columns[data-margin="marks"] { padding-left: max(48px, var(--anchor-gutter, 0px)); } }
+.margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center; cursor: pointer; }
+.margin-anchor { display: grid; width: 13px; height: 13px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
+.margin-slot { display: inline; padding-left: 21px; }
+@media print { .margin-slot { display: none; } }
+.margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow-pop); }
+.margin-anchor svg { width: 100%; height: 100%; }
+.margin-mark:hover .margin-anchor, .margin-mark[data-active] .margin-anchor { color: var(--text); }
+.margin-mark[data-active] .margin-anchor { transform: scale(1.2); }
+.margin-mark[data-more] .margin-anchor { color: var(--text); }
+@media (pointer: coarse) { .margin-mark { width: 44px; height: 44px; } }
+@container note (min-width: 900px) { .note-columns[data-margin="marks"] { padding-left: 48px; } }
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
-.note-context { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 12px; min-height: 24px; }
-@media (min-width: 1000px) { .note-context { display: none; } }
 .note-meta .margin-mode { font-size: var(--fs-sm); padding: 2px 6px; margin-left: -2px; }
 #margin-status { margin-left: auto; }
 .margin-mode-wrap { position: relative; flex: none; }
@@ -266,11 +292,12 @@ figure.drawing.inked img { filter: none !important; }
 .choice-diagram .d-mark { fill: var(--accent); }
 .choice-diagram .d-head { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) {
-  .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
-  .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit { transition: none; }
+  .margin-quiet, .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
+  .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
 }
 @media (forced-colors: active) {
   .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-note[data-inline] { outline: 1px solid CanvasText; }
   .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
@@ -280,6 +307,7 @@ figure.drawing.inked img { filter: none !important; }
   .margin-note[data-id="draft"] .margin-reply { border-color: CanvasText; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
-  .margin-anchor { background: Highlight; box-shadow: 0 0 0 2px Canvas; }
+  .margin-anchor { color: Highlight; }
+  .page-mark::before { background: CanvasText; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
   .choice-diagram .d-felix, .choice-diagram .d-text, .choice-diagram .d-head { stroke: CanvasText; }
