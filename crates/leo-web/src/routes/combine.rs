@@ -46,7 +46,7 @@ async fn notes_for(
     with: String,
 ) -> Result<(Note, Note, std::path::PathBuf), Failure> {
     let found = state
-        .with_store(move |store| {
+        .read_store(move |store| {
             let a = store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?.clone();
             let b = store.find_note(&with).ok_or(StatusCode::NOT_FOUND)?.clone();
             if a.id == b.id {

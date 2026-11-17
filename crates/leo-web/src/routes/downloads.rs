@@ -130,7 +130,7 @@ pub(crate) async fn originals_zip(
     Path(id): Path<String>,
 ) -> Response {
     let found = state
-        .with_store(move |store| {
+        .read_store(move |store| {
             let note = store.find_note(&id).ok_or(StatusCode::NOT_FOUND)?;
             let folder = originals_dir(&store.notes_dir, &note.id).ok_or(StatusCode::NOT_FOUND)?;
             Ok((

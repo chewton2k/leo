@@ -124,7 +124,7 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
     let notes_dir = state.notes_dir.clone();
     if field == "trash_days" {
         return state
-            .with_store(move |store| {
+            .read_store(move |store| {
                 Ok(store
                     .trashed()
                     .iter()

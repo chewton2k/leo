@@ -629,7 +629,7 @@ pub(crate) async fn start_import(
     }
     if let Some(note) = body.into.clone() {
         let found = state
-            .with_store(move |store| Ok(store.notes.iter().any(|n| n.id == note)))
+            .read_store(move |store| Ok(store.notes.iter().any(|n| n.id == note)))
             .await
             .unwrap_or(false);
         if !found {
@@ -660,7 +660,7 @@ pub(crate) async fn start_import(
     let Ok(permit) = slots.try_acquire_owned() else {
         return import_busy();
     };
-    let checked = state.with_store({
+    let checked = state.read_store({
         let dir = dir.clone();
         move |store| {
             let _permit = permit;

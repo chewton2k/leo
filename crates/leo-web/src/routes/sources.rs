@@ -28,7 +28,7 @@ async fn outside<R: Send + 'static>(
         + 'static,
 ) -> Result<R, StatusCode> {
     let (notes, note) = state
-        .with_store(move |store| {
+        .read_store(move |store| {
             let note = match id {
                 Some(id) => Some(store.find_note(&id).ok_or(StatusCode::NOT_FOUND)?.clone()),
                 None => None,

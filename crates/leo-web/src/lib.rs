@@ -435,31 +435,9 @@ impl AppState {
         work: impl FnOnce(&mut Store) -> Result<R, StatusCode> + Send + 'static,
     ) -> Result<R, StatusCode> {
         let state = self.clone();
-        tokio::task::spawn_blocking(move || {
-            let mut store = lock_storage(&state.store);
-            let force = state
-                .refresh_requested
-                .swap(false, std::sync::atomic::Ordering::AcqRel);
-            let check =
-                writing || force || store.changes.as_mut().is_none_or(|changes| changes.due());
-            if store.reload || (check && store.changed_on_disk()) {
-                store
-                    .refresh()
-                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-                store.reload = false;
-            }
-            let result = work(&mut store);
-            if writing
-                && result
-                    .as_ref()
-                    .is_err_and(|status| !status.is_client_error())
-            {
-                store.reload = true;
-            }
-            result
-        })
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        tokio::task::spawn_blocking(move || store_access(&state, writing, work))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     }
 
     #[cfg(test)]
@@ -741,25 +719,45 @@ async fn stop_idle_sessions(warm: Arc<warm::Slot>) {
     }
 }
 
-fn store_now<R>(
+fn store_access<R>(
     state: &AppState,
+    writing: bool,
     work: impl FnOnce(&mut Store) -> Result<R, StatusCode>,
 ) -> Result<R, StatusCode> {
     let mut store = lock_storage(&state.store);
-    if store.reload || store.changed_on_disk() {
+    let force = state
+        .refresh_requested
+        .swap(false, std::sync::atomic::Ordering::AcqRel);
+    let check = writing || force || store.changes.as_mut().is_none_or(|changes| changes.due());
+    if store.reload || (check && store.changed_on_disk()) {
         store
             .refresh()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         store.reload = false;
     }
     let result = work(&mut store);
-    if result
-        .as_ref()
-        .is_err_and(|status| !status.is_client_error())
+    if writing
+        && result
+            .as_ref()
+            .is_err_and(|status| !status.is_client_error())
     {
         store.reload = true;
     }
     result
+}
+
+fn store_now<R>(
+    state: &AppState,
+    work: impl FnOnce(&mut Store) -> Result<R, StatusCode>,
+) -> Result<R, StatusCode> {
+    store_access(state, true, work)
+}
+
+fn read_now<R>(
+    state: &AppState,
+    work: impl FnOnce(&Store) -> Result<R, StatusCode>,
+) -> Result<R, StatusCode> {
+    store_access(state, false, |store| work(store))
 }
 
 // ── Query params ──────────────────────────────────────────────────────────

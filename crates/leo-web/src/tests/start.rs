@@ -235,3 +235,15 @@ fn fresh_tokens_differ_and_look_like_saved_ones() {
     assert_eq!(a.len(), 32);
     assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
 }
+
+#[test]
+fn store_now_clears_a_forced_check() {
+    let (state, _dir, _) = super::state_with(&[]);
+    state
+        .refresh_requested
+        .store(true, std::sync::atomic::Ordering::Release);
+    crate::store_now(&state, |_| Ok(())).unwrap();
+    assert!(!state
+        .refresh_requested
+        .load(std::sync::atomic::Ordering::Acquire));
+}

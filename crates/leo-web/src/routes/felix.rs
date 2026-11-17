@@ -8,7 +8,9 @@ use axum::Json;
 
 use crate::routes::notes::{save, NoteResponse};
 use crate::routes::uploads::{safe_file_name, ImportFileBody};
-use crate::{captions, chat, chat_files, chats, review, store_now, tools, AppState, UploadFile};
+use crate::{
+    captions, chat, chat_files, chats, read_now, review, store_now, tools, AppState, UploadFile,
+};
 
 fn ndjson(value: serde_json::Value) -> String {
     format!("{value}\n")
@@ -865,7 +867,7 @@ fn execute_tool(
         read_original(state, desk, call)?
     } else {
         let graphs = Arc::clone(&state.graphs);
-        store_now(state, |store| {
+        read_now(state, |store| {
             let cache = graphs.load();
             Ok(desk.run(store, &cache, call))
         })
