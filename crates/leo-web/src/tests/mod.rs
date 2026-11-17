@@ -3,6 +3,7 @@ mod auth;
 mod boards;
 mod calendar;
 mod combine;
+mod combine_originals;
 mod dictation;
 mod errors;
 mod felix;

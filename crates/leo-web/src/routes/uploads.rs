@@ -234,6 +234,75 @@ fn save_original(
     Ok(())
 }
 
+pub(crate) fn share_originals(
+    notes_dir: &std::path::Path,
+    from: &str,
+    into: &str,
+) -> std::io::Result<Vec<String>> {
+    let mut written = Vec::new();
+    let shared = crate::originals::files(notes_dir, from)
+        .into_iter()
+        .try_for_each(|(name, _)| {
+            let name = share_original(notes_dir, from, into, &name, &written)?;
+            written.push(name);
+            Ok(())
+        });
+    match shared {
+        Ok(()) => Ok(written),
+        Err(error) => {
+            let _ = remove_originals(notes_dir, into, &written);
+            Err(error)
+        }
+    }
+}
+
+fn share_original(
+    notes_dir: &std::path::Path,
+    from: &str,
+    into: &str,
+    name: &str,
+    taken: &[String],
+) -> std::io::Result<String> {
+    let invalid =
+        || std::io::Error::other("Original files must stay inside the attachments folder");
+    let source = original_path(notes_dir, from, name).ok_or_else(invalid)?;
+    let free = free_original_name(notes_dir, into, name, taken);
+    let folder = originals_dir(notes_dir, into).ok_or_else(invalid)?;
+    std::fs::create_dir_all(&folder)?;
+    let target = original_path(notes_dir, into, &free).ok_or_else(invalid)?;
+    if std::fs::hard_link(&source, &target).is_err() {
+        let mut out = tempfile::NamedTempFile::new_in(&folder)?;
+        std::io::copy(&mut leo_core::paths::open_regular(&source)?, &mut out)?;
+        out.as_file().sync_all()?;
+        original_path(notes_dir, into, &free).ok_or_else(invalid)?;
+        out.persist_noclobber(&target)
+            .map_err(|error| error.error)?;
+    }
+    Ok(free)
+}
+
+pub(crate) fn remove_originals(
+    notes_dir: &std::path::Path,
+    note: &str,
+    names: &[String],
+) -> std::io::Result<()> {
+    let mut failed = None;
+    for name in names {
+        let removed = original_path(notes_dir, note, name)
+            .ok_or_else(|| {
+                std::io::Error::other("Original files must stay inside the attachments folder")
+            })
+            .and_then(|path| match std::fs::remove_file(path) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                done => done,
+            });
+        if let Err(error) = removed {
+            failed.get_or_insert(error);
+        }
+    }
+    failed.map_or(Ok(()), Err)
+}
+
 fn read_original(notes_dir: &std::path::Path, note: &str, name: &str) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
     let path = original_path(notes_dir, note, name).ok_or_else(|| {

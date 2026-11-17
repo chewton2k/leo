@@ -10,6 +10,7 @@ use leo_core::notes::Note;
 use serde::Deserialize;
 
 use super::notes::{save, version_of, NoteResponse};
+use super::uploads::{remove_originals, share_originals};
 use crate::reply::error;
 use crate::{combine, progress, AppState};
 
@@ -304,6 +305,13 @@ pub(crate) async fn keep(
             let notes_dir = store.notes_dir.clone();
             let copied = leo_core::recording::copy_to(&notes_dir, &from, &target, &from_title)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let originals = match share_originals(&notes_dir, &from, &target) {
+                Ok(names) => names,
+                Err(_) => {
+                    let _ = leo_core::recording::remove(&notes_dir, &target, &copied);
+                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                }
+            };
             let note = store.find_note_mut(&target).ok_or(StatusCode::NOT_FOUND)?;
             let before = std::mem::replace(&mut note.body, body.body);
             note.updated_at = chrono::Utc::now();
@@ -311,13 +319,28 @@ pub(crate) async fn keep(
             store.delete_notes(std::slice::from_ref(&from));
             if let Err(code) = save(store) {
                 let _ = leo_core::recording::remove(&notes_dir, &target, &copied);
+                let _ = remove_originals(&notes_dir, &target, &originals);
                 return Err(code);
             }
-            Ok(serde_json::json!({ "note": response, "before": before, "removed": from, "sources": copied }))
+            let record = Combined {
+                from: from.clone(),
+                originals,
+                at: chrono::Utc::now(),
+            };
+            Ok((
+                target,
+                record,
+                serde_json::json!({ "note": response, "before": before, "removed": from, "sources": copied }),
+            ))
         })
         .await;
     match done {
-        Ok(value) => Json(value).into_response(),
+        Ok((target, record, value)) => {
+            let chats = state.chats.clone();
+            let _ =
+                tokio::task::spawn_blocking(move || set_combined(&chats, &target, &record)).await;
+            Json(value).into_response()
+        }
         Err(StatusCode::CONFLICT) => error(
             StatusCode::CONFLICT,
             "One of the notes changed while they were being combined. Combine them again.",
@@ -330,6 +353,73 @@ pub(crate) async fn keep(
 pub(crate) struct Uncombine {
     #[serde(default)]
     sources: Vec<String>,
+    #[serde(default)]
+    from: Option<String>,
+}
+
+#[derive(serde::Serialize, Deserialize)]
+pub(crate) struct Combined {
+    from: String,
+    originals: Vec<String>,
+    at: chrono::DateTime<chrono::Utc>,
+}
+
+const COMBINED: &str = "combined:";
+
+fn set_combined(chats: &std::path::Path, target: &str, record: &Combined) -> bool {
+    let Ok(text) = serde_json::to_string(record) else {
+        return false;
+    };
+    crate::db::for_chats(chats)
+        .with(|c| {
+            c.execute(
+                "INSERT INTO margin_state (key, data) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET data = excluded.data",
+                [format!("{COMBINED}{target}"), text],
+            )
+        })
+        .is_ok()
+}
+
+fn combined_of(chats: &std::path::Path, target: &str) -> Option<Combined> {
+    use rusqlite::OptionalExtension;
+    let text: String = crate::db::for_chats(chats)
+        .with(|c| {
+            c.query_row(
+                "SELECT data FROM margin_state WHERE key = ?1",
+                [format!("{COMBINED}{target}")],
+                |r| r.get(0),
+            )
+            .optional()
+        })
+        .ok()??;
+    serde_json::from_str(&text).ok()
+}
+
+fn forget_combined(chats: &std::path::Path, target: &str) -> bool {
+    crate::db::for_chats(chats)
+        .with(|c| {
+            c.execute(
+                "DELETE FROM margin_state WHERE key = ?1",
+                [format!("{COMBINED}{target}")],
+            )
+        })
+        .is_ok()
+}
+
+pub(crate) fn forget_old_combines(chats: &std::path::Path, before: chrono::DateTime<chrono::Utc>) {
+    let db = crate::db::for_chats(chats);
+    let Ok(rows) = db.with(|c| {
+        c.prepare("SELECT key, data FROM margin_state WHERE key LIKE 'combined:%'")?
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()
+    }) else {
+        return;
+    };
+    for (key, data) in rows {
+        if serde_json::from_str::<Combined>(&data).map_or(true, |record| record.at < before) {
+            let _ = db.with(|c| c.execute("DELETE FROM margin_state WHERE key = ?1", [&key]));
+        }
+    }
 }
 
 pub(crate) async fn uncombine(
@@ -340,15 +430,29 @@ pub(crate) async fn uncombine(
     if body.sources.len() > 1000 {
         return error(StatusCode::BAD_REQUEST, "Too many recordings.");
     }
+    let chats = state.chats.clone();
     let done = state
         .with_store(move |store| {
             store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
             leo_core::recording::remove(&store.notes_dir, &into, &body.sources)
-                .map_err(|_| StatusCode::BAD_REQUEST)
+                .map_err(|_| StatusCode::BAD_REQUEST)?;
+            let Some(from) = body.from else {
+                return Ok(());
+            };
+            let Some(record) = combined_of(&chats, &into).filter(|r| r.from == from) else {
+                return Ok(());
+            };
+            remove_originals(&store.notes_dir, &into, &record.originals)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            forget_combined(&chats, &into);
+            Ok(())
         })
         .await;
     match done {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
-        Err(code) => error(code, "The recordings could not be moved back."),
+        Err(code) => error(
+            code,
+            "The recordings and original files could not be moved back.",
+        ),
     }
 }

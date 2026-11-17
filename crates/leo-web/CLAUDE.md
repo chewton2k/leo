@@ -447,7 +447,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   fenced code and display maths stay whole; a closing fence needs the opener's
   character and at least its length with no trailing text. Two combines at once,
   15-minute between-request deadline; any failed part leaves both notes
-  unchanged. Saving copies the other note's transcripts (`recording::copy_to`).
+  unchanged. Saving copies the other note's transcripts (`recording::copy_to`)
+  and gives it the other note's original files (`share_originals`).
   In the explorer a note dropped on a note moves it unless held on that row for
   `SPRING_MS` (arms Combine: `.combine-wait`, then `.combine-armed`; the folder
   is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists at

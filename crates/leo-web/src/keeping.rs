@@ -212,6 +212,7 @@ pub(crate) async fn expire_now(state: &AppState) {
             let _writing = crate::boards::writing();
             crate::boards::forget_deleted(&chats, keep.trash_days, now);
         }
+        crate::routes::combine::forget_old_combines(&chats, now - chrono::Duration::days(1));
         expire_uploads(&notes_dir, keep.upload_days, now);
         expire_transcripts(&notes_dir, keep.transcript_days, now, active.as_deref());
         if let Some(housekeeper) = housekeeper {
