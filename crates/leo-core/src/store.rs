@@ -897,6 +897,7 @@ impl Store {
         let targets = self.assign_paths(&seen);
         let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
         let mut conflicted = false;
+        let mut failed: Option<anyhow::Error> = None;
 
         for note in &self.notes {
             let target = &targets[&note.id];
@@ -942,7 +943,18 @@ impl Store {
             if let Some(old_path) = old_path {
                 if !same_file(&old_path, target) {
                     if let Err(e) = fs::remove_file(&old_path) {
-                        crate::diag::warn(format!("could not remove {}: {e}", old_path.display()));
+                        let _ = fs::remove_file(target);
+                        let folder = previous
+                            .as_ref()
+                            .and_then(|previous| previous.path.parent())
+                            .map(|parent| parent.display().to_string())
+                            .filter(|parent| !parent.is_empty())
+                            .unwrap_or_else(|| "the notes folder".to_string());
+                        let said =
+                            format!("leo could not move \"{}\" out of {folder}: {e}", note.title);
+                        crate::diag::warn(said.clone());
+                        failed.get_or_insert(anyhow::anyhow!(said));
+                        continue;
                     }
                 }
             }
@@ -986,6 +998,9 @@ impl Store {
         save_directories(&self.notes_dir, &self.directories)?;
         if !conflicted {
             self.fingerprint.set(fingerprint_of(&self.notes_dir));
+        }
+        if let Some(e) = failed {
+            return Err(e);
         }
         Ok(())
     }
@@ -3956,6 +3971,38 @@ mod tests {
         let bodies: HashSet<String> = reloaded.notes.iter().map(|n| n.body.clone()).collect();
         assert!(bodies.contains("the original, edited in leo"), "{bodies:?}");
         assert!(bodies.contains("the copy, edited"), "{bodies:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_move_that_cannot_remove_the_old_file_fails_and_leaves_one_file() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut store, _tmp) = temp_store();
+        store.create_dir("locked");
+        let id = store
+            .create_note("Moving", "body", vec![], "locked")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let locked = store.notes_dir.join("locked");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+        store.move_note(&id, "").unwrap();
+        let saved = store.save();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(saved.is_err());
+        let files = note_files(&store);
+        let holding: Vec<&String> = files
+            .iter()
+            .filter(|f| {
+                fs::read_to_string(store.notes_dir.join(f))
+                    .unwrap()
+                    .contains(&format!("id: {id}"))
+            })
+            .collect();
+        assert_eq!(holding.len(), 1, "files holding the id: {holding:?}");
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.find_note(&id).unwrap().directory, "locked");
     }
 
     #[test]
