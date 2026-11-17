@@ -424,12 +424,24 @@ impl Library {
         if let Ok(path) = self.speaker_model() {
             return Ok(path);
         }
-        if !self.downloading(DIARIZER) {
-            if let Err(e) = start() {
-                if !self.downloading(DIARIZER) {
-                    return Err(e);
-                }
+        while !self.downloading(DIARIZER) {
+            let Err(e) = start() else { break };
+            if self.downloading(DIARIZER) {
+                break;
             }
+            let full = self
+                .jobs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .values()
+                .filter(|j| j.state == "downloading")
+                .count()
+                >= MOST_DOWNLOADS;
+            if !full {
+                return Err(e);
+            }
+            ensure!(!stop(), "Stopped while the speaker model was downloading");
+            std::thread::sleep(CANCEL_POLL);
         }
         let failed = loop {
             let job = self
@@ -440,18 +452,25 @@ impl Library {
                 .cloned();
             match job {
                 Some(job) if job.state == "downloading" => {
-                    ensure!(
-                        !stop(),
-                        "Finish was pressed while the speaker model was downloading"
-                    );
+                    ensure!(!stop(), "Stopped while the speaker model was downloading");
                     progress(job.bytes, job.total);
                     std::thread::sleep(CANCEL_POLL);
                 }
-                job => break job.filter(|j| j.state == "failed").and_then(|j| j.error),
+                job => {
+                    break job.and_then(|j| match j.state {
+                        "failed" => j.error,
+                        "cancelled" => Some("The speaker model download was cancelled".into()),
+                        _ => None,
+                    });
+                }
             }
         };
-        self.speaker_model()
-            .map_err(|e| failed.map_or(e, anyhow::Error::msg))
+        let path = self
+            .speaker_model()
+            .map_err(|e| failed.map_or(e, anyhow::Error::msg))?;
+        let size = self.catalog.known(DIARIZER)?.file().size;
+        progress(size, size);
+        Ok(path)
     }
 
     #[cfg(test)]

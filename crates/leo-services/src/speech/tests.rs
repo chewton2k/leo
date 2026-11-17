@@ -610,7 +610,7 @@ fn finishing_during_the_speaker_model_download_leaves_it_running() {
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "Finish was pressed while the speaker model was downloading"
+        "Stopped while the speaker model was downloading"
     );
     assert!(l.downloading(DIARIZER));
     l.cancel(DIARIZER).unwrap();
@@ -652,19 +652,56 @@ fn a_speaker_model_download_started_elsewhere_meanwhile_is_waited_for() {
 }
 
 #[test]
-fn a_refused_speaker_model_download_reports_the_refusal() {
+fn a_cancelled_speaker_model_download_says_so() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job(DIARIZER, "cancelled", None);
+    let error = l
+        .ensure_speaker_model(&|| Ok(()), &|| false, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "The speaker model download was cancelled"
+    );
+}
+
+#[test]
+fn a_speaker_model_download_refused_for_lack_of_a_slot_waits_and_retries() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job("first", "downloading", None);
+    l.seed_job("second", "downloading", None);
+    let (url, t) = model_server(b"model");
+    let starts = std::sync::atomic::AtomicUsize::new(0);
+    let path = l
+        .ensure_speaker_model(
+            &|| {
+                if starts.fetch_add(1, Ordering::SeqCst) == 1 {
+                    l.seed_job("first", "ready", None);
+                }
+                l.download_from(DIARIZER, &url)
+            },
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_speaker_model_download_waiting_for_a_slot_stops_when_asked() {
     let (_dir, l) = speaker_fixture();
     l.seed_job("first", "downloading", None);
     l.seed_job("second", "downloading", None);
     let error = l
         .ensure_speaker_model(
             &|| l.download_from(DIARIZER, "http://127.0.0.1:9/model"),
-            &|| false,
-            &|_, _| {},
+            &|| true,
+            &|_, _| panic!("reported progress"),
         )
         .unwrap_err();
     assert_eq!(
         error.to_string(),
-        "Let a model download finish or cancel one first."
+        "Stopped while the speaker model was downloading"
     );
 }

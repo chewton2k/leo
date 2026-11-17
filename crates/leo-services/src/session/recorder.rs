@@ -602,9 +602,16 @@ pub fn finish(
                 .diarize(parts, finish_now, &|done, total| {
                     let steps = Some(((done >> 20) as usize, (total >> 20) as usize));
                     if shown.replace(steps) != steps {
-                        emit(Event::Progress {
-                            label: "Downloading the speaker model".to_string(),
-                            steps,
+                        emit(if done >= total {
+                            Event::Progress {
+                                label: "Telling speakers apart".to_string(),
+                                steps: None,
+                            }
+                        } else {
+                            Event::Progress {
+                                label: "Downloading the speaker model (MiB)".to_string(),
+                                steps,
+                            }
                         })
                     }
                 })

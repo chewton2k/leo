@@ -175,10 +175,12 @@ and lists it under `speakers` (never in `extra_files`) and it can never be
 chosen as the speech model; Settings → Speech models lists it to delete.
 `Engine::diarize` gets the model through `Library::ensure_speaker_model`: a
 verified model is used at once; otherwise it starts the download (or joins one
-already running, including one started while its own start was refused), waits
-for it with no time limit, reporting bytes, and ends early with an error when
-Finish now is pressed or the engine stops, leaving the download running; a
-failed download answers with the job's error. It then waits for a running
+already running, including one started while its own start was refused; a
+start refused because other model downloads fill every slot waits and retries),
+waits for it with no time limit, reporting bytes (a last full report once it is
+ready), and ends early with an error when Finish now is pressed or the engine
+stops, leaving the download running; a failed download answers with the job's
+error and a cancelled one says it was cancelled. It then waits for a running
 dictation and queues `Message::Diarize`: the actor loads the
 chosen speech model if needed and sends `Request::Diarize { model, parts }`; the
 worker reads the WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops
