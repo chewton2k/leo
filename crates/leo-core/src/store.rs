@@ -3519,9 +3519,7 @@ mod tests {
             .clone();
         store.save().unwrap();
         let path = store.notes_dir.join("Half.md");
-        let text = fs::read_to_string(&path).unwrap();
-        let cut: String = text.chars().take(text.chars().count() / 3).collect();
-        fs::write(&path, format!("{cut}\n---\ntitle: [\n")).unwrap();
+        fs::write(&path, "---\ntitle: [\n---\nbody").unwrap();
         store.find_note_mut(&id).unwrap().body = "edited".into();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
