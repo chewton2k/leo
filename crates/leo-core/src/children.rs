@@ -29,6 +29,49 @@ pub fn stop_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+#[derive(Clone, Default)]
+pub struct Stop {
+    pub flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub deadline: Option<std::time::Instant>,
+}
+
+impl Stop {
+    pub fn asked(&self) -> bool {
+        self.flag.load(std::sync::atomic::Ordering::Relaxed)
+            || self
+                .deadline
+                .is_some_and(|d| std::time::Instant::now() >= d)
+    }
+}
+
+thread_local! {
+    static STOP: std::cell::RefCell<Option<Stop>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn with_stop<R>(stop: Stop, work: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Stop>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            STOP.with(|s| *s.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(STOP.with(|s| s.borrow_mut().replace(stop)));
+    work()
+}
+
+pub fn current_stop() -> Option<Stop> {
+    STOP.with(|s| s.borrow().clone())
+}
+
+pub struct StopOnDrop(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 const READER_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
 
 pub struct Captured {
@@ -683,5 +726,39 @@ mod tests {
         assert!(captured.status.success());
         assert!(!captured.timed_out);
         assert_eq!(String::from_utf8_lossy(&captured.stdout).trim(), "done");
+    }
+
+    #[test]
+    fn with_stop_restores_the_outer_stop() {
+        assert!(current_stop().is_none());
+        let outer = Stop::default();
+        let inner = Stop {
+            deadline: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        with_stop(outer.clone(), || {
+            with_stop(inner, || {
+                assert!(current_stop().is_some_and(|s| s.asked()));
+            });
+            let now = current_stop().unwrap();
+            assert!(std::sync::Arc::ptr_eq(&now.flag, &outer.flag));
+            assert!(!now.asked());
+            let unwound = std::panic::catch_unwind(|| with_stop(Stop::default(), || panic!("x")));
+            assert!(unwound.is_err());
+            assert!(std::sync::Arc::ptr_eq(
+                &current_stop().unwrap().flag,
+                &outer.flag
+            ));
+        });
+        assert!(current_stop().is_none());
+    }
+
+    #[test]
+    fn stop_on_drop_sets_the_flag() {
+        let stop = Stop::default();
+        let guard = StopOnDrop(stop.flag.clone());
+        assert!(!stop.asked());
+        drop(guard);
+        assert!(stop.asked());
     }
 }
