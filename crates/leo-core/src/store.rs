@@ -476,6 +476,13 @@ pub struct Trashed {
     pub title: String,
     pub directory: String,
     pub deleted_at: DateTime<Utc>,
+    pub readable: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Restored {
+    pub titles: Vec<String>,
+    pub unreadable: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1004,12 +1011,22 @@ impl Store {
         let mut out: Vec<Trashed> = trash_entries(&self.notes_dir)
             .into_iter()
             .filter_map(|entry| {
-                let head = entry.head?;
+                let Some(head) = entry.head else {
+                    let place = head_of(&mut serde_yaml::Mapping::new(), &entry.relative);
+                    return Some(Trashed {
+                        id: entry.id(),
+                        title: place.title,
+                        directory: place.directory,
+                        deleted_at: entry.deleted_at,
+                        readable: false,
+                    });
+                };
                 (!live.contains(head.id.as_str())).then_some(Trashed {
                     id: head.id,
                     title: head.title,
                     directory: head.directory,
                     deleted_at: entry.deleted_at,
+                    readable: true,
                 })
             })
             .collect();
@@ -1018,42 +1035,51 @@ impl Store {
     }
 
     pub fn restore(&mut self, id: &str) -> Option<String> {
-        self.restore_many(&[id.to_string()]).pop()
+        self.restore_many(&[id.to_string()]).titles.pop()
     }
 
-    pub fn restore_many(&mut self, ids: &[String]) -> Vec<String> {
+    pub fn restore_many(&mut self, ids: &[String]) -> Restored {
         let entries = trash_entries(&self.notes_dir);
         let mut by_id: HashMap<&str, &TrashEntry> = HashMap::new();
+        let mut headless = HashSet::new();
         for entry in &entries {
-            if let Some(head) = &entry.head {
-                by_id.entry(head.id.as_str()).or_insert(entry);
+            match &entry.head {
+                Some(head) => {
+                    by_id.entry(head.id.as_str()).or_insert(entry);
+                }
+                None => {
+                    headless.insert(entry.id());
+                }
             }
         }
         let mut taken: HashSet<String> = self.notes.iter().map(|n| n.id.clone()).collect();
-        let mut titles = Vec::new();
+        let mut restored = Restored::default();
         for id in ids {
             if taken.contains(id) {
                 continue;
             }
             let Some(entry) = by_id.get(id.as_str()) else {
+                if headless.remove(id) {
+                    restored.unreadable += 1;
+                }
                 continue;
             };
-            let Ok(text) = fs::read_to_string(&entry.path) else {
-                continue;
-            };
-            let Ok(note) = parse_note_from_markdown(&text, &entry.relative, entry.deleted_at)
-            else {
-                continue;
-            };
+            let note = fs::read_to_string(&entry.path).ok().and_then(|text| {
+                parse_note_from_markdown(&text, &entry.relative, entry.deleted_at).ok()
+            });
             taken.insert(id.clone());
+            let Some(note) = note else {
+                restored.unreadable += 1;
+                continue;
+            };
             add_with_parents(&mut self.directories, &note.directory);
-            titles.push(note.title.clone());
+            restored.titles.push(note.title.clone());
             self.notes.push(note);
         }
-        if !titles.is_empty() {
+        if !restored.titles.is_empty() {
             self.notes.sort_by_key(|n| std::cmp::Reverse(n.created_at));
         }
-        titles
+        restored
     }
 
     pub fn delete_from_trash(&self, ids: &[String]) -> Emptied {
@@ -2375,6 +2401,61 @@ mod tests {
     }
 
     #[test]
+    fn an_unreadable_trashed_file_is_listed_by_its_file_name() {
+        let (store, _tmp) = temp_store();
+        trashed_file(&store, "cs130/week 1/Broken.md", "---\ntitle: [\n---\nx");
+        let listed = store.trashed();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(
+            (
+                listed[0].title.as_str(),
+                listed[0].directory.as_str(),
+                listed[0].readable
+            ),
+            ("Broken", "cs130/week 1", false)
+        );
+        assert_eq!(
+            listed[0].id,
+            stable_id(Path::new(".trash/cs130/week 1/Broken.md"))
+        );
+    }
+
+    #[test]
+    fn an_unreadable_trashed_file_can_be_deleted_for_good_by_its_id() {
+        let (store, _tmp) = temp_store();
+        let path = trashed_file(&store, "Broken.md", "---\ntitle: [\n---\nx");
+        trashed_file(&store, "Other.md", "---\ntitle: [\n---\ny");
+        let id = store
+            .trashed()
+            .into_iter()
+            .find(|t| t.title == "Broken")
+            .unwrap()
+            .id;
+        let emptied = store.delete_from_trash(&[id]);
+        assert_eq!((emptied.deleted, emptied.failed), (1, 0));
+        assert!(emptied.forgotten.is_empty());
+        assert!(!path.exists());
+        assert_eq!(store.trashed().len(), 1);
+    }
+
+    #[test]
+    fn restoring_an_unreadable_trashed_file_restores_nothing() {
+        let (mut store, _tmp) = temp_store();
+        let path = trashed_file(&store, "Broken.md", "---\ntitle: [\n---\nx");
+        let id = store.trashed()[0].id.clone();
+        let restored = store.restore_many(&[id.clone(), id]);
+        assert_eq!(
+            restored,
+            Restored {
+                titles: vec![],
+                unreadable: 1
+            }
+        );
+        assert!(store.notes.is_empty());
+        assert!(path.exists());
+    }
+
+    #[test]
     fn a_trashed_file_leo_cannot_read_has_its_own_id() {
         let (store, _tmp) = temp_store();
         fs::create_dir_all(store.notes_dir.join("a")).unwrap();
@@ -2404,7 +2485,10 @@ mod tests {
             format!("---\nid: {}\ntitle: Bad\n---\n", uuid::Uuid::new_v4()).into_bytes();
         bytes.extend([0xff, 0xfe, 0xfd]);
         fs::write(&path, bytes).unwrap();
-        assert_eq!(store.restore_many(std::slice::from_ref(&id)), ["Keep"]);
+        assert_eq!(
+            store.restore_many(std::slice::from_ref(&id)).titles,
+            ["Keep"]
+        );
         assert!(store.find_note(&id).is_some());
     }
 
@@ -2479,7 +2563,7 @@ mod tests {
             ids[1].clone(),
             ids[0].clone(),
         ];
-        assert_eq!(store.restore_many(&asked), ["C", "A", "B"]);
+        assert_eq!(store.restore_many(&asked).titles, ["C", "A", "B"]);
         assert_eq!(store.notes.len(), 4);
         assert!(store.directories.contains(&"x/y".to_string()));
     }
@@ -3160,8 +3244,292 @@ mod tests {
             (id.as_str(), "Big")
         );
         assert_eq!(store.trashed().len(), 1);
-        assert!(store.restore_many(std::slice::from_ref(&id)).is_empty());
+        let restored = store.restore_many(std::slice::from_ref(&id));
+        assert!(restored.titles.is_empty());
+        assert_eq!(restored.unreadable, 1);
         assert!(store.notes.is_empty());
+    }
+
+    fn unreadable_under(root: &Path) -> Vec<String> {
+        let mut bad = Vec::new();
+        let mut stack = vec![root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            for entry in fs::read_dir(&dir).into_iter().flatten().flatten() {
+                let path = entry.path();
+                if entry.file_type().unwrap().is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|e| e == "md") {
+                    let relative = path.strip_prefix(root).unwrap();
+                    let readable = fs::read_to_string(&path).is_ok_and(|text| {
+                        parse_note_from_markdown(&text, relative, Utc::now()).is_ok()
+                    });
+                    if !readable {
+                        bad.push(relative.display().to_string());
+                    }
+                }
+            }
+        }
+        bad
+    }
+
+    #[test]
+    fn every_note_leo_writes_reads_back() {
+        let titles = [
+            "---",
+            "...",
+            "a: b",
+            "#x",
+            " lead",
+            "trail ",
+            "\"q\"",
+            "'q'",
+            "[x]",
+            "{x}",
+            "&a",
+            "*a",
+            "!t",
+            "%x",
+            "@x",
+            "`x",
+            "|",
+            ">",
+            "? x",
+            "- x",
+            "yes",
+            "null",
+            "~",
+            "123",
+            "1e3",
+            "0x1F",
+            "2026-01-01",
+            "a\tb",
+            "\u{feff}bom",
+            "a\u{85}b",
+            "a\u{2028}b",
+            "🦉 owl",
+            "a\nb",
+            "a\rb",
+        ];
+        let long = "t".repeat(300);
+        let mut extras: Vec<serde_yaml::Mapping> = vec![serde_yaml::Mapping::new()];
+        for yaml in [
+            "nested:\n  a: 1\n  b: [x, y]\n",
+            "list:\n- one\n- two\n",
+            "tagged: !thing 5\n",
+            "text: \"line\\n---\\nmore\\n\"\n",
+            "'---': odd key\n",
+        ] {
+            extras.push(serde_yaml::from_str(yaml).unwrap());
+        }
+        let bodies = [
+            "",
+            "---\n",
+            "---\nid: fake\n---\nlook-alike",
+            "\n\nlead",
+            "a\r\nb",
+        ];
+        let mut findings = Vec::new();
+        let mut damaged = Vec::new();
+        let mut check = |title: &str, extra: &serde_yaml::Mapping, body: &str| {
+            let mut note = Note::new(title, body, vec![], "");
+            note.extra = extra.clone();
+            let text = note_to_markdown(&note).unwrap();
+            let relative = format!("{}.md", filename::file_name(title));
+            match parse_note_from_markdown(&text, Path::new(&relative), Utc::now()) {
+                Err(e) => damaged.push(format!("{title:?} {extra:?} {body:?}: {e}")),
+                Ok(back) => {
+                    if back.id != note.id || back.title != note.title {
+                        damaged.push(format!("{title:?}: came back as {:?}", back.title));
+                    }
+                    for (key, value) in &note.extra {
+                        let came = back.extra.get(key);
+                        match (value, came) {
+                            (
+                                serde_yaml::Value::String(sent),
+                                Some(serde_yaml::Value::String(got)),
+                            ) if sent != got => {
+                                findings.push(format!("property {sent:?} reads back as {got:?}"))
+                            }
+                            _ if came != Some(value) => {
+                                damaged.push(format!("{key:?} came back as {came:?}"))
+                            }
+                            _ => {}
+                        }
+                    }
+                    let expected = body.replace("\r\n", "\n");
+                    if back.body != expected.trim_start_matches('\n') {
+                        damaged.push(format!(
+                            "{title:?} body {body:?} came back as {:?}",
+                            back.body
+                        ));
+                    } else if back.body != body {
+                        findings.push(format!("body {body:?} reads back as {:?}", back.body));
+                    }
+                }
+            }
+        };
+        for title in titles.iter().copied().chain([long.as_str()]) {
+            check(title, &extras[0], "x");
+        }
+        for extra in &extras {
+            check("Extras", extra, "x");
+        }
+        for body in bodies {
+            check("Body", &extras[0], body);
+        }
+        assert!(damaged.is_empty(), "{damaged:#?}");
+        assert_eq!(
+            findings,
+            [
+                "property \"line\\n---\\nmore\\n\" reads back as \"line\\n---\\nmore\"",
+                "body \"\\n\\nlead\" reads back as \"lead\"",
+                "body \"a\\r\\nb\" reads back as \"a\\nb\"",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_trashed_copy_written_under_a_new_id_reads_back() {
+        let (store, _tmp) = temp_store();
+        let text = "---\nid: same\ntitle: One\n---\nx";
+        fs::write(store.notes_dir.join("One.md"), text).unwrap();
+        fs::write(
+            store.notes_dir.join("Two.md"),
+            "---\nid: same\ntitle: Two\n---\ny",
+        )
+        .unwrap();
+        set_mtime_to_the_past(&store.notes_dir.join("One.md"));
+        let mut store = Store::load_from(&store.notes_dir).unwrap();
+        let second = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Two")
+            .unwrap()
+            .id
+            .clone();
+        assert_ne!(second, "same");
+        store.delete_notes(std::slice::from_ref(&second));
+        store.save().unwrap();
+        assert!(unreadable_under(&store.notes_dir).is_empty());
+        assert_eq!(trashed_ids(&store.notes_dir), HashSet::from([second]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_stamp_fallback_rewrite_reads_back() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Locked", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let path = store.notes_dir.join("Locked.md");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        assert!(unreadable_under(&store.notes_dir).is_empty());
+        assert_eq!(trashed_ids(&store.notes_dir), HashSet::from([id]));
+    }
+
+    #[test]
+    fn a_conflict_copy_reads_back() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Shared", "mine", vec![], "a")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let path = store.notes_dir.join("a/Shared.md");
+        let theirs = fs::read_to_string(&path).unwrap().replace("mine", "theirs");
+        fs::write(&path, theirs).unwrap();
+        store.find_note_mut(&id).unwrap().body = "mine, edited".into();
+        store.save().unwrap();
+        assert!(unreadable_under(&store.notes_dir).is_empty());
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.notes.len(), 2);
+    }
+
+    #[test]
+    fn a_restored_note_is_written_readable() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Back: again", "x", vec![], "a/b")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        assert_eq!(store.restore(&id).as_deref(), Some("Back: again"));
+        store.save().unwrap();
+        assert!(unreadable_under(&store.notes_dir).is_empty());
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.find_note(&id).unwrap().title, "Back: again");
+    }
+
+    #[test]
+    fn a_save_racing_an_outside_rename_leaves_every_file_readable() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Moving", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        fs::rename(
+            store.notes_dir.join("Moving.md"),
+            store.notes_dir.join("Moved elsewhere.md"),
+        )
+        .unwrap();
+        store.find_note_mut(&id).unwrap().body = "changed".into();
+        store.save().unwrap();
+        assert!(unreadable_under(&store.notes_dir).is_empty());
+    }
+
+    #[test]
+    fn an_outside_edit_mid_save_leaves_every_file_leo_wrote_readable() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Half", "x", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let path = store.notes_dir.join("Half.md");
+        let text = fs::read_to_string(&path).unwrap();
+        let cut: String = text.chars().take(text.chars().count() / 3).collect();
+        fs::write(&path, format!("{cut}\n---\ntitle: [\n")).unwrap();
+        store.find_note_mut(&id).unwrap().body = "edited".into();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        assert_eq!(unreadable_under(&store.notes_dir), ["Half.md"]);
+        assert!(trash_files(&store).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failed_write_leaves_no_partial_md() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut store, _tmp) = temp_store();
+        store.create_note("First", "x", vec![], "locked").unwrap();
+        store.save().unwrap();
+        let locked = store.notes_dir.join("locked");
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
+        store.create_note("Second", "y", vec![], "locked").unwrap();
+        let saved = store.save();
+        let names: Vec<String> = fs::read_dir(&locked)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(saved.is_err());
+        assert_eq!(names, ["First.md"]);
+        assert!(unreadable_under(&store.notes_dir).is_empty());
     }
 
     #[test]

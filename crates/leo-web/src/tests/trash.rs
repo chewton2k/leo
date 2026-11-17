@@ -144,6 +144,36 @@ fn a_trashed_folder_leaves_no_empty_directory_to_block_its_name() {
     assert_eq!(renamed.0["path"], "Week 1");
 }
 
+#[test]
+fn a_trashed_file_leo_cannot_read_is_listed_and_cannot_be_restored() {
+    let (state, _d, _ids) = state_with(&[]);
+    let trash = state.fresh().notes_dir.join(".trash/cs130");
+    std::fs::create_dir_all(&trash).unwrap();
+    std::fs::write(trash.join("Broken.md"), "---\ntitle: [\n---\nx").unwrap();
+    let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        (
+            listed[0].title.as_str(),
+            listed[0].directory.as_str(),
+            listed[0].readable
+        ),
+        ("Broken", "cs130", false)
+    );
+    let restored = run(restore_many(
+        State(state.clone()),
+        Json(TrashChoice {
+            ids: vec![listed[0].id.clone()],
+            all: false,
+            dirs: vec![],
+        }),
+    ))
+    .unwrap();
+    assert_eq!(restored.0["restored"], 0);
+    assert_eq!(restored.0["unreadable"], 1);
+    assert!(trash.join("Broken.md").exists());
+}
+
 #[cfg(unix)]
 #[test]
 fn p02_empty_trash_with_one_locked_folder_reports_what_failed() {

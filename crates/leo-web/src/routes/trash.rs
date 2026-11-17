@@ -12,6 +12,7 @@ pub(crate) struct TrashResponse {
     pub(crate) title: String,
     pub(crate) directory: String,
     pub(crate) deleted_at: String,
+    pub(crate) readable: bool,
 }
 
 pub(crate) async fn list_trash(
@@ -28,6 +29,7 @@ pub(crate) async fn list_trash(
                         title: t.title,
                         directory: t.directory,
                         deleted_at: t.deleted_at.to_rfc3339(),
+                        readable: t.readable,
                     })
                     .collect(),
             ))
@@ -172,9 +174,12 @@ pub(crate) async fn restore_many(
             for dir in &choice.dirs {
                 store.create_dir(dir);
             }
-            let restored = store.restore_many(&choice.ids).len();
+            let restored = store.restore_many(&choice.ids);
             save(store)?;
-            Ok(Json(serde_json::json!({ "restored": restored })))
+            Ok(Json(serde_json::json!({
+                "restored": restored.titles.len(),
+                "unreadable": restored.unreadable,
+            })))
         })
         .await
 }
