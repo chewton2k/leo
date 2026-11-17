@@ -1500,7 +1500,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   (2026-11-02, the user's call: no modal; `#kanban-panel`, kept across board redraws, a
   full-screen layer under 760 px): title, subheading, status and board (the shared select
   menu), priority (`segmented`, `data-priority`), a borderless description (autosave after
-  600 ms, on blur, and before Escape or × closes it), Delete with Undo. The description is
+  600 ms, on blur, and before Escape or × closes it; a save that cannot reach leo retries every 3 s
+  and says "Not saved, will retry"), Delete with Undo. The description is
   the note editor itself (2026-11-06, the user's call: "render markdown the same as our
   notes"): `leoDoc.mount` on `#kanban-card-description` (rendered blocks, click a line to
   edit, checkboxes toggle), no outline, pictures, margin or note id. `description` stays plain

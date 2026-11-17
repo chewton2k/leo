@@ -9,6 +9,7 @@ const KANBAN_HOLD_MS = 300;
 const KANBAN_EDGE = 56;
 const KANBAN_OTHERS = '.kanban-card:not(.kanban-placeholder)';
 const KANBAN_SAVE_MS = 600;
+const KANBAN_RETRY_MS = 3000;
 const KANBAN_MOST_DESCRIPTION = 8000;
 const KANBAN_PRIORITIES = [['', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const KANBAN_ICON = {
@@ -695,6 +696,7 @@ async function kanbanCardPanel(id) {
   const valueOf = (name) => name === 'description' ? doc.source().trim() : fields[name].value.replace(/\s+/g, ' ').trim();
   const dirty = () => names.some((name) => valueOf(name) !== (card[name] || '') && (name !== 'title' || valueOf(name)));
   const running = {};
+  const retrying = {};
   const save = (name) => {
     clearTimeout(timers[name]);
     timers[name] = 0;
@@ -702,17 +704,25 @@ async function kanbanCardPanel(id) {
   };
   const write = async (name) => {
     const value = valueOf(name);
-    if (value === (card[name] || '')) return true;
+    if (value === (card[name] || '')) { retrying[name] = false; return true; }
     if (name === 'title' && !value) { title.value = card.title; fit(title); return true; }
     if (name === 'description' && tellOver()) return false;
     try {
       const done = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { [name]: value } });
       kanbanUpdate(card, done);
+      retrying[name] = false;
       if (saved.isConnected) saved.textContent = 'Saved';
       if (problem.isConnected) tellOver();
       return true;
     } catch (e) {
       if (e instanceof Locked) throw e;
+      if (e instanceof Offline || e.status >= 500) {
+        if (saved.isConnected) saved.textContent = 'Not saved, will retry';
+        if (!retrying[name]) toast(e.message, { bad: true });
+        retrying[name] = true;
+        timers[name] = setTimeout(() => save(name).catch(fail), KANBAN_RETRY_MS);
+        return false;
+      }
       toast(e.message, { bad: true });
       if (problem.isConnected) tell(e.message);
       return false;
