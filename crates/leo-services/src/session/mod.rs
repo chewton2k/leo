@@ -380,6 +380,28 @@ impl Session {
         out
     }
 
+    pub fn settled(&self) -> (std::collections::BTreeSet<u32>, usize) {
+        let mut all = std::collections::BTreeSet::new();
+        let mut settled = std::collections::BTreeSet::new();
+        let Ok(entries) = std::fs::read_dir(&self.dir) else {
+            return (settled, 0);
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            let Some((index, ext)) = index_of(&name) else {
+                continue;
+            };
+            if !matches!(ext, "txt" | "err" | "wav" | "part.wav") {
+                continue;
+            }
+            all.insert(index);
+            if matches!(ext, "txt" | "err") {
+                settled.insert(index);
+            }
+        }
+        (settled, all.len())
+    }
+
     pub fn segments(&self) -> Vec<Segment> {
         let mut found: std::collections::BTreeMap<u32, SegmentState> = Default::default();
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
@@ -597,6 +619,26 @@ mod tests {
         std::fs::create_dir(dir.join("session.json")).unwrap();
         assert!(settle_new(dir.clone(), Manifest::new(None, None, "", false)).is_err());
         assert!(!dir.exists());
+    }
+
+    #[test]
+    fn settled_counts_parts_from_names_only() {
+        let (recording, _dir) = session();
+        for name in ["seg-00000.txt", "seg-00001.txt", "seg-00002.txt"] {
+            std::fs::create_dir(recording.dir.join(name)).unwrap();
+        }
+        for name in [
+            "seg-00003.err",
+            "seg-00004.wav",
+            "seg-00005.wav",
+            "seg-00006.part.wav",
+            "notes.txt",
+        ] {
+            std::fs::write(recording.dir.join(name), "").unwrap();
+        }
+        let (settled, total) = recording.settled();
+        assert_eq!(settled.into_iter().collect::<Vec<_>>(), [0, 1, 2, 3]);
+        assert_eq!(total, 7);
     }
 
     #[test]

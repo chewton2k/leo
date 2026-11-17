@@ -547,34 +547,32 @@ pub fn finish(
     }
     transcriber.recording_ended();
     let segment_samples = session.manifest.segment_secs * wav::RATE as u64;
+    let (mut settled, total) = session.settled();
     let mut no_model = false;
-    let mut take = |update: Update, state: &mut Live| {
-        if let Update::Failed { error, .. } = &update {
-            no_model |= session::transcriber::waiting_for_model(error);
-        }
-        state.apply(update, emit, segment_samples);
-    };
+    let mut take =
+        |update: Update, state: &mut Live, settled: &mut std::collections::BTreeSet<u32>| {
+            match &update {
+                Update::Done { index, .. } => {
+                    settled.insert(*index);
+                }
+                Update::Failed { index, error } => {
+                    settled.insert(*index);
+                    no_model |= session::transcriber::waiting_for_model(error);
+                }
+                _ => {}
+            }
+            state.apply(update, emit, segment_samples);
+        };
     while !transcriber.is_finished() {
         if finish_now.load(Ordering::Relaxed) {
             transcriber.cancel();
         }
         for update in updates.try_iter() {
-            take(update, state);
+            take(update, state, &mut settled);
         }
-        let segments = session.segments();
-        let total = segments.len();
-        let done = segments
-            .iter()
-            .filter(|s| {
-                matches!(
-                    s.state,
-                    session::SegmentState::Done(_) | session::SegmentState::Failed(_)
-                )
-            })
-            .count();
         emit(Event::Progress {
             label: "Transcribing the recording".to_string(),
-            steps: (total > 1).then_some((done, total)),
+            steps: (total > 1).then_some((settled.len().min(total), total)),
         });
         state.show(emit);
         std::thread::sleep(POLL);
@@ -594,7 +592,7 @@ pub fn finish(
         );
     }
     for update in updates.try_iter() {
-        take(update, state);
+        take(update, state, &mut settled);
     }
     let assembled = session.assemble();
     if assembled.pending > 0 {
@@ -1314,6 +1312,56 @@ mod tests {
             ending_of_a_silent_recording(false),
             Some(Event::Failed(SILENT_RECORDING.to_string()))
         );
+    }
+
+    #[test]
+    fn progress_after_stop_counts_parts_settled_before_and_after() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", false)).unwrap();
+        let dir = session.dir.clone();
+        for index in 0..3 {
+            std::fs::write(dir.join(format!("seg-{index:05}.txt")), "said").unwrap();
+        }
+        for index in 3..5 {
+            wav::write(&dir.join(wav::done_name(index)), &vec![3000i16; 16_000]).unwrap();
+        }
+        let (tx, updates) = mpsc::channel();
+        let transcriber = Transcriber::start(
+            &dir,
+            std::sync::Arc::new(|_| {
+                std::thread::sleep(Duration::from_millis(400));
+                Ok("said".into())
+            }),
+            Policy {
+                workers: 1,
+                ..Policy::default()
+            },
+            false,
+            tx,
+        );
+        let events = std::sync::Mutex::new(Vec::new());
+        finish(
+            session,
+            transcriber,
+            &updates,
+            &mut Live::new(live::ROLL_INTERVAL),
+            &|event| events.lock().unwrap().push(event),
+            &AtomicBool::new(false),
+        );
+        let steps: Vec<(usize, usize)> = events
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Progress { steps, .. } => steps,
+                _ => None,
+            })
+            .collect();
+        assert!(steps.len() >= 2, "{steps:?}");
+        assert!(steps.iter().all(|&(_, total)| total == 5), "{steps:?}");
+        assert!(steps[0].0 >= 3, "{steps:?}");
+        assert!(steps.windows(2).all(|w| w[0].0 <= w[1].0), "{steps:?}");
+        assert!(steps.last().unwrap().0 >= 4, "{steps:?}");
     }
 
     #[test]
