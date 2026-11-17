@@ -644,24 +644,20 @@ fn label_speakers(
     });
     let parts = session.segments().len() as u32;
     let started = Instant::now();
-    let labelled = if parts > kept_parts(session) {
-        Err("the recording is longer than two hours".to_string())
-    } else {
-        session::speakers::label(
-            &session.dir,
-            parts,
-            session.manifest.segment_secs * 1000,
-            diarize,
-            transcribe,
-            finish_now,
-            &|done, total| {
-                emit(Event::Progress {
-                    label: "Telling speakers apart".to_string(),
-                    steps: Some((done, total)),
-                })
-            },
-        )
-    };
+    let labelled = session::speakers::label(
+        &session.dir,
+        parts,
+        session.manifest.segment_secs * 1000,
+        diarize,
+        transcribe,
+        finish_now,
+        &|done, total| {
+            emit(Event::Progress {
+                label: "Telling speakers apart".to_string(),
+                steps: Some((done, total)),
+            })
+        },
+    );
     let spoken = match labelled {
         Ok(spoken) => spoken,
         Err(problem) if crate::speech::engine::engine().stopping() => {

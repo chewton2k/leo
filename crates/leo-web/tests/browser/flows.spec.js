@@ -2631,7 +2631,7 @@ test.describe('recording', () => {
       return painted;
     });
     expect(leftEdge, 'the wave reaches the left edge of its box').toBeGreaterThan(0);
-    expect(seen.started).toEqual({ source: 'microphone', directory: '', title: 'Graphs', profile: { context: '', wants: 'Focus on BFS' } });
+    expect(seen.started).toEqual({ source: 'microphone', directory: '', title: 'Graphs', profile: { context: '', wants: 'Focus on BFS', speakers: false } });
     const live = page.locator('#rec-wants-live');
     await expect(live).toHaveValue('Focus on BFS');
     await live.click();

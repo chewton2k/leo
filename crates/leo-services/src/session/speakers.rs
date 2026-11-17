@@ -159,10 +159,17 @@ pub fn label(
         parts: Vec::new(),
         loaded: None,
     };
+    let too_long = || "the recording is longer than two hours".to_string();
     for index in 0..parts {
         let path = dir.join(wav::done_name(index));
         let bytes = std::fs::metadata(&path)
-            .map_err(|_| "the audio of this recording is no longer kept".to_string())?
+            .map_err(|_| {
+                if index as u64 * segment_ms > MOST_SECS * 1000 {
+                    too_long()
+                } else {
+                    "the audio of this recording is no longer kept".to_string()
+                }
+            })?
             .len();
         let samples = bytes.saturating_sub(wav::HEADER) / 2;
         let skip = if index == 0 { 0 } else { lead.min(samples) };
@@ -170,7 +177,7 @@ pub fn label(
     }
     let total_ms = audio.parts.iter().map(|p| p.2).sum::<u64>() * 1000 / wav::RATE as u64;
     if total_ms > MOST_SECS * 1000 {
-        return Err("the recording is longer than two hours".into());
+        return Err(too_long());
     }
     if stop.load(Ordering::Relaxed) {
         return Err("Finish now was pressed".into());
@@ -216,9 +223,10 @@ pub fn label(
             .prefix(".speaker-")
             .suffix(".wav")
             .tempfile_in(dir)
-            .map_err(|e| e.to_string())?;
-        wav::write(file.path(), &samples).map_err(|e| e.to_string())?;
-        let text = transcribe(file.path()).or_else(|_| transcribe(file.path()))?;
+            .map_err(|e| e.to_string())?
+            .into_temp_path();
+        wav::write(&file, &samples).map_err(|e| e.to_string())?;
+        let text = transcribe(&file).or_else(|_| transcribe(&file))?;
         let text = text.trim();
         if text.is_empty() || crate::ai::live::is_silence_artifact(text) {
             continue;
@@ -394,16 +402,26 @@ mod tests {
             &|_, _| {}
         )
         .is_err());
-        assert!(label(
-            dir.path(),
-            2,
-            SEGMENT,
-            &two,
-            &fine,
-            &AtomicBool::new(false),
-            &|_, _| {}
-        )
-        .is_err());
+        let missing = |segment_ms| {
+            label(
+                dir.path(),
+                2,
+                segment_ms,
+                &two,
+                &fine,
+                &AtomicBool::new(false),
+                &|_, _| {},
+            )
+            .unwrap_err()
+        };
+        assert_eq!(
+            missing(SEGMENT),
+            "the audio of this recording is no longer kept"
+        );
+        assert_eq!(
+            missing(MOST_SECS * 1000 + 1),
+            "the recording is longer than two hours"
+        );
         let broken = |_: Vec<(PathBuf, u64)>| Err("no model".to_string());
         assert_eq!(
             label(

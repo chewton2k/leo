@@ -172,8 +172,11 @@ chosen speech model if needed and sends `Request::Diarize { model, parts }`; the
 worker reads the WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops
 it, answering `Response::Turns`. Its deadline is `Deadlines::diarize` (run floor
 plus 1/40 of the transcription factor); Finish now cancels it through
-`supervisor.cancel()`, and a lost worker there never marks the GPU unusable. It
-shares the worker, so a dictation started during the pass waits for it.
+`supervisor.cancel()`. A worker lost there (not hung, not pinned) never marks the
+GPU unusable for speech: the pass is retried once in a CPU-only worker
+(`Owner.diarize_on_cpu`), and later passes in that app session start there, dropping
+the speech worker, which restarts on the next request. It shares the worker, so
+a dictation started during the pass waits for it.
 
 `speech/supervisor.rs` re-executes the binary with `--leo-speech-worker` before
 normal startup. Only the worker initializes GPU backends, loads a speech model

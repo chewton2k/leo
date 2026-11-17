@@ -68,7 +68,8 @@ process tap or Windows loopback, else BlackHole or `LEO_SCREEN_DEVICE`; see
 header refreshed each second, renamed to `.wav` every `SEGMENT_SECS` (300)
 with `OVERLAP_SECS` of the previous segment prefilled. Paused audio is never
 written. `transcriber::Transcriber` transcribes each `.wav` into `.txt`
-(atomic), deletes the audio, backs off per segment, never gives up while
+(atomic), deletes the audio (with speaker labels on, `Policy.keep_parts` keeps the
+first two hours of parts until the speaker pass at Finish, which then deletes them), backs off per segment, never gives up while
 recording, gives up after `attempts_after_stop` (writes `.err`, keeps audio)
 unless the error is a rate limit. `Session::assemble` stitches segment texts in
 order. `recover_parts` seals a crash's `.part.wav` and clears `.err` for retry.
@@ -76,7 +77,8 @@ order. `recover_parts` seals a crash's `.part.wav` and clears `.err` for retry.
 request per group plus a title/summary request; every failure falls back to
 the raw transcript, so it cannot fail.
 
-Drafting while recording (2026-11-11, for every writing provider): the time after Stop was
+Drafting while recording (2026-11-11, for every writing provider; off when the recording
+labels speakers, since the labelled transcript only exists after Finish): the time after Stop was
 one call decoding the whole note (EE116, 12 min, Codex gpt-6.1-sol: 57.8 s for 2,585 output
 tokens). `recorder::Drafter` writes each finished stretch of segments in the background
 (`chat::build_draft_prompt`, the longest contiguous Done prefix that fits the budget; one call

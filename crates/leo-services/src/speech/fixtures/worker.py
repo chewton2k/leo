@@ -73,6 +73,13 @@ try:
                 send({'Error': 'feed failed'})
             else:
                 send({'Fed': {'update': {}, 'text': None}})
+        elif 'Diarize' in request:
+            model = pathlib.Path(request['Diarize']['model'])
+            with (model.parent / 'diarized').open('a') as file:
+                file.write(('cpu' if cpu else 'gpu') + '\n')
+            if not cpu and model.name == 'crashed':
+                os._exit(7)
+            send({'Turns': [{'start_ms': 0, 'end_ms': 1000, 'speaker': 1}]})
         elif 'Finalize' in request:
             send({'Finalized': {'update': {}, 'text': {'committed': 'local words'}, 'language': None}})
         else:
