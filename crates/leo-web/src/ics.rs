@@ -261,14 +261,18 @@ fn duration(value: &str) -> Option<Duration> {
             unit => {
                 let n: i64 = number.parse().ok()?;
                 number.clear();
-                total += match (unit, in_time) {
-                    ('W', _) => Duration::weeks(n),
-                    ('D', _) => Duration::days(n),
-                    ('H', true) => Duration::hours(n),
-                    ('M', true) => Duration::minutes(n),
-                    ('S', true) => Duration::seconds(n),
+                let part = match (unit, in_time) {
+                    ('W', _) => Duration::try_weeks(n)?,
+                    ('D', _) => Duration::try_days(n)?,
+                    ('H', true) => Duration::try_hours(n)?,
+                    ('M', true) => Duration::try_minutes(n)?,
+                    ('S', true) => Duration::try_seconds(n)?,
                     _ => return None,
                 };
+                total = total.checked_add(&part)?;
+                if total > Duration::days(366) {
+                    return None;
+                }
             }
         }
     }
@@ -438,7 +442,9 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
     let mut emit = |raw: &Raw, start: DateTime<Utc>, length: Duration, out: &mut Vec<Event>| {
-        let end = start + length;
+        let Some(end) = start.checked_add_signed(length) else {
+            return;
+        };
         if raw.cancelled || end < from || start > to || !seen.insert((raw.uid.clone(), start)) {
             return;
         }
@@ -514,7 +520,13 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
         let starts = match raw.rule.as_deref() {
             None => vec![start],
             Some(text) => match rule_of(text) {
-                Some(rule) => occurrences(start, zone, &rule, from - length, to),
+                Some(rule) => occurrences(
+                    start,
+                    zone,
+                    &rule,
+                    from.checked_sub_signed(length).unwrap_or(from),
+                    to,
+                ),
                 None => vec![start],
             },
         };
@@ -830,5 +842,35 @@ END:VCALENDAR\r
         );
         assert!(began.elapsed() < std::time::Duration::from_secs(5));
         assert!(!cal.events.is_empty());
+    }
+
+    fn reads_without_panic(duration: &str) -> Result<usize, String> {
+        let feed = format!("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:a\nDTSTART:20260101T100000Z\nDURATION:{duration}\nEND:VEVENT\nEND:VCALENDAR");
+        let from = at("2025-12-01T00:00:00Z");
+        let to = at("2026-02-01T00:00:00Z");
+        std::panic::catch_unwind(|| read(&feed, from, to).events.len()).map_err(|e| {
+            e.downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default()
+        })
+    }
+
+    #[test]
+    fn a_huge_week_count_does_not_panic() {
+        let read = reads_without_panic("P99999999999999999W");
+        assert!(read.is_ok(), "the reader panicked: {read:?}");
+    }
+
+    #[test]
+    fn a_huge_day_count_on_a_timed_event_does_not_panic() {
+        let read = reads_without_panic("P300000000D");
+        assert!(read.is_ok(), "the reader panicked: {read:?}");
+    }
+
+    #[test]
+    fn a_huge_duration_gives_the_event_its_default_length() {
+        assert_eq!(reads_without_panic("P300000000D"), Ok(1));
+        assert_eq!(duration("P2D"), Some(Duration::days(2)));
     }
 }
