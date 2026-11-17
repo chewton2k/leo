@@ -249,3 +249,21 @@ test('a meeting prompt preselects Call and its event and fills the meeting wordi
   const body = recordingSource.slice(recordingSource.indexOf('    function preselect('), recordingSource.indexOf('    function idleForm('));
   assert.doesNotMatch(body, /begin|start\(|rec-start|click/, 'the prompt never presses Start');
 });
+
+test('a hidden window pauses the speaker-model poll', async () => {
+  const timers = [];
+  const asked = [];
+  const box = { isConnected: true, querySelector: () => ({}) };
+  const scope = {
+    s: {}, setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, redrawSpeakers() {}, onScreen: () => false,
+    api: async (url) => { asked.push(url); return { speakers: { progress: { state: 'downloading', bytes: 1, total: 2 } } }; },
+  };
+  const speakerModel = require('node:vm').runInNewContext(`(function(){${recordingSource.slice(recordingSource.indexOf('    async function speakerModel('), recordingSource.indexOf('    function redrawSpeakers('))} return speakerModel;})()`, scope);
+  await speakerModel(box);
+  const first = asked.length;
+  for (let i = 0; i < 4; i++) {
+    for (const t of timers.splice(0)) t.fn();
+    for (let n = 0; n < 5; n++) await Promise.resolve();
+  }
+  assert.equal(asked.length - first, 0);
+});

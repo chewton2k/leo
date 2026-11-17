@@ -58,3 +58,52 @@ test('holding a note drag on another note row arms combine, and leaving the row 
   assert.equal(over(row), false, 'coming back starts the hold again');
   assert.equal(timers.length, 2);
 });
+
+function clock() {
+  const list = [];
+  return {
+    list,
+    setTimeout(fn, ms) { list.push({ fn, ms }); return list.length; },
+    async fire() {
+      for (const t of list.splice(0)) t.fn();
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    },
+  };
+}
+
+function combineWatch(visible, answer) {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8');
+  const code = source.slice(source.indexOf('const combinesWatched = new Set();'), source.indexOf('async function forgetCombine'));
+  const timer = clock();
+  const asked = [];
+  const toasts = [];
+  const context = {
+    setTimeout: timer.setTimeout, appVisible: () => visible.now, enc: String, checkActivity() {}, reviewCombine: async () => {}, fail() {},
+    toast: (text) => toasts.push(text), api: async (url) => { asked.push(url); return answer(); },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.watchCombine = watchCombine; globalThis.combinesPaused = combinesPaused;`, context);
+  return { context, timer, asked, toasts };
+}
+
+test('a hidden window pauses the combine watch', async () => {
+  const { context, timer, asked } = combineWatch({ now: false }, () => ({ state: 'working' }));
+  context.watchCombine('j1');
+  for (let i = 0; i < 4; i++) await timer.fire();
+  assert.equal(asked.length, 0);
+  assert.equal(context.combinesPaused.has('j1'), true);
+});
+
+test('a combine paused while hidden and ready on return toasts once', async () => {
+  const visible = { now: false };
+  const { context, timer, asked, toasts } = combineWatch(visible, () => ({ state: 'ready', with_title: 'A', into_title: 'B' }));
+  context.watchCombine('j1');
+  await timer.fire();
+  assert.equal(asked.length, 0);
+  visible.now = true;
+  if (context.combinesPaused.delete('j1')) context.watchCombine('j1');
+  await timer.fire();
+  await timer.fire();
+  assert.equal(asked.length, 1);
+  assert.equal(toasts.length, 1);
+});

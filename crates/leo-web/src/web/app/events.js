@@ -241,7 +241,14 @@ async function checkActivity() {
     if (e instanceof Locked) return;
   }
   drawActivity();
-  for (const t of activity.tasks) if (t.kind === 'combine' && !t.ready) watchCombine(t.href.slice('#combine/'.length));
+  const combining = new Set();
+  for (const t of activity.tasks) {
+    if (t.kind !== 'combine') continue;
+    const id = t.href.slice('#combine/'.length);
+    combining.add(id);
+    if (!t.ready || combinesPaused.delete(id)) watchCombine(id);
+  }
+  for (const id of combinesPaused) if (!combining.has(id)) combinesPaused.delete(id);
   if (appVisible() && activity.tasks.some((t) => !t.ready)) activity.timer = setTimeout(checkActivity, 1000);
 }
 

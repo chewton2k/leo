@@ -219,11 +219,13 @@ async function combineNow(from, into) {
 }
 
 const combinesWatched = new Set();
+const combinesPaused = new Set();
 
 function watchCombine(id) {
   if (combinesWatched.has(id)) return;
   combinesWatched.add(id);
   const look = async () => {
+    if (!appVisible()) { combinesWatched.delete(id); combinesPaused.add(id); return; }
     let job;
     try {
       job = await api(`/api/combines/${enc(id)}`);

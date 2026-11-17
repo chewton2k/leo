@@ -393,7 +393,7 @@
       redrawSpeakers(box);
       const job = s.speakerModel && s.speakerModel.progress;
       clearTimeout(s.speakerPoll);
-      if (job && job.state === 'downloading') s.speakerPoll = setTimeout(() => { if (box.isConnected && box.querySelector('#rec-speakers-box')) speakerModel(box); }, 1000);
+      if (job && job.state === 'downloading') s.speakerPoll = setTimeout(() => { if (onScreen() && box.isConnected && box.querySelector('#rec-speakers-box')) speakerModel(box); }, 1000);
     }
 
     function redrawSpeakers(box) {
@@ -787,6 +787,7 @@
       if (!onScreen()) return;
       pollNow();
       paintWaveNow();
+      if (s.speakerModel?.progress?.state === 'downloading' && s.container?.isConnected && s.container.querySelector('#rec-speakers-box')) speakerModel(s.container);
     }
     root.document.addEventListener('visibilitychange', recordingVisibility);
     root.addEventListener('leo-visibility', recordingVisibility);
