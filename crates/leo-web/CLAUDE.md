@@ -1046,7 +1046,7 @@ AI uses a pen icon, never a sparkle.
 
 - `read_store` takes an immutable Store callback and coalesces filesystem scans
   with core's Watch: it checks first, on relevant/rescan notifications, every
-  60 s and after native foreground return; a missing watcher checks every access.
+  60 s and after native foreground return; a missing watcher checks every access, a broken one at most every 2 s, until it reports events again.
   `with_store` and `store_now` always reconcile before mutations: a save must
   never absorb an unread external edit into its fingerprint.
 - App-status polling stops while the document or window is hidden and drops late
