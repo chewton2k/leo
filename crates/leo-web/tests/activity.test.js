@@ -27,3 +27,19 @@ test('models belong to the maker that trains them and shade by rank, a fourth go
   assert.equal(shades['claude-a'], 'var(--fam-claude-1)');
   assert.equal(shades['llama3.1'], 'var(--fam-local-1)');
 });
+
+test('Felix activity dates use the page language', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/settings.js'), 'utf8');
+  const value = {};
+  value.S = require('../src/web/schedule.js');
+  value.calLocale = () => 'de-DE';
+  vm.createContext(value);
+  vm.runInContext(source.slice(source.indexOf('function faToday'), source.indexOf('function faBarName')), value);
+  const march = new Date(2026, 2, 5);
+  assert.equal(value.faDate('2026-03-05'), march.toLocaleDateString('de-DE', { month: 'short', day: 'numeric' }));
+  assert.notEqual(value.faDate('2026-03-05'), march.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+  assert.equal(value.faDate('2026-03-05', true), march.toLocaleDateString('de-DE', { weekday: 'short', month: 'short', day: 'numeric' }));
+  assert.equal(value.faDate('2026-03-05 14', true), new Date(2026, 2, 5, 14).toLocaleString('de-DE', { weekday: 'short', hour: 'numeric' }));
+  assert.equal(value.faExact(1234567), (1234567).toLocaleString('de-DE'));
+  assert.equal(value.faToday(), value.S.dayKey(new Date()));
+});

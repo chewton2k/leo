@@ -569,7 +569,7 @@ const FA_NEUTRAL = 'color-mix(in srgb, var(--text) 45%, transparent)';
 
 function faToday(hourly) {
   const now = new Date();
-  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const day = S.dayKey(now);
   return hourly ? `${day} ${String(now.getHours()).padStart(2, '0')}` : day;
 }
 function faSpanName(span) { return span === 1 ? 'last 24 hours' : `last ${span} days`; }
@@ -578,13 +578,16 @@ function faCompact(n) {
   if (n >= 1000) return `${(n / 1e3).toFixed(1)}k`;
   return String(n);
 }
-function faExact(n) { return n.toLocaleString('en-US'); }
+function faExact(n) { return n.toLocaleString(calLocale()); }
 function faSeconds(ms) { return `${(ms / 1000).toFixed(1)} s`; }
 function faDate(day, long) {
   const [date, hour] = day.split(' ');
-  const [y, m, d] = date.split('-').map(Number);
-  if (hour !== undefined) return new Date(y, m - 1, d, Number(hour)).toLocaleString('en-US', long ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric' });
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', long ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const when = S.fromKey(date);
+  if (hour !== undefined) {
+    when.setHours(Number(hour));
+    return when.toLocaleString(calLocale(), long ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric' });
+  }
+  return when.toLocaleDateString(calLocale(), long ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
 }
 function faBarName(bar, weekly) { return weekly ? `${faDate(bar.from)} – ${faDate(bar.to)}` : faDate(bar.from, true); }
 function faModelName(name) { return name || 'Model not reported'; }

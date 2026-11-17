@@ -668,7 +668,8 @@ test('Felix activity over 24 hours draws hourly bars and detail for that day', a
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   await page.setContent(`<style>${pageCss()}</style><main id="app"></main>`);
-  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true;` });
+  await page.addScriptTag({ content: read('schedule.js') });
+  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true, S=window.leoSchedule, calLocale=()=>'en-US';` });
   await page.addScriptTag({ content: read('chat.js') });
   await page.addScriptTag({ content: read('app/settings.js').replace(/^(const|let) /gm, 'var ') });
   await page.evaluate(() => {
@@ -696,7 +697,8 @@ test('Felix activity draws gridlines and colours bars by maker', async ({ page }
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
   await page.setContent(`<style>${css}</style><main id="app"></main>`);
-  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true;` });
+  await page.addScriptTag({ content: read('schedule.js') });
+  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true, S=window.leoSchedule, calLocale=()=>'en-US';` });
   await page.addScriptTag({ content: read('chat.js') });
   await page.addScriptTag({ content: read('app/settings.js').replace(/^(const|let) /gm, 'var ') });
   await page.evaluate(() => {

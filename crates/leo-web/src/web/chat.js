@@ -507,8 +507,8 @@
     const effort = typeof spent.effort === 'string' && spent.effort ? `${spent.effort} effort` : '';
     const about = spent.estimated ? 'about ' : '';
     const steps = spent.steps > 1 ? ` over ${spent.steps} steps` : '';
-    const cached = Number(spent.cached || 0) > 0 ? ` (${Number(spent.cached).toLocaleString('en-US')} from the cache)` : '';
-    const title = `${about}${Number(spent.input || 0).toLocaleString('en-US')} tokens in${cached}, ${Number(spent.output || 0).toLocaleString('en-US')} out${steps}`;
+    const cached = Number(spent.cached || 0) > 0 ? ` (${Number(spent.cached).toLocaleString()} from the cache)` : '';
+    const title = `${about}${Number(spent.input || 0).toLocaleString()} tokens in${cached}, ${Number(spent.output || 0).toLocaleString()} out${steps}`;
     let parts;
     const by = spent.auto === true ? `Auto · ${spent.by}` : spent.by;
     if (spent.plan) parts = [by, model, effort || 'default effort', 'on your plan'];
