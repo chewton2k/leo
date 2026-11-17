@@ -143,7 +143,6 @@
 .margin-resolved-label { font-size: var(--fs-xs); color: var(--faint); }
 .margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); }
-.margin-foot svg { width: 13px; height: 13px; flex: none; }
 .margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
 .margin-long .link-btn { font-size: inherit; color: inherit; }
 .margin-more { position: relative; z-index: 2; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-drawer) var(--ease-arrive), opacity var(--t-follow) var(--ease-arrive), visibility 0s var(--t-drawer); }
@@ -219,7 +218,7 @@ figure.drawing.inked img { filter: none !important; }
 .margin-anchor { display: grid; width: 13px; height: 13px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
 .margin-slot { display: inline; padding-left: 21px; }
 @media print { .margin-slot { display: none; } }
-.margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow); }
+.margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow-pop); }
 .margin-anchor svg { width: 100%; height: 100%; }
 .margin-mark:hover .margin-anchor, .margin-mark[data-active] .margin-anchor { color: var(--text); }
 .margin-mark[data-active] .margin-anchor { transform: scale(1.2); }

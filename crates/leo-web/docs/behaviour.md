@@ -283,7 +283,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   The save state (`#save-state`) shows the leo mark, not words, while editing and
   saving (full ink, still) and once Saved (it dries to .45 once, `margin-breathe`
   reversed; the end frame under Reduced Motion); the words stay as hidden text, and
-  the "Not saved" lines stay visible text. "Edited …" shows until the first edit.
+  the "Not saved" lines stay visible text. "Edited …" stays beside the mark and says "Edited just now" after each save (2026-11-16, the user's call); it hides only while a "Not saved" line shows.
   Undo: up to `MOST_UNDO` snapshots per note (typing grouped by pauses).
   Lists (2026-11-06, the user's call): `markdown.js` `MARKER` is the one definition of a
   list marker: `-`, `*`, `+`, `1.`, `1)`, `a.`, `a)`, `A)`,

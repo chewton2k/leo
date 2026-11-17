@@ -248,7 +248,8 @@ Decided: one app, window only (2026-10-31).
   buttons, selection, tags or text.
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
-  rest, `--shadow-pop` for menus, toasts and sheets, `--shadow-lift` while
+  rest, `--shadow-pop` for menus, toasts, sheets and the open note in Marks, with no
+  hairline ring since 2026-11-16, `--shadow-lift` while
   dragging); dark mode lifts with lighter surfaces and a faint top highlight.
   Inputs, tables, code and focus rings keep a clear edge; so do board lanes, one
   step off the board's tone with a 1px inset edge (they vanish otherwise).
@@ -355,8 +356,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The line under
-  the title (`#note-facts`) holds the save state, `#save-state` ("Edited …",
-  Saving, the drying mark), then the read time (`#note-read`, " · N min read" from
+  the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
+  words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
+  "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
   `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
   edit); there is no word count (2026-11-16, the user's call). It is skipped by search highlights and hidden in print. The note's
   tools (transcript, Tasks, Add picture, Move to folder, Share as a second step, Move

@@ -571,7 +571,7 @@ function marginFill(el, t, arriving, changed) {
       marginAnswer(line, marginNow(t), arriving);
       said.append(line);
       const more = (t.messages || []).length - 1;
-      if (more > 0) said.insertAdjacentHTML('beforeend', `<div class="margin-foot">${ICON.chat}<span>${more} ${more === 1 ? 'reply' : 'replies'}</span></div>`);
+      if (more > 0) said.insertAdjacentHTML('beforeend', `<div class="margin-foot"><span>${more} ${more === 1 ? 'reply' : 'replies'}</span></div>`);
     } else {
       const all = t.messages || [];
       const folded = el.dataset.all ? 0 : Math.max(0, all.length - SHOWN_MESSAGES);
