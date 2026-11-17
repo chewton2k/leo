@@ -395,9 +395,20 @@ test('without the note page option every other reader gets the same markup as be
 test('the read time counts words outside code at 238 a minute', () => {
   assert.equal(md.readTime(''), '');
   assert.equal(md.readTime('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '1 min read');
+  assert.equal(md.readTime('one\n\n```\n' + 'skip '.repeat(300) + '\n```\n'), '1 min read');
+  assert.equal(md.readTime('```\n' + 'skip '.repeat(300) + '\n```'), '');
   assert.equal(md.readTime('w '.repeat(238)), '1 min read');
   assert.equal(md.readTime('w '.repeat(239)), '2 min read');
   assert.equal(md.readTime('w '.repeat(1200)), '6 min read');
+});
+
+test('the read time of a note with a long run of blank lines comes back quickly', () => {
+  for (const gap of ['\n', ' \n', '\r\n', '\t\n']) {
+    const started = Date.now();
+    assert.equal(md.readTime(`start${gap.repeat(4000)}end`), '1 min read');
+    assert.ok(Date.now() - started < 1000, JSON.stringify(gap));
+  }
+  assert.equal(md.plain(`a${' \n'.repeat(3000)}---${' \n'.repeat(3000)}b`), 'a b');
 });
 
 test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {

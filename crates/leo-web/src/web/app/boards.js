@@ -54,7 +54,7 @@ function kanbanRemember(id) {
 async function showBoards(arg) {
   const mine = ++seq;
   state = { view: 'boards', dir: '' };
-  chrome({});
+  chrome();
   document.title = 'Boards · leo';
   if (!kanban.loaded || !app.querySelector('.kanban-page')) app.innerHTML = `<div class="kanban-page">${skeleton(3, 'board')}</div>`;
   const { boards } = await api('/api/boards');

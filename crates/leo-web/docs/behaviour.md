@@ -177,7 +177,7 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
 - Escape from Settings, Keeping or Trash returns to the page before them
   (`places.before`, kept on `hashchange`; Keeping opened from Settings goes
   back to Settings), so a note you were reading stays where you left it.
-  When the page Back goes to is the previous history entry (each entry keeps
+  When the page Escape goes back to is the previous history entry (each entry keeps
   its position in `history.state.leoAt`; in-place URL rewrites keep it), it
   steps back with `history.back()` instead of adding an entry, so the
   browser's or phone's own back does not return to Settings (2026-10-20).
@@ -1037,7 +1037,7 @@ target. Check the page sequence after loading preferences.
   A refused read waits for the next edit; a stale-version refusal resets the page's
   retry delay to the normal typing pause, while provider cooldowns stay bounded.
   A read-along also sends up to 1,500 characters of the note before the first changed block as `earlier_text` (`margin::earlier_text`: its last occurrence, cut at a block boundary), context only; the raw quote must lie inside a changed block or the read is silent. Read through sends none.
-  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; resolved and dismissed threads do not count. A reworded passage still holds its sentence (2026-11-16, the user's call): the page sends the current wording of every note it places only by the surrounding words (`changed`), and a read-along note on that sentence replaces the old note quietly when you never answered it, it is not pinned and not open, else the new note is dropped (Read through always drops it); a replaced note leaves no reopen underline under the new note's text. There is no Reading… status
+  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; resolved and dismissed threads do not count. A reworded passage still holds its sentence (2026-11-16, the user's call): the page sends the current wording of every note it places only by the surrounding words (`changed`), the server counts that wording only where the note's own surrounding words put it, and a read-along note on that sentence replaces the old read-along note quietly when you never answered it, it is not pinned and not open, else (or when the old note came from Read through, Felix this or the chat) the new note is dropped (Read through always drops it); nothing is replaced unless the new note is stored; a replaced note leaves no reopen underline under the new note's text. There is no Reading… status
   (2026-11-07, the user's call): 200 ms into a read, the leo mark (`#leo-mark` in `.margin-waiting`, never a `.margin-note`, never in
   `threads`; it breathes by opacity only, still under Reduced Motion) sits in the margin beside the last changed block (`doc.blockAt`), placed by `margin.js` `clear` so notes never
   move for it (free spot on the right, else the left in Both, else below what blocks it), or is the gutter mark in Marks only.
@@ -1768,7 +1768,7 @@ Speech models show In use, every Downloaded file and filtered All models cards.
 Rows show escaped catalog descriptions, languages, size, streaming support and
 measured accuracy/speed with themed meters; unknown scores stay unmeasured.
 A remembered Keeping section at the Settings root keeps Settings selected and
-Back returns to the previous note; only the explicit Keeping route selects Keeping.
+Escape returns to the previous note; only the explicit Keeping route selects Keeping.
 
 Usage keeps a single provider column with compact Session/Weekly rows: remaining
 percentage at left, a muted provider-colored bar and reset time at right. The

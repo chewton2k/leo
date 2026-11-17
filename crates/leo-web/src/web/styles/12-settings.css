@@ -59,17 +59,17 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
   .settings-section .segmented { flex: 0 1 auto; min-width: 0; grid-auto-columns: 1fr; }
   .settings-section .segment { padding: 0 14px; }
 }
-.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { position: relative; padding: 12px 14px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
+.settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch), .settings-section .set-row.width-row { position: relative; padding: 12px 14px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
 .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):has(+ label.set-row > .switch, + .set-row.column > .set-line > .switch) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) { border-top-left-radius: 0; border-top-right-radius: 0; clip-path: inset(0 -24px -24px); }
 .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 1px; background: linear-gradient(90deg, var(--raised) 14px, var(--line) 14px calc(100% - 14px), var(--raised) calc(100% - 14px)); pointer-events: none; }
 .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):is(.found, .found-still), .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)) + :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch)):is(.found, .found-still) { z-index: 1; clip-path: none; }
-@media (forced-colors: active) { .settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch) { border-color: CanvasText; } .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { display: none; } }
+@media (forced-colors: active) { .settings-section label.set-row:has(> .switch), .settings-section .set-row.column:has(> .set-line > .switch), .settings-section .set-row.width-row { border-color: CanvasText; } .settings-section :is(label.set-row:has(> .switch), .set-row.column:has(> .set-line > .switch))::before { display: none; } }
 .set-desc { display: block; margin-top: 2px; font-size: var(--fs-sm); font-weight: 400; line-height: 1.4; color: var(--muted); }
 .settings-section .set-row.column > .btn { align-self: flex-start; }
-.settings-section .set-row.width-row { flex-wrap: nowrap; align-items: center; gap: 16px; padding: 12px 14px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
+.settings-section .set-row.width-row { flex-wrap: nowrap; align-items: center; gap: 16px; }
 .settings-section .set-row.width-row > .btn { flex: none; }
-@media (forced-colors: active) { .settings-section .set-row.width-row { border: 1px solid CanvasText; } }
+.settings-section .width-row .btn[aria-disabled="true"] { opacity: .5; cursor: default; }
 .settings-section .btn { white-space: nowrap; }
 .set-shortcut { display: flex; align-items: center; justify-content: flex-end; gap: 8px; flex: 0 1 auto; min-width: 0; }
 .shortcut-field { display: flex; align-items: center; gap: 6px; flex: 0 1 220px; min-width: 110px; min-height: 38px; box-sizing: border-box; padding: 0 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); overflow: hidden; }

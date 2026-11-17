@@ -5,7 +5,7 @@
 .page-mark { position: absolute; top: 2px; width: 24px; height: 28px; display: grid; place-items: center; cursor: col-resize; border-radius: var(--r-xs); touch-action: none; }
 .page-mark[data-edge="left"] { left: -28px; }
 .page-mark[data-edge="right"] { right: -28px; }
-.page-mark::before { content: ''; width: 2px; height: 18px; border-radius: 1px; background: color-mix(in srgb, var(--text) 38%, transparent); transition: background-color var(--t-press), height var(--t-press); }
+.page-mark::before { content: ''; width: 2px; height: 18px; border-radius: 1px; background: color-mix(in srgb, var(--text) var(--mark-ink), transparent); transition: background-color var(--t-press), height var(--t-press); }
 .page-mark:hover::before, .page-mark.dragging::before, .page-mark:focus-visible::before { height: 22px; background: color-mix(in srgb, var(--text) 70%, transparent); }
 .page-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .page-width-label { position: absolute; top: 32px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--text); color: var(--page); font-size: var(--fs-xs); font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
@@ -290,7 +290,6 @@ figure.drawing.inked img { filter: none !important; }
 .choice-diagram .d-felix { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; fill: none; }
 .choice-diagram .d-text { stroke: var(--line); stroke-width: 2; stroke-linecap: round; fill: none; }
 .choice-diagram .d-mark { fill: var(--accent); }
-.choice-diagram .d-head { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) {
   .margin-quiet, .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
   .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
@@ -310,4 +309,4 @@ figure.drawing.inked img { filter: none !important; }
   .margin-anchor { color: Highlight; }
   .page-mark::before { background: CanvasText; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
-  .choice-diagram .d-felix, .choice-diagram .d-text, .choice-diagram .d-head { stroke: CanvasText; }
+  .choice-diagram .d-felix, .choice-diagram .d-text { stroke: CanvasText; }

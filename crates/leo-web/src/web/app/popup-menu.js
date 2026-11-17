@@ -1,14 +1,15 @@
 let popup = null;
+let armed = null;
 
 function closePopup(focus = true) {
   if (!popup) return;
-  const { box, owner } = popup;
+  const { box, owner, marked } = popup;
   popup = null;
   box.inert = true;
   box.setAttribute('aria-hidden', 'true');
   box.className = 'popup-menu-gone';
   fold(box, () => box.remove());
-  if (owner.hasAttribute('aria-haspopup')) owner.setAttribute('aria-expanded', 'false');
+  if (marked) owner.hasAttribute('aria-haspopup') ? owner.setAttribute('aria-expanded', 'false') : owner.removeAttribute('aria-expanded');
   if (focus && owner.isConnected) owner.focus({ preventScroll: true });
 }
 
@@ -21,8 +22,8 @@ function popupRow(row, index) {
 }
 
 function popupMenu(owner, { label, rows, point = null, find = '' }) {
-  const again = !point && popup && !popup.point && popup.owner === owner;
-  closePopup(false);
+  const again = !point && popup && !popup.point && popup.owner === owner && popup.label === label;
+  closePopup(again);
   if (again) return;
   const box = document.createElement('div');
   box.className = 'popup-menu';
@@ -43,10 +44,11 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
     box.style.top = `${Math.max(8, Math.min(point?.y ?? bounds.bottom + 4, innerHeight - box.offsetHeight - 8))}px`;
   };
   const first = () => (input || list.querySelector('button:not(:disabled)'))?.focus();
-  if (owner.hasAttribute('aria-haspopup')) owner.setAttribute('aria-expanded', 'true');
+  const marked = owner.hasAttribute('aria-haspopup') || owner.matches('button:not([aria-expanded])');
+  if (marked) owner.setAttribute('aria-expanded', 'true');
   draw(rows);
   place();
-  popup = { box, owner, point };
+  popup = { box, owner, point, label, marked };
   unfold(box, point || owner);
   first();
   input?.addEventListener('input', () => {
@@ -79,6 +81,14 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
 }
 
 document.addEventListener('pointerdown', (event) => {
-  if (popup && !popup.box.contains(event.target) && (popup.point || !popup.owner.contains(event.target))) closePopup(false);
+  armed = null;
+  if (!popup || popup.box.contains(event.target)) return;
+  if (event.button === 0 && !popup.point && popup.owner.contains(event.target)) armed = popup;
+  else closePopup(false);
 });
+document.addEventListener('click', (event) => {
+  const kept = armed;
+  armed = null;
+  if (kept && kept.owner.contains(event.target)) setTimeout(() => popup === kept && closePopup(false));
+}, true);
 addEventListener('hashchange', () => closePopup(false));

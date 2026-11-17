@@ -678,8 +678,8 @@ function back() {
   goBack('#/');
 }
 
-function chrome({ dir = '', actions = null }) {
-  floating.innerHTML = actions || '';
+function chrome({ dir = '' } = {}) {
+  floating.innerHTML = '';
   document.title = dir ? `${folderLabel(dir)} · leo` : 'leo';
 }
 
@@ -697,7 +697,7 @@ async function showWorkspace(dir = null) {
   if (state.session?.doc) state.session.doc.destroy();
   state = { view: 'workspace', dir: '' };
   document.body.classList.remove('on-note');
-  chrome({});
+  chrome();
   swap('workspace', () => {
     app.innerHTML = `<section class="workspace-empty"><header class="home-head"><h1 class="home-day" id="home-day"></h1><p class="home-line" id="home-line"></p><div class="home-week" id="home-week" role="group" aria-label="This week"></div></header><hr class="home-rule"><label class="quick-bar home-ask">${ICON.search}<input id="home-ask" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Search notes, or ask Felix"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label><p class="hint home-dictate" hidden></p><section class="home-today" id="home-today" aria-label="Today" tabindex="-1" hidden></section><section class="home-recent${(homeRecent.notes ? homeRecent.notes.length : side.notes.get('')?.items?.length) ? ' reserve' : ''}" id="home-recent" aria-label="Recently written"></section><div class="home-foot">${DRAWN.arrow}<p id="home-foot"></p>${!sideWide() ? '<button class="btn plain" data-action="folders">Folders</button>' : ''}<button class="btn plain" data-action="new" title="New note (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}New note</button></div></section>`;
     wireHomeAsk();
@@ -788,8 +788,8 @@ function mark(s, text) {
   el.innerHTML = ink ? `<svg class="save-drop" aria-hidden="true"><use href="#leo-mark"/></svg><span class="said">${esc(text)}</span>` : esc(text);
   const edited = $('#note-edited');
   if (!edited) return;
-  edited.hidden = !ink;
-  if (ink) edited.textContent = `Edited ${rel(new Date().toISOString())}`;
+  edited.hidden = /^Not saved/.test(text);
+  if (text === 'Saved') edited.textContent = `Edited ${rel(new Date().toISOString())}`;
 }
 
 let local;
@@ -955,7 +955,7 @@ async function ready() {
 async function showSearch(query) {
   const mine = ++seq;
   state = { view: 'search', dir: '', query };
-  chrome({});
+  chrome();
   openSearch(query);
   if (!query.trim()) {
     app.innerHTML = empty(ICON.search, 'Search every note', 'Titles, text and the ideas. Abbreviations like BFS work too.');
@@ -1001,7 +1001,7 @@ async function showRecord(arg) {
   const asked = new URLSearchParams(location.hash.split('?')[1] || '');
   const mine = ++seq;
   state = { view: 'record', dir: '' };
-  chrome({});
+  chrome();
   $('#crumbs').innerHTML = '<span class="sep">/</span><button>Record</button>';
   document.title = 'Record · leo';
   app.innerHTML = '<div id="rec-box"></div>';

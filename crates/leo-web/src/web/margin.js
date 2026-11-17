@@ -147,10 +147,9 @@
     return width < (setting === 'both' ? ROOM_BOTH : ROOM_RIGHT) ? 'marks' : setting;
   }
 
-  function mostColumn({ width, setting = 'both' }) {
-    if (setting === 'marks') return Infinity;
+  function mostColumn({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
+    if (arrangement({ width, setting, noteWidth, panel }) === 'marks') return Infinity;
     const both = setting === 'both';
-    if (width < (both ? ROOM_BOTH : ROOM_RIGHT)) return Infinity;
     return width - TICK_GUTTER - END_GUTTER - (both ? 2 : 1) * ((both ? LEAST_SHARED : MARGIN_WIDTH) + MARGIN_GAP);
   }
 

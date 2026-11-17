@@ -169,7 +169,7 @@ Decided: one app, window only (2026-10-31).
 - A few options: `segmented()` (settings-navigation.js; `field` mode fires
   `change` on a hidden input, `action` mode makes `data-action` buttons with
   `aria-pressed`; a 4th choice item is the tooltip; `syncSegmented(box, from)`
-  after a redraw). Picture choices: `choiceCards()` (same two modes; `columns`).
+  after a redraw). Picture choices: `choiceCards()` (same two modes).
 - On/off: `settingsSwitch()`; checkboxes only for task completion and picking
   several items (Trash). Task checks (`.prose .task input`, `.sched-check`,
   `.cal-check`) are real checkboxes drawn as a pencil box and tick (masks on
@@ -229,7 +229,7 @@ Decided: one app, window only (2026-10-31).
   2026-11-16, the user's call: every former purple, `--focus` and the indigo tone
   `--hue-indigo` used by calendar assignments, callouts and note cards, is #3f6d97 /
   #b4cfe7; Felix's pixel pen keeps its colours), tone only as
-  dots and ticks (calendar events keep their colour fills). One exception,
+  dots and ticks (calendar events keep their colour fills; board priority strokes are tone too). One exception,
   Felix's own blue (`--felix`: light #3f6d97, dark #b4cfe7, from his sprite;
   2026-11-15, the user's call), only while he works: the reading blot
   (`.margin-waiting` or the gutter `.margin-mark.reading`) and pencil
@@ -654,10 +654,13 @@ Felix (2026-10-19).
   editor or a code, table or maths block) before anything is measured, and the blot sits on
   it; side by side when two end together. A read's blot, and any passage without a slot,
   sits just after the last word instead (`marginPassageEnd`). An open or pinned note sits
-  under its block as a raised card (`--raised`, `--shadow`), the block's `--margin-room`
-  holding its height (pinned cards stack); it unfolds with a clip and the room over
-  `OPEN_MS` and folds away over `OPEN_MS × EXIT_SHARE` before it closes
-  (`marginFoldAway`, inert while leaving), none under `stillMotion()`.
+  under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
+  holding its height (pinned cards stack, placed in document order); it unfolds with a
+  clip and the room over `OPEN_MS` only when the user opens it (not on load or a layout
+  change) and folds away over `OPEN_MS × EXIT_SHARE` before it closes (`marginFoldAway`,
+  tracked by thread, inert while leaving, still drawn open until the fold ends:
+  `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn(noteWidth, panel)`
+  is the widest column the chosen margins allow (Infinity when they are marks).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
@@ -675,7 +678,7 @@ Felix (2026-10-19).
   with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it first
   resolves the oldest open note that is not pinned, not `keep` (the thread open on the
   page, sent as `keep`) and not being replied to (`margin::free_oldest`), listing it
-  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL` (no Settings problem), before the model is asked or, if the last free note was taken meanwhile, after it (its blocks are forgotten, so nothing is spent and the text is read again). The page never drops the open thread or one with typed text from `resolved`: it POSTs status `open` for it.
+  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL` (no Settings problem), before the model is asked or, if the last free note was taken meanwhile, after it (its blocks are forgotten, so nothing is spent and the text is read again). The page never drops the open thread or one with typed text from `resolved`: it POSTs status `open` for it, and deletes a new read note that overlaps a thread it holds that way (showing it if the delete fails).
   Only Read through still answers 409 `full`.
   Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more
   than `TIDY_TO` (5) notes are open, the least recently updated ones are resolved
@@ -705,10 +708,14 @@ Felix (2026-10-19).
   then `margin::crowded` allows one open note per sentence. A reworded passage still counts
   (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
   open thread the page places only by context, as `{id, text}` of its current wording, at most
-  2 × `MOST_OPEN`, each ≤ 2 × `MOST_QUOTE` and in the note). A read-along note landing on such
-  a sentence replaces the old one (`margin::replace_changed`: resolved and listed in `resolved`,
-  only if it is not pinned, not `keep`, not being answered and has no message from you); else,
-  and always in Read through, the new note is dropped. `marginRevisits` draws no reopen
+  2 × `MOST_OPEN`). The server places each text itself between that thread's stored context
+  tails, as the page's `byContext` does (`margin::by_context`: its quote gone from the note, the
+  text ≤ 2 × the quote + 120 UTF-16 units), else ignores it, and compares sentences by position
+  (`margin::crowds_at`). A read-along note landing on such a sentence replaces every old one there
+  (`margin::put_replacing`: one transaction that resolves them and stores the new note, listed in
+  `resolved`, only if each is a read-along note, not pinned, not `keep`, not being answered and
+  has no message from you); else, and always in Read through, the new note is dropped and the
+  old ones keep the sentence. `marginRevisits` draws no reopen
   underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
   never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
   characters, else the chat; read-along and `add_margin_note` quotes

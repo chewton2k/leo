@@ -437,10 +437,10 @@
   function plain(markdown) {
     return String(markdown || '')
       .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
-      .replace(/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/gm, ' ')
+      .replace(/^[^\S\n]*(?:-{3,}|\*{3,}|_{3,})[^\S\n]*$/gm, ' ')
+      .replace(/^[^\S\n]*\|?[^\S\n]*:?-+:?[^\S\n]*(\|[^\S\n]*:?-+:?[^\S\n]*)*\|?[^\S\n]*$/gm, ' ')
       .replace(/\s*\|\s*/g, ' ')
-      .replace(new RegExp(String.raw`^\s*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
+      .replace(new RegExp(String.raw`^[^\S\n]*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
       .replace(/\[( |x|X)\]\s+/g, '')
       .replace(/!\[\[[^\]]*\]\]/g, ' ')
       .replace(/!\[([^\]]*)\]\([^)]*\)/g, ' ')

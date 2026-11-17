@@ -231,3 +231,27 @@ test('leaving Settings stops the sign-in check', async () => {
   assert.deepEqual(calls, []);
   assert.equal(timers.length, 0);
 });
+
+test('the Note width row says what is stored and keeps its Reset reachable', () => {
+  const stored = { width: 'wide', page: null };
+  const leoTheme = { noteWidth: () => stored.width, pageWidth: () => stored.page, setNoteWidth(width) { stored.width = width; stored.page = null; } };
+  const desc = { textContent: '' }, button = { attrs: {}, setAttribute(name, value) { this.attrs[name] = value; } };
+  const row = { querySelector: (selector) => selector === '.set-desc' ? desc : button };
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {}, querySelector: () => row }, window: { leoTheme }, ICON: new Proxy({}, {get: () => ''}), esc: text => String(text) };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const html = () => context.widthRow();
+  assert.match(html(), /^<div class="set-row width-row"[^>]*>.*The default\./);
+  assert.match(html(), /aria-label="Reset Note width to default" aria-disabled="true"/);
+  for (const [width, page, words] of [['wide', 812, 'Up to 812 px wide.'], ['comfortable', null, 'Comfortable.'], ['full', null, 'Full width.'], ['full', 700, 'Full width.']]) {
+    Object.assign(stored, { width, page });
+    assert.ok(html().includes(words), `${width} ${page}`);
+    assert.ok(!html().includes('aria-disabled'), `${width} ${page} can be reset`);
+  }
+  assert.ok(!html().includes('drag a mark'));
+  Object.assign(stored, { width: 'comfortable', page: null });
+  context.resetWidth();
+  assert.equal(stored.width, 'wide');
+  assert.match(desc.textContent, /^The default\./);
+  assert.equal(button.attrs['aria-disabled'], 'true');
+});

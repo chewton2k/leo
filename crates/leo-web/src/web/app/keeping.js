@@ -9,7 +9,7 @@ const KEEPING_ROWS = [
 async function showKeeping() {
   const mine = ++seq;
   state = { view: 'keeping', dir: '' };
-  chrome({});
+  chrome();
   $('#crumbs').innerHTML = settingsCrumbs('keeping');
   document.title = 'Keeping · leo';
   refreshPanel(app, settingsFrame('keeping', skeleton(4, 'keeping')));

@@ -828,8 +828,13 @@ test('dragging a top corner of the note sets its width live, never past the room
   await mark.focus();
   await page.keyboard.press('ArrowLeft');
   await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.round(before) - 20);
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.min(Math.round(before), most));
   await page.keyboard.press('Enter');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width'))), 'the keyboard stops where both margins still fit').toBe(most);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
 });
 
 test('a selection too long for the margin says so inside the Felix bar', async ({ page }) => {

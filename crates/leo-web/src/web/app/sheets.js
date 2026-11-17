@@ -1,7 +1,7 @@
 function showLocked() {
   ++seq;
   state = { view: 'locked' };
-  chrome({});
+  chrome();
   app.innerHTML = empty(
     ICON.lock,
     'leo needs to sign in again',

@@ -627,6 +627,11 @@ test('page toolbars share geometry', async ({ page }) => {
       if (!baseline) baseline = box;
       expect(box).toEqual(baseline);
       if (width < 1000) expect(box.width).toBeLessThanOrEqual(760);
+      else {
+        const room = await page.locator('.bar').evaluate((bar) => { const cs = getComputedStyle(bar); return bar.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); });
+        const inset = await page.locator('.bar-row').evaluate((row) => { const cs = getComputedStyle(row); return [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)]; });
+        for (const side of inset) expect(Math.abs(side - Math.min(room * 0.08, 128))).toBeLessThan(1);
+      }
     }
   }
 });

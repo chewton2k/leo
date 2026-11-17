@@ -18,7 +18,7 @@ async function showSettings(section) {
   const mine = ++seq;
   state = { view: 'settings', dir: '', section };
   scheduleAppStatus(appPollGeneration);
-  chrome({});
+  chrome();
   $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
   refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
@@ -509,19 +509,24 @@ function pickTheme(el) {
   syncAppearanceResets();
 }
 
-const WIDTH_LABELS = { comfortable: 'Comfortable', wide: 'Wide', full: 'Full width' };
+function widthWords() {
+  const dragged = window.leoTheme.pageWidth(), width = window.leoTheme.noteWidth();
+  if (width === 'full') return 'Full width. Reset brings the page marks back.';
+  const now = dragged ? `Up to ${dragged} px wide.` : width === APPEARANCE_DEFAULTS.width ? 'The default.' : 'Comfortable.';
+  return `${now} On a wide note, drag a mark at its top corners or focus one and use the arrow keys; Enter on a mark resets.`;
+}
 
 function widthRow() {
-  const dragged = window.leoTheme.pageWidth(), width = window.leoTheme.noteWidth();
-  const now = width === 'full' ? 'Full width.' : dragged ? `${dragged} px wide.` : width === APPEARANCE_DEFAULTS.width ? 'The default.' : `${WIDTH_LABELS[width]}.`;
-  const changed = width !== APPEARANCE_DEFAULTS.width || Boolean(dragged);
-  return `<div class="set-row width-row" data-find="note-width"><span class="grow">Note width<span class="set-desc">${now} Drag either mark at the note's top corners; double-click one to reset.</span></span><button type="button" class="btn sm" data-action="width-reset"${changed ? '' : ' disabled'}>Reset</button></div>`;
+  const changed = window.leoTheme.noteWidth() !== APPEARANCE_DEFAULTS.width || Boolean(window.leoTheme.pageWidth());
+  return `<div class="set-row width-row" data-find="note-width"><span class="grow">Note width<span class="set-desc" aria-live="polite">${widthWords()}</span></span><button type="button" class="btn sm" data-action="width-reset" aria-label="Reset Note width to default"${changed ? '' : ' aria-disabled="true"'}>Reset</button></div>`;
 }
 
 function resetWidth() {
   window.leoTheme.setNoteWidth(APPEARANCE_DEFAULTS.width);
   const row = document.querySelector('[data-find="note-width"]');
-  if (row) row.outerHTML = widthRow();
+  if (!row) return;
+  row.querySelector('.set-desc').textContent = widthWords();
+  row.querySelector('[data-action="width-reset"]').setAttribute('aria-disabled', 'true');
 }
 
 function pickFelix(el) {

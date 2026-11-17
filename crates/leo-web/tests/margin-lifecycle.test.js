@@ -833,3 +833,194 @@ test('pin and resolve change the margin at once and come back when the save fail
   assert.deepEqual([...h.state.threads.map((x) => x.id)], ['t1']);
   assert.equal(h.state.resolved.length, 0);
 });
+
+function paragraph(text) {
+  class Bit {
+    get parentElement() { return this.parent; }
+    get nextSibling() { return this.parent.kids[this.parent.kids.indexOf(this) + 1] || null; }
+    get previousSibling() { return this.parent.kids[this.parent.kids.indexOf(this) - 1] || null; }
+    before(node) { node.parent = this.parent; this.parent.kids.splice(this.parent.kids.indexOf(this), 0, node); }
+    after(node) { node.parent = this.parent; this.parent.kids.splice(this.parent.kids.indexOf(this) + 1, 0, node); }
+    remove() { this.parent.kids.splice(this.parent.kids.indexOf(this), 1); }
+  }
+  class Words extends Bit {
+    constructor(data) { super(); this.nodeType = 3; this.data = data; }
+    splitText(at) { const rest = new Words(this.data.slice(at)); this.data = this.data.slice(0, at); this.after(rest); return rest; }
+  }
+  class Box extends Bit {
+    constructor(name = '') { super(); this.nodeType = 1; this.className = name; this.kids = []; this.dataset = {}; this.classList = { contains: (c) => this.className.split(' ').includes(c) }; }
+    setAttribute() {}
+    closest(sel) { for (let at = this; at; at = at.parent) if (at.classList?.contains(sel.slice(1))) return at; return null; }
+    querySelectorAll(sel) { return this.kids.flatMap((kid) => (kid.kids ? [...(kid.classList.contains(sel.slice(1)) ? [kid] : []), ...kid.querySelectorAll(sel)] : [])); }
+    querySelector(sel) { const id = sel.match(/data-id="([^"]+)"/)?.[1]; return this.querySelectorAll('.margin-slot').find((slot) => slot.dataset.id === id) || null; }
+  }
+  const columns = new Box('note-columns');
+  const blk = new Box('blk');
+  blk.parent = columns;
+  columns.kids.push(blk);
+  const words = new Words(text);
+  words.parent = blk;
+  blk.kids.push(words);
+  const domPoint = (to) => {
+    const texts = blk.kids.filter((kid) => kid.nodeType === 3);
+    let seen = 0;
+    for (const node of texts) {
+      for (let offset = 0; offset < node.data.length; offset++, seen++) if (seen >= to) return { node, offset };
+    }
+    const last = texts[texts.length - 1];
+    return { node: last, offset: last.data.length };
+  };
+  const shown = () => blk.kids.map((kid) => (kid.nodeType === 3 ? kid.data : `[${kid.dataset.id}]`)).join('');
+  return { columns, blk, domPoint, shown, make: () => new Box() };
+}
+
+function slotHarness(text) {
+  const h = harness();
+  const p = paragraph(text);
+  h.context.Node = { TEXT_NODE: 3 };
+  h.context.CSS = { escape: (id) => id };
+  h.context.document.createElement = p.make;
+  h.state.s.doc.domPoint = p.domPoint;
+  h.state.layer = { parentElement: p.columns, remove() {} };
+  return { ...h, p };
+}
+
+test('mark slots go at each passage’s own end, whatever order the notes were made in', () => {
+  const text = 'First sentence here. Second sentence there.';
+  for (const order of [['a', 'b'], ['b', 'a']]) {
+    const h = slotHarness(text);
+    const ends = { a: 20, b: text.length };
+    const placed = order.map((id) => ({ t: { id }, at: { to: ends[id] } }));
+    const first = h.context.marginSlots(placed, h.p.columns);
+    assert.equal(h.p.shown(), 'First sentence here.[a] Second sentence there.[b]');
+    const again = h.context.marginSlots(placed, h.p.columns);
+    assert.equal(h.p.shown(), 'First sentence here.[a] Second sentence there.[b]');
+    for (const id of order) assert.equal(again.get(id), first.get(id));
+  }
+});
+
+test('two passages ending together keep their slots side by side without swapping on a redraw', () => {
+  const h = slotHarness('First sentence here. Second sentence there.');
+  const placed = [{ t: { id: 'a' }, at: { to: 20 } }, { t: { id: 'b' }, at: { to: 20 } }];
+  h.context.marginSlots(placed, h.p.columns);
+  const once = h.p.shown();
+  assert.match(once, /^First sentence here\.(\[a\]\[b\]|\[b\]\[a\]) Second sentence there\.$/);
+  for (let draw = 0; draw < 3; draw++) {
+    h.context.marginSlots(placed, h.p.columns);
+    assert.equal(h.p.shown(), once);
+  }
+});
+
+test('slots leave with their thread, with the layout and with the note', () => {
+  const h = slotHarness('First sentence here. Second sentence there.');
+  const placed = [{ t: { id: 'a' }, at: { to: 20 } }, { t: { id: 'b' }, at: { to: 43 } }];
+  h.context.marginSlots(placed, h.p.columns);
+  h.context.marginDropThread('a');
+  assert.equal(h.p.shown(), 'First sentence here. Second sentence there.[b]');
+  h.context.marginSlots(placed, h.p.columns);
+  h.context.marginSlots([], h.p.columns);
+  assert.equal(h.p.shown(), 'First sentence here. Second sentence there.');
+  h.context.marginSlots(placed, h.p.columns);
+  h.context.marginLeave();
+  assert.equal(h.p.columns.querySelectorAll('.margin-slot').length, 0);
+});
+
+function run() {
+  let finish;
+  let stop;
+  const finished = new Promise((resolve, reject) => { finish = resolve; stop = reject; });
+  finished.catch(() => {});
+  return { finished, finish: () => finish(), cancel() { this.cancelled = true; stop(new Error('cancelled')); } };
+}
+
+function foldHarness(...threads) {
+  const h = harness();
+  const runs = [];
+  const draws = [];
+  Object.assign(h.context, { OPEN_MS: 200, EXIT_SHARE: .8, EASE_EXIT: 'linear', getComputedStyle: () => ({ marginBottom: '64px' }) });
+  h.context.marginDraw = () => draws.push(h.state.open);
+  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : null);
+  const block = { animate: () => { const r = run(); runs.push(r); return r; } };
+  h.state.threads = threads;
+  for (const t of threads) {
+    h.state.els.set(t.id, { hidden: false, inert: false, offsetHeight: 50, area: { value: '' }, hasAttribute: (name) => name === 'data-inline', contains: () => false, animate: block.animate, remove() {} });
+    h.state.roomy.set(t.id, block);
+  }
+  return { ...h, runs, draws, el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
+}
+
+test('unpinning a pinned card folds it, stays drawn open while it folds, then redraws and frees it', async () => {
+  const t = { id: 't1', quote: 'q', pinned: true };
+  const h = foldHarness(t);
+  const pin = h.context.marginPin(t);
+  assert.equal(h.el('t1').inert, true);
+  assert.equal(h.context.marginIsOpen(t), true);
+  assert.deepEqual(h.draws, []);
+  await h.finish();
+  assert.equal(h.draws.length, 1);
+  assert.equal(h.el('t1').inert, false);
+  assert.equal(h.context.marginIsOpen(t), false);
+  assert.ok(h.runs.every((r) => r.cancelled));
+  h.settle().resolve({ pinned: false });
+  await pin;
+});
+
+test('a note closed while another opens folds away without closing the new one', async () => {
+  const h = foldHarness({ id: 'x', quote: 'q' }, { id: 'y', quote: 'p' });
+  h.state.open = 'x';
+  h.context.marginClose();
+  assert.equal(h.state.open, 'x');
+  h.state.open = 'y';
+  await h.finish();
+  assert.equal(h.state.open, 'y');
+  assert.deepEqual(h.draws, ['y']);
+});
+
+test('opening a folding note again stops the fold and keeps it open', async () => {
+  const h = foldHarness({ id: 'x', quote: 'q' });
+  h.state.open = 'x';
+  h.context.marginClose();
+  h.context.marginOpen('x');
+  assert.equal(h.el('x').inert, false);
+  assert.equal(h.state.folds.size, 0);
+  assert.ok(h.runs.every((r) => r.cancelled));
+  await new Promise(setImmediate);
+  assert.equal(h.state.open, 'x');
+  assert.deepEqual(h.draws, ['x']);
+});
+
+test('Cancel on a typed question forgets it after the fold, Escape keeps it for the passage', async () => {
+  for (const discard of [true, false]) {
+    const h = foldHarness();
+    const draft = { id: 'draft', quote: 'q', prefix: 'a', suffix: 'b', messages: [] };
+    Object.assign(h.state, { draft, open: 'draft' });
+    h.state.els.set('draft', { hidden: false, inert: false, offsetHeight: 50, area: { value: 'half a question' }, hasAttribute: () => true, animate: () => { const r = run(); h.runs.push(r); return r; }, remove() {} });
+    h.context.marginClose(discard);
+    await h.finish();
+    assert.equal(h.state.open, null);
+    assert.equal(h.state.draft, null);
+    assert.equal(h.state.drafted.get(h.context.marginDraftKey(draft)), discard ? undefined : 'half a question');
+  }
+});
+
+test('a read that replaces a note the page still holds open deletes the new note instead of showing both', async () => {
+  const h = harness();
+  const calls = [];
+  h.context.api = (path, init) => new Promise((resolve) => { calls.push({ path, init, resolve }); });
+  h.context.toast = () => {};
+  Object.assign(h.state, { threads: [{ id: 'open', quote: 'changed paragraph' }], open: 'open' });
+  const pending = h.context.marginRead(h.state.s);
+  await new Promise(setImmediate);
+  calls.shift().resolve({ note: { id: 't1', quote: 'A changed paragraph long enough to read.', messages: [] }, resolved: ['open'] });
+  await new Promise(setImmediate);
+  const back = calls.shift();
+  assert.ok(back.path.endsWith('/threads/open'));
+  back.resolve({ id: 'open', status: 'open', quote: 'changed paragraph', messages: [] });
+  await new Promise(setImmediate);
+  const gone = calls.shift();
+  assert.ok(gone.path.endsWith('/threads/t1'));
+  assert.equal(gone.init.method, 'DELETE');
+  gone.resolve(null);
+  await pending;
+  assert.deepEqual(h.state.threads.map((t) => t.id), ['open']);
+});

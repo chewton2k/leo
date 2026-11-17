@@ -99,6 +99,7 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
+    open: Vec<Thread>,
     limit: usize,
     free: bool,
 }
@@ -455,7 +456,8 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                 instructions: margin::instructions_of(&held, &id),
                 cap: prefs.cap,
                 gap: prefs.gap,
-                quotes: open.into_iter().map(|thread| thread.quote).collect(),
+                quotes: open.iter().map(|thread| thread.quote.clone()).collect(),
+                open,
             }
         })
         .await;
@@ -619,20 +621,20 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         2 * margin::MOST_OPEN
     };
     let mut quotes = facts.quotes;
-    let mut changed: Vec<&Changed> = body
+    let mut changed: Vec<(&str, usize, usize)> = body
         .changed
         .iter()
         .take(2 * margin::MOST_OPEN)
-        .filter(|c| {
-            !c.text.trim().is_empty()
-                && c.text.chars().count() <= 2 * margin::MOST_QUOTE
-                && now.body.contains(c.text.as_str())
+        .filter_map(|c| {
+            let thread = facts.open.iter().find(|t| t.id == c.id)?;
+            let at = margin::by_context(&now.body, thread, &c.text)?;
+            Some((c.id.as_str(), at, c.text.len()))
         })
         .collect();
     let mut saved = Vec::new();
     let mut resolved = Vec::new();
     let mut stopped = false;
-    'found: for found in founds {
+    for found in founds {
         if !through
             && !blocks
                 .iter()
@@ -647,34 +649,13 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let Some(place) = margin::placed(&now.body, &quote, &blocks) else {
             continue;
         };
-        while let Some(at) = changed.iter().position(|c| {
-            margin::crowded(&now.body, &quote, &blocks, std::slice::from_ref(&c.text))
-        }) {
-            let old = changed.remove(at);
-            if through {
-                continue 'found;
-            }
-            let (held, reads, noted, gone) = (
-                chats.clone(),
-                state.margin.clone(),
-                id.clone(),
-                old.id.clone(),
-            );
-            let keep = body.keep.clone();
-            let swap = blocking(move || {
-                margin::replace_changed(&held, &reads, &noted, &gone, keep.as_deref())
-            })
-            .await;
-            match swap {
-                Ok(margin::Swap::Replaced(gone)) => {
-                    if let Some(at) = quotes.iter().position(|q| *q == gone.quote) {
-                        quotes.remove(at);
-                    }
-                    resolved.push(gone.id);
-                }
-                Ok(margin::Swap::Missing) => {}
-                _ => continue 'found,
-            }
+        let olds: Vec<String> = changed
+            .iter()
+            .filter(|(_, at, length)| margin::crowds_at(&now.body, &quote, &blocks, *at, *length))
+            .map(|(old, _, _)| old.to_string())
+            .collect();
+        if through && !olds.is_empty() {
+            continue;
         }
         let thread = margin::new_thread(
             &id,
@@ -683,7 +664,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             &quote,
             vec![margin::felix_says(&found.text)],
         );
-        if !through && quotes.len() >= limit {
+        if !through && olds.is_empty() && quotes.len() >= limit {
             let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
             let keep = body.keep.clone();
             let freed =
@@ -699,12 +680,26 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         }
         let held = chats.clone();
         let stored = thread.clone();
-        if !matches!(
-            blocking(move || margin::put(&held, &stored, limit)).await,
-            Ok(true)
-        ) {
-            stopped = true;
-            break;
+        let (reads, keep) = (state.margin.clone(), body.keep.clone());
+        let put = blocking(move || {
+            margin::put_replacing(&held, &reads, &stored, &olds, keep.as_deref(), limit)
+        })
+        .await;
+        match put {
+            Ok(margin::Swap::Put(gone)) => {
+                for old in gone {
+                    if let Some(at) = quotes.iter().position(|q| *q == old.quote) {
+                        quotes.remove(at);
+                    }
+                    changed.retain(|(id, _, _)| *id != old.id);
+                    resolved.push(old.id);
+                }
+            }
+            Ok(margin::Swap::Kept) => continue,
+            _ => {
+                stopped = true;
+                break;
+            }
         }
         quotes.push(quote);
         if !through {

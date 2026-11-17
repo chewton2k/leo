@@ -189,22 +189,21 @@ test('width: notes fill the room beside the column, 240 to 360 px on one side an
 
 test('width: Both keeps notes on both sides whenever both fit, too narrow stays marks', () => {
   assert.equal(M.ROOM_BOTH, 48 + M.SHARED_COLUMN + 2 * (M.MARGIN_GAP + M.LEAST_SHARED) + 16);
-  assert.equal(M.arrangement({ width: 1100, column: 980 }), 'both');
   assert.ok(M.ROOM_BOTH > M.ROOM_RIGHT);
-  assert.equal(M.arrangement({ width: 1600, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: 1440, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: 1900, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: 1400, column: 760 }), 'both');
-  assert.equal(M.arrangement({ width: M.ROOM_BOTH, column: 980 }), 'both');
-  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, column: 980 }), 'marks');
-  assert.equal(M.arrangement({ width: 1600, column: 980, setting: 'right' }), 'right');
-  assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, column: 980 }), 'marks');
+  for (const width of [1100, 1400, 1600, 1900, M.ROOM_BOTH]) assert.equal(M.arrangement({ width }), 'both');
+  assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1 }), 'marks');
+  assert.equal(M.arrangement({ width: 1600, setting: 'right' }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_RIGHT, setting: 'right' }), 'right');
+  assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, setting: 'right' }), 'marks');
+  assert.equal(M.arrangement({ width: 1600, noteWidth: 'full' }), 'marks');
+  assert.equal(M.arrangement({ width: 1600, panel: true }), 'marks');
 });
 
 test('width: notes never squeeze the column below its least width', () => {
   for (const column of [760, 980]) {
-    for (let width = M.ROOM_RIGHT; width <= 2600; width += 7) {
-      const layout = M.arrangement({ width, column });
+    for (const setting of ['both', 'right']) for (let width = setting === 'both' ? M.ROOM_BOTH : M.ROOM_RIGHT; width <= 2600; width += 7) {
+      const layout = M.arrangement({ width, setting });
+      assert.equal(layout, setting);
       const size = M.marginWidth({ width, column, layout });
       const sides = layout === 'both' ? 2 : 1;
       const left = width - 64 - sides * (size + M.MARGIN_GAP);
@@ -311,6 +310,29 @@ test('passes: surrogate pairs are kept whole', () => {
   assert.ok(parts.every((p) => p.blocks.every((b) => !/[\ud800-\udbff]$|^[\udc00-\udfff]/.test(b))));
 });
 
+
+test('a dragged page width stops where the chosen margins still fit', () => {
+  const room = (width, column, sides) => Math.floor((width - column - 64) / sides) - M.MARGIN_GAP;
+  const width = 1156;
+  assert.equal(M.mostColumn({ width, setting: 'both' }), 684);
+  assert.equal(M.mostColumn({ width, setting: 'right' }), 828);
+  for (const setting of ['both', 'right']) {
+    const most = M.mostColumn({ width, setting });
+    const sides = setting === 'both' ? 2 : 1;
+    const least = setting === 'both' ? M.LEAST_SHARED : M.MARGIN_WIDTH;
+    assert.equal(M.arrangement({ width, setting }), setting);
+    assert.equal(room(width, most, sides), least);
+    assert.ok(room(width, most + 1, sides) < least);
+  }
+  assert.equal(M.mostColumn({ width: M.ROOM_BOTH, setting: 'both' }), M.SHARED_COLUMN);
+  assert.equal(M.mostColumn({ width: M.ROOM_RIGHT, setting: 'right' }), M.LEAST_COLUMN);
+  assert.equal(M.mostColumn({ width: M.ROOM_BOTH - 1, setting: 'both' }), Infinity);
+  assert.equal(M.mostColumn({ width: M.ROOM_RIGHT - 1, setting: 'right' }), Infinity);
+  assert.equal(M.mostColumn({ width, setting: 'marks' }), Infinity);
+  assert.equal(M.mostColumn({ width, setting: 'both', noteWidth: 'full' }), Infinity);
+  assert.equal(M.mostColumn({ width, setting: 'right', panel: true }), Infinity);
+});
+
 for (const [name, fn] of cases) {
   try {
     fn();
@@ -320,18 +342,3 @@ for (const [name, fn] of cases) {
   }
 }
 console.log(`ok ${cases.length}`);
-
-test('a dragged page width stops where the chosen margins still fit', () => {
-  const width = 1156;
-  for (const setting of ['both', 'right']) {
-    const most = M.mostColumn({ width, setting });
-    const layout = M.arrangement({ width, setting });
-    assert.equal(layout, setting);
-    assert.equal(M.marginWidth({ width, column: most, layout }), setting === 'both' ? M.LEAST_SHARED : M.MARGIN_WIDTH);
-    assert.ok(Math.floor((width - most - 1 - 64) / (setting === 'both' ? 2 : 1)) - M.MARGIN_GAP <= M.marginWidth({ width, column: most + 1, layout }));
-  }
-  assert.equal(M.mostColumn({ width, setting: 'both' }), width - 64 - 2 * (M.LEAST_SHARED + M.MARGIN_GAP));
-  assert.equal(M.mostColumn({ width, setting: 'right' }), width - 64 - M.MARGIN_WIDTH - M.MARGIN_GAP);
-  assert.equal(M.mostColumn({ width, setting: 'marks' }), Infinity);
-  assert.equal(M.mostColumn({ width: M.ROOM_BOTH - 1, setting: 'both' }), Infinity);
-});
