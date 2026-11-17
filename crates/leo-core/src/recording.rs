@@ -110,19 +110,7 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
     }
-    let mut file = tempfile::NamedTempFile::new_in(parent)?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        file.as_file()
-            .set_permissions(std::fs::Permissions::from_mode(0o600))?;
-    }
-    serde_json::to_writer_pretty(&mut file, value)?;
-    file.as_file().sync_all()?;
-    file.persist(path).map_err(|e| e.error)?;
-    #[cfg(unix)]
-    std::fs::File::open(parent)?.sync_all()?;
-    Ok(())
+    crate::paths::write_atomic(path, serde_json::to_vec_pretty(value)?)
 }
 
 pub fn save(notes: &Path, note: &str, source: &Archive) -> Result<()> {

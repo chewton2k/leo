@@ -227,5 +227,21 @@ mod tests {
         write_atomic(&path, b"second").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "second");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+        let folder = dir.path().join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        assert!(write_atomic(&folder, "third").is_err());
+        let mut left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        left.sort();
+        assert_eq!(left, ["f.json", "folder"]);
+        assert!(std::fs::read_dir(&folder).unwrap().next().is_none());
     }
 }
