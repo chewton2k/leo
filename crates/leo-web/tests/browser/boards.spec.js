@@ -1016,6 +1016,7 @@ test('a card saved from its panel while it is being dragged leaves no copy behin
     await expect(page.locator('[data-card="cread00001"] .kanban-card-sub')).toHaveText("Jonathan's work");
     expect(await titles(page, 'ktodo00001')).toEqual(['Write essay', 'Read chapter 3']);
 
+    await page.locator('.kanban-cols').evaluate((el) => { el.scrollLeft = 0; });
     const card = await page.locator('[data-card="cread00001"]').boundingBox();
     await page.mouse.move(card.x + 20, card.y + 10);
     await page.mouse.down();
