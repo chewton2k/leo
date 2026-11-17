@@ -115,9 +115,12 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 
 
 ## Page and navigation
-On note pages at 1000 px and up the top bar takes no room (2026-11-16): Back is the
-first button of the chip row and Felix's button sits level with it at the column's
-right. Home has no footer line once the explorer is showing (New note is in the
+On note pages at 1000 px and up the top bar takes no room (2026-11-16): Felix's button
+stays where it is on every other page and the chip row starts one bar's height below it
+(`main` padded by `--bar-height` + 8 px), leaving an empty band above the note. There is
+no Back button on any page (2026-11-16, the user's call); Escape still goes back. From
+1000 px the top bar spans the page with an inset of `min(8%, 128px)` each side, so Felix
+sits in the same spot on every page, a little in from the right edge. Home has no footer line once the explorer is showing (New note is in the
 explorer and on Cmd/Ctrl+N); the first-day arrow and the narrow-window Folders and
 New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-16).
 
@@ -126,9 +129,11 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   (`events.js`); Updates explains that every successful installation reopens Leo.
 
 - Notes read wide (2026-10-19, the user's call): `.note-columns > .note` uses
-  `--note-width`, 980 px by default; Settings → Appearance → Note width picks
-  Comfortable (760 px), Wide or Full width, kept per browser in
-  `leo-note-width` and set early by `/theme.js` as `html[data-note-width]`.
+  `--note-width`, 980 px by default. Settings → Appearance → Note width only says
+  the current width (the default, a dragged px width, or an older Comfortable or
+  Full width choice still kept in `leo-note-width`) with a Reset button
+  (`width-reset`, disabled at the default); the width is changed by dragging the
+  page marks (2026-11-16, the user's call). `/theme.js` sets `html[data-note-width]`.
   Width checks measure the reading column; its outer wrapper also reserves the
   outline gutter. Full width fills the remaining column. Reading tests scroll
   over a note block, independently of the explorer’s own scroll area.
@@ -169,10 +174,10 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   today with boxes to tick. Lookups are scoped to the open sheet
   (`inQuick`), since a closing one can still be in the page.
 
-- Back from Settings, Keeping or Trash returns to the page before them
+- Escape from Settings, Keeping or Trash returns to the page before them
   (`places.before`, kept on `hashchange`; Keeping opened from Settings goes
   back to Settings), so a note you were reading stays where you left it.
-  When the page Back goes to is the previous history entry (each entry keeps
+  When the page Escape goes back to is the previous history entry (each entry keeps
   its position in `history.state.leoAt`; in-place URL rewrites keep it), it
   steps back with `history.back()` instead of adding an entry, so the
   browser's or phone's own back does not return to Settings (2026-10-20).
@@ -226,8 +231,9 @@ prose and editable fields remain selectable. The page admits native drag starts
 only from its explicit note/folder sources, preventing accidental link, image and
 selection drags while keeping file drops and pointer-driven board/resize actions.
 
-Page toolbars share the same 760 px maximum width across notes, workspace, recording
-and Settings. Every Settings section uses the same Settings / section breadcrumb;
+Page toolbars share one geometry across notes, workspace, calendar, boards, recording
+and Settings: 760 px at most below 1000 px, the page's width less `min(8%, 128px)` each
+side from 1000 px. Every Settings section uses the same Settings / section breadcrumb;
 Keeping and Trash keep their routes and controllers inside that frame.
 Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
@@ -249,8 +255,8 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   beside a pencil bracket; tables have a pencil double rule under the header running
   edge to edge, banded rows and right-aligned number columns; code blocks show their
   language and a Copy button on hover or keyboard focus. Chat, margin notes, previews
-  and board cards keep plain styling. A faint "N words · M min read" line sits under
-  the title. Note rows in the explorer edited in the last 30 minutes carry a small
+  and board cards keep plain styling. A faint line under the title says when the
+  note was edited and its read time ("M min read"; no word count). Note rows in the explorer edited in the last 30 minutes carry a small
   dot (not when sorted by Last edited).
 
 - No editor view: `editing.js` splits the body into blocks; `doc.js` renders
@@ -277,7 +283,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   The save state (`#save-state`) shows the leo mark, not words, while editing and
   saving (full ink, still) and once Saved (it dries to .45 once, `margin-breathe`
   reversed; the end frame under Reduced Motion); the words stay as hidden text, and
-  the "Not saved" lines stay visible text. "Edited …" shows until the first edit.
+  the "Not saved" lines stay visible text. "Edited …" stays beside the mark and says "Edited just now" after each save (2026-11-16, the user's call); it hides only while a "Not saved" line shows.
   Undo: up to `MOST_UNDO` snapshots per note (typing grouped by pauses).
   Lists (2026-11-06, the user's call): `markdown.js` `MARKER` is the one definition of a
   list marker: `-`, `*`, `+`, `1.`, `1)`, `a.`, `a)`, `A)`,
@@ -593,8 +599,8 @@ Reading-position anchors skip blank editor blocks and zero-width placeholders, s
 
 Explorer revisions: opening a different note clears the prior folder creation
 scope; selecting a folder afterwards deliberately sets the creation destination.
-Explicit chips and breadcrumbs reveal Folders on compact windows or unfold the
-desktop explorer; passive reveals never open a sheet. Loaded metadata stays
+Explorer rows reveal Folders on compact windows or unfold the desktop explorer (the
+note page has no folder chip and the bar no breadcrumbs since 2026-11-16); passive reveals never open a sheet. Loaded metadata stays
 visible during refresh, including empty folders, while generation and entry
 guards reject stale reads. The rail omits Felix and the explorer has no Collapse
 all control. Heading context uses creation scope, blank tree context uses root,
@@ -1024,14 +1030,14 @@ target. Check the page sequence after loading preferences.
   overlapping reads and the daily cap (429 with `why`). A useful comment adds no
   separate five-minute lockout. Reads can explain, connect ideas, ask a worthwhile
   question or correct a mistake, about the passage as a whole thought; they never draw.
-  A read-along never refuses for a full margin (2026-11-14, the user's call; only Read through answers 409 `full`): it saves with a limit of twice `MOST_OPEN` (48). At 48 open it first resolves the oldest open note that is not pinned, not the thread open on the page (`keep` in the body) and not being replied to (`margin::free_oldest`) and lists it in the response's `resolved`, which the page removes without a toast. When none qualifies the read answers `{failed: true, error}` with "Felix's margin is full. Resolve a note and he'll read again." before the model is asked: no read is spent and the page keeps its baseline.
-  Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more than 5 notes are open, the least recently updated notes with `source: "read"` (never asks, chat-made notes or Read through notes), no message from you, not pinned, not the `keep` thread, not being replied to and not the note just saved are resolved without a toast, and their ids join `resolved`. A note reopened from its underline has a fresh `updated_at`, so it is the last to go.
+  A read-along never refuses for a full margin (2026-11-14, the user's call; only Read through answers 409 `full`): it saves with a limit of twice `MOST_OPEN` (48). At 48 open it frees the oldest open note that is not pinned, not in `keep` (a list in the body: the thread open on the page and every thread with typed text), not a note the new one replaces and not being replied to (`margin::free_oldest`), in the transaction that stores the new note and only when it would not fit otherwise, so nothing is freed unless the new note is stored, and lists it in the response's `resolved`, which the page removes without a toast. When none qualifies the read answers `{failed: true, error}` with "Felix's margin is full. Resolve a note and he'll read again." before the model is asked: no read is spent and the page keeps its baseline.
+  Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more than 5 notes are open, the least recently updated notes with `source: "read"` (never asks, chat-made notes or Read through notes), no message from you, not pinned, not in `keep`, not being replied to and not the note just saved are resolved without a toast, and their ids join `resolved`. A note reopened from its underline has a fresh `updated_at`, so it is the last to go.
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is still saved if another read used the last one), and a broken day row counts as spent. Blocks already read are dropped. A failed
   read forgets its blocks and answers `{failed: true}`, so the page keeps its baseline.
   A refused read waits for the next edit; a stale-version refusal resets the page's
   retry delay to the normal typing pause, while provider cooldowns stay bounded.
   A read-along also sends up to 1,500 characters of the note before the first changed block as `earlier_text` (`margin::earlier_text`: its last occurrence, cut at a block boundary), context only; the raw quote must lie inside a changed block or the read is silent. Read through sends none.
-  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; resolved and dismissed threads do not count. There is no Reading… status
+  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; resolved and dismissed threads do not count. A reworded passage still holds its sentence (2026-11-16, the user's call): the page sends the current wording of every note it places only by the surrounding words (`changed`), the server counts that wording only where the note's own surrounding words put it, and a read-along note on that sentence replaces the old read-along note quietly when you never answered it, it is not pinned and not open, else (or when the old note came from Read through, Felix this or the chat) the new note is dropped (Read through always drops it); nothing is replaced unless the new note is stored; a replaced note leaves no reopen underline under the new note's text. A note that is still one sentence gives a comment on the whole note no surrounding words to be found by, so once its words are gone the page hides it and the next read-along note there replaces it (only an untouched, unpinned read-along comment, never one you kept open). There is no Reading… status
   (2026-11-07, the user's call): 200 ms into a read, the leo mark (`#leo-mark` in `.margin-waiting`, never a `.margin-note`, never in
   `threads`; it breathes by opacity only, still under Reduced Motion) sits in the margin beside the last changed block (`doc.blockAt`), placed by `margin.js` `clear` so notes never
   move for it (free spot on the right, else the left in Both, else below what blocks it), or is the gutter mark in Marks only.
@@ -1103,7 +1109,8 @@ target. Check the page sequence after loading preferences.
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
   text as a whole stops at 12 lines with a bottom fade on the last shown block (`.margin-cut`, set only when it overflows; later text blocks hide), figures and drawings
   always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
-  keeps the closed note undimmed with a faint tether. Open, its messages and the waiting mark sit right of a 1 px
+  keeps the note open with its reply box in every layout (2026-11-16, the user's call): Escape and a
+  click outside leave it, several can stay open, unpinning folds it; a faint tether shows at rest. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).
   Pin, Resolve, Dismiss and the mode change show at once; a failed save puts them back (only the
   newest request's answer counts; a resolved note returns to its place, open if it was, with its typed reply).
@@ -1134,20 +1141,23 @@ target. Check the page sequence after loading preferences.
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes
   (`Warm.margin`).
-- Round two from the reference app (2026-11-16, the user's call): marks are an ink blot after the passage's last
+- Margin polish (2026-11-16, the user's call): marks are an ink blot after the passage's last
   word; closed left-margin notes are right-aligned; a silent read leaves a faint "Nothing to add." after the passage;
   a draw ask waits with "Sketching it…"; the ask box says "Enter to ask · Esc to close"; Felix this on a passage with a
   thread only opens it; the open thread offers Copy; a folded thread says "N replies"; a resolved note stays faded with
   "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
+  In Marks the blot takes its own room in the line, so it never covers the next word; the open note is a raised
+  card under the paragraph that unfolds and folds away (none under Reduce Motion).
 - Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
-  least 6 characters, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
+  least 6 UTF-16 units, as the server's `margin::by_context` counts, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
   `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 992 px.
   Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:
   the room beside the note's own width less the gap and the window padding: 240 to 360 px on the right, 180 to 360 px
   per side with Both. Both holds on as long as it stays readable: the notes shrink to 180 px first, then the column to
-  520 px; only then does it become Right, and marks below that. It never moves every note right to make them wider. The margin is
+  520 px; below that it becomes marks, never Right (2026-11-16, the user's call: a layout never falls back to one side).
+  Dragging the page marks stops at `marginKit.mostColumn`, the widest column that leaves the chosen margins their least width. It never moves every note right to make them wider. The margin is
   reserved up front on every note, in both modes, whatever its threads
   (2026-11-04, the orchestrator's decision): `.note-columns[data-margin]` pads the
   column, so the note is min(its note width, the room left) and sits left of centre,
@@ -1478,7 +1488,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   (2026-11-07, the user's call), both always on touch.
   Cards show the title (three lines at most), the muted subheading, two lines of the
   description when there is one (`.kanban-has-text`) and the priority as one to three
-  slanted pencil strokes before the title, the word kept as hidden text (2026-11-15). A
+  slanted pencil strokes before the title, the word kept as hidden text (2026-11-15), coloured
+  by level so it reads at a glance (2026-11-16): low `--hue-0` blue, medium `--hue-amber`, high `--hue-red`. A
   dragged card tilts 1.5° while lifted and lands flat (none under Reduced Motion). Add
   card sits directly under the last card; its composer stays open for the next card (adds
   are queued so fast typing loses nothing). A redraw keeps each lane's scroll. ⋯ opens the shared `popupMenu`, the explorer's
@@ -1532,16 +1543,15 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   per AI with prices and effort chips.
 
 - Theme (2026-10-14, the user's request): Settings → Appearance picks Match
-  this device, Light or Dark, kept per browser in `leo-theme`. Theme, Felix and
-  Note width are rows of picture cards (2026-11-06, the owner's screenshots:
+  this device, Light or Dark, kept per browser in `leo-theme`. Theme and Felix
+  are rows of picture cards (2026-11-06, the owner's screenshots:
   `choiceCards` with `action`/`key`, so the buttons keep `theme-pick`,
-  `felix-pick`, `width-pick` and `aria-pressed`): Theme previews are inline SVG in
+  `felix-pick` and `aria-pressed`): Theme previews are inline SVG in
   fixed light and dark surfaces (Match device is split), Felix shows
-  `felix-preview cute-look` / `demon-look` (the mood code skips them), Note width
-  a miniature page per width; Felix's two cards sit in a three-column grid so
-  every row lines up. No footnote. Each has a row reset (`settingReset`,
+  `felix-preview cute-look` / `demon-look` (the mood code skips them); Felix's two cards span the row like the others,
+  their previews a wide, short strip (2026-11-16, the user's call). No footnote. Each has a row reset (`settingReset`,
   a small icon button that shows only while the value differs from
-  `APPEARANCE_DEFAULTS`: Match device, Cute, Wide; `data-action="setting-reset"`,
+  `APPEARANCE_DEFAULTS`: Match device, Cute; `data-action="setting-reset"`,
   named "Reset <setting> to default"). Text size and Felix's lettering
   (2026-11-06, the user's request) are two more rows in `theme.js` (`READING`,
   stored like Note width in `leo-text-size` / `leo-felix-letters`, set as
@@ -1758,7 +1768,7 @@ Speech models show In use, every Downloaded file and filtered All models cards.
 Rows show escaped catalog descriptions, languages, size, streaming support and
 measured accuracy/speed with themed meters; unknown scores stay unmeasured.
 A remembered Keeping section at the Settings root keeps Settings selected and
-Back returns to the previous note; only the explicit Keeping route selects Keeping.
+Escape returns to the previous note; only the explicit Keeping route selects Keeping.
 
 Usage keeps a single provider column with compact Session/Weekly rows: remaining
 percentage at left, a muted provider-colored bar and reset time at right. The

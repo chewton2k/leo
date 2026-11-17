@@ -115,7 +115,7 @@ body.chat-open .quick-perch { display: none; }
 body.on-calendar #crumbs .page-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .page-name { display: none; color: var(--text); font-weight: 650; font-size: 16px; padding: 4px 6px; }
 @media (min-width: 1000px) { .page-name { display: inline; } }
-body.crumb-fit .bar-row { width: var(--crumb-width); max-width: none; margin-left: var(--crumb-shift); margin-right: 0; }
+@media (min-width: 1000px) { .bar-row { max-width: none; padding-inline: min(8%, 128px); } }
 body.side-mini .side { grid-template-columns: 52px; }
 body.side-mini .side-explorer, body.side-mini .side-head .brand { display: none; }
 body.side-folding { transition: --side var(--t-follow) var(--ease-arrive); }

@@ -1,7 +1,7 @@
-use super::catalog::{catalog, Catalog};
+use super::catalog::{catalog, Catalog, DIARIZER};
 use super::library::Library;
 use std::io::{Read, Write};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 fn fixture() -> (tempfile::TempDir, Library) {
@@ -501,4 +501,232 @@ fn a_choice_the_catalog_no_longer_offers_still_opens_speech_models() {
             .to_string()
             .contains("Choose and download"));
     }
+}
+
+#[test]
+fn the_speaker_model_is_listed_apart_and_can_never_become_the_speech_model() {
+    let dir = tempfile::tempdir().unwrap();
+    let library = Library::with_catalog(
+        dir.path().join("models"),
+        dir.path().join("config"),
+        Arc::new(catalog().clone()),
+    );
+    let speaker = catalog().known(super::catalog::DIARIZER).unwrap();
+    std::fs::create_dir_all(dir.path().join("models")).unwrap();
+    std::fs::write(
+        dir.path().join("models").join(&speaker.file().filename),
+        b"partial",
+    )
+    .unwrap();
+    let view = library.view().unwrap();
+    assert_eq!(view["speakers"]["id"], super::catalog::DIARIZER);
+    assert_eq!(view["speakers"]["size"], speaker.file().size);
+    assert_eq!(view["speakers"]["verified"], false);
+    assert!(view["extra_files"].as_array().unwrap().is_empty());
+    assert!(library.use_model(super::catalog::DIARIZER, "en").is_err());
+    assert!(catalog().get(super::catalog::DIARIZER).is_err());
+    assert!(library.speaker_model().is_err());
+    assert_eq!(catalog().curated().count(), 29);
+}
+
+fn speaker_fixture() -> (tempfile::TempDir, Library) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut data = catalog().clone();
+    data.models.retain(|m| m.id == DIARIZER);
+    let quant = data.models[0].quant.clone();
+    let file = data.models[0].files.get_mut(&quant).unwrap();
+    file.size = 5;
+    file.sha256 = crate::providers::hex(&<sha2::Sha256 as sha2::Digest>::digest(b"model"));
+    let library = Library::with_catalog(
+        dir.path().join("models"),
+        dir.path().join("config"),
+        Arc::new(data),
+    );
+    (dir, library)
+}
+
+#[test]
+fn a_ready_speaker_model_is_used_without_starting_a_download() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    l.fetch(DIARIZER, &url, &AtomicBool::new(false), &|_, _| {})
+        .unwrap();
+    t.join().unwrap();
+    let path = l
+        .ensure_speaker_model(&|| panic!("started a download"), &|| false, &|_, _| {})
+        .unwrap();
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_missing_speaker_model_is_downloaded_and_waited_for() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    let reported = std::sync::atomic::AtomicUsize::new(0);
+    let path = l
+        .ensure_speaker_model(
+            &|| l.download_from(DIARIZER, &url),
+            &|| false,
+            &|_, total| {
+                assert_eq!(total, 5);
+                reported.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert!(reported.load(Ordering::SeqCst) > 0);
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_failed_speaker_model_download_reports_the_download_error() {
+    let (_dir, l) = speaker_fixture();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/model", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.read(&mut [0; 4096]);
+        let _ = stream.write_all(
+            b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+    });
+    let error = l
+        .ensure_speaker_model(&|| l.download_from(DIARIZER, &url), &|| false, &|_, _| {})
+        .unwrap_err();
+    server.join().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "The model download failed. Check your connection and try again."
+    );
+}
+
+#[test]
+fn finishing_during_the_speaker_model_download_leaves_it_running() {
+    let (_dir, l) = speaker_fixture();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/model", listener.local_addr().unwrap());
+    let error = l
+        .ensure_speaker_model(&|| l.download_from(DIARIZER, &url), &|| true, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Stopped while the speaker model was downloading"
+    );
+    assert!(l.downloading(DIARIZER));
+    l.cancel(DIARIZER).unwrap();
+    drop(listener);
+}
+
+#[test]
+fn a_speaker_model_job_that_already_failed_reports_its_error() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job(DIARIZER, "failed", Some("The model download was damaged."));
+    let error = l
+        .ensure_speaker_model(&|| Ok(()), &|| false, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(error.to_string(), "The model download was damaged.");
+}
+
+#[test]
+fn a_speaker_model_download_started_elsewhere_meanwhile_is_waited_for() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    let path = l
+        .ensure_speaker_model(
+            &|| {
+                l.seed_job(DIARIZER, "downloading", None);
+                let (l, url) = (l.clone(), url.clone());
+                std::thread::spawn(move || {
+                    l.fetch(DIARIZER, &url, &AtomicBool::new(false), &|_, _| {})
+                        .unwrap();
+                    l.seed_job(DIARIZER, "ready", None);
+                });
+                anyhow::bail!("This model is already downloading.")
+            },
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_cancelled_speaker_model_download_says_so() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job(DIARIZER, "cancelled", None);
+    let error = l
+        .ensure_speaker_model(&|| Ok(()), &|| false, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "The speaker model download was cancelled"
+    );
+}
+
+#[test]
+fn a_speaker_model_download_refused_for_lack_of_a_slot_waits_and_retries() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job("first", "downloading", None);
+    l.seed_job("second", "downloading", None);
+    let (url, t) = model_server(b"model");
+    let starts = std::sync::atomic::AtomicUsize::new(0);
+    let path = l
+        .ensure_speaker_model(
+            &|| {
+                if starts.fetch_add(1, Ordering::SeqCst) == 1 {
+                    l.seed_job("first", "ready", None);
+                }
+                l.download_from(DIARIZER, &url)
+            },
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert_eq!(starts.load(Ordering::SeqCst), 2);
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_speaker_model_download_waiting_for_a_slot_stops_when_asked() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job("first", "downloading", None);
+    l.seed_job("second", "downloading", None);
+    let error = l
+        .ensure_speaker_model(
+            &|| l.download_from(DIARIZER, "http://127.0.0.1:9/model"),
+            &|| true,
+            &|_, _| panic!("reported progress"),
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Stopped while the speaker model was downloading"
+    );
+}
+
+#[test]
+#[ignore = "downloads the 133 MiB speaker model from Hugging Face"]
+fn the_real_speaker_model_downloads_from_hugging_face_and_verifies() {
+    let dir = tempfile::tempdir().unwrap();
+    let l = Library::new(dir.path().join("models"), dir.path().join("config"));
+    let seen = std::sync::Mutex::new(Vec::new());
+    let started = std::time::Instant::now();
+    let path = l
+        .ensure_speaker_model(&|| l.download(DIARIZER), &|| false, &|done, total| {
+            seen.lock().unwrap().push((done, total))
+        })
+        .unwrap();
+    let size = catalog().known(DIARIZER).unwrap().file().size;
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), size);
+    let seen = seen.into_inner().unwrap();
+    assert_eq!(seen.last(), Some(&(size, size)));
+    assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0));
+    println!(
+        "downloaded {} MiB in {:.1}s with {} progress reports",
+        size >> 20,
+        started.elapsed().as_secs_f64(),
+        seen.len()
+    );
 }

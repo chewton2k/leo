@@ -45,6 +45,8 @@ const CONTEXT_MESSAGE: usize = 320;
 const CONTEXT_FRAME: usize = 320;
 const REPLY_MESSAGES: usize = 8;
 const AROUND: usize = 48;
+const TAIL: usize = 24;
+const NEAR: usize = 120;
 const NEARBY: usize = 3_000;
 const EARLIER_CHARS: usize = 1_500;
 const REMEMBERED: usize = 64;
@@ -319,30 +321,34 @@ pub fn room(open: &[Thread], gone: &[String]) -> usize {
     (MOST_OPEN + open.iter().filter(|t| gone.contains(&t.id)).count()).min(2 * MOST_OPEN)
 }
 
-pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
+fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::Result<usize> {
     let messages = serde_json::to_string(&thread.messages).unwrap_or_else(|_| "[]".into());
+    c.execute(
+        "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12
+         WHERE ?6 != 'open'
+            OR (SELECT count(*) FROM margin_threads WHERE note = ?2 AND status = 'open') < ?11",
+        params![
+            thread.id,
+            thread.note,
+            thread.quote,
+            thread.prefix,
+            thread.suffix,
+            thread.status,
+            thread.source,
+            messages,
+            thread.created_at.to_rfc3339(),
+            thread.updated_at.to_rfc3339(),
+            limit as i64,
+            thread.pinned,
+        ],
+    )
+}
+
+pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
     db_of(chats)
         .with(|c| {
-            let added = c.execute(
-                "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned)
-                 SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12
-                 WHERE ?6 != 'open'
-                    OR (SELECT count(*) FROM margin_threads WHERE note = ?2 AND status = 'open') < ?11",
-                params![
-                    thread.id,
-                    thread.note,
-                    thread.quote,
-                    thread.prefix,
-                    thread.suffix,
-                    thread.status,
-                    thread.source,
-                    messages,
-                    thread.created_at.to_rfc3339(),
-                    thread.updated_at.to_rfc3339(),
-                    limit as i64,
-                    thread.pinned,
-                ],
-            )?;
+            let added = insert(c, thread, limit)?;
             prune_closed(c, &thread.note)?;
             Ok(added)
         })
@@ -351,37 +357,48 @@ pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
 
 pub const FULL: &str = "Felix's margin is full. Resolve a note and he'll read again.";
 
-pub fn evictable(thread: &Thread, keep: Option<&str>) -> bool {
-    !thread.pinned && Some(thread.id.as_str()) != keep
+pub fn evictable(thread: &Thread, keep: &[String]) -> bool {
+    !thread.pinned && !keep.contains(&thread.id)
 }
 
-pub fn freeable(reads: &Reads, thread: &Thread, keep: Option<&str>) -> bool {
+pub fn freeable(reads: &Reads, thread: &Thread, keep: &[String]) -> bool {
     evictable(thread, keep) && !reads.is_replying(&thread.id)
+}
+
+fn resolve_in(
+    c: &rusqlite::Connection,
+    thread: &Thread,
+    untouched: bool,
+) -> rusqlite::Result<Option<bool>> {
+    let row: Option<(String, bool)> = c
+        .query_row(
+            "SELECT messages, pinned FROM margin_threads WHERE id = ?1 AND note = ?2 AND status = 'open'",
+            [&thread.id, &thread.note],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((messages, pinned)) = row else {
+        return Ok(None);
+    };
+    let spoken = serde_json::from_str::<Vec<Message>>(&messages)
+        .map_or(true, |all| all.iter().any(|m| m.from != "felix"));
+    if pinned || untouched && spoken {
+        return Ok(Some(false));
+    }
+    c.execute(
+        "UPDATE margin_threads SET status = 'resolved', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+        params![Utc::now().to_rfc3339(), thread.id],
+    )?;
+    Ok(Some(true))
 }
 
 fn resolved_if_open(chats: &Path, thread: &Thread, untouched: bool) -> bool {
     db_of(chats)
         .with(|c| {
             let tx = c.transaction()?;
-            let messages: Option<String> = tx
-                .query_row(
-                    "SELECT messages FROM margin_threads WHERE id = ?1 AND note = ?2 AND status = 'open'",
-                    [&thread.id, &thread.note],
-                    |r| r.get(0),
-                )
-                .optional()?;
-            let Some(messages) = messages else {
-                return Ok(false);
-            };
-            let spoken = serde_json::from_str::<Vec<Message>>(&messages)
-                .map_or(true, |all| all.iter().any(|m| m.from != "felix"));
-            if untouched && spoken {
+            if resolve_in(&tx, thread, untouched)? != Some(true) {
                 return Ok(false);
             }
-            tx.execute(
-                "UPDATE margin_threads SET status = 'resolved', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
-                params![Utc::now().to_rfc3339(), thread.id],
-            )?;
             prune_closed(&tx, &thread.note)?;
             tx.commit()?;
             Ok(true)
@@ -399,23 +416,83 @@ fn resolve_one(
     resolved_if_open(chats, thread, untouched).then(|| thread.clone())
 }
 
+pub enum Swap {
+    Put(Vec<Thread>),
+    Kept,
+    Failed,
+}
+
+pub fn put_replacing(
+    chats: &Path,
+    reads: &Arc<Reads>,
+    thread: &Thread,
+    olds: &[String],
+    keep: &[String],
+    victim: Option<(Thread, Replying)>,
+    limit: usize,
+) -> Swap {
+    let open: Vec<Thread> = open_on(chats, &thread.note)
+        .into_iter()
+        .filter(|t| olds.contains(&t.id))
+        .collect();
+    if open
+        .iter()
+        .any(|t| t.source != "read" || !freeable(reads, t, keep))
+    {
+        return Swap::Kept;
+    }
+    let Some(_held) = open
+        .iter()
+        .map(|t| reads.replying(&t.id))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Swap::Kept;
+    };
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let mut gone = Vec::new();
+            for old in &open {
+                match resolve_in(&tx, old, true)? {
+                    Some(true) => gone.push(old.clone()),
+                    Some(false) => return Ok(Swap::Kept),
+                    None => {}
+                }
+            }
+            if insert(&tx, thread, limit)? == 0 {
+                let Some((freed, _)) = &victim else {
+                    return Ok(Swap::Failed);
+                };
+                if resolve_in(&tx, freed, false)? != Some(true) || insert(&tx, thread, limit)? == 0
+                {
+                    return Ok(Swap::Failed);
+                }
+                gone.push(freed.clone());
+            }
+            prune_closed(&tx, &thread.note)?;
+            tx.commit()?;
+            Ok(Swap::Put(gone))
+        })
+        .unwrap_or(Swap::Failed)
+}
+
 pub fn free_oldest(
     chats: &Path,
     reads: &Arc<Reads>,
     note: &str,
-    keep: Option<&str>,
-) -> Option<Thread> {
+    keep: &[String],
+) -> Option<(Thread, Replying)> {
     open_on(chats, note)
-        .iter()
+        .into_iter()
         .filter(|t| freeable(reads, t, keep))
-        .find_map(|t| resolve_one(chats, reads, t, false))
+        .find_map(|t| reads.replying(&t.id).map(|held| (t, held)))
 }
 
 pub fn resolve_untouched(
     chats: &Path,
     reads: &Arc<Reads>,
     note: &str,
-    keep: Option<&str>,
+    keep: &[String],
     fresh: &str,
 ) -> Vec<String> {
     let open = open_on(chats, note);
@@ -935,6 +1012,15 @@ pub fn placed(body: &str, quote: &str, within: &[String]) -> Option<Place> {
     context_around(body, found_at(body, quote, within)?, quote.len())
 }
 
+pub fn one_sentence(body: &str) -> bool {
+    let text = body.trim();
+    let lead = body.len() - body.trim_start().len();
+    let words = text
+        .trim_end_matches(['.', '!', '?', '。', '！', '？'])
+        .len();
+    words > 0 && sentence_at(body, lead, 0).1 >= lead + words
+}
+
 fn sentence_at(body: &str, at: usize, length: usize) -> (usize, usize) {
     let stops = |i: usize, c: char| {
         matches!(c, '\n' | '。' | '！' | '？')
@@ -976,6 +1062,68 @@ pub fn whole_sentences(body: &str, quote: &str, within: &[String]) -> String {
             (quotable(span, MOST_QUOTE) && tail >= LEAST_TAIL).then(|| span.to_string())
         })
         .unwrap_or_else(|| quote.to_string())
+}
+
+fn tail_of(text: &str) -> &str {
+    let mut used = 0;
+    let from = text
+        .char_indices()
+        .rev()
+        .take_while(|(_, c)| {
+            used += c.len_utf16();
+            used <= TAIL
+        })
+        .last()
+        .map_or(text.len(), |(i, _)| i);
+    &text[from..]
+}
+
+fn head_of(text: &str) -> &str {
+    let mut used = 0;
+    let to = text
+        .char_indices()
+        .take_while(|(_, c)| {
+            used += c.len_utf16();
+            used <= TAIL
+        })
+        .last()
+        .map_or(0, |(i, c)| i + c.len_utf8());
+    &text[..to]
+}
+
+pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
+    let units = |s: &str| s.encode_utf16().count();
+    if text.trim().is_empty()
+        || body.contains(thread.quote.as_str())
+        || units(text) > 2 * units(&thread.quote) + NEAR
+    {
+        return None;
+    }
+    let (before, after) = (tail_of(&thread.prefix), head_of(&thread.suffix));
+    let short = |part: &str, whole: &str| !whole.is_empty() && units(part) < LEAST_TAIL;
+    if before.is_empty() && after.is_empty()
+        || short(before, &thread.prefix)
+        || short(after, &thread.suffix)
+    {
+        return None;
+    }
+    let needle = format!("{before}{text}{after}");
+    if thread.prefix.is_empty() {
+        body.starts_with(&needle).then_some(0)
+    } else if thread.suffix.is_empty() {
+        Some(body.strip_suffix(needle.as_str())?.len() + before.len())
+    } else {
+        Some(body.find(&needle)? + before.len())
+    }
+}
+
+pub fn crowds_at(body: &str, quote: &str, within: &[String], at: usize, length: usize) -> bool {
+    let Some(start) = found_at(body, quote, within) else {
+        return false;
+    };
+    let (from, to) = sentence_at(body, start, quote.len());
+    let (head, tail) = sentence_at(body, at, length);
+    head < to && from < tail
 }
 
 pub fn crowded(body: &str, quote: &str, within: &[String], taken: &[String]) -> bool {
@@ -1729,6 +1877,11 @@ mod tests {
         assert_eq!(one(&chats, "n", &dismissed.id).unwrap().status, "dismissed");
         assert_eq!(one(&chats, "n", &answered.id).unwrap().status, "open");
         assert_eq!(one(&chats, "n", &plain.id).unwrap().status, "resolved");
+        let late = open_thread("n");
+        assert!(put(&chats, &late, MOST_OPEN));
+        assert!(set_pinned(&chats, "n", &late.id, true).is_some());
+        assert!(resolve_one(&chats, &reads, &late, false).is_none());
+        assert_eq!(one(&chats, "n", &late.id).unwrap().status, "open");
     }
 
     #[test]

@@ -18,7 +18,7 @@ async function showSettings(section) {
   const mine = ++seq;
   state = { view: 'settings', dir: '', section };
   scheduleAppStatus(appPollGeneration);
-  chrome({ showBack: true });
+  chrome();
   $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
   refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
@@ -469,37 +469,29 @@ const THEME_DIAGRAMS = {
 const TEXT_SIZE_LABELS = { small: 'Small', medium: 'Medium', large: 'Large' };
 const LETTERING_LABELS = { own: "Felix's own", notes: 'Like your notes' };
 const LETTERING_SAMPLE = 'Found it, in your Tuesday note.';
-const WIDTH_COLUMNS = { comfortable: 44, wide: 70, full: 108 };
-function widthDiagram(width) {
-  const w = WIDTH_COLUMNS[width], x = (120 - w) / 2, line = (share) => Math.round((w - 12) * share);
-  return `<svg viewBox="0 0 120 52"><path class="d-page" d="M${x} 6h${w}v46H${x}z"/><path class="d-head" d="M${x + 6} 15h${line(0.45)}"/><path class="d-text" d="M${x + 6} 24h${line(1)}M${x + 6} 31h${line(0.9)}M${x + 6} 38h${line(0.65)}"/></svg>`;
-}
-
 function themeCard() {
   const now = window.leoTheme.choice();
   const felixNow = window.leoTheme.felix();
-  const widthNow = window.leoTheme.noteWidth();
   const sizeNow = window.leoTheme.textSize();
   const lettersNow = window.leoTheme.felixLetters();
   return `<section class="set-card appearance">
       <header><h3>Appearance</h3></header>
       <div class="set-row column" data-find="theme"><span class="set-label">Theme${settingReset('Theme', 'theme', now !== APPEARANCE_DEFAULTS.theme)}</span>${choiceCards({ label: 'Theme', action: 'theme-pick', key: 'theme', current: now, choices: window.leoTheme.CHOICES.map((choice) => [choice, THEME_LABELS[choice], '', THEME_DIAGRAMS[choice]]) })}</div>
-      <div class="set-row column" data-find="felix-look"><span class="set-label">Felix${settingReset('Felix', 'felix', felixNow !== APPEARANCE_DEFAULTS.felix)}</span>${choiceCards({ label: 'Felix', action: 'felix-pick', key: 'felix', current: felixNow, columns: 3, choices: [['cute', 'Cute'], ['demon', 'Demon']].map(([kind, label]) => [kind, label, '', `<svg viewBox="0 0 120 52">${felix.felix(40, `felix-preview ${kind}-look`).replace('<svg ', '<svg x="40" y="10" ')}</svg>`]) })}</div>
-      <div class="set-row column" data-find="note-width"><span class="set-label">Note width${settingReset('Note width', 'width', widthNow !== APPEARANCE_DEFAULTS.width || Boolean(window.leoTheme.pageWidth()))}</span>${choiceCards({ label: 'Note width', action: 'width-pick', key: 'width', current: widthNow, choices: window.leoTheme.WIDTHS.map((width) => [width, WIDTH_LABELS[width], '', widthDiagram(width)]) })}${window.leoTheme.pageWidth() && widthNow !== 'full' ? `<p class="set-desc">Dragged to ${window.leoTheme.pageWidth()} px at the note's top corners. Pick a size to go back.</p>` : ''}</div>
+      <div class="set-row column" data-find="felix-look"><span class="set-label">Felix${settingReset('Felix', 'felix', felixNow !== APPEARANCE_DEFAULTS.felix)}</span>${choiceCards({ label: 'Felix', action: 'felix-pick', key: 'felix', current: felixNow, choices: [['cute', 'Cute'], ['demon', 'Demon']].map(([kind, label]) => [kind, label, '', `<svg viewBox="0 0 240 52">${felix.felix(40, `felix-preview ${kind}-look`).replace('<svg ', '<svg x="100" y="10" ')}</svg>`]) })}</div>
+      ${widthRow()}
       <div class="set-row column" data-find="text-size"><span class="set-label">Text size${settingReset('Text size', 'size', sizeNow !== APPEARANCE_DEFAULTS.size)}</span>${choiceCards({ label: 'Text size', action: 'text-size-pick', key: 'size', current: sizeNow, choices: window.leoTheme.TEXT_SIZES.map((size) => [size, TEXT_SIZE_LABELS[size], '', `<span class="read-sample size" data-text-size="${size}">Notes</span>`]) })}</div>
       <div class="set-row column" data-find="felix-lettering"><span class="set-label">Felix's lettering${settingReset("Felix's lettering", 'letters', lettersNow !== APPEARANCE_DEFAULTS.letters)}</span>${choiceCards({ label: "Felix's lettering", action: 'letters-pick', key: 'letters', current: lettersNow, choices: window.leoTheme.LETTERINGS.map((letters) => [letters, LETTERING_LABELS[letters], '', `<span class="read-sample letters" data-letters="${letters}">${LETTERING_SAMPLE}</span>`]) })}</div>
     </section>`;
 }
 
 function syncAppearanceResets() {
-  const now = { theme: window.leoTheme.choice(), felix: window.leoTheme.felix(), width: window.leoTheme.pageWidth() ? 'dragged' : window.leoTheme.noteWidth(), size: window.leoTheme.textSize(), letters: window.leoTheme.felixLetters() };
+  const now = { theme: window.leoTheme.choice(), felix: window.leoTheme.felix(), size: window.leoTheme.textSize(), letters: window.leoTheme.felixLetters() };
   for (const button of document.querySelectorAll('[data-action="setting-reset"]')) button.toggleAttribute('data-on', now[button.dataset.reset] !== APPEARANCE_DEFAULTS[button.dataset.reset]);
 }
 function resetSetting(el) {
   const key = el.dataset.reset;
   if (key === 'theme') pickTheme({ dataset: { theme: APPEARANCE_DEFAULTS.theme } });
   else if (key === 'felix') pickFelix({ dataset: { felix: APPEARANCE_DEFAULTS.felix } });
-  else if (key === 'width') pickWidth({ dataset: { width: APPEARANCE_DEFAULTS.width } });
   else if (key === 'size') pickTextSize({ dataset: { size: APPEARANCE_DEFAULTS.size } });
   else if (key === 'letters') pickLetters({ dataset: { letters: APPEARANCE_DEFAULTS.letters } });
 }
@@ -517,20 +509,24 @@ function pickTheme(el) {
   syncAppearanceResets();
 }
 
-const WIDTH_LABELS = { comfortable: 'Comfortable', wide: 'Wide', full: 'Full width' };
+function widthWords() {
+  const dragged = window.leoTheme.pageWidth(), width = window.leoTheme.noteWidth();
+  if (width === 'full') return 'Full width. Reset brings the page marks back.';
+  const now = dragged ? `Up to ${dragged} px wide.` : width === APPEARANCE_DEFAULTS.width ? 'The default.' : 'Comfortable.';
+  return `${now} On a wide note, drag a mark at its top corners or focus one and use the arrow keys; Enter on a mark resets.`;
+}
 
-function pickWidth(el) {
-  window.leoTheme.setNoteWidth(el.dataset.width);
-  document.querySelector('[data-find="note-width"] .set-desc')?.remove();
-  for (const button of document.querySelectorAll('[data-action="width-pick"]')) {
-    const on = button.dataset.width === window.leoTheme.noteWidth();
-    button.classList.toggle('on', on);
-    button.setAttribute('aria-pressed', String(on));
-  }
-  // Callers may pass just { dataset }, so the highlight follows the page's own buttons.
-  const box = document.querySelector('[data-action="width-pick"]')?.closest('.choice-cards');
-  if (box) syncChoiceCards(box);
-  syncAppearanceResets();
+function widthRow() {
+  const changed = window.leoTheme.noteWidth() !== APPEARANCE_DEFAULTS.width || Boolean(window.leoTheme.pageWidth());
+  return `<div class="set-row width-row" data-find="note-width"><span class="grow">Note width<span class="set-desc" aria-live="polite">${widthWords()}</span></span><button type="button" class="btn sm" data-action="width-reset" aria-label="Reset Note width to default"${changed ? '' : ' aria-disabled="true"'}>Reset</button></div>`;
+}
+
+function resetWidth() {
+  window.leoTheme.setNoteWidth(APPEARANCE_DEFAULTS.width);
+  const row = document.querySelector('[data-find="note-width"]');
+  if (!row) return;
+  row.querySelector('.set-desc').textContent = widthWords();
+  row.querySelector('[data-action="width-reset"]').setAttribute('aria-disabled', 'true');
 }
 
 function pickFelix(el) {
@@ -1161,14 +1157,15 @@ function speechCards(view) {
   const language = current && view.ready && current.languages.length > 1 ? `<label class="set-row" data-find="speech-language"><span class="set-label">Language</span><span class="select-control"><select id="speech-language" data-speech-language="${esc(current.id)}">${current.detects_language === false ? '' : settingsOption('auto', 'Detect language', selected.language)}${current.languages.map((code) => settingsOption(code, speechLanguage(code), selected.language)).join('')}</select>${ICON.chevron}</span></label>` : '';
   const downloaded = view.models.filter((model) => model.downloaded);
   const extras = view.extra_files || [];
+  const speakers = view.speakers && view.speakers.bytes > 0 ? view.speakers : null;
   const available = view.models.filter((model) => !model.downloaded);
   if (!state.speechFilter || state.speechFilter === 'downloaded') state.speechFilter = 'recommended';
   const filter = state.speechFilter;
   const filters = [['recommended', 'Recommended'], ['english', 'English'], ['many', 'Multilingual'], ['all', `All ${available.length}`]];
   const rows = speechFiltered(available, filter).map(speechModelRow).join('');
   return `<section class="set-card" data-find="speech-in-use"><header><h3>In use</h3><span class="set-status ${view.ready ? 'ok' : 'missing'}">${view.ready ? 'Ready' : 'Choose a model'}</span></header><div class="set-row"><span class="grow set-value-text">${view.ready && current ? esc(current.name) : 'Download a model below, then choose Use.'}</span></div><p class="set-note">Dictation and recording share this model. Audio stays on this computer.</p>${language}</section>
-    <section class="set-card" data-models-downloaded data-find="speech-downloaded"><header><h3>Downloaded</h3><span class="hint">${plural(downloaded.length + extras.length, 'model')} · ${speechBytes(view.disk_bytes)} on this computer</span></header>
-      ${downloaded.map(speechModelRow).join('')}${extras.map((file) => `<div class="set-row"><span class="grow"><span>${esc(file.name)}</span><span class="set-note">${speechBytes(file.bytes)} · Not in the current catalog</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(file.name)}" data-verb="delete_file">Delete</button></div>`).join('')}${!downloaded.length && !extras.length ? '<p class="set-note">No models downloaded yet.</p>' : ''}</section>
+    <section class="set-card" data-models-downloaded data-find="speech-downloaded"><header><h3>Downloaded</h3><span class="hint">${plural(downloaded.length + extras.length + (speakers ? 1 : 0), 'model')} · ${speechBytes(view.disk_bytes)} on this computer</span></header>
+      ${downloaded.map(speechModelRow).join('')}${extras.map((file) => `<div class="set-row"><span class="grow"><span>${esc(file.name)}</span><span class="set-note">${speechBytes(file.bytes)} · Not in the current catalog</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(file.name)}" data-verb="delete_file">Delete</button></div>`).join('')}${speakers ? `<div class="set-row"><span class="grow"><span>Speaker model</span><span class="set-note">${speechBytes(speakers.bytes)} · For Label speakers on the Record page</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(speakers.id)}" data-verb="delete_speakers">Delete</button></div>` : ''}${!downloaded.length && !extras.length && !speakers ? '<p class="set-note">No models downloaded yet.</p>' : ''}</section>
     <section class="set-card" data-models-all data-find="speech-all"><header><h3>All models</h3></header><p class="hint">Choose a local model. Larger models use more memory.</p><div class="model-filters">${segmented({ label: 'Filter models', action: 'speech-filter', key: 'filter', current: filter, choices: filters })}</div>${rows || '<p class="set-note">No models match this filter.</p>'}<p class="set-note">Accuracy uses the chosen language, or combines measured languages with Detect language. Benchmark speed may differ on your computer.</p></section>`;
 }
 function speechBytes(bytes) {
@@ -1260,6 +1257,10 @@ function speechDeleteMenu(el, name, note, change) {
 }
 
 function changeSpeechModel(el) {
+  if (el.dataset.verb === 'delete_speakers') {
+    speechDeleteMenu(el, 'the speaker model', 'Label speakers offers to download it again when you turn it on.', { action: 'delete', id: el.dataset.model });
+    return;
+  }
   if (el.dataset.verb === 'delete_file') {
     const file = (state.speech.extra_files || []).find((file) => file.name === el.dataset.model);
     if (file) speechDeleteMenu(el, file.name, 'This removes the model file from this computer.', { action: 'delete_file', id: file.name });

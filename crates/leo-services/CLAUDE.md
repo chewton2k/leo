@@ -77,6 +77,38 @@ fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
 
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
+never for call tracks; omitted from JSON when off, so old cache keys hold):
+`Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
+drafting is off. In `recorder::finish`, once every part is done,
+`label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
+parts (each later part's 1 s lead skipped), `runs` tiles the whole timeline into
+speaker runs (gaps split between neighbours, runs under 1 s merged, numbered by
+first appearance), runs are cut at each part boundary at the quietest 20 ms
+within 2 s, and each piece is re-transcribed through the normal `TranscribeFn`
+(silent pieces skipped, one retry; Progress shows steps). A missing speaker
+model is downloaded at Finish and waited for (Progress "Downloading the speaker
+model" in MiB steps); a failed download warns and keeps the plain transcript.
+Passages belong to the
+part holding their midpoint (`part_of`) and never merge across parts, so every
+part keeps its own five minutes. `speakers.json` holds the result; `[]` (no
+labels, the plain transcript) when one speaker remains, and with a warning on a
+failure, Finish now or over two hours; never redone on recovery, except when the
+engine was stopping (app quit or update), which keeps the audio for recovery. A
+failed part skips labelling with a warning. WAVs of done parts are deleted after
+labelling, and `Session::finish` drops them too when it keeps a session for
+retry. `assemble` prefixes `[Speaker N]` per line (`live::stitch` keeps those
+lines) and `archive` gives one passage per run (raw text). Measured on AMI
+meetings: 86–91% of transcribed speech gets the right speaker, Sortformer
+~0.5 s per minute on Metal, ~1.6 s per minute on CPU. The ignored
+`speakers_across_models` test and `speakers.yml` (weekly, manual, PRs touching
+labelling; models over 2.2 GB only on demand) run it per curated English model
+on a pinned, checksummed AMI excerpt: right speaker ≥ 80%, speech with text
+≥ 75%, and word error rate against AMI's manual words (fillers and cut-off words
+left out) at most 5 points above the same model's plain transcript. Words kept
+against the plain path is only printed: Whisper's plain 5-minute parts can run
+long (whisper-large-v3: 706 words where most models give about 575).
+
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s;
 `CLOUD_ROLL_INTERVAL` 8 s) re-transcribe from `settled_at`, at most
 `LIVE_MOST_SECS` (20); at `SETTLE_AFTER_SECS` (12) settle at `live::quietest`
@@ -136,6 +168,29 @@ cannot load. Dictation filters while capturing; the engine only cuts and pads
 clips under a second. Recordings are never trimmed: a chunk goes whole unless
 VAD, on a copy raised to speech level (median frame level to 0.1, gain 1–50),
 hears nothing. Slow catalog models skip live passes.
+
+The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
+License) is found by `Catalog::known`, never `get`: `Library` downloads, verifies
+and lists it under `speakers` (never in `extra_files`) and it can never be
+chosen as the speech model; Settings → Speech models lists it to delete.
+`Engine::diarize` gets the model through `Library::ensure_speaker_model`: a
+verified model is used at once; otherwise it starts the download (or joins one
+already running, including one started while its own start was refused; a
+start refused because other model downloads fill every slot waits and retries),
+waits for it with no time limit, reporting bytes (a last full report once it is
+ready), and ends early with an error when Finish now is pressed or the engine
+stops, leaving the download running; a failed download answers with the job's
+error and a cancelled one says it was cancelled. It then waits for a running
+dictation and queues `Message::Diarize`: the actor loads the
+chosen speech model if needed and sends `Request::Diarize { model, parts }`; the
+worker reads the WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops
+it, answering `Response::Turns`. Its deadline is `Deadlines::diarize` (run floor
+plus 1/40 of the transcription factor); Finish now cancels it through
+`supervisor.cancel()`. A worker lost there (not hung, not pinned) never marks the
+GPU unusable for speech: the pass is retried once in a CPU-only worker
+(`Owner.diarize_on_cpu`), and later passes in that app session start there, dropping
+the speech worker, which restarts on the next request. It shares the worker, so
+a dictation started during the pass waits for it.
 
 `speech/supervisor.rs` re-executes the binary with `--leo-speech-worker` before
 normal startup. Only the worker initializes GPU backends, loads a speech model

@@ -1,11 +1,11 @@
 use super::protocol::{
-    read_message, write_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response,
+    read_message, write_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response, Turn,
 };
 use super::{CPU_ONLY_FLAG, LOG_LEVEL_ENV};
 use log::{debug, error, warn, LevelFilter, Log, Metadata, Record};
 use std::fs::File;
 use std::io::{self, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use transcribe_cpp::{
@@ -121,6 +121,10 @@ pub fn run() -> i32 {
             Request::Feed | Request::Finalize { .. } | Request::StreamReset => {
                 Response::Error("no active stream".to_string())
             }
+            Request::Diarize { model, parts } => match diarize(&model, &parts) {
+                Ok(turns) => Response::Turns(turns),
+                Err(e) => Response::Error(e),
+            },
         };
         if let Err(e) = write_message(&mut output, &response, None) {
             error!("Protocol write failed: {}", e);
@@ -224,6 +228,46 @@ fn run_error(e: transcribe_cpp::Error) -> Response {
     } else {
         Response::Error(e.to_string())
     }
+}
+
+fn diarize(model: &Path, parts: &[(PathBuf, u64)]) -> Result<Vec<Turn>, String> {
+    use transcribe_cpp::{
+        DiarizeExtension, DiarizeOptions, SortformerDiarizeOptions, SortformerPreset,
+    };
+    let mut pcm = Vec::with_capacity(
+        parts
+            .iter()
+            .map(|(path, _)| std::fs::metadata(path).map_or(0, |m| m.len() as usize / 2))
+            .sum(),
+    );
+    for (path, skip_ms) in parts {
+        let samples = crate::session::wav::read(path)
+            .map_err(|e| format!("Could not read {}: {e}", path.display()))?;
+        let skip =
+            (*skip_ms as usize * crate::session::wav::RATE as usize / 1000).min(samples.len());
+        pcm.extend(samples[skip..].iter().map(|&s| s as f32 / 32768.0));
+    }
+    let model = Model::load(model).map_err(|e| format!("Failed to load the speaker model: {e}"))?;
+    let mut session = model
+        .diarize_session()
+        .map_err(|e| format!("Failed to start telling speakers apart: {e}"))?;
+    let options = DiarizeOptions {
+        family: Some(DiarizeExtension::Sortformer(SortformerDiarizeOptions {
+            preset: Some(SortformerPreset::VeryHighLatency),
+        })),
+    };
+    let segments = session
+        .run(&pcm, &options)
+        .map_err(|e| format!("Telling speakers apart failed: {e}"))?;
+    Ok(segments
+        .into_iter()
+        .filter(|s| s.t1_ms > s.t0_ms && (1..=4).contains(&s.speaker_id))
+        .map(|s| Turn {
+            start_ms: s.t0_ms.max(0) as u64,
+            end_ms: s.t1_ms as u64,
+            speaker: s.speaker_id as u8,
+        })
+        .collect())
 }
 
 fn load(

@@ -1921,5 +1921,11 @@
 
   if (root.CSS?.highlights && typeof root.Highlight === 'function') root.document.addEventListener('selectionchange', paintPick);
 
-  root.leoDoc = { mount };
+  function insertAt({ node, offset }, el) {
+    if (offset === 0) node.before(el);
+    else if (offset >= node.data.length) node.after(el);
+    else node.splitText(offset).before(el);
+  }
+
+  root.leoDoc = { mount, insertAt };
 })(window);

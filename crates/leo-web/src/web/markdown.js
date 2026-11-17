@@ -437,10 +437,13 @@
   function plain(markdown) {
     return String(markdown || '')
       .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, ' ')
-      .replace(/^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/gm, ' ')
-      .replace(/\s*\|\s*/g, ' ')
-      .replace(new RegExp(String.raw`^\s*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
+      .replace(/^[^\S\n]*(?:-{3,}|\*{3,}|_{3,})[^\S\n]*$/gm, ' ')
+      .replace(/^[^\S\n]*\|?[^\S\n]*:?-+:?[^\S\n]*(\|[^\S\n]*:?-+:?[^\S\n]*)*\|?[^\S\n]*$/gm, ' ')
+      .split('|').map((part, i, all) => {
+        const head = i ? part.trimStart() : part;
+        return i < all.length - 1 ? head.trimEnd() : head;
+      }).join(' ')
+      .replace(new RegExp(String.raw`^[^\S\n]*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
       .replace(/\[( |x|X)\]\s+/g, '')
       .replace(/!\[\[[^\]]*\]\]/g, ' ')
       .replace(/!\[([^\]]*)\]\([^)]*\)/g, ' ')
@@ -449,6 +452,14 @@
       .replace(/[*_~`]/g, '')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  function readTime(markdown) {
+    const text = plain(markdown);
+    const words = typeof Intl === 'object' && Intl.Segmenter
+      ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
+      : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+    return words ? `${Math.ceil(words / 238)} min read` : '';
   }
 
   function wordDiff(before, after, most = 120000) {
@@ -507,7 +518,7 @@
     return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
   }
 
-  const api = { render, plain, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, plain, readTime, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

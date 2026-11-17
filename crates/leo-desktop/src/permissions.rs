@@ -248,6 +248,51 @@ pub fn microphone() -> &'static str {
         "unknown"
     }
 }
+pub fn notifications() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        use mac_usernotifications::AuthorizationStatus::*;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(mac_usernotifications::blocking::get_notification_settings());
+        });
+        let settings = rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .ok()?
+            .ok()?;
+        Some(match settings.authorization_status {
+            Authorized | Provisional | Ephemeral => "allowed",
+            NotDetermined => "not_requested",
+            _ => "denied",
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+pub fn request_notifications(app: &tauri::AppHandle) -> anyhow::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        if notifications() == Some("denied") {
+            return open_system_settings(
+                &format!(
+                    "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id={}",
+                    app.config().identifier
+                ),
+                "System Settings could not be opened. Open System Settings → Notifications and turn on Leo.",
+            );
+        }
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(mac_usernotifications::blocking::request_auth());
+        });
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = app;
+    Ok(())
+}
 pub fn request_microphone(app: &tauri::AppHandle) -> anyhow::Result<()> {
     anyhow::ensure!(
         !leo_services::session::mic::disabled(),
@@ -297,17 +342,20 @@ pub fn request_accessibility(app: &tauri::AppHandle) -> anyhow::Result<()> {
 }
 #[cfg(target_os = "macos")]
 fn open_macos_privacy(pane: &str) -> anyhow::Result<()> {
-    let uri = format!("x-apple.systempreferences:com.apple.preference.security?{pane}");
+    open_system_settings(
+        &format!("x-apple.systempreferences:com.apple.preference.security?{pane}"),
+        "System Settings could not be opened. Open System Settings → Privacy & Security → Microphone and turn on Leo.",
+    )
+}
+#[cfg(target_os = "macos")]
+fn open_system_settings(uri: &str, failed: &str) -> anyhow::Result<()> {
     let status = leo_core::children::quiet_command("open")
         .arg(uri)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status();
-    anyhow::ensure!(
-        status.is_ok_and(|status| status.success()),
-        "System Settings could not be opened. Open System Settings → Privacy & Security → Microphone and turn on Leo."
-    );
+    anyhow::ensure!(status.is_ok_and(|status| status.success()), "{failed}");
     Ok(())
 }
 #[cfg(windows)]

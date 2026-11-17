@@ -62,21 +62,6 @@ test('a passive folder reveal keeps the explorer hidden and opens no sheet', asy
   await expect(page.locator('.scrim')).toHaveCount(0);
 });
 
-test('compact folder chip opens Folders with that folder revealed and Escape returns to More', async ({ page }) => {
-  const dir = await createFolder(page);
-  const note = await createNote(page, dir);
-  await openNote(page, note);
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.locator(`#app [data-action="open-folder"][data-dir="${dir}"]`).click();
-  await expect(page.locator('#folders-sheet')).toBeVisible();
-  await expect(folderRow(page, dir, '#folders-sheet')).toBeVisible();
-  await expect(folderRow(page, dir, '#folders-sheet')).toHaveAttribute('aria-expanded', 'true');
-  await expect(noteRow(page, note.id, '#folders-sheet')).toBeVisible();
-  await page.keyboard.press('Escape');
-  await expect(page.locator('#folders-sheet')).toHaveCount(0);
-  await expect(page.locator('#menu')).toBeFocused();
-});
-
 for (const home of ['root', 'folder']) test(`folder then note: opening a note in the ${home} replaces the folder scope for New, Record and Upload`, async ({ page }) => {
   const picked = await createFolder(page);
   const other = home === 'folder' ? await createFolder(page) : '';

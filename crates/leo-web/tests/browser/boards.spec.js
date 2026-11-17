@@ -189,7 +189,7 @@ test('a board shows columns of cards, and cards drag between columns and onto an
   });
 });
 
-test('priority is one to three pencil strokes before the title, with the word kept as hidden text', async ({ browser }) => {
+test('priority is one to three coloured pencil strokes before the title, with the word kept as hidden text', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const mark = id => page.locator(`[data-card="${id}"] .kanban-priority`);
     await expect(mark('cessay0001').locator('path')).toHaveCount(3);
@@ -203,13 +203,33 @@ test('priority is one to three pencil strokes before the title, with the word ke
       const card = document.querySelector('[data-card="cessay0001"]');
       const strokes = card.querySelector('.kanban-priority svg').getBoundingClientRect();
       const title = card.querySelector('.kanban-card-title');
-      return { indent: getComputedStyle(title).textIndent, plain: getComputedStyle(document.querySelector('[data-card="cread00001"] .kanban-card-title')).textIndent, strokesRight: strokes.right, titleLeft: title.getBoundingClientRect().left, height: strokes.height, color: getComputedStyle(card.querySelector('.kanban-priority')).color === getComputedStyle(title).color };
+      return { indent: getComputedStyle(title).textIndent, plain: getComputedStyle(document.querySelector('[data-card="cread00001"] .kanban-card-title')).textIndent, strokesRight: strokes.right, titleLeft: title.getBoundingClientRect().left, height: strokes.height, color: getComputedStyle(card.querySelector('.kanban-priority')).color, ink: getComputedStyle(title).color, low: getComputedStyle(document.querySelector('[data-card="cemail0001"] .kanban-priority')).color };
     });
+    const levels = await page.evaluate(() => {
+      const probe = document.createElement('span');
+      document.body.append(probe);
+      const named = name => { probe.style.color = `var(--${name})`; return getComputedStyle(probe).color; };
+      const level = (name) => {
+        const mark = document.querySelector('[data-card="cemail0001"] .kanban-priority').cloneNode(true);
+        mark.className = `kanban-priority ${name}`;
+        probe.append(mark);
+        return getComputedStyle(mark).color;
+      };
+      const result = { low: level('low'), medium: level('medium'), high: level('high'), hueLow: named('hue-0'), hueMedium: named('hue-amber'), hueHigh: named('hue-red') };
+      probe.remove();
+      return result;
+    });
+    expect(levels.low, 'low is blue').toBe(levels.hueLow);
+    expect(levels.medium, 'medium is amber').toBe(levels.hueMedium);
+    expect(levels.high, 'high is red').toBe(levels.hueHigh);
+    expect(new Set([levels.low, levels.medium, levels.high]).size, 'each level has its own colour').toBe(3);
     expect(look.indent).toBe('24px');
     expect(look.plain).toBe('0px');
     expect(look.strokesRight).toBeLessThan(look.titleLeft + 24);
     expect(look.height).toBe(14);
-    expect(look.color, 'the strokes are ink, not a hue').toBe(true);
+    expect(look.color, 'high priority is a hue, not ink').not.toBe(look.ink);
+    expect(look.color).toBe(levels.high);
+    expect(look.low).toBe(levels.low);
   });
 });
 

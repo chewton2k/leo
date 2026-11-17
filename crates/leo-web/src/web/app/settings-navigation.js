@@ -23,7 +23,7 @@ const SETTINGS_SECTIONS = [
 const SETTINGS_INDEX = [
   { section: 'general', id: 'theme', label: 'Theme', keywords: 'appearance dark light match device mode colours colors night' },
   { section: 'general', id: 'felix-look', label: 'Felix look', keywords: 'appearance cute demon character mascot horns' },
-  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance comfortable wide full width reading column margin page' },
+  { section: 'general', id: 'note-width', label: 'Note width', keywords: 'appearance width wide narrow full comfortable reading column margin page drag reset' },
   { section: 'general', id: 'text-size', label: 'Text size', keywords: 'appearance small medium large font reading bigger smaller zoom' },
   { section: 'general', id: 'felix-lettering', label: "Felix's lettering", keywords: 'appearance font typeface serif letters notes writing felix own' },
   { section: 'general', id: 'open-at-login', label: 'Open at login', keywords: 'start startup boot launch computer' },
@@ -332,7 +332,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 let choiceCardsMade = 0;
-function choiceCards({ label, choices, current, field = '', action = '', key = '', columns = 0, className = '' }) {
+function choiceCards({ label, choices, current, field = '', action = '', key = '', className = '' }) {
   const name = `choice-${++choiceCardsMade}`;
   const index = Math.max(0, choices.findIndex(([value]) => String(value) === String(current)));
   const cards = choices.map(([value, title, about = '', diagram = '', icon = ''], i) => {
@@ -344,7 +344,7 @@ function choiceCards({ label, choices, current, field = '', action = '', key = '
       : `<label class="choice-pick${on ? ' on' : ''}">${art}<input type="radio" name="${name}" value="${esc(value)}"${on ? ' checked' : ''}>${words}</label>`;
   }).join('');
   const hidden = field ? `<input type="hidden" ${field} value="${esc(current ?? '')}">` : '';
-  return `<div class="choice-cards${className ? ` ${className}` : ''}" role="${action ? 'group' : 'radiogroup'}" aria-label="${esc(label)}" style="--count:${columns || choices.length};--at:${index}">${hidden}<span class="choice-ring" aria-hidden="true"></span>${cards}</div>`;
+  return `<div class="choice-cards${className ? ` ${className}` : ''}" role="${action ? 'group' : 'radiogroup'}" aria-label="${esc(label)}" style="--count:${choices.length};--at:${index}">${hidden}<span class="choice-ring" aria-hidden="true"></span>${cards}</div>`;
 }
 function syncChoiceCards(box, from = null) {
   const picks = [...box.querySelectorAll('.choice-pick')];

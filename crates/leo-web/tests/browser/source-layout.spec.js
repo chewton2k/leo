@@ -144,7 +144,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
   const style = pageCss();
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
-  const show = core.slice(core.indexOf('async function showNote('), core.indexOf('function newNote('));
+  const show = core.slice(core.indexOf('function readLine('), core.indexOf('function newNote('));
   const body = '# Introduction to planetary environments\n\nFirst paragraph.\n\n' + 'Reading material.\n\n'.repeat(80) + '## **Sounds**\n\nCompare vowels.\n\n### Vowel examples\n\n' + 'Examples to compare.\n\n'.repeat(30) + '```md\n# Ignore code\n```\n\n## Sounds\n\nLast paragraph.';
   const fixture = `const md = window.leoMarkdown, leoDoc = window.leoDoc;
     const $ = (q, root = document) => root.querySelector(q), app = $('#app');
@@ -184,7 +184,8 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await expect(nav.getByRole('button', {name:'Ignore code'})).toHaveCount(0);
     await expect(page.locator('.note-outline details')).not.toHaveAttribute('open', '');
     const facts = page.locator('#title + #note-facts');
-    await expect(facts).toHaveText('Edited now');
+    await expect(facts).toHaveText('Edited now · 2 min read');
+    await expect(page.locator('#note-edited')).toBeVisible();
     await expect(page.locator('.note-meta #save-state')).toHaveCount(0);
     expect(await facts.evaluate(el => getComputedStyle(el).fontVariantNumeric)).toBe('tabular-nums');
     await page.emulateMedia({media:'print'});
@@ -237,7 +238,8 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.locator('#doc .blk').filter({hasText:'First paragraph.'}).click();
     const editor = page.locator('#doc textarea');
-    await editor.fill('## Newly typed heading');
+    await editor.fill('## Newly typed heading\n' + 'w '.repeat(300));
+    await expect(facts).toHaveText('Edited now · 3 min read');
     await page.locator('.note-outline summary').hover();
     await expect(nav.getByRole('button', {name:'Newly typed heading'})).toBeVisible();
     await expect(editor).toBeFocused();

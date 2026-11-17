@@ -31,6 +31,17 @@ pub enum Request {
         want_language: bool,
     },
     StreamReset,
+    Diarize {
+        model: PathBuf,
+        parts: Vec<(PathBuf, u64)>,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Turn {
+    pub start_ms: u64,
+    pub end_ms: u64,
+    pub speaker: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -56,6 +67,7 @@ pub enum Response {
         text: StreamText,
         language: Option<String>,
     },
+    Turns(Vec<Turn>),
     Ok,
     Error(String),
     BackendError(String),

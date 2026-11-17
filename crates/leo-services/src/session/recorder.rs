@@ -592,10 +592,114 @@ pub fn finish(
         emit(Event::Failed(silent.to_string()));
         return;
     }
+    label_speakers(
+        &session,
+        emit,
+        finish_now,
+        &|parts| {
+            let shown = std::cell::Cell::new(None);
+            crate::speech::engine::engine()
+                .diarize(parts, finish_now, &|done, total| {
+                    let steps = Some(((done >> 20) as usize, (total >> 20) as usize));
+                    if shown.replace(steps) != steps {
+                        emit(if done >= total {
+                            Event::Progress {
+                                label: "Telling speakers apart".to_string(),
+                                steps: None,
+                            }
+                        } else {
+                            Event::Progress {
+                                label: "Downloading the speaker model (MiB)".to_string(),
+                                steps,
+                            }
+                        })
+                    }
+                })
+                .map_err(|e| e.to_string())
+        },
+        &|path| transcribe_segment()(path),
+    );
+    let assembled = session.assemble();
     emit(Event::Finished {
         transcript: assembled.text(),
         session: session.dir.clone(),
     });
+}
+
+fn kept_parts(session: &Session) -> u32 {
+    if session.manifest.profile.speakers {
+        (session::speakers::MOST_SECS / session.manifest.segment_secs.max(1)) as u32 + 1
+    } else {
+        0
+    }
+}
+
+fn label_speakers(
+    session: &Session,
+    emit: &dyn Fn(Event),
+    finish_now: &AtomicBool,
+    diarize: session::speakers::Diarize,
+    transcribe: session::speakers::Transcribe,
+) {
+    if !session.manifest.profile.speakers || session.dir.join(session::speakers::FILE).exists() {
+        return;
+    }
+    let skipped = |problem: &str| {
+        session.trace("speakers-skipped", problem);
+        emit(Event::Warning(format!(
+            "Speakers are not labelled: {}. The transcript is kept as it is.",
+            problem.trim_end_matches('.')
+        )));
+    };
+    if !session.assemble().failed.is_empty() {
+        return skipped("part of the recording could not be transcribed");
+    }
+    emit(Event::Progress {
+        label: "Telling speakers apart".to_string(),
+        steps: None,
+    });
+    let parts = session.segments().len() as u32;
+    let started = Instant::now();
+    let labelled = session::speakers::label(
+        &session.dir,
+        parts,
+        session.manifest.segment_secs * 1000,
+        diarize,
+        transcribe,
+        finish_now,
+        &|done, total| {
+            emit(Event::Progress {
+                label: "Telling speakers apart".to_string(),
+                steps: Some((done, total)),
+            })
+        },
+    );
+    let spoken = match labelled {
+        Ok(spoken) => spoken,
+        Err(problem) if crate::speech::engine::engine().stopping() => {
+            return skipped(&format!("{problem}; recover the recording to try again"));
+        }
+        Err(problem) => {
+            skipped(&problem);
+            Vec::new()
+        }
+    };
+    session.trace(
+        "speakers",
+        &format!(
+            "{} labelled passages in {:.1}s",
+            spoken.len(),
+            started.elapsed().as_secs_f64()
+        ),
+    );
+    if let Err(e) = session::speakers::write(&session.dir, &spoken) {
+        skipped(&format!("the labels could not be saved ({e})"));
+    }
+    for index in 0..parts {
+        if session.dir.join(format!("seg-{index:05}.txt")).exists() {
+            let _ = std::fs::remove_file(session.dir.join(wav::done_name(index)));
+        }
+    }
 }
 
 pub fn resume(dir: &Path, emit: &dyn Fn(Event)) {
@@ -627,6 +731,7 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
         transcribe_segment(),
         Policy {
             workers: crate::ai::parallel_transcriptions(),
+            keep_parts: kept_parts(&session),
             ..Policy::default()
         },
         false,
@@ -676,9 +781,10 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         input,
         draft,
     } = request;
-    let drafting = draft.is_some() && append_to.is_none();
+    let labelled = profile.as_ref().is_some_and(|p| p.speakers);
+    let drafting = draft.is_some() && append_to.is_none() && !labelled;
     let mut drafter = draft
-        .filter(|_| append_to.is_none())
+        .filter(|_| append_to.is_none() && !labelled)
         .map(|chat| Drafter::new(chat, crate::ai::writing_budget()));
     let started = session::root().and_then(|root| {
         let mut manifest = Manifest::new(title, append_to, &dir, screen);
@@ -714,6 +820,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         transcribe_segment(),
         Policy {
             workers: crate::ai::parallel_transcriptions(),
+            keep_parts: kept_parts(&session),
             ..Policy::default()
         },
         true,
@@ -981,6 +1088,94 @@ pub fn write_up(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn labelled_session(root: &Path) -> Session {
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.profile.speakers = true;
+        let session = Session::create(root, manifest).unwrap();
+        for index in 0..2 {
+            std::fs::write(session.dir.join(format!("seg-{index:05}.txt")), "plain").unwrap();
+            wav::write(
+                &session.dir.join(wav::done_name(index)),
+                &vec![1000i16; 16_000 * 4],
+            )
+            .unwrap();
+        }
+        session
+    }
+
+    #[test]
+    fn labelling_at_finish_saves_the_labels_and_drops_the_kept_audio() {
+        let root = tempfile::tempdir().unwrap();
+        let session = labelled_session(root.path());
+        let events = Mutex::new(Vec::new());
+        label_speakers(
+            &session,
+            &|e| events.lock().unwrap().push(e),
+            &AtomicBool::new(false),
+            &|_| {
+                Ok(vec![
+                    crate::speech::Turn {
+                        start_ms: 0,
+                        end_ms: 3_000,
+                        speaker: 1,
+                    },
+                    crate::speech::Turn {
+                        start_ms: 3_000,
+                        end_ms: 7_000,
+                        speaker: 2,
+                    },
+                ])
+            },
+            &|_| Ok("words".to_string()),
+        );
+        assert_eq!(session.spoken().map(|s| s.len()), Some(2));
+        assert!(!session.dir.join(wav::done_name(0)).exists());
+        assert!(!session.dir.join(wav::done_name(1)).exists());
+        let events = events.into_inner().unwrap();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::Progress {
+                steps: Some((1, 2)),
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|e| matches!(e, Event::Warning(_))));
+    }
+
+    #[test]
+    fn labelling_is_skipped_with_a_warning_for_a_failed_part_or_a_failed_pass() {
+        let root = tempfile::tempdir().unwrap();
+        let session = labelled_session(root.path());
+        std::fs::write(session.dir.join("seg-00002.err"), "failed").unwrap();
+        let warned = Mutex::new(Vec::new());
+        let emit = |e| {
+            if let Event::Warning(w) = e {
+                warned.lock().unwrap().push(w)
+            }
+        };
+        let never =
+            |_: Vec<(std::path::PathBuf, u64)>| -> Result<Vec<crate::speech::Turn>, String> {
+                panic!("no pass with a failed part")
+            };
+        label_speakers(&session, &emit, &AtomicBool::new(false), &never, &|_| {
+            Ok(String::new())
+        });
+        assert!(!session.dir.join(session::speakers::FILE).exists());
+        std::fs::remove_file(session.dir.join("seg-00002.err")).unwrap();
+        label_speakers(
+            &session,
+            &emit,
+            &AtomicBool::new(false),
+            &|_| Err("no model".into()),
+            &|_| Ok(String::new()),
+        );
+        assert!(session.dir.join(session::speakers::FILE).exists());
+        assert!(session.spoken().is_none());
+        let warned = warned.into_inner().unwrap();
+        assert_eq!(warned.len(), 2);
+        assert!(warned[1].contains("no model"));
+    }
 
     #[test]
     fn a_cached_write_up_is_reused_only_when_the_writer_succeeded() {

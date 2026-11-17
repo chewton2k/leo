@@ -15,6 +15,7 @@ fn quick() -> Policy {
         idle: Duration::from_millis(2),
         workers: 3,
         finish_limit: Duration::from_secs(30),
+        keep_parts: 0,
     }
 }
 

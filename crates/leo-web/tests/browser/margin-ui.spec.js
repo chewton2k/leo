@@ -791,7 +791,7 @@ test('a resolved note stays faded with a Resolved label until it is reopened', a
   await expect(thread).toHaveAttribute('data-open', '');
 });
 
-test('dragging a top corner of the note sets its width live, margins give way, and a double-click resets it', async ({ page }) => {
+test('dragging a top corner of the note sets its width live, never past the room its margins need, and a double-click resets it', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: 'Wide page', body: 'Words.' } })).json();
   await page.goto(`/#/n/${note.id}`);
@@ -807,18 +807,57 @@ test('dragging a top corner of the note sets its width live, margins give way, a
   await expect(page.locator('.page-width-label')).toHaveText(/^\d+ px$/);
   await page.mouse.up();
   await expect(page.locator('.page-width-label')).toBeHidden();
+  const columns = page.locator('.note-columns');
+  const most = await columns.evaluate((el) => window.leoMargin.mostColumn({ width: el.clientWidth, setting: 'both' }));
+  const wide = Number(await page.evaluate(() => localStorage.getItem('leo-page-width')));
+  expect(wide, 'a drag stops where both margins still fit').toBeLessThanOrEqual(most);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
+  const held = await mark.boundingBox();
+  await page.mouse.move(held.x + held.width / 2, held.y + held.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(held.x + held.width / 2 - 100, held.y + held.height / 2, { steps: 6 });
+  await page.mouse.up();
   const saved = Number(await page.evaluate(() => localStorage.getItem('leo-page-width')));
-  expect(saved).toBeGreaterThan(before);
+  expect(saved).toBeLessThan(wide);
   await expect.poll(async () => Math.round((await article.boundingBox()).width)).toBe(saved);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
   const after = await mark.boundingBox();
   await page.mouse.dblclick(after.x + after.width / 2, after.y + after.height / 2);
   await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
   await expect.poll(async () => Math.round((await article.boundingBox()).width)).toBe(Math.round(before));
   await mark.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.round(before) - 20);
   await page.keyboard.press('ArrowRight');
-  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.round(before) + 20);
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width')))).toBe(Math.min(Math.round(before), most));
   await page.keyboard.press('Enter');
   await expect.poll(() => page.evaluate(() => localStorage.getItem('leo-page-width'))).toBeNull();
+  for (let i = 0; i < 30; i++) await page.keyboard.press('ArrowRight');
+  await expect.poll(() => page.evaluate(() => Number(localStorage.getItem('leo-page-width'))), 'the keyboard stops where both margins still fit').toBe(most);
+  await expect(columns).toHaveAttribute('data-margin', 'both');
+});
+
+test('dragging the note wider with the margin on the right stops where one margin still fits', async ({ page }) => {
+  await page.setViewportSize({ width: 1600, height: 900 });
+  await page.request.post('/api/margin', { data: { layout: 'right' } });
+  try {
+    const note = await (await page.request.post('/api/notes', { data: { title: 'Wide right page', body: 'Words.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    const columns = page.locator('.note-columns');
+    await expect(columns).toHaveAttribute('data-margin', 'right');
+    const mark = page.locator('.page-mark[data-edge="right"]');
+    const box = await mark.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 600, box.y + box.height / 2, { steps: 6 });
+    await page.mouse.up();
+    const most = await columns.evaluate((el) => window.leoMargin.mostColumn({ width: el.clientWidth, setting: 'right' }));
+    const wide = Number(await page.evaluate(() => localStorage.getItem('leo-page-width')));
+    expect(wide, 'a drag stops where the one margin still fits').toBeLessThanOrEqual(most);
+    await expect(columns).toHaveAttribute('data-margin', 'right');
+  } finally {
+    await page.request.post('/api/margin', { data: { layout: 'both' } });
+  }
 });
 
 test('a selection too long for the margin says so inside the Felix bar', async ({ page }) => {

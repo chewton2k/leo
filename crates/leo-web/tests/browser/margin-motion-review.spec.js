@@ -58,7 +58,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     }
     ${read('app/margin-notes.js')}
     window.start=async()=>{
-      app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-context"><span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1><div class="note-meta">${MODE_MARKUP}</div></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
+      app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
       const s={note:{id:'n1',version:'v1',title:'Test'},title:$('#title'),edit:{}};
       s.doc=leoDoc.mount($('#doc'),{source:${JSON.stringify(source)},onChange(){},placeholder:''});
       state.session=s;window.session=s;
@@ -379,7 +379,7 @@ test.describe('reading pencil', () => {
 
 test.describe('whole notes and pins', () => {
   const LONG = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it before you store it. Use a slow hash such as Argon2id with a unique salt for each user, and verify at login by hashing the attempt the same way.' }] };
-  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pin stays undimmed', async ({ browser }) => {
+  test('a closed note shows its whole text and dims; opening shows the conversation right of a thin rule, and a pinned note stays open', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
       const said = note.locator('.margin-said');
@@ -401,10 +401,13 @@ test.describe('whole notes and pins', () => {
       expect(await pin.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe('rgba(0, 0, 0, 0)');
       await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
       await page.mouse.click(5, 5);
-      await expect(note).not.toHaveAttribute('data-open', '');
+      await page.keyboard.press('Escape');
+      await expect(note).toHaveAttribute('data-open', '');
       await expect(note).toHaveAttribute('data-pinned', '');
-      expect(await height()).toBeGreaterThan(line * 2);
+      await expect(note.locator('.margin-reply textarea')).toBeVisible();
       await expect.poll(opacity).toBe(1);
+      await pin.click();
+      await expect(note).not.toHaveAttribute('data-open', '');
     }, { threads: [LONG] });
   });
 

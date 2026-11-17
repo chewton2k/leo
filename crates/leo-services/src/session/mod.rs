@@ -2,6 +2,7 @@ pub mod awake;
 pub mod capture;
 pub mod mic;
 pub mod recorder;
+pub mod speakers;
 #[cfg(test)]
 mod stress;
 pub mod transcriber;
@@ -423,7 +424,29 @@ impl Session {
     }
 
     pub fn assemble(&self) -> Assembled {
-        assemble(&self.segments(), self.manifest.segment_secs)
+        let mut assembled = assemble(&self.segments(), self.manifest.segment_secs);
+        if let Some(spoken) = self.labels(&assembled) {
+            let segment_ms = self.manifest.segment_secs * 1000;
+            for part in &mut assembled.parts {
+                part.text = spoken
+                    .iter()
+                    .filter(|s| speakers::part_of(s, segment_ms) == part.index as u64)
+                    .map(|s| format!("[Speaker {}] {}", s.speaker, s.text))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
+        }
+        assembled
+    }
+
+    pub fn spoken(&self) -> Option<Vec<speakers::Spoken>> {
+        self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
+    }
+
+    fn labels(&self, assembled: &Assembled) -> Option<Vec<speakers::Spoken>> {
+        (assembled.failed.is_empty() && assembled.pending == 0)
+            .then(|| speakers::read(&self.dir))
+            .flatten()
     }
 
     pub fn recover_parts(&self) -> Result<()> {
@@ -450,6 +473,9 @@ impl Session {
         let assembled = self.assemble();
         let keep_audio = !assembled.failed.is_empty() || assembled.pending > 0;
         if keep_audio {
+            for part in &assembled.parts {
+                let _ = std::fs::remove_file(self.dir.join(wav::done_name(part.index)));
+            }
             self.manifest.saved = true;
             self.save()
         } else {
@@ -459,11 +485,18 @@ impl Session {
     }
 
     pub fn archive(&self) -> leo_core::recording::Archive {
-        let assembled = self.assemble();
-        leo_core::recording::Archive {
-            id: self.manifest.id.clone(),
-            started: self.manifest.started,
-            passages: assembled
+        let assembled = assemble(&self.segments(), self.manifest.segment_secs);
+        let passages = match self.labels(&assembled) {
+            Some(spoken) => spoken
+                .into_iter()
+                .map(|s| leo_core::recording::Passage {
+                    start_secs: s.start_ms / 1000,
+                    end_secs: s.end_ms.div_ceil(1000),
+                    text: s.text,
+                    speaker: format!("Speaker {}", s.speaker),
+                })
+                .collect(),
+            None => assembled
                 .parts
                 .iter()
                 .map(|p| leo_core::recording::Passage {
@@ -481,6 +514,11 @@ impl Session {
                     .into(),
                 })
                 .collect(),
+        };
+        leo_core::recording::Archive {
+            id: self.manifest.id.clone(),
+            started: self.manifest.started,
+            passages,
             points: self
                 .manifest
                 .points
@@ -572,6 +610,78 @@ mod tests {
         let held = recording.lock().unwrap();
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         drop(held);
+    }
+
+    #[test]
+    fn a_session_kept_for_retry_drops_audio_already_transcribed_and_keeps_the_failed_part() {
+        let (s, _t) = session();
+        let dir = s.dir.clone();
+        std::fs::write(dir.join("seg-00000.txt"), "done").unwrap();
+        wav::write(&dir.join(wav::done_name(0)), &[1, 2, 3]).unwrap();
+        std::fs::write(dir.join("seg-00001.err"), "failed").unwrap();
+        wav::write(&dir.join(wav::done_name(1)), &[1, 2, 3]).unwrap();
+        s.finish().unwrap();
+        assert!(!dir.join(wav::done_name(0)).exists());
+        assert!(dir.join(wav::done_name(1)).exists());
+    }
+
+    #[test]
+    fn saved_speaker_labels_prefix_the_note_text_and_split_the_sources() {
+        let (s, _t) = session();
+        std::fs::write(s.dir.join("seg-00000.txt"), "so friday then fine").unwrap();
+        std::fs::write(s.dir.join("seg-00001.txt"), "okay").unwrap();
+        let plain = s.archive();
+        assert_eq!(plain.passages.len(), 2);
+        assert_eq!(plain.passages[0].speaker, "Microphone");
+        speakers::write(
+            &s.dir,
+            &[
+                speakers::Spoken {
+                    start_ms: 0,
+                    end_ms: 4_000,
+                    speaker: 1,
+                    text: "So Friday then?".into(),
+                },
+                speakers::Spoken {
+                    start_ms: 4_000,
+                    end_ms: 9_000,
+                    speaker: 2,
+                    text: "Fine.".into(),
+                },
+                speakers::Spoken {
+                    start_ms: 300_500,
+                    end_ms: 302_000,
+                    speaker: 1,
+                    text: "Okay.".into(),
+                },
+            ],
+        )
+        .unwrap();
+        let parts = s.assemble().parts;
+        assert_eq!(
+            parts[0].text,
+            "[Speaker 1] So Friday then?\n[Speaker 2] Fine."
+        );
+        assert_eq!(parts[1].text, "[Speaker 1] Okay.");
+        let archive = s.archive();
+        assert_eq!(
+            archive
+                .passages
+                .iter()
+                .map(|p| (p.speaker.as_str(), p.text.as_str(), p.start_secs))
+                .collect::<Vec<_>>(),
+            vec![
+                ("Speaker 1", "So Friday then?", 0),
+                ("Speaker 2", "Fine.", 4),
+                ("Speaker 1", "Okay.", 300)
+            ]
+        );
+        std::fs::write(s.dir.join("seg-00002.err"), "failed").unwrap();
+        assert_eq!(
+            s.archive().passages[0].speaker,
+            "Microphone",
+            "a failed part keeps today's text"
+        );
     }
 
     #[test]

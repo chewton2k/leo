@@ -495,6 +495,506 @@ async fn a_sentence_with_a_margin_note_gets_no_second_one() {
     engine.stop().await;
 }
 
+const WAS: &str =
+    "Passwords use bcrypt. then login simply checks if it matches. Sessions last a day.";
+const NOW: &str =
+    "Passwords use bcrypt. then login just checks if it matches. Sessions last a day.";
+const REWORDED: &str = "then login just checks if it matches.";
+
+fn old_note(
+    engine: &Engine,
+    id: &str,
+    was: &str,
+    quote: &str,
+    source: &str,
+    said: Vec<margin::Message>,
+) -> String {
+    let held = margin::new_thread(
+        id,
+        source,
+        margin::placed(was, quote, &[]).unwrap(),
+        quote,
+        said,
+    );
+    assert!(margin::put(&engine.chats(), &held, 2 * margin::MOST_OPEN));
+    held.id
+}
+
+fn untouched() -> Vec<margin::Message> {
+    vec![margin::felix_says("Hm.")]
+}
+
+fn answered() -> Vec<margin::Message> {
+    vec![margin::felix_says("Hm."), margin::you_say("Why?")]
+}
+
+async fn read_changed(engine: &Engine, id: &str, body: serde_json::Value) -> serde_json::Value {
+    let (status, reply) = engine
+        .post(&format!("/api/notes/{id}/margin/read"), body)
+        .await;
+    assert_eq!(status, 200);
+    reply
+}
+
+async fn open_ids(engine: &Engine, id: &str) -> Vec<String> {
+    let (_, view) = engine.get(&format!("/api/notes/{id}/margin")).await;
+    view["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+async fn reworded(said: Vec<margin::Message>) -> (Engine, String, String, serde_json::Value) {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Reworded", NOW).await;
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        said,
+    );
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    (engine, id, old, reply)
+}
+
+#[tokio::test]
+async fn a_reworded_sentence_trades_its_untouched_note_for_the_new_one() {
+    let (engine, id, old, reply) = reworded(untouched()).await;
+    assert!(reply["note"].is_object());
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    assert_eq!(
+        open_ids(&engine, &id).await,
+        [reply["note"]["id"].as_str().unwrap()]
+    );
+    engine.stop().await;
+}
+
+#[test]
+fn one_sentence_means_no_sentence_ends_before_the_last_word() {
+    for (body, one) in [
+        ("then login just checks if it matches.", true),
+        ("  no full stop yet  ", true),
+        ("Version 1.2 is out!", true),
+        ("Two here. And here.", false),
+        ("A line\nand another", false),
+        ("", false),
+        (" . ", false),
+    ] {
+        assert_eq!(margin::one_sentence(body), one, "{body:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_one_sentence_note_s_lost_whole_note_comment_gives_way_to_the_next_read() {
+    for (said, replaced) in [(untouched(), true), (answered(), false)] {
+        let (engine, _) = reading(SAYS).await;
+        let now = "then login just checks if it matches.";
+        let (id, version) = engine.note("One sentence", now).await;
+        let was = "then login simply checks if it matches.";
+        let old = old_note(&engine, &id, was, was, "read", said);
+        let reply = read_changed(
+            &engine,
+            &id,
+            serde_json::json!({ "version": version, "blocks": [now] }),
+        )
+        .await;
+        let fresh = reply["note"]["id"].as_str().unwrap().to_string();
+        let open = open_ids(&engine, &id).await;
+        if replaced {
+            assert_eq!(reply["resolved"], serde_json::json!([old]));
+            assert_eq!(open, [fresh]);
+        } else {
+            assert_eq!(reply["resolved"], serde_json::json!([]));
+            assert_eq!(open.len(), 2);
+        }
+        engine.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn a_reworded_sentence_keeps_a_note_you_answered() {
+    let (engine, id, old, reply) = reworded(answered()).await;
+    assert!(reply["note"].is_null());
+    assert_eq!(open_ids(&engine, &id).await, [old]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_reworded_sentence_keeps_a_pinned_open_busy_or_asked_for_note() {
+    for case in ["pinned", "keep", "replying", "through", "ask"] {
+        let (engine, _) = reading(SAYS).await;
+        let (id, version) = engine.note("Reworded", NOW).await;
+        let source = if matches!(case, "through" | "ask") {
+            case
+        } else {
+            "read"
+        };
+        let old = old_note(
+            &engine,
+            &id,
+            WAS,
+            "then login simply checks if it matches.",
+            source,
+            untouched(),
+        );
+        if case == "pinned" {
+            assert!(margin::set_pinned(&engine.chats(), &id, &old, true).is_some());
+        }
+        let keep = (case == "keep").then(|| old.clone());
+        let held =
+            (case == "replying").then(|| engine.running.state.margin.replying(&old).unwrap());
+        let reply = read_changed(
+            &engine,
+            &id,
+            serde_json::json!({ "version": version, "blocks": [NOW], "keep": keep, "changed": [{ "id": old, "text": REWORDED }] }),
+        )
+        .await;
+        drop(held);
+        assert!(reply["note"].is_null(), "{case}");
+        assert_eq!(
+            open_ids(&engine, &id).await,
+            std::slice::from_ref(&old),
+            "{case}"
+        );
+        engine.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn a_changed_wording_counts_only_where_its_own_note_sits() {
+    let cases = [
+        (
+            "Passwords use bcrypt. it. then login just checks if it matches.",
+            "Passwords use bcrypt. Hash the password with care. then login just checks if it matches.",
+            "Hash the password with care",
+            "it",
+            SAYS,
+        ),
+        (
+            "We use it. Logins are slow.\n\nThe cache helps. We use it.",
+            "We use it. Logins are slow.\n\nThe cache helps. We rely on it.",
+            "We rely on it.",
+            "We use it.",
+            r#"{"quote":"We use it.","text":"Which part?"}"#,
+        ),
+        (
+            NOW,
+            "Cookies are signed. Tokens rotate weekly. Logs are kept.",
+            "Tokens rotate weekly.",
+            REWORDED,
+            SAYS,
+        ),
+    ];
+    for (now, was, quote, text, answer) in cases {
+        for said in [untouched(), answered()] {
+            let (engine, _) = reading(answer).await;
+            let (id, version) = engine.note("Elsewhere", now).await;
+            let block = now.split("\n\n").next().unwrap();
+            let old = old_note(&engine, &id, was, quote, "read", said);
+            let reply = read_changed(
+                &engine,
+                &id,
+                serde_json::json!({ "version": version, "blocks": [block], "changed": [{ "id": old, "text": text }] }),
+            )
+            .await;
+            assert!(reply["note"].is_object(), "{now}");
+            assert_eq!(reply["resolved"], serde_json::json!([]), "{now}");
+            assert_eq!(open_ids(&engine, &id).await.len(), 2, "{now}");
+            engine.stop().await;
+        }
+    }
+}
+
+#[tokio::test]
+async fn one_answered_note_in_a_reworded_sentence_keeps_every_note_there() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Merged", NOW).await;
+    let first = old_note(&engine, &id, WAS, "then login simply", "read", untouched());
+    let second = old_note(
+        &engine,
+        &id,
+        "Passwords use bcrypt. then login just verifies it matches. Sessions last a day.",
+        "verifies it",
+        "read",
+        answered(),
+    );
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [
+            { "id": first, "text": "then login just" },
+            { "id": second, "text": "checks if it" },
+        ] }),
+    )
+    .await;
+    assert!(reply["note"].is_null());
+    assert_eq!(open_ids(&engine, &id).await, [first, second]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn read_through_drops_every_note_on_a_reworded_sentence() {
+    let (engine, _) = reading(
+        r#"{"notes":[{"quote":"then login just","text":"A"},{"quote":"checks if it matches","text":"B"}]}"#,
+    )
+    .await;
+    let (id, version) = engine.plain(NOW).await;
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let (status, reply) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/analyze"),
+            serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+        )
+        .await;
+    assert_eq!(
+        (status, reply["notes"].clone()),
+        (200, serde_json::json!([]))
+    );
+    assert_eq!(open_ids(&engine, &id).await, [old]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_swap_that_cannot_store_the_new_note_keeps_the_old_one() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Stuck", NOW).await;
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let fresh = margin::new_thread(
+        &id,
+        "read",
+        margin::placed(NOW, REWORDED, &[]).unwrap(),
+        REWORDED,
+        untouched(),
+    );
+    let swap = margin::put_replacing(
+        &engine.chats(),
+        &engine.running.state.margin,
+        &fresh,
+        std::slice::from_ref(&old),
+        &[],
+        None,
+        0,
+    );
+    assert!(matches!(swap, margin::Swap::Failed));
+    assert_eq!(open_ids(&engine, &id).await, [old]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_that_cannot_store_the_new_note_keeps_the_oldest_open() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Stuck", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let reads = &engine.running.state.margin;
+    let mut fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    fresh.id = ids[1].clone();
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, &[]);
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, &[], &[], victim, most);
+    assert!(matches!(swap, margin::Swap::Failed));
+    assert_eq!(open_ids(&engine, &id).await, ids);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_whose_chosen_oldest_note_was_pinned_since_keeps_everything() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Pinned since", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let reads = &engine.running.state.margin;
+    let fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, &[]);
+    assert_eq!(victim.as_ref().map(|(t, _)| &t.id), Some(&ids[0]));
+    assert!(margin::set_pinned(&engine.chats(), &id, &ids[0], true).is_some());
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, &[], &[], victim, most);
+    assert!(matches!(swap, margin::Swap::Failed));
+    assert_eq!(open_ids(&engine, &id).await, ids);
+    assert!(margin::one(&engine.chats(), &id, &fresh.id).is_none());
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_of_notes_to_keep_still_swaps_the_reworded_one() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("All kept", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    for held in &ids {
+        assert!(margin::set_pinned(&engine.chats(), &id, held, true).is_some());
+    }
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    assert!(reply["note"].is_object(), "{reply}");
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(ids.iter().all(|kept| open.contains(kept)) && !open.contains(&old));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn only_the_first_notes_of_a_long_keep_list_are_kept() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Long keep", PASSAGE).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let keep: Vec<String> = (0..most)
+        .map(|n| format!("none {n}"))
+        .chain([ids[0].clone()])
+        .collect();
+    let (status, read) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": keep }),
+        )
+        .await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!([ids[0]]));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_frees_the_oldest_when_the_reworded_note_went_elsewhere() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Elsewhere", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "Sessions last a day.",
+        "read",
+        untouched(),
+    );
+    margin::set_status(&engine.chats(), &id, &old, "resolved", most);
+    fill(&engine, &id, "ask", 1, most);
+    let reads = &engine.running.state.margin;
+    let fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    let olds = std::slice::from_ref(&old);
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, olds);
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, olds, &[], victim, most);
+    let margin::Swap::Put(gone) = swap else {
+        panic!("not stored");
+    };
+    assert_eq!(gone.iter().map(|t| &t.id).collect::<Vec<_>>(), [&ids[0]]);
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(open.contains(&fresh.id) && !open.contains(&ids[0]));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_whose_oldest_note_is_the_reworded_one_replaces_it_once() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Oldest", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    assert!(reply["note"].is_object(), "{reply}");
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(ids.iter().all(|kept| open.contains(kept)));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn read_through_at_the_limit_answers_full_and_resolves_nothing() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.plain(PASSAGE).await;
+    let ids = fill(&engine, &id, "read", margin::MOST_OPEN, margin::MOST_OPEN);
+    let (status, why) = engine.analyze(&id, &version, &[PASSAGE], None).await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("full")));
+    assert_eq!(open_ids(&engine, &id).await, ids);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_swap_on_a_full_margin_frees_only_the_replaced_note() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Full", NOW).await;
+    for _ in 1..2 * margin::MOST_OPEN {
+        old_note(
+            &engine,
+            &id,
+            NOW,
+            "Sessions last a day.",
+            "ask",
+            untouched(),
+        );
+    }
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    assert!(reply["note"].is_object());
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), 2 * margin::MOST_OPEN);
+    assert!(!open.contains(&old));
+    engine.stop().await;
+}
+
 #[tokio::test]
 async fn a_useful_diagram_survives_the_read_and_saved_thread() {
     let text = "Chloroplasts make sugar; mitochondria release its energy.\n\n```mermaid\nflowchart TD\n Sun-->Sugar\n Sugar-->Energy\n```";
@@ -2047,6 +2547,21 @@ async fn a_read_along_reads_a_full_note_and_frees_the_oldest_free_note_at_twice_
         2 * margin::MOST_OPEN
     );
     engine.stop().await;
+
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Kept", PASSAGE).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let (status, read) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": &ids[..2] }),
+        )
+        .await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!([ids[2]]));
+    assert_eq!(margin::open_on(&engine.chats(), &id).len(), most);
+    engine.stop().await;
 }
 
 #[tokio::test]
@@ -2151,7 +2666,11 @@ fn seeded(engine: &Engine, id: &str, source: &str, said: bool, quote: &str) -> S
     if said {
         messages.push(margin::you_say("Why?"));
     }
-    let thread = margin::new_thread(id, source, nowhere(), quote, messages);
+    let place = margin::Place {
+        prefix: "Earlier words ".into(),
+        suffix: " later words.".into(),
+    };
+    let thread = margin::new_thread(id, source, place, quote, messages);
     assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
     thread.id
 }
@@ -2256,7 +2775,7 @@ async fn the_margin_lists_resolved_passages_without_their_messages_and_never_dis
     assert_eq!(view["threads"][0]["id"], open);
     assert_eq!(
         view["resolved"],
-        serde_json::json!([{ "id": resolved, "quote": "resolved one", "prefix": "", "suffix": "" }])
+        serde_json::json!([{ "id": resolved, "quote": "resolved one", "prefix": "Earlier words ", "suffix": " later words." }])
     );
     let path = format!("/api/notes/{id}/margin/threads/{resolved}");
     let (status, reopened) = engine
@@ -2589,4 +3108,72 @@ async fn a_thread_is_claimed_before_it_is_read_for_a_reply_or_forget() {
     let (status, _) = engine.send_as(&engine.cookie, "DELETE", &path, None).await;
     assert_eq!(status, 404);
     engine.stop().await;
+}
+
+#[test]
+fn a_changed_wording_is_placed_between_its_own_note_s_context() {
+    let thread = |was: &str, quote: &str| {
+        margin::new_thread(
+            "n",
+            "read",
+            margin::placed(was, quote, &[]).unwrap(),
+            quote,
+            Vec::new(),
+        )
+    };
+    let short = thread(
+        "Passwords use bcrypt. Hash the password with care. then login just checks if it matches.",
+        "Hash the password with care",
+    );
+    let body = "Passwords use bcrypt. it. then login just checks if it matches.";
+    assert_eq!(margin::by_context(body, &short, "it"), Some(22));
+    assert_eq!(margin::by_context(body, &short, " "), None);
+    let twice = thread(
+        "We use it. Logins are slow.\n\nThe cache helps. We rely on it.",
+        "We rely on it.",
+    );
+    let body = "We use it. Logins are slow.\n\nThe cache helps. We use it.";
+    assert_eq!(
+        margin::by_context(body, &twice, "We use it."),
+        Some(body.len() - "We use it.".len())
+    );
+    assert_eq!(
+        margin::by_context(
+            "We use it. Logins are slow.\n\nThe cache helps. We rely on it.",
+            &twice,
+            "We rely on it."
+        ),
+        None
+    );
+    let quote = "Hash the password with care";
+    let long = |n: usize| "x".repeat(n);
+    for (n, placed) in [
+        (2 * quote.len() + 120, true),
+        (2 * quote.len() + 121, false),
+    ] {
+        let body = format!(
+            "Passwords use bcrypt. {}. then login just checks if it matches.",
+            long(n)
+        );
+        assert_eq!(
+            margin::by_context(&body, &short, &long(n)).is_some(),
+            placed,
+            "{n}"
+        );
+    }
+    let astral = thread(
+        "Notes 🎉 on passwords: hash them first. Then store the digest.",
+        "hash them first.",
+    );
+    let body = "Notes 🎉 on passwords: salt and hash them. Then store the digest.";
+    assert_eq!(
+        margin::by_context(body, &astral, "salt and hash them."),
+        body.find("salt")
+    );
+    let emoji = thread("🎉🎉🎉 hash them first.", "hash them first.");
+    let body = "🎉🎉🎉 salt and hash them.";
+    assert_eq!(
+        margin::by_context(body, &emoji, "salt and hash them."),
+        body.find("salt")
+    );
 }

@@ -5,8 +5,8 @@
 .page-mark { position: absolute; top: 2px; width: 24px; height: 28px; display: grid; place-items: center; cursor: col-resize; border-radius: var(--r-xs); touch-action: none; }
 .page-mark[data-edge="left"] { left: -28px; }
 .page-mark[data-edge="right"] { right: -28px; }
-.page-mark::before { content: ''; width: 1px; height: 14px; background: color-mix(in srgb, var(--text) 18%, transparent); transition: background-color var(--t-press), height var(--t-press); }
-.page-mark:hover::before, .page-mark.dragging::before, .page-mark:focus-visible::before { height: 18px; background: color-mix(in srgb, var(--text) 55%, transparent); }
+.page-mark::before { content: ''; width: 2px; height: 18px; border-radius: 1px; background: color-mix(in srgb, var(--text) var(--mark-ink), transparent); transition: background-color var(--t-press), height var(--t-press); }
+.page-mark:hover::before, .page-mark.dragging::before, .page-mark:focus-visible::before { height: 22px; background: color-mix(in srgb, var(--text) 70%, transparent); }
 .page-mark:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
 .page-width-label { position: absolute; top: 32px; padding: 2px 8px; border-radius: var(--r-pill); background: var(--text); color: var(--page); font-size: var(--fs-xs); font-weight: 550; font-variant-numeric: tabular-nums; white-space: nowrap; pointer-events: none; }
 .page-width-label[data-edge="left"] { left: -40px; }
@@ -143,7 +143,6 @@
 .margin-resolved-label { font-size: var(--fs-xs); color: var(--faint); }
 .margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); }
-.margin-foot svg { width: 13px; height: 13px; flex: none; }
 .margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
 .margin-long .link-btn { font-size: inherit; color: inherit; }
 .margin-more { position: relative; z-index: 2; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-drawer) var(--ease-arrive), opacity var(--t-follow) var(--ease-arrive), visibility 0s var(--t-drawer); }
@@ -216,16 +215,17 @@ figure.drawing.inked img { filter: none !important; }
 .margin-revisit:hover, .margin-revisit:focus-visible { border-bottom-color: color-mix(in srgb, var(--text) 60%, transparent); }
 .margin-revisit:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center; cursor: pointer; }
-.margin-anchor { display: grid; width: 11px; height: 11px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
+.margin-anchor { display: grid; width: 13px; height: 13px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform .14s ease-out, color .14s ease-out; }
+.margin-slot { display: inline; padding-left: 21px; }
+@media print { .margin-slot { display: none; } }
+.margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow-pop); }
 .margin-anchor svg { width: 100%; height: 100%; }
 .margin-mark:hover .margin-anchor, .margin-mark[data-active] .margin-anchor { color: var(--text); }
-.margin-mark[data-active] .margin-anchor { transform: scale(1.35); }
+.margin-mark[data-active] .margin-anchor { transform: scale(1.2); }
 .margin-mark[data-more] .margin-anchor { color: var(--text); }
 @media (pointer: coarse) { .margin-mark { width: 44px; height: 44px; } }
 @container note (min-width: 900px) { .note-columns[data-margin="marks"] { padding-left: 48px; } }
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
-.note-context { display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: 12px; min-height: 24px; }
-@media (min-width: 1000px) { .note-context { display: none; } }
 .note-meta .margin-mode { font-size: var(--fs-sm); padding: 2px 6px; margin-left: -2px; }
 #margin-status { margin-left: auto; }
 .margin-mode-wrap { position: relative; flex: none; }
@@ -290,13 +290,13 @@ figure.drawing.inked img { filter: none !important; }
 .choice-diagram .d-felix { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; fill: none; }
 .choice-diagram .d-text { stroke: var(--line); stroke-width: 2; stroke-linecap: round; fill: none; }
 .choice-diagram .d-mark { fill: var(--accent); }
-.choice-diagram .d-head { stroke: var(--muted); stroke-width: 4; stroke-linecap: round; }
 @media (prefers-reduced-motion: reduce) {
   .margin-quiet, .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
   .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
 }
 @media (forced-colors: active) {
   .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-note[data-inline] { outline: 1px solid CanvasText; }
   .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }
   .margin-ink path.wash { fill: Highlight; }
@@ -309,4 +309,4 @@ figure.drawing.inked img { filter: none !important; }
   .margin-anchor { color: Highlight; }
   .page-mark::before { background: CanvasText; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
-  .choice-diagram .d-felix, .choice-diagram .d-text, .choice-diagram .d-head { stroke: CanvasText; }
+  .choice-diagram .d-felix, .choice-diagram .d-text { stroke: CanvasText; }

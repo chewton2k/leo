@@ -392,6 +392,46 @@ test('without the note page option every other reader gets the same markup as be
   assert.equal(render(body, { noteTools: false }), render(body));
 });
 
+test('the read time counts words outside code at 238 a minute', () => {
+  assert.equal(md.readTime(''), '');
+  assert.equal(md.readTime('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '1 min read');
+  assert.equal(md.readTime('one\n\n```\n' + 'skip '.repeat(300) + '\n```\n'), '1 min read');
+  assert.equal(md.readTime('```\n' + 'skip '.repeat(300) + '\n```'), '');
+  assert.equal(md.readTime('w '.repeat(238)), '1 min read');
+  assert.equal(md.readTime('w '.repeat(239)), '2 min read');
+  assert.equal(md.readTime('w '.repeat(1200)), '6 min read');
+});
+
+test('the read time of a note with a long run of blank lines comes back quickly', () => {
+  for (const gap of ['\n', ' \n', '\r\n', '\t\n']) {
+    const started = Date.now();
+    assert.equal(md.readTime(`start${gap.repeat(4000)}end`), '1 min read');
+    assert.ok(Date.now() - started < 1000, JSON.stringify(gap));
+  }
+  assert.equal(md.plain(`a${' \n'.repeat(3000)}---${' \n'.repeat(3000)}b`), 'a b');
+});
+
+test('plain on a long run of blank lines grows linearly', () => {
+  for (const gap of ['\n', ' \n', '\r\n', '\t\n']) {
+    const time = (n) => {
+      const started = performance.now();
+      md.plain(`start${gap.repeat(n)}end | a |${gap.repeat(n)}end`);
+      return performance.now() - started;
+    };
+    const small = time(40000);
+    const large = time(80000);
+    assert.ok(large < 1000 && large <= Math.max(small * 4, 50), `${JSON.stringify(gap)} ${small} ${large}`);
+  }
+});
+
+test('plain turns table pipes into spaces exactly as the old pattern did', () => {
+  for (const text of ['', '|', '||', 'a||b', 'a | | b', '| a', 'a |', '| a |', '|a|b|', 'a\r\n|\r\nb', 'a\t|\tb', 'a | b', 'a \n | \n b', 'no pipes here', ' | ']) {
+    const old = text.replace(/\s*\|\s*/g, ' ');
+    const now = md.plain(text);
+    assert.equal(now, old.replace(/\s+/g, ' ').trim(), JSON.stringify(text));
+  }
+});
+
 test('an edit reads as kept, removed and added words, and too long an edit gives up', () => {
   const words = (s) => s.split(/\s+/).filter(Boolean).join(' ');
   const pairs = [

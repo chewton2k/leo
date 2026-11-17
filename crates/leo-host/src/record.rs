@@ -228,7 +228,10 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
             let input = Source::from_env(speaker == "Others");
             let tx = tx.clone();
             let id = id.clone();
-            let profile = profile.clone();
+            let profile = leo_core::recording::Profile {
+                speakers: false,
+                ..profile.clone()
+            };
             let title = title.clone();
             let directory = directory.clone();
             let controls = Controls {

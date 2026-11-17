@@ -1,0 +1,68 @@
+name: Speaker labels across models
+
+on:
+  schedule:
+    - cron: '17 9 * * 2'
+  pull_request:
+    paths:
+      - crates/leo-services/src/session/speakers.rs
+      - crates/leo-services/src/session/recorder.rs
+      - crates/leo-services/src/session/mod.rs
+      - crates/leo-services/src/speech/catalog.json
+      - crates/leo-services/src/speech/engine.rs
+      - crates/leo-services/src/speech/supervisor.rs
+      - crates/leo-services/src/speech/protocol.rs
+      - crates/leo-services/src/speech/worker.rs
+      - scripts/speaker_check.py
+      - .github/workflows/speakers.yml
+  workflow_dispatch:
+    inputs:
+      large:
+        description: Also run the models over 2.2 GB (they may not fit a hosted runner)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: speakers-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: never
+  RUST_BACKTRACE: 1
+
+jobs:
+  models:
+    name: ${{ matrix.model }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        model: ${{ fromJSON(inputs.large && '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3","cohere-transcribe-03-2026","cohere-transcribe-arabic-07-2026","canary-qwen-2.5b","granite-speech-4.1-2b","Voxtral-Mini-4B-Realtime-2602","Voxtral-Mini-3B-2507"]' || '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3"]') }}
+    env:
+      MODEL: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: speakers
+          save-if: ${{ github.event_name == 'schedule' }}
+      - name: Download the model, the speaker model and a meeting
+        run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL" "$RUNNER_TEMP/meeting"
+      - name: Build the speech worker
+        run: cargo test -p leo-host --no-run --locked
+      - name: Label a seven-minute meeting
+        env:
+          LEO_HOME: ${{ runner.temp }}/home
+          LEO_SPEAKER_AUDIO: ${{ runner.temp }}/meeting/meeting.wav
+          LEO_SPEAKER_TRUTH: ${{ runner.temp }}/meeting/meeting.rttm
+          LEO_SPEAKER_WORDS: ${{ runner.temp }}/meeting/meeting.txt
+        shell: bash
+        run: |
+          export LEO_TRANSCRIBE_WORKER_EXE="$PWD/target/debug/leo-test-server"
+          cargo test -p leo-services --lib speakers_across_models --locked -- --ignored --nocapture | tee result.txt
+          grep '^speakers_across_models' result.txt >> "$GITHUB_STEP_SUMMARY"

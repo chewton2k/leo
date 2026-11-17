@@ -165,7 +165,8 @@ test('a failed save survives navigation and reload, then saves on reconnection',
   await page.locator('.line-edit').fill('Keep this phone draft');
   await expect(page.locator('#save-state')).toContainText('draft kept');
   const refused = await page.evaluate(() => window.__refusedSaves);
-  await page.locator('#back:visible, .note-back:visible').first().click();
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press('Escape');
   await expect.poll(() => page.evaluate(() => window.__refusedSaves)).toBeGreaterThan(refused);
   await page.reload();
   await expect(page.locator('#save-state')).toContainText('draft kept');
@@ -2633,7 +2634,7 @@ test.describe('recording', () => {
       return painted;
     });
     expect(leftEdge, 'the wave reaches the left edge of its box').toBeGreaterThan(0);
-    expect(seen.started).toEqual({ source: 'microphone', directory: '', title: 'Graphs', profile: { context: '', wants: 'Focus on BFS' } });
+    expect(seen.started).toEqual({ source: 'microphone', directory: '', title: 'Graphs', profile: { context: '', wants: 'Focus on BFS', speakers: false } });
     const live = page.locator('#rec-wants-live');
     await expect(live).toHaveValue('Focus on BFS');
     await live.click();
@@ -2653,7 +2654,7 @@ test.describe('recording', () => {
     await page.locator('[data-action="rec-pause"]').click();
     await expect(page.locator('[data-action="rec-pause"]')).toHaveText('Pause');
 
-    await page.locator('#back').click();
+    await page.keyboard.press('Escape');
     await expect(page.locator('#rec-pill')).toContainText('Recording');
     await page.locator('#rec-pill').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
@@ -2739,6 +2740,29 @@ test.describe('recording', () => {
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.source).toBe('nativecall');
+  });
+
+  test('Label speakers is chosen per recording, remembered, hidden for calls and sent with Start once its model is ready', async ({ page }) => {
+    const seen = stubRecorder(page, { noteId: 'x', local: false });
+    let model = { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null };
+    await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: model } }));
+    await page.goto('/#/record');
+    const toggle = page.locator('#rec-speakers');
+    await expect(toggle, 'off by default, so lectures stay as they are').not.toBeChecked();
+    await toggle.check();
+    await expect(page.locator('#rec-speakers-model')).toContainText('133 MB');
+    await expect(page.locator('#rec-speakers-get')).toBeVisible();
+    model = { ...model, bytes: model.size, verified: true };
+    await page.reload();
+    await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
+    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
+    await page.locator('.rec-kind', { hasText: 'Microphone' }).click();
+    await expect(page.locator('#rec-speakers-box')).toBeVisible();
+    await page.locator('[data-action="rec-start"]').click();
+    await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
+    expect(seen.started.profile.speakers).toBe(true);
   });
 
   test('the class or meeting happening now names the recording and tells the AI who and what, without overwriting a typed title', async ({ page, context }) => {
@@ -5303,36 +5327,46 @@ test('beside a lone picture a double-click or a Shift-click opens its Markdown, 
   for (const note of [pictured, broken]) await page.request.delete(`/api/notes/${note.id}`);
 });
 
-test('the header starts where each page\'s content starts, in a wide window', async ({ page }) => {
+test('Felix\'s button sits in the same place on every page, a little in from the right', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'widths matter on a wide screen');
   await page.setViewportSize({ width: 1600, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: `Edge ${Date.now().toString(36)}`, body: 'A line.' } })).json();
   const board = await (await page.request.post('/api/boards', { data: { name: 'Edge' } })).json();
-  const header = async () => (await page.locator('.bar-row').boundingBox()).x;
-  const left = async (selector) => page.locator(selector).first().evaluate((el) => el.getBoundingClientRect().left + (parseFloat(getComputedStyle(el).paddingLeft) || 0));
+  let first;
   for (const [hash, selector] of [['#/', '.workspace-empty'], [`#/n/${note.id}`, '.note-columns > .note'], ['#/calendar', '.cal-head'], ['#/boards', '.kanban-head'], ['#/record', 'main']]) {
     await page.goto('/' + hash);
     await expect(page.locator(selector).first()).toBeVisible();
-    await expect.poll(async () => Math.abs((await header()) - (selector === 'main' ? (await left('main')) : await left(selector))), { message: hash }).toBeLessThanOrEqual(1);
+    const box = await page.locator('#chat-toggle').boundingBox();
+    first ||= box;
+    expect(Math.abs(box.x - first.x), hash).toBeLessThanOrEqual(1);
+    expect(Math.abs(box.y - first.y), hash).toBeLessThanOrEqual(1);
   }
+  const bar = await page.locator('#bar').boundingBox();
+  const inset = bar.x + bar.width - first.x - first.width;
+  expect(inset, 'not hard against the edge').toBeGreaterThan(48);
+  expect(inset, 'not toward the middle').toBeLessThan(bar.width / 8);
   await page.request.delete(`/api/notes/${note.id}`);
   await page.request.delete(`/api/boards/${board.id}`);
 });
 
 
 
-test('notes read wide by default, and Settings can make them comfortable or full width', async ({ page }) => {
+test('notes read wide by default, and Settings shows a dragged width and resets it', async ({ page }) => {
   test.skip(test.info().project.name !== 'desktop', 'widths matter on a wide screen');
   await page.setViewportSize({ width: 2000, height: 900 });
   const note = await (await page.request.post('/api/notes', { data: { title: `Wide ${Date.now().toString(36)}`, body: 'A line that should have room to breathe.' } })).json();
   const width = async () => { await page.goto(`/#/n/${note.id}`); await expect(page.locator('#doc')).toContainText('room to breathe'); return (await page.locator('.note').boundingBox()).width; };
   expect(await width()).toBeCloseTo(980, -1);
-  for (const [choice, check] of [['comfortable', (w) => expect(w).toBeCloseTo(760, -1)], ['full', (w) => expect(w).toBeGreaterThan(1200)], ['wide', (w) => expect(w).toBeCloseTo(980, -1)]]) {
-    await page.goto('/#/settings');
-    await page.locator(`[data-action="width-pick"][data-width="${choice}"]`).click();
-    await expect(page.locator(`[data-action="width-pick"][data-width="${choice}"]`)).toHaveAttribute('aria-pressed', 'true');
-    check(await width());
-  }
+  await page.evaluate(() => window.leoTheme.setPageWidth(700));
+  expect(await width()).toBeCloseTo(700, -1);
+  await page.goto('/#/settings');
+  const row = page.locator('[data-find="note-width"]');
+  await expect(row).toContainText('700 px wide.');
+  await expect(row.locator('.choice-cards')).toHaveCount(0);
+  await row.getByRole('button', { name: 'Reset' }).click();
+  await expect(row).toContainText('The default.');
+  await expect(row.getByRole('button', { name: 'Reset' })).toBeDisabled();
+  expect(await width()).toBeCloseTo(980, -1);
   await page.goto('/#/');
   await expect(page.locator('.workspace-empty')).toBeVisible();
   const content = await page.locator('main').evaluate((main) => { const cs = getComputedStyle(main); return main.getBoundingClientRect().width - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight); });
@@ -5576,10 +5610,10 @@ test('a late missing note response keeps a new draft open', async ({ page }) => 
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
-test('Back from Settings, Keeping or Trash returns to the note you were reading', async ({ page }) => {
+test('Escape from Settings, Keeping or Trash returns to the note you were reading', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: `Back here ${Date.now().toString(36)}`, body: 'Keep my place.' } })).json();
   const visit = (hash) => page.evaluate((h) => { location.hash = h; }, hash);
-  const back = async () => { await page.locator('#back').click(); };
+  const back = async () => { await page.evaluate(() => document.activeElement?.blur()); await page.keyboard.press('Escape'); };
   const at = () => page.evaluate(() => location.hash);
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('#doc')).toContainText('Keep my place.');
@@ -5601,7 +5635,6 @@ test('Back from Settings, Keeping or Trash returns to the note you were reading'
   await expect.poll(at).toBe(`#/n/${note.id}`);
   expect(await page.evaluate(() => history.length)).toBe(depth);
   await visit('#/settings/keeping');
-  await expect(page.locator('#back')).toBeVisible();
   await back();
   await expect.poll(at).toBe(`#/n/${note.id}`);
   await visit('#/settings');
@@ -5793,7 +5826,7 @@ for (const width of [1280, 390]) {
       await page.goto('/#/' + route);
       await expect(page.locator('#crumbs')).toContainText(new RegExp(crumb.replaceAll(' / ', '\\s*/\\s*')));
       const header = await page.locator('.bar-row').boundingBox();
-      expect(header.width).toBeLessThanOrEqual(760);
+      if (width < 1000) expect(header.width).toBeLessThanOrEqual(760);
       if (reference) {
         if (width < 1000) {
           expect(header.x).toBeCloseTo(reference.x, 0);

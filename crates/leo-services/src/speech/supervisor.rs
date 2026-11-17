@@ -1,5 +1,5 @@
 use super::protocol::{
-    encode_message, read_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response,
+    encode_message, read_message, DeviceInfo, DeviceSelector, LoadedInfo, Request, Response, Turn,
 };
 use super::worker::LOG_LINE_PREFIX;
 use super::{CPU_ONLY_FLAG, LOG_LEVEL_ENV, WORKER_FLAG};
@@ -61,6 +61,11 @@ impl Deadlines {
 
     fn run(&self, samples: usize) -> Duration {
         self.run_floor.max(self.audio(samples))
+    }
+
+    fn diarize(&self, samples: usize) -> Duration {
+        self.run_floor
+            + Duration::from_secs_f64(samples as f64 / SAMPLE_RATE * self.audio_factor / 40.0)
     }
 }
 
@@ -156,6 +161,12 @@ enum Command {
     },
     StreamReset {
         id: u64,
+    },
+    Diarize {
+        request: Request,
+        samples: usize,
+        epoch: u64,
+        reply: Reply<Result<Vec<Turn>, EngineError>>,
     },
 }
 
@@ -275,6 +286,7 @@ impl EngineSupervisor {
             stream: None,
             unloads_done: 0,
             gpu_backend_error: false,
+            diarize_on_cpu: false,
         };
         thread::Builder::new()
             .name("transcribe-engine".into())
@@ -329,6 +341,22 @@ impl EngineSupervisor {
         self.ask(|reply| Command::Transcribe {
             pcm,
             run,
+            epoch,
+            reply,
+        })
+        .unwrap_or_else(|| Err(engine_stopped()))
+    }
+
+    pub fn diarize(
+        &self,
+        model: PathBuf,
+        parts: Vec<(PathBuf, u64)>,
+        samples: usize,
+    ) -> Result<Vec<Turn>, EngineError> {
+        let epoch = self.cancel_mark().0;
+        self.ask(|reply| Command::Diarize {
+            request: Request::Diarize { model, parts },
+            samples,
             epoch,
             reply,
         })
@@ -514,6 +542,7 @@ struct Owner {
     stream: Option<ActiveStream>,
     unloads_done: u64,
     gpu_backend_error: bool,
+    diarize_on_cpu: bool,
 }
 
 impl Owner {
@@ -552,6 +581,14 @@ impl Owner {
                     reply,
                 } => {
                     let _ = reply.send(self.finalize(id, want_language, epoch));
+                }
+                Command::Diarize {
+                    request,
+                    samples,
+                    epoch,
+                    reply,
+                } => {
+                    let _ = reply.send(self.diarize(&request, samples, epoch));
                 }
                 Command::StreamReset { id } => {
                     if self.stream.as_ref().is_some_and(|s| s.id == id) {
@@ -776,6 +813,47 @@ impl Owner {
                         warn!("Retrying the transcription in a fresh worker");
                         retried = true;
                     }
+                }
+                Err(failure) => return Err(failure.into()),
+            }
+        }
+    }
+
+    fn diarize(
+        &mut self,
+        request: &Request,
+        samples: usize,
+        epoch: u64,
+    ) -> Result<Vec<Turn>, EngineError> {
+        self.end_stream();
+        loop {
+            if self.shared.cancelled_since(epoch) {
+                return Err(EngineError::Cancelled);
+            }
+            if self.diarize_on_cpu {
+                self.worker = None;
+                *lock(&self.shared.loaded) = None;
+                self.worker = Some(self.shared.hello(true, false)?);
+            } else {
+                self.ensure_worker()?;
+            }
+            let deadline = self.deadlines().diarize(samples);
+            let result = self.call_work(request, None, deadline, epoch);
+            if self.diarize_on_cpu {
+                self.worker = None;
+            }
+            match result {
+                Ok(Response::Turns(turns)) => return Ok(turns),
+                Ok(other) => return Err(unexpected(&other).into()),
+                Err(failure) if failure.worker_lost() => {
+                    self.worker = None;
+                    *lock(&self.shared.loaded) = None;
+                    let pinned = self.spec.as_ref().is_some_and(LoadSpec::pinned);
+                    if self.diarize_on_cpu || pinned || matches!(failure, Failure::Hung(_)) {
+                        return Err(failure.into());
+                    }
+                    warn!("Speaker detection lost its worker ({failure}); retrying on CPU");
+                    self.diarize_on_cpu = true;
                 }
                 Err(failure) => return Err(failure.into()),
             }
@@ -1262,6 +1340,7 @@ fn request_name(request: &Request) -> &'static str {
         Request::Feed => "stream feed",
         Request::Finalize { .. } => "stream finalize",
         Request::StreamReset => "stream reset",
+        Request::Diarize { .. } => "speaker detection",
     }
 }
 
@@ -1308,6 +1387,12 @@ mod unit_tests {
         assert_eq!(gpu.audio(16_000 * 5), Duration::from_secs(50));
         assert_eq!(gpu.run(16_000), gpu.run_floor);
         assert_eq!(gpu.run(16_000 * 10), Duration::from_secs(100));
+        let two_hours = 16_000 * 60 * 60 * 2;
+        assert_eq!(gpu.diarize(two_hours), Duration::from_secs(60 + 1_800));
+        assert_eq!(
+            Deadlines::for_device(false).diarize(two_hours),
+            Duration::from_secs(300 + 3_600)
+        );
 
         let cpu = Deadlines::for_device(false);
         assert_eq!(cpu, CPU_DEADLINES);
@@ -1372,6 +1457,37 @@ pub(super) mod fake_tests {
                 assert_ne!(unsafe { libc::kill(pid, 0) }, 0);
             }
         }
+        std::env::remove_var("LEO_TRANSCRIBE_WORKER_EXE");
+    }
+
+    #[test]
+    fn a_speaker_pass_that_crashes_the_gpu_worker_moves_to_cpu_and_leaves_speech_on_the_gpu() {
+        let _guard = ENV.lock().unwrap();
+        let dir = fake();
+        let engine = EngineSupervisor::new(true);
+        engine
+            .load(LoadSpec {
+                path: dir.path().join("speech"),
+                backend: Backend::Auto,
+                device: DeviceSelector::Auto,
+            })
+            .unwrap();
+        for _ in 0..2 {
+            let turns = engine
+                .diarize(dir.path().join("crashed"), Vec::new(), 16_000)
+                .unwrap();
+            assert_eq!(turns.len(), 1);
+        }
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("diarized")).unwrap(),
+            "gpu\ncpu\ncpu\n"
+        );
+        let answer = engine
+            .transcribe(vec![0.2; 1600], RunOptions::default())
+            .unwrap();
+        assert_eq!(answer.text, "local words");
+        assert!(engine.loaded().unwrap().on_gpu);
+        engine.unload().wait();
         std::env::remove_var("LEO_TRANSCRIBE_WORKER_EXE");
     }
 

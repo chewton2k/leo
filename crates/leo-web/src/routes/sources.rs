@@ -108,6 +108,7 @@ pub(crate) async fn regenerate(
         let profile = recording::Profile {
             context: joined(|s| s.context.as_str()),
             wants: body.wants.unwrap_or_else(|| joined(|s| s.wants.as_str())),
+            ..Default::default()
         }
         .checked()
         .map_err(|_| StatusCode::BAD_REQUEST)?;

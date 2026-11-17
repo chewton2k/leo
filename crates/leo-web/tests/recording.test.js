@@ -171,7 +171,7 @@ const icons = new Proxy({}, { get: () => '' });
 function idle(checks, platform, denied = false) {
   return piece('drawIdle', 'drawLive', 'drawIdle', {
     s: { overview: { available: true, checks }, calendar: null, event: null },
-    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '',
+    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '', speakersRow: () => '',
     preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
   })([], '');
 }

@@ -22,8 +22,30 @@ pub(crate) struct ReadBody {
     most: Option<usize>,
     #[serde(default)]
     gone: Vec<String>,
+    #[serde(default, deserialize_with = "listed")]
+    keep: Vec<String>,
     #[serde(default)]
-    keep: Option<String>,
+    changed: Vec<Changed>,
+}
+
+fn listed<'de, D: serde::Deserializer<'de>>(to: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Keep {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<Keep>::deserialize(to)? {
+        Some(Keep::One(id)) => vec![id],
+        Some(Keep::Many(ids)) => ids.into_iter().take(2 * margin::MOST_OPEN).collect(),
+        None => Vec::new(),
+    })
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Changed {
+    id: String,
+    text: String,
 }
 
 #[derive(Deserialize)]
@@ -91,6 +113,7 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
+    open: Vec<Thread>,
     limit: usize,
     free: bool,
 }
@@ -441,13 +464,14 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                 limit: margin::room(&open, &gone),
                 free: open
                     .iter()
-                    .any(|thread| margin::freeable(&reads, thread, keep.as_deref())),
+                    .any(|thread| margin::freeable(&reads, thread, &keep)),
                 along: margin::mode_of(&held, &id, created) == "along",
                 voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
                 instructions: margin::instructions_of(&held, &id),
                 cap: prefs.cap,
                 gap: prefs.gap,
-                quotes: open.into_iter().map(|thread| thread.quote).collect(),
+                quotes: open.iter().map(|thread| thread.quote.clone()).collect(),
+                open,
             }
         })
         .await;
@@ -611,6 +635,32 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         2 * margin::MOST_OPEN
     };
     let mut quotes = facts.quotes;
+    let mut changed: Vec<(&str, usize, usize)> = body
+        .changed
+        .iter()
+        .take(2 * margin::MOST_OPEN)
+        .filter_map(|c| {
+            let thread = facts.open.iter().find(|t| t.id == c.id)?;
+            let at = margin::by_context(&now.body, thread, &c.text)?;
+            Some((c.id.as_str(), at, c.text.len()))
+        })
+        .collect();
+    let mut stranded: Vec<String> = facts
+        .open
+        .iter()
+        .filter(|t| {
+            !through
+                && t.source == "read"
+                && t.prefix.is_empty()
+                && t.suffix.is_empty()
+                && !t.pinned
+                && !body.keep.contains(&t.id)
+                && t.messages.iter().all(|m| m.from == "felix")
+                && !now.body.contains(t.quote.as_str())
+                && margin::one_sentence(&now.body)
+        })
+        .map(|t| t.id.clone())
+        .collect();
     let mut saved = Vec::new();
     let mut resolved = Vec::new();
     let mut stopped = false;
@@ -629,6 +679,15 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let Some(place) = margin::placed(&now.body, &quote, &blocks) else {
             continue;
         };
+        let olds: Vec<String> = changed
+            .iter()
+            .filter(|(_, at, length)| margin::crowds_at(&now.body, &quote, &blocks, *at, *length))
+            .map(|(old, _, _)| old.to_string())
+            .chain(stranded.iter().cloned())
+            .collect();
+        if through && !olds.is_empty() {
+            continue;
+        }
         let thread = margin::new_thread(
             &id,
             if through { "through" } else { "read" },
@@ -636,37 +695,50 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             &quote,
             vec![margin::felix_says(&found.text)],
         );
+        let mut victim = None;
         if !through && quotes.len() >= limit {
             let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
-            let keep = body.keep.clone();
-            let freed =
-                blocking(move || margin::free_oldest(&held, &reads, &noted, keep.as_deref())).await;
-            let Ok(Some(freed)) = freed else {
+            let spared = [body.keep.clone(), olds.clone()].concat();
+            victim = blocking(move || margin::free_oldest(&held, &reads, &noted, &spared))
+                .await
+                .ok()
+                .flatten();
+            if victim.is_none() && olds.is_empty() {
                 forget(state);
                 return Pass::Failed(margin::FULL.into());
-            };
-            if let Some(at) = quotes.iter().position(|q| *q == freed.quote) {
-                quotes.remove(at);
             }
-            resolved.push(freed.id);
         }
         let held = chats.clone();
         let stored = thread.clone();
-        if !matches!(
-            blocking(move || margin::put(&held, &stored, limit)).await,
-            Ok(true)
-        ) {
-            stopped = true;
-            break;
+        let (reads, keep) = (state.margin.clone(), body.keep.clone());
+        let put = blocking(move || {
+            margin::put_replacing(&held, &reads, &stored, &olds, &keep, victim, limit)
+        })
+        .await;
+        match put {
+            Ok(margin::Swap::Put(gone)) => {
+                for old in gone {
+                    if let Some(at) = quotes.iter().position(|q| *q == old.quote) {
+                        quotes.remove(at);
+                    }
+                    changed.retain(|(id, _, _)| *id != old.id);
+                    stranded.retain(|id| *id != old.id);
+                    resolved.push(old.id);
+                }
+            }
+            Ok(margin::Swap::Kept) => continue,
+            _ => {
+                stopped = true;
+                break;
+            }
         }
         quotes.push(quote);
         if !through {
             let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
             let (keep, fresh) = (body.keep.clone(), thread.id.clone());
-            let tidied = blocking(move || {
-                margin::resolve_untouched(&held, &reads, &noted, keep.as_deref(), &fresh)
-            })
-            .await;
+            let tidied =
+                blocking(move || margin::resolve_untouched(&held, &reads, &noted, &keep, &fresh))
+                    .await;
             resolved.extend(tidied.unwrap_or_default());
         }
         saved.push(thread);
