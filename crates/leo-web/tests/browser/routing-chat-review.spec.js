@@ -157,20 +157,23 @@ for (const layout of ['desktop', 'compact', 'source']) test(`Chats history ${lay
     list.scrollTop = 180;
     window.historyRow = list.firstElementChild;
     window.historyScroll = list.scrollTop;
-    for (const run of historyMotion) run.currentTime = run.effect.getTiming().duration * .5;
   });
   const close = layout === 'desktop' ? toggle : history.locator('.chat-history-back');
-  const reversal = await close.evaluate(async el => {
+  const reversal = await close.evaluate(el => {
     const history = document.querySelector('#chat-history');
     el.focus({ preventScroll: true });
+    for (const run of historyMotion) run.currentTime = run.effect.getTiming().duration * .5;
     const before = history.getBoundingClientRect().x;
     el.click();
     const after = history.getBoundingClientRect().x;
-    const runs = document.querySelector('#chat').getAnimations({ subtree: true }).map(run => ({ on: run.effect.target.id || String(run.effect.target.className), what: run.transitionProperty || run.animationName || '', at: run.currentTime, state: run.playState, pending: run.pending }));
-    await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
-    return { before, after, later: history.getBoundingClientRect().x, runs };
+    const runs = history.getAnimations().map(run => ({ what: run.transitionProperty, at: run.currentTime, state: run.playState, pending: run.pending }));
+    for (const run of historyMotion) {
+      run.pause();
+      run.currentTime = 0;
+    }
+    return { before, after, first: history.getBoundingClientRect().x, runs };
   });
-  expect(Math.abs(reversal.after - reversal.before), `reverse preserves position in the same browser turn ${JSON.stringify(reversal)}`).toBeLessThan(4);
+  expect(Math.abs(reversal.first - reversal.before), `the reversed slide starts from the frame it was closed on ${JSON.stringify(reversal)}`).toBeLessThan(1);
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await page.evaluate(() => { for (const run of historyMotion) run.finish(); });
   await expect(history).toBeHidden();
