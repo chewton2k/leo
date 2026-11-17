@@ -9,7 +9,9 @@ a test, or leave it unset to see the user's own data.
 ## Startup (`lib.rs`)
 
 1. macOS: `PATH` = the login shell's PATH (`shell_path::login_path`, markers,
-   3 s timeout, process group killed on timeout) merged with the current PATH and
+   3 s timeout, process group killed on timeout; the last good answer is kept in
+   `<config>/login-path` and used at launch, refreshed in the background after the
+   window opens; with no saved answer the first launch waits for the shell) merged with the current PATH and
    `usual_folders` (Homebrew, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`),
    so Codex, Claude Code and Ollama are found when Finder starts leo.
 2. `leo_web::start` on `port::remembered` (`<config>/app-port`, default 47318,

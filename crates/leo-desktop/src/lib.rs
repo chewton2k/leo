@@ -35,7 +35,16 @@ const LAUNCHED: &str = "app-launched";
 struct Engine(Mutex<Option<leo_web::Running>>);
 
 pub fn run() {
-    fix_path();
+    let config = leo_core::paths::config_dir().ok();
+    let began = std::time::Instant::now();
+    let saved = fix_path(config.as_deref());
+    if cfg!(target_os = "macos") {
+        eprintln!(
+            "  login PATH ready in {} ms ({})",
+            began.elapsed().as_millis(),
+            if saved { "saved copy" } else { "login shell" }
+        );
+    }
     let hidden = std::env::args().any(|a| a == HIDDEN);
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -51,7 +60,7 @@ pub fn run() {
         ))
         .invoke_handler(tauri::generate_handler![print_page, dictation_popup])
         .setup(move |app| {
-            if let Err(error) = set_up(app, hidden) {
+            if let Err(error) = set_up(app, hidden, config, saved) {
                 eprintln!("  leo could not start: {error:#}");
                 if app.get_webview_window(MAIN).is_none() {
                     WebviewWindowBuilder::new(app, MAIN, problem_address(&format!("{error:#}")))
@@ -106,8 +115,12 @@ pub fn run() {
     });
 }
 
-fn set_up(app: &mut tauri::App, hidden: bool) -> anyhow::Result<()> {
-    let config = leo_core::paths::config_dir().ok();
+fn set_up(
+    app: &mut tauri::App,
+    hidden: bool,
+    config: Option<std::path::PathBuf>,
+    saved: bool,
+) -> anyhow::Result<()> {
     let foreground = config.as_deref().is_some_and(update_window::take);
     let hidden = update_window::hidden(hidden, foreground);
     let mut parts: Vec<(&str, Option<String>)> = Vec::new();
@@ -260,6 +273,13 @@ fn set_up(app: &mut tauri::App, hidden: bool) -> anyhow::Result<()> {
     if let Some(sentence) = startup_problem(&parts) {
         eprintln!("  {sentence}");
         app_settings.note(sentence);
+    }
+    if let (true, Some(config)) = (saved, config) {
+        std::thread::spawn(move || {
+            if let Some(path) = shell_path::login_path(&login_shell(), Duration::from_secs(3)) {
+                let _ = shell_path::remember(&config, &path);
+            }
+        });
     }
     Ok(())
 }
@@ -452,14 +472,25 @@ fn open_at_login_once(app: &AppHandle, config: Option<&std::path::Path>) {
     }
 }
 
-fn fix_path() {
-    if !cfg!(target_os = "macos") {
-        return;
-    }
-    let shell = std::env::var_os("SHELL")
+fn login_shell() -> std::path::PathBuf {
+    std::env::var_os("SHELL")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| "/bin/zsh".into());
-    let login = shell_path::login_path(&shell, Duration::from_secs(3));
+        .unwrap_or_else(|| "/bin/zsh".into())
+}
+
+fn fix_path(config: Option<&std::path::Path>) -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let saved = config.and_then(shell_path::cached);
+    let used = saved.is_some();
+    let login = saved.or_else(|| {
+        let found = shell_path::login_path(&login_shell(), Duration::from_secs(3));
+        if let (Some(config), Some(path)) = (config, found.as_deref()) {
+            let _ = shell_path::remember(config, path);
+        }
+        found
+    });
     let current = std::env::var("PATH").unwrap_or_default();
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
     let path = shell_path::merged(
@@ -468,6 +499,7 @@ fn fix_path() {
         &shell_path::usual_folders(home.as_deref()),
     );
     std::env::set_var("PATH", path);
+    used
 }
 
 fn url_text(text: &str) -> String {

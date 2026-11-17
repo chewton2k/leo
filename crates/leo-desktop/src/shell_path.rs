@@ -3,6 +3,32 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MARK: &str = "__LEO_PATH__";
+const SAVED: &str = "login-path";
+const MOST_SAVED: u64 = 16 * 1024;
+
+pub fn cached(config: &Path) -> Option<String> {
+    let mut text = String::new();
+    std::fs::File::open(config.join(SAVED))
+        .ok()?
+        .take(MOST_SAVED + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    let line = text.trim_end_matches(['\n', '\r']);
+    (text.len() as u64 <= MOST_SAVED && !line.is_empty() && !line.contains('\n'))
+        .then(|| line.to_string())
+}
+
+pub fn remember(config: &Path, path: &str) -> std::io::Result<bool> {
+    if path.is_empty() || path.len() as u64 > MOST_SAVED || path.contains('\n') {
+        return Ok(false);
+    }
+    if cached(config).as_deref() == Some(path) {
+        return Ok(false);
+    }
+    std::fs::create_dir_all(config)?;
+    leo_core::paths::write_atomic(&config.join(SAVED), path).map_err(std::io::Error::other)?;
+    Ok(true)
+}
 
 pub fn login_path(shell: &Path, timeout: Duration) -> Option<String> {
     let mut command = leo_core::children::quiet_command(shell);
@@ -135,6 +161,26 @@ mod tests {
             Some("/opt/homebrew/bin")
         );
         assert!(began.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_saved_login_path_is_read_back_and_rewritten_only_when_it_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(cached(dir.path()), None);
+        assert!(remember(dir.path(), "/opt/homebrew/bin:/usr/bin").unwrap());
+        assert_eq!(
+            cached(dir.path()).as_deref(),
+            Some("/opt/homebrew/bin:/usr/bin")
+        );
+        assert!(!remember(dir.path(), "/opt/homebrew/bin:/usr/bin").unwrap());
+        assert!(remember(dir.path(), "/usr/bin").unwrap());
+        assert_eq!(cached(dir.path()).as_deref(), Some("/usr/bin"));
+        std::fs::write(dir.path().join("login-path"), "a".repeat(17 * 1024)).unwrap();
+        assert_eq!(cached(dir.path()), None);
+        std::fs::write(dir.path().join("login-path"), "/usr/bin\n/bin").unwrap();
+        assert_eq!(cached(dir.path()), None);
+        assert!(remember(dir.path(), "/bin").unwrap());
+        assert_eq!(cached(dir.path()).as_deref(), Some("/bin"));
     }
 
     #[test]
