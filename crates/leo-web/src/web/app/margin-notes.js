@@ -99,8 +99,8 @@ function marginLeave() {
   marginPage.personaSlide?.cancel();
   marginPage.observer?.disconnect();
   marginPage.observer = null;
+  for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
-  for (const slot of document.querySelectorAll('.margin-slot')) slot.remove();
   Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map() });
   marginPage.els.clear();
   marginPage.paths.clear();
