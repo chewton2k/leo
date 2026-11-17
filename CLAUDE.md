@@ -132,6 +132,8 @@ settings and credentials are excluded from note exports.
   `filename::portable_folder`. Old
   `<id>.md` files are renamed on the next save. A file name that is neither an
   id nor its title's name becomes the title on load (Obsidian rename).
+  When two files share an id, the one still named after its header title
+  keeps it; the other gets a new id, written on the next save.
 - Headerless `.md` files load as notes: title = stem, id = `stable_id(path)`
   (FNV-1a 128 → UUID v8, golden-tested: never change it), dates = mtime, tags
   from list or string. `Note.extra` keeps unknown front matter.

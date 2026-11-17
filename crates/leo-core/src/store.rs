@@ -137,6 +137,10 @@ fn normalised(text: &str) -> std::borrow::Cow<'_, str> {
 }
 
 fn head_of(props: &mut serde_yaml::Mapping, relative_path: &Path) -> Head {
+    head_and_renamed(props, relative_path).0
+}
+
+fn head_and_renamed(props: &mut serde_yaml::Mapping, relative_path: &Path) -> (Head, bool) {
     let directory = relative_path
         .parent()
         .map(|p| {
@@ -161,17 +165,17 @@ fn head_of(props: &mut serde_yaml::Mapping, relative_path: &Path) -> Head {
     }
     .unwrap_or_else(|| stable_id(relative_path));
     let header_title = text_from(props.remove("title")).unwrap_or_else(|| stem.clone());
-    let title =
-        if uuid::Uuid::parse_str(&stem).is_ok() || filename::matches_title(&stem, &header_title) {
-            header_title
-        } else {
-            stem.clone()
-        };
-    Head {
-        id,
-        title,
-        directory,
-    }
+    let named =
+        uuid::Uuid::parse_str(&stem).is_ok() || filename::matches_title(&stem, &header_title);
+    let title = if named { header_title } else { stem.clone() };
+    (
+        Head {
+            id,
+            title,
+            directory,
+        },
+        !named,
+    )
 }
 
 fn marker_end(bytes: &[u8]) -> Option<usize> {
@@ -239,14 +243,25 @@ fn parse_note_from_markdown(
     relative_path: &Path,
     modified: DateTime<Utc>,
 ) -> Result<Note> {
+    parse_note(content, relative_path, modified).map(|(note, _)| note)
+}
+
+fn parse_note(
+    content: &str,
+    relative_path: &Path,
+    modified: DateTime<Utc>,
+) -> Result<(Note, bool)> {
     let text = normalised(content);
     let (front, body) = split_front_matter(&text)?;
     let mut props = front.unwrap_or_default();
-    let Head {
-        id,
-        title,
-        directory,
-    } = head_of(&mut props, relative_path);
+    let (
+        Head {
+            id,
+            title,
+            directory,
+        },
+        renamed,
+    ) = head_and_renamed(&mut props, relative_path);
     let tags = props.remove("tags").map(tags_from).unwrap_or_default();
     let created_at = props
         .remove("created_at")
@@ -261,17 +276,20 @@ fn parse_note_from_markdown(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    Ok(Note {
-        id,
-        title,
-        body,
-        tags,
-        directory,
-        created_at,
-        updated_at,
-        pinned,
-        extra: props,
-    })
+    Ok((
+        Note {
+            id,
+            title,
+            body,
+            tags,
+            directory,
+            created_at,
+            updated_at,
+            pinned,
+            extra: props,
+        },
+        renamed,
+    ))
 }
 
 pub const CONFLICT_SUFFIX: &str = " (conflict from leo)";
@@ -648,11 +666,13 @@ fn add_with_parents(directories: &mut Vec<String>, dir: &str) {
     }
 }
 
+type Found = (PathBuf, Note, String, std::time::SystemTime, bool);
+
 /// Recursively parse all .md files under `dir` into `notes`.
 fn collect_notes(
     notes_dir: &Path,
     dir: &Path,
-    found: &mut Vec<(PathBuf, Note, String, std::time::SystemTime)>,
+    found: &mut Vec<Found>,
     unreadable: &mut Vec<(PathBuf, String)>,
 ) -> Result<()> {
     collect_notes_at(notes_dir, dir, found, unreadable, 0)
@@ -666,7 +686,7 @@ fn skip(unreadable: &mut Vec<(PathBuf, String)>, path: &Path, error: &dyn std::f
 fn collect_notes_at(
     notes_dir: &Path,
     dir: &Path,
-    found: &mut Vec<(PathBuf, Note, String, std::time::SystemTime)>,
+    found: &mut Vec<Found>,
     unreadable: &mut Vec<(PathBuf, String)>,
     depth: usize,
 ) -> Result<()> {
@@ -720,13 +740,14 @@ fn collect_notes_at(
                 .to_path_buf();
             let modified = entry.metadata().and_then(|m| m.modified()).ok();
             let changed = modified.map_or_else(Utc::now, DateTime::<Utc>::from);
-            match parse_note_from_markdown(&content, &relative, changed) {
-                Ok(note) => {
+            match parse_note(&content, &relative, changed) {
+                Ok((note, renamed)) => {
                     found.push((
                         relative,
                         note,
                         content,
                         modified.unwrap_or(std::time::UNIX_EPOCH),
+                        renamed,
                     ));
                 }
                 Err(e) => skip(unreadable, &path, &e),
@@ -736,29 +757,43 @@ fn collect_notes_at(
     Ok(())
 }
 
-fn index_notes(
-    mut found: Vec<(PathBuf, Note, String, std::time::SystemTime)>,
-) -> (Vec<Note>, HashMap<String, Seen>) {
-    found.sort_by(|a, b| (a.3, &a.0).cmp(&(b.3, &b.0)));
+fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
+    let mut once = HashSet::new();
+    let twins: HashSet<String> = found
+        .iter()
+        .filter(|item| !once.insert(item.1.id.as_str()))
+        .map(|item| item.1.id.clone())
+        .collect();
+    drop(once);
+    let last = |item: &Found| item.4 && twins.contains(&item.1.id);
+    found.sort_by(|a, b| (last(a), a.3, &a.0).cmp(&(last(b), b.3, &b.0)));
     let mut notes = Vec::with_capacity(found.len());
     let mut seen = HashMap::new();
-    for (relative, mut note, content, _) in found {
-        if seen.contains_key(&note.id) {
+    for (relative, mut note, content, _, _) in found {
+        let reassigned = seen.contains_key(&note.id);
+        if reassigned {
             note.id = stable_id(&relative);
             if seen.contains_key(&note.id) {
                 note.id = uuid::Uuid::new_v4().to_string();
             }
         }
-        let model = note_to_markdown(&note)
-            .map(|text| hash_str(&text))
-            .unwrap_or(0);
+        let (model, fields) = if reassigned {
+            (0, 0)
+        } else {
+            (
+                note_to_markdown(&note)
+                    .map(|text| hash_str(&text))
+                    .unwrap_or(0),
+                hash_note(&note),
+            )
+        };
         seen.insert(
             note.id.clone(),
             Seen {
                 path: relative,
                 disk: hash_str(&content),
                 model,
-                fields: hash_note(&note),
+                fields,
                 copy: None,
             },
         );
@@ -3921,6 +3956,75 @@ mod tests {
         let bodies: HashSet<String> = reloaded.notes.iter().map(|n| n.body.clone()).collect();
         assert!(bodies.contains("the original, edited in leo"), "{bodies:?}");
         assert!(bodies.contains("the copy, edited"), "{bodies:?}");
+    }
+
+    #[test]
+    fn a_copy_with_the_same_mtime_leaves_the_original_its_id() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Lecture 4", "the original", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let original = store.notes_dir.join("Lecture 4.md");
+        let copy = store.notes_dir.join("Lecture 4 copy.md");
+        fs::write(
+            &copy,
+            fs::read_to_string(&original)
+                .unwrap()
+                .replace("the original", "the copy"),
+        )
+        .unwrap();
+        let when = fs::metadata(&original).unwrap().modified().unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&copy)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+        let store = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(
+            store.find_note(&id).unwrap().body,
+            "the original",
+            "the copy took the original's id"
+        );
+    }
+
+    #[test]
+    fn editing_the_original_keeps_its_id_on_the_next_launch() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Lecture 4", "the original", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let original = store.notes_dir.join("Lecture 4.md");
+        let copy = store.notes_dir.join("Lecture 4 1.md");
+        fs::write(
+            &copy,
+            fs::read_to_string(&original)
+                .unwrap()
+                .replace("the original", "the copy, edited"),
+        )
+        .unwrap();
+        set_mtime_to_the_past(&original);
+        let mut store = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(store.find_note(&id).unwrap().body, "the original");
+        store.find_note_mut(&id).unwrap().body = "the original, edited in leo".to_string();
+        store.save().unwrap();
+        store.save().unwrap();
+        let copy_keeps_old_id = fs::read_to_string(&copy)
+            .unwrap()
+            .contains(&format!("id: {id}"));
+        assert!(!copy_keeps_old_id, "the copy file still holds the old id");
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(
+            reloaded.find_note(&id).unwrap().body,
+            "the original, edited in leo",
+            "next launch gave the id to the copy; copy file still holds the old id: {copy_keeps_old_id}"
+        );
     }
 
     #[test]
