@@ -6,7 +6,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
@@ -114,18 +114,19 @@ pub fn build(app: &AppHandle) -> tauri::Result<()> {
         .thread()
         .clone();
     let tray = tray.on_tray_icon_event(move |tray, event| {
-        if matches!(event, tauri::tray::TrayIconEvent::Click { .. }) {
-            status.clicked.store(true, Ordering::Release);
-            refresher.unpark();
-        }
-        #[cfg(target_os = "macos")]
-        if matches!(
+        let down = matches!(
             event,
             tauri::tray::TrayIconEvent::Click {
                 button_state: tauri::tray::MouseButtonState::Down,
                 ..
             }
-        ) {
+        );
+        if down {
+            status.clicked.store(true, Ordering::Release);
+            refresher.unpark();
+        }
+        #[cfg(target_os = "macos")]
+        if down {
             popup(tray, menu.clone());
         }
         #[cfg(not(target_os = "macos"))]
@@ -303,7 +304,14 @@ fn copy_last_dictation(app: &AppHandle) {
         });
 }
 
+fn ask_due(last: Option<&(String, Instant)>, provider: &str, now: Instant) -> bool {
+    last.is_none_or(|(asked, at)| {
+        asked != provider || now.duration_since(*at) >= leo_services::usage::STALE_AFTER
+    })
+}
+
 fn refresh(app: AppHandle, status: Arc<Status>) {
+    let mut asked: Option<(String, Instant)> = None;
     loop {
         let clicked = status.clicked.swap(false, Ordering::AcqRel);
         let speech = leo_services::speech::library::library()
@@ -311,13 +319,21 @@ fn refresh(app: AppHandle, status: Arc<Status>) {
             .and_then(|library| library.selected_name())
             .unwrap_or_else(|| "no model chosen".into());
         let _ = status.speech.set_text(format!("Speech: {speech}"));
-        let writing = leo_services::web_settings::writing_status(clicked);
-        let ready = leo_services::health::writing(
-            &leo_services::config::Config::load(),
-            leo_services::config::secret::default_store().as_ref(),
-            None,
+        let config = leo_services::config::Config::load();
+        let store = leo_services::config::secret::default_store();
+        let provider = leo_services::config::choice::selection(
+            &config,
+            store.as_ref(),
+            leo_services::config::edit::Task::Chat,
         )
-        .state;
+        .map(|selection| selection.provider)
+        .unwrap_or_default();
+        let may_ask = clicked && ask_due(asked.as_ref(), &provider, Instant::now());
+        if may_ask {
+            asked = Some((provider, Instant::now()));
+        }
+        let writing = leo_services::web_settings::writing_status(may_ask);
+        let ready = leo_services::health::writing(&config, store.as_ref(), None).state;
         let _ = status.writing.set_text(format!("Writing: {}", writing.0));
         let _ = status
             .limits
@@ -415,5 +431,57 @@ mod tests {
                 "Plan use: 5h 20%"
             );
         }
+    }
+
+    #[test]
+    fn a_codex_ask_that_found_nothing_is_not_repeated_within_the_stale_time() {
+        use super::ask_due;
+        use std::time::{Duration, Instant};
+        let t = Instant::now();
+        assert!(ask_due(None, "codex", t));
+        let last = ("codex".to_string(), t);
+        assert!(!ask_due(
+            Some(&last),
+            "codex",
+            t + Duration::from_secs(4 * 60)
+        ));
+        assert!(ask_due(
+            Some(&last),
+            "codex",
+            t + Duration::from_secs(5 * 60)
+        ));
+    }
+
+    #[test]
+    fn switching_writing_ai_asks_at_once() {
+        use super::ask_due;
+        use std::time::{Duration, Instant};
+        let t = Instant::now();
+        let last = ("codex".to_string(), t);
+        assert!(ask_due(
+            Some(&last),
+            "claude_code",
+            t + Duration::from_secs(60)
+        ));
+        let t1 = t + Duration::from_secs(60);
+        let last = ("claude_code".to_string(), t1);
+        assert!(ask_due(Some(&last), "codex", t1 + Duration::from_secs(60)));
+    }
+
+    #[test]
+    fn ten_clicks_in_five_minutes_ask_once() {
+        use super::ask_due;
+        use std::time::{Duration, Instant};
+        let start = Instant::now();
+        let mut asked: Option<(String, Instant)> = None;
+        let mut asks = 0;
+        for click in 0..10u64 {
+            let now = start + Duration::from_secs(click * 20);
+            if ask_due(asked.as_ref(), "codex", now) {
+                asked = Some(("codex".into(), now));
+                asks += 1;
+            }
+        }
+        assert_eq!(asks, 1);
     }
 }
