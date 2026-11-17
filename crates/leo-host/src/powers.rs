@@ -109,7 +109,9 @@ pub fn powers() -> leo_web::Powers {
                         mime: file.mime,
                         bytes: file.bytes,
                     },
-                    &|prompt, images, most| leo_services::ai::see(prompt, images, most),
+                    &|prompt, images, most| {
+                        leo_services::ai::see(prompt, images, most).map_err(crate::felix::said)
+                    },
                     progress,
                 )
             },
