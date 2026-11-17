@@ -675,16 +675,19 @@ Felix (2026-10-19).
   streaming reply, the gap, overlapping reads and the daily cap (429 with `why`).
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is saved even if another read used the last one).
   A read-along never refuses for a full margin (2026-11-14, the user's call): it saves
-  with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it first
-  resolves the oldest open note that is not pinned, not `keep` (the thread open on the
-  page, sent as `keep`) and not being replied to (`margin::free_oldest`), listing it
-  in `resolved`; with none free it answers `{failed: true}` with `margin::FULL` (no Settings problem), before the model is asked or, if the last free note was taken meanwhile, after it (its blocks are forgotten, so nothing is spent and the text is read again). The page never drops the open thread or one with typed text from `resolved`: it POSTs status `open` for it, and deletes a new read note that overlaps a thread it holds that way (showing it if the delete fails).
+  with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it frees
+  the oldest open note that is not pinned, not in `keep` (a list: the thread open on the
+  page and every thread with typed text; a string or null is still accepted), not a note
+  the new one replaces and not being replied to (`margin::free_oldest` picks it and holds
+  its reply guard; `margin::put_replacing` resolves it in the transaction that stores the
+  new note, only if the note would not fit otherwise, so nothing is freed unless the new
+  note is stored), listing it in `resolved`; with none free it answers `{failed: true}` with `margin::FULL` (no Settings problem), before the model is asked or, if the last free note was taken meanwhile, after it (its blocks are forgotten, so nothing is spent and the text is read again). The page never drops the open thread or one with typed text from `resolved`: it POSTs status `open` for it, and deletes a new read note that overlaps a thread it holds that way (showing it if the delete fails).
   Only Read through still answers 409 `full`.
   Quiet tidy (2026-11-14, the user's call): after a read-along note is saved, while more
   than `TIDY_TO` (5) notes are open, the least recently updated ones are resolved
   (`margin::resolve_untouched`) if they have `source` `read` (not asks, chat-made or
   Read through notes, which are saved as `through`), no message from you, are not pinned,
-  `keep`, being replied to or the note just saved; their ids join `resolved` and the page
+  in `keep`, being replied to or the note just saved; their ids join `resolved` and the page
   removes them with no toast. A note reopened from its underline has a fresh
   `updated_at`, so it is the last to go.
   Silence (`{}`/empty) is success; malformed JSON or prose is a failure
@@ -709,11 +712,12 @@ Felix (2026-10-19).
   (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
   open thread the page places only by context, as `{id, text}` of its current wording, at most
   2 × `MOST_OPEN`). The server places each text itself between that thread's stored context
-  tails, as the page's `byContext` does (`margin::by_context`: its quote gone from the note, the
-  text ≤ 2 × the quote + 120 UTF-16 units), else ignores it, and compares sentences by position
+  tails, as the page's `byContext` does (`margin::by_context`: its quote gone from the note, each
+  stored tail cut to at least `LEAST_TAIL` (6) UTF-16 units, the text ≤ 2 × the quote + 120 UTF-16 units), else ignores it, and compares sentences by position
   (`margin::crowds_at`). A read-along note landing on such a sentence replaces every old one there
-  (`margin::put_replacing`: one transaction that resolves them and stores the new note, listed in
-  `resolved`, only if each is a read-along note, not pinned, not `keep`, not being answered and
+  (`margin::put_replacing`: one transaction that resolves them and stores the new note, freeing
+  the oldest free note too when the margin is still full, listed in
+  `resolved`, only if each is a read-along note, not pinned, not in `keep`, not being answered and
   has no message from you); else, and always in Read through, the new note is dropped and the
   old ones keep the sentence. `marginRevisits` draws no reopen
   underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and

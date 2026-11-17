@@ -45,7 +45,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfold: null };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -104,7 +104,7 @@ function marginLeave() {
   marginPage.observer = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
-  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfold: null });
+  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.revisits.clear();
@@ -133,7 +133,7 @@ async function marginMount(s, mine) {
   layer.addEventListener('submit', (e) => marginSubmit(e).catch(fail));
   layer.addEventListener('input', (e) => e.target.matches('.margin-reply textarea') && marginSized(e.target));
   if (window.ResizeObserver) {
-    marginPage.observer = new ResizeObserver(() => marginRedraw());
+    marginPage.observer = new ResizeObserver(() => marginPage.folds.size || marginPage.unfolds.size || marginRedraw());
     marginPage.observer.observe(columns);
     marginPage.observer.observe($('#doc'));
   }
@@ -1034,14 +1034,11 @@ function marginSlots(placed, columns) {
   for (const [id, to] of want) {
     const point = pointAt(to);
     if (!point) continue;
-    const { node, offset } = point;
     const slot = document.createElement('span');
     slot.className = 'margin-slot';
     slot.dataset.id = id;
     slot.setAttribute('aria-hidden', 'true');
-    if (offset === 0) node.before(slot);
-    else if (offset >= node.data.length) node.after(slot);
-    else node.splitText(offset).before(slot);
+    leoDoc.insertAt(point, slot);
     slots.set(id, slot);
   }
   return slots;
@@ -1078,7 +1075,12 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
     el.dataset.unfolded = '1';
     if (stillMotion() || marginPage.unfold !== t.id) continue;
     el.animate([{ clipPath: 'inset(0 0 100% 0)', opacity: .4 }, { clipPath: 'inset(0 0 0 0)', opacity: 1 }], { duration: OPEN_MS, easing: EASE_OUT });
-    block.animate([{ marginBottom: `${above - CARD_TOP}px` }, { marginBottom: `${room}px` }], { duration: OPEN_MS, easing: EASE_OUT }).onfinish = marginRedraw;
+    const grow = block.animate([{ marginBottom: `${above - CARD_TOP}px` }, { marginBottom: `${room}px` }], { duration: OPEN_MS, easing: EASE_OUT });
+    marginPage.unfolds.add(t.id);
+    grow.onfinish = grow.oncancel = () => {
+      marginPage.unfolds.delete(t.id);
+      marginRedraw();
+    };
   }
   for (const { t, rects } of boxes) {
     const mark = marginMark(t);
@@ -1884,7 +1886,7 @@ async function marginRead(s) {
     marginPage.newest = null;
     for (const path of marginPage.svg?.querySelectorAll('path.pencil.leaving') || []) path.remove();
     marginShowReading(s, source, blocks);
-    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: marginPage.open, changed: marginChanged(s) } });
+    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: [...new Set([marginPage.open, ...marginPage.els.keys()])].filter((id) => id && marginTyped(id)), changed: marginChanged(s) } });
     if (s !== marginPage.s) return;
     const along = marginPage.mode === 'along';
     if (!got?.failed) marginPage.baseline = marginKit.blocksOf(source);

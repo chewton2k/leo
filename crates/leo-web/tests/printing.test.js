@@ -150,7 +150,7 @@ function notesHarness({ notes = [{ at: { from: 0, to: 9 }, text: 'Rows sum to on
   const element = (tag) => ({ tag, dataset: {}, children: [], hidden: false, textContent: '', get childElementCount() { return this.children.length; }, append(...kids) { this.children.push(...kids); }, after(node) { place(node); }, remove() { live.splice(live.indexOf(this), 1); } });
   const s = { note: { title }, doc: { domPoint: (at) => ({ node: { nodeType: 3 }, offset: at }), blockAt: () => null } };
   const context = {
-    seq: 1, ICON: { note: 'N', download: 'D', share: 'S' }, Node: { TEXT_NODE: 3 }, marginPage: { s },
+    seq: 1, leoDoc: { insertAt: (point, node) => place(node) }, ICON: { note: 'N', download: 'D', share: 'S' }, Node: { TEXT_NODE: 3 }, marginPage: { s },
     marginPrintable: () => notes, marginAnswer: (item, text) => { item.textContent = text; },
     $: () => element('div'), ready: async () => s, snapshot: () => ({ title: 'x', body: '' }), toast: (text) => log.toasts.push(text), popupMenu: (owner, menu) => log.menus.push(menu),
     document: { title: 'Leo', head: { append: place }, createElement: element, createRange: () => ({ setStart() {}, selectNodeContents() {}, collapse() {}, insertNode: place }), querySelectorAll: (q) => (q === '[data-print]' ? [...live] : []) },

@@ -357,11 +357,11 @@ pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
 
 pub const FULL: &str = "Felix's margin is full. Resolve a note and he'll read again.";
 
-pub fn evictable(thread: &Thread, keep: Option<&str>) -> bool {
-    !thread.pinned && Some(thread.id.as_str()) != keep
+pub fn evictable(thread: &Thread, keep: &[String]) -> bool {
+    !thread.pinned && !keep.contains(&thread.id)
 }
 
-pub fn freeable(reads: &Reads, thread: &Thread, keep: Option<&str>) -> bool {
+pub fn freeable(reads: &Reads, thread: &Thread, keep: &[String]) -> bool {
     evictable(thread, keep) && !reads.is_replying(&thread.id)
 }
 
@@ -427,7 +427,8 @@ pub fn put_replacing(
     reads: &Arc<Reads>,
     thread: &Thread,
     olds: &[String],
-    keep: Option<&str>,
+    keep: &[String],
+    victim: Option<(Thread, Replying)>,
     limit: usize,
 ) -> Swap {
     let open: Vec<Thread> = open_on(chats, &thread.note)
@@ -459,7 +460,14 @@ pub fn put_replacing(
                 }
             }
             if insert(&tx, thread, limit)? == 0 {
-                return Ok(Swap::Failed);
+                let Some((freed, _)) = &victim else {
+                    return Ok(Swap::Failed);
+                };
+                if resolve_in(&tx, freed, false)? != Some(true) || insert(&tx, thread, limit)? == 0
+                {
+                    return Ok(Swap::Failed);
+                }
+                gone.push(freed.clone());
             }
             prune_closed(&tx, &thread.note)?;
             tx.commit()?;
@@ -472,19 +480,19 @@ pub fn free_oldest(
     chats: &Path,
     reads: &Arc<Reads>,
     note: &str,
-    keep: Option<&str>,
-) -> Option<Thread> {
+    keep: &[String],
+) -> Option<(Thread, Replying)> {
     open_on(chats, note)
-        .iter()
+        .into_iter()
         .filter(|t| freeable(reads, t, keep))
-        .find_map(|t| resolve_one(chats, reads, t, false))
+        .find_map(|t| reads.replying(&t.id).map(|held| (t, held)))
 }
 
 pub fn resolve_untouched(
     chats: &Path,
     reads: &Arc<Reads>,
     note: &str,
-    keep: Option<&str>,
+    keep: &[String],
     fresh: &str,
 ) -> Vec<String> {
     let open = open_on(chats, note);
@@ -1083,7 +1091,7 @@ pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
         return None;
     }
     let (before, after) = (tail_of(&thread.prefix), head_of(&thread.suffix));
-    let short = |part: &str, whole: &str| !whole.is_empty() && part.chars().count() < LEAST_TAIL;
+    let short = |part: &str, whole: &str| !whole.is_empty() && units(part) < LEAST_TAIL;
     if before.is_empty() && after.is_empty()
         || short(before, &thread.prefix)
         || short(after, &thread.suffix)

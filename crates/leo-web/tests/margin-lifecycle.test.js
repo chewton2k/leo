@@ -6,6 +6,9 @@ const vm = require('node:vm');
 const { pageHtml } = require('./page-source');
 const kit = require('../src/web/margin.js');
 require('../src/web/chat.js');
+const docContext = { document: { addEventListener() {} }, leoMarkdown: {}, leoEditing: {} };
+docContext.window = docContext;
+vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/doc.js'), 'utf8'), vm.createContext(docContext));
 const FAILED = "Felix could not read your note just now. Try again in a moment.";
 
 function harness() {
@@ -122,7 +125,7 @@ test('a read that frees notes removes them and tells the server which thread is 
   await new Promise(setImmediate);
   h.settle().resolve({ note: { id: 't1', messages: [] }, resolved: ['old'] });
   await pending;
-  assert.equal(bodies[0].keep, 'open');
+  assert.deepEqual([...bodies[0].keep], ['open']);
   assert.deepEqual(h.state.threads.map((t) => t.id), ['open', 't1']);
   assert.deepEqual([...h.state.resolved].map((r) => r.id), ['old']);
   assert.equal(h.state.status, '');
@@ -143,6 +146,7 @@ test('a read never drops the open note or one with typed text, and tells the ser
   h.state.els.set('empty', { remove() {}, area: { value: '  ' } });
   const pending = h.context.marginRead(h.state.s);
   await new Promise(setImmediate);
+  assert.deepEqual([...calls[0].body.keep], ['open', 'typed']);
   calls.shift().resolve({ note: { id: 't1', messages: [] }, resolved: ['old', 'open', 'typed', 'empty'] });
   for (const id of ['open', 'typed']) {
     await new Promise(setImmediate);
@@ -878,12 +882,25 @@ function slotHarness(text) {
   const h = harness();
   const p = paragraph(text);
   h.context.Node = { TEXT_NODE: 3 };
+  h.context.leoDoc = docContext.leoDoc;
   h.context.CSS = { escape: (id) => id };
   h.context.document.createElement = p.make;
   h.state.s.doc.domPoint = p.domPoint;
   h.state.layer = { parentElement: p.columns, remove() {} };
   return { ...h, p };
 }
+
+test('insertAt puts a node before a text node at offset 0, after it at the end and between its halves otherwise', () => {
+  const text = 'First sentence here.';
+  for (const [offset, shown] of [[0, '[x]First sentence here.'], [5, 'First[x] sentence here.'], [text.length, 'First sentence here.[x]']]) {
+    const p = paragraph(text);
+    const node = p.blk.kids[0];
+    const el = p.make();
+    el.dataset.id = 'x';
+    docContext.leoDoc.insertAt({ node, offset }, el);
+    assert.equal(p.shown(), shown);
+  }
+});
 
 test('mark slots go at each passage’s own end, whatever order the notes were made in', () => {
   const text = 'First sentence here. Second sentence there.';
@@ -939,14 +956,23 @@ function foldHarness(...threads) {
   const draws = [];
   Object.assign(h.context, { OPEN_MS: 200, EXIT_SHARE: .8, EASE_EXIT: 'linear', getComputedStyle: () => ({ marginBottom: '64px' }) });
   h.context.marginDraw = () => draws.push(h.state.open);
-  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : null);
-  const block = { animate: () => { const r = run(); runs.push(r); return r; } };
+  const columns = { dataset: {}, clientWidth: 800, appendChild() {} };
+  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : sel === '.note-columns' ? columns : sel === '#doc' ? {} : null);
+  let observed;
+  h.context.ResizeObserver = h.context.window.ResizeObserver = class { constructor(fn) { observed = fn; } observe() {} disconnect() {} };
+  h.context.marginLayout = () => 'both';
+  h.context.document.createElement = () => ({ setAttribute() {}, addEventListener() {}, firstChild: {}, parentElement: columns });
+  h.context.marginMount({ note: {}, doc: { source: () => '' } }, 0);
+  const block = {
+    animate: () => { const r = run(); runs.push(r); return r; },
+    style: { setProperty() {} }, classList: { add() {} }, getBoundingClientRect: () => ({ bottom: 0 }),
+  };
   h.state.threads = threads;
   for (const t of threads) {
     h.state.els.set(t.id, { hidden: false, inert: false, offsetHeight: 50, area: { value: '' }, hasAttribute: (name) => name === 'data-inline', contains: () => false, animate: block.animate, remove() {} });
     h.state.roomy.set(t.id, block);
   }
-  return { ...h, runs, draws, el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
+  return { ...h, runs, draws, block, observe: () => observed(), el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
 }
 
 test('unpinning a pinned card folds it, stays drawn open while it folds, then redraws and frees it', async () => {
@@ -1001,6 +1027,62 @@ test('Cancel on a typed question forgets it after the fold, Escape keeps it for 
     assert.equal(h.state.draft, null);
     assert.equal(h.state.drafted.get(h.context.marginDraftKey(draft)), discard ? undefined : 'half a question');
   }
+});
+
+test('the layout observer waits out a fold and redraws once when it ends', async () => {
+  const h = foldHarness({ id: 'x', quote: 'q' });
+  const redraws = [];
+  h.context.marginRedraw = () => redraws.push(1);
+  h.state.open = 'x';
+  h.context.marginClose();
+  h.observe();
+  assert.deepEqual(redraws, []);
+  await h.finish();
+  assert.equal(h.draws.length, 1);
+  h.observe();
+  assert.equal(redraws.length, 1);
+});
+
+test('the layout observer waits out an unfold, and an ended or cancelled unfold redraws once', () => {
+  for (const end of ['onfinish', 'oncancel']) {
+    const h = foldHarness({ id: 'x', quote: 'q' });
+    const redraws = [];
+    Object.assign(h.context, { marginRedraw: () => redraws.push(1), marginMark: () => ({ toggleAttribute() {}, offsetWidth: 10, offsetHeight: 10, style: {} }), EASE_OUT: 'ease-out' });
+    Object.assign(h.el('x'), { dataset: {}, style: {}, removeAttribute() {}, setAttribute() {} });
+    h.state.s.doc.blockAt = () => h.block;
+    Object.assign(h.state, { open: 'x', unfold: 'x' });
+    h.context.marginPlaceAsMarks([{ t: h.state.threads[0], at: { to: 1 }, el: h.el('x'), rects: [{ left: 0, right: 5, top: 0, bottom: 5 }] }], { left: 0, width: 100 }, { left: 0, top: 0 }, new Map());
+    h.observe();
+    assert.deepEqual(redraws, []);
+    h.runs.at(-1)[end]();
+    assert.equal(redraws.length, 1);
+    assert.equal(h.state.unfolds.size, 0);
+    h.observe();
+    assert.equal(redraws.length, 2);
+  }
+});
+
+test('two cards in one block fold one after another and together, each freeing its room', async () => {
+  const h = foldHarness({ id: 'x', quote: 'q' }, { id: 'y', quote: 'p' });
+  const shut = [];
+  h.block.animate = (frames) => { shut.push(frames[1].marginBottom); const r = run(); h.runs.push(r); return r; };
+  const closed = [];
+  h.context.marginFoldAway('x', () => closed.push('x'));
+  await h.finish();
+  h.state.roomy.delete('x');
+  h.context.marginFoldAway('y', () => closed.push('y'));
+  await h.finish();
+  assert.deepEqual(closed, ['x', 'y']);
+  assert.deepEqual(shut, ['4px', '0px']);
+  const both = foldHarness({ id: 'x', quote: 'q' }, { id: 'y', quote: 'p' });
+  both.context.marginFoldAway('x', () => closed.push('x2'));
+  both.context.marginFoldAway('y', () => closed.push('y2'));
+  assert.equal(both.state.folds.size, 2);
+  assert.equal(both.el('x').inert && both.el('y').inert, true);
+  await both.finish();
+  assert.deepEqual(closed.slice(2), ['x2', 'y2']);
+  assert.equal(both.state.folds.size, 0);
+  assert.equal(both.el('x').inert || both.el('y').inert, false);
 });
 
 test('a read that replaces a note the page still holds open deletes the new note instead of showing both', async () => {

@@ -669,18 +669,18 @@ function printNotes(s) {
   const list = document.createElement('ol');
   for (const { at, text } of found) {
     const point = s.doc.domPoint(at.to);
-    const range = document.createRange();
-    if (point.node.nodeType === Node.TEXT_NODE) range.setStart(point.node, point.offset);
-    else {
-      const blk = s.doc.blockAt(Math.max(at.from, at.to - 1));
-      if (!blk) continue;
-      range.selectNodeContents(blk);
-      range.collapse(false);
-    }
     const sup = document.createElement('sup');
     sup.hidden = true;
     sup.dataset.print = String(list.childElementCount + 1);
-    range.insertNode(sup);
+    if (point.node.nodeType === Node.TEXT_NODE) leoDoc.insertAt(point, sup);
+    else {
+      const blk = s.doc.blockAt(Math.max(at.from, at.to - 1));
+      if (!blk) continue;
+      const range = document.createRange();
+      range.selectNodeContents(blk);
+      range.collapse(false);
+      range.insertNode(sup);
+    }
     const item = document.createElement('li');
     marginAnswer(item, text);
     list.append(item);

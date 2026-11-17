@@ -752,11 +752,98 @@ async fn a_swap_that_cannot_store_the_new_note_keeps_the_old_one() {
         &engine.running.state.margin,
         &fresh,
         std::slice::from_ref(&old),
+        &[],
         None,
         0,
     );
     assert!(matches!(swap, margin::Swap::Failed));
     assert_eq!(open_ids(&engine, &id).await, [old]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_that_cannot_store_the_new_note_keeps_the_oldest_open() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Stuck", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let reads = &engine.running.state.margin;
+    let mut fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    fresh.id = ids[1].clone();
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, &[]);
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, &[], &[], victim, most);
+    assert!(matches!(swap, margin::Swap::Failed));
+    assert_eq!(open_ids(&engine, &id).await, ids);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_frees_the_oldest_when_the_reworded_note_went_elsewhere() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Elsewhere", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "Sessions last a day.",
+        "read",
+        untouched(),
+    );
+    margin::set_status(&engine.chats(), &id, &old, "resolved", most);
+    fill(&engine, &id, "ask", 1, most);
+    let reads = &engine.running.state.margin;
+    let fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    let olds = std::slice::from_ref(&old);
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, olds);
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, olds, &[], victim, most);
+    let margin::Swap::Put(gone) = swap else {
+        panic!("not stored");
+    };
+    assert_eq!(gone.iter().map(|t| &t.id).collect::<Vec<_>>(), [&ids[0]]);
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(open.contains(&fresh.id) && !open.contains(&ids[0]));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_whose_oldest_note_is_the_reworded_one_replaces_it_once() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Oldest", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    assert!(reply["note"].is_object(), "{reply}");
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(ids.iter().all(|kept| open.contains(kept)));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn read_through_at_the_limit_answers_full_and_resolves_nothing() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.plain(PASSAGE).await;
+    let ids = fill(&engine, &id, "read", margin::MOST_OPEN, margin::MOST_OPEN);
+    let (status, why) = engine.analyze(&id, &version, &[PASSAGE], None).await;
+    assert_eq!((status, why["why"].as_str()), (409, Some("full")));
+    assert_eq!(open_ids(&engine, &id).await, ids);
     engine.stop().await;
 }
 
@@ -2348,6 +2435,21 @@ async fn a_read_along_reads_a_full_note_and_frees_the_oldest_free_note_at_twice_
         2 * margin::MOST_OPEN
     );
     engine.stop().await;
+
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Kept", PASSAGE).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let (status, read) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": &ids[..2] }),
+        )
+        .await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!([ids[2]]));
+    assert_eq!(margin::open_on(&engine.chats(), &id).len(), most);
+    engine.stop().await;
 }
 
 #[tokio::test]
@@ -2950,6 +3052,12 @@ fn a_changed_wording_is_placed_between_its_own_note_s_context() {
     let body = "Notes 🎉 on passwords: salt and hash them. Then store the digest.";
     assert_eq!(
         margin::by_context(body, &astral, "salt and hash them."),
+        body.find("salt")
+    );
+    let emoji = thread("🎉🎉🎉 hash them first.", "hash them first.");
+    let body = "🎉🎉🎉 salt and hash them.";
+    assert_eq!(
+        margin::by_context(body, &emoji, "salt and hash them."),
         body.find("salt")
     );
 }

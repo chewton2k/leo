@@ -22,10 +22,24 @@ pub(crate) struct ReadBody {
     most: Option<usize>,
     #[serde(default)]
     gone: Vec<String>,
-    #[serde(default)]
-    keep: Option<String>,
+    #[serde(default, deserialize_with = "listed")]
+    keep: Vec<String>,
     #[serde(default)]
     changed: Vec<Changed>,
+}
+
+fn listed<'de, D: serde::Deserializer<'de>>(to: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Keep {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match Option::<Keep>::deserialize(to)? {
+        Some(Keep::One(id)) => vec![id],
+        Some(Keep::Many(ids)) => ids,
+        None => Vec::new(),
+    })
 }
 
 #[derive(Deserialize)]
@@ -450,7 +464,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                 limit: margin::room(&open, &gone),
                 free: open
                     .iter()
-                    .any(|thread| margin::freeable(&reads, thread, keep.as_deref())),
+                    .any(|thread| margin::freeable(&reads, thread, &keep)),
                 along: margin::mode_of(&held, &id, created) == "along",
                 voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
                 instructions: margin::instructions_of(&held, &id),
@@ -664,25 +678,24 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
             &quote,
             vec![margin::felix_says(&found.text)],
         );
-        if !through && olds.is_empty() && quotes.len() >= limit {
+        let mut victim = None;
+        if !through && quotes.len() >= limit {
             let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
-            let keep = body.keep.clone();
-            let freed =
-                blocking(move || margin::free_oldest(&held, &reads, &noted, keep.as_deref())).await;
-            let Ok(Some(freed)) = freed else {
+            let spared = [body.keep.clone(), olds.clone()].concat();
+            victim = blocking(move || margin::free_oldest(&held, &reads, &noted, &spared))
+                .await
+                .ok()
+                .flatten();
+            if victim.is_none() && olds.is_empty() {
                 forget(state);
                 return Pass::Failed(margin::FULL.into());
-            };
-            if let Some(at) = quotes.iter().position(|q| *q == freed.quote) {
-                quotes.remove(at);
             }
-            resolved.push(freed.id);
         }
         let held = chats.clone();
         let stored = thread.clone();
         let (reads, keep) = (state.margin.clone(), body.keep.clone());
         let put = blocking(move || {
-            margin::put_replacing(&held, &reads, &stored, &olds, keep.as_deref(), limit)
+            margin::put_replacing(&held, &reads, &stored, &olds, &keep, victim, limit)
         })
         .await;
         match put {
@@ -705,10 +718,9 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         if !through {
             let (held, reads, noted) = (chats.clone(), state.margin.clone(), id.clone());
             let (keep, fresh) = (body.keep.clone(), thread.id.clone());
-            let tidied = blocking(move || {
-                margin::resolve_untouched(&held, &reads, &noted, keep.as_deref(), &fresh)
-            })
-            .await;
+            let tidied =
+                blocking(move || margin::resolve_untouched(&held, &reads, &noted, &keep, &fresh))
+                    .await;
             resolved.extend(tidied.unwrap_or_default());
         }
         saved.push(thread);
