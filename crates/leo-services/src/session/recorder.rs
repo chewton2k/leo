@@ -17,6 +17,10 @@ pub const SILENT_RECORDING: &str = "No sound was recorded. macOS may not be lett
      leo use the microphone: System Settings > Privacy & Security > \
      Microphone, then quit and reopen leo.";
 
+pub const SILENT_COMPUTER_AUDIO: &str = "No sound was recorded from the computer. Check that \
+     something was playing, and on a Mac that leo may record computer audio in System \
+     Settings > Privacy & Security, then try again.";
+
 const LIVE_MOST_SECS: u64 = 20;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -458,7 +462,15 @@ fn hear(samples: &[i16]) -> Option<String> {
     })
 }
 
-fn roll(capture: &Capture, state: &mut Live, emit: &dyn Fn(Event)) {
+fn silent_for(session: &Session) -> &'static str {
+    if session.manifest.screen {
+        SILENT_COMPUTER_AUDIO
+    } else {
+        SILENT_RECORDING
+    }
+}
+
+fn roll(capture: &Capture, state: &mut Live, screen: bool, emit: &dyn Fn(Event)) {
     let rate = wav::RATE as u64;
     let from = state.settled_at.max(state.base);
     let (start, samples) = capture.tail(from, (LIVE_MOST_SECS * rate) as usize);
@@ -477,9 +489,16 @@ fn roll(capture: &Capture, state: &mut Live, emit: &dyn Fn(Event)) {
         state.silent_slices += 1;
         if state.silent_slices >= 4 && !state.warned_silent {
             state.warned_silent = true;
-            emit(Event::Fallback {
-                from: "no sound from the microphone".to_string(),
-                to: "check System Settings > Privacy & Security > Microphone".to_string(),
+            emit(if screen {
+                Event::Fallback {
+                    from: "no sound from the computer".to_string(),
+                    to: "check that something is playing".to_string(),
+                }
+            } else {
+                Event::Fallback {
+                    from: "no sound from the microphone".to_string(),
+                    to: "check System Settings > Privacy & Security > Microphone".to_string(),
+                }
             });
         }
         return;
@@ -517,7 +536,6 @@ pub fn finish(
     updates: &Receiver<Update>,
     state: &mut Live,
     emit: &dyn Fn(Event),
-    silent: &str,
     finish_now: &AtomicBool,
 ) {
     session.manifest.stopped = true;
@@ -589,7 +607,7 @@ pub fn finish(
     }
     if assembled.is_silent() && session.manifest.points.is_empty() {
         let _ = std::fs::remove_dir_all(&session.dir);
-        emit(Event::Failed(silent.to_string()));
+        emit(Event::Failed(silent_for(&session).to_string()));
         return;
     }
     label_speakers(
@@ -744,7 +762,6 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
         &updates,
         &mut state,
         emit,
-        SILENT_RECORDING,
         &controls.finish_now,
     );
 }
@@ -917,7 +934,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             && live_model_ready()
         {
             last_roll = Instant::now();
-            if let Err(message) = caught(|| roll(&capture, &mut state, emit)) {
+            if let Err(message) =
+                caught(|| roll(&capture, &mut state, session.manifest.screen, emit))
+            {
                 state.interval = live::backoff(state.interval);
                 leo_core::diag::warn(format!(
                     "live transcription hit a problem ({message}); the recording continues"
@@ -954,7 +973,6 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         &updates,
         &mut state,
         emit,
-        SILENT_RECORDING,
         &controls.finish_now,
     );
     if let Some(drafter) = drafter {
@@ -1258,6 +1276,46 @@ mod tests {
         assert!(Session::unfinished(root.path()).is_empty());
     }
 
+    fn ending_of_a_silent_recording(screen: bool) -> Option<Event> {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", screen)).unwrap();
+        wav::write(&session.dir.join(wav::done_name(0)), &vec![0i16; 16_000]).unwrap();
+        let (tx, updates) = mpsc::channel();
+        let transcriber = Transcriber::start(
+            &session.dir,
+            std::sync::Arc::new(|_| Ok("unused".into())),
+            Policy::default(),
+            false,
+            tx,
+        );
+        let events = std::sync::Mutex::new(Vec::new());
+        finish(
+            session,
+            transcriber,
+            &updates,
+            &mut Live::new(live::ROLL_INTERVAL),
+            &|event| events.lock().unwrap().push(event),
+            &AtomicBool::new(false),
+        );
+        events.into_inner().unwrap().pop()
+    }
+
+    #[test]
+    fn a_silent_computer_audio_recording_is_told_about_computer_audio() {
+        assert_eq!(
+            ending_of_a_silent_recording(true),
+            Some(Event::Failed(SILENT_COMPUTER_AUDIO.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_silent_microphone_recording_keeps_the_microphone_sentence() {
+        assert_eq!(
+            ending_of_a_silent_recording(false),
+            Some(Event::Failed(SILENT_RECORDING.to_string()))
+        );
+    }
+
     #[test]
     fn a_recording_stopped_without_a_model_ends_unsaved_and_stays_recoverable() {
         let root = tempfile::tempdir().unwrap();
@@ -1284,7 +1342,6 @@ mod tests {
             &updates,
             &mut Live::new(live::ROLL_INTERVAL),
             &|event| events.lock().unwrap().push(event),
-            SILENT_RECORDING,
             &AtomicBool::new(false),
         );
         let events = events.into_inner().unwrap();
