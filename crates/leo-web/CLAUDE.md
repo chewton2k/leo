@@ -840,7 +840,7 @@ Decided: one note per uploaded file (2026-10-20).
 
 Embeddings, summaries, concepts and note links are shared by search, related
 notes and Felix, and refresh when idle. The graph page, canvas renderer and
-`/api/graph*` routes are removed; connection caches stay. Graph, vector and
+`/api/graph*` routes are removed; connection caches stay. A note the meaning model refuses waits 10 minutes, or until edited, while the rest index. Graph, vector and
 caption maintenance starts after its first interval and defers while the window
 is hidden or the capture activity gate is busy.
 

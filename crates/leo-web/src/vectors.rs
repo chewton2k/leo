@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -43,6 +43,7 @@ pub struct Vectors {
     known: Mutex<BTreeMap<String, Entry>>,
     version: std::sync::atomic::AtomicU64,
     held: Mutex<Option<Held>>,
+    failed: Mutex<HashMap<String, (String, std::time::Instant)>>,
 }
 
 struct Held {
@@ -217,6 +218,7 @@ impl Vectors {
             known: Mutex::new(known),
             version: std::sync::atomic::AtomicU64::new(0),
             held: Mutex::new(None),
+            failed: Mutex::new(HashMap::new()),
         }
     }
 
@@ -307,10 +309,15 @@ impl Vectors {
         let Ok(known) = self.known.lock() else {
             return Vec::new();
         };
+        let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+        failed.retain(|_, (_, at)| at.elapsed() < crate::graph::RETRY_AUTO_AFTER);
         let mut out = Vec::new();
         let mut pieces = 0;
         for note in &store.notes {
             let hash = hash_of(note);
+            if failed.get(&note.id).is_some_and(|(was, _)| *was == hash) {
+                continue;
+            }
             let entry = known.get(&note.id);
             let current = entry.is_some_and(|e| e.hash == hash);
             let mut found = pieces_of(note);
@@ -495,9 +502,27 @@ pub fn read_in(vectors: &Vectors, meaning: &Meaning, work: &[Work]) -> usize {
     match found {
         Ok(found) if found.len() == texts.len() => {
             vectors.put(work, found);
+            let mut failed = vectors.failed.lock().unwrap_or_else(|e| e.into_inner());
+            work.iter().for_each(|w| {
+                failed.remove(&w.id);
+            });
             work.len()
         }
-        _ => 0,
+        _ if work.len() > 1 => work
+            .iter()
+            .map(|one| read_in(vectors, meaning, std::slice::from_ref(one)))
+            .sum(),
+        _ => {
+            vectors
+                .failed
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    work[0].id.clone(),
+                    (work[0].hash.clone(), std::time::Instant::now()),
+                );
+            0
+        }
     }
 }
 
@@ -592,6 +617,52 @@ mod tests {
         assert!(vectors.stale(&store, 100).is_empty());
         let again = Vectors::for_notes(&store.notes_dir);
         assert_eq!(again.known.lock().unwrap()[&id].pieces.len(), 2);
+    }
+
+    #[test]
+    fn a_note_that_cannot_be_embedded_does_not_stop_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        for n in 0..100 {
+            let body = if n == 0 {
+                "POISON".to_string()
+            } else {
+                format!("note {n}")
+            };
+            store
+                .create_note(format!("Note {n}"), body, vec![], "")
+                .unwrap();
+        }
+        let tries = Arc::new(Mutex::new(0usize));
+        let seen = Arc::clone(&tries);
+        let failing: Meaning = Arc::new(move |texts: &[String], query: bool| {
+            if texts.iter().any(|t| t.contains("POISON")) {
+                *seen.lock().unwrap() += 1;
+                anyhow::bail!("this text cannot be read");
+            }
+            fake()(texts, query)
+        });
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        for _ in 0..3 {
+            let work = vectors.stale(&store, PIECES_PER_TICK);
+            read_in(&vectors, &failing, &work);
+        }
+        assert_eq!(vectors.len(), 99);
+        assert!(*tries.lock().unwrap() <= 2);
+        assert!(vectors.stale(&store, PIECES_PER_TICK).is_empty());
+
+        let bad = store
+            .notes
+            .iter()
+            .find(|n| n.body == "POISON")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&bad).unwrap().body = "fixed".into();
+        let work = vectors.stale(&store, PIECES_PER_TICK);
+        assert_eq!(work.len(), 1, "an edited note is tried again at once");
+        read_in(&vectors, &failing, &work);
+        assert_eq!(vectors.len(), 100);
     }
 
     #[test]
