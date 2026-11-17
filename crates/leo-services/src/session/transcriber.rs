@@ -292,9 +292,9 @@ fn settle(
     work: &Work,
 ) {
     let path = dir.join(wav::done_name(index));
-    let result = match wav::read(&path) {
-        Ok(samples) if live::is_silent(wav::peak(&samples)) => Ok(String::new()),
-        Ok(_) => transcribe(&path).map(|t| {
+    let result = match wav::read(&path).map(|samples| live::is_silent(wav::peak(&samples))) {
+        Ok(true) => Ok(String::new()),
+        Ok(false) => transcribe(&path).map(|t| {
             if live::is_silence_artifact(&t) {
                 String::new()
             } else {

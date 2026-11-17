@@ -507,8 +507,9 @@ fn frame_level(frame: &[f32]) -> f32 {
     (frame.iter().map(|n| n * n).sum::<f32>() / frame.len() as f32).sqrt()
 }
 
-fn speech_chunks(pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
-    let mut chunks = super::prepare(raised(&pcm, gain))?;
+fn speech_chunks(mut pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
+    pcm.iter_mut().for_each(|n| *n *= gain);
+    let mut chunks = super::prepare(pcm)?;
     for chunk in &mut chunks {
         chunk.iter_mut().for_each(|n| *n /= gain);
     }
@@ -791,6 +792,34 @@ fn run(
 #[cfg(test)]
 mod audio_level_tests {
     use super::*;
+
+    #[test]
+    fn chunks_are_the_same_after_raising_in_place() {
+        let pcm: Vec<f32> = (0..60 * 16_000usize)
+            .map(|i| {
+                let burst = (i / 16_000) % 3 != 2;
+                let noise = ((i as u32).wrapping_mul(2_654_435_761) >> 16) as f32 / 65_536.0 - 0.5;
+                if burst {
+                    noise * 0.2
+                } else {
+                    noise * 0.001
+                }
+            })
+            .collect();
+        let gain = speech_gain(&pcm);
+        let mut old = super::super::prepare(raised(&pcm, gain)).unwrap();
+        for chunk in &mut old {
+            chunk.iter_mut().for_each(|n| *n /= gain);
+        }
+        let new = speech_chunks(pcm, gain).unwrap();
+        assert_eq!(old.len(), new.len());
+        for (a, b) in old.iter().zip(&new) {
+            assert!(a
+                .iter()
+                .map(|n| n.to_bits())
+                .eq(b.iter().map(|n| n.to_bits())));
+        }
+    }
 
     #[test]
     fn a_short_dictation_is_padded_and_an_empty_one_stays_empty() {

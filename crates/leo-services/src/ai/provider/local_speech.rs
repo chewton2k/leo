@@ -30,8 +30,10 @@ impl TranscribeProvider for LocalSpeech {
                 std::fs::metadata(path)?.len() <= 32 * 1024 * 1024,
                 "This audio is too long. Record in shorter parts."
             );
-            let bytes = std::fs::read(path)?;
-            let pcm = super::audio::read_wav(&bytes).map_err(anyhow::Error::msg)?;
+            let pcm = {
+                let bytes = std::fs::read(path)?;
+                super::audio::read_wav(&bytes).map_err(anyhow::Error::msg)?
+            };
             crate::speech::engine::engine().transcribe(
                 selected,
                 pcm,
