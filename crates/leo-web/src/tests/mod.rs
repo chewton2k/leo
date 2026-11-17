@@ -1,3 +1,4 @@
+mod audit_bench;
 mod auth;
 mod boards;
 mod calendar;
