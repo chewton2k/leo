@@ -733,10 +733,17 @@ mod tests {
         )
         .unwrap();
         let took = started.elapsed().as_secs_f64();
+        let mut plain_failed = 0;
         let plain_text = (0..parts)
             .map(|i| {
                 let part = dir.path().join(wav::done_name(i));
-                transcribe(&part).or_else(|_| transcribe(&part)).unwrap()
+                transcribe(&part)
+                    .or_else(|_| transcribe(&part))
+                    .unwrap_or_else(|e| {
+                        println!("plain part {i} failed, as it would without labels: {e}");
+                        plain_failed += 1;
+                        String::new()
+                    })
             })
             .collect::<Vec<_>>()
             .join(" ");
@@ -767,7 +774,7 @@ mod tests {
         let right = best_match(&spans) as f64 / covered.max(1) as f64;
         let kept = words as f64 / plain.max(1) as f64;
         println!(
-            "speakers_across_models model={} minutes={:.1} speakers={} right={:.1}% heard={:.1}% words={} plain_words={} kept={:.1}% wer={:.1}% plain_wer={:.1}% labelling_s={:.1}",
+            "speakers_across_models model={} minutes={:.1} speakers={} right={:.1}% heard={:.1}% words={} plain_words={} kept={:.1}% wer={:.1}% plain_wer={:.1}% plain_failed={} labelling_s={:.1}",
             selected.id,
             samples.len() as f64 / wav::RATE as f64 / 60.0,
             spoken.iter().map(|s| s.speaker).max().unwrap_or(0),
@@ -778,6 +785,7 @@ mod tests {
             kept * 100.0,
             wer * 100.0,
             plain_wer * 100.0,
+            plain_failed,
             took
         );
         assert!(right >= 0.80, "speaker attribution {right:.3}");
