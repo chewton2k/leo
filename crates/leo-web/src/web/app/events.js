@@ -141,7 +141,22 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (!['workspace', 'note', 'search', 'trash'].includes(state.view)) return;
-  if (state.view === 'note' && (busy() || !state.session?.note.id)) return;
+  if (state.view === 'note') {
+    if (busy() || !state.session?.note.id) return;
+    const s = state.session;
+    const shown = JSON.stringify(s.note);
+    api(`/api/notes/${enc(s.note.id)}`)
+      .then((note) => {
+        if (state.session !== s || busy()) return;
+        if (JSON.stringify(note) !== shown) return render();
+        loadSideFolders();
+        marginLoad(s, () => state.session === s).catch(fail);
+      }, () => {
+        if (state.session === s) return render();
+      })
+      .catch(fail);
+    return;
+  }
   render().catch(fail);
 });
 
