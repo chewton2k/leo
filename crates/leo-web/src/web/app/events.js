@@ -197,7 +197,6 @@ function drawActivity() {
     box.id = 'activity';
     box.className = 'activity';
     box.setAttribute('aria-label', 'Working in the background');
-    box.setAttribute('aria-live', 'polite');
     dock().appendChild(box);
   }
   const shown = activity.tasks.filter((t) => !hiddenHere(t));
@@ -227,7 +226,9 @@ function drawActivity() {
     })
     .join('');
   const settled = shown.every((t) => t.ready);
-  box.innerHTML = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<span class="activity-spin"></span>'}<span class="grow">${settled ? (shown.length === 1 ? 'Ready in the background' : `${shown.length} ready in the background`) : shown.length === 1 ? 'Working in the background' : `${shown.length} things in the background`}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>${activity.folded ? '' : rows}`;
+  const said = settled ? (shown.length === 1 ? 'Ready in the background' : `${shown.length} ready in the background`) : shown.length === 1 ? 'Working in the background' : `${shown.length} things in the background`;
+  const head = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<span class="activity-spin"></span>'}<span class="grow">${said}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>`;
+  refreshPanel(box, `<span class="said" role="status">${esc(said)}</span>${head}${activity.folded ? '' : rows}`);
 }
 
 async function checkActivity() {

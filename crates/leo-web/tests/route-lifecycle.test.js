@@ -133,3 +133,27 @@ test('returning to a note that is gone rebuilds it so the missing-note path runs
   assert.equal(e.seen.renders, 1);
   assert.equal(e.seen.margins.length, 0);
 });
+
+test('the background panel updates in place and announces only its state', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
+  const code = source.slice(source.indexOf('function drawActivity()'), source.indexOf('async function checkActivity()'));
+  const painted = [];
+  const attrs = {};
+  const box = {
+    hidden: false, classList: { toggle() {} }, setAttribute: (k, v) => { attrs[k] = v; },
+    set innerHTML(value) { throw new Error(`innerHTML rewritten: ${value}`); },
+  };
+  let now = 1000;
+  const context = {
+    $: () => box, activity: { tasks: [{ kind: 'combine', label: 'Combining a', step: 'Felix is writing one note', done: 10, total: 100, href: '#combine/1', ready: false }], folded: false, route: '', seen: new Map() },
+    hiddenHere: () => false, esc: String, Math, Date: { now: () => now }, refreshPanel: (_, html) => painted.push(html),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.drawActivity = drawActivity;`, context);
+  for (let i = 0; i < 3; i++) { context.drawActivity(); now += 1000; }
+  assert.equal(painted.length, 3);
+  assert.equal(attrs['aria-live'], undefined);
+  const said = painted.map((html) => html.match(/<span class="said" role="status">([^<]*)<\/span>/)?.[1]);
+  assert.deepEqual(said, ['Working in the background', 'Working in the background', 'Working in the background']);
+  assert.deepEqual(painted.map((html) => html.match(/· (\d+ s)/)?.[1]), ['0 s', '1 s', '2 s']);
+});
