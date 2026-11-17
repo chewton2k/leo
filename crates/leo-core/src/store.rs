@@ -1107,10 +1107,7 @@ impl Store {
         for entry in trash_entries(&self.notes_dir) {
             let (wanted, counted) = match &entry.head {
                 Some(head) => (chosen.is_none_or(|c| c.contains(head.id.as_str())), true),
-                None => {
-                    let by_id = chosen.is_some_and(|c| c.contains(entry.id().as_str()));
-                    (chosen.is_none() || by_id, by_id)
-                }
+                None => (chosen.is_none_or(|c| c.contains(entry.id().as_str())), true),
             };
             if !wanted {
                 continue;
@@ -2355,6 +2352,29 @@ mod tests {
             listed == 1 || !broken.exists(),
             "a 400-day-old unparseable trashed file is neither listed nor expired nor emptied"
         );
+    }
+
+    #[test]
+    fn emptying_the_trash_counts_a_file_leo_cannot_read() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Kept", "x", vec![], "").unwrap();
+        store.save().unwrap();
+        let id = store.notes[0].id.clone();
+        store.delete_notes(&[id]);
+        store.save().unwrap();
+        let trash = store.notes_dir.join(".trash");
+        fs::write(trash.join("Broken.md"), "---\ntitle: [\n---\nbody").unwrap();
+        assert_eq!(
+            trash_entries(&store.notes_dir)
+                .iter()
+                .filter(|entry| entry.head.is_none())
+                .count(),
+            1
+        );
+        let result = store.empty_trash();
+        assert_eq!(result.deleted, 2);
+        assert_eq!(result.failed, 0);
+        assert!(trash_files(&store).is_empty());
     }
 
     #[cfg(unix)]
