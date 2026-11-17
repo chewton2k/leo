@@ -113,13 +113,74 @@ pub fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     crate::paths::write_atomic(path, serde_json::to_vec_pretty(value)?)
 }
 
-pub fn save(notes: &Path, note: &str, source: &Archive) -> Result<()> {
-    if !valid_id(&source.id) {
+fn source_path(notes: &Path, note: &str, id: &str) -> Result<PathBuf> {
+    if !valid_id(id) {
         bail!("Invalid recording id");
     }
     let dir = folder(notes, note)?;
-    let path = crate::paths::contained_path(&dir, Path::new(&format!("{}.json", source.id)))?;
-    write_json(&path, source)
+    crate::paths::contained_path(&dir, Path::new(&format!("{id}.json")))
+}
+
+pub fn save(notes: &Path, note: &str, source: &Archive) -> Result<()> {
+    write_json(&source_path(notes, note, &source.id)?, source)
+}
+
+pub fn save_merged(notes: &Path, note: &str, source: &Archive) -> Result<()> {
+    let path = source_path(notes, note, &source.id)?;
+    let old = std::fs::read(&path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Archive>(&bytes).ok())
+        .filter(|old| old.id == source.id);
+    match old {
+        Some(old) => write_json(&path, &merged(&old, source)),
+        None => write_json(&path, source),
+    }
+}
+
+pub fn merged(old: &Archive, new: &Archive) -> Archive {
+    let said: std::collections::HashSet<(u64, &str)> = old
+        .passages
+        .iter()
+        .map(|p| (p.start_secs, p.text.as_str()))
+        .collect();
+    let mut passages = old.passages.clone();
+    passages.extend(
+        new.passages
+            .iter()
+            .filter(|p| !said.contains(&(p.start_secs, p.text.as_str())))
+            .cloned(),
+    );
+    passages.sort_by_key(|p| p.start_secs);
+    let mut points = old.points.clone();
+    points.extend(
+        new.points
+            .iter()
+            .filter(|p| !old.points.contains(p))
+            .cloned(),
+    );
+    points.sort_by_key(|p| p.at_secs);
+    let mut warnings = old.warnings.clone();
+    warnings.extend(
+        new.warnings
+            .iter()
+            .filter(|w| !old.warnings.contains(w))
+            .cloned(),
+    );
+    let mut trace = old.trace.clone();
+    trace.extend(new.trace.iter().filter(|t| !old.trace.contains(t)).cloned());
+    trace.sort_by_key(|t| t.at);
+    let kept = |new: &String, old: &String| if new.is_empty() { old } else { new }.clone();
+    Archive {
+        id: new.id.clone(),
+        started: old.started,
+        passages,
+        points,
+        context: kept(&new.context, &old.context),
+        wants: kept(&new.wants, &old.wants),
+        warnings,
+        trace,
+        from: kept(&old.from, &new.from),
+    }
 }
 
 pub fn copy_to(notes: &Path, from: &str, into: &str, label: &str) -> Result<Vec<String>> {
@@ -311,6 +372,86 @@ mod tests {
             ["good-0001"]
         );
         assert_eq!(std::fs::read_to_string(&broken).unwrap(), "{");
+    }
+
+    fn spoken(id: &str, said: &[(u64, &str, &str)]) -> Archive {
+        Archive {
+            id: id.into(),
+            started: Utc::now(),
+            passages: said
+                .iter()
+                .map(|(at, speaker, text)| Passage {
+                    start_secs: *at,
+                    end_secs: at + 5,
+                    text: (*text).into(),
+                    speaker: (*speaker).into(),
+                })
+                .collect(),
+            points: vec![],
+            context: String::new(),
+            wants: String::new(),
+            warnings: vec![],
+            trace: vec![],
+            from: String::new(),
+        }
+    }
+
+    #[test]
+    fn merged_keeps_the_other_side_points_and_context() {
+        let mut you = spoken("call-0001", &[(0, "You", "my side"), (20, "You", "more")]);
+        you.points = vec![Point {
+            at_secs: 3,
+            text: "ask about the budget".into(),
+        }];
+        you.context = "Weekly sync".into();
+        you.warnings = vec!["Others: No sound was recorded.".into()];
+        let others = spoken("call-0001", &[(10, "Others", "the other side")]);
+        let both = merged(&you, &others);
+        assert_eq!(
+            both.passages
+                .iter()
+                .map(|p| (p.start_secs, p.speaker.as_str()))
+                .collect::<Vec<_>>(),
+            [(0, "You"), (10, "Others"), (20, "You")]
+        );
+        assert_eq!(both.points, you.points);
+        assert_eq!(both.context, "Weekly sync");
+        assert_eq!(both.warnings, you.warnings);
+        assert_eq!(both.started, you.started);
+        let again = merged(&both, &others);
+        assert_eq!(
+            serde_json::to_value(&again).unwrap(),
+            serde_json::to_value(&both).unwrap(),
+            "the same recovery twice changes nothing"
+        );
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(&notes, "note-0001", &you).unwrap();
+        save_merged(&notes, "note-0001", &others).unwrap();
+        save_merged(&notes, "note-0001", &others).unwrap();
+        assert_eq!(
+            serde_json::to_value(&load(&notes, "note-0001").unwrap()[0]).unwrap(),
+            serde_json::to_value(&both).unwrap()
+        );
+        save_merged(&notes, "note-0002", &others).unwrap();
+        assert_eq!(
+            load(&notes, "note-0002").unwrap()[0].passages,
+            others.passages
+        );
+    }
+
+    #[test]
+    fn the_same_words_under_two_labels_are_kept_once_with_the_stored_label() {
+        let labelled = spoken(
+            "solo-0001",
+            &[(0, "Speaker 1", "hello"), (5, "Speaker 2", "hi there")],
+        );
+        let plain = spoken(
+            "solo-0001",
+            &[(0, "Microphone", "hello"), (5, "Microphone", "hi there")],
+        );
+        let both = merged(&labelled, &plain);
+        assert_eq!(both.passages, labelled.passages);
     }
 
     #[cfg(unix)]

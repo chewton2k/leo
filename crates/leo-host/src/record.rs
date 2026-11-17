@@ -351,7 +351,7 @@ fn finish_tracks(
         writer_failed: written.writer_failed,
         source: Some(source),
         commit: Some(Arc::new(move |notes, note| {
-            leo_core::recording::save(notes, note, &committed)?;
+            leo_core::recording::save_merged(notes, note, &committed)?;
             for (_, dir) in &dirs {
                 leo_services::session::Session::open(dir)?.finish()?;
             }
@@ -520,5 +520,111 @@ mod tests {
             &mut |_| {},
         );
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn the_call_commit_keeps_both_sides() {
+        use leo_core::recording::{load, save, Archive, Passage, Point};
+        use leo_services::session::{Manifest, Session};
+        if let Some(order) = std::env::var_os("LEO_CALL_COMMIT_CHILD") {
+            let (first, second) = if order == "you" {
+                ("You", "Others")
+            } else {
+                ("Others", "You")
+            };
+            let home = std::path::PathBuf::from(std::env::var_os("LEO_HOME").unwrap());
+            let notes = home.join("notes");
+            let point = Point {
+                at_secs: 2,
+                text: "ask about the budget".into(),
+            };
+            save(
+                &notes,
+                "call-0001",
+                &Archive {
+                    id: "call-0001".into(),
+                    started: chrono::Utc::now(),
+                    passages: vec![Passage {
+                        start_secs: 0,
+                        end_secs: 5,
+                        text: "the first side".into(),
+                        speaker: first.into(),
+                    }],
+                    points: vec![point.clone()],
+                    context: String::new(),
+                    wants: String::new(),
+                    warnings: vec![],
+                    trace: vec![],
+                    from: String::new(),
+                },
+            )
+            .unwrap();
+            let commit_once = || {
+                let mut manifest = Manifest::new(None, None, "", second == "Others");
+                manifest.id = format!("call-0001-{}", second.to_lowercase());
+                let dir = Session::create(&home.join("recordings"), manifest)
+                    .unwrap()
+                    .dir;
+                std::fs::write(dir.join("seg-00000.txt"), "the second side").unwrap();
+                let recorded = super::finish_tracks(
+                    vec![(second, dir)],
+                    vec![],
+                    "call-0001".into(),
+                    Default::default(),
+                    Default::default(),
+                    &mut |_| {},
+                )
+                .unwrap();
+                (recorded.commit.unwrap())(&notes, "call-0001").unwrap();
+                let saved = load(&notes, "call-0001").unwrap();
+                assert_eq!(saved.len(), 1);
+                (saved[0].passages.clone(), saved[0].points.clone())
+            };
+            let (passages, points) = commit_once();
+            assert_eq!(
+                passages
+                    .iter()
+                    .map(|p| (p.speaker.as_str(), p.text.as_str()))
+                    .collect::<Vec<_>>(),
+                [(first, "the first side"), (second, "the second side")]
+            );
+            assert_eq!(points, [point]);
+            assert_eq!(
+                commit_once(),
+                (passages, points),
+                "recovering the same side again changes nothing"
+            );
+            return;
+        }
+        for order in ["you", "others"] {
+            let home = tempfile::tempdir().unwrap();
+            let missing = home.path().join("missing");
+            std::fs::write(
+                home.path().join("config.toml"),
+                format!(
+                    "[chat]\nchain = [\"ollama\"]\n[providers.codex]\nbin = {0}\n[providers.claude_code]\nbin = {0}\n[providers.ollama]\nbase_url = \"\"\n",
+                    serde_json::to_string(&missing).unwrap()
+                ),
+            )
+            .unwrap();
+            let output = leo_core::children::quiet_command(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "record::tests::the_call_commit_keeps_both_sides",
+                    "--nocapture",
+                ])
+                .env("LEO_CALL_COMMIT_CHILD", order)
+                .env("LEO_HOME", home.path())
+                .env("LEO_NO_MICROPHONE", "1")
+                .env_remove("LEO_USE_KEYCHAIN")
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{order} first: {}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
     }
 }

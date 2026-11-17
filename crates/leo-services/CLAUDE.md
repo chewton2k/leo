@@ -367,6 +367,12 @@ segments pending without `.err`; the recorder waits for a model only the finish
 window (120 s), then ends unsaved with audio kept, releasing its guards, and the
 recording stays recoverable. `recorder::resume_with_controls` exposes the finish
 control in recovery; leo-host refuses to write a note when recovery failed.
+Saving a recovered recording's sources, and the call commit, merge with an
+existing archive of the same id (`recording::save_merged`): other speakers,
+points, warnings and context are kept, and a passage already there by time and
+text keeps its stored label, so running a recovery twice changes nothing. Plain
+`recording::save` replaces (a new recording, `Session::commit`, transcript
+corrections), so a corrected point never brings back its old wording.
 Capture queues are bounded; shutdown never waits on an active transcription;
 lock heartbeats join on drop. Live previews pass PCM directly (never a temp
 live.wav); `Controls.preview` false skips only new preview passes.

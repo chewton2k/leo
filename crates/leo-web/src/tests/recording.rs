@@ -774,3 +774,90 @@ fn expiry_and_delete_leave_the_recording_being_recovered_alone() {
     run(record::stop(State(state.clone()), Path(id)));
     recording_until(&state, |s| s == "done" || s == "failed");
 }
+
+fn one_side(id: String, speaker: &str, text: &str) -> leo_core::recording::Archive {
+    leo_core::recording::Archive {
+        id,
+        started: chrono::Utc::now(),
+        passages: vec![leo_core::recording::Passage {
+            start_secs: 0,
+            end_secs: 5,
+            text: text.into(),
+            speaker: speaker.into(),
+        }],
+        points: vec![],
+        context: String::new(),
+        wants: String::new(),
+        warnings: vec![],
+        trace: vec![],
+        from: String::new(),
+    }
+}
+
+#[test]
+fn recovering_a_leftover_call_track_keeps_the_other_sides_passages() {
+    struct Kept(Arc<Mutex<String>>);
+    impl crate::record::Housekeeper for Kept {
+        fn pending_recordings(&self) -> anyhow::Result<Vec<record::Pending>> {
+            Ok(vec![record::Pending {
+                id: self.0.lock().unwrap().clone(),
+                title: None,
+                directory: String::new(),
+                source: record::Source::Nativecall,
+                profile: Default::default(),
+                started: None,
+            }])
+        }
+    }
+    let (mut state, dir, _) = state_with(&[]);
+    let leftover: Arc<Mutex<String>> = Default::default();
+    state.housekeeper = Some(Arc::new(Kept(leftover.clone())));
+    state.listener = Some(Arc::new(|input, _| {
+        let source = match input.recover {
+            Some(id) => one_side(id, "Others", "the other side"),
+            None => leo_core::recording::Archive {
+                points: vec![leo_core::recording::Point {
+                    at_secs: 2,
+                    text: "ask about the budget".into(),
+                }],
+                ..one_side(input.id, "You", "my side")
+            },
+        };
+        Ok(record::Recorded {
+            title: "Call".into(),
+            body: "notes".into(),
+            source: Some(source),
+            ..Default::default()
+        })
+    }));
+    start_recording(&state, record::Source::Microphone);
+    let note = recording_until(&state, |s| s == "done" || s == "failed")
+        .note
+        .unwrap();
+    *leftover.lock().unwrap() = note.clone();
+    let notes = dir.path().join("notes");
+    let recover = || {
+        let recovered = run(record::recover(State(state.clone()), Path(note.clone())));
+        assert_eq!(recovered.status(), StatusCode::ACCEPTED);
+        assert_eq!(
+            recording_until(&state, |s| s == "done" || s == "failed").state,
+            "done"
+        );
+        serde_json::to_value(leo_core::recording::load(&notes, &note).unwrap()).unwrap()
+    };
+    let first = recover();
+    let sources = leo_core::recording::load(&notes, &note).unwrap();
+    assert_eq!(
+        sources
+            .iter()
+            .flat_map(|a| a.passages.iter().map(|p| p.speaker.as_str()))
+            .collect::<Vec<_>>(),
+        ["You", "Others"]
+    );
+    assert_eq!(sources[0].points[0].text, "ask about the budget");
+    assert_eq!(
+        recover(),
+        first,
+        "recovering the same side again changes nothing"
+    );
+}

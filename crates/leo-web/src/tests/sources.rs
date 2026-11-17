@@ -132,3 +132,32 @@ fn felix_reads_and_searches_the_recording_a_note_was_made_from() {
     })
     .unwrap();
 }
+
+#[test]
+fn an_edited_typed_point_does_not_bring_back_its_old_wording() {
+    let (state, _d, ids) = state_with(&[("Graphs", "cs130")]);
+    let id = ids[0].clone();
+    let notes = store_now(&state, |store| {
+        leo_core::recording::save(&store.notes_dir, &id, &source("session-1234")).unwrap();
+        Ok(store.notes_dir.clone())
+    })
+    .unwrap();
+    let page = json_of(run(sources::sources(
+        State(state.clone()),
+        Path(id.clone()),
+        Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+    )));
+    let edit = serde_json::json!({"source":"session-1234","base":page["versions"]["session-1234"],"points":[{"at_secs":5,"text":"explain a heap"}],"passages":[{"start_secs":0,"end_secs":30,"speaker":"Microphone","text":"Dijkstra finds shortest paths"}]});
+    let saved = run(sources::edit_sources(
+        State(state.clone()),
+        Path(id.clone()),
+        Json(serde_json::from_value(edit).unwrap()),
+    ));
+    assert_eq!(saved.status(), StatusCode::OK);
+    let points: Vec<String> = leo_core::recording::load(&notes, &id).unwrap()[0]
+        .points
+        .iter()
+        .map(|p| p.text.clone())
+        .collect();
+    assert_eq!(points, ["explain a heap"]);
+}

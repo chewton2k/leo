@@ -472,6 +472,7 @@ fn run(
             });
         }
     }
+    let recovering = listening.recover.is_some();
     let recordings = Arc::clone(&state.recording);
     let _guard = RunGuard {
         recordings: Arc::clone(&recordings),
@@ -531,8 +532,12 @@ fn run(
     let commit = recorded.commit;
     if let Some(source) = &source {
         let archived = store_now(&state, |store| Ok(store.notes_dir.clone())).and_then(|notes| {
-            leo_core::recording::save(&notes, &source.id, source)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+            let save = if recovering {
+                leo_core::recording::save_merged
+            } else {
+                leo_core::recording::save
+            };
+            save(&notes, &source.id, source).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
         });
         if archived.is_err() {
             change(&recordings, &id, |job| {
