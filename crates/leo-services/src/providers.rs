@@ -170,16 +170,7 @@ pub fn download_verified(
         "the model folder cannot be a symbolic link"
     );
     let target = leo_core::paths::contained_path(dir, std::path::Path::new(name))?;
-    for entry in std::fs::read_dir(dir)?.flatten() {
-        let left = entry.file_name();
-        let left = left.to_string_lossy();
-        if left.starts_with(".leo-download-")
-            && left.ends_with(".part")
-            && older_than(&entry, STALE_DOWNLOAD)
-        {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
+    drop_stale_downloads(dir);
     let partial = tempfile::Builder::new()
         .prefix(".leo-download-")
         .suffix(".part")
@@ -231,6 +222,23 @@ pub fn download_verified(
     }
     partial.persist(&target).map_err(|e| e.error)?;
     Ok(target)
+}
+
+pub(crate) fn drop_stale_downloads(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".leo-download-")
+            && entry.file_type().is_ok_and(|t| t.is_file())
+            && older_than(&entry, STALE_DOWNLOAD)
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 const STALE_DOWNLOAD: std::time::Duration = std::time::Duration::from_secs(15 * 60);

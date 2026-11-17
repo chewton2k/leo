@@ -100,14 +100,16 @@ impl Library {
     }
 
     pub(crate) fn with_catalog(models: PathBuf, config: PathBuf, catalog: Arc<Catalog>) -> Self {
-        Self {
+        let library = Self {
             verified: Arc::new(Mutex::new(remembered(&config))),
             models,
             config,
             catalog,
             jobs: Default::default(),
             hashing: Default::default(),
-        }
+        };
+        library.drop_partials();
+        library
     }
 
     pub fn models_dir(&self) -> &Path {
@@ -618,17 +620,7 @@ impl Library {
         if safe_root(&self.models).is_err() {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(&self.models) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().starts_with(PARTIAL)
-                && entry.file_type().is_ok_and(|t| t.is_file())
-                && crate::providers::older_than(&entry, Duration::from_secs(600))
-            {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
+        crate::providers::drop_stale_downloads(&self.models);
     }
 
     fn extra_name(name: &str) -> bool {

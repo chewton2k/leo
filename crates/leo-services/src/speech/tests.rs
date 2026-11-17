@@ -730,3 +730,63 @@ fn the_real_speaker_model_downloads_from_hugging_face_and_verifies() {
         seen.len()
     );
 }
+
+fn library_over(models: &std::path::Path, root: &std::path::Path) -> Library {
+    let mut data = catalog().clone();
+    data.models.retain(|m| m.id == "parakeet-tdt-0.6b-v3");
+    Library::with_catalog(models.to_path_buf(), root.join("config"), Arc::new(data))
+}
+
+fn partial_aged(
+    models: &std::path::Path,
+    name: &str,
+    age: std::time::Duration,
+) -> std::path::PathBuf {
+    std::fs::create_dir_all(models).unwrap();
+    let partial = models.join(name);
+    std::fs::write(&partial, vec![0u8; 4096]).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&partial)
+        .unwrap()
+        .set_modified(std::time::SystemTime::now() - age)
+        .unwrap();
+    partial
+}
+
+#[test]
+fn a_stale_partial_download_is_removed_when_the_library_starts() {
+    let dir = tempfile::tempdir().unwrap();
+    let models = dir.path().join("models");
+    let stale = partial_aged(
+        &models,
+        ".leo-download-AbC123",
+        std::time::Duration::from_secs(3600),
+    );
+    let suffixed = partial_aged(
+        &models,
+        ".leo-download-x.part",
+        std::time::Duration::from_secs(3600),
+    );
+    let library = library_over(&models, dir.path());
+    assert!(!stale.exists());
+    assert!(!suffixed.exists());
+    let view = library.view().unwrap();
+    assert_eq!(view["disk_bytes"], 0);
+}
+
+#[test]
+fn a_fresh_partial_download_is_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let models = dir.path().join("models");
+    let fresh = partial_aged(&models, ".leo-download-AbC123", std::time::Duration::ZERO);
+    let nearly = partial_aged(
+        &models,
+        ".leo-download-y.part",
+        std::time::Duration::from_secs(14 * 60),
+    );
+    let library = library_over(&models, dir.path());
+    library.view().unwrap();
+    assert!(fresh.exists());
+    assert!(nearly.exists());
+}

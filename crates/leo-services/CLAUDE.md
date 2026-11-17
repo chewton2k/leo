@@ -147,7 +147,7 @@ accuracy stays unknown. Selection lives in `<config>/speech-model.json`, files i
 `models_dir()/speech`; an empty selected ID means the user deleted the current
 model. `Library` verifies exact size and SHA-256, keeps verified size/mtime
 stamps in `<config>/speech-verified.json` (never re-hash on every launch),
-downloads at most two models into owned temp files, checks cancellation while
+downloads at most two models into owned temp files (stale ones, over 15 minutes old, are removed when the library starts), checks cancellation while
 awaiting the network and promotes atomically; linked and hard-linked models are
 refused; selection/deletion/promotion use a private file lock.
 
