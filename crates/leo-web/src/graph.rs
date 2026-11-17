@@ -800,6 +800,7 @@ pub struct Graphs {
     room: Option<crate::Room>,
     vectors: Option<Arc<crate::vectors::Vectors>>,
     near: Mutex<Option<(u64, Arc<Near>)>>,
+    held: Mutex<Option<Arc<Cache>>>,
     job: Mutex<Job>,
     auto: Mutex<Option<std::time::Instant>>,
 }
@@ -849,6 +850,7 @@ impl Graphs {
             room: None,
             vectors: None,
             near: Mutex::new(None),
+            held: Mutex::new(None),
             auto: Mutex::new(None),
             job: Mutex::new(Job {
                 state: "idle",
@@ -880,8 +882,18 @@ impl Graphs {
         }
     }
 
-    pub fn load(&self) -> Cache {
+    pub fn load(&self) -> Arc<Cache> {
         self.bring_in_file();
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cache) = held.as_ref() {
+            return Arc::clone(cache);
+        }
+        let cache = Arc::new(self.read_cache());
+        *held = Some(Arc::clone(&cache));
+        cache
+    }
+
+    fn read_cache(&self) -> Cache {
         self.db
             .with(|c| {
                 let mut cache = Cache::default();
@@ -962,9 +974,10 @@ impl Graphs {
     }
 
     fn write_all(&self, cache: &Cache, replace: bool) -> Result<()> {
-        self.db.with(|c| {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        let written = self.db.with(|c| {
             let tx = c.transaction()?;
-            let held: HashMap<String, String> = {
+            let stored: HashMap<String, String> = {
                 let mut found = tx.prepare("SELECT id, data FROM graph_notes")?;
                 let rows = found
                     .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
@@ -972,14 +985,14 @@ impl Graphs {
             };
             for (id, read) in &cache.notes {
                 let data = serde_json::to_string(read).unwrap_or_default();
-                if replace || held.get(id) != Some(&data) {
+                if replace || stored.get(id) != Some(&data) {
                     tx.execute(
                         "INSERT OR REPLACE INTO graph_notes (id, data) VALUES (?1, ?2)",
                         [id, &data],
                     )?;
                 }
             }
-            for id in held.keys().filter(|id| !cache.notes.contains_key(*id)) {
+            for id in stored.keys().filter(|id| !cache.notes.contains_key(*id)) {
                 tx.execute("DELETE FROM graph_notes WHERE id = ?1", [id])?;
             }
             tx.execute("DELETE FROM graph_links", [])?;
@@ -998,7 +1011,11 @@ impl Graphs {
                 [serde_json::to_string(&cache.pairs).unwrap_or_default()],
             )?;
             tx.commit()
-        })
+        });
+        if written.is_ok() {
+            *held = None;
+        }
+        written
     }
 
     fn job(&self) -> Job {
@@ -1040,7 +1057,7 @@ impl Graphs {
                 &self.scale(),
                 self.near().as_deref(),
             ),
-            built_at: cache.built_at,
+            built_at: cache.built_at.clone(),
         }
     }
 
@@ -1129,7 +1146,7 @@ impl Graphs {
         let Some(writer) = self.writer.clone() else {
             return;
         };
-        let mut cache = self.load();
+        let mut cache = (*self.load()).clone();
         let scale = self.scale();
         let near = self.near();
         let problems = build_near(
@@ -1932,6 +1949,34 @@ mod tests {
             user.chars().count() < NOTE_CHARS + 400,
             "a long note is clipped"
         );
+    }
+
+    #[test]
+    fn a_written_cache_is_seen_by_the_next_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let graphs = Graphs::for_notes(&dir.path().join("notes"), None);
+        assert!(graphs.load().notes.is_empty());
+        let one = Read {
+            summary: "heaps".into(),
+            ..Read::default()
+        };
+        let mut cache = Cache::default();
+        cache.notes.insert("n1".into(), one);
+        graphs.save(&cache).unwrap();
+        assert_eq!(graphs.load().notes["n1"].summary, "heaps");
+        assert!(Arc::ptr_eq(&graphs.load(), &graphs.load()));
+
+        let mut file = Cache::default();
+        file.notes.insert(
+            "n2".into(),
+            Read {
+                summary: "queues".into(),
+                ..Read::default()
+            },
+        );
+        std::fs::write(graphs.path(), serde_json::to_string(&file).unwrap()).unwrap();
+        let seen = graphs.load();
+        assert_eq!(seen.notes["n2"].summary, "queues");
     }
 
     #[test]
