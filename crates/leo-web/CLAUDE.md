@@ -54,7 +54,8 @@ This file holds the rules. How each screen behaves, area by area, is in
   specs read.
 - Only the app's window talks to the engine: `same_host` refuses any Host but
   `127.0.0.1:<port>`/`localhost:<port>` (421); `?token=` on GET `/` → 303 + a
-  `leo_session` cookie (`SameSite=Strict`, 30 days, `serve-sessions.json`). No
+  `leo_session` cookie (`SameSite=Strict`, 30 days, `app-sessions.json`; a
+  damaged sessions file loads as none). No
   tunnel, Wi-Fi bind, QR, signed-in browsers list or link rotation.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
