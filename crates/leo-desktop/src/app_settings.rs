@@ -2,7 +2,6 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
 };
@@ -60,11 +59,7 @@ impl Preferences {
     pub fn save(&self, path: &Path) -> Result<()> {
         let parent = path.parent().context("App settings need a folder.")?;
         std::fs::create_dir_all(parent)?;
-        let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        file.write_all(&serde_json::to_vec_pretty(self)?)?;
-        file.as_file().sync_all()?;
-        file.persist(path).map_err(|e| e.error)?;
-        Ok(())
+        leo_core::paths::write_atomic(path, serde_json::to_vec_pretty(self)?)
     }
 }
 pub trait UpdateApi: Send + Sync {
@@ -131,10 +126,7 @@ impl PreferenceStore {
                     next.save(&path)?;
                     if let Err(error) = native(&preferences, &next) {
                         if let Some(bytes) = original {
-                            let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-                            file.write_all(&bytes)?;
-                            file.as_file().sync_all()?;
-                            file.persist(&path).map_err(|e| e.error)?;
+                            leo_core::paths::write_atomic(&path, bytes)?;
                         } else {
                             std::fs::remove_file(&path)?;
                         }
