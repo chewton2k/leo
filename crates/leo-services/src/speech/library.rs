@@ -334,6 +334,14 @@ impl Library {
         Ok(())
     }
 
+    pub fn downloading(&self, id: &str) -> bool {
+        self.jobs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(id)
+            .is_some_and(|j| j.state == "downloading")
+    }
+
     pub fn speaker_model(&self) -> Result<PathBuf> {
         self.verify(DIARIZER)
             .context("the speaker model is not downloaded yet (Download it beside Label speakers on the Record page)")
@@ -571,7 +579,11 @@ impl Library {
             "Choose a downloaded model file from the list."
         );
         ensure!(
-            !self.catalog.curated().any(|m| m.file().filename == name),
+            !self.catalog.curated().any(|m| m.file().filename == name)
+                && !self
+                    .catalog
+                    .known(DIARIZER)
+                    .is_ok_and(|m| m.file().filename == name),
             "Use the model’s Delete button instead."
         );
         self.folders()?;

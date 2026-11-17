@@ -725,7 +725,10 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and
   `record::start` forces it off for a call. With the speaker model missing it
   offers Download through `/api/speech` (`speakers` in the view, polled while
-  downloading); recording never waits for it.
+  downloading, redrawn only when it changes, focus kept); Start sends it only
+  while the model is ready or downloading. The switch is `settingsSwitch()`,
+  and the choice is kept in memory when storage is blocked. Settings → Speech
+  models lists the speaker model under Downloaded with Delete.
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the

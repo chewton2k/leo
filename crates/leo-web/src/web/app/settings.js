@@ -1160,14 +1160,15 @@ function speechCards(view) {
   const language = current && view.ready && current.languages.length > 1 ? `<label class="set-row" data-find="speech-language"><span class="set-label">Language</span><span class="select-control"><select id="speech-language" data-speech-language="${esc(current.id)}">${current.detects_language === false ? '' : settingsOption('auto', 'Detect language', selected.language)}${current.languages.map((code) => settingsOption(code, speechLanguage(code), selected.language)).join('')}</select>${ICON.chevron}</span></label>` : '';
   const downloaded = view.models.filter((model) => model.downloaded);
   const extras = view.extra_files || [];
+  const speakers = view.speakers && view.speakers.bytes > 0 ? view.speakers : null;
   const available = view.models.filter((model) => !model.downloaded);
   if (!state.speechFilter || state.speechFilter === 'downloaded') state.speechFilter = 'recommended';
   const filter = state.speechFilter;
   const filters = [['recommended', 'Recommended'], ['english', 'English'], ['many', 'Multilingual'], ['all', `All ${available.length}`]];
   const rows = speechFiltered(available, filter).map(speechModelRow).join('');
   return `<section class="set-card" data-find="speech-in-use"><header><h3>In use</h3><span class="set-status ${view.ready ? 'ok' : 'missing'}">${view.ready ? 'Ready' : 'Choose a model'}</span></header><div class="set-row"><span class="grow set-value-text">${view.ready && current ? esc(current.name) : 'Download a model below, then choose Use.'}</span></div><p class="set-note">Dictation and recording share this model. Audio stays on this computer.</p>${language}</section>
-    <section class="set-card" data-models-downloaded data-find="speech-downloaded"><header><h3>Downloaded</h3><span class="hint">${plural(downloaded.length + extras.length, 'model')} · ${speechBytes(view.disk_bytes)} on this computer</span></header>
-      ${downloaded.map(speechModelRow).join('')}${extras.map((file) => `<div class="set-row"><span class="grow"><span>${esc(file.name)}</span><span class="set-note">${speechBytes(file.bytes)} · Not in the current catalog</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(file.name)}" data-verb="delete_file">Delete</button></div>`).join('')}${!downloaded.length && !extras.length ? '<p class="set-note">No models downloaded yet.</p>' : ''}</section>
+    <section class="set-card" data-models-downloaded data-find="speech-downloaded"><header><h3>Downloaded</h3><span class="hint">${plural(downloaded.length + extras.length + (speakers ? 1 : 0), 'model')} · ${speechBytes(view.disk_bytes)} on this computer</span></header>
+      ${downloaded.map(speechModelRow).join('')}${extras.map((file) => `<div class="set-row"><span class="grow"><span>${esc(file.name)}</span><span class="set-note">${speechBytes(file.bytes)} · Not in the current catalog</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(file.name)}" data-verb="delete_file">Delete</button></div>`).join('')}${speakers ? `<div class="set-row"><span class="grow"><span>Speaker model</span><span class="set-note">${speechBytes(speakers.bytes)} · For Label speakers on the Record page</span></span><button class="btn plain sm" data-action="speech-model" data-model="${esc(speakers.id)}" data-verb="delete_speakers">Delete</button></div>` : ''}${!downloaded.length && !extras.length && !speakers ? '<p class="set-note">No models downloaded yet.</p>' : ''}</section>
     <section class="set-card" data-models-all data-find="speech-all"><header><h3>All models</h3></header><p class="hint">Choose a local model. Larger models use more memory.</p><div class="model-filters">${segmented({ label: 'Filter models', action: 'speech-filter', key: 'filter', current: filter, choices: filters })}</div>${rows || '<p class="set-note">No models match this filter.</p>'}<p class="set-note">Accuracy uses the chosen language, or combines measured languages with Detect language. Benchmark speed may differ on your computer.</p></section>`;
 }
 function speechBytes(bytes) {
@@ -1259,6 +1260,10 @@ function speechDeleteMenu(el, name, note, change) {
 }
 
 function changeSpeechModel(el) {
+  if (el.dataset.verb === 'delete_speakers') {
+    speechDeleteMenu(el, 'the speaker model', 'Label speakers offers to download it again when you turn it on.', { action: 'delete', id: el.dataset.model });
+    return;
+  }
   if (el.dataset.verb === 'delete_file') {
     const file = (state.speech.extra_files || []).find((file) => file.name === el.dataset.model);
     if (file) speechDeleteMenu(el, file.name, 'This removes the model file from this computer.', { action: 'delete_file', id: file.name });

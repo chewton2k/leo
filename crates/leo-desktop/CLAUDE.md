@@ -74,9 +74,10 @@ a test, or leave it unset to see the user's own data.
   silently (authorization Denied) and a second ask shows nothing. `post` asks
   (`request_auth` waits while the question is open), skips an event past
   start+10 min, closes the banner then, and a click opens Record. Never asked during
-  onboarding; an unbundled run has no bundle id and posts nothing. Health's
-  Notifications row (macOS only, `permissions::notifications`) asks, or opens
-  System Settings → Notifications once denied. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
+  onboarding; an unbundled run has no bundle id and posts nothing; only one
+  reminder waits on the question at a time. `permissions::notifications` reads the
+  setting with a 500 ms bound; Health shows a Notifications row (warn) only once
+  it is denied, whose button opens System Settings → Notifications. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
   characters with an ellipsis) under Record a call until start+10 min, hidden while a recording is live
   (`Running::recording_live`), so a denied or missed notification still has a way in.
 - The window disables Tauri's drag-drop handler (`disable_drag_drop_handler`):

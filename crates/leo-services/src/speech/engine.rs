@@ -193,22 +193,40 @@ impl Engine {
         .context("Transcription took too long. Your audio is kept; try a faster speech model.")?
     }
 
-    pub fn diarize(&self, parts: Vec<(std::path::PathBuf, u64)>) -> Result<Vec<super::Turn>> {
-        ensure!(
-            !self.stopped.load(Ordering::Acquire),
-            "The speech engine is stopping."
-        );
+    pub fn stopping(&self) -> bool {
+        self.stopped.load(Ordering::Acquire)
+    }
+
+    pub fn diarize(
+        &self,
+        parts: Vec<(std::path::PathBuf, u64)>,
+        stop: &AtomicBool,
+    ) -> Result<Vec<super::Turn>> {
+        ensure!(!self.stopping(), "the speech engine is stopping");
         let library = super::library::library()?;
+        let waited = Instant::now();
+        while library.downloading(super::catalog::DIARIZER)
+            && waited.elapsed() < Duration::from_secs(120)
+            && !stop.load(Ordering::Acquire)
+        {
+            std::thread::sleep(POLL);
+        }
         let speakers = library.speaker_model()?;
         let selected = library.selected()?;
+        let per_ms = crate::session::wav::RATE as usize / 1000;
         let samples = parts
             .iter()
             .map(|(path, skip_ms)| {
                 std::fs::metadata(path)
-                    .map_or(0, |m| m.len() as usize / 2)
-                    .saturating_sub(*skip_ms as usize * 16)
+                    .map_or(0, |m| {
+                        m.len().saturating_sub(crate::session::wav::HEADER) as usize / 2
+                    })
+                    .saturating_sub(*skip_ms as usize * per_ms)
             })
             .sum();
+        while self.dictating() && !stop.load(Ordering::Acquire) {
+            std::thread::sleep(POLL);
+        }
         let (reply, answer) = mpsc::sync_channel(1);
         self.requests
             .send(Message::Diarize {
@@ -218,10 +236,20 @@ impl Engine {
                 samples,
                 reply,
             })
-            .map_err(|_| anyhow::anyhow!("The speech engine is stopping."))?;
-        answer
-            .recv()
-            .map_err(|_| anyhow::anyhow!("The speech engine is stopping."))?
+            .map_err(|_| anyhow::anyhow!("the speech engine is stopping"))?;
+        loop {
+            match answer.recv_timeout(POLL) {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if stop.load(Ordering::Acquire) {
+                        self.supervisor.cancel();
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    anyhow::bail!("the speech engine is stopping")
+                }
+            }
+        }
     }
 
     pub fn warm(&self, selected: Selected) {
@@ -499,6 +527,22 @@ fn heard_speech(pcm: &[f32], gain: f32) -> Result<bool> {
     Ok(!vad.finish().is_empty())
 }
 
+fn load(
+    supervisor: &EngineSupervisor,
+    model: &mut Option<std::path::PathBuf>,
+    path: &std::path::Path,
+) -> std::result::Result<(), EngineError> {
+    if model.as_deref() != Some(path) || supervisor.loaded().is_none() {
+        supervisor.load(LoadSpec {
+            path: path.to_path_buf(),
+            backend: Backend::Auto,
+            device: DeviceSelector::Auto,
+        })?;
+        *model = Some(path.to_path_buf());
+    }
+    Ok(())
+}
+
 fn padded(mut pcm: Vec<f32>) -> Vec<f32> {
     if !pcm.is_empty() && pcm.len() < SHORTEST_CLIP {
         pcm.resize(SHORT_CLIP_PADDED, 0.0);
@@ -536,14 +580,7 @@ fn run(
                     reply,
                 } => {
                     let result = (|| -> Result<Vec<super::Turn>> {
-                        if model.as_ref() != Some(&selected.path) || supervisor.loaded().is_none() {
-                            supervisor.load(LoadSpec {
-                                path: selected.path.clone(),
-                                backend: Backend::Auto,
-                                device: DeviceSelector::Auto,
-                            })?;
-                            model = Some(selected.path.clone());
-                        }
+                        load(&supervisor, &mut model, &selected.path)?;
                         Ok(supervisor.diarize(speakers, parts, samples)?)
                     })();
                     let _ = reply.send(result);
@@ -575,14 +612,7 @@ fn run(
                     reply,
                 } => {
                     let result = (|| -> Result<String> {
-                        if model.as_ref() != Some(&selected.path) || supervisor.loaded().is_none() {
-                            supervisor.load(LoadSpec {
-                                path: selected.path.clone(),
-                                backend: Backend::Auto,
-                                device: DeviceSelector::Auto,
-                            })?;
-                            model = Some(selected.path.clone());
-                        }
+                        load(&supervisor, &mut model, &selected.path)?;
                         {
                             let mut serving = lock(&serving);
                             ensure!(
@@ -715,14 +745,7 @@ fn run(
             continue;
         }
         let result = (|| -> Result<()> {
-            if model.as_ref() != Some(&job.selected.path) || supervisor.loaded().is_none() {
-                supervisor.load(LoadSpec {
-                    path: job.selected.path.clone(),
-                    backend: Backend::Auto,
-                    device: DeviceSelector::Auto,
-                })?;
-                model = Some(job.selected.path.clone());
-            }
+            load(&supervisor, &mut model, &job.selected.path)?;
             if let Some(chunk) = job.chunks.pop_front() {
                 let pcm = if job.priority == Priority::Dictation {
                     padded(chunk)

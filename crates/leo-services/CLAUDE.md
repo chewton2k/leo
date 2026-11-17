@@ -83,16 +83,24 @@ never for call tracks; omitted from JSON when off, so old cache keys hold):
 drafting is off. In `recorder::finish`, once every part is done,
 `label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
 parts (each later part's 1 s lead skipped), `runs` tiles the whole timeline into
-speaker runs (gaps split between neighbours, runs under 1 s merged, over 290 s
-split, numbered by first appearance), and each run is re-transcribed through the
-normal `TranscribeFn`. `speakers.json` holds the result (`[]` when one speaker,
-a failure, Finish now or over two hours: today's output plus a warning, never
-redone on recovery); WAVs of done parts are deleted after. `assemble` prefixes
-`[Speaker N]` per line and `archive` gives one passage per run (raw text); a
-failed part ignores the labels. Measured on AMI meetings: 86–91% of transcribed
-speech gets the right speaker, ≥97% of words kept, Sortformer ~0.5 s per minute
-(Metal). The ignored `speakers_across_models` test and `speakers.yml` (weekly,
-manual; models over 2.2 GB only on demand) run it per curated English model.
+speaker runs (gaps split between neighbours, runs under 1 s merged, numbered by
+first appearance), runs are cut at each part boundary at the quietest 20 ms
+within 2 s, and each piece is re-transcribed through the normal `TranscribeFn`
+(silent pieces skipped, one retry; Progress shows steps). Passages belong to the
+part holding their midpoint (`part_of`) and never merge across parts, so every
+part keeps its own five minutes. `speakers.json` holds the result; `[]` (no
+labels, the plain transcript) when one speaker remains, and with a warning on a
+failure, Finish now or over two hours; never redone on recovery, except when the
+engine was stopping (app quit or update), which keeps the audio for recovery. A
+failed part skips labelling with a warning. WAVs of done parts are deleted after
+labelling, and `Session::finish` drops them too when it keeps a session for
+retry. `assemble` prefixes `[Speaker N]` per line (`live::stitch` keeps those
+lines) and `archive` gives one passage per run (raw text). Measured on AMI
+meetings: 86–91% of transcribed speech gets the right speaker, ≥97% of words
+kept, Sortformer ~0.5 s per minute on Metal, ~1.6 s per minute on CPU. The
+ignored `speakers_across_models` test and `speakers.yml` (weekly, manual, PRs
+touching labelling; models over 2.2 GB only on demand) run it per curated
+English model on a pinned, checksummed AMI excerpt.
 
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s;
 `CLOUD_ROLL_INTERVAL` 8 s) re-transcribe from `settled_at`, at most
@@ -157,10 +165,15 @@ hears nothing. Slow catalog models skip live passes.
 The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
 License) is found by `Catalog::known`, never `get`: `Library` downloads, verifies
 and lists it under `speakers` (never in `extra_files`) and it can never be
-chosen as the speech model. `Engine::diarize` loads the chosen speech model if
-none is, then sends `Request::Diarize { model, parts }`: the worker reads the
-WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops it, answering
-`Response::Turns`; it shares the worker, so a dictation waits for that pass.
+chosen as the speech model; Settings → Speech models lists it to delete.
+`Engine::diarize` waits for a running dictation and up to 120 s for a running
+speaker-model download, then queues `Message::Diarize`: the actor loads the
+chosen speech model if needed and sends `Request::Diarize { model, parts }`; the
+worker reads the WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops
+it, answering `Response::Turns`. Its deadline is `Deadlines::diarize` (run floor
+plus 1/40 of the transcription factor); Finish now cancels it through
+`supervisor.cancel()`, and a lost worker there never marks the GPU unusable. It
+shares the worker, so a dictation started during the pass waits for it.
 
 `speech/supervisor.rs` re-executes the binary with `--leo-speech-worker` before
 normal startup. Only the worker initializes GPU backends, loads a speech model

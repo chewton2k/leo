@@ -592,7 +592,17 @@ pub fn finish(
         emit(Event::Failed(silent.to_string()));
         return;
     }
-    label_speakers(&session, emit, finish_now);
+    label_speakers(
+        &session,
+        emit,
+        finish_now,
+        &|parts| {
+            crate::speech::engine::engine()
+                .diarize(parts, finish_now)
+                .map_err(|e| e.to_string())
+        },
+        &|path| transcribe_segment()(path),
+    );
     let assembled = session.assemble();
     emit(Event::Finished {
         transcript: assembled.text(),
@@ -608,12 +618,25 @@ fn kept_parts(session: &Session) -> u32 {
     }
 }
 
-fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBool) {
-    if !session.manifest.profile.speakers
-        || session.dir.join(session::speakers::FILE).exists()
-        || !session.assemble().failed.is_empty()
-    {
+fn label_speakers(
+    session: &Session,
+    emit: &dyn Fn(Event),
+    finish_now: &AtomicBool,
+    diarize: session::speakers::Diarize,
+    transcribe: session::speakers::Transcribe,
+) {
+    if !session.manifest.profile.speakers || session.dir.join(session::speakers::FILE).exists() {
         return;
+    }
+    let skipped = |problem: &str| {
+        session.trace("speakers-skipped", problem);
+        emit(Event::Warning(format!(
+            "Speakers are not labelled: {}. The transcript is kept as it is.",
+            problem.trim_end_matches('.')
+        )));
+    };
+    if !session.assemble().failed.is_empty() {
+        return skipped("part of the recording could not be transcribed");
     }
     emit(Event::Progress {
         label: "Telling speakers apart".to_string(),
@@ -627,23 +650,28 @@ fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBo
         session::speakers::label(
             &session.dir,
             parts,
-            &|parts| {
-                crate::speech::engine::engine()
-                    .diarize(parts)
-                    .map_err(|e| e.to_string())
-            },
-            &|path| transcribe_segment()(path),
+            session.manifest.segment_secs * 1000,
+            diarize,
+            transcribe,
             finish_now,
+            &|done, total| {
+                emit(Event::Progress {
+                    label: "Telling speakers apart".to_string(),
+                    steps: Some((done, total)),
+                })
+            },
         )
     };
-    let spoken = labelled.unwrap_or_else(|problem| {
-        session.trace("speakers-skipped", &problem);
-        emit(Event::Warning(format!(
-            "Speakers are not labelled: {}. The transcript is kept as it is.",
-            problem.trim_end_matches('.')
-        )));
-        Vec::new()
-    });
+    let spoken = match labelled {
+        Ok(spoken) => spoken,
+        Err(problem) if crate::speech::engine::engine().stopping() => {
+            return skipped(&format!("{problem}; recover the recording to try again"));
+        }
+        Err(problem) => {
+            skipped(&problem);
+            Vec::new()
+        }
+    };
     session.trace(
         "speakers",
         &format!(
@@ -653,10 +681,7 @@ fn label_speakers(session: &Session, emit: &dyn Fn(Event), finish_now: &AtomicBo
         ),
     );
     if let Err(e) = session::speakers::write(&session.dir, &spoken) {
-        session.trace(
-            "speakers-skipped",
-            &format!("could not save the labels: {e}"),
-        );
+        skipped(&format!("the labels could not be saved ({e})"));
     }
     for index in 0..parts {
         if session.dir.join(format!("seg-{index:05}.txt")).exists() {
@@ -1051,6 +1076,94 @@ pub fn write_up(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn labelled_session(root: &Path) -> Session {
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.profile.speakers = true;
+        let session = Session::create(root, manifest).unwrap();
+        for index in 0..2 {
+            std::fs::write(session.dir.join(format!("seg-{index:05}.txt")), "plain").unwrap();
+            wav::write(
+                &session.dir.join(wav::done_name(index)),
+                &vec![1000i16; 16_000 * 4],
+            )
+            .unwrap();
+        }
+        session
+    }
+
+    #[test]
+    fn labelling_at_finish_saves_the_labels_and_drops_the_kept_audio() {
+        let root = tempfile::tempdir().unwrap();
+        let session = labelled_session(root.path());
+        let events = Mutex::new(Vec::new());
+        label_speakers(
+            &session,
+            &|e| events.lock().unwrap().push(e),
+            &AtomicBool::new(false),
+            &|_| {
+                Ok(vec![
+                    crate::speech::Turn {
+                        start_ms: 0,
+                        end_ms: 3_000,
+                        speaker: 1,
+                    },
+                    crate::speech::Turn {
+                        start_ms: 3_000,
+                        end_ms: 7_000,
+                        speaker: 2,
+                    },
+                ])
+            },
+            &|_| Ok("words".to_string()),
+        );
+        assert_eq!(session.spoken().map(|s| s.len()), Some(2));
+        assert!(!session.dir.join(wav::done_name(0)).exists());
+        assert!(!session.dir.join(wav::done_name(1)).exists());
+        let events = events.into_inner().unwrap();
+        assert!(events.iter().any(|e| matches!(
+            e,
+            Event::Progress {
+                steps: Some((1, 2)),
+                ..
+            }
+        )));
+        assert!(!events.iter().any(|e| matches!(e, Event::Warning(_))));
+    }
+
+    #[test]
+    fn labelling_is_skipped_with_a_warning_for_a_failed_part_or_a_failed_pass() {
+        let root = tempfile::tempdir().unwrap();
+        let session = labelled_session(root.path());
+        std::fs::write(session.dir.join("seg-00002.err"), "failed").unwrap();
+        let warned = Mutex::new(Vec::new());
+        let emit = |e| {
+            if let Event::Warning(w) = e {
+                warned.lock().unwrap().push(w)
+            }
+        };
+        let never =
+            |_: Vec<(std::path::PathBuf, u64)>| -> Result<Vec<crate::speech::Turn>, String> {
+                panic!("no pass with a failed part")
+            };
+        label_speakers(&session, &emit, &AtomicBool::new(false), &never, &|_| {
+            Ok(String::new())
+        });
+        assert!(!session.dir.join(session::speakers::FILE).exists());
+        std::fs::remove_file(session.dir.join("seg-00002.err")).unwrap();
+        label_speakers(
+            &session,
+            &emit,
+            &AtomicBool::new(false),
+            &|_| Err("no model".into()),
+            &|_| Ok(String::new()),
+        );
+        assert!(session.dir.join(session::speakers::FILE).exists());
+        assert!(session.spoken().is_none());
+        let warned = warned.into_inner().unwrap();
+        assert_eq!(warned.len(), 2);
+        assert!(warned[1].contains("no model"));
+    }
 
     #[test]
     fn a_cached_write_up_is_reused_only_when_the_writer_succeeded() {

@@ -2739,15 +2739,20 @@ test.describe('recording', () => {
     expect(seen.started.source).toBe('nativecall');
   });
 
-  test('Label speakers is chosen per recording, remembered, hidden for calls and sent with Start', async ({ page }) => {
+  test('Label speakers is chosen per recording, remembered, hidden for calls and sent with Start once its model is ready', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
-    await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null } } }));
+    let model = { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null };
+    await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: model } }));
     await page.goto('/#/record');
     const toggle = page.locator('#rec-speakers');
     await expect(toggle, 'off by default, so lectures stay as they are').not.toBeChecked();
     await toggle.check();
-    await expect(page.locator('#rec-speakers-model')).toContainText('139 MB');
-    expect(await page.evaluate(() => localStorage.getItem('leo-label-speakers'))).toBe('on');
+    await expect(page.locator('#rec-speakers-model')).toContainText('133 MB');
+    await expect(page.locator('#rec-speakers-get')).toBeVisible();
+    model = { ...model, bytes: model.size, verified: true };
+    await page.reload();
+    await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
+    await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('.rec-kind', { hasText: 'Call' }).click();
     await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
     await page.locator('.rec-kind', { hasText: 'Microphone' }).click();

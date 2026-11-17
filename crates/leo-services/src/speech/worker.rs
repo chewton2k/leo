@@ -234,11 +234,17 @@ fn diarize(model: &Path, parts: &[(PathBuf, u64)]) -> Result<Vec<Turn>, String> 
     use transcribe_cpp::{
         DiarizeExtension, DiarizeOptions, SortformerDiarizeOptions, SortformerPreset,
     };
-    let mut pcm = Vec::new();
+    let mut pcm = Vec::with_capacity(
+        parts
+            .iter()
+            .map(|(path, _)| std::fs::metadata(path).map_or(0, |m| m.len() as usize / 2))
+            .sum(),
+    );
     for (path, skip_ms) in parts {
         let samples = crate::session::wav::read(path)
             .map_err(|e| format!("Could not read {}: {e}", path.display()))?;
-        let skip = (*skip_ms as usize * 16).min(samples.len());
+        let skip =
+            (*skip_ms as usize * crate::session::wav::RATE as usize / 1000).min(samples.len());
         pcm.extend(samples[skip..].iter().map(|&s| s as f32 / 32768.0));
     }
     let model = Model::load(model).map_err(|e| format!("Failed to load the speaker model: {e}"))?;

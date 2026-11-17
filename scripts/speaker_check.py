@@ -8,7 +8,9 @@ import wave
 
 DIARIZER = "diar_streaming_sortformer_4spk-v2.1"
 AUDIO = "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2004a/audio/ES2004a.Mix-Headset.wav"
-TRUTH = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/main/only_words/rttms/test/ES2004a.rttm"
+AUDIO_SHA = "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f"
+TRUTH = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/67c2d539286e89f68952d5dcf83912bd9f01dfae/only_words/rttms/test/ES2004a.rttm"
+TRUTH_SHA = "9869c6146c2fd9595403edb36c2caeda65c12ffa2c0af4ce48d6814b673fd5a9"
 SECONDS = 420
 
 
@@ -48,7 +50,7 @@ def main():
     json.dump({"id": wanted, "language": language}, open(os.path.join(home, "speech-model.json"), "w"))
     os.makedirs(out, exist_ok=True)
     whole = os.path.join(out, "whole.wav")
-    fetch(AUDIO, whole)
+    fetch(AUDIO, whole, AUDIO_SHA)
     with wave.open(whole) as source:
         frames = source.readframes(SECONDS * source.getframerate())
         params = source.getparams()
@@ -56,7 +58,7 @@ def main():
         cut.setparams(params)
         cut.writeframes(frames)
     os.remove(whole)
-    fetch(TRUTH, os.path.join(out, "whole.rttm"))
+    fetch(TRUTH, os.path.join(out, "whole.rttm"), TRUTH_SHA)
     rows = []
     for line in open(os.path.join(out, "whole.rttm")):
         fields = line.split()

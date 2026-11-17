@@ -199,6 +199,16 @@ pub fn stitch(previous: &str, segment: &str) -> String {
     if kept.is_empty() {
         return previous.trim_end().to_string();
     }
+    if segment.contains('\n') {
+        let mut rest = segment.trim_start();
+        for _ in 0..dropped {
+            rest = rest
+                .split_once(char::is_whitespace)
+                .map_or("", |(_, after)| after)
+                .trim_start();
+        }
+        return format!("{}\n{}", previous.trim_end(), rest.trim_end());
+    }
     format!("{} {}", previous.trim_end(), kept.join(" "))
 }
 
@@ -303,6 +313,13 @@ mod tests {
     #[test]
     fn an_empty_segment_changes_nothing() {
         assert_eq!(stitch("hello there", ""), "hello there");
+        assert_eq!(
+            stitch(
+                "[Speaker 1] so friday",
+                "[Speaker 2] fine\n[Speaker 1] okay"
+            ),
+            "[Speaker 1] so friday\n[Speaker 2] fine\n[Speaker 1] okay"
+        );
         assert_eq!(stitch("hello there", "   "), "hello there");
     }
 

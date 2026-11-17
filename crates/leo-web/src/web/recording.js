@@ -143,6 +143,7 @@
 
   function create(deps) {
     const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields } = deps;
+    const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
       dismissed: (() => { try { return root.sessionStorage.getItem('leo-record-dismissed'); } catch (e) { return null; } })(),
@@ -363,10 +364,15 @@
 
     function speakersOn() {
       try {
-        return root.localStorage.getItem('leo-label-speakers') === 'on';
-      } catch (e) {
-        return false;
-      }
+        const saved = root.localStorage.getItem('leo-label-speakers');
+        if (saved !== null) return saved === 'on';
+      } catch (e) {}
+      return s.speakers === true;
+    }
+
+    function speakersReady() {
+      const model = s.speakerModel;
+      return Boolean(model && (model.verified || (model.progress && model.progress.state === 'downloading')));
     }
 
     function speakersRow() {
@@ -376,8 +382,8 @@
       const missing = speakersOn() && model && !model.verified;
       const note = !missing ? '' : getting
         ? `Downloading the speaker model… ${Math.floor((100 * job.bytes) / Math.max(1, job.total))}%`
-        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${Math.round(model.size / 1e6)} MB, stays on this computer).`;
-      return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span><input type="checkbox" class="switch" role="switch" id="rec-speakers"${speakersOn() ? ' checked' : ''}></label>`
+        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${Math.round(model.size / 1048576)} MB, stays on this computer).`;
+      return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span>${settingsSwitch('id="rec-speakers"', speakersOn())}</label>`
         + (missing ? `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>` : '');
     }
 
@@ -393,14 +399,20 @@
     function redrawSpeakers(box) {
       const holder = box.querySelector('#rec-speakers-box');
       if (!holder) return;
-      holder.innerHTML = speakersRow();
+      const html = speakersRow();
+      if (holder.dataset.drawn === html) return;
+      const focused = holder.contains(root.document.activeElement) ? root.document.activeElement.id : '';
+      holder.dataset.drawn = html;
+      holder.innerHTML = html;
       const toggle = holder.querySelector('#rec-speakers');
       toggle.addEventListener('change', () => {
+        s.speakers = toggle.checked;
         try {
           root.localStorage.setItem('leo-label-speakers', toggle.checked ? 'on' : 'off');
         } catch (e) {}
         redrawSpeakers(box);
-        holder.querySelector('#rec-speakers').focus();
+        const again = holder.querySelector('#rec-speakers');
+        if (again) again.focus();
       });
       const get = holder.querySelector('#rec-speakers-get');
       if (get) {
@@ -410,6 +422,8 @@
           speakerModel(box);
         });
       }
+      const back = focused && holder.querySelector(`#${focused}`);
+      if (back) back.focus();
     }
 
     function drawIdle(folders, here) {
@@ -805,7 +819,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() });
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() && speakersReady() });
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }

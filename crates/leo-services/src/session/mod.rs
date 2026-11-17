@@ -425,12 +425,12 @@ impl Session {
 
     pub fn assemble(&self) -> Assembled {
         let mut assembled = assemble(&self.segments(), self.manifest.segment_secs);
-        if let Some(spoken) = self.spoken() {
+        if let Some(spoken) = self.labels(&assembled) {
             let segment_ms = self.manifest.segment_secs * 1000;
             for part in &mut assembled.parts {
                 part.text = spoken
                     .iter()
-                    .filter(|s| s.start_ms / segment_ms == part.index as u64)
+                    .filter(|s| speakers::part_of(s, segment_ms) == part.index as u64)
                     .map(|s| format!("[Speaker {}] {}", s.speaker, s.text))
                     .collect::<Vec<_>>()
                     .join("\n");
@@ -440,7 +440,10 @@ impl Session {
     }
 
     pub fn spoken(&self) -> Option<Vec<speakers::Spoken>> {
-        let assembled = assemble(&self.segments(), self.manifest.segment_secs);
+        self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
+    }
+
+    fn labels(&self, assembled: &Assembled) -> Option<Vec<speakers::Spoken>> {
         (assembled.failed.is_empty() && assembled.pending == 0)
             .then(|| speakers::read(&self.dir))
             .flatten()
@@ -470,6 +473,9 @@ impl Session {
         let assembled = self.assemble();
         let keep_audio = !assembled.failed.is_empty() || assembled.pending > 0;
         if keep_audio {
+            for part in &assembled.parts {
+                let _ = std::fs::remove_file(self.dir.join(wav::done_name(part.index)));
+            }
             self.manifest.saved = true;
             self.save()
         } else {
@@ -479,8 +485,8 @@ impl Session {
     }
 
     pub fn archive(&self) -> leo_core::recording::Archive {
-        let assembled = self.assemble();
-        let passages = match self.spoken() {
+        let assembled = assemble(&self.segments(), self.manifest.segment_secs);
+        let passages = match self.labels(&assembled) {
             Some(spoken) => spoken
                 .into_iter()
                 .map(|s| leo_core::recording::Passage {
@@ -604,6 +610,19 @@ mod tests {
         let held = recording.lock().unwrap();
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         drop(held);
+    }
+
+    #[test]
+    fn a_session_kept_for_retry_drops_audio_already_transcribed_and_keeps_the_failed_part() {
+        let (s, _t) = session();
+        let dir = s.dir.clone();
+        std::fs::write(dir.join("seg-00000.txt"), "done").unwrap();
+        wav::write(&dir.join(wav::done_name(0)), &[1, 2, 3]).unwrap();
+        std::fs::write(dir.join("seg-00001.err"), "failed").unwrap();
+        wav::write(&dir.join(wav::done_name(1)), &[1, 2, 3]).unwrap();
+        s.finish().unwrap();
+        assert!(!dir.join(wav::done_name(0)).exists());
+        assert!(dir.join(wav::done_name(1)).exists());
     }
 
     #[test]

@@ -62,6 +62,11 @@ impl Deadlines {
     fn run(&self, samples: usize) -> Duration {
         self.run_floor.max(self.audio(samples))
     }
+
+    fn diarize(&self, samples: usize) -> Duration {
+        self.run_floor
+            + Duration::from_secs_f64(samples as f64 / SAMPLE_RATE * self.audio_factor / 40.0)
+    }
 }
 
 fn ms_to_samples(ms: i64) -> usize {
@@ -820,7 +825,7 @@ impl Owner {
     ) -> Result<Vec<Turn>, EngineError> {
         self.end_stream();
         self.ensure_worker()?;
-        let deadline = self.deadlines().run(samples);
+        let deadline = self.deadlines().diarize(samples);
         match self.call_work(request, None, deadline, epoch) {
             Ok(Response::Turns(turns)) => Ok(turns),
             Ok(other) => Err(unexpected(&other).into()),
@@ -1361,6 +1366,12 @@ mod unit_tests {
         assert_eq!(gpu.audio(16_000 * 5), Duration::from_secs(50));
         assert_eq!(gpu.run(16_000), gpu.run_floor);
         assert_eq!(gpu.run(16_000 * 10), Duration::from_secs(100));
+        let two_hours = 16_000 * 60 * 60 * 2;
+        assert_eq!(gpu.diarize(two_hours), Duration::from_secs(60 + 1_800));
+        assert_eq!(
+            Deadlines::for_device(false).diarize(two_hours),
+            Duration::from_secs(300 + 3_600)
+        );
 
         let cpu = Deadlines::for_device(false);
         assert_eq!(cpu, CPU_DEADLINES);

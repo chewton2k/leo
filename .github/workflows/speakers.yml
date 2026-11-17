@@ -6,6 +6,12 @@ on:
   pull_request:
     paths:
       - crates/leo-services/src/session/speakers.rs
+      - crates/leo-services/src/session/recorder.rs
+      - crates/leo-services/src/session/mod.rs
+      - crates/leo-services/src/speech/catalog.json
+      - crates/leo-services/src/speech/engine.rs
+      - crates/leo-services/src/speech/supervisor.rs
+      - crates/leo-services/src/speech/protocol.rs
       - crates/leo-services/src/speech/worker.rs
       - scripts/speaker_check.py
       - .github/workflows/speakers.yml
@@ -19,6 +25,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: speakers-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: never
   RUST_BACKTRACE: 1
@@ -31,56 +41,21 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        large: [false]
-        model:
-          - parakeet-unified-en-0.6b
-          - nemotron-3.5-asr-streaming-0.6b
-          - canary-180m-flash
-          - whisper-medium
-          - parakeet-ultra
-          - parakeet-tdt-0.6b-v3
-          - parakeet-tdt-0.6b-v2
-          - Qwen3-ASR-0.6B
-          - Fun-ASR-MLT-Nano-2512
-          - canary-1b-v2
-          - Fun-ASR-Nano-2512
-          - granite-speech-5.0-470m-turboctc
-          - medasr
-          - parakeet-tdt_ctc-110m
-          - multitalker-parakeet-streaming-0.6b-v1
-          - Qwen3-ASR-1.7B
-          - SenseVoiceSmall
-          - whisper-small
-          - whisper-large-v3-turbo
-          - Breeze-ASR-25
-          - whisper-large-v3
-        include:
-          - { model: cohere-transcribe-03-2026, large: true }
-          - { model: cohere-transcribe-arabic-07-2026, large: true }
-          - { model: canary-qwen-2.5b, large: true }
-          - { model: granite-speech-4.1-2b, large: true }
-          - { model: Voxtral-Mini-4B-Realtime-2602, large: true }
-          - { model: Voxtral-Mini-3B-2507, large: true }
+        model: ${{ fromJSON(inputs.large && '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3","cohere-transcribe-03-2026","cohere-transcribe-arabic-07-2026","canary-qwen-2.5b","granite-speech-4.1-2b","Voxtral-Mini-4B-Realtime-2602","Voxtral-Mini-3B-2507"]' || 'SM["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3","cohere-transcribe-03-2026","cohere-transcribe-arabic-07-2026","canary-qwen-2.5b","granite-speech-4.1-2b","Voxtral-Mini-4B-Realtime-2602","Voxtral-Mini-3B-2507"]') }}
     env:
-      RUN: ${{ !matrix.large || inputs.large }}
       MODEL: ${{ matrix.model }}
     steps:
       - uses: actions/checkout@v5
-        if: env.RUN == 'true'
       - uses: dtolnay/rust-toolchain@stable
-        if: env.RUN == 'true'
       - uses: Swatinem/rust-cache@v2
-        if: env.RUN == 'true'
         with:
-          save-if: false
+          shared-key: speakers
+          save-if: ${{ github.event_name == 'schedule' }}
       - name: Download the model, the speaker model and a meeting
-        if: env.RUN == 'true'
         run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL" "$RUNNER_TEMP/meeting"
       - name: Build the speech worker
-        if: env.RUN == 'true'
         run: cargo test -p leo-host --no-run --locked
       - name: Label a seven-minute meeting
-        if: env.RUN == 'true'
         env:
           LEO_HOME: ${{ runner.temp }}/home
           LEO_SPEAKER_AUDIO: ${{ runner.temp }}/meeting/meeting.wav

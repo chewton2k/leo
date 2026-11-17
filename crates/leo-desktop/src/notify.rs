@@ -6,6 +6,9 @@ use tauri_plugin_notification::NotificationExt;
 const OFFER_FOR: Duration = Duration::from_secs(10 * 60);
 
 pub fn listen(app: &AppHandle) {
+    if cfg!(target_os = "macos") {
+        return;
+    }
     let handle = app.clone();
     let _ = app.notification().on_action(move |performed| {
         let extra = |name: &str| {
@@ -49,7 +52,15 @@ const BODY: &str = "Click to open Record, ready to record it.";
 #[cfg(target_os = "macos")]
 fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime) {
     use mac_usernotifications::{block_on, blocking, Notification};
-    if !matches!(blocking::request_auth(), Ok(true)) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static ASKING: AtomicBool = AtomicBool::new(false);
+    if crate::permissions::notifications() == Some("denied") || ASKING.swap(true, Ordering::AcqRel)
+    {
+        return;
+    }
+    let allowed = matches!(blocking::request_auth(), Ok(true));
+    ASKING.store(false, Ordering::Release);
+    if !allowed {
         return;
     }
     let Ok(left) = until.duration_since(std::time::SystemTime::now()) else {

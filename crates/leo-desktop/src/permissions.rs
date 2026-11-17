@@ -252,7 +252,14 @@ pub fn notifications() -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
         use mac_usernotifications::AuthorizationStatus::*;
-        let settings = mac_usernotifications::blocking::get_notification_settings().ok()?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(mac_usernotifications::blocking::get_notification_settings());
+        });
+        let settings = rx
+            .recv_timeout(std::time::Duration::from_millis(500))
+            .ok()?
+            .ok()?;
         Some(match settings.authorization_status {
             Authorized | Provisional | Ephemeral => "allowed",
             NotDetermined => "not_requested",
@@ -276,7 +283,11 @@ pub fn request_notifications(app: &tauri::AppHandle) -> anyhow::Result<()> {
                 "System Settings could not be opened. Open System Settings → Notifications and turn on Leo.",
             );
         }
-        std::thread::spawn(mac_usernotifications::blocking::request_auth);
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(mac_usernotifications::blocking::request_auth());
+        });
+        let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app;
