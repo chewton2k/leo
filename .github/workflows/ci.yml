@@ -257,10 +257,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: cargo +1.88 check --workspace --exclude leo-desktop --all-targets --locked
       - name: Compile for Intel Macs
-        if: ${{ !cancelled() && github.event_name != 'schedule' && github.event_name != 'workflow_dispatch' }}
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         run: cargo check --locked --target x86_64-apple-darwin
       - name: Build the release for Intel Macs
-        if: ${{ !cancelled() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') }}
+        if: ${{ !cancelled() && github.event_name != 'pull_request' }}
         run: cargo build --release --locked --target x86_64-apple-darwin
 
   ci:

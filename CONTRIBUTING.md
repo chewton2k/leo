@@ -144,8 +144,10 @@ queue runs and the weekly run (Mondays, 09:23 UTC) select every check.
 Chromium runs in three shards and WebKit in two; the first Chromium shard also
 runs the phone test. All five jobs download the same test-server artifact built
 once earlier in that run, and each installs only its own browser. Clippy, the
-Rust 1.88 check and the Intel Mac compile check share one macOS job; the full
-Intel release build runs in the weekly and manual runs and at release. A run
+Rust 1.88 check and the Intel Mac check share one macOS job: a pull request
+compile-checks the Intel target, and every other run (a push to main, the merge
+queue, the weekly and manual runs) builds its release, so a release never starts
+from a commit whose Intel build fails. A run
 starts eight macOS jobs and needs at most five at once, the number GitHub runs
 for this repository, so jobs do not wait on each other. Each job has a timeout. Pull
 requests restore Rust caches from main without uploading another copy; browser
