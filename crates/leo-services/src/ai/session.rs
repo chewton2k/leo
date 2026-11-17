@@ -376,13 +376,19 @@ pub fn open(
                         schema: t.schema.clone(),
                     })
                     .collect();
-                let session = if offered.is_empty() {
-                    agent.claude_session(systems.text).ok()?
+                let started = if offered.is_empty() {
+                    agent.claude_session(systems.text)
                 } else {
                     agent
                         .claude_native(systems.native, offered)
                         .or_else(|_| agent.claude_session(systems.text))
-                        .ok()?
+                };
+                let session = match started {
+                    Ok(session) => session,
+                    Err(e) => {
+                        leo_core::diag::warn(format!("claude code native session: {e}"));
+                        continue;
+                    }
                 };
                 return Some(Box::new(ClaudeTalk {
                     sent: schemas
@@ -619,6 +625,40 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("That did not work: the arguments were not a JSON object"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_code_that_cannot_start_falls_through_to_the_next_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("claude");
+        std::fs::write(&bin, "not a program").unwrap();
+        let (url, _) = serve(Vec::new());
+        let mut cfg = Config::default();
+        cfg.chat.chain = vec!["claude_code".into(), "ollama".into()];
+        cfg.providers.insert(
+            "claude_code".into(),
+            ProviderConfig {
+                kind: Some(ProviderKind::ClaudeCode),
+                bin: Some(bin.to_string_lossy().to_string()),
+                ..Default::default()
+            },
+        );
+        cfg.providers.insert(
+            "ollama".into(),
+            ProviderConfig {
+                kind: Some(ProviderKind::Openai),
+                base_url: Some(url),
+                model: Some("llama3.2".into()),
+                ..Default::default()
+            },
+        );
+        let systems = Systems {
+            native: "n",
+            text: "t",
+        };
+        assert!(open(&cfg, &MemoryStore::default(), &systems, &[]).is_some());
+        assert!(open(&cfg, &MemoryStore::default(), &systems, &tools()).is_some());
     }
 
     #[test]

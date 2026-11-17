@@ -320,7 +320,7 @@ discovery is bounded and fails closed (shell control and hooks included). CLI
 probes, native turns and text runs share one process-group watchdog covering
 stdin, stdout EOF, exit and pipe joins. Bridge request reads keep partial bodies
 across polling timeouts and check cancellation on Windows and Unix. A failed
-native start is logged through `diag` and shown in Health ("Felix and Codex"). Tests use
+native start is logged through `diag` and the next provider is tried; Codex's is also shown in Health ("Felix and Codex"). Tests use
 local fake servers, never paid APIs.
 
 ### What an answer used (`ai/spend.rs`)
