@@ -37,7 +37,7 @@ fn listed<'de, D: serde::Deserializer<'de>>(to: D) -> Result<Vec<String>, D::Err
     }
     Ok(match Option::<Keep>::deserialize(to)? {
         Some(Keep::One(id)) => vec![id],
-        Some(Keep::Many(ids)) => ids,
+        Some(Keep::Many(ids)) => ids.into_iter().take(2 * margin::MOST_OPEN).collect(),
         None => Vec::new(),
     })
 }

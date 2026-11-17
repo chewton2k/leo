@@ -778,6 +778,76 @@ async fn a_full_margin_that_cannot_store_the_new_note_keeps_the_oldest_open() {
 }
 
 #[tokio::test]
+async fn a_full_margin_whose_chosen_oldest_note_was_pinned_since_keeps_everything() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, _) = engine.note("Pinned since", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let reads = &engine.running.state.margin;
+    let fresh = margin::new_thread(&id, "read", nowhere(), "fresh", untouched());
+    let victim = margin::free_oldest(&engine.chats(), reads, &id, &[]);
+    assert_eq!(victim.as_ref().map(|(t, _)| &t.id), Some(&ids[0]));
+    assert!(margin::set_pinned(&engine.chats(), &id, &ids[0], true).is_some());
+    let swap = margin::put_replacing(&engine.chats(), reads, &fresh, &[], &[], victim, most);
+    assert!(matches!(swap, margin::Swap::Failed));
+    assert_eq!(open_ids(&engine, &id).await, ids);
+    assert!(margin::one(&engine.chats(), &id, &fresh.id).is_none());
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn a_full_margin_of_notes_to_keep_still_swaps_the_reworded_one() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("All kept", NOW).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most - 1, most);
+    for held in &ids {
+        assert!(margin::set_pinned(&engine.chats(), &id, held, true).is_some());
+    }
+    let old = old_note(
+        &engine,
+        &id,
+        WAS,
+        "then login simply checks if it matches.",
+        "read",
+        untouched(),
+    );
+    let reply = read_changed(
+        &engine,
+        &id,
+        serde_json::json!({ "version": version, "blocks": [NOW], "changed": [{ "id": old, "text": REWORDED }] }),
+    )
+    .await;
+    assert!(reply["note"].is_object(), "{reply}");
+    assert_eq!(reply["resolved"], serde_json::json!([old]));
+    let open = open_ids(&engine, &id).await;
+    assert_eq!(open.len(), most);
+    assert!(ids.iter().all(|kept| open.contains(kept)) && !open.contains(&old));
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn only_the_first_notes_of_a_long_keep_list_are_kept() {
+    let (engine, _) = reading(SAYS).await;
+    let (id, version) = engine.note("Long keep", PASSAGE).await;
+    let most = 2 * margin::MOST_OPEN;
+    let ids = fill(&engine, &id, "ask", most, most);
+    let keep: Vec<String> = (0..most)
+        .map(|n| format!("none {n}"))
+        .chain([ids[0].clone()])
+        .collect();
+    let (status, read) = engine
+        .post(
+            &format!("/api/notes/{id}/margin/read"),
+            serde_json::json!({ "version": version, "blocks": [PASSAGE], "keep": keep }),
+        )
+        .await;
+    assert_eq!(status, 200, "{read}");
+    assert_eq!(read["resolved"], serde_json::json!([ids[0]]));
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn a_full_margin_frees_the_oldest_when_the_reworded_note_went_elsewhere() {
     let (engine, _) = reading(SAYS).await;
     let (id, _) = engine.note("Elsewhere", NOW).await;
