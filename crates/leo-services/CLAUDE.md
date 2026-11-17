@@ -255,7 +255,7 @@ availability and sign-in use the same normalized `AgentCli::bin`.
 ### Plan limits (`usage.rs`)
 
 `<config>/usage.json` keeps the latest `Usage` (5h/7d `Window`, `seen_at`) per
-provider. Claude Code's come free with every answer (`rate_limit_event` →
+provider (saved one at a time; an unchanged reading under a minute old is not rewritten). Claude Code's come free with every answer (`rate_limit_event` →
 `from_claude`, saved even when the request failed); never send a request just to
 check, except `refresh_claude` on an explicit Refresh (`POST /api/settings/usage`
 with `{ "claude": true }`; `{}` reads Codex only): one tiny request on the first
