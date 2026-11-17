@@ -731,6 +731,187 @@ fn the_real_speaker_model_downloads_from_hugging_face_and_verifies() {
     );
 }
 
+fn gguf_values_named(bytes: &[u8], wanted: &str) -> Option<Vec<(String, String)>> {
+    fn take<'a>(bytes: &'a [u8], at: &mut usize, n: usize) -> Option<&'a [u8]> {
+        let got = bytes.get(*at..at.checked_add(n)?)?;
+        *at += n;
+        Some(got)
+    }
+    fn number(bytes: &[u8], at: &mut usize, n: usize) -> Option<u64> {
+        let mut buf = [0u8; 8];
+        buf[..n].copy_from_slice(take(bytes, at, n)?);
+        Some(u64::from_le_bytes(buf))
+    }
+    fn text(bytes: &[u8], at: &mut usize) -> Option<String> {
+        let len = number(bytes, at, 8)? as usize;
+        Some(String::from_utf8_lossy(take(bytes, at, len)?).into_owned())
+    }
+    fn value(bytes: &[u8], at: &mut usize, kind: u64) -> Option<String> {
+        let width = |kind| match kind {
+            0 | 1 | 7 => Some(1),
+            2 | 3 => Some(2),
+            4..=6 => Some(4),
+            10..=12 => Some(8),
+            _ => None,
+        };
+        match kind {
+            8 => text(bytes, at),
+            9 => {
+                let inner = number(bytes, at, 4)?;
+                let count = number(bytes, at, 8)?;
+                for _ in 0..count {
+                    value(bytes, at, inner)?;
+                }
+                Some("[array]".into())
+            }
+            _ => {
+                let n = width(kind)?;
+                Some(number(bytes, at, n)?.to_string())
+            }
+        }
+    }
+    let mut at = 0;
+    if take(bytes, &mut at, 4)? != b"GGUF" {
+        return None;
+    }
+    number(bytes, &mut at, 4)?;
+    number(bytes, &mut at, 8)?;
+    let pairs = number(bytes, &mut at, 8)?;
+    let mut found = Vec::new();
+    for _ in 0..pairs {
+        let key = text(bytes, &mut at)?;
+        let kind = number(bytes, &mut at, 4)?;
+        let held = value(bytes, &mut at, kind)?;
+        if key.contains(wanted) {
+            found.push((key, held));
+        }
+    }
+    Some(found)
+}
+
+#[test]
+fn the_gguf_reader_finds_the_number_of_mel_bins() {
+    let mut file = b"GGUF".to_vec();
+    file.extend(3u32.to_le_bytes());
+    file.extend(0u64.to_le_bytes());
+    file.extend(3u64.to_le_bytes());
+    let key = |file: &mut Vec<u8>, name: &str| {
+        file.extend((name.len() as u64).to_le_bytes());
+        file.extend(name.as_bytes());
+    };
+    key(&mut file, "general.name");
+    file.extend(8u32.to_le_bytes());
+    key(&mut file, "sortformer");
+    key(&mut file, "tokens");
+    file.extend(9u32.to_le_bytes());
+    file.extend(8u32.to_le_bytes());
+    file.extend(2u64.to_le_bytes());
+    key(&mut file, "a");
+    key(&mut file, "bc");
+    key(&mut file, "sortformer.fe_num_mels");
+    file.extend(4u32.to_le_bytes());
+    file.extend(128u32.to_le_bytes());
+    assert_eq!(
+        gguf_values_named(&file, "fe_num_mels"),
+        Some(vec![("sortformer.fe_num_mels".into(), "128".into())])
+    );
+    assert_eq!(gguf_values_named(b"nope", "x"), None);
+}
+
+#[cfg(unix)]
+fn speech_worker_kilobytes() -> u64 {
+    let Some(owned) = leo_core::children::owned() else {
+        return 0;
+    };
+    owned
+        .iter()
+        .filter(|p| {
+            p.args
+                .split_whitespace()
+                .any(|a| a == leo_core::children::WORKER_FLAG)
+        })
+        .filter_map(|p| {
+            let out = std::process::Command::new("ps")
+                .args(["-o", "rss=", "-p", &p.pid.to_string()])
+                .output()
+                .ok()?;
+            String::from_utf8_lossy(&out.stdout)
+                .trim()
+                .parse::<u64>()
+                .ok()
+        })
+        .sum()
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "needs LEO_HOME with a chosen speech model; downloads the speaker model and runs a two-hour pass"]
+fn the_speaker_pass_stays_in_memory_bounds_at_two_hours() {
+    use crate::session::wav;
+    let selected = super::library::library().unwrap().selected().unwrap();
+    println!("speech model {} {}", selected.id, selected.language);
+    let speaker_model = super::library::library()
+        .unwrap()
+        .ensure_speaker_model(
+            &|| super::library::library()?.download(DIARIZER),
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+    let mels = std::fs::read(&speaker_model)
+        .ok()
+        .and_then(|bytes| gguf_values_named(&bytes, "num_mels"));
+    println!("speaker model mel bins: {mels:?}");
+    let dir = tempfile::tempdir().unwrap();
+    let part_secs = 300usize;
+    let lead = crate::session::OVERLAP_SECS as usize;
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let mut parts = Vec::new();
+    for index in 0..24u32 {
+        let extra = if index == 0 { 0 } else { lead };
+        let noise: Vec<i16> = (0..(part_secs + extra) * wav::RATE as usize)
+            .map(|_| {
+                state ^= state << 13;
+                state ^= state >> 7;
+                state ^= state << 17;
+                ((state >> 40) as i64 % 6001 - 3000) as i16
+            })
+            .collect();
+        let path = dir.path().join(wav::done_name(index));
+        wav::write(&path, &noise).unwrap();
+        parts.push((path, (extra * 1000) as u64));
+    }
+    let engine = super::engine::engine();
+    let before = speech_worker_kilobytes();
+    let peak = Arc::new(std::sync::atomic::AtomicU64::new(before));
+    let done = Arc::new(AtomicBool::new(false));
+    let sampler = {
+        let (peak, done) = (peak.clone(), done.clone());
+        std::thread::spawn(move || {
+            while !done.load(Ordering::Acquire) {
+                peak.fetch_max(speech_worker_kilobytes(), Ordering::AcqRel);
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+        })
+    };
+    let started = std::time::Instant::now();
+    let turns = engine.diarize(parts, &AtomicBool::new(false), &|_, _| {});
+    done.store(true, Ordering::Release);
+    sampler.join().unwrap();
+    let peak = peak.load(Ordering::Acquire);
+    println!(
+        "speaker pass at two hours: peak speech worker {} MiB (before the pass {} MiB), {:.1}s, {} turns, result ok: {}",
+        peak >> 10,
+        before >> 10,
+        started.elapsed().as_secs_f64(),
+        turns.as_ref().map_or(0, |t| t.len()),
+        turns.is_ok()
+    );
+    turns.unwrap();
+    assert!(peak > 0, "the speech worker was never seen");
+    assert!(peak < 1 << 20, "the speaker pass peaked over 1 GiB");
+}
+
 fn library_over(models: &std::path::Path, root: &std::path::Path) -> Library {
     let mut data = catalog().clone();
     data.models.retain(|m| m.id == "parakeet-tdt-0.6b-v3");
