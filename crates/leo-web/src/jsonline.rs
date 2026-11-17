@@ -54,7 +54,6 @@ pub(crate) fn read_file<T: Line>(chats: &Path, path: &Path) -> Option<T> {
 }
 
 pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> {
-    use std::io::Write;
     anyhow::ensure!(valid_id(item.id()), "That id is not valid.");
     let dir = checked_dir(chats, T::DIR)?;
     std::fs::create_dir_all(&dir)?;
@@ -64,17 +63,7 @@ pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> 
         "That is too large to save. Shorten its description and try again."
     );
     let path = file_path(chats, T::DIR, &format!("{}.json", item.id()))?;
-    // Keep temporary files hidden beside their destination.
-    let mut temp = tempfile::Builder::new()
-        .prefix(".")
-        .suffix(".tmp")
-        .tempfile_in(&dir)?;
-    temp.write_all(line.as_bytes())?;
-    temp.as_file().sync_all()?;
-    temp.persist(&path).map_err(|e| e.error)?;
-    #[cfg(unix)]
-    let _ = std::fs::File::open(&dir).and_then(|d| d.sync_all());
-    Ok(())
+    leo_core::paths::write_atomic(&path, line)
 }
 
 /// Every file of one kind, tombstones included. A file counts only when its
@@ -175,6 +164,20 @@ mod tests {
             .collect();
         text.push_str(tail);
         std::fs::write(path, text).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_save_whose_folder_cannot_be_flushed_reports_an_error() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let folder = checked_dir(&chats, "items").unwrap();
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o300)).unwrap();
+        let saved = write_file(&chats, &item("Saved", Utc::now(), false));
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(saved.is_err());
     }
 
     #[test]

@@ -175,16 +175,20 @@ fn account(id: &str) -> String {
 }
 
 fn read<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
+    use std::io::Read;
+    let Ok(file) = leo_core::paths::open_regular(path) else {
         return T::default();
     };
-    if !meta.is_file() || meta.len() > MOST_BYTES * 4 {
+    let mut bytes = Vec::new();
+    if file
+        .take(MOST_BYTES * 4 + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MOST_BYTES * 4
+    {
         return T::default();
     }
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
 pub fn link_of(text: &str) -> Result<String> {
@@ -782,6 +786,18 @@ pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_calendar_file_reads_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.json");
+        std::fs::write(&real, r#"{"kept":true}"#).unwrap();
+        let link = dir.path().join("calendars.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(read::<serde_json::Value>(&real)["kept"].as_bool().unwrap());
+        assert!(read::<serde_json::Value>(&link).is_null());
+    }
 
     #[derive(Default)]
     pub(crate) struct Fake {
