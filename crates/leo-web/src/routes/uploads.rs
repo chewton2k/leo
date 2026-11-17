@@ -828,10 +828,7 @@ pub(crate) async fn list_originals(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let Some(folder) = originals_dir(&notes_dir, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
@@ -894,10 +891,7 @@ pub(crate) async fn get_original(
     Path((id, name)): Path<(String, String)>,
     Query(how): Query<OriginalView>,
 ) -> Response {
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let read = {
         let (id, name) = (id.clone(), name.clone());
         tokio::task::spawn_blocking(move || read_original(&notes_dir, &id, &name)).await

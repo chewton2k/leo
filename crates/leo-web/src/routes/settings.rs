@@ -21,10 +21,7 @@ async fn settings_page(state: AppState, note: Option<String>) -> Response {
     let Some(settings) = state.settings.clone() else {
         return no_settings();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let usage = std::sync::Arc::clone(&state.usage);
     let described = tokio::task::spawn_blocking(move || {
         let mut page = settings.describe(&notes_dir);
@@ -91,10 +88,7 @@ pub(crate) async fn change_setting(
     let Some(settings) = state.settings.clone() else {
         return no_settings();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let warm = std::sync::Arc::clone(&state.warm);
     let usage = std::sync::Arc::clone(&state.usage);
     let done = tokio::task::spawn_blocking(move || {

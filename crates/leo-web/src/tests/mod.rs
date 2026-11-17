@@ -62,6 +62,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         .collect();
     store.save().unwrap();
     let graphs = Arc::new(graph::Graphs::for_notes(&store.notes_dir, None));
+    let notes_dir = store.notes_dir.clone();
     let state = AppState {
         powers: Powers {
             lighter: Some(Arc::new(|| true)),
@@ -98,6 +99,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         calendar: Default::default(),
         source_writing: Default::default(),
         chats: dir.path().join("chats"),
+        notes_dir,
         captions: Arc::new(captions::Captions::at(dir.path().join("captions.json"))),
         originals: Default::default(),
         activity: Default::default(),

@@ -390,9 +390,7 @@ pub(crate) async fn offer_to_record(state: AppState) {
     every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         every.tick().await;
-        let Ok(notes) = notes_of(&state).await else {
-            continue;
-        };
+        let notes = state.notes_dir.clone();
         let live = crate::record::live(&state.recording);
         let calendar = Arc::clone(&state.calendar);
         let access = state.calendar_access.clone();
@@ -432,10 +430,6 @@ fn forget_old_google(notes: &Path, access: &dyn crate::CalendarAccess) {
     }
 }
 
-async fn notes_of(state: &AppState) -> Result<PathBuf, StatusCode> {
-    state.read_store(|s| Ok(s.notes_dir.clone())).await
-}
-
 struct Busy(Arc<AtomicBool>);
 
 impl Busy {
@@ -451,10 +445,7 @@ impl Drop for Busy {
 }
 
 pub(crate) async fn get(State(state): State<AppState>) -> Response {
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let now = Utc::now();
     if let Some(access) = state.calendar_access.clone() {
         let old = notes.clone();
@@ -503,10 +494,7 @@ pub(crate) async fn add(State(state): State<AppState>, Json(body): Json<Add>) ->
         Ok(link) => link,
         Err(e) => return error(StatusCode::BAD_REQUEST, e),
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return error(
             StatusCode::CONFLICT,
@@ -569,10 +557,7 @@ pub(crate) async fn remove(
             "Calendars are not available in this copy of leo.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return error(
             StatusCode::CONFLICT,
@@ -615,10 +600,7 @@ pub(crate) async fn refresh_now(State(state): State<AppState>) -> Response {
             "Calendars are not available in this copy of leo.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return match tokio::task::spawn_blocking(move || {
@@ -654,10 +636,7 @@ pub(crate) struct Change {
 }
 
 pub(crate) async fn change(State(state): State<AppState>, Json(body): Json<Change>) -> Response {
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
     let busy = state.calendar.busy.load(Ordering::Acquire);
     let done = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
@@ -720,10 +699,7 @@ pub(crate) async fn schedule(
             "Ask for at most six weeks, within a year of today.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let live = matches!(window.live.as_deref(), Some("1" | "true"));
     let wait = if live {
         LIVE_MINUTES

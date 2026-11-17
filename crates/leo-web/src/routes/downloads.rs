@@ -115,10 +115,7 @@ pub(crate) async fn export_zip(
     State(state): State<AppState>,
     Query(parts): Query<export::Parts>,
 ) -> Response {
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let chats = state.chats.clone();
     zip_download(
         Arc::clone(&state.zip_slots),

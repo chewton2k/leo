@@ -822,10 +822,7 @@ fn schedule(state: &AppState, call: &Call) -> Done {
         Ok(all) => all,
         Err(why) => return fail(step, why),
     };
-    let notes = match store_now(state, |store| Ok(store.notes_dir.clone())) {
-        Ok(n) => n,
-        Err(_) => return fail(step, "leo could not read the notes"),
-    };
+    let notes = state.notes_dir.clone();
     let events = state.calendar.events(&notes, start, end);
     let task_line = |t: &Listed| {
         let from = t

@@ -531,15 +531,12 @@ fn run(
     let source = recorded.source;
     let commit = recorded.commit;
     if let Some(source) = &source {
-        let archived = store_now(&state, |store| Ok(store.notes_dir.clone())).and_then(|notes| {
-            let save = if recovering {
-                leo_core::recording::save_merged
-            } else {
-                leo_core::recording::save
-            };
-            save(&notes, &source.id, source).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        });
-        if archived.is_err() {
+        let save = if recovering {
+            leo_core::recording::save_merged
+        } else {
+            leo_core::recording::save
+        };
+        if save(&state.notes_dir, &source.id, source).is_err() {
             change(&recordings, &id, |job| {
                 job.view.state = "failed";
                 job.view.error = Some("The recording sources could not be saved. Check free disk space and recover this recording.".into());
@@ -882,15 +879,7 @@ pub(crate) async fn snapshot(
 ) -> Response {
     use base64::Engine;
     writes_done(&state, &id).await;
-    let notes = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(notes) => notes,
-        Err(code) => {
-            return error(
-                code,
-                "The screenshot folder could not be opened. Try again.",
-            )
-        }
-    };
+    let notes = state.notes_dir.clone();
     let input = with_job(&state, &id, |job| -> anyhow::Result<_> {
         anyhow::ensure!(
             job.live() && job.view.points.len() < MOST_POINTS,

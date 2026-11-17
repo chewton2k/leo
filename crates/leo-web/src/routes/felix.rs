@@ -1150,10 +1150,7 @@ pub(crate) async fn original_passage(
     let Some(reader) = state.reader.clone() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let originals = Arc::clone(&state.originals);
     let found = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, StatusCode> {
         let path =

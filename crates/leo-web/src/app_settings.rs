@@ -88,10 +88,7 @@ pub(crate) async fn change(
     call(state.app_settings.clone(), Some(value), None, None).await
 }
 pub(crate) async fn health(State(state): State<AppState>) -> Response {
-    let notes = match state.read_store(|s| Ok(s.notes_dir.clone())).await {
-        Ok(notes) => notes,
-        Err(status) => return status.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     call(
         state.app_settings.clone(),
         None,
