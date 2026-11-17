@@ -56,10 +56,10 @@ async fn call(
             }
             Ok(view)
         } else {
-            if let Some(change) = change {
-                api.change(change)?;
+            match change {
+                Some(change) => api.change(change),
+                None => api.view(),
             }
-            api.view()
         }
     })
     .await
@@ -105,9 +105,13 @@ pub(crate) async fn health(State(state): State<AppState>) -> Response {
 mod tests {
     use super::*;
     #[derive(Default)]
-    struct Fake(std::sync::Mutex<Vec<serde_json::Value>>);
+    struct Fake(
+        std::sync::Mutex<Vec<serde_json::Value>>,
+        std::sync::atomic::AtomicUsize,
+    );
     impl AppApi for Fake {
         fn view(&self) -> anyhow::Result<serde_json::Value> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(serde_json::json!({"automatic_updates":true,"install_on_quit":true}))
         }
         fn change(&self, value: serde_json::Value) -> anyhow::Result<serde_json::Value> {
@@ -178,6 +182,18 @@ mod tests {
                 .status(),
             axum::http::StatusCode::OK
         );
+    }
+
+    #[tokio::test]
+    async fn an_app_change_builds_the_view_once() {
+        let fake = std::sync::Arc::new(Fake::default());
+        let api = Some(fake.clone() as std::sync::Arc<dyn AppApi>);
+        let asked = serde_json::json!({"action":"check_updates"});
+        assert_eq!(
+            call(api, Some(asked), None, None).await.status(),
+            axum::http::StatusCode::OK
+        );
+        assert_eq!(fake.1.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
