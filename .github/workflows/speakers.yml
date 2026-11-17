@@ -60,6 +60,7 @@ jobs:
           LEO_HOME: ${{ runner.temp }}/home
           LEO_SPEAKER_AUDIO: ${{ runner.temp }}/meeting/meeting.wav
           LEO_SPEAKER_TRUTH: ${{ runner.temp }}/meeting/meeting.rttm
+          LEO_SPEAKER_WORDS: ${{ runner.temp }}/meeting/meeting.txt
         shell: bash
         run: |
           export LEO_TRANSCRIBE_WORKER_EXE="$PWD/target/debug/leo-test-server"

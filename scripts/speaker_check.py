@@ -5,12 +5,16 @@ import os
 import sys
 import urllib.request
 import wave
+import xml.etree.ElementTree as ET
+import zipfile
 
 DIARIZER = "diar_streaming_sortformer_4spk-v2.1"
 AUDIO = "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus/ES2004a/audio/ES2004a.Mix-Headset.wav"
 AUDIO_SHA = "3e2560b19bee6952c7c7ce041b0f1ea8a7ea9468044c4eea79d2a2c67e24ab0f"
 TRUTH = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/67c2d539286e89f68952d5dcf83912bd9f01dfae/only_words/rttms/test/ES2004a.rttm"
 TRUTH_SHA = "9869c6146c2fd9595403edb36c2caeda65c12ffa2c0af4ce48d6814b673fd5a9"
+WORDS = "https://groups.inf.ed.ac.uk/ami/AMICorpusAnnotations/ami_public_manual_1.6.2.zip"
+WORDS_SHA = "b56e5babb2496b8795deeeda7e71178d7fbc9963f94276cf2a3f4b56ebbc9f9d"
 SECONDS = 420
 
 
@@ -67,6 +71,17 @@ def main():
             fields[4] = f"{min(start + float(fields[4]), SECONDS) - start:.3f}"
             rows.append(" ".join(fields))
     open(os.path.join(out, "meeting.rttm"), "w").write("\n".join(rows) + "\n")
+    annotations = os.path.join(out, "words.zip")
+    fetch(WORDS, annotations, WORDS_SHA)
+    said = []
+    with zipfile.ZipFile(annotations) as archive:
+        for speaker in "ABCD":
+            for word in ET.fromstring(archive.read(f"words/ES2004a.{speaker}.words.xml")):
+                start = word.get("starttime")
+                if word.tag == "w" and start and float(start) < SECONDS and not word.get("punc") and not word.get("trunc"):
+                    said.append((float(start), word.text))
+    os.remove(annotations)
+    open(os.path.join(out, "meeting.txt"), "w").write(" ".join(text for _, text in sorted(said)) + "\n")
 
 
 if __name__ == "__main__":

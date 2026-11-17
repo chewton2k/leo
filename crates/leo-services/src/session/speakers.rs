@@ -584,6 +584,47 @@ mod tests {
         assert_eq!(read(dir.path()), Some(spoken));
     }
 
+    fn spoken_words(text: &str) -> Vec<String> {
+        const FILLERS: [&str; 11] = [
+            "hmm", "mm", "mmm", "um", "uh", "ah", "eh", "er", "erm", "huh", "uhm",
+        ];
+        text.to_lowercase()
+            .replace('-', " ")
+            .split_whitespace()
+            .map(|w| {
+                w.chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '\'')
+                    .collect::<String>()
+            })
+            .filter(|w| !w.is_empty() && !FILLERS.contains(&w.as_str()))
+            .collect()
+    }
+
+    fn word_errors(said: &[String], heard: &[String]) -> f64 {
+        let mut row: Vec<usize> = (0..=heard.len()).collect();
+        for (i, a) in said.iter().enumerate() {
+            let mut diagonal = row[0];
+            row[0] = i + 1;
+            for (j, b) in heard.iter().enumerate() {
+                let next = (row[j + 1] + 1)
+                    .min(row[j] + 1)
+                    .min(diagonal + usize::from(a != b));
+                diagonal = row[j + 1];
+                row[j + 1] = next;
+            }
+        }
+        row[heard.len()] as f64 / said.len().max(1) as f64
+    }
+
+    #[test]
+    fn word_errors_count_substitutions_insertions_and_deletions_over_the_reference() {
+        let said = spoken_words("Hmm, so we start-up on Friday.");
+        assert_eq!(said, ["so", "we", "start", "up", "on", "friday"]);
+        assert_eq!(word_errors(&said, &said), 0.0);
+        let heard = spoken_words("so we start on a Friday then");
+        assert!((word_errors(&said, &heard) - 3.0 / 6.0).abs() < 1e-9);
+    }
+
     fn best_match(spans: &[(String, u8, u64)]) -> u64 {
         let refs: Vec<String> = spans
             .iter()
@@ -634,6 +675,12 @@ mod tests {
         let audio =
             std::env::var("LEO_SPEAKER_AUDIO").expect("LEO_SPEAKER_AUDIO: a 16 kHz mono WAV");
         let truth = std::env::var("LEO_SPEAKER_TRUTH").expect("LEO_SPEAKER_TRUTH: its RTTM");
+        let said = spoken_words(
+            &std::fs::read_to_string(
+                std::env::var("LEO_SPEAKER_WORDS").expect("LEO_SPEAKER_WORDS: its words"),
+            )
+            .unwrap(),
+        );
         let selected = crate::speech::library::library()
             .unwrap()
             .selected()
@@ -668,7 +715,7 @@ mod tests {
                     crate::speech::engine::Priority::Segment,
                     Vec::new(),
                 )
-                .map_err(|e| e.to_string())
+                .map_err(|e| format!("{e:#}"))
         };
         let started = std::time::Instant::now();
         let spoken = label(
@@ -686,18 +733,22 @@ mod tests {
         )
         .unwrap();
         let took = started.elapsed().as_secs_f64();
-        let plain: usize = (0..parts)
+        let plain_text = (0..parts)
             .map(|i| {
-                transcribe(&dir.path().join(wav::done_name(i)))
-                    .unwrap()
-                    .split_whitespace()
-                    .count()
+                let part = dir.path().join(wav::done_name(i));
+                transcribe(&part).or_else(|_| transcribe(&part)).unwrap()
             })
-            .sum();
-        let words: usize = spoken
+            .collect::<Vec<_>>()
+            .join(" ");
+        let labelled_text = spoken
             .iter()
-            .map(|s| s.text.split_whitespace().count())
-            .sum();
+            .map(|s| s.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let plain = plain_text.split_whitespace().count();
+        let words = labelled_text.split_whitespace().count();
+        let plain_wer = word_errors(&said, &spoken_words(&plain_text));
+        let wer = word_errors(&said, &spoken_words(&labelled_text));
         let mut spans = Vec::new();
         let mut total = 0;
         for line in std::fs::read_to_string(&truth).unwrap().lines() {
@@ -716,7 +767,7 @@ mod tests {
         let right = best_match(&spans) as f64 / covered.max(1) as f64;
         let kept = words as f64 / plain.max(1) as f64;
         println!(
-            "speakers_across_models model={} minutes={:.1} speakers={} right={:.1}% heard={:.1}% words={} plain_words={} kept={:.1}% labelling_s={:.1}",
+            "speakers_across_models model={} minutes={:.1} speakers={} right={:.1}% heard={:.1}% words={} plain_words={} kept={:.1}% wer={:.1}% plain_wer={:.1}% labelling_s={:.1}",
             selected.id,
             samples.len() as f64 / wav::RATE as f64 / 60.0,
             spoken.iter().map(|s| s.speaker).max().unwrap_or(0),
@@ -725,11 +776,16 @@ mod tests {
             words,
             plain,
             kept * 100.0,
+            wer * 100.0,
+            plain_wer * 100.0,
             took
         );
         assert!(right >= 0.80, "speaker attribution {right:.3}");
         let heard = covered as f64 / total.max(1) as f64;
         assert!(heard >= 0.75, "speech with text {heard:.3}");
-        assert!(kept >= 0.95, "words kept {kept:.3}");
+        assert!(
+            wer <= plain_wer + 0.05,
+            "labelled word errors {wer:.3} against {plain_wer:.3} without labels"
+        );
     }
 }
