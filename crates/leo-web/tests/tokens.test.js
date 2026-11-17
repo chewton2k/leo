@@ -233,3 +233,10 @@ test('quiz chalk tones are one plain token pair per theme, readable as text on e
   assert.match(at('.quiz-card.wrong'), /var\(--chalk-bad\)/);
   assert.match(at('.quiz-mark'), /mask: var\(--chalk-break\)/);
 });
+
+test('the reduced-motion rule covers pseudo-elements', () => {
+  const rule = all.find((r) => r.selector.startsWith('*') && r.at.some((a) => a.includes('prefers-reduced-motion: reduce')) && /animation:\s*none\s*!important/.test(r.body));
+  assert.ok(rule, 'a reduced-motion rule turns animation off');
+  assert.match(rule.selector, /\*::before/);
+  assert.match(rule.selector, /\*::after/);
+});
