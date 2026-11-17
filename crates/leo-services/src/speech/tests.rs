@@ -1,7 +1,7 @@
-use super::catalog::{catalog, Catalog};
+use super::catalog::{catalog, Catalog, DIARIZER};
 use super::library::Library;
 use std::io::{Read, Write};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 fn fixture() -> (tempfile::TempDir, Library) {
@@ -527,4 +527,144 @@ fn the_speaker_model_is_listed_apart_and_can_never_become_the_speech_model() {
     assert!(catalog().get(super::catalog::DIARIZER).is_err());
     assert!(library.speaker_model().is_err());
     assert_eq!(catalog().curated().count(), 29);
+}
+
+fn speaker_fixture() -> (tempfile::TempDir, Library) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut data = catalog().clone();
+    data.models.retain(|m| m.id == DIARIZER);
+    let quant = data.models[0].quant.clone();
+    let file = data.models[0].files.get_mut(&quant).unwrap();
+    file.size = 5;
+    file.sha256 = crate::providers::hex(&<sha2::Sha256 as sha2::Digest>::digest(b"model"));
+    let library = Library::with_catalog(
+        dir.path().join("models"),
+        dir.path().join("config"),
+        Arc::new(data),
+    );
+    (dir, library)
+}
+
+#[test]
+fn a_ready_speaker_model_is_used_without_starting_a_download() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    l.fetch(DIARIZER, &url, &AtomicBool::new(false), &|_, _| {})
+        .unwrap();
+    t.join().unwrap();
+    let path = l
+        .ensure_speaker_model(&|| panic!("started a download"), &|| false, &|_, _| {})
+        .unwrap();
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_missing_speaker_model_is_downloaded_and_waited_for() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    let reported = std::sync::atomic::AtomicUsize::new(0);
+    let path = l
+        .ensure_speaker_model(
+            &|| l.download_from(DIARIZER, &url),
+            &|| false,
+            &|_, total| {
+                assert_eq!(total, 5);
+                reported.fetch_add(1, Ordering::SeqCst);
+            },
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert!(reported.load(Ordering::SeqCst) > 0);
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_failed_speaker_model_download_reports_the_download_error() {
+    let (_dir, l) = speaker_fixture();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/model", listener.local_addr().unwrap());
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let _ = stream.read(&mut [0; 4096]);
+        let _ = stream.write_all(
+            b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+        );
+    });
+    let error = l
+        .ensure_speaker_model(&|| l.download_from(DIARIZER, &url), &|| false, &|_, _| {})
+        .unwrap_err();
+    server.join().unwrap();
+    assert_eq!(
+        error.to_string(),
+        "The model download failed. Check your connection and try again."
+    );
+}
+
+#[test]
+fn finishing_during_the_speaker_model_download_leaves_it_running() {
+    let (_dir, l) = speaker_fixture();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/model", listener.local_addr().unwrap());
+    let error = l
+        .ensure_speaker_model(&|| l.download_from(DIARIZER, &url), &|| true, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Finish was pressed while the speaker model was downloading"
+    );
+    assert!(l.downloading(DIARIZER));
+    l.cancel(DIARIZER).unwrap();
+    drop(listener);
+}
+
+#[test]
+fn a_speaker_model_job_that_already_failed_reports_its_error() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job(DIARIZER, "failed", Some("The model download was damaged."));
+    let error = l
+        .ensure_speaker_model(&|| Ok(()), &|| false, &|_, _| {})
+        .unwrap_err();
+    assert_eq!(error.to_string(), "The model download was damaged.");
+}
+
+#[test]
+fn a_speaker_model_download_started_elsewhere_meanwhile_is_waited_for() {
+    let (_dir, l) = speaker_fixture();
+    let (url, t) = model_server(b"model");
+    let path = l
+        .ensure_speaker_model(
+            &|| {
+                l.seed_job(DIARIZER, "downloading", None);
+                let (l, url) = (l.clone(), url.clone());
+                std::thread::spawn(move || {
+                    l.fetch(DIARIZER, &url, &AtomicBool::new(false), &|_, _| {})
+                        .unwrap();
+                    l.seed_job(DIARIZER, "ready", None);
+                });
+                anyhow::bail!("This model is already downloading.")
+            },
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap();
+    t.join().unwrap();
+    assert_eq!(path, l.model_path(DIARIZER).unwrap());
+}
+
+#[test]
+fn a_refused_speaker_model_download_reports_the_refusal() {
+    let (_dir, l) = speaker_fixture();
+    l.seed_job("first", "downloading", None);
+    l.seed_job("second", "downloading", None);
+    let error = l
+        .ensure_speaker_model(
+            &|| l.download_from(DIARIZER, "http://127.0.0.1:9/model"),
+            &|| false,
+            &|_, _| {},
+        )
+        .unwrap_err();
+    assert_eq!(
+        error.to_string(),
+        "Let a model download finish or cancel one first."
+    );
 }

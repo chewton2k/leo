@@ -201,17 +201,15 @@ impl Engine {
         &self,
         parts: Vec<(std::path::PathBuf, u64)>,
         stop: &AtomicBool,
+        progress: &dyn Fn(u64, u64),
     ) -> Result<Vec<super::Turn>> {
         ensure!(!self.stopping(), "the speech engine is stopping");
         let library = super::library::library()?;
-        let waited = Instant::now();
-        while library.downloading(super::catalog::DIARIZER)
-            && waited.elapsed() < Duration::from_secs(120)
-            && !stop.load(Ordering::Acquire)
-        {
-            std::thread::sleep(POLL);
-        }
-        let speakers = library.speaker_model()?;
+        let speakers = library.ensure_speaker_model(
+            &|| library.download(super::catalog::DIARIZER),
+            &|| stop.load(Ordering::Acquire) || self.stopping(),
+            progress,
+        )?;
         let selected = library.selected()?;
         let per_ms = crate::session::wav::RATE as usize / 1000;
         let samples = parts

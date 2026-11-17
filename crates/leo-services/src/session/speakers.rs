@@ -724,7 +724,7 @@ mod tests {
             300_000,
             &|p| {
                 engine
-                    .diarize(p, &AtomicBool::new(false))
+                    .diarize(p, &AtomicBool::new(false), &|_, _| {})
                     .map_err(|e| e.to_string())
             },
             &transcribe,

@@ -86,7 +86,10 @@ parts (each later part's 1 s lead skipped), `runs` tiles the whole timeline into
 speaker runs (gaps split between neighbours, runs under 1 s merged, numbered by
 first appearance), runs are cut at each part boundary at the quietest 20 ms
 within 2 s, and each piece is re-transcribed through the normal `TranscribeFn`
-(silent pieces skipped, one retry; Progress shows steps). Passages belong to the
+(silent pieces skipped, one retry; Progress shows steps). A missing speaker
+model is downloaded at Finish and waited for (Progress "Downloading the speaker
+model" in MiB steps); a failed download warns and keeps the plain transcript.
+Passages belong to the
 part holding their midpoint (`part_of`) and never merge across parts, so every
 part keeps its own five minutes. `speakers.json` holds the result; `[]` (no
 labels, the plain transcript) when one speaker remains, and with a warning on a
@@ -170,8 +173,13 @@ The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
 License) is found by `Catalog::known`, never `get`: `Library` downloads, verifies
 and lists it under `speakers` (never in `extra_files`) and it can never be
 chosen as the speech model; Settings → Speech models lists it to delete.
-`Engine::diarize` waits for a running dictation and up to 120 s for a running
-speaker-model download, then queues `Message::Diarize`: the actor loads the
+`Engine::diarize` gets the model through `Library::ensure_speaker_model`: a
+verified model is used at once; otherwise it starts the download (or joins one
+already running, including one started while its own start was refused), waits
+for it with no time limit, reporting bytes, and ends early with an error when
+Finish now is pressed or the engine stops, leaving the download running; a
+failed download answers with the job's error. It then waits for a running
+dictation and queues `Message::Diarize`: the actor loads the
 chosen speech model if needed and sends `Request::Diarize { model, parts }`; the
 worker reads the WAVs, loads Sortformer (`VeryHighLatency`), runs it and drops
 it, answering `Response::Turns`. Its deadline is `Deadlines::diarize` (run floor

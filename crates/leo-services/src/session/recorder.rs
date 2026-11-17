@@ -597,8 +597,17 @@ pub fn finish(
         emit,
         finish_now,
         &|parts| {
+            let shown = std::cell::Cell::new(None);
             crate::speech::engine::engine()
-                .diarize(parts, finish_now)
+                .diarize(parts, finish_now, &|done, total| {
+                    let steps = Some(((done >> 20) as usize, (total >> 20) as usize));
+                    if shown.replace(steps) != steps {
+                        emit(Event::Progress {
+                            label: "Downloading the speaker model".to_string(),
+                            steps,
+                        })
+                    }
+                })
                 .map_err(|e| e.to_string())
         },
         &|path| transcribe_segment()(path),

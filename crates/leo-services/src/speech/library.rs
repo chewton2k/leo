@@ -415,9 +415,66 @@ impl Library {
         )
     }
 
+    pub fn ensure_speaker_model(
+        &self,
+        start: &dyn Fn() -> Result<()>,
+        stop: &dyn Fn() -> bool,
+        progress: &dyn Fn(u64, u64),
+    ) -> Result<PathBuf> {
+        if let Ok(path) = self.speaker_model() {
+            return Ok(path);
+        }
+        if !self.downloading(DIARIZER) {
+            if let Err(e) = start() {
+                if !self.downloading(DIARIZER) {
+                    return Err(e);
+                }
+            }
+        }
+        let failed = loop {
+            let job = self
+                .jobs
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(DIARIZER)
+                .cloned();
+            match job {
+                Some(job) if job.state == "downloading" => {
+                    ensure!(
+                        !stop(),
+                        "Finish was pressed while the speaker model was downloading"
+                    );
+                    progress(job.bytes, job.total);
+                    std::thread::sleep(CANCEL_POLL);
+                }
+                job => break job.filter(|j| j.state == "failed").and_then(|j| j.error),
+            }
+        };
+        self.speaker_model()
+            .map_err(|e| failed.map_or(e, anyhow::Error::msg))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn seed_job(&self, id: &str, state: &'static str, error: Option<&str>) {
+        self.jobs.lock().unwrap_or_else(|e| e.into_inner()).insert(
+            id.into(),
+            Download {
+                cancel: Default::default(),
+                bytes: 0,
+                total: 0,
+                state,
+                error: error.map(Into::into),
+            },
+        );
+    }
+
     pub fn download(&self, id: &str) -> Result<()> {
+        self.download_from(id, &self.catalog.known(id)?.url())
+    }
+
+    pub(crate) fn download_from(&self, id: &str, url: &str) -> Result<()> {
         let model = self.catalog.known(id)?;
-        let url = model.url();
+        let url = url.to_owned();
         let total = model.file().size;
         let cancel = Arc::new(AtomicBool::new(false));
         {
