@@ -364,7 +364,7 @@ synced temp files. Capture opens only when requested, never because the page is
 visible; `session::awake::Awake` holds App Nap off and native recording holds a
 core activity lease until finished. Transcription attempts and filesystem
 traversal are snapshotted outside their mutexes before disk I/O; temporary
-write-up WAVs are guarded. A missing model leaves
+write-up WAVs are guarded. A missing model, or the speech engine stopping, leaves
 segments pending without `.err`; the recorder waits for a model only the finish
 window (120 s), then ends unsaved with audio kept, releasing its guards, and the
 recording stays recoverable. `recorder::resume_with_controls` exposes the finish

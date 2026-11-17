@@ -78,10 +78,8 @@ pub fn rate_limited(error: &str) -> bool {
 
 pub fn waiting_for_model(error: &str) -> bool {
     error.contains("Settings → Speech models")
-        && (error.contains("Download")
-            || error.contains("download")
-            || error.contains("incomplete")
-            || error.contains("damaged"))
+        || error.contains(crate::speech::engine::STOPPED)
+        || error.contains(crate::speech::engine::STOPPING)
 }
 
 pub fn waiting(dir: &Path) -> Vec<u32> {
@@ -406,6 +404,24 @@ fn settle(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_no_model_message_keeps_the_part_waiting() {
+        for message in [
+            "Choose a model in Settings → Speech models. Your recorded audio is kept.",
+            "Choose a speech model from Settings → Speech models.",
+            "That speech model is not in the library. Choose one in Settings → Speech models.",
+            "Download a model in Settings → Speech models. Your recorded audio is kept until one is ready.",
+            "Choose and download a model in Settings → Speech models. Your audio is kept until one is ready.",
+            crate::speech::engine::STOPPED,
+            crate::speech::engine::STOPPING,
+        ] {
+            assert!(waiting_for_model(message), "{message}");
+        }
+        assert!(!waiting_for_model(
+            "The speech engine is busy. Your recorded audio is kept; try again in a moment."
+        ));
+    }
     use std::sync::atomic::AtomicU32;
     use std::sync::mpsc;
 

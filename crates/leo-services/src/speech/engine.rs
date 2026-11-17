@@ -13,6 +13,9 @@ use super::protocol::DeviceSelector;
 use super::supervisor::{lock, EngineError, EngineSupervisor, Fed, LoadSpec};
 use super::vad::{detector, CaptureVad, VAD_OFFLINE_HANGOVER_MS};
 
+pub const STOPPED: &str = "Transcription stopped. Your recorded audio is kept.";
+pub const STOPPING: &str = "The speech engine is stopping. Reopen Leo to transcribe again.";
+
 const QUEUED: usize = 8;
 const SHADERS_MARKER: &str = "speech-shaders-ready";
 const IDLE: Duration = Duration::from_secs(5 * 60);
@@ -166,10 +169,7 @@ impl Engine {
         words: Vec<String>,
     ) -> Result<String> {
         let cancels = self.dictation_cancels.load(Ordering::Acquire);
-        ensure!(
-            !self.stopped.load(Ordering::Acquire),
-            "The speech engine is stopping. Reopen Leo to transcribe again."
-        );
+        ensure!(!self.stopped.load(Ordering::Acquire), "{STOPPING}");
         #[allow(deprecated)]
         self.admitted
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
@@ -714,9 +714,7 @@ fn run(
                 Message::Stop(done) => {
                     supervisor.unload().wait();
                     for job in pending {
-                        let _ = job.reply.send(Err(anyhow::anyhow!(
-                            "Transcription stopped. Your recorded audio is kept."
-                        )));
+                        let _ = job.reply.send(Err(anyhow::anyhow!(STOPPED)));
                     }
                     let _ = done.send(());
                     return;
