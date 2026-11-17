@@ -132,12 +132,16 @@ function dictationDraft() {
   }
   return settings;
 }
+function pruneDictationOffers(view) {
+  for (const id of Object.keys(dictationOffers)) if (!(view.recent || []).some((item) => String(item.id) === id)) delete dictationOffers[id];
+}
 let dictationGeneration = 0;
 async function dictationChange(change, mine = seq) {
   const generation = mine === seq ? ++dictationGeneration : dictationGeneration;
   const view = await api('/api/dictation', { method: 'POST', body: change });
   if (mine !== seq || generation !== dictationGeneration || state.view !== 'settings') return;
   state.dictation = view;
+  pruneDictationOffers(view);
   updateDictationStatus(view);
   const recent = $('#dictation-recent');
   refreshPanel(recent, dictationRecent(view.recent || []));
@@ -211,6 +215,7 @@ async function pollDictation(mine, generation) {
     const view = await api('/api/dictation');
     if (mine !== seq || generation !== dictationGeneration || state.view !== 'settings') return;
     state.dictation = view;
+    pruneDictationOffers(view);
     updateDictationStatus(view);
     const recent = $('#dictation-recent');
     refreshPanel(recent, dictationRecent(view.recent || []));

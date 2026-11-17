@@ -425,3 +425,14 @@ test('a debounced custom-words save sends the shortcut saved since, not the one 
   await vm.runInContext('dictationSaving', context);
   assert.deepEqual(plain(calls[0].settings), { shortcut: 'command+k', custom_words: ['Charlton'] });
 });
+test('word offers for a dictation that left the history are dropped after a refresh', async () => {
+  const { context } = editContext(['Felix'], [{ id: 7, text: 'leo seal I' }]);
+  context.startDictationEdit({ dataset: { id: '7' } });
+  type(context, 'Leo CLI');
+  await context.saveDictationEdit();
+  assert.deepEqual(plain(vm.runInContext('dictationOffers[7]', context)), ['Leo CLI']);
+  context.api = async () => ({ settings: { custom_words: ['Felix'] }, recent: [{ id: 8, text: 'newer' }] });
+  await vm.runInContext('dictationChange({ action: "refresh" })', context);
+  assert.deepEqual(plain(vm.runInContext('state.dictation.recent.map((i) => i.id)', context)), [8]);
+  assert.deepEqual(plain(vm.runInContext('Object.keys(dictationOffers)', context)), [], 'row 7 is gone from the history, so its offers should be too');
+});

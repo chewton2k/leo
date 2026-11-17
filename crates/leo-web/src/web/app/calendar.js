@@ -1150,7 +1150,9 @@ function tickWrite(id, on) {
 }
 
 async function setTaskDone(id, done, on = null) {
-  if (done) tickedAt.set(tickKey(id, on), performance.now());
+  const nowAt = performance.now();
+  for (const [key, at] of tickedAt) if (nowAt - at >= TICK_MS) tickedAt.delete(key);
+  if (done) tickedAt.set(tickKey(id, on), nowAt);
   const before = calFind(id);
   const was = before && (on ? before.done_on : before.done);
   markTaskDone(id, done, on);

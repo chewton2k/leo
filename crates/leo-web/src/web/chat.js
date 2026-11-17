@@ -1559,6 +1559,7 @@
     function excerptOf(r) {
       if (excerpts.has(r.id)) return excerpts.get(r.id);
       excerpts.set(r.id, '');
+      if (excerpts.size > 200) excerpts.delete(excerpts.keys().next().value);
       request(`/api/notes/${encodeURIComponent(r.id)}`)
         .then((response) => (response.ok ? response.json() : null))
         .then((note) => {
