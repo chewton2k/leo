@@ -185,7 +185,7 @@ Enigo is taken out of its state slot for native I/O; layout-aware Cmd+V resolves
 on the main thread. Without Accessibility or with an elevated Windows target,
 text remains on the clipboard with a manual-paste instruction.
 
-`overlay.rs` creates a bundled `dist/dictation.html` popup: a nonactivating NSPanel
+`overlay.rs` creates the bundled `dist/dictation.html` popup just after the main page has loaded (or at the first dictation, if that comes sooner): a nonactivating NSPanel
 on macOS, nonfocusable always-on-top window on Windows. It uses the focused
 window's monitor, with cursor/primary fallbacks, and supports top/bottom and
 Live/Minimal/Off. Its CSS token block comes directly from the web page's theme;

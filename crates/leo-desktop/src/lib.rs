@@ -22,8 +22,9 @@ mod tray;
 mod update_window;
 mod updates;
 
-use std::sync::Mutex;
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
@@ -34,7 +35,11 @@ const LAUNCHED: &str = "app-launched";
 
 struct Engine(Mutex<Option<leo_web::Running>>);
 
+static START: OnceLock<Instant> = OnceLock::new();
+static POPUP_PREPARED: AtomicBool = AtomicBool::new(false);
+
 pub fn run() {
+    START.get_or_init(Instant::now);
     let config = leo_core::paths::config_dir().ok();
     let began = std::time::Instant::now();
     let saved = fix_path(config.as_deref());
@@ -126,10 +131,6 @@ fn set_up(
     let mut parts: Vec<(&str, Option<String>)> = Vec::new();
     #[cfg(target_os = "macos")]
     overlay::plugin_registered(app.handle().plugin(tauri_nspanel::init()).is_ok());
-    parts.push((
-        "dictation popup",
-        overlay::create_guarded(app.handle()).err(),
-    ));
     notify::listen(app.handle());
     let dictation = dictation::Dictation::new(app.handle().clone())?;
     let app_settings = app_settings::AppSettings::new(app.handle().clone(), dictation.clone())?;
@@ -193,6 +194,15 @@ fn set_up(
                     window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
                 sync_visible(&window, visible, true);
                 sync_fullscreen(&window, true);
+                if !POPUP_PREPARED.swap(true, Ordering::AcqRel) {
+                    if let Some(start) = START.get() {
+                        eprintln!(
+                            "  launch: window shown {} ms after start",
+                            start.elapsed().as_millis()
+                        );
+                    }
+                    overlay::prepare(window.app_handle());
+                }
             }
         })
         // Tauri's own file-drop handler swallows the webview's drag events,
@@ -297,7 +307,7 @@ fn problem_address(text: &str) -> WebviewUrl {
     WebviewUrl::App(format!("index.html?problem={}", url_text(text)).into())
 }
 
-fn startup_problem(parts: &[(&str, Option<String>)]) -> Option<String> {
+pub(crate) fn startup_problem(parts: &[(&str, Option<String>)]) -> Option<String> {
     let failed: Vec<String> = parts
         .iter()
         .filter_map(|(name, why)| why.as_ref().map(|why| format!("the {name} ({why})")))

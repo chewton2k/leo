@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
 use leo_services::dictation::settings::{Popup, Settings};
 use tauri::{AppHandle, Manager};
 
@@ -7,6 +10,10 @@ use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelBuilder, PanelLevel, S
 tauri_panel! { panel!(DictationPanel { config: { can_become_key_window: false, is_floating_panel: true } }) }
 #[cfg(target_os = "macos")]
 static PLUGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CREATING: Mutex<()> = Mutex::new(());
+static FAILED: AtomicBool = AtomicBool::new(false);
+const AFTER_PAGE_LOAD: &str = "after page load";
+const ON_DEMAND: &str = "on demand";
 const WIDTH: f64 = 400.0;
 const HEIGHT: f64 = 132.0;
 #[cfg(target_os = "macos")]
@@ -34,6 +41,56 @@ pub fn create_guarded(app: &AppHandle) -> Result<(), String> {
         }
     }
     made
+}
+pub fn popup(app: &AppHandle, when: &str) -> Option<tauri::WebviewWindow> {
+    if FAILED.load(Ordering::Acquire) {
+        return None;
+    }
+    let _creating = CREATING.lock().unwrap_or_else(|e| e.into_inner());
+    if FAILED.load(Ordering::Acquire) {
+        return None;
+    }
+    if let Some(window) = app.get_webview_window("dictation") {
+        return Some(window);
+    }
+    let began = std::time::Instant::now();
+    match create_guarded(app) {
+        Ok(()) => {
+            eprintln!(
+                "  dictation popup built in {} ms ({when})",
+                began.elapsed().as_millis()
+            );
+            app.get_webview_window("dictation")
+        }
+        Err(why) => {
+            FAILED.store(true, Ordering::Release);
+            let sentence =
+                crate::startup_problem(&[("dictation popup", Some(why))]).unwrap_or_default();
+            eprintln!("  {sentence}");
+            if let Some(settings) =
+                app.try_state::<std::sync::Arc<crate::app_settings::AppSettings>>()
+            {
+                settings.note(sentence);
+            }
+            None
+        }
+    }
+}
+pub fn prepare(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new()
+        .name("leo-popup".into())
+        .spawn(move || {
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    popup(&handle, AFTER_PAGE_LOAD);
+                });
+            }
+            #[cfg(not(target_os = "macos"))]
+            popup(&app, AFTER_PAGE_LOAD);
+        });
 }
 fn create(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
@@ -90,14 +147,21 @@ pub fn show(
     }
     let app = app.clone();
     let top = settings.top;
+    #[cfg(not(target_os = "macos"))]
+    let Some(built) = popup(&app, ON_DEMAND) else {
+        return;
+    };
     let caller = app.clone();
     let _ = caller.run_on_main_thread(move || {
         if !current() {
             return;
         }
-        let Some(window) = app.get_webview_window("dictation") else {
+        #[cfg(target_os = "macos")]
+        let Some(window) = popup(&app, ON_DEMAND) else {
             return;
         };
+        #[cfg(not(target_os = "macos"))]
+        let window = built;
         let point = crate::permissions::focused_point();
         let monitor = app
             .available_monitors()
