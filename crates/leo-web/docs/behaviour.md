@@ -1616,6 +1616,11 @@ Trash: Delete for good and Empty trash skip a trashed file they cannot delete
 and remove the rest; POST `/api/trash/delete` answers `{deleted, failed}` and the
 toast then reads "Deleted N notes for good. M could not be deleted: check the
 permissions of leo's notes folder." Folders left empty inside the trash are removed.
+A trashed file leo cannot read shows as a row with its file name and "leo cannot
+read this file", with Delete for good and its checkbox but no Restore; the select
+bar's Restore is disabled when every picked row is such a file. POST
+`/api/trash/restore` answers `{restored, unreadable}`, and the toast then adds
+"M could not be restored: leo cannot read the file."
 
 Writing Settings offers Ollama, Codex and Claude Code. Removed AGY/Copilot
 choices and sign-in commands are unavailable; legacy saved profiles stay on disk

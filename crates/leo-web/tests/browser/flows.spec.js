@@ -2277,6 +2277,26 @@ test.describe('trash', () => {
     await expect(row(5)).toHaveCount(0);
     expect(await mine()).toEqual([]);
   });
+
+  test('an unreadable trashed file shows with Delete for good only', async ({ page }) => {
+    const name = `Broken ${test.info().project.name}`;
+    const trash = path.join(process.env.LEO_BROWSER_HOME, 'notes', '.trash');
+    fs.mkdirSync(trash, { recursive: true });
+    fs.writeFileSync(path.join(trash, `${name}.md`), '---\ntitle: [\n---\nx');
+    await page.goto('/#/trash');
+    const row = page.locator('.trash-row', { hasText: `${name}.md` });
+    await expect(row).toContainText('leo cannot read this file');
+    await expect(row.locator('[data-action="restore"]')).toHaveCount(0);
+    await page.locator('[data-action="trash-select"]').click();
+    await row.click();
+    await expect(page.locator('[data-action="trash-restore-picked"]')).toBeDisabled();
+    await expect(page.locator('[data-action="trash-delete-picked"]')).toBeEnabled();
+    await page.locator('[data-action="trash-delete-picked"]').click();
+    await page.locator('[data-action="trash-delete-now"]').click();
+    await expect(page.locator('.toast')).toContainText('Deleted 1 note for good');
+    await expect(row).toHaveCount(0);
+    expect(fs.existsSync(path.join(trash, `${name}.md`))).toBe(false);
+  });
 });
 
 test.describe('export and this browser', () => {
