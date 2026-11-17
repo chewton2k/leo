@@ -831,7 +831,7 @@ fn speech_worker_kilobytes() -> u64 {
                 .any(|a| a == leo_core::children::WORKER_FLAG)
         })
         .filter_map(|p| {
-            let out = std::process::Command::new("ps")
+            let out = leo_core::children::quiet_command("ps")
                 .args(["-o", "rss=", "-p", &p.pid.to_string()])
                 .output()
                 .ok()?;
