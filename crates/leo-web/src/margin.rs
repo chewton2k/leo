@@ -399,6 +399,31 @@ fn resolve_one(
     resolved_if_open(chats, thread, untouched).then(|| thread.clone())
 }
 
+pub enum Swap {
+    Replaced(Box<Thread>),
+    Kept,
+    Missing,
+}
+
+pub fn replace_changed(
+    chats: &Path,
+    reads: &Arc<Reads>,
+    note: &str,
+    id: &str,
+    keep: Option<&str>,
+) -> Swap {
+    let Some(thread) = open_on(chats, note).into_iter().find(|t| t.id == id) else {
+        return Swap::Missing;
+    };
+    if !freeable(reads, &thread, keep) {
+        return Swap::Kept;
+    }
+    match resolve_one(chats, reads, &thread, true) {
+        Some(gone) => Swap::Replaced(Box::new(gone)),
+        None => Swap::Kept,
+    }
+}
+
 pub fn free_oldest(
     chats: &Path,
     reads: &Arc<Reads>,

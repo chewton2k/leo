@@ -552,6 +552,14 @@ function marginElement(t) {
 
 const MARGIN_DRAWS = /\b(draw|sketch|visuali[sz]e|diagram|picture)/i;
 
+function marginChanged(s) {
+  const source = s.doc.source();
+  return marginPage.threads.flatMap((t) => {
+    const at = marginKit.find(source, t);
+    return at?.how === 'context' ? [{ id: t.id, text: source.slice(at.from, at.to) }] : [];
+  });
+}
+
 function marginPinnedOpen(t) {
   return Boolean(t.pinned) && t.id !== 'draft' && !marginPage.faded.has(t.id);
 }
@@ -852,9 +860,11 @@ function marginDraw() {
 
 function marginRevisits(source, origin) {
   const live = new Set();
+  const open = marginPage.threads.map((t) => marginKit.find(source, t)).filter(Boolean);
   for (const r of marginPage.resolved) {
     const at = marginKit.find(source, r);
-    const rects = at ? marginPage.s.doc.spanRects(at.from, at.to) : [];
+    const covered = at && open.some((o) => o.from < at.to && at.from < o.to);
+    const rects = at && !covered ? marginPage.s.doc.spanRects(at.from, at.to) : [];
     if (!rects.length) continue;
     live.add(r.id);
     const els = marginPage.revisits.get(r.id) || [];
@@ -1841,7 +1851,7 @@ async function marginRead(s) {
     marginPage.newest = null;
     for (const path of marginPage.svg?.querySelectorAll('path.pencil.leaving') || []) path.remove();
     marginShowReading(s, source, blocks);
-    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: marginPage.open } });
+    const got = await api(`/api/notes/${enc(s.note.id)}/margin/read`, { method: 'POST', body: { version: s.note.version, blocks, keep: marginPage.open, changed: marginChanged(s) } });
     if (s !== marginPage.s) return;
     const along = marginPage.mode === 'along';
     if (!got?.failed) marginPage.baseline = marginKit.blocksOf(source);
@@ -1966,7 +1976,7 @@ async function marginThroughPart(s, run, part, label) {
       s.doc.glow(part.from, part.to);
       let got;
       try {
-        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone } });
+        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone, changed: marginChanged(s) } });
       } finally {
         s.doc.glow();
       }

@@ -702,7 +702,14 @@ Felix (2026-10-19).
 - A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent. Read through sends none.
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
-  then `margin::crowded` allows one open note per sentence. The server anchors on prefix + quote + suffix exactly and
+  then `margin::crowded` allows one open note per sentence. A reworded passage still counts
+  (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
+  open thread the page places only by context, as `{id, text}` of its current wording, at most
+  2 × `MOST_OPEN`, each ≤ 2 × `MOST_QUOTE` and in the note). A read-along note landing on such
+  a sentence replaces the old one (`margin::replace_changed`: resolved and listed in `resolved`,
+  only if it is not pinned, not `keep`, not being answered and has no message from you); else,
+  and always in Read through, the new note is dropped. `marginRevisits` draws no reopen
+  underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
   never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
   characters, else the chat; read-along and `add_margin_note` quotes
   `MOST_QUOTE` (600). The selection toolbar (`passages.js`) has Felix this
