@@ -790,3 +790,33 @@ fn a_fresh_partial_download_is_kept() {
     assert!(fresh.exists());
     assert!(nearly.exists());
 }
+
+#[test]
+fn a_damaged_model_is_not_hashed_again_while_unchanged() {
+    let (_dir, library) = fixture();
+    let path = library.model_path("parakeet-tdt-0.6b-v3").unwrap();
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, b"mode!").unwrap();
+    let before = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let verified = |library: &Library| {
+        library.view().unwrap()["models"][0]["verified"]
+            .as_bool()
+            .unwrap()
+    };
+    assert!(!verified(&library));
+    std::fs::write(&path, b"model").unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(before)
+        .unwrap();
+    assert!(!verified(&library));
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(before + std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(verified(&library));
+}

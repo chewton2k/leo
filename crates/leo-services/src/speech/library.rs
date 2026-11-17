@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -63,6 +63,7 @@ pub struct Library {
     jobs: Arc<Mutex<BTreeMap<String, Download>>>,
     verified: Arc<Mutex<Verified>>,
     hashing: Arc<Mutex<()>>,
+    damaged: Arc<Mutex<Verified>>,
 }
 
 pub fn library() -> Result<&'static Library> {
@@ -107,6 +108,7 @@ impl Library {
             catalog,
             jobs: Default::default(),
             hashing: Default::default(),
+            damaged: Default::default(),
         };
         library.drop_partials();
         library
@@ -210,19 +212,47 @@ impl Library {
                 .get(&path)
                 == Some(&stamp)
         };
+        let said_damaged = || {
+            self.damaged
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&path)
+                == Some(&stamp)
+        };
+        let refusal = || {
+            anyhow!("This speech model is damaged. Delete it and download it again in Settings → Speech models.")
+        };
         if known() {
             return Ok(path);
+        }
+        if said_damaged() {
+            return Err(refusal());
         }
         let _hashing = self.hashing.lock().unwrap_or_else(|e| e.into_inner());
         if known() {
             return Ok(path);
         }
+        if said_damaged() {
+            return Err(refusal());
+        }
         let actual = crate::providers::sha256_of(&path)?;
-        ensure!(actual.eq_ignore_ascii_case(&model.file().sha256), "This speech model is damaged. Delete it and download it again in Settings → Speech models.");
+        if !actual.eq_ignore_ascii_case(&model.file().sha256) {
+            self.set_damaged(&path, Some(stamp));
+            return Err(refusal());
+        }
+        self.set_damaged(&path, None);
         self.change_verified(|verified| {
             verified.insert(path.clone(), stamp);
         });
         Ok(path)
+    }
+
+    fn set_damaged(&self, path: &Path, now: Option<(u64, SystemTime)>) {
+        let mut damaged = self.damaged.lock().unwrap_or_else(|e| e.into_inner());
+        match now {
+            Some(stamp) => damaged.insert(path.to_path_buf(), stamp),
+            None => damaged.remove(path),
+        };
     }
 
     fn change_verified(&self, change: impl FnOnce(&mut Verified)) {
@@ -311,6 +341,7 @@ impl Library {
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
+        self.set_damaged(&path, None);
         self.change_verified(|verified| {
             verified.remove(&path);
         });
@@ -605,6 +636,7 @@ impl Library {
         );
         tmp.persist(&target).map_err(|e| e.error)?;
         let stamp = std::fs::symlink_metadata(&target).and_then(|m| Ok((m.len(), m.modified()?)));
+        self.set_damaged(&target, None);
         self.change_verified(|verified| match stamp {
             Ok(stamp) => {
                 verified.insert(target.clone(), stamp);
