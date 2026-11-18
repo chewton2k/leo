@@ -43,6 +43,7 @@ type Expansion = (String, Arc<Vec<Event>>);
 pub(crate) struct Calendar {
     busy: Arc<AtomicBool>,
     expanded: Mutex<VecDeque<Expansion>>,
+    bodies: Mutex<std::collections::HashMap<String, (String, i64, u64)>>,
     settings: Mutex<()>,
 }
 
@@ -97,6 +98,19 @@ fn body_of(notes: &Path, id: &str) -> Option<(DateTime<Utc>, Vec<u8>)> {
         .and_then(|(at, body)| time_of(at).map(|at| (at, body)))
 }
 
+fn stamp_of(notes: &Path, id: &str) -> Option<(String, i64)> {
+    db_for(notes)
+        .with(|c| {
+            c.query_row(
+                "SELECT fetched_at, length(body) FROM calendar_feeds WHERE feed = ?1 AND body IS NOT NULL",
+                [id],
+                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, i64>(1)?)),
+            )
+        })
+        .ok()
+        .and_then(|(at, length)| at.map(|at| (at, length)))
+}
+
 impl Calendar {
     pub(crate) fn events(
         &self,
@@ -107,13 +121,35 @@ impl Calendar {
         let linking: Linking = read(&settings_path(notes));
         let mut out = Vec::new();
         for linked in &linking.calendars {
-            let Some((fetched, body)) = body_of(notes, &linked.id) else {
+            let Some((fetched, length)) = stamp_of(notes, &linked.id) else {
                 continue;
             };
+            let known = self
+                .bodies
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&linked.id)
+                .filter(|(at, len, _)| *at == fetched && *len == length)
+                .map(|(_, _, hash)| *hash);
+            let mut read = None;
+            let hash = match known {
+                Some(hash) => hash,
+                None => {
+                    let Some((_, body)) = body_of(notes, &linked.id) else {
+                        continue;
+                    };
+                    let hash = crate::vectors::fnv64(body.iter().copied());
+                    self.bodies
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .insert(linked.id.clone(), (fetched, length, hash));
+                    read = Some(body);
+                    hash
+                }
+            };
             let key = format!(
-                "{}|{}|{}|{}",
+                "{}|{hash:016x}|{}|{}",
                 linked.id,
-                fetched.timestamp(),
                 from.timestamp(),
                 to.timestamp()
             );
@@ -124,15 +160,23 @@ impl Calendar {
                 .iter()
                 .find(|(k, _)| *k == key)
                 .map(|(_, e)| Arc::clone(e));
-            let events = kept.unwrap_or_else(|| {
-                let events = Arc::new(ics::read(&String::from_utf8_lossy(&body), from, to).events);
-                let mut kept = self.expanded.lock().unwrap_or_else(|e| e.into_inner());
-                kept.push_back((key, Arc::clone(&events)));
-                while kept.len() > KEPT_EXPANSIONS {
-                    kept.pop_front();
+            let events = match kept {
+                Some(events) => events,
+                None => {
+                    let Some(body) = read.or_else(|| body_of(notes, &linked.id).map(|(_, b)| b))
+                    else {
+                        continue;
+                    };
+                    let events =
+                        Arc::new(ics::read(&String::from_utf8_lossy(&body), from, to).events);
+                    let mut kept = self.expanded.lock().unwrap_or_else(|e| e.into_inner());
+                    kept.push_back((key, Arc::clone(&events)));
+                    while kept.len() > KEPT_EXPANSIONS {
+                        kept.pop_front();
+                    }
+                    events
                 }
-                events
-            });
+            };
             out.extend(
                 events
                     .iter()
@@ -246,6 +290,16 @@ fn refresh(notes: &Path, access: &dyn crate::CalendarAccess, now: DateTime<Utc>)
             Ok(crate::Fetched { body: Some(bytes), etag, modified })
                 if bytes.len() as u64 <= MOST_BYTES && String::from_utf8_lossy(bytes).contains("BEGIN:VCALENDAR") =>
             {
+                let stored: Option<Vec<u8>> = c
+                    .query_row("SELECT body FROM calendar_feeds WHERE feed = ?1", [&linked.id], |r| r.get(0))
+                    .ok()
+                    .flatten();
+                if stored.as_deref() == Some(bytes.as_slice()) {
+                    return c.execute(
+                        "UPDATE calendar_feeds SET fetched_at = ?2, tried_at = ?2, etag = ?3, modified = ?4, problem = NULL WHERE feed = ?1",
+                        rusqlite::params![linked.id, stamp, etag, modified],
+                    );
+                }
                 c.execute(
                     "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, etag, modified, problem, body) VALUES (?1, ?2, ?2, ?3, ?4, NULL, ?5) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, etag = excluded.etag, modified = excluded.modified, problem = NULL, body = excluded.body",
                     rusqlite::params![linked.id, stamp, etag, modified, bytes],
@@ -873,6 +927,80 @@ pub(crate) mod tests {
         fn delete(&self, _: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn refreshing_with_the_same_bytes_keeps_the_expansion() {
+        let (_dir, notes) = linked(None);
+        db_for(&notes)
+            .with(|c| {
+                c.execute_batch(
+                    "CREATE TABLE audit_writes (n INTEGER);
+                     CREATE TRIGGER audit_body AFTER UPDATE OF body ON calendar_feeds BEGIN INSERT INTO audit_writes VALUES (1); END;",
+                )
+            })
+            .unwrap();
+        let calendar = Calendar::default();
+        let from = at("2026-10-30T00:00:00Z");
+        let to = at("2026-11-06T00:00:00Z");
+        let before = calendar.events(&notes, from, to);
+        let access = Counting::default();
+        refresh(&notes, &access, Utc::now() + Duration::seconds(5));
+        let after = calendar.events(&notes, from, to);
+        refresh(&notes, &access, Utc::now() + Duration::seconds(10));
+        calendar.events(&notes, from, to);
+        let writes: i64 = db_for(&notes)
+            .with(|c| c.query_row("SELECT COUNT(*) FROM audit_writes", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(access.0.load(Ordering::SeqCst), 2);
+        assert_eq!(before.len(), after.len());
+        assert_eq!(
+            calendar.expanded.lock().unwrap().len(),
+            1,
+            "the same bytes were parsed again after each refresh"
+        );
+        assert_eq!(writes, 0, "the same bytes were written again");
+    }
+
+    struct Serving(&'static str);
+
+    impl crate::CalendarAccess for Serving {
+        fn fetch(&self, _: &str) -> Result<Vec<u8>> {
+            Ok(self.0.as_bytes().to_vec())
+        }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(Some("https://example.com/a.ics".into()))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_changed_feed_is_expanded_again() {
+        let (_dir, notes) = linked(None);
+        let calendar = Calendar::default();
+        let from = at("2026-10-30T00:00:00Z");
+        let to = at("2026-11-06T00:00:00Z");
+        let before = calendar.events(&notes, from, to);
+        assert!(before.iter().any(|(_, _, e)| e.title == "Holiday"));
+        let fewer = MEETINGS.replace(
+            "BEGIN:VEVENT\nUID:holiday\nSUMMARY:Holiday\nDTSTART;VALUE=DATE:20261105\nDTEND;VALUE=DATE:20261106\nEND:VEVENT\n",
+            "",
+        );
+        assert_ne!(fewer, MEETINGS);
+        refresh(
+            &notes,
+            &Serving(fewer.leak()),
+            Utc::now() + Duration::seconds(5),
+        );
+        let after = calendar.events(&notes, from, to);
+        assert!(!after.iter().any(|(_, _, e)| e.title == "Holiday"));
+        assert_eq!(after.len(), before.len() - 1);
+        assert_eq!(calendar.expanded.lock().unwrap().len(), 2);
     }
 
     #[test]
