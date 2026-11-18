@@ -117,7 +117,8 @@ function drawRecordingSources(query = '') {
     <label class="field">${ICON.search}<input id="source-query" value="${esc(query)}" placeholder="Find a word, name or phrase" autocomplete="off"></label>
     <div id="source-found">${sourceMatches(page)}</div>
     <div id="source-passages" class="source-list">${body}<p class="hint source-none" hidden>Nothing on this page matches.</p></div>
-    <label class="source-wants"><span>What you want from the note</span><textarea id="regenerate-wants" class="set-input" rows="2" maxlength="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(page.wants || '')}</textarea></label>
+    <label class="source-wants"><span>What you want from the note</span><textarea id="regenerate-wants" class="set-input" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(page.wants || '')}</textarea></label>
+    <p class="set-desc" id="regenerate-wants-hint"${Array.from((typedWants !== null ? typedWants : page.wants || '').trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
     ${sheetButtons(['Write the note again', 'data-action="source-regenerate"'], { cancel: 'Close', middle: '<button type="button" class="btn plain" data-action="source-save">Save fixes</button>' })}`);
   $('.sheet', box).classList.add('source-sheet');
   if (typedWants !== null) $('#regenerate-wants', box).value = typedWants;

@@ -469,7 +469,7 @@
         ${recover ? `<section class="set-card"><header><h3>Not saved yet</h3></header>${recover}</section>` : ''}
         <section class="set-card rec-card">
           ${kindChoices(kind)}
-          ${noteFields({ id: 'rec', folders, here, most: 4000, before: event })}
+          ${noteFields({ id: 'rec', folders, here, reads: 4000, before: event })}
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
@@ -495,6 +495,7 @@
             <button class="rec-round plain" data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}">${paused ? '<svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>' : '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>'}<span>${paused ? 'Resume' : 'Pause'}</span></button>
             <button class="rec-round stop rec-stop" data-action="rec-stop" aria-label="Stop and save"><span class="rec-square"></span><span>Stop and save</span></button>
           </div>`;
+      const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       return `<div class="rec rec-live${paused ? ' paused' : ''}">
         <section class="set-card rec-live-card">
           <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind}</span></div>
@@ -515,7 +516,8 @@
         <section class="set-card rec-wants-card">
           <header><h3>What you want from the notes</h3><span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></header>
           <p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p>
-          <textarea id="rec-wants-live" class="set-input rec-wants" rows="2" maxlength="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(s.wantsDraft !== null ? s.wantsDraft : v.wants || '')}</textarea>
+          <textarea id="rec-wants-live" class="set-input rec-wants" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
+          <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
         </section>
       </div>`;
     }

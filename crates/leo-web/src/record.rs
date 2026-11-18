@@ -480,10 +480,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     if let Err(code) = checked {
         return error(code, "Check the folder before recording.");
     }
-    let mut profile = match body.profile.clone().unwrap_or_default().checked() {
-        Ok(profile) => profile,
-        Err(e) => return error(StatusCode::BAD_REQUEST, e.to_string()),
-    };
+    let mut profile = body.profile.clone().unwrap_or_default().checked();
     profile.speakers &= body.source != Source::Nativecall;
     let title = body
         .title
@@ -965,12 +962,6 @@ pub(crate) async fn wants(
     Json(body): Json<WantsBody>,
 ) -> Response {
     let text = body.text.trim().to_string();
-    if text.chars().count() > leo_core::recording::MOST_WANTS_CHARS {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "Keep what you want from the notes under 4,000 characters.",
-        );
-    }
     writes_done(&state, &id).await;
     let lease = match with_job(&state, &id, |job| -> anyhow::Result<_> {
         if !job.live() {

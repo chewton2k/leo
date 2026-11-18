@@ -19,16 +19,23 @@ pub fn recorded_on(mut prompt: Prompt, day: chrono::NaiveDate) -> Prompt {
     prompt
 }
 
+fn read_of(text: &str, most: usize) -> &str {
+    let text = text.trim();
+    text.char_indices()
+        .nth(most)
+        .map_or(text, |(at, _)| text[..at].trim_end())
+}
+
 pub fn with_profile(prompt: Prompt, profile: &leo_core::recording::Profile) -> Prompt {
     let mut prompt = recorded_on(prompt, chrono::Local::now().date_naive());
-    let context = profile.context.trim();
+    let context = read_of(&profile.context, leo_core::recording::CONTEXT_READ_CHARS);
     if !context.is_empty() {
         prompt.user = format!(
             "<recording_context>\n{context}\n</recording_context>\n\n{}",
             prompt.user
         );
     }
-    let wants = profile.wants.trim();
+    let wants = read_of(&profile.wants, leo_core::recording::WANTS_READ_CHARS);
     if !wants.is_empty() {
         prompt.system.push_str(&format!("\n\n{WANTS}"));
         prompt.user = format!(
@@ -416,7 +423,14 @@ pub fn room_after_profile(
     budget: super::budget::Budget,
     profile: &leo_core::recording::Profile,
 ) -> super::budget::Budget {
-    let added = profile.context.chars().count() + profile.wants.chars().count() * 2 + 600;
+    let added = read_of(&profile.context, leo_core::recording::CONTEXT_READ_CHARS)
+        .chars()
+        .count()
+        + read_of(&profile.wants, leo_core::recording::WANTS_READ_CHARS)
+            .chars()
+            .count()
+            * 2
+        + 600;
     super::budget::Budget {
         words: budget.words.saturating_sub(added.div_ceil(6)),
         ..budget
@@ -1583,6 +1597,29 @@ mod tests {
         );
         assert_eq!(s.title, "Disk Scheduling");
         assert!(s.body.starts_with("How the arm is scheduled."));
+    }
+
+    #[test]
+    fn a_long_brief_is_read_at_its_budget_and_never_zeroes_the_room() {
+        use leo_core::recording::{CONTEXT_READ_CHARS, WANTS_READ_CHARS};
+        let long = leo_core::recording::Profile {
+            context: "ß".repeat(CONTEXT_READ_CHARS * 50),
+            wants: "界".repeat(WANTS_READ_CHARS * 50),
+            ..Default::default()
+        };
+        let p = with_profile(chat::build_structure_prompt_with("words", &[]), &long);
+        assert_eq!(p.user.matches('ß').count(), CONTEXT_READ_CHARS);
+        assert_eq!(p.user.matches('界').count(), WANTS_READ_CHARS);
+        let at_budget = leo_core::recording::Profile {
+            context: "ß".repeat(CONTEXT_READ_CHARS),
+            wants: "界".repeat(WANTS_READ_CHARS),
+            ..Default::default()
+        };
+        assert_eq!(
+            room_after_profile(TEST, &long).words,
+            room_after_profile(TEST, &at_budget).words
+        );
+        assert!(room_after_profile(TEST, &long).words > 0);
     }
 
     #[test]

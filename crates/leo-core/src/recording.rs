@@ -5,8 +5,8 @@ use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const MOST_WANTS_CHARS: usize = 4000;
-pub const MOST_CONTEXT_CHARS: usize = 8000;
+pub const WANTS_READ_CHARS: usize = 4000;
+pub const CONTEXT_READ_CHARS: usize = 8000;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default)]
@@ -18,20 +18,12 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn checked(self) -> Result<Profile> {
-        anyhow::ensure!(
-            self.wants.chars().count() <= MOST_WANTS_CHARS,
-            "Keep what you want from the notes under 4,000 characters"
-        );
-        anyhow::ensure!(
-            self.context.chars().count() <= MOST_CONTEXT_CHARS,
-            "Keep the meeting details under 8,000 characters"
-        );
-        Ok(Profile {
+    pub fn checked(self) -> Profile {
+        Profile {
             context: self.context.trim().to_string(),
             wants: self.wants.trim().to_string(),
             speakers: self.speakers,
-        })
+        }
     }
 }
 
@@ -1176,29 +1168,33 @@ mod tests {
         .unwrap();
         assert_eq!(old, r#"{"context":"c","wants":"w"}"#);
         let on: Profile = serde_json::from_str(r#"{"speakers":true}"#).unwrap();
-        assert!(on.speakers && on.clone().checked().unwrap().speakers);
+        assert!(on.speakers && on.clone().checked().speakers);
         assert!(!serde_json::from_str::<Profile>("{}").unwrap().speakers);
     }
 
     #[test]
-    fn what_the_user_wants_is_bounded_and_trimmed() {
+    fn what_the_user_wants_is_trimmed_and_kept_whole() {
         let p = Profile {
             context: " Design review ".into(),
             wants: " Just the decisions ".into(),
             ..Default::default()
         }
-        .checked()
-        .unwrap();
+        .checked();
         assert_eq!(
             (p.context.as_str(), p.wants.as_str()),
             ("Design review", "Just the decisions")
         );
-        assert!(Profile {
-            wants: "x".repeat(MOST_WANTS_CHARS + 1),
+        let long = Profile {
+            context: format!(" {} ", "c".repeat(30_000)),
+            wants: format!(" {} ", "w".repeat(30_000)),
             ..Default::default()
         }
-        .checked()
-        .is_err());
+        .checked();
+        assert_eq!(
+            (long.context.len(), long.wants.len()),
+            (30_000, 30_000),
+            "a long brief and long meeting details are kept whole"
+        );
         let old: Profile = serde_json::from_str(
             r#"{"template":"meeting","vocabulary":["Dijkstra"],"context":"c"}"#,
         )

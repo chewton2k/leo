@@ -74,13 +74,19 @@ function choosePictures() {
 
 const UPLOAD_READS = 2000;
 
-function noteFields({ id, folders, here, most, reads, before = '' }) {
+document.addEventListener('input', (e) => {
+  const area = e.target.closest ? e.target.closest('[data-reads]') : null;
+  const hint = area && document.getElementById(`${area.id}-hint`);
+  if (hint) hint.hidden = Array.from(area.value.trim()).length <= Number(area.dataset.reads);
+});
+
+function noteFields({ id, folders, here, reads, before = '' }) {
   const options = ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
   return `<div class="note-fields">
     <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>${before}
     <p class="note-fields-optional">Optional</p>
     <label class="field">${ICON.note}<input id="${id}-title" placeholder="Title" aria-label="Title (optional)" autocomplete="off"></label>
-    <label class="field field-area"><textarea id="${id}-wants" rows="2"${most ? ` maxlength="${most}"` : ''} aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>${reads ? `\n    <p class="set-desc" id="${id}-wants-hint" hidden>Felix reads the first ${reads.toLocaleString('en')} characters of this.</p>` : ''}
+    <label class="field field-area"><textarea id="${id}-wants" rows="2"${reads ? ` data-reads="${reads}"` : ''} aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>${reads ? `\n    <p class="set-desc" id="${id}-wants-hint" hidden>Felix reads the first ${reads.toLocaleString('en')} characters of this.</p>` : ''}
   </div>`;
 }
 
@@ -143,7 +149,6 @@ async function uploadSheet(files, into, { add = false } = {}) {
     <label class="source-keep" id="upload-together-row" hidden><span class="grow">Make one note from all of them</span>${settingsSwitch('id="upload-together"', false)}</label>
     ${noteFields({ id: 'upload', folders: folders.map((d) => d.name), here, reads: UPLOAD_READS })}
     ${sheetButtons(['Make the note', 'id="upload-go" data-action="upload-go" disabled'])}`);
-  $('#upload-wants').addEventListener('input', (e) => { $('#upload-wants-hint').hidden = Array.from(e.target.value.trim()).length <= UPLOAD_READS; });
   $('#upload-together').addEventListener('change', drawPicked);
   $('#upload-where')?.addEventListener('change', drawPicked);
   $('#upload-input').addEventListener('change', (e) => {

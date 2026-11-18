@@ -1258,6 +1258,27 @@ fn a_long_point_is_kept() {
 }
 
 #[test]
+fn what_you_want_can_be_any_length_while_recording() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.listener = Some(saving_quickly());
+    let id = json_of(start_recording(&state, record::Source::Microphone))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(&state, |s| s == "recording");
+    let long = "界".repeat(20_000);
+    let answer = run(record::wants(
+        State(state.clone()),
+        Path(id.clone()),
+        Json(serde_json::from_value(serde_json::json!({ "text": long })).unwrap()),
+    ));
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(json_of(answer)["wants"], long.as_str());
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done");
+}
+
+#[test]
 fn earlier_points_come_fifty_at_a_time() {
     let (mut state, _d, _ids) = state_with(&[]);
     let id = two_hundred_and_two_points(&mut state);

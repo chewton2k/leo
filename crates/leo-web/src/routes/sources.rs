@@ -168,19 +168,13 @@ pub(crate) async fn regenerate(
                 .unwrap_or_else(|| joined(sources.heads.iter().map(|h| h.wants.as_str()))),
             ..Default::default()
         }
-        .checked()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .checked();
         Ok((sources, profile, super::notes::version_of(note)))
     })
     .await;
     let (sources, profile, base) = match input {
         Ok(v) => v,
-        Err(code) => {
-            return error(
-                code,
-                "This note needs a kept recording transcript, and what you want must be under 4,000 characters",
-            )
-        }
+        Err(code) => return error(code, "This note needs a kept recording transcript"),
     };
     let Ok(slot) = state.regenerating.clone().acquire_owned().await else {
         return error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");

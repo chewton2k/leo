@@ -173,3 +173,32 @@ fn an_edited_typed_point_does_not_bring_back_its_old_wording() {
     .unwrap();
     assert_eq!(points, ["explain a heap"]);
 }
+
+#[test]
+fn a_long_brief_is_kept_whole_when_a_note_is_written_again() {
+    let (mut state, _d, ids) = state_with(&[("Graphs", "cs130")]);
+    let id = ids[0].clone();
+    let long = "界".repeat(20_000);
+    store_now(&state, |store| {
+        let mut kept = source("session-long");
+        kept.wants = long.clone();
+        leo_core::recording::save(&store.notes_dir, &id, &kept).unwrap();
+        Ok(())
+    })
+    .unwrap();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let heard = Arc::clone(&asked);
+    state.regenerator = Some(Arc::new(move |_, profile| {
+        heard.lock().unwrap().push(profile.wants.clone());
+        Ok(("Generated".into(), "Preview body".into()))
+    }));
+    for body in [serde_json::json!({}), serde_json::json!({ "wants": long })] {
+        let answer = run(sources::regenerate(
+            State(state.clone()),
+            Path(id.clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        ));
+        assert_eq!(answer.status(), StatusCode::OK);
+    }
+    assert_eq!(*asked.lock().unwrap(), [long.clone(), long]);
+}
