@@ -23,14 +23,6 @@ pub struct Doc {
     pub excerpt: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
-pub struct Held {
-    pub chat: String,
-    pub docs: usize,
-    pub bytes: u64,
-    pub last: Option<DateTime<Utc>>,
-}
-
 fn valid_doc(id: &str) -> bool {
     id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -287,35 +279,6 @@ pub fn remove(dir: &Path, chat: &str, doc: &str) -> bool {
                 )
             })
             .is_ok_and(|n| n > 0)
-}
-
-pub fn remove_all(dir: &Path, chat: &str) -> bool {
-    crate::chats::db_of(dir)
-        .with(|c| c.execute("DELETE FROM chat_docs WHERE chat = ?1", [chat]))
-        .is_ok_and(|n| n > 0)
-}
-
-pub fn held(dir: &Path) -> Vec<Held> {
-    crate::chats::db_of(dir)
-        .with(|c| {
-            let mut found = c.prepare(
-                "SELECT chat, COUNT(*), SUM(length(text) + length(name)), MAX(added_at)
-                 FROM chat_docs GROUP BY chat ORDER BY SUM(length(text) + length(name)) DESC, chat",
-            )?;
-            let rows = found.query_map([], |r| {
-                Ok(Held {
-                    chat: r.get(0)?,
-                    docs: r.get::<_, i64>(1)? as usize,
-                    bytes: r.get::<_, i64>(2)?.max(0) as u64,
-                    last: r
-                        .get::<_, Option<String>>(3)?
-                        .and_then(|t| DateTime::parse_from_rfc3339(&t).ok())
-                        .map(|t| t.with_timezone(&Utc)),
-                })
-            })?;
-            rows.collect()
-        })
-        .unwrap_or_default()
 }
 
 static ARRIVING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
@@ -701,7 +664,7 @@ mod tests {
         assert!(remove(&dir, "chat-aaaa-1", &a.id));
         assert!(!remove(&dir, "chat-aaaa-1", "../../notes"));
         assert_eq!(list(&dir, "chat-aaaa-1").len(), 1);
-        assert!(remove_all(&dir, "chat-aaaa-1"));
+        raw(&dir, "DELETE FROM chat_docs WHERE chat = 'chat-aaaa-1'");
         assert!(list(&dir, "chat-aaaa-1").is_empty());
         assert!(add(&dir, "../escape", "x", "y", at(1)).is_err());
     }
@@ -790,7 +753,13 @@ mod tests {
         assert_eq!(tidy_orphans(dir, at(12)), 0, "not a day old yet");
         let tomorrow = at(1) + chrono::Duration::hours(25);
         assert_eq!(tidy_orphans(dir, tomorrow), 1);
-        let left: Vec<String> = held(dir).into_iter().map(|h| h.chat).collect();
+        let left: Vec<String> = crate::chats::db_of(dir)
+            .with(|c| {
+                c.prepare("SELECT DISTINCT chat FROM chat_docs")?
+                    .query_map([], |r| r.get(0))?
+                    .collect()
+            })
+            .unwrap();
         assert_eq!(left, ["chat-kept-0002"]);
     }
 
@@ -909,7 +878,7 @@ mod tests {
             count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"),
             held / 3 * 2
         );
-        assert!(remove_all(&dir, "chat-aaaa-1"));
+        raw(&dir, "DELETE FROM chat_docs WHERE chat = 'chat-aaaa-1'");
         assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), held / 3);
         raw(&dir, "DELETE FROM chat_docs");
         assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 0);

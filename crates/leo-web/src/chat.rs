@@ -453,6 +453,7 @@ pub fn question_of(messages: &[Turn]) -> String {
 
 pub const MOST_RECENT: usize = 6;
 
+#[cfg(test)]
 pub fn gather(
     store: &Store,
     cache: &Cache,
@@ -464,6 +465,7 @@ pub fn gather(
     gather_with(store, cache, open, attached, &[], question, room)
 }
 
+#[cfg(test)]
 pub fn gather_with(
     store: &Store,
     cache: &Cache,
@@ -836,10 +838,6 @@ Lesson, when they want to understand. 1. Find the edge first: before explaining,
 Practice, when they want testing. Call study_plan with the 3 to 8 key ideas or problems of what they are studying (fewer for a quick check), then ask about one idea at a time, giving its idea number, without naming the idea the question needs. A worked problem broken into steps is one idea: ask for the next step, check it, then the one after, with more_parts on all but the last, asking why as well as what. Take each idea as far through three demands as it needs, in order, dropping back when one fails: bring it to mind from a new situation; tell it apart from the idea it is most easily confused with; combine it with others in a longer problem. Other strong forms: give the conclusion and ask for the grounds, weaken a premise and ask what breaks, or show a plausible wrong solution and ask what is wrong. Mix ideas instead of drilling one; with three or more ideas, the last open idea's question needs earlier ones too. Adapt: after a clean right answer go a step harder; after a miss ask a simpler question on the same idea, in a new form. Solve each question before asking it, and rewrite one that a shortcut gets around. Aim for answers that take effort but usually succeed. Move on from an idea once it has two good answers; come back to a missed one once, in a new situation and never the same wording, before the session ends.
 Hints come only when asked and never give the answer. Give one rung at a time, least revealing first: where to look, what kind of problem this is, which group of ideas applies, the idea itself, the outline of the move, the next step. Aim at the first thing they got wrong, which may be earlier than where they feel stuck. Explaining what a question means costs nothing. Asked for the answer outright, give it with its reasoning, then go on with a question on another idea and come back to that one later with a new case, never the solved question. Harder or easier changes the next question, never the plan.
 Sessions: when they say that is enough, want to stop or want something else, call end_session and write the recap. Judge readiness only from answers they reached unaided. Do not reveal answers before the user tries or asks for them. If they ask for a study plan, base it on the notes and spread review over days. Keep each turn short.";
-
-pub fn documents_block(docs: &[(String, String)]) -> String {
-    documents_within(docs, DOCS_CHARS)
-}
 
 pub fn notes_room(practice: bool, room: usize) -> usize {
     if practice {
@@ -1729,7 +1727,7 @@ mod tests {
             user.chars().count() < DOCS_CHARS + 2_000,
             "two documents share the budget"
         );
-        assert!(documents_block(&[]).is_empty());
+        assert!(documents_within(&[], DOCS_CHARS).is_empty());
     }
 
     #[test]

@@ -158,12 +158,14 @@ impl Captions {
         self.moved();
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.db
             .with(|c| c.query_row("SELECT COUNT(*) FROM captions", [], |r| r.get::<_, i64>(0)))
             .map_or(0, |n| n.max(0) as usize)
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -318,6 +320,7 @@ pub fn describe(path: &Path, seer: &Seer, question: &str) -> Result<String> {
     Ok(said.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
+#[cfg(test)]
 pub fn caption_some(store: &Store, captions: &Captions, seer: &Seer, most: usize) -> usize {
     caption_paths(
         &uncaptioned(store, captions, most, &Changed::Everything),

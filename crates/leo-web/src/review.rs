@@ -10,12 +10,14 @@ use crate::chats::{self, Chat, Ref};
 pub const DUE_AFTER_HOURS: i64 = 20;
 pub const MOST_MISSED: usize = 20;
 
+#[cfg(test)]
 pub fn count(dir: &Path) -> usize {
     chats::db_of(dir)
         .with(|c| c.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get::<_, i64>(0)))
         .map_or(0, |n| n.max(0) as usize)
 }
 
+#[cfg(test)]
 pub fn reset(dir: &Path) -> bool {
     chats::db_of(dir)
         .with(|c| c.execute("DELETE FROM reviewed", []))

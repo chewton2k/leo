@@ -34,6 +34,7 @@ pub struct Sessions {
 }
 
 impl Sessions {
+    #[cfg(test)]
     pub fn in_memory() -> Sessions {
         Sessions {
             path: None,
@@ -131,21 +132,17 @@ impl Sessions {
 }
 
 pub struct Gate {
-    token: std::sync::RwLock<String>,
+    token: String,
     pub sessions: Sessions,
 }
 
 impl Gate {
     pub fn new(token: String, sessions: Sessions) -> Gate {
-        Gate {
-            token: std::sync::RwLock::new(token),
-            sessions,
-        }
+        Gate { token, sessions }
     }
 
     pub fn token_matches(&self, given: &str) -> bool {
-        let token = self.token.read().unwrap_or_else(|e| e.into_inner());
-        token::same(given, &token)
+        token::same(given, &self.token)
     }
 }
 
