@@ -320,3 +320,41 @@ test('`lineStart` and `lineOf` give the same answers as the loops they replace',
     if (step % 50 === 0) { clock.t += 1100; api.undo(); check(`undo ${step}`); }
   }
 });
+
+test('undo and redo after bursts of typing, pastes and rewrites give back the recorded text', () => {
+  const clock = { t: 1000 };
+  const { api, type } = editor(linesOf(20000).join('\n'), clock);
+  let r = 5;
+  const pick = (n) => (r = (r * 1103515245 + 12345) % 2147483648) % n;
+  const burst = () => {
+    clock.t += 1100;
+    const at = 1 + pick(api.lines.length - 2);
+    for (const [k, line] of [at, at, at - 1, at + 1, at + 1, at].entries()) type(line, String.fromCharCode(97 + k));
+  };
+  for (let round = 0; round < 30; round++) {
+    const before = api.source();
+    burst();
+    const after = api.source();
+    assert.notEqual(after, before);
+    assert.equal(api.undo(), true);
+    assert.equal(api.source(), before, `round ${round}: undo of a burst`);
+    assert.equal(api.lines.join('\n'), before);
+    assert.equal(api.redo(), true);
+    assert.equal(api.source(), after, `round ${round}: redo of a burst`);
+    const kind = round % 3;
+    const ahead = api.source();
+    if (kind === 0) { api.lines.splice(pick(api.lines.length), 1, 'pasted', 'more'); api.changed(); }
+    else if (kind === 1) { api.lines = api.lines.join('\n').replace('o', 'OO').split('\n'); api.changed(); }
+    else burst();
+    const done = api.source();
+    burst();
+    const last = api.source();
+    assert.equal(api.undo(), true);
+    assert.equal(api.source(), done, `round ${round}: undo after a ${['paste', 'rewrite', 'burst'][kind]}`);
+    assert.equal(api.undo(), true);
+    assert.equal(api.source(), ahead, `round ${round}: undo of the ${['paste', 'rewrite', 'burst'][kind]}`);
+    assert.equal(api.redo(), true);
+    assert.equal(api.redo(), true);
+    assert.equal(api.source(), last);
+  }
+});
