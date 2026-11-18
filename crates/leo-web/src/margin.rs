@@ -360,8 +360,10 @@ fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::
 pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
     db_of(chats)
         .with(|c| {
-            let added = insert(c, thread, limit)?;
-            prune_closed(c, &thread.note)?;
+            let tx = c.transaction()?;
+            let added = insert(&tx, thread, limit)?;
+            prune_closed(&tx, &thread.note)?;
+            tx.commit()?;
             Ok(added)
         })
         .is_ok_and(|added| added > 0)
@@ -924,26 +926,27 @@ pub fn sweep_due(last: Option<Instant>) -> bool {
 }
 
 pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
-    let mut removed = 0;
-    for note in notes {
-        removed += db_of(chats)
-            .with(|c| {
-                let threads = c.execute("DELETE FROM margin_threads WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_modes WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_personas WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM note_tasks WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM reading WHERE note = ?1", [note])?;
-                c.execute(
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let mut removed = 0;
+            for note in notes {
+                removed += tx.execute("DELETE FROM margin_threads WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM margin_modes WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM margin_personas WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM note_tasks WHERE note = ?1", [note])?;
+                tx.execute("DELETE FROM reading WHERE note = ?1", [note])?;
+                tx.execute(
                     "DELETE FROM margin_state WHERE key = 'combined:' || ?1",
                     [note],
                 )?;
-                Ok(threads)
-            })
-            .unwrap_or(0);
-    }
-    removed
+            }
+            tx.commit()?;
+            Ok(removed)
+        })
+        .unwrap_or(0)
 }
 
 pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
@@ -2489,5 +2492,85 @@ mod tests {
         assert!(!text.contains("passage 21"));
         assert_eq!(context(&all, 100), "");
         assert_eq!(context(&[], 100_000), "");
+    }
+
+    fn closed(note: &str, n: usize) -> Thread {
+        let mut thread = new_thread(
+            note,
+            "read",
+            Place {
+                prefix: String::new(),
+                suffix: String::new(),
+            },
+            &format!("closed quote {n}"),
+            vec![felix_says("Hm.")],
+        );
+        thread.status = "resolved".into();
+        thread.updated_at = Utc::now() - chrono::Duration::minutes(100 - n as i64);
+        thread
+    }
+
+    #[test]
+    fn a_put_whose_prune_fails_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        for n in 0..MOST_CLOSED {
+            assert!(put(&chats, &closed("n", n), MOST_OPEN));
+        }
+        db_of(&chats)
+            .with(|c| c.execute_batch("CREATE TEMP TRIGGER no_prune BEFORE DELETE ON margin_threads BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+            .unwrap();
+        let extra = closed("n", MOST_CLOSED);
+        let stored = put(&chats, &extra, MOST_OPEN);
+        let left = one(&chats, "n", &extra.id).is_some();
+        assert!(
+            stored || !left,
+            "put reported failure but its insert stayed"
+        );
+    }
+
+    #[test]
+    fn forgetting_a_note_whose_later_delete_fails_leaves_everything() {
+        for table in ["margin_modes", "reading"] {
+            let dir = tempfile::tempdir().unwrap();
+            let chats = dir.path().join("chats");
+            let thread = new_thread(
+                "gone-note",
+                "read",
+                Place {
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+                "some quote",
+                vec![felix_says("Hm.")],
+            );
+            assert!(put(&chats, &thread, MOST_OPEN));
+            assert!(set_mode(&chats, "gone-note", "along"));
+            db_of(&chats)
+                .with(|c| {
+                    c.execute(
+                        "INSERT INTO reading (note, anchor, at) VALUES ('gone-note', 'a', 't')",
+                        [],
+                    )?;
+                    c.execute_batch(&format!("CREATE TEMP TRIGGER no_forget BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+                })
+                .unwrap();
+            let removed = forget_notes(&chats, &["gone-note".to_string()]);
+            assert_eq!(removed, 0, "{table}");
+            assert!(
+                one(&chats, "gone-note", &thread.id).is_some(),
+                "the threads were deleted although forgetting failed at {table}"
+            );
+            let modes_left: i64 = db_of(&chats)
+                .with(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM margin_modes WHERE note = 'gone-note'",
+                        [],
+                        |r| r.get(0),
+                    )
+                })
+                .unwrap();
+            assert_eq!(modes_left, 1, "{table}");
+        }
     }
 }
