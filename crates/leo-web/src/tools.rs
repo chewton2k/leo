@@ -911,9 +911,7 @@ pub fn guidance_for(access: Access) -> String {
     let limits = if access.changes() {
         format!("At most {MOST_STEPS} tool calls per answer, document reads extra, and at most {MOST_PROPOSALS} changes across every tool that changes notes, folders, tasks or boards.")
     } else {
-        format!(
-            "At most {MOST_STEPS} tool calls per answer, document reads extra."
-        )
+        format!("At most {MOST_STEPS} tool calls per answer, document reads extra.")
     };
     let when = match access {
         Access::Ask => WHEN_ASK,
