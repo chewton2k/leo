@@ -494,6 +494,32 @@ fn commit(
         },
     )?;
     after("pair")?;
+    if let Some(old) = old.filter(|o| o.revision == 0) {
+        let (mut passages, mut points) = (0usize, 0usize);
+        read_lines(
+            &dir.join(lines_name(&id, head.revision, Kind::Passage)),
+            Some(0),
+            &mut |_, _: Passage| {
+                passages += 1;
+                Ok(true)
+            },
+        )?;
+        read_lines(
+            &dir.join(lines_name(&id, head.revision, Kind::Point)),
+            Some(0),
+            &mut |_, _: Point| {
+                points += 1;
+                Ok(true)
+            },
+        )?;
+        anyhow::ensure!(
+            passages == head.passages
+                && points == head.points
+                && passages >= old.passages
+                && points >= old.points,
+            "The rewritten recording did not read back whole"
+        );
+    }
     if let Some(old) = old.filter(|_| backup) {
         keep_backup(dir, old)?;
         after("backup")?;
@@ -1975,6 +2001,42 @@ mod tests {
                 .unwrap()
                 .contains("\"one\"")
         );
+    }
+
+    #[test]
+    fn converting_an_old_recording_fixed_before_keeps_its_first_backup_and_every_row() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let mut source = spoken("rec-old004", &[(0, "", "fixed once"), (5, "", "two")]);
+        source.points = vec![typed(1, "p")];
+        old_layout(&notes, "note-0001", &source);
+        let dir = folder(&notes, "note-0001").unwrap();
+        std::fs::write(dir.join("rec-old004.original"), "the first wording").unwrap();
+        edit(
+            &notes,
+            "note-0001",
+            "rec-old004",
+            0,
+            &[Change {
+                kind: Kind::Passage,
+                seq: 2,
+                text: "TWO".into(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("rec-old004.original")).unwrap(),
+            "the first wording"
+        );
+        let kept = &whole(&notes, "note-0001")[0];
+        assert_eq!(
+            kept.passages
+                .iter()
+                .map(|p| p.text.as_str())
+                .collect::<Vec<_>>(),
+            ["fixed once", "TWO"]
+        );
+        assert_eq!(kept.points, source.points);
     }
 
     #[test]
