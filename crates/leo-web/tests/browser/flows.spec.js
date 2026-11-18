@@ -111,6 +111,17 @@ async function dropFiles(page, selector, files) {
   await page.dispatchEvent(selector, 'drop', { dataTransfer: data });
 }
 
+async function fakeFileSends(page) {
+  const puts = [];
+  await page.route('**/api/import/files/**', async (route) => {
+    const request = route.request();
+    const parts = new URL(request.url()).pathname.split('/');
+    puts.push({ method: request.method(), upload: parts.at(-2), item: parts.at(-1), name: new URL(request.url()).searchParams.get('name'), body: request.postDataBuffer() });
+    await route.fulfill({ status: 204 });
+  });
+  return puts;
+}
+
 async function openNote(page, title) {
   const response = await page.request.post('/api/notes', { data: { title, body: 'Original sentence' } });
   expect(response.status()).toBe(201);
@@ -2549,6 +2560,7 @@ test.describe('uploads', () => {
     const made = await (await page.request.post('/api/notes', { data: { title: 'Lecture 9: Sorting', body: '## Merge sort\n- divide and conquer' } })).json();
     let sent = null;
     let polls = 0;
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent = route.request().postDataJSON();
       await route.fulfill({ status: 202, json: { id: 'job-1' } });
@@ -2568,7 +2580,12 @@ test.describe('uploads', () => {
     expect(sent.title).toBe('Sorting');
     expect(sent.wants).toBe('The algorithm, then the code, explained step by step');
     expect(sent.files[0].name).toBe('sorting.txt');
-    expect(Buffer.from(sent.files[0].data, 'base64').toString()).toBe('Merge sort splits the list in half.');
+    expect(puts.map((p) => p.method)).toEqual(['PUT']);
+    expect(puts[0].name).toBe('sorting.txt');
+    expect(puts[0].body.toString()).toBe('Merge sort splits the list in half.');
+    expect(sent.upload).toBe(puts[0].upload);
+    expect(sent.files[0].item).toBe(puts[0].item);
+    expect(sent.files[0], 'the file travels in its own request, never in the JSON').not.toHaveProperty('data');
   });
 
   test('files dropped on an open note can be added to it, or still make a new note', async ({ page }) => {
@@ -2576,6 +2593,7 @@ test.describe('uploads', () => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Week 3 ${Date.now().toString(36)}`, body: 'My own notes on heaps.' } })).json();
     let sent = null;
     let polls = 0;
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent = route.request().postDataJSON();
       await route.fulfill({ status: 202, json: { id: 'job-into' } });
@@ -2607,6 +2625,9 @@ test.describe('uploads', () => {
     await expect(page).toHaveURL(new RegExp(`#/n/${note.id}$`));
     expect(sent).toMatchObject({ into: note.id, each: false, wants: 'just the proofs', title: null });
     expect(sent.files.map((f) => f.name)).toEqual(['proofs.pdf', 'board.png']);
+    expect(sent.files.map((f) => f.item).sort()).toEqual(puts.map((p) => p.item).sort());
+    expect(puts.find((p) => p.name === 'proofs.pdf').body.toString()).toBe('%PDF fake');
+    expect(new Set(puts.map((p) => p.upload))).toEqual(new Set([sent.upload]));
     const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
     await expect.poll(async () => (await body()).trim()).toBe('My own notes on heaps.\n\n## Heap proofs\n\nSift down keeps the order.');
     await page.locator('.toast button', { hasText: 'Undo' }).click();
@@ -2619,6 +2640,7 @@ test.describe('uploads', () => {
     const notes = [];
     for (const n of [1, 2]) notes.push(await (await page.request.post('/api/notes', { data: { title: `Lecture ${n}`, body: 'x', directory: dir } })).json());
     const sent = [];
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent.push(route.request().postDataJSON());
       await route.fulfill({ status: 202, json: { id: 'job-each' } });
@@ -2650,6 +2672,8 @@ test.describe('uploads', () => {
     expect(sent[0].each).toBe(true);
     expect(sent[0].title).toBe(null);
     expect(sent[0].files.map((f) => f.name)).toEqual(['lecture 1.txt', 'lecture 2.txt']);
+    expect(puts.map((p) => p.body.toString()).sort()).toEqual(['One', 'Two']);
+    expect(sent[0].files.map((f) => f.item)).toEqual(['lecture 1.txt', 'lecture 2.txt'].map((name) => puts.find((p) => p.name === name).item));
     for (const n of notes) await page.request.delete(`/api/notes/${n.id}`);
   });
 
@@ -2657,6 +2681,7 @@ test.describe('uploads', () => {
     const title = `Uploaded later ${test.info().project.name}`;
     let polls = 0;
     let made = null;
+    await fakeFileSends(page);
     await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-late' } }));
     await page.route('**/api/import/job-late', async (route) => {
       polls += 1;
@@ -2677,6 +2702,7 @@ test.describe('uploads', () => {
   });
 
   test('a failed upload says why and offers to try again', async ({ page }) => {
+    await fakeFileSends(page);
     await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-2' } }));
     await page.route('**/api/import/job-2', (route) => route.fulfill({ json: { state: 'failed', step: '', done: 0, total: 1, error: 'qwen3:8b cannot read images' } }));
     await page.goto('/');
@@ -2685,6 +2711,25 @@ test.describe('uploads', () => {
     await page.locator('#upload-go').click();
     await expect(page.locator('.upload-error')).toContainText('cannot read images');
     await expect(page.locator(':is(.sheet, .popup-menu) [data-action="upload"]')).toBeVisible();
+  });
+
+  test('an upload that has to wait for its turn says so, then runs and opens its note', async ({ page }) => {
+    const made = await (await page.request.post('/api/notes', { data: { title: `Waited ${test.info().project.name} ${Date.now().toString(36)}`, body: 'From the upload.' } })).json();
+    await fakeFileSends(page);
+    let polls = 0;
+    await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-wait' } }));
+    await page.route('**/api/import/job-wait', (route) => {
+      polls += 1;
+      route.fulfill({ json: polls < 3 ? { state: 'waiting', step: 'Uploading', done: 0, total: 1 } : polls < 4 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: made.id } });
+    });
+    await page.goto('/');
+    await control(page, 'upload').click();
+    await page.locator('#upload-input').setInputFiles({ name: 'queued.txt', mimeType: 'text/plain', buffer: Buffer.from('From the upload.') });
+    await page.locator('#upload-go').click();
+    const progress = page.locator('.upload-working #upload-progress');
+    await expect(progress).toContainText('Waiting for another upload to finish…');
+    await expect(progress).toContainText('Writing the note', { timeout: 8000 });
+    await expect(page).toHaveURL(new RegExp(`#/n/${made.id}$`), { timeout: 8000 });
   });
 });
 
