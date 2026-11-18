@@ -520,14 +520,24 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         .as_deref()
         .ok_or_else(|| anyhow!("Choose an interrupted recording."))?;
     let root = recordings_root()?.ok_or_else(|| anyhow!("This recording cannot be recovered."))?;
-    let found: Vec<_> = leo_services::session::find(&root, id)
+    let mut found: Vec<_> = leo_services::session::find(&root, id)
         .into_iter()
         .filter(waiting)
         .collect();
     let into = found
         .iter()
-        .filter(|session| session.manifest.saved)
-        .find_map(|session| session.owner());
+        .find_map(|session| session.owner())
+        .or_else(|| {
+            found
+                .iter()
+                .any(|session| session.manifest.saved)
+                .then(|| id.to_owned())
+        });
+    for session in found.iter_mut().filter(|session| session.manifest.saved) {
+        session.manifest.saved = false;
+        session.manifest.note = into.clone();
+        session.save()?;
+    }
     let selected: Vec<_> = found
         .into_iter()
         .map(|session| (session.manifest.id, session.dir))
@@ -981,6 +991,32 @@ mod tests {
                 let recorded = super::recover(listening("kept-retry-01"), &mut |_| {}).unwrap();
                 assert_eq!(recorded.into.as_deref(), Some("note-owner-1"));
                 assert_eq!(recorded.source.unwrap().id, "kept-retry-01");
+                assert!(
+                    super::pending_one(&leo_services::session::root().unwrap(), "kept-retry-01")
+                        .is_some(),
+                    "a recovery that is never committed stays recoverable"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn a_saved_recording_without_an_owner_recovers_into_its_own_id() {
+        in_scratch_home(
+            "record::tests::a_saved_recording_without_an_owner_recovers_into_its_own_id",
+            || {
+                let dir = track("kept-old-0001", false);
+                let mut kept = leo_services::session::Session::open(&dir).unwrap();
+                kept.manifest.saved = true;
+                kept.save().unwrap();
+                std::fs::write(dir.join("seg-00000.txt"), "the first part").unwrap();
+                silent_part(&dir);
+                std::fs::rename(dir.join("seg-00000.wav"), dir.join("seg-00001.wav")).unwrap();
+                let recorded = super::recover(listening("kept-old-0001"), &mut |_| {}).unwrap();
+                assert_eq!(recorded.into.as_deref(), Some("kept-old-0001"));
+                let again = leo_services::session::Session::open(&dir).unwrap().manifest;
+                assert!(!again.saved);
+                assert_eq!(again.note.as_deref(), Some("kept-old-0001"));
             },
         );
     }

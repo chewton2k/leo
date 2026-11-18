@@ -535,6 +535,7 @@ mod tests {
         assert!(discard_kept_for_notes(tmp.path(), &[A.into()])
             .unwrap()
             .is_empty());
+        assert!(!remove_kept(tmp.path(), &dir, &[A.into()]).unwrap());
         assert!(dir.exists());
         assert_eq!(note_of(&dir).as_deref(), Some(B));
     }
