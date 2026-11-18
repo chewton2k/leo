@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
-    use base64::Engine;
     let (mut state, _d, _ids) = state_with(&[]);
     state.reader = Some(Arc::new(|file: UploadFile, _: &mut dyn FnMut(&str)| {
         assert_eq!(file.bytes, b"%PDF fake");
@@ -23,14 +22,13 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
         },
     ));
     let upload = |name: &str, data: &[u8]| {
-        run(add_chat_file(
+        run(crate::routes::felix::put_chat_file(
             State(state.clone()),
-            Path("chat-docs-0001".into()),
-            Json(ImportFileBody {
-                name: name.into(),
+            Path(("chat-docs-0001".into(), name.into())),
+            Query(crate::routes::felix::FileKind {
                 mime: "application/pdf".into(),
-                data: base64::engine::general_purpose::STANDARD.encode(data),
             }),
+            axum::body::Body::from(data.to_vec()),
         ))
     };
     let added = upload("../../slides.pdf", b"%PDF fake");
@@ -100,14 +98,13 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
     state.reader = Some(Arc::new(|_: UploadFile, _: &mut dyn FnMut(&str)| {
         anyhow::bail!("leo cannot read song.mp3 yet")
     }));
-    let unreadable = run(add_chat_file(
+    let unreadable = run(crate::routes::felix::put_chat_file(
         State(state.clone()),
-        Path("chat-docs-0001".into()),
-        Json(ImportFileBody {
-            name: "song.mp3".into(),
+        Path(("chat-docs-0001".into(), "song.mp3".into())),
+        Query(crate::routes::felix::FileKind {
             mime: "audio/mpeg".into(),
-            data: "AAAA".into(),
         }),
+        axum::body::Body::from("AAAA"),
     ));
     assert_eq!(unreadable.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(json_of(unreadable)["error"]
@@ -4428,13 +4425,13 @@ fn benchmark_a_chats_documents_are_listed_and_added() {
             assert_eq!(listed.as_array().unwrap().len(), 9);
         }
         let started = std::time::Instant::now();
-        let added = run(add_chat_file(
+        let added = run(crate::routes::felix::put_chat_file(
             State(state.clone()),
-            Path(chat.into()),
-            Json(
-                serde_json::from_value(serde_json::json!({ "name": "new.pdf", "type": "application/pdf", "data": "JVBERg==" }))
-                    .unwrap(),
-            ),
+            Path((chat.into(), "new.pdf".into())),
+            Query(crate::routes::felix::FileKind {
+                mime: "application/pdf".into(),
+            }),
+            axum::body::Body::from("%PDF"),
         ));
         let add_ms = started.elapsed().as_secs_f64() * 1e3;
         assert_eq!(added.status(), StatusCode::CREATED);

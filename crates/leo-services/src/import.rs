@@ -881,21 +881,10 @@ fn named(mut prompt: Prompt, label: Option<&str>) -> Prompt {
 pub type Write<'a> = &'a (dyn Fn(Prompt, u32) -> Result<String> + Sync);
 pub type See<'a> = &'a (dyn Fn(Prompt, &[Image], u32) -> Result<String> + Sync);
 
-pub const CHAT_DOC_CHARS: usize = 2_000_000;
 const TRANSCRIBE_TOKENS: u32 = 6_000;
 
 const TRANSCRIBING: &str = "\
 You copy out what is on photographed or scanned pages so someone can ask questions about them later. Write the text exactly as it appears, in reading order, in Markdown: keep headings, lists, tables, and formulas written in LaTeX ($...$ inline, $$...$$ on their own lines). Describe each diagram or figure in one short sentence in [brackets]. Write [unreadable] for anything you cannot read. Reply with the text only.";
-
-pub fn clip_document(text: &str) -> String {
-    let text = text.trim();
-    if text.chars().count() <= CHAT_DOC_CHARS {
-        return text.to_string();
-    }
-    let mut out: String = text.chars().take(CHAT_DOC_CHARS).collect();
-    out.push_str("\n\n[…the rest of this document is left out]");
-    out
-}
 
 fn seen_pages(
     images: &[ImageFile],
@@ -930,7 +919,11 @@ pub fn read_for_chat(
     progress: &mut dyn FnMut(&str),
 ) -> Result<String> {
     let material = extract(upload)?;
-    let mut text = material.text.head(CHAT_DOC_CHARS + 1)?.trim().to_string();
+    let mut text = material
+        .text
+        .read(0..material.text.len())?
+        .trim()
+        .to_string();
     seen_pages(&material.images, &upload.name, see, progress, |seen| {
         if !text.is_empty() {
             text.push_str("\n\n");
@@ -941,7 +934,7 @@ pub fn read_for_chat(
     if text.trim().is_empty() {
         bail!("there is no text in {} for Felix to read", upload.name);
     }
-    Ok(clip_document(&text))
+    Ok(text)
 }
 
 const TEXT_PIECE: usize = 64 * 1024;
@@ -1372,7 +1365,7 @@ mod tests {
     }
 
     #[test]
-    fn a_document_for_felix_keeps_only_its_text_and_is_clipped() {
+    fn a_document_for_felix_keeps_only_its_text_and_is_kept_whole() {
         let text = Upload {
             name: "notes.md".into(),
             mime: "text/markdown".into(),
@@ -1383,13 +1376,13 @@ mod tests {
         assert_eq!(read, "# Heaps\n\nMinimum at the root.");
         let long = Upload {
             name: "long.txt".into(),
+            bytes: "word ".repeat(420_000).into_bytes(),
             mime: "text/plain".into(),
-            bytes: "word ".repeat(CHAT_DOC_CHARS / 5 + 100).into_bytes(),
             path: None,
         };
-        let clipped = read_for_chat(&long, &never, &mut |_| {}).unwrap();
-        assert!(clipped.chars().count() < CHAT_DOC_CHARS + 60);
-        assert!(clipped.ends_with("[…the rest of this document is left out]"));
+        let whole = read_for_chat(&long, &never, &mut |_| {}).unwrap();
+        assert_eq!(whole.chars().count(), 5 * 420_000 - 1);
+        assert!(!whole.contains("left out"));
         let blank = Upload {
             name: "blank.txt".into(),
             mime: "text/plain".into(),

@@ -9,10 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::routes::notes::{save, NoteResponse};
-use crate::routes::uploads::{safe_file_name, ImportFileBody};
-use crate::{
-    captions, chat, chat_files, chats, read_now, review, store_now, tools, AppState, UploadFile,
-};
+use crate::routes::uploads::safe_file_name;
+use crate::{captions, chat, chat_files, chats, read_now, review, store_now, tools, AppState};
 
 fn ndjson(value: serde_json::Value) -> String {
     format!("{value}\n")
@@ -63,60 +61,10 @@ pub(crate) async fn list_chat_files(
     }
 }
 
-pub(crate) async fn add_chat_file(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<ImportFileBody>,
-) -> Response {
-    let refuse = |status: StatusCode, message: String| {
-        (status, Json(serde_json::json!({ "error": message }))).into_response()
-    };
-    if !chats::valid_id(&id) {
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    let Some(reader) = state.reader.clone() else {
-        return refuse(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "This copy of leo cannot read files.".into(),
-        );
-    };
-    let data = body.data;
-    let decoded = tokio::task::spawn_blocking(move || {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD.decode(data.as_bytes())
-    })
-    .await;
-    let Ok(Ok(bytes)) = decoded else {
-        return refuse(
-            StatusCode::BAD_REQUEST,
-            format!("{} did not arrive intact; try again.", body.name),
-        );
-    };
-    let name = safe_file_name(&body.name);
-    let dir = state.chats.clone();
-    let file = UploadFile {
-        name: name.clone(),
-        mime: body.mime,
-        bytes,
-        path: None,
-    };
-    let (_guard, stop) = crate::stop_when_dropped();
-    let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
-        let text = leo_core::children::with_stop(stop, || reader(file, &mut |_| {}))?;
-        chat_files::add(&dir, &id, &name, &text, chrono::Utc::now())
-    })
-    .await;
-    match done {
-        Ok(Ok(doc)) => (StatusCode::CREATED, Json(doc)).into_response(),
-        Ok(Err(e)) => refuse(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    }
-}
-
 #[derive(serde::Deserialize, Default)]
 pub(crate) struct FileKind {
     #[serde(default, rename = "type")]
-    mime: String,
+    pub(crate) mime: String,
 }
 
 pub(crate) async fn put_chat_file(

@@ -6,7 +6,6 @@ use serde::Serialize;
 
 use crate::chats::valid_id;
 
-pub const UPLOAD_BYTES: usize = 40 * 1024 * 1024;
 pub const KEPT_WHOLE: usize = 2_000_000;
 pub const PIECE_CHARS: usize = 64_000;
 const PIECES_AT_ONCE: usize = 16;

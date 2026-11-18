@@ -1,5 +1,4 @@
 use super::*;
-use crate::routes::pictures::put_picture;
 
 const PICTURE: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\0\x10\0\0\0\x10\x08\x02\0\0\0";
 
@@ -15,14 +14,11 @@ fn picture_at(state: &AppState, path: &str, from: &str) -> Response {
 
 #[test]
 fn a_pasted_picture_is_saved_beside_the_notes_and_served_back() {
-    use base64::Engine;
     let (state, _d, _ids) = state_with(&[]);
-    let added = run(add_picture(
+    let added = run(put_picture(
         State(state.clone()),
-        Json(NewPicture {
-            name: "pasted-1.png".into(),
-            data: base64::engine::general_purpose::STANDARD.encode(PICTURE),
-        }),
+        Path("pasted-1.png".into()),
+        axum::body::Body::from(PICTURE.to_vec()),
     ));
     assert_eq!(added.status(), StatusCode::CREATED);
     let path = json_of(added)["path"].as_str().unwrap().to_string();
@@ -51,13 +47,11 @@ fn a_pasted_picture_is_saved_beside_the_notes_and_served_back() {
             "{bad} from {from}"
         );
     }
-    for (name, data) in [("x.svg", "PHN2Zy8+"), ("x.png", "not base64!")] {
-        let refused = run(add_picture(
+    for (name, data) in [("x.svg", &b"<svg/>"[..]), ("x.png", &b"hello"[..])] {
+        let refused = run(put_picture(
             State(state.clone()),
-            Json(NewPicture {
-                name: name.into(),
-                data: data.into(),
-            }),
+            Path(name.into()),
+            axum::body::Body::from(data.to_vec()),
         ));
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST, "{name}");
     }
@@ -139,22 +133,6 @@ fn a_picture_that_stops_arriving_leaves_nothing() {
     let failed = put_stream(&state, "x.png", pieces);
     assert_ne!(failed.status(), StatusCode::CREATED);
     assert!(attachments_of(&state).is_empty());
-}
-
-#[test]
-fn a_picture_over_twenty_megabytes_is_added_by_the_older_post() {
-    use base64::Engine;
-    let (state, _d, _ids) = state_with(&[]);
-    let mut big = PICTURE.to_vec();
-    big.resize(21 * 1024 * 1024, 3);
-    let added = run(add_picture(
-        State(state.clone()),
-        Json(NewPicture {
-            name: "big.png".into(),
-            data: base64::engine::general_purpose::STANDARD.encode(&big),
-        }),
-    ));
-    assert_eq!(added.status(), StatusCode::CREATED);
 }
 
 #[test]

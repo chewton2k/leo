@@ -264,14 +264,6 @@ fn write_refused(error: &std::io::Error, name: &str) -> Response {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ImportFileBody {
-    pub(crate) name: String,
-    #[serde(default, rename = "type")]
-    pub(crate) mime: String,
-    pub(crate) data: String,
-}
-
-#[derive(Deserialize)]
 pub(crate) struct SentFile {
     pub(crate) item: String,
     pub(crate) name: String,

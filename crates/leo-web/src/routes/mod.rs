@@ -29,16 +29,16 @@ use crate::routes::assets::{favicon, index, script};
 use crate::routes::auth::{auth_middleware, note_peer, security_headers};
 use crate::routes::downloads::{export_zip, originals_zip};
 use crate::routes::felix::{
-    add_chat_file, apply_suggestion, change_answer_access, chat_reply, delete_chat,
-    drop_last_messages, get_chat, get_review, list_chat_files, list_chats, mark_reviewed, put_chat,
-    put_chat_file, remove_chat_file, steer_answer,
+    apply_suggestion, change_answer_access, chat_reply, delete_chat, drop_last_messages, get_chat,
+    get_review, list_chat_files, list_chats, mark_reviewed, put_chat, put_chat_file,
+    remove_chat_file, steer_answer,
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
     create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes, move_dir,
     move_note, rename_dir, search_notes, update_note,
 };
-use crate::routes::pictures::{add_picture, get_picture, put_picture, PICTURE_BYTES};
+use crate::routes::pictures::{get_picture, put_picture};
 use crate::routes::settings::{change_setting, get_settings, test_setting};
 use crate::routes::trash::{
     delete_from_trash, list_trash, move_to_trash, restore_many, restore_note,
@@ -263,14 +263,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/chat/{answer}/access", post(change_answer_access))
         .route("/api/chats", get(list_chats))
         .route("/api/review", get(get_review).post(mark_reviewed))
-        .route(
-            "/api/chats/{id}/files",
-            get(list_chat_files)
-                .post(add_chat_file)
-                .layer(axum::extract::DefaultBodyLimit::max(
-                    crate::chat_files::UPLOAD_BYTES,
-                )),
-        )
+        .route("/api/chats/{id}/files", get(list_chat_files))
         .route(
             "/api/chats/{id}/files/{doc}",
             axum::routing::delete(remove_chat_file)
@@ -304,10 +297,6 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/activity", get(activity))
         .route("/api/visible", post(page_visible))
         .route("/api/image", get(get_picture))
-        .route(
-            "/api/images",
-            post(add_picture).layer(axum::extract::DefaultBodyLimit::max(PICTURE_BYTES)),
-        )
         .route(
             "/api/pictures/{name}",
             axum::routing::put(put_picture).layer(axum::extract::DefaultBodyLimit::disable()),

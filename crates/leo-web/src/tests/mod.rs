@@ -36,8 +36,7 @@ use leo_core::store::Store;
 use crate::routes::activity::activity_tasks;
 use crate::routes::downloads::attachment_header;
 use crate::routes::felix::{
-    add_chat_file, apply_suggestion, chat_reply, list_chat_files, remove_chat_file, steer_answer,
-    Suggestion,
+    apply_suggestion, chat_reply, list_chat_files, remove_chat_file, steer_answer, Suggestion,
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
@@ -45,13 +44,13 @@ use crate::routes::notes::{
     move_note, tasks_in, update_note, CreateBody, CreateDirBody, ListParams, MoveBody, MoveDirBody,
     NoteResponse, UpdateBody, EXCERPT_CHARS,
 };
-use crate::routes::pictures::{add_picture, get_picture, NewPicture, PictureAt};
+use crate::routes::pictures::{get_picture, put_picture, PictureAt};
 use crate::routes::trash::{
     list_trash, move_to_trash, restore_many, restore_note, TrashChoice, TrashMove,
 };
 use crate::routes::uploads::{
     get_original, list_originals, safe_file_name, settle_figures, start_import, upload_label,
-    viewable, ImportBody, ImportFileBody, ImportJob, OriginalView,
+    viewable, ImportBody, ImportJob, OriginalView,
 };
 use crate::*;
 

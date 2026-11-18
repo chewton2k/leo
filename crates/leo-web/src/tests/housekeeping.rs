@@ -174,18 +174,12 @@ fn a_write_failure_reads_as_a_write_failure() {
     use std::os::unix::fs::PermissionsExt;
     let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
     png.extend_from_slice(&[0u8; 64]);
-    let data = {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(&png)
-    };
     let keep = || leo_core::keep::Keep::default();
     let picture = |state: &AppState| {
-        run(add_picture(
+        run(put_picture(
             State(state.clone()),
-            Json(NewPicture {
-                name: "board.png".into(),
-                data: data.clone(),
-            }),
+            Path("board.png".into()),
+            axum::body::Body::from(png.clone()),
         ))
     };
 
@@ -227,12 +221,10 @@ fn a_write_failure_reads_as_a_write_failure() {
         }),
     ));
     assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
-    let not_a_picture = run(add_picture(
+    let not_a_picture = run(put_picture(
         State(state),
-        Json(NewPicture {
-            name: "x.png".into(),
-            data: "aGVsbG8=".into(),
-        }),
+        Path("x.png".into()),
+        axum::body::Body::from("hello"),
     ));
     assert_eq!(not_a_picture.status(), StatusCode::BAD_REQUEST);
 }
