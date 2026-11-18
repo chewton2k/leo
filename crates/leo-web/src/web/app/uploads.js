@@ -299,7 +299,7 @@ function watchUpload(id, dir, into = null) {
     if (into) {
       if (open) closeSheet();
       if (job.error) toast(job.error, { bad: true });
-      await addSection(into, (job.section || '').trim() ? id : '').catch(fail);
+      await addSection(into, job.section_chars ? id : '').catch(fail);
       return;
     }
     const many = (job.notes || []).length > 1;

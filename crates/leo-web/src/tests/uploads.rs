@@ -1222,3 +1222,29 @@ fn the_scratch_folder_is_gone_after_the_upload() {
     let root = folder.lock().unwrap().clone().unwrap();
     assert!(!root.exists(), "{}", root.display());
 }
+
+#[test]
+fn the_status_of_an_upload_into_a_note_counts_its_section_and_never_carries_it() {
+    let job = ImportJob {
+        state: "done",
+        label: String::new(),
+        dir: String::new(),
+        step: String::new(),
+        done: 1,
+        total: 1,
+        note: None,
+        notes: Vec::new(),
+        error: None,
+        section: Some("## Heap proofs\n\nSift down.".into()),
+    };
+    let shown = serde_json::to_value(&job).unwrap();
+    assert_eq!(shown["section_chars"], 26);
+    assert!(shown.get("section").is_none());
+    assert!(!shown.to_string().contains("Sift down"));
+    let none = serde_json::to_value(ImportJob {
+        section: None,
+        ..job
+    })
+    .unwrap();
+    assert!(none.get("section_chars").is_none());
+}

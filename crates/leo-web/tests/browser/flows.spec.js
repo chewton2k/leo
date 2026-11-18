@@ -2608,7 +2608,7 @@ test.describe('uploads', () => {
     });
     await page.route('**/api/import/job-into', (route) => {
       polls += 1;
-      route.fulfill({ json: polls < 2 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: note.id, section: '## Heap proofs\n\nSift down keeps the order.' } });
+      route.fulfill({ json: polls < 2 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: note.id, section_chars: 36 } });
     });
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#doc')).toContainText('My own notes on heaps.');

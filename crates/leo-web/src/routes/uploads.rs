@@ -20,9 +20,16 @@ pub(crate) struct ImportJob {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) notes: Vec<String>,
     pub(crate) error: Option<String>,
-    /// For an upload added to an open note: the section the page inserts.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "section_chars",
+        serialize_with = "count_chars",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) section: Option<String>,
+}
+
+fn count_chars<S: serde::Serializer>(section: &Option<String>, out: S) -> Result<S::Ok, S::Error> {
+    out.serialize_u64(section.as_deref().map_or(0, |s| s.chars().count() as u64))
 }
 
 pub(crate) const IMPORT_JSON_BYTES: usize = 8 * 1024 * 1024;
