@@ -835,7 +835,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   are named by id or exact name ignoring case; the board may be left out when
   there is only one. They validate against the
   store, become `Proposal` cards, run through POST `/api/felix/act` (reusing
-  the normal routes) and return the inverse card as `undo`. The page redraws
+  the normal routes and answering their status) and return the inverse card as `undo`. The page redraws
   an open board after one applies (`BOARD_KINDS`). add_margin_note (`quote` must
   be in the note; Undo is `remove_margin_note`) redraws the open note's margin
   (`MARGIN_KINDS`); it never changes the note. The text manual stays under

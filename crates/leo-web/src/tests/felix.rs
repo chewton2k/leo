@@ -2288,10 +2288,31 @@ fn felix_organizes_tasks_folders_and_notes_through_cards_that_undo() {
                 .unwrap(),
             ),
         ));
-        assert_eq!(refused.status(), 409, "{bad:?} is refused");
+        assert_eq!(refused.status(), 400, "{bad:?} is refused");
     }
     assert!(state.fresh().dir_exists("archive"));
     assert!(state.fresh().find_note(&ids[0]).is_some());
+}
+
+#[test]
+fn apply_answers_the_routes_own_status() {
+    let (state, _dir, _) = state_with(&[]);
+    let missing = run(crate::routes::organize::act_route(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({"kind": "delete_task", "summary": "x", "id": "t0123456789abcdef"}),
+            )
+            .unwrap(),
+        ),
+    ));
+    let direct = run(crate::routes::tasks::delete_task(
+        State(state.clone()),
+        Path("t0123456789abcdef".into()),
+    ));
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(direct.status(), missing.status());
+    assert_eq!(json_of(missing)["error"], "That is not there any more.");
 }
 
 #[test]

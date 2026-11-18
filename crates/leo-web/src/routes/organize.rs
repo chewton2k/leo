@@ -957,20 +957,37 @@ fn schedule(state: &AppState, call: &Call) -> Done {
     }
 }
 
-async fn reply_of(response: Response) -> Result<serde_json::Value, String> {
-    let ok = response.status().is_success();
+pub(crate) struct Refused(StatusCode, String);
+
+impl From<String> for Refused {
+    fn from(why: String) -> Self {
+        Refused(StatusCode::CONFLICT, why)
+    }
+}
+
+impl From<&str> for Refused {
+    fn from(why: &str) -> Self {
+        why.to_string().into()
+    }
+}
+
+async fn reply_of(response: Response) -> Result<serde_json::Value, Refused> {
+    let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 2_000_000)
         .await
-        .map_err(|_| "leo could not read its own answer".to_string())?;
+        .map_err(|_| "leo could not read its own answer")?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    if ok {
+    if status.is_success() {
         Ok(value)
     } else {
-        Err(value["error"]
-            .as_str()
-            .unwrap_or("leo could not do that")
-            .to_string())
+        Err(Refused(
+            status,
+            value["error"]
+                .as_str()
+                .unwrap_or(crate::reply::sentence(status))
+                .to_string(),
+        ))
     }
 }
 
@@ -978,19 +995,20 @@ fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T, 
     serde_json::from_value(value).map_err(|_| "that change could not be read".to_string())
 }
 
-fn status_error(code: StatusCode) -> String {
-    match code {
-        StatusCode::NOT_FOUND => "it is not there any more".into(),
-        StatusCode::CONFLICT => "something with that name is already there".into(),
-        StatusCode::BAD_REQUEST => "that name cannot be used".into(),
-        _ => "leo could not do that".into(),
-    }
+fn status_error(code: StatusCode) -> Refused {
+    let why = match code {
+        StatusCode::NOT_FOUND => "it is not there any more",
+        StatusCode::CONFLICT => "something with that name is already there",
+        StatusCode::BAD_REQUEST => "that name cannot be used",
+        _ => "leo could not do that",
+    };
+    Refused(code, why.into())
 }
 
 pub(crate) async fn act(
     state: &AppState,
     p: &Proposal,
-) -> Result<(serde_json::Value, Proposal), String> {
+) -> Result<(serde_json::Value, Proposal), Refused> {
     use crate::boards;
     use crate::routes::{boards as board_routes, notes, tasks as task_routes, trash};
     match p {
@@ -1228,7 +1246,7 @@ pub(crate) async fn act(
                 .await
                 .map_err(|code| {
                     if code == StatusCode::CONFLICT {
-                        "the folder has notes in it now, so leo left it".to_string()
+                        "the folder has notes in it now, so leo left it".into()
                     } else {
                         status_error(code)
                     }
@@ -1385,10 +1403,10 @@ pub(crate) async fn act(
                 Some(false) => {
                     return Err(
                         "you have replied to that margin note, so it stays; dismiss it instead"
-                            .to_string(),
+                            .into(),
                     )
                 }
-                None => return Err("that margin note is not there any more".to_string()),
+                None => return Err("that margin note is not there any more".into()),
             }
             Ok((
                 serde_json::Value::Null,
@@ -1542,11 +1560,11 @@ pub(crate) async fn act(
                 .await,
             )
             .await
-            .map_err(|why| {
+            .map_err(|Refused(code, why)| {
                 if why.contains("column") {
-                    "the card's column is not on its board any more".to_string()
+                    Refused(code, "the card's column is not on its board any more".into())
                 } else {
-                    why
+                    Refused(code, why)
                 }
             })?;
             let back: boards::Card = parse(made)?;
@@ -1761,20 +1779,22 @@ pub(crate) async fn act(
 }
 
 pub(crate) async fn act_route(State(state): State<AppState>, Json(p): Json<Proposal>) -> Response {
-    let applied = tokio::task::spawn_blocking(move || act_now(&state, &p))
+    let applied = tokio::task::spawn_blocking(move || applied(&state, &p))
         .await
         .unwrap_or_else(|_| Err("leo could not do that".into()));
     match applied {
         Ok(shown) => Json(shown).into_response(),
-        Err(why) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": why })),
-        )
-            .into_response(),
+        Err(Refused(code, why)) => {
+            (code, Json(serde_json::json!({ "error": why }))).into_response()
+        }
     }
 }
 
 pub(crate) fn act_now(state: &AppState, p: &Proposal) -> Result<serde_json::Value, String> {
+    applied(state, p).map_err(|Refused(_, why)| why)
+}
+
+fn applied(state: &AppState, p: &Proposal) -> Result<serde_json::Value, Refused> {
     let handle = tokio::runtime::Handle::current();
     let (extra, undo) = handle.block_on(act(state, p))?;
     let mut shown = serde_json::json!(p);
