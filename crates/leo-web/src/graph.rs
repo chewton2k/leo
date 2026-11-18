@@ -159,13 +159,13 @@ pub struct NoteLink {
     pub why: String,
 }
 
-fn fnv(text: &str) -> String {
-    format!("{:016x}", fnv64(text))
+fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
+    format!("{:016x}", fnv64(bytes))
 }
 
-fn fnv64(text: &str) -> u64 {
+fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
+    for byte in bytes {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -173,7 +173,7 @@ fn fnv64(text: &str) -> u64 {
 }
 
 fn hash_of(source: &Source) -> String {
-    fnv(&format!("{}\u{0}{}", source.title, source.body))
+    fnv(source.title.bytes().chain([0]).chain(source.body.bytes()))
 }
 
 fn key(label: &str) -> String {
@@ -442,7 +442,7 @@ fn group_count_at(notes: usize, group_notes: usize) -> usize {
 }
 
 fn link_key(source: &Source, read: &Read) -> String {
-    fnv(&note_line(0, source, Some(read)))
+    fnv(note_line(0, source, Some(read)).bytes())
 }
 
 pub struct Work<'a> {
@@ -781,7 +781,6 @@ pub struct Status {
     pub read: usize,
     pub stale: usize,
     pub requests: usize,
-    pub rebuild_requests: usize,
     pub built_at: Option<String>,
 }
 
@@ -956,7 +955,7 @@ impl Graphs {
                     else {
                         continue;
                     };
-                    let hash = fnv(&format!("{}\u{0}{}", note.title, note.body));
+                    let hash = crate::vectors::hash_of(note);
                     if read.hash == hash && !read.summary.trim().is_empty() {
                         out.insert(
                             note.id.clone(),
@@ -1051,21 +1050,15 @@ impl Graphs {
             read,
             stale: stale(sources, &cache).len(),
             requests: requests_needed_near(sources, &cache, &self.scale(), self.near().as_deref()),
-            rebuild_requests: requests_needed_near(
-                sources,
-                &Cache::default(),
-                &self.scale(),
-                self.near().as_deref(),
-            ),
             built_at: cache.built_at.clone(),
         }
     }
 
     pub fn settled(&self, sources: &[Source]) -> bool {
-        if self.writer.is_none() {
-            return true;
-        }
-        let status = self.status(sources);
+        self.writer.is_none() || self.settled_by(&self.status(sources))
+    }
+
+    fn settled_by(&self, status: &Status) -> bool {
         status.state != "building" && (status.built_at.is_none() || status.requests == 0)
     }
 
@@ -1073,21 +1066,22 @@ impl Graphs {
         self: &Arc<Self>,
         sources: Vec<Source>,
         idle: std::time::Duration,
-    ) -> bool {
+    ) -> (bool, bool) {
         if self.writer.is_none() {
-            return false;
+            return (false, true);
         }
         let since = self
             .auto
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .map(|at| at.elapsed());
-        if !should_update(&self.status(&sources), idle, since) {
-            return false;
+        let status = self.status(&sources);
+        if !should_update(&status, idle, since) {
+            return (false, self.settled_by(&status));
         }
         *self.auto.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
         self.start(sources);
-        true
+        (true, false)
     }
 
     pub fn start(self: &Arc<Self>, sources: Vec<Source>) {
@@ -1312,6 +1306,16 @@ mod tests {
     }
 
     #[test]
+    fn the_note_hash_is_unchanged() {
+        let title = "Graph traversals";
+        let body = "BFS uses a queue — très vite.";
+        let read = source("a", title, body, "cs130");
+        assert_eq!(hash_of(&read), "f29dc93fe22f93cd");
+        let note = Note::new(title, body, Vec::new(), "cs130");
+        assert_eq!(hash_of(&read), crate::vectors::hash_of(&note));
+    }
+
+    #[test]
     fn the_graph_updates_itself_only_when_built_before_changed_and_left_alone() {
         let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
         let ready = Status {
@@ -1323,7 +1327,6 @@ mod tests {
             read: 3,
             stale: 1,
             requests: 2,
-            rebuild_requests: 4,
             built_at: Some("2026-10-09T00:00:00Z".into()),
         };
         assert!(should_update(&ready, minutes(2), None));
@@ -1403,22 +1406,24 @@ mod tests {
         });
         let graphs = Arc::new(Graphs::new(dir.path().join("graph.json"), Some(writer)));
         let idle = std::time::Duration::from_secs(300);
-        assert!(
-            !graphs.update_if_due(notes.to_vec(), idle),
-            "never built yet"
+        assert_eq!(
+            graphs.update_if_due(notes.to_vec(), idle),
+            (false, true),
+            "never built yet, so nothing to do before the first build"
         );
-        assert!(
-            graphs.settled(&notes),
-            "nothing to do before the first build"
-        );
+        assert!(graphs.settled(&notes));
         let cache = Cache {
             built_at: Some("2026-10-09T00:00:00Z".into()),
             ..Cache::default()
         };
         std::fs::write(graphs.path(), serde_json::to_string(&cache).unwrap()).unwrap();
         assert!(!graphs.settled(&notes), "an unread note is waiting");
-        assert!(graphs.update_if_due(notes.to_vec(), idle));
-        assert!(!graphs.update_if_due(notes.to_vec(), idle), "one at a time");
+        assert_eq!(graphs.update_if_due(notes.to_vec(), idle), (true, false));
+        assert_eq!(
+            graphs.update_if_due(notes.to_vec(), idle),
+            (false, false),
+            "one at a time, and still building"
+        );
         assert!(!graphs.settled(&notes), "still building");
         let waited = std::time::Instant::now();
         while graphs.status(&notes).state == "building" {

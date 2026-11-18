@@ -333,23 +333,25 @@ async fn keep_graph_current(state: AppState) {
         {
             continue;
         }
-        let Ok(sources) = state
-            .read_store(|store| Ok(graph::sources(&store.notes)))
+        let (mut settled, mut busy) = if state.graphs.writer().is_none() {
+            (true, state.graphs.building().is_some())
+        } else {
+            let Ok(sources) = state
+                .read_store(|store| Ok(graph::sources(&store.notes)))
+                .await
+            else {
+                continue;
+            };
+            let graphs = Arc::clone(&state.graphs);
+            let Ok(checked) = tokio::task::spawn_blocking(move || {
+                let (started, settled) = graphs.update_if_due(sources, idle);
+                (settled, started || graphs.building().is_some())
+            })
             .await
-        else {
-            continue;
-        };
-        let graphs = Arc::clone(&state.graphs);
-        let Ok((mut settled, mut busy)) = tokio::task::spawn_blocking(move || {
-            let started = graphs.update_if_due(sources.clone(), idle);
-            (
-                !started && graphs.settled(&sources),
-                started || graphs.building().is_some(),
-            )
-        })
-        .await
-        else {
-            continue;
+            else {
+                continue;
+            };
+            checked
         };
         if let Some(seer) = state.seer.clone() {
             let captions = Arc::clone(&state.captions);
