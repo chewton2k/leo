@@ -1104,7 +1104,7 @@
       fit(area);
       changed();
       if (!e?.isComposing) slashSeen();
-      const marker = ed.listPrefix(editing.prefix + area.value, lines.slice(0, start));
+      const marker = ed.listPrefixAt(editing.prefix + area.value, lines, start);
       if (editing.kind === 'line' && !e?.isComposing && marker.length > editing.prefix.length && /[^\S\n]$/.test(marker)) {
         const caret = lineStart(start) + editing.prefix.length + area.selectionStart;
         const line = lineOf(caret);

@@ -140,6 +140,11 @@
   }
 
   const listPrefix = (line, above) => itemIn(line, above)?.head || '';
+  function listPrefixAt(line, lines, start) {
+    let from = start - 1;
+    while (from > 0 && item(lines[from - 1])) from--;
+    return listPrefix(line, lines.slice(Math.max(from, 0), start));
+  }
 
   function nextMarker(marker) {
     const number = marker.match(/^(\d+)(.)$/);
@@ -500,7 +505,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -570,3 +570,20 @@ test('Tab and Shift+Tab leave prose and chosen numbers alone', () => {
   assert.deepEqual(press(['1. a', '   2005. b'], 1, true), ['1. a', '2005. b'], 'a chosen number survives the move out');
   assert.deepEqual(press(['1. a', '2. b'], 1, false), ['1. a', '   1. b']);
 });
+
+test('the list marker above a line is the same when only the run of list lines is passed', () => {
+  const docs = [
+    ['- one', '  - two', '    - three', '  - four', ''],
+    ['A paragraph', 'that runs on', '', '1. first', '2. second', '   - inner', ''],
+    ['Plain text', 'more plain text', 'and more', ''],
+    ['- [ ] a box', '- [x] done', 'not a list', '- again', '  1. nested'],
+    [''],
+  ];
+  for (const lines of docs) {
+    for (let at = 0; at < lines.length; at++) {
+      for (const line of [lines[at], '- typed', '  - typed', '3. typed', 'typed']) {
+        assert.equal(ed.listPrefixAt(line, lines, at), ed.listPrefix(line, lines.slice(0, at)), `${JSON.stringify(lines)} at ${at}: ${line}`);
+      }
+    }
+  }
+});

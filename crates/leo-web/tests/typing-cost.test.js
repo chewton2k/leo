@@ -148,6 +148,8 @@ function keystroke(bytes) {
     'lineStart + lineOf (middle line)': () => lineOf(lineStart(mid) + 3),
     'listPrefix with lines above (last line)': () => ed.listPrefix(lines[last - 1], lines.slice(0, last - 1)),
     'listPrefix with lines above (middle line)': () => ed.listPrefix(lines[mid], lines.slice(0, mid)),
+    'listPrefixAt, the run of list lines above (last line)': () => ed.listPrefixAt(lines[last - 1], lines, last - 1),
+    'listPrefixAt, the run of list lines above (middle line)': () => ed.listPrefixAt(lines[mid], lines, mid),
     'reading-time line (300 ms after a pause)': () => md.readTime(text),
     'save request body (stringify of the PATCH body)': () => JSON.stringify({ ...edit, base: 'v1' }),
     'margin text search, 24 open + 48 resolved': () => { for (const t of open) kit.find(text, t); for (const r of resolved) kit.find(text, r); },
