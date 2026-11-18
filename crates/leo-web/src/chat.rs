@@ -8,6 +8,7 @@ use leo_core::notes::Note;
 use leo_core::store::Store;
 
 use crate::graph::Cache;
+use crate::search_index::Candidates;
 
 pub type Streamer = Arc<
     dyn Fn(
@@ -363,9 +364,19 @@ pub(crate) fn flat(text: &str) -> String {
     text.to_lowercase().replace(['-', '_'], " ")
 }
 
-fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String]) -> usize {
+fn match_score(
+    note: &Note,
+    read: Option<&crate::graph::Read>,
+    words: &[String],
+    indexed: Option<&Candidates>,
+) -> usize {
     let title = flat(&note.title);
-    let body = flat(&note.body);
+    let lookup = indexed.filter(|c| c.holds_text_of(&note.id));
+    let body = if lookup.is_some() {
+        String::new()
+    } else {
+        flat(&note.body)
+    };
     let summary = read.map(|r| flat(&r.summary)).unwrap_or_default();
     let concepts: Vec<String> = read
         .map(|r| r.concepts.iter().map(|c| flat(c)).collect())
@@ -386,7 +397,11 @@ fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String])
             if summary.contains(word.as_str()) {
                 score += 2;
             }
-            if body.contains(word.as_str()) {
+            let in_body = match lookup {
+                Some(found) => found.has(&note.id, word),
+                None => body.contains(word.as_str()),
+            };
+            if in_body {
                 score += 1;
             }
             score
@@ -394,8 +409,22 @@ fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String])
         .sum()
 }
 
+pub(crate) fn question_terms(question: &str) -> Vec<String> {
+    leo_core::notes::question_words(&flat(question))
+}
+
 pub fn matches<'a>(store: &'a Store, cache: &Cache, question: &str, limit: usize) -> Vec<&'a Note> {
-    let words: Vec<String> = leo_core::notes::question_words(&flat(question));
+    matches_with(store, cache, question, limit, None)
+}
+
+pub fn matches_with<'a>(
+    store: &'a Store,
+    cache: &Cache,
+    question: &str,
+    limit: usize,
+    indexed: Option<&Candidates>,
+) -> Vec<&'a Note> {
+    let words = question_terms(question);
     if words.is_empty() {
         return Vec::new();
     }
@@ -403,7 +432,7 @@ pub fn matches<'a>(store: &'a Store, cache: &Cache, question: &str, limit: usize
         .notes
         .iter()
         .filter_map(|note| {
-            let score = match_score(note, cache.notes.get(&note.id), &words);
+            let score = match_score(note, cache.notes.get(&note.id), &words, indexed);
             (score > 0).then_some((score, note))
         })
         .collect();
@@ -471,6 +500,25 @@ pub fn gather_seeing(
     close: &[(String, f32)],
     margin: &str,
 ) -> (Vec<SourceRef>, String) {
+    gather_indexed(
+        store, cache, open, attached, recent, question, room, captions, close, margin, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn gather_indexed(
+    store: &Store,
+    cache: &Cache,
+    open: Option<&str>,
+    attached: &[String],
+    recent: &[String],
+    question: &str,
+    room: usize,
+    captions: Option<&crate::captions::Captions>,
+    close: &[(String, f32)],
+    margin: &str,
+    indexed: Option<&Candidates>,
+) -> (Vec<SourceRef>, String) {
     let room = room.min(GATHER_ROOM).saturating_sub(margin.chars().count());
     let mut picked: Vec<Picked> = Vec::new();
     let mut have = BTreeSet::new();
@@ -514,7 +562,7 @@ pub fn gather_seeing(
         }
     }
     let mut found: Vec<&Note> = Vec::new();
-    for note in matches(store, cache, question, MATCHES + have.len()) {
+    for note in matches_with(store, cache, question, MATCHES + have.len(), indexed) {
         if found.len() >= MATCHES {
             break;
         }

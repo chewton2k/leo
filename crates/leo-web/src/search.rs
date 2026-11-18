@@ -7,6 +7,7 @@ use leo_core::store::Store;
 
 use crate::chat::flat;
 use crate::graph::{Cache, Read};
+use crate::search_index::Candidates;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 #[serde(tag = "kind", content = "name", rename_all = "lowercase")]
@@ -55,11 +56,11 @@ fn initials(words: &[String]) -> Vec<String> {
     out
 }
 
-fn seen(title: &str, body: &str, read: Option<&Read>) -> Seen {
+fn seen(title: &str, body: Option<&str>, read: Option<&Read>) -> Seen {
     let title = flat(title);
     let title_initials = initials(&parts(&title));
     Seen {
-        text: format!("{title}\n{}", flat(body)),
+        text: body.map_or_else(String::new, |body| format!("{title}\n{}", flat(body))),
         title,
         summary: read.map(|r| flat(&r.summary)).unwrap_or_default(),
         ideas: read
@@ -85,12 +86,12 @@ enum Found {
     Summary,
 }
 
-fn find_word(seen: &Seen, word: &str) -> Option<Found> {
+fn find_word(seen: &Seen, word: &str, in_text: Option<bool>) -> Option<Found> {
     let short = (2..=6).contains(&word.chars().count());
     if seen.title.contains(word) || (short && seen.title_initials.iter().any(|i| i == word)) {
         return Some(Found::Title);
     }
-    if seen.text.contains(word) {
+    if in_text.unwrap_or_else(|| seen.text.contains(word)) {
         return Some(Found::Text);
     }
     for (idea, words, ideas_initials) in &seen.ideas {
@@ -146,15 +147,24 @@ pub(crate) fn ranked<'n>(
     notes: impl Iterator<Item = Text<'n>>,
     cache: &Cache,
     words: &[(String, usize)],
+    indexed: Option<&Candidates>,
 ) -> Vec<(usize, Option<Why>)> {
     let typed: usize = words.iter().map(|(_, n)| n).sum();
     let needed = (2 * typed).div_ceil(3);
     let mut ranked: Vec<Ranked<'_>> = Vec::new();
     for (at, note) in notes.enumerate() {
-        let seen = seen(note.title, note.body, cache.notes.get(note.id));
+        let lookup = indexed.filter(|c| c.holds_text_of(note.id));
+        let seen = seen(
+            note.title,
+            lookup.is_none().then_some(note.body),
+            cache.notes.get(note.id),
+        );
         let found: Vec<(Option<Found>, usize)> = words
             .iter()
-            .map(|(w, n)| (find_word(&seen, w), *n))
+            .map(|(w, n)| {
+                let in_text = lookup.map(|c| c.has(note.id, w));
+                (find_word(&seen, w, in_text), *n)
+            })
             .collect();
         let hits: usize = found
             .iter()
@@ -222,11 +232,20 @@ pub fn finish<'a>(store: &'a Store, query: &str, mut hits: Vec<Hit<'a>>) -> Vec<
 }
 
 pub fn search<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<Hit<'a>> {
+    search_with(store, cache, query, None)
+}
+
+pub fn search_with<'a>(
+    store: &'a Store,
+    cache: &Cache,
+    query: &str,
+    indexed: Option<&Candidates>,
+) -> Vec<Hit<'a>> {
     let words = words_of(query);
     if words.is_empty() {
         return Vec::new();
     }
-    let hits = ranked(store.notes.iter().map(Text::of), cache, &words)
+    let hits = ranked(store.notes.iter().map(Text::of), cache, &words, indexed)
         .into_iter()
         .map(|(at, why)| Hit {
             note: &store.notes[at],
@@ -301,8 +320,9 @@ mod tests {
         let needed = (2 * words.len()).div_ceil(3);
         let mut ranked: Vec<(u8, usize, &Note, Option<Why>)> = Vec::new();
         for note in &store.notes {
-            let seen = seen(&note.title, &note.body, cache.notes.get(&note.id));
-            let found: Vec<Option<Found>> = words.iter().map(|w| find_word(&seen, w)).collect();
+            let seen = seen(&note.title, Some(&note.body), cache.notes.get(&note.id));
+            let found: Vec<Option<Found>> =
+                words.iter().map(|w| find_word(&seen, w, None)).collect();
             let hits = found.iter().flatten().count();
             if hits == 0 {
                 continue;

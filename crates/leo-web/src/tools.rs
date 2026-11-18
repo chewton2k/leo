@@ -2122,6 +2122,8 @@ pub struct Desk {
         std::sync::Arc<crate::vectors::Vectors>,
     )>,
     close: Option<Vec<(String, f32)>>,
+    index: Option<std::sync::Arc<crate::search_index::SearchIndex>>,
+    indexed: Option<crate::search_index::Candidates>,
     pub(crate) titles: Option<crate::titles::Table>,
 }
 
@@ -2147,6 +2149,8 @@ impl Desk {
             reply: None,
             meaning: None,
             close: None,
+            index: None,
+            indexed: None,
             titles: None,
         }
     }
@@ -2162,8 +2166,15 @@ impl Desk {
 
     pub fn ready(&mut self, call: &Call) {
         if call.name == "search_notes" && check(call).is_ok() {
-            self.close = Some(self.near(&call.text("query")));
+            let query = call.text("query");
+            self.close = Some(self.near(&query));
+            self.indexed = self.index.as_ref().and_then(|i| i.for_query(&query));
         }
+    }
+
+    pub fn with_index(mut self, index: std::sync::Arc<crate::search_index::SearchIndex>) -> Desk {
+        self.index = Some(index);
+        self
     }
 
     pub fn with_meaning(
@@ -2750,7 +2761,12 @@ impl Desk {
                 let close = self.close.take().unwrap_or_else(|| self.near(&query));
                 let hits = crate::search::with_meaning(
                     store,
-                    crate::search::search(store, cache, &query),
+                    crate::search::search_with(
+                        store,
+                        cache,
+                        &query,
+                        self.indexed.take().as_ref().filter(|c| c.usable(store)),
+                    ),
                     &close,
                 );
                 if hits.is_empty() {

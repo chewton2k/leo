@@ -566,15 +566,17 @@ async fn fresh_search(
 ) -> Result<Page, StatusCode> {
     let words = crate::search::words_of(&q);
     let version = state.vectors.version();
-    let (close, cache) = {
+    let (close, cache, indexed) = {
         let meaning = state.meaning.clone();
         let vectors = Arc::clone(&state.vectors);
         let graphs = Arc::clone(&state.graphs);
+        let index = Arc::clone(&state.search_index);
         let asked = q.clone();
         tokio::task::spawn_blocking(move || {
             (
                 crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 20),
                 graphs.load(),
+                index.for_query(&asked).map(Arc::new),
             )
         })
         .await
@@ -584,9 +586,10 @@ async fn fresh_search(
     let (kept, page) = if words.len() <= WORDS_UNDER_LOCK {
         state
             .read_store(move |store| {
+                let usable = indexed.as_deref().filter(|c| c.usable(store));
                 let hits = crate::search::with_meaning(
                     store,
-                    crate::search::search(store, &cache, &q),
+                    crate::search::search_with(store, &cache, &q, usable),
                     &close,
                 );
                 let stamps = (store.fingerprint(), version, graph);
@@ -594,14 +597,23 @@ async fn fresh_search(
             })
             .await?
     } else {
-        let (copy, taken_at) = state
-            .read_store(|store| {
+        let found = indexed.clone();
+        let (copy, taken_at, usable) = state
+            .read_store(move |store| {
+                let usable = found.as_deref().filter(|c| c.usable(store));
                 let copy: Vec<(String, String, String, chrono::DateTime<chrono::Utc>)> = store
                     .notes
                     .iter()
-                    .map(|n| (n.id.clone(), n.title.clone(), n.body.clone(), n.updated_at))
+                    .map(|n| {
+                        let body = if usable.is_some_and(|c| c.holds_text_of(&n.id)) {
+                            String::new()
+                        } else {
+                            n.body.clone()
+                        };
+                        (n.id.clone(), n.title.clone(), body, n.updated_at)
+                    })
                     .collect();
-                Ok((copy, store.fingerprint()))
+                Ok((copy, store.fingerprint(), usable.is_some()))
             })
             .await?;
         let (ids, ranked) = tokio::task::spawn_blocking(move || {
@@ -615,6 +627,7 @@ async fn fresh_search(
                     }),
                 &cache,
                 &words,
+                indexed.as_deref().filter(|_| usable),
             );
             let ids: Vec<String> = copy.into_iter().map(|(id, ..)| id).collect();
             (ids, ranked)

@@ -39,7 +39,9 @@ This file holds the rules. How each screen behaves, area by area, is in
   and its page slice are gone), chat documents, review progress, picture captions,
   meaning vectors, note connections, calendar feeds, note-task metadata,
   reading positions, margin threads, dictations, usage days, recordings whose
-  notes are not written yet. Old caption, graph and meaning JSON files are
+  notes are not written yet, a search index of note text (`notes_text`, trigram,
+  no copy of the text; no database version: it is checked against the notes by
+  hash at every start). Old caption, graph and meaning JSON files are
   brought in on first open and renamed `*.before-database` (browser tests seed
   note connections this way). Writes touch only what changed. New databases
   give deleted space back in small steps when leo is idle and not recording
@@ -477,7 +479,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   Show more for further pages (2026-11-17, the user's call: no fixed limit on data;
   overturns 2026-11-09).
 - Search (`search.rs`): titles and acronyms, text, graph concepts and summaries,
-  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Every word
+  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Text matches for
+  words of three or more characters come from the index (`search_index.rs`) when it is in
+  step with the store, else from the notes themselves. Every word
   counts, a repeated one looked up once; a query of more than `WORDS_UNDER_LOCK`
   (16) different words is matched on a copy outside the notes lock. Results are
   read a page at a time (`offset`, `limit`, `x-total`; a given `limit` is never

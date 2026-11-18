@@ -32,6 +32,7 @@ pub mod review;
 mod routes;
 mod routing;
 pub mod search;
+pub mod search_index;
 pub mod sessions;
 mod shutdown;
 pub mod speech;
@@ -258,6 +259,7 @@ struct AppState {
     titles: Arc<titles::Titles>,
     generation: Arc<std::sync::atomic::AtomicU64>,
     listed: Arc<tasks::ListedCache>,
+    search_index: Arc<search_index::SearchIndex>,
 }
 
 #[derive(Clone)]
@@ -388,6 +390,33 @@ async fn give_back_when_idle(state: AppState) {
                     }
                 }
             }
+        }
+    }
+}
+
+async fn keep_search_current(state: AppState) {
+    let index = Arc::clone(&state.search_index);
+    loop {
+        let asked = Arc::clone(&index);
+        let work = state
+            .read_store(move |store| Ok(asked.stale(store, search_index::MOST_COPIED)))
+            .await;
+        let applied = match work {
+            Ok(work) => {
+                let busy = work.busy();
+                let index = Arc::clone(&index);
+                match tokio::task::spawn_blocking(move || index.apply(work)).await {
+                    Ok(Ok(())) if busy => continue,
+                    Ok(Ok(())) => true,
+                    _ => false,
+                }
+            }
+            Err(_) => false,
+        };
+        if applied {
+            index.wake.notified().await;
+        } else {
+            tokio::time::sleep(search_index::RETRY).await;
         }
     }
 }
@@ -646,6 +675,7 @@ struct Background {
     expiry: tokio::task::JoinHandle<()>,
     calendar: tokio::task::JoinHandle<()>,
     give_back: tokio::task::JoinHandle<()>,
+    search: tokio::task::JoinHandle<()>,
 }
 
 impl Background {
@@ -655,6 +685,7 @@ impl Background {
         self.expiry.abort();
         self.calendar.abort();
         self.give_back.abort();
+        self.search.abort();
     }
 }
 
@@ -815,6 +846,7 @@ pub(crate) async fn start_in(
         titles: Default::default(),
         generation: Default::default(),
         listed: Default::default(),
+        search_index: Arc::new(search_index::SearchIndex::for_notes(&notes)),
     };
 
     let expiry = tokio::spawn({
@@ -834,6 +866,7 @@ pub(crate) async fn start_in(
         expiry,
         calendar: tokio::spawn(calendar::offer_to_record(state.clone())),
         give_back: tokio::spawn(give_back_when_idle(state.clone())),
+        search: tokio::spawn(keep_search_current(state.clone())),
     };
     let app = routes::router(state.clone()).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {
@@ -927,12 +960,14 @@ fn store_access<R>(
         state
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        state.search_index.wake.notify_one();
     }
     let result = work(&mut store);
     if writing {
         state
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        state.search_index.wake.notify_one();
     }
     if writing
         && result

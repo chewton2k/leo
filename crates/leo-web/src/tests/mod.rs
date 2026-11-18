@@ -105,6 +105,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         calendar: Default::default(),
         source_writing: Default::default(),
         chats: dir.path().join("chats"),
+        search_index: Arc::new(search_index::SearchIndex::for_notes(&notes_dir)),
         notes_dir,
         captions: Arc::new(captions::Captions::at(dir.path().join("captions.json"))),
         originals: Default::default(),
@@ -141,4 +142,69 @@ fn wait_for(state: &AppState, id: &str) -> ImportJob {
 fn json_of(response: Response) -> serde_json::Value {
     let bytes = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
     serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null)
+}
+
+#[test]
+#[ignore = "benchmark: release, LEO_BENCH_NOTES=5000,10000"]
+fn search_handler_with_and_without_the_index() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_NOTES")
+        .unwrap_or_else(|_| "5000,10000".into())
+        .split(',')
+        .map(|n| n.parse().unwrap())
+        .collect();
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    for n in sizes {
+        let (dir, store) = search_index::bench_library(n);
+        let (mut state, _other, _) = state_with(&[]);
+        let notes_dir = store.notes_dir.clone();
+        state.search_index = Arc::new(search_index::SearchIndex::for_notes(&notes_dir));
+        state.chats = dir.path().join("chats");
+        state.store = Arc::new(Mutex::new(Storage {
+            changes: Some(store_refresh::Changes::new(&notes_dir)),
+            store,
+            reload: false,
+        }));
+        let behind = Arc::new(search_index::SearchIndex::new(db::at(
+            &_other.path().join("leo.db"),
+        )));
+        let caught = Arc::clone(&state.search_index);
+        loop {
+            let asked = Arc::clone(&caught);
+            let work = asked.stale(
+                &state.store.lock().unwrap().store,
+                search_index::MOST_COPIED,
+            );
+            let last = !work.more;
+            caught.apply(work).unwrap();
+            if last {
+                break;
+            }
+        }
+        for query in ["queue", "quokka"] {
+            let mut with = Vec::new();
+            let mut without = Vec::new();
+            for _ in 0..7 {
+                for (index, times) in [(&caught, &mut with), (&behind, &mut without)] {
+                    state.search_index = Arc::clone(index);
+                    *state.searched.lock().unwrap() = None;
+                    let params: crate::routes::notes::SearchParams =
+                        serde_json::from_value(serde_json::json!({"q": query, "brief": true}))
+                            .unwrap();
+                    let started = std::time::Instant::now();
+                    rt.block_on(crate::routes::notes::search_notes(
+                        State(state.clone()),
+                        Query(params),
+                    ))
+                    .unwrap();
+                    times.push(started.elapsed().as_secs_f64() * 1000.0);
+                }
+            }
+            with.sort_by(f64::total_cmp);
+            without.sort_by(f64::total_cmp);
+            println!(
+                "handler notes={n} query={query:?} today_ms={:.2} index_ms={:.2}",
+                without[3], with[3]
+            );
+        }
+    }
 }

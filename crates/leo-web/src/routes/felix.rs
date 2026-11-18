@@ -1422,6 +1422,7 @@ fn answer(
     .with_documents(chats, chat, documents)
     .with_captions(Arc::clone(&state.captions))
     .with_meaning(state.meaning.clone(), Arc::clone(&state.vectors))
+    .with_index(Arc::clone(&state.search_index))
     .with_reply(tx.clone())
     .with_steer(steer);
     desk.session = session;
@@ -2013,12 +2014,16 @@ pub(crate) async fn chat_reply(
         .as_ref()
         .map_or(chat::ROOM, |measure| measure())
         .min(chat::MOST_ROOM);
-    let close = {
+    let (close, indexed) = {
         let meaning = state.meaning.clone();
         let vectors = Arc::clone(&state.vectors);
+        let index = Arc::clone(&state.search_index);
         let asked = question.clone();
         tokio::task::spawn_blocking(move || {
-            crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 24)
+            (
+                crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 24),
+                index.for_question(&asked),
+            )
         })
         .await
         .unwrap_or_default()
@@ -2045,7 +2050,7 @@ pub(crate) async fn chat_reply(
                 .filter(|t| crate::margin::shown(body, t))
                 .collect();
             let margin_context = crate::margin::context(&shown, note_room / 8);
-            let gathered = chat::gather_seeing(
+            let gathered = chat::gather_indexed(
                 store,
                 &cache,
                 note.as_deref(),
@@ -2056,6 +2061,7 @@ pub(crate) async fn chat_reply(
                 Some(&seen),
                 &close,
                 &margin_context,
+                indexed.as_ref().filter(|c| c.usable(store)),
             );
             Ok((gathered, margin_context))
         })

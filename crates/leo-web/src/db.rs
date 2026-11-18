@@ -210,6 +210,13 @@ CREATE TABLE IF NOT EXISTS board_undos (
 CREATE INDEX IF NOT EXISTS board_undos_by_board ON board_undos(board);
 ";
 
+pub(crate) const INDEX_TABLES: &str = "
+CREATE VIRTUAL TABLE IF NOT EXISTS notes_text USING fts5(body, content = '', contentless_delete = 1, tokenize = 'trigram case_sensitive 1');
+CREATE TABLE IF NOT EXISTS notes_indexed (n INTEGER PRIMARY KEY, note TEXT NOT NULL, hash TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS notes_indexed_by_note ON notes_indexed(note);
+CREATE TABLE IF NOT EXISTS notes_whole (note TEXT PRIMARY KEY, hash TEXT NOT NULL);
+";
+
 pub struct Db {
     path: PathBuf,
     conn: Mutex<Option<Connection>>,
@@ -711,6 +718,7 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     conn.pragma_update(None, "foreign_keys", "ON")?;
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
+    tx.execute_batch(INDEX_TABLES)?;
     add_column(&tx, "note_tasks", "description", "TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
