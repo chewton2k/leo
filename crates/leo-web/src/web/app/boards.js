@@ -23,7 +23,7 @@ const KANBAN_TONES = [
   [/\b(to do|todo|tasks?|backlog|ideas?|next|planned|new)\b/i, 'todo'],
 ];
 const KANBAN_NEAR = ['todo hue0', 'done hue1', 'blocked hue2', 'hue1 hue3'];
-const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null, drawnHtml: null };
+const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null, opening: null, drawnHtml: null };
 
 const kanbanClash = (a, b) => a === b || KANBAN_NEAR.includes(`${a} ${b}`) || KANBAN_NEAR.includes(`${b} ${a}`);
 
@@ -695,6 +695,20 @@ async function kanbanCardPanel(id) {
     discard.hidden = extra <= 0;
     return extra > 0;
   };
+  description.innerHTML = skeleton(3, 'board');
+  const opening = kanban.opening = {};
+  try {
+    card.description = (await api(`/api/cards/${enc(id)}`)).description || '';
+  } catch (e) {
+    if (kanban.opening === opening && box.isConnected) {
+      box.hidden = true;
+      box.innerHTML = '';
+      document.body.classList.remove('kanban-panel-on');
+    }
+    throw e;
+  }
+  if (kanban.opening !== opening || !box.isConnected || box.hidden) return;
+  kanban.opening = null;
   const doc = leoDoc.mount(description, { source: card.description || '', placeholder: 'Add details, steps or links…', onChange: () => { tellOver(); queue('description'); } });
   const valueOf = (name) => name === 'description' ? doc.source().trim() : fields[name].value.replace(/\s+/g, ' ').trim();
   const dirty = () => names.some((name) => valueOf(name) !== (card[name] || '') && (name !== 'title' || valueOf(name)));
@@ -905,7 +919,7 @@ async function kanbanDeleteCard(card) {
   }
   toast(`Deleted “${card.title}”`, {
     action: 'Undo',
-    run: () => kanbanWrite(`/api/boards/${enc(card.board)}/cards`, { method: 'POST', body: { id: card.id, column: card.column, title: card.title, subheading: card.subheading, description: card.description, priority: card.priority, rank: card.rank } }).then(kanbanRefresh).catch(fail),
+    run: () => kanbanWrite(`/api/cards/${enc(card.id)}/undelete`, { method: 'POST' }).then(kanbanRefresh).catch(fail),
   });
 }
 
