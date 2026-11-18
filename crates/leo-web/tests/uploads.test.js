@@ -49,6 +49,19 @@ function page({ reject = () => false } = {}) {
   return context;
 }
 
+test('the upload read-hint listener can run with or without the shared helper', () => {
+  const area = {};
+  for (const withHelper of [false, true]) {
+    let input, updated;
+    const document = { addEventListener: (event, fn) => { if (event === 'input') input = fn; } };
+    const context = { document };
+    if (withHelper) context.updateReadHint = (field) => { updated = field; };
+    vm.runInNewContext(slice('const UPLOAD_READS', 'function noteFields('), context);
+    input({ target: { closest: () => area } });
+    assert.equal(updated, withHelper ? area : undefined);
+  }
+});
+
 const files = (n) => Array.from({length: n}, (_, i) => ({ name: `file ${i}.pdf`, type: 'application/pdf', size: 10 + i }));
 
 test('25 chosen files send 25 PUTs and one POST, with no file content in the JSON', async () => {

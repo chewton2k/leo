@@ -18,7 +18,6 @@ const MENU_MS = MOTION_MS;
 const MENU_SLIDE = [{ clipPath: 'inset(0 0 100% 0)', opacity: 0, transform: `scale(${POP_FROM})` }, { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'none' }];
 const MARGIN_MESSAGE_READS = 1000;
 const MARGIN_PASSAGE_READS = 1000;
-const MARGIN_INSTRUCTIONS_READS = 500;
 const marginKit = window.leoMargin;
 const READ_PAUSE = marginKit.READ_PAUSE;
 const PERSONA_ICON = {
@@ -396,6 +395,12 @@ function marginPersonaControl() {
   menu.innerHTML = list.map((p) => `<button type="button" role="menuitemradio" aria-checked="${p.id === now.id}" data-margin-persona="${esc(p.id)}" title="${esc(p.details)}"><span class="persona-icon" aria-hidden="true">${PERSONA_ICON[p.icon] || PERSONA_ICON.book}</span><span class="persona-words"><b>${esc(p.name)}</b><small>${esc(p.line || p.details)}</small></span></button>`).join('')
     + `<hr><button type="button" role="menuitem" data-margin-persona="new"><span class="persona-icon" aria-hidden="true">${PERSONA_ICON.plus}</span><span class="persona-words"><b>New persona</b></span></button>`
     + `<button type="button" role="menuitem" data-margin-persona="instructions"><span class="persona-icon" aria-hidden="true">${PERSONA_ICON.pen}</span><span class="persona-words"><b>Instructions for this note…</b></span></button>`;
+}
+
+function updateReadHint(area) {
+  const hint = area?.closest?.('[data-read-field]')?.querySelector('[data-read-hint]')
+    || (area?.id && document.getElementById(`${area.id}-hint`));
+  if (hint) hint.hidden = Array.from(area.value.trim()).length <= Number(area.dataset.reads);
 }
 
 function marginInstructions(open = false) {

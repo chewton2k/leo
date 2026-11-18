@@ -28,8 +28,6 @@ function harness() {
   vm.createContext(context);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   vm.runInContext(core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint')), context);
-  const uploads = fs.readFileSync(path.join(__dirname, '../src/web/app/uploads.js'), 'utf8');
-  vm.runInContext(uploads.slice(uploads.indexOf('function updateReadHint('), uploads.indexOf('function noteFields(')), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8'), context);
   const state = vm.runInContext('marginPage', context);
   const session = () => ({ note: { id: 'a', version: 'abc' }, doc: { source: () => 'A changed paragraph long enough to read.' } });

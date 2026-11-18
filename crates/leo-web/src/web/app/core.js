@@ -845,6 +845,8 @@ function readLine(text) {
   return time ? ` · ${time}` : '';
 }
 
+const MARGIN_INSTRUCTIONS_READS = 500;
+
 let readTimer = 0;
 let readWanted = 0;
 function readSoon(text) {

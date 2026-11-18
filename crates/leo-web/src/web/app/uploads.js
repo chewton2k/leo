@@ -74,13 +74,9 @@ function choosePictures() {
 
 const UPLOAD_READS = 2000;
 
-function updateReadHint(area) {
-  const hint = area?.closest?.('[data-read-field]')?.querySelector('[data-read-hint]')
-    || (area?.id && document.getElementById(`${area.id}-hint`));
-  if (hint) hint.hidden = Array.from(area.value.trim()).length <= Number(area.dataset.reads);
-}
-
-globalThis.document?.addEventListener('input', (e) => updateReadHint(e.target.closest?.('[data-reads]')));
+globalThis.document?.addEventListener('input', (e) => {
+  if (typeof updateReadHint === 'function') updateReadHint(e.target.closest?.('[data-reads]'));
+});
 
 function noteFields({ id, folders, here, reads, before = '' }) {
   const options = ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');

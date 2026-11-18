@@ -847,9 +847,12 @@ Felix (2026-10-19).
   and keep full names and instructions. Per-note instructions are kept whole.
   Persona names are UI labels. Felix reads the first 500 characters of each
   instruction and the first 1,000 of a new margin question or reply. The boxes
-  use the shared `data-reads` hint. Threads keep full messages and tool-created
-  margin notes. Prior thread messages still contribute up to 320 characters each
-  to prompts. Ask, reply and re-anchor use Axum's 2 MiB JSON request limit.
+  use the shared `data-reads` hint. `margin-notes.js` owns `updateReadHint` and
+  the delegated listener in `uploads.js` uses it when available. `core.js` keeps
+  the page's 500-character instruction budget with the note header. Threads keep
+  full messages and tool-created margin notes. Prior thread messages still
+  contribute up to 320 characters each to prompts. Ask, reply and re-anchor use
+  Axum's 2 MiB JSON request limit.
 - Settings says text stays here only for a loopback address and a model without
   `cloud` in its name (`ai::reads_stay_here`). Failure text is the writer's own
   sentence (`leo_core::writing_said`), `no_writer()` or `margin::PROBLEM`.
