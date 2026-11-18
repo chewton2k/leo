@@ -36,9 +36,7 @@ async fn outside<R: Send + 'static>(
             Ok((store.notes_dir.clone(), note))
         })
         .await?;
-    tokio::task::spawn_blocking(move || work(notes, note))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    super::off(move || work(notes, note)).await?
 }
 
 #[derive(Default, Deserialize)]

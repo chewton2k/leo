@@ -28,12 +28,12 @@ const NOT_DELETED: &str =
     "leo could not delete that task. Check that the notes folder can be written to, then try again.";
 
 async fn writing(work: impl FnOnce() -> Response + Send + 'static) -> Response {
-    tokio::task::spawn_blocking(move || {
+    super::off(move || {
         let _writing = tasks::writing();
         work()
     })
     .await
-    .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    .unwrap_or_else(IntoResponse::into_response)
 }
 
 fn time_of(text: Option<&str>) -> Result<Option<NaiveTime>, ()> {

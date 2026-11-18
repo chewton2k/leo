@@ -191,9 +191,9 @@ async fn open_note(state: &AppState, id: &str) -> Result<Open, Box<Response>> {
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, Box<Response>> {
-    tokio::task::spawn_blocking(work)
+    super::off(work)
         .await
-        .map_err(|_| Box::new(StatusCode::INTERNAL_SERVER_ERROR.into_response()))
+        .map_err(|code| Box::new(code.into_response()))
 }
 
 pub(crate) async fn note_margin(State(state): State<AppState>, Path(id): Path<String>) -> Response {

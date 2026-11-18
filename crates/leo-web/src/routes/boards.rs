@@ -19,9 +19,9 @@ async fn blocking(
     work: impl FnOnce(&std::path::Path) -> Response + Send + 'static,
 ) -> Response {
     let chats = state.chats.clone();
-    tokio::task::spawn_blocking(move || work(&chats))
+    super::off(move || work(&chats))
         .await
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+        .unwrap_or_else(IntoResponse::into_response)
 }
 
 fn not_saved() -> Response {

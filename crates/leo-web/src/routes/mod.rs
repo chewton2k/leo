@@ -48,6 +48,14 @@ use crate::routes::uploads::{
 };
 use crate::AppState;
 
+pub(crate) async fn off<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, axum::http::StatusCode> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
