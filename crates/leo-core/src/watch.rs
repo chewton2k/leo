@@ -52,6 +52,7 @@ pub struct Watch {
     _watcher: RecommendedWatcher,
     touched: Arc<AtomicBool>,
     broken: Arc<AtomicBool>,
+    trash: Arc<AtomicBool>,
     leo: Arc<Leo>,
 }
 
@@ -59,6 +60,7 @@ impl Watch {
     pub fn start(notes_dir: &Path) -> Option<Watch> {
         let touched = Arc::new(AtomicBool::new(false));
         let broken = Arc::new(AtomicBool::new(false));
+        let trash = Arc::new(AtomicBool::new(false));
         let root = notes_dir.to_path_buf();
         let real = notes_dir.canonicalize().unwrap_or_else(|_| root.clone());
         let leo = Arc::new(Leo {
@@ -66,12 +68,14 @@ impl Watch {
             broken: Arc::clone(&broken),
         });
         let (seen, failed, told) = (Arc::clone(&touched), Arc::clone(&broken), Arc::clone(&leo));
+        let binned = Arc::clone(&trash);
         let mut watcher = RecommendedWatcher::new(
             move |event: notify::Result<notify::Event>| match event {
                 Ok(event) => {
                     failed.store(false, Ordering::Relaxed);
                     if event.need_rescan() {
                         told.everything();
+                        binned.store(true, Ordering::Relaxed);
                     }
                     let mut counted = event.need_rescan();
                     for path in &event.paths {
@@ -79,6 +83,9 @@ impl Watch {
                         if path.starts_with(root.join(".leo")) {
                             told.add(path);
                         } else {
+                            if path.starts_with(root.join(".trash")) {
+                                binned.store(true, Ordering::Relaxed);
+                            }
                             counted |= counts(&root, &path);
                         }
                     }
@@ -89,6 +96,7 @@ impl Watch {
                 Err(_) => {
                     failed.store(true, Ordering::Relaxed);
                     seen.store(true, Ordering::Relaxed);
+                    binned.store(true, Ordering::Relaxed);
                     told.everything();
                 }
             },
@@ -100,6 +108,7 @@ impl Watch {
             _watcher: watcher,
             touched,
             broken,
+            trash,
             leo,
         })
     }
@@ -114,6 +123,10 @@ impl Watch {
 
     pub fn take(&self) -> bool {
         self.touched.swap(false, Ordering::Relaxed)
+    }
+
+    pub fn take_trash(&self) -> bool {
+        self.trash.swap(false, Ordering::Relaxed)
     }
 
     pub fn broken(&self) -> bool {
@@ -204,6 +217,26 @@ mod tests {
         );
         std::thread::sleep(std::time::Duration::from_millis(300));
         assert!(!watch.take(), "a change under .leo marked the notes");
+    }
+
+    #[test]
+    fn a_change_in_the_trash_is_reported_on_its_own_and_does_not_mark_the_notes() {
+        let root = tempfile::tempdir().unwrap();
+        let trash = root.path().join(".trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let watch = Watch::start(root.path()).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        let _ = watch.take();
+        let _ = watch.take_trash();
+        std::fs::write(trash.join("Old.md"), "old").unwrap();
+        let start = std::time::Instant::now();
+        while !watch.take_trash() {
+            assert!(start.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        assert!(!watch.take(), "a change in the trash marked the notes");
+        assert_eq!(watch.take_leo(), LeoChanged::Nothing);
     }
 
     #[test]

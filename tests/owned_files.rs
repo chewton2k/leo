@@ -17,6 +17,7 @@ const ELSEWHERE: &[(&str, &str)] = &[
     (".leo-download-", "models"),
     (".trash", "notes"),
     ("directories.json", "notes"),
+    ("trash.json", "notes"),
     ("Downloads", "home"),
     ("LEO_TRANSCRIBE_WORKER_LOG", "variable"),
     ("Leo", "app"),

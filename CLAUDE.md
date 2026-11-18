@@ -115,7 +115,7 @@ settings and credentials are excluded from note exports.
 - Trash: `save` moves any note file that vanished (and was not just moved:
   its id is not live) to `<notes>/.trash/<same relative path>`, mtime = when
   deleted. `tidy_trash` (load, a save that writes a new id, and hourly on save) drops live ids and ones past
-  the Keeping choice (`keep::DEFAULT_TRASH_DAYS`, 30); it also expires trashed files it cannot parse (by mtime) and removes folders left empty; Empty trash and delete for good skip a file they cannot delete and report it; the list and the tidy read only each trashed file's header; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
+  the Keeping choice (`keep::DEFAULT_TRASH_DAYS`, 30); it also expires trashed files it cannot parse (by mtime) and removes folders left empty; Empty trash and delete for good skip a file they cannot delete and report it; leo keeps an index of the trash (`<notes>/.leo/trash.json`), checked against each file's size and times; the list opens only new or changed files, and every deletion checks the trash first; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
 - Updates: the app's signed updater is the only update path
   (`crates/leo-desktop/src/updates.rs`; `leo update` removed 2026-11-17).
   `LEO_NO_UPDATE_CHECK=1` disables its automatic check (e2e and the browser
