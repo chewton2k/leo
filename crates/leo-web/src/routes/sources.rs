@@ -43,6 +43,28 @@ async fn outside<R: Send + 'static>(
 pub(crate) struct SourceQuery {
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    at: Option<String>,
+    #[serde(default)]
+    passages: Option<String>,
+    #[serde(default)]
+    points: Option<String>,
+}
+
+fn cursor(value: Option<&str>) -> Result<Option<u64>, StatusCode> {
+    match value {
+        None => Ok(Some(0)),
+        Some("end") => Ok(None),
+        Some(n) => n.parse().map(Some).map_err(|_| StatusCode::BAD_REQUEST),
+    }
+}
+
+fn joined<'a>(parts: impl Iterator<Item = &'a str>) -> String {
+    parts
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) async fn sources(
@@ -51,20 +73,65 @@ pub(crate) async fn sources(
     Query(query): Query<SourceQuery>,
 ) -> Response {
     match outside(&state, Some(id.clone()), move |notes, _| {
-        let sources = recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let failed = |_| StatusCode::INTERNAL_SERVER_ERROR;
+        let heads = recording::list(&notes, &id).map_err(failed)?;
         let words = leo_core::notes::question_words(&query.q);
         let mut matches = Vec::new();
-        for source in &sources {
-            for (index, p) in source.passages.iter().enumerate() {
-                let lower = p.text.to_lowercase();
-                let score: usize = words.iter().map(|w| lower.matches(w.as_str()).count()).sum();
-                if score > 0 { matches.push(serde_json::json!({"source": source.id, "index": index, "score": score, "passage": p})); }
+        let best = |matches: &mut Vec<(usize, serde_json::Value)>| {
+            matches.sort_by_key(|m| std::cmp::Reverse(m.0));
+            matches.truncate(10);
+        };
+        if !words.is_empty() {
+            for head in &heads {
+                recording::rows(
+                    &notes,
+                    &id,
+                    head,
+                    |seq, p| {
+                        let lower = p.text.to_lowercase();
+                        let score: usize =
+                            words.iter().map(|w| lower.matches(w.as_str()).count()).sum();
+                        if score > 0 {
+                            matches.push((
+                                score,
+                                serde_json::json!({"source": head.id, "seq": seq, "score": score, "passage": p}),
+                            ));
+                            if matches.len() > 100 {
+                                best(&mut matches);
+                            }
+                        }
+                        Ok(true)
+                    },
+                    |_, _| Ok(false),
+                )
+                .map_err(failed)?;
             }
         }
-        matches.sort_by_key(|m| std::cmp::Reverse(m["score"].as_u64().unwrap_or(0)));
-        matches.truncate(10);
-        let versions = sources.iter().map(|s| (s.id.clone(), source_version(s))).collect::<std::collections::BTreeMap<_,_>>();
-        Ok(serde_json::json!({"sources": sources, "matches": matches, "versions":versions}))
+        best(&mut matches);
+        let page = match query.at.clone().or_else(|| heads.first().map(|h| h.id.clone())) {
+            Some(at) => Some(
+                recording::page(
+                    &notes,
+                    &id,
+                    &at,
+                    recording::Cursor {
+                        passages: cursor(query.passages.as_deref())?,
+                        points: cursor(query.points.as_deref())?,
+                    },
+                )
+                .map_err(|_| StatusCode::NOT_FOUND)?,
+            ),
+            None => None,
+        };
+        let wants = joined(heads.iter().map(|h| h.wants.as_str()));
+        let mut list = serde_json::to_value(&heads).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for head in list.as_array_mut().into_iter().flatten() {
+            if let Some(head) = head.as_object_mut() {
+                head.remove("trace");
+            }
+        }
+        let matches: Vec<_> = matches.into_iter().map(|m| m.1).collect();
+        Ok(serde_json::json!({"list": list, "wants": wants, "page": page, "matches": matches}))
     }).await {
         Ok(value) => Json(value).into_response(), Err(code) => error(code, "Could not read this recording"),
     }
@@ -90,22 +157,15 @@ pub(crate) async fn regenerate(
     let input = outside(&state, Some(id.clone()), move |notes, note| {
         let note = note.as_ref().ok_or(StatusCode::NOT_FOUND)?;
         let sources =
-            recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if sources.is_empty() {
+            recording::Sources::of(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if sources.heads.is_empty() {
             return Err(StatusCode::NOT_FOUND);
         }
-        let joined = |part: fn(&recording::Archive) -> &str| {
-            sources
-                .iter()
-                .map(part)
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
         let profile = recording::Profile {
-            context: joined(|s| s.context.as_str()),
-            wants: body.wants.unwrap_or_else(|| joined(|s| s.wants.as_str())),
+            context: joined(sources.heads.iter().map(|h| h.context.as_str())),
+            wants: body
+                .wants
+                .unwrap_or_else(|| joined(sources.heads.iter().map(|h| h.wants.as_str()))),
             ..Default::default()
         }
         .checked()
@@ -147,30 +207,25 @@ pub(crate) async fn regenerate(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RawSource {
-    base: String,
+pub(crate) struct Fix {
     source: String,
-    points: Vec<recording::Point>,
-    passages: Vec<recording::Passage>,
+    base: u64,
+    changes: Vec<recording::Change>,
 }
 
 pub(crate) async fn edit_sources(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<RawSource>,
+    Json(body): Json<Fix>,
 ) -> Response {
-    if body.passages.len() > 2000
-        || body.points.len() > 500
-        || body
-            .passages
-            .iter()
-            .any(|p| p.text.len() > 100_000 || p.start_secs > p.end_secs)
-        || body.points.iter().any(|p| p.text.len() > 8000)
-    {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "Recording source is too large or has invalid times",
-        );
+    if body.changes.iter().any(|c| {
+        c.text.len()
+            > match c.kind {
+                recording::Kind::Passage => 100_000,
+                recording::Kind::Point => 8000,
+            }
+    }) {
+        return error(StatusCode::BAD_REQUEST, "A transcript line is too long");
     }
     if state.source_writing.swap(true, Ordering::AcqRel) {
         return error(
@@ -180,53 +235,25 @@ pub(crate) async fn edit_sources(
     }
     let _editing = Editing(state.source_writing.clone());
     match outside(&state, Some(id.clone()), move |notes, _| {
-        let mut sources =
-            recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let source = sources
-            .iter_mut()
-            .find(|s| s.id == body.source)
-            .ok_or(StatusCode::NOT_FOUND)?;
-        if source_version(source) != body.base {
-            return Err(StatusCode::CONFLICT);
-        }
-        let backup = leo_core::paths::contained_path(
-            &recording::root(&notes),
-            &std::path::Path::new(&id).join(format!("{}.original", source.id)),
-        )
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-        if !backup.exists() {
-            recording::write_json(&backup, source)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        }
-        source.points = body.points;
-        source.passages = body.passages;
-        recording::save(&notes, &id, source).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        recording::edit(&notes, &id, &body.source, body.base, &body.changes).map_err(|e| {
+            match e.downcast_ref::<recording::Refused>() {
+                Some(recording::Refused::Stale) => StatusCode::CONFLICT,
+                Some(recording::Refused::NoRow) => StatusCode::BAD_REQUEST,
+                None if e
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+                {
+                    StatusCode::NOT_FOUND
+                }
+                None => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })
     })
     .await
     {
-        Ok(()) => Json(serde_json::json!({"saved": true})).into_response(),
+        Ok(head) => {
+            Json(serde_json::json!({"saved": true, "revision": head.revision})).into_response()
+        }
         Err(code) => error(code, "Could not save original notes"),
-    }
-}
-
-fn source_version(source: &recording::Archive) -> String {
-    format!(
-        "{:016x}",
-        crate::vectors::fnv64(serde_json::to_vec(source).unwrap_or_default())
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn stored_hashes_do_not_change() {
-        let source: leo_core::recording::Archive = serde_json::from_value(serde_json::json!({
-            "id": "rec-00000001",
-            "started": "2026-01-02T03:04:05Z",
-            "passages": [{"start_secs": 0, "end_secs": 4, "text": "Héllo there.", "speaker": "A"}],
-            "points": [{"at_secs": 2, "text": "greeting"}],
-        }))
-        .unwrap();
-        assert_eq!(super::source_version(&source), "fb4c169d4e0b529d");
     }
 }

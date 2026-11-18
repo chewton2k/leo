@@ -640,7 +640,7 @@ fn joined_the_note(
     assert_eq!(store.find_note(into).unwrap().body, "");
     assert!(store.find_note(KEPT_SAVED).is_none());
     drop(store);
-    let sources = leo_core::recording::load(&state.notes_dir, into).unwrap();
+    let sources = kept(&state.notes_dir, into);
     assert_eq!(sources.len(), 1);
     assert_eq!(sources[0].id, KEPT_SAVED);
     assert_eq!(sources[0].passages[0].text, "the part that failed before");
@@ -731,9 +731,7 @@ fn recovery_into_a_note_that_is_gone_keeps_the_audio() {
     );
     assert!(committed.lock().unwrap().is_empty());
     assert!(state.fresh().notes.is_empty());
-    assert!(leo_core::recording::load(&state.notes_dir, &ids[0])
-        .unwrap()
-        .is_empty());
+    assert!(kept(&state.notes_dir, &ids[0]).is_empty());
 }
 
 #[test]
@@ -1117,10 +1115,10 @@ fn recovering_a_leftover_call_track_keeps_the_other_sides_passages() {
             recording_until(&state, |s| s == "done" || s == "failed").state,
             "done"
         );
-        serde_json::to_value(leo_core::recording::load(&notes, &note).unwrap()).unwrap()
+        serde_json::to_value(kept(&notes, &note)).unwrap()
     };
     let first = recover();
-    let sources = leo_core::recording::load(&notes, &note).unwrap();
+    let sources = kept(&notes, &note);
     assert_eq!(
         sources
             .iter()
@@ -1393,4 +1391,235 @@ fn a_recording_started_while_quitting_is_refused() {
     assert_eq!(started.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(json_of(started)["error"], "leo is quitting.");
     assert!(state.recording.lock().unwrap().is_none());
+}
+
+fn kept(notes: &std::path::Path, note: &str) -> Vec<leo_core::recording::Archive> {
+    let sources = leo_core::recording::Sources::of(notes, note).unwrap();
+    sources
+        .heads
+        .iter()
+        .map(|head| {
+            let (mut passages, mut points) = (Vec::new(), Vec::new());
+            sources
+                .rows(
+                    head,
+                    |_, p| {
+                        passages.push(p);
+                        Ok(true)
+                    },
+                    |_, p| {
+                        points.push(p);
+                        Ok(true)
+                    },
+                )
+                .unwrap();
+            leo_core::recording::Archive {
+                id: head.id.clone(),
+                started: head.started,
+                passages,
+                points,
+                context: head.context.clone(),
+                wants: head.wants.clone(),
+                warnings: head.warnings.clone(),
+                trace: head.trace.clone(),
+                from: head.from.clone(),
+            }
+        })
+        .collect()
+}
+
+fn spoken(id: &str, text: &str) -> leo_core::recording::Archive {
+    leo_core::recording::Archive {
+        id: id.into(),
+        started: chrono::Utc::now(),
+        passages: vec![leo_core::recording::Passage {
+            start_secs: 0,
+            end_secs: 5,
+            text: text.into(),
+            speaker: String::new(),
+        }],
+        points: vec![leo_core::recording::Point {
+            at_secs: 2,
+            text: format!("typed beside {text}"),
+        }],
+        context: String::new(),
+        wants: String::new(),
+        warnings: vec![],
+        trace: vec![],
+        from: String::new(),
+    }
+}
+
+fn many(notes: &std::path::Path, note: &str, count: usize) {
+    leo_core::recording::save(notes, note, &spoken("rec-00000", "the first one")).unwrap();
+    let dir = leo_core::recording::folder(notes, note).unwrap();
+    let mut head = leo_core::recording::head(notes, note, "rec-00000").unwrap();
+    for n in 1..count {
+        head.id = format!("rec-{n:05}");
+        head.started += chrono::Duration::seconds(1);
+        std::fs::write(
+            dir.join(format!("{}.json", head.id)),
+            serde_json::to_vec(&head).unwrap(),
+        )
+        .unwrap();
+        for kind in ["passages", "points"] {
+            std::fs::copy(
+                dir.join(format!("rec-00000.1.{kind}.jsonl")),
+                dir.join(format!("{}.1.{kind}.jsonl", head.id)),
+            )
+            .unwrap();
+        }
+    }
+}
+
+fn transcript_page(state: &AppState, id: &str, query: serde_json::Value) -> serde_json::Value {
+    json_of(run(crate::routes::sources::sources(
+        State(state.clone()),
+        Path(id.to_string()),
+        Query(serde_json::from_value(query).unwrap()),
+    )))
+}
+
+#[test]
+fn the_transcript_route_answers_the_list_a_page_and_matches_across_recordings() {
+    let (state, _d, ids) = state_with(&[("Graphs", "")]);
+    let notes = state.notes_dir.clone();
+    let mut first = spoken("rec-first1", "graphs have nodes");
+    first.wants = "the exam".into();
+    first.trace = vec![leo_core::recording::Trace {
+        at: chrono::Utc::now(),
+        stage: "saved".into(),
+        detail: "ok".into(),
+    }];
+    leo_core::recording::save(&notes, &ids[0], &first).unwrap();
+    let mut second = spoken("rec-second", "nodes and edges");
+    second.started += chrono::Duration::seconds(10);
+    leo_core::recording::save(&notes, &ids[0], &second).unwrap();
+    let page = transcript_page(&state, &ids[0], serde_json::json!({"q": "nodes"}));
+    assert_eq!(page["list"].as_array().unwrap().len(), 2);
+    assert!(page["list"][0].get("trace").is_none());
+    assert_eq!(page["wants"], "the exam");
+    assert_eq!(page["page"]["head"]["id"], "rec-first1");
+    assert_eq!(page["page"]["head"]["trace"][0]["stage"], "saved");
+    assert_eq!(page["page"]["passages"][0][1]["text"], "graphs have nodes");
+    assert_eq!(page["page"]["next"], serde_json::Value::Null);
+    let found: Vec<&str> = page["matches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["source"].as_str().unwrap())
+        .collect();
+    assert_eq!(found, ["rec-first1", "rec-second"]);
+    assert_eq!(page["matches"][1]["seq"], 1);
+    let later = transcript_page(
+        &state,
+        &ids[0],
+        serde_json::json!({"at": "rec-second", "passages": "end", "points": "1"}),
+    );
+    assert_eq!(later["page"]["head"]["id"], "rec-second");
+    assert!(later["page"]["passages"].as_array().unwrap().is_empty());
+    assert_eq!(
+        later["page"]["points"][0][1]["text"],
+        "typed beside nodes and edges"
+    );
+    let refused = run(crate::routes::sources::sources(
+        State(state.clone()),
+        Path(ids[0].clone()),
+        Query(serde_json::from_value(serde_json::json!({"passages": "soon"})).unwrap()),
+    ));
+    assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
+    let (state, _d, ids) = state_with(&[("Graphs", "")]);
+    let notes = state.notes_dir.clone();
+    let mut source = spoken("rec-fixed1", "dykstra");
+    source.passages.push(leo_core::recording::Passage {
+        start_secs: 6,
+        end_secs: 9,
+        text: "untouched".into(),
+        speaker: String::new(),
+    });
+    leo_core::recording::save(&notes, &ids[0], &source).unwrap();
+    let put = |body: serde_json::Value| {
+        run(crate::routes::sources::edit_sources(
+            State(state.clone()),
+            Path(ids[0].clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        ))
+    };
+    let fixed = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 1, "changes": [{"kind": "passage", "seq": 1, "text": "Dijkstra"}]}),
+    );
+    assert_eq!(fixed.status(), StatusCode::OK);
+    assert_eq!(json_of(fixed)["revision"], 2);
+    let stale = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 1, "changes": [{"kind": "passage", "seq": 1, "text": "x"}]}),
+    );
+    assert_eq!(stale.status(), StatusCode::CONFLICT);
+    let missing = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 7, "text": "x"}]}),
+    );
+    assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
+    let long = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 1, "text": "x".repeat(8001)}]}),
+    );
+    assert_eq!(long.status(), StatusCode::BAD_REQUEST);
+    let all = kept(&notes, &ids[0]);
+    assert_eq!(
+        all[0]
+            .passages
+            .iter()
+            .map(|p| p.text.as_str())
+            .collect::<Vec<_>>(),
+        ["Dijkstra", "untouched"]
+    );
+    assert_eq!(all[0].points[0].text, "typed beside dykstra");
+}
+
+#[test]
+fn regenerate_reads_a_note_with_1001_recordings() {
+    let (mut state, _d, ids) = state_with(&[("Graphs", "")]);
+    many(&state.notes_dir.clone(), &ids[0], 1001);
+    let heard = Arc::new(Mutex::new(0));
+    let seen = heard.clone();
+    state.regenerator = Some(Arc::new(move |sources, _| {
+        *seen.lock().unwrap() = sources.heads.len();
+        Ok(("Written".into(), "Notes".into()))
+    }));
+    let answer = run(crate::routes::sources::regenerate(
+        State(state.clone()),
+        Path(ids[0].clone()),
+        Json(serde_json::from_value(serde_json::json!({})).unwrap()),
+    ));
+    assert_eq!(answer.status(), StatusCode::OK);
+    assert_eq!(*heard.lock().unwrap(), 1001);
+}
+
+#[test]
+fn felix_reads_the_transcript_of_a_note_with_1001_recordings() {
+    let (state, _d, ids) = state_with(&[("Graphs", "")]);
+    many(&state.notes_dir.clone(), &ids[0], 1001);
+    store_now(&state, |store| {
+        let cache = crate::graph::Cache::default();
+        let mut desk = crate::tools::Desk::new(vec![], crate::chat::ROOM)
+            .with_access(crate::tools::Access::Read);
+        let read = desk.run(
+            store,
+            &cache,
+            &crate::tools::Call {
+                name: "read_transcript".into(),
+                args: serde_json::json!({"note": "Graphs", "find": "first"}),
+            },
+        );
+        assert!(read.result.contains("the first one"), "{}", read.result);
+        assert!(
+            !read.result.starts_with("That did not work"),
+            "{}",
+            read.result
+        );
+        Ok(())
+    })
+    .unwrap();
 }

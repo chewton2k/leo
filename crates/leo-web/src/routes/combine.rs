@@ -398,7 +398,7 @@ pub(crate) async fn keep(
             Ok((
                 target,
                 record,
-                serde_json::json!({ "note": response, "before": before, "removed": from, "sources": copied }),
+                serde_json::json!({ "note": response, "before": before, "removed": from }),
             ))
         })
         .await;
@@ -430,10 +430,7 @@ pub(crate) static AFTER_COPY: std::sync::Mutex<Vec<(String, AfterCopy)>> =
 
 #[derive(Deserialize)]
 pub(crate) struct Uncombine {
-    #[serde(default)]
-    sources: Vec<String>,
-    #[serde(default)]
-    from: Option<String>,
+    from: String,
 }
 
 #[derive(serde::Serialize, Deserialize)]
@@ -485,25 +482,24 @@ pub(crate) async fn uncombine(
     Path(into): Path<String>,
     Json(body): Json<Uncombine>,
 ) -> Response {
-    if body.sources.len() > 1000 {
-        return error(StatusCode::BAD_REQUEST, "Too many recordings.");
-    }
     let chats = state.chats.clone();
     let done = state
         .with_store(move |store| {
             store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
-            if let Some(from) = &body.from {
-                let kept = store.find_note(from).is_some()
-                    || leo_core::store::trashed_ids(&store.notes_dir).contains(from);
-                if !kept {
-                    return Err(StatusCode::CONFLICT);
-                }
+            let from = body.from;
+            let kept = store.find_note(&from).is_some()
+                || leo_core::store::trashed_ids(&store.notes_dir).contains(&from);
+            if !kept {
+                return Err(StatusCode::CONFLICT);
             }
-            leo_core::recording::remove(&store.notes_dir, &into, &body.sources)
-                .map_err(|_| StatusCode::BAD_REQUEST)?;
-            let Some(from) = body.from else {
-                return Ok(());
-            };
+            let copies: Vec<String> = leo_core::recording::list(&store.notes_dir, &into)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+                .into_iter()
+                .filter(|h| h.copied_from == from)
+                .map(|h| h.id)
+                .collect();
+            leo_core::recording::remove(&store.notes_dir, &into, &copies)
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let Some(record) = combined_of(&chats, &into).filter(|r| r.from == from) else {
                 return Ok(());
             };

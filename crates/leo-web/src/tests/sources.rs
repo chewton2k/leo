@@ -40,7 +40,7 @@ fn retained_sources_are_editable_with_conflict_protection_and_regeneration_is_a_
         Query(serde_json::from_value(serde_json::json!({"q":"shortest"})).unwrap()),
     )));
     assert_eq!(page["matches"].as_array().unwrap().len(), 1);
-    let edit = serde_json::json!({"source":"session-1234","base":page["versions"]["session-1234"],"points":[{"at_secs":5,"text":"priority queue"}],"passages":[{"start_secs":0,"end_secs":30,"speaker":"Microphone","text":"Dijkstra’s algorithm"}]});
+    let edit = serde_json::json!({"source":"session-1234","base":page["page"]["head"]["revision"],"changes":[{"kind":"point","seq":1,"text":"priority queue"},{"kind":"passage","seq":1,"text":"Dijkstra’s algorithm"}]});
     let put = || {
         run(sources::edit_sources(
             State(state.clone()),
@@ -53,7 +53,18 @@ fn retained_sources_are_editable_with_conflict_protection_and_regeneration_is_a_
     let asked = Arc::new(Mutex::new(Vec::new()));
     let heard = Arc::clone(&asked);
     state.regenerator = Some(Arc::new(move |sources, profile| {
-        assert_eq!(sources[0].passages[0].text, "Dijkstra’s algorithm");
+        let mut first = String::new();
+        sources
+            .rows(
+                &sources.heads[0],
+                |_, p| {
+                    first = p.text;
+                    Ok(false)
+                },
+                |_, _| Ok(false),
+            )
+            .unwrap();
+        assert_eq!(first, "Dijkstra’s algorithm");
         heard.lock().unwrap().push(profile.wants.clone());
         Ok(("Generated".into(), "Preview body".into()))
     }));
@@ -147,17 +158,18 @@ fn an_edited_typed_point_does_not_bring_back_its_old_wording() {
         Path(id.clone()),
         Query(serde_json::from_value(serde_json::json!({})).unwrap()),
     )));
-    let edit = serde_json::json!({"source":"session-1234","base":page["versions"]["session-1234"],"points":[{"at_secs":5,"text":"explain a heap"}],"passages":[{"start_secs":0,"end_secs":30,"speaker":"Microphone","text":"Dijkstra finds shortest paths"}]});
+    let edit = serde_json::json!({"source":"session-1234","base":page["page"]["head"]["revision"],"changes":[{"kind":"point","seq":1,"text":"explain a heap"}]});
     let saved = run(sources::edit_sources(
         State(state.clone()),
         Path(id.clone()),
         Json(serde_json::from_value(edit).unwrap()),
     ));
     assert_eq!(saved.status(), StatusCode::OK);
-    let points: Vec<String> = leo_core::recording::load(&notes, &id).unwrap()[0]
-        .points
-        .iter()
-        .map(|p| p.text.clone())
-        .collect();
+    let mut points = Vec::new();
+    leo_core::recording::each_point(&notes, &id, |_, _, p| {
+        points.push(p.text.clone());
+        Ok(())
+    })
+    .unwrap();
     assert_eq!(points, ["explain a heap"]);
 }

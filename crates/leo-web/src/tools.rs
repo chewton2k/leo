@@ -2299,40 +2299,56 @@ impl Desk {
             proposal: None,
             found: Vec::new(),
         };
-        let sources = leo_core::recording::load(notes_dir, &note.id).unwrap_or_default();
+        let sources = match leo_core::recording::Sources::of(notes_dir, &note.id) {
+            Ok(sources) => sources,
+            Err(e) => return fail(format!("leo could not read the recording ({e})")),
+        };
         let speakers: std::collections::HashSet<&str> = sources
+            .heads
             .iter()
-            .flat_map(|s| s.passages.iter().map(|p| p.speaker.as_str()))
+            .flat_map(|s| s.speakers.iter().map(String::as_str))
             .collect();
+        let named = speakers.len() > 1;
+        let count = sources.heads.len();
         let mut lines: Vec<String> = Vec::new();
-        for (n, source) in sources.iter().enumerate() {
-            if sources.len() > 1 {
+        for (n, source) in sources.heads.iter().enumerate() {
+            if count > 1 {
                 lines.push(if source.from.is_empty() {
-                    format!("Recording {} of {}:", n + 1, sources.len())
+                    format!("Recording {} of {count}:", n + 1)
                 } else {
                     format!(
-                        "Recording {} of {} (from the note “{}”):",
+                        "Recording {} of {count} (from the note “{}”):",
                         n + 1,
-                        sources.len(),
                         source.from
                     )
                 });
             }
-            for p in &source.passages {
-                let who = if speakers.len() > 1 && !p.speaker.is_empty() {
-                    format!("{}: ", p.speaker)
-                } else {
-                    String::new()
-                };
-                lines.push(format!("[{}] {who}{}", clock(p.start_secs), p.text.trim()));
+            let (mut said, mut typed) = (Vec::new(), Vec::new());
+            let read = sources.rows(
+                source,
+                |_, p| {
+                    let who = if named && !p.speaker.is_empty() {
+                        format!("{}: ", p.speaker)
+                    } else {
+                        String::new()
+                    };
+                    said.push(format!("[{}] {who}{}", clock(p.start_secs), p.text.trim()));
+                    Ok(true)
+                },
+                |_, p| {
+                    typed.push(format!(
+                        "[{}] (the user typed) {}",
+                        clock(p.at_secs),
+                        p.text.trim()
+                    ));
+                    Ok(true)
+                },
+            );
+            if let Err(e) = read {
+                return fail(format!("leo could not read the recording ({e})"));
             }
-            for p in &source.points {
-                lines.push(format!(
-                    "[{}] (the user typed) {}",
-                    clock(p.at_secs),
-                    p.text.trim()
-                ));
-            }
+            lines.append(&mut said);
+            lines.append(&mut typed);
         }
         if lines.iter().all(|l| l.starts_with("Recording ")) {
             return fail(format!(

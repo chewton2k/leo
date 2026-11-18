@@ -136,7 +136,7 @@ fn notes_combine_in_the_background_then_wait_for_review_and_keep_both_transcript
         serde_json::json!({ "with": ids[1], "body": body, "base": page["base"], "with_base": page["with_base"] }),
     ));
     assert_eq!(saved["before"], "A graph has nodes and edges.");
-    assert_eq!(saved["sources"], serde_json::json!(["session-bfs01"]));
+    assert_eq!(saved["removed"], ids[1].as_str());
     let store = state.fresh();
     assert!(store.find_note(&ids[1]).is_none());
     assert!(
@@ -144,7 +144,7 @@ fn notes_combine_in_the_background_then_wait_for_review_and_keep_both_transcript
         "the other note can be restored"
     );
     drop(store);
-    let both = leo_core::recording::load(&notes, &ids[0]).unwrap();
+    let both = leo_core::recording::list(&notes, &ids[0]).unwrap();
     assert!(both
         .iter()
         .any(|s| s.id == "session-bfs01" && s.from == "BFS"));
@@ -152,10 +152,10 @@ fn notes_combine_in_the_background_then_wait_for_review_and_keep_both_transcript
     let undone = run(combine::uncombine(
         State(state.clone()),
         Path(ids[0].clone()),
-        Json(serde_json::from_value(serde_json::json!({ "sources": saved["sources"] })).unwrap()),
+        Json(serde_json::from_value(serde_json::json!({ "from": saved["removed"] })).unwrap()),
     ));
     assert_eq!(undone.status(), StatusCode::NO_CONTENT);
-    assert_eq!(leo_core::recording::load(&notes, &ids[0]).unwrap().len(), 1);
+    assert_eq!(leo_core::recording::list(&notes, &ids[0]).unwrap().len(), 1);
     assert_eq!(
         run(combine::forget(State(state.clone()), Path(id.clone()))).status(),
         StatusCode::NO_CONTENT
@@ -376,4 +376,46 @@ fn a_streamed_combine_is_counted_in_usage() {
     let done = finished(&state, job["id"].as_str().unwrap());
     assert_eq!(done["state"], "ready", "{done}");
     assert_eq!(state.usage.line(), "1 AI request · 1k tokens");
+}
+
+#[test]
+fn undoing_a_combine_of_1001_recordings_works() {
+    let (state, _d, ids) = state_with(&[("Graphs", ""), ("BFS", "")]);
+    let notes = state.fresh().notes_dir.clone();
+    leo_core::recording::save(&notes, &ids[0], &transcript("session-graphs")).unwrap();
+    leo_core::recording::save(&notes, &ids[1], &transcript("session-bfs00")).unwrap();
+    leo_core::recording::copy_to(&notes, &ids[1], &ids[0], "BFS").unwrap();
+    let dir = leo_core::recording::folder(&notes, &ids[0]).unwrap();
+    let mut head = leo_core::recording::head(&notes, &ids[0], "session-bfs00").unwrap();
+    for n in 1..1001 {
+        head.id = format!("session-bfs{n:04}");
+        std::fs::write(
+            dir.join(format!("{}.json", head.id)),
+            serde_json::to_vec(&head).unwrap(),
+        )
+        .unwrap();
+        for kind in ["passages", "points"] {
+            std::fs::copy(
+                dir.join(format!("session-bfs00.1.{kind}.jsonl")),
+                dir.join(format!("{}.1.{kind}.jsonl", head.id)),
+            )
+            .unwrap();
+        }
+    }
+    assert_eq!(
+        leo_core::recording::list(&notes, &ids[0]).unwrap().len(),
+        1002
+    );
+    let undone = run(combine::uncombine(
+        State(state.clone()),
+        Path(ids[0].clone()),
+        Json(serde_json::from_value(serde_json::json!({ "from": ids[1] })).unwrap()),
+    ));
+    assert_eq!(undone.status(), StatusCode::NO_CONTENT);
+    let left = leo_core::recording::list(&notes, &ids[0]).unwrap();
+    assert_eq!(
+        left.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
+        ["session-graphs"]
+    );
+    assert_eq!(leo_core::recording::list(&notes, &ids[1]).unwrap().len(), 1);
 }

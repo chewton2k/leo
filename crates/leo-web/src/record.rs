@@ -167,10 +167,7 @@ pub enum Heard {
 
 pub type Commit = Arc<dyn Fn(&std::path::Path, &str) -> Result<()> + Send + Sync>;
 pub type Regenerator = Arc<
-    dyn Fn(
-            Vec<leo_core::recording::Archive>,
-            leo_core::recording::Profile,
-        ) -> Result<(String, String)>
+    dyn Fn(leo_core::recording::Sources, leo_core::recording::Profile) -> Result<(String, String)>
         + Send
         + Sync,
 >;
@@ -682,7 +679,7 @@ fn run(
     }
     if let Some(source) = &source {
         let save = if recovering {
-            leo_core::recording::save_merged
+            leo_core::recording::merge_into
         } else {
             leo_core::recording::save
         };

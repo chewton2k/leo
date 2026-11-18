@@ -901,6 +901,11 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   while the model is ready or downloading. The switch is `settingsSwitch()`,
   and the choice is kept in memory when storage is blocked. Settings → Speech
   models lists the speaker model under Downloaded with Delete.
+- The transcript sheet pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`,
+  512 KB of each kind a page, Earlier and Later; a pick list when a note has several; search
+  matches across all of them open the page that holds each); a fix sends only the changed rows
+  (`{source, base: revision, changes}`, batches under 1 MB); Combine's Undo sends `{from}` and
+  removes the recordings copied from that note (`copied_from`).
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the

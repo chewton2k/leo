@@ -287,7 +287,7 @@ async function saveCombined(made, from, into, id) {
       try {
         await api(`/api/notes/${enc(into.id)}`, { method: 'PATCH', body: { body: saved.before, base: saved.note.version } });
         await api('/api/trash/restore', { method: 'POST', body: { ids: [saved.removed] } });
-        await api(`/api/notes/${enc(into.id)}/uncombine`, { method: 'POST', body: { from: saved.removed, sources: saved.sources || [] } });
+        await api(`/api/notes/${enc(into.id)}/uncombine`, { method: 'POST', body: { from: saved.removed } });
         await afterCombine(into.id);
         toast('Both notes are back as they were.');
       } catch (e) {
