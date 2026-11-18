@@ -85,8 +85,10 @@ pub(crate) fn saving() -> Option<Saving> {
 /// a truncated config: the new text lands in a sibling file first, then
 /// replaces the original in one rename.
 pub fn save_document(path: &std::path::Path, doc: &DocumentMut) -> Result<()> {
-    leo_core::paths::write_atomic(path, doc.to_string())
-        .with_context(|| format!("could not replace {}", path.display()))
+    let written = leo_core::paths::write_atomic(path, doc.to_string())
+        .with_context(|| format!("could not replace {}", path.display()));
+    super::forget_loaded(path);
+    written
 }
 
 #[cfg(test)]

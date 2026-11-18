@@ -134,7 +134,7 @@ Calendar secrets use the private credentials file, or the keychain with
 Config saves are atomic and serialised: `web_settings::apply` holds one `SAVING`
 lock and `config::edit::save_document` writes through `leo_core::paths::write_atomic`
 (a private temp file, 0600, renamed over), so no save interleaves and a crash
-never truncates config.toml; a missing `config.toml` is created the same way; every replace-a-file write uses `leo_core::paths::write_atomic`. `toml_edit` keeps the user's text; unrelated TOML
+never truncates config.toml; a missing `config.toml` is created the same way; every replace-a-file write uses `leo_core::paths::write_atomic`. `Config::load` keeps one parsed copy per path until the file's size, mtime, change time or inode changes (a file stamped within 2 s is read again), `save_document` writes it, or 10 s pass; env overrides are applied on every load. `toml_edit` keeps the user's text; unrelated TOML
 and legacy `[sync]` survive (tolerated, never migrated). `config/choice.rs`
 keeps writing model/effort choices and the one local speech entry;
 `web_settings::describe` never includes a key; `apply` validates every change

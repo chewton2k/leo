@@ -123,7 +123,7 @@ pub fn local_models(cfg: &Config) -> Local {
     let ollama_running = remote || url.as_deref().is_some_and(crate::health::port_open);
     let ollama = match (&url, ollama_running) {
         _ if remote => provider.and_then(|p| p.model.clone()).into_iter().collect(),
-        (Some(url), true) => ollama_models(url),
+        (Some(url), true) => tags(url),
         _ => Vec::new(),
     };
     Local {
@@ -137,6 +137,10 @@ pub fn ollama_models(base_url: &str) -> Vec<String> {
     if !crate::ai::loopback(base_url) || !crate::health::port_open(base_url) {
         return Vec::new();
     }
+    tags(base_url)
+}
+
+pub(crate) fn tags(base_url: &str) -> Vec<String> {
     let root = crate::ollama::root(base_url);
     static CLIENT: std::sync::LazyLock<reqwest::Result<reqwest::blocking::Client>> =
         std::sync::LazyLock::new(|| {
@@ -588,6 +592,51 @@ mod tests {
         let started = std::time::Instant::now();
         assert!(ollama_models("http://127.0.0.1:9/v1").is_empty());
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_running_ollama_is_connected_to_once_per_model_list() {
+        use std::io::{Read, Write};
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::SeqCst};
+        use std::sync::Arc;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let done = Arc::new(AtomicBool::new(false));
+        let server = {
+            let (accepted, done) = (accepted.clone(), done.clone());
+            std::thread::spawn(move || {
+                while !done.load(SeqCst) {
+                    let Ok((mut stream, _)) = listener.accept() else {
+                        std::thread::sleep(std::time::Duration::from_millis(5));
+                        continue;
+                    };
+                    accepted.fetch_add(1, SeqCst);
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(std::time::Duration::from_millis(100)))
+                        .unwrap();
+                    let mut request = [0u8; 1024];
+                    if stream.read(&mut request).unwrap_or(0) > 0 {
+                        let body = r#"{"models":[{"name":"qwen3:8b","size":1}]}"#;
+                        let _ = write!(
+                            stream,
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        );
+                    }
+                }
+            })
+        };
+        let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
+        cfg.providers.get_mut("ollama").unwrap().base_url =
+            Some(format!("http://127.0.0.1:{port}/v1"));
+        let local = local_models(&cfg);
+        done.store(true, SeqCst);
+        server.join().unwrap();
+        assert_eq!(local.ollama, ["qwen3:8b"]);
+        assert_eq!(accepted.load(SeqCst), 2, "the probe and the request");
     }
 
     #[test]
