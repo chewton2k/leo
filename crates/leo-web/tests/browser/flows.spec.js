@@ -2057,6 +2057,59 @@ test.describe('pictures', () => {
     expect(plain.html).toBe('');
   });
 
+  test('the transcript pages through a long recording, finds a phrase and saves only the fixed line', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Lecture ${test.info().project.name}`, body: 'Notes from a recording.' } })).json();
+    const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
+    fs.mkdirSync(folder, { recursive: true });
+    const filler = 'lorem ipsum dolor sit amet '.repeat(2000);
+    const passages = Array.from({ length: 12 }, (_, i) => ({
+      start_secs: i * 60,
+      end_secs: i * 60 + 59,
+      text: `Passage ${i + 1} ${i === 11 ? 'about the zebrafish ' : ''}${filler}`.slice(0, 50000),
+      speaker: '',
+    }));
+    fs.writeFileSync(path.join(folder, 'browser-recording-1.json'), JSON.stringify({ id: 'browser-recording-1', started: '2026-11-03T09:00:00Z', passages, points: [], context: '', wants: '', warnings: [], trace: [] }));
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Show transcript' }).click();
+    const sheet = page.locator('.source-sheet');
+    await expect(sheet.locator('h3')).toHaveText('Transcript');
+    const rows = sheet.locator('.source-text');
+    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    const first = await rows.count();
+    expect(first, 'the first page holds part of the recording').toBeGreaterThan(0);
+    expect(first).toBeLessThan(12);
+    await expect(sheet.locator('[data-action="source-earlier"]')).toHaveCount(0);
+    await sheet.locator('[data-action="source-later"]').click();
+    await expect(rows.first()).toHaveValue(new RegExp(`^Passage ${first + 1} `));
+    expect(first + (await rows.count()), 'the two pages hold every passage once').toBe(12);
+    await expect(sheet.locator('[data-action="source-later"]')).toHaveCount(0);
+    await sheet.locator('[data-action="source-earlier"]').click();
+    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    await sheet.locator('#source-query').fill('zebrafish');
+    const match = sheet.locator('.source-match');
+    await expect(match).toHaveCount(1);
+    await match.click();
+    const fixed = rows.last();
+    await expect(fixed).toHaveValue(/Passage 12 about the zebrafish/);
+    await expect(sheet.locator('[data-action="source-earlier"]')).toBeVisible();
+    await fixed.evaluate((box) => {
+      box.value = `${box.value} Fixed.`;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/api/notes/${note.id}/recording`));
+    await sheet.locator('[data-action="source-save"]').click();
+    const body = (await sent).postDataJSON();
+    expect(body.source).toBe('browser-recording-1');
+    expect(body.changes, 'only the fixed line is sent').toHaveLength(1);
+    expect(body.changes[0].kind).toBe('passage');
+    await expect(page.locator('.toast')).toContainText('Saved your fixes');
+    const after = await (await page.request.get(`/api/notes/${note.id}/recording?q=zebrafish`)).json();
+    expect(after.matches).toHaveLength(1);
+    expect(after.matches[0].passage.text.endsWith(' Fixed.')).toBe(true);
+    expect(after.list).toHaveLength(1);
+  });
+
   test('the Picture button adds a picture from the device', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Chosen ${test.info().project.name}`, body: 'x' } })).json();
     await page.goto(`/#/n/${note.id}`);
