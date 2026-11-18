@@ -1515,39 +1515,39 @@ pub struct Replying(Arc<Reads>, String);
 
 impl Drop for Reading {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.0 .0.lock() {
-            inner.busy = false;
-        }
+        self.0.held().busy = false;
     }
 }
 
 impl Drop for Replying {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.0 .0.lock() {
-            inner.replying.remove(&self.1);
-        }
+        self.0.held().replying.remove(&self.1);
     }
 }
 
 impl Reads {
+    fn held(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn edited(&self, note: &str, version: &str) {
-        if let Ok(mut inner) = self.0.lock() {
-            inner.edited.retain(|(n, _)| n != note);
-            inner.edited.push_back((note.into(), version.into()));
-            while inner.edited.len() > REMEMBERED {
-                inner.edited.pop_front();
-            }
+        let mut inner = self.held();
+        inner.edited.retain(|(n, _)| n != note);
+        inner.edited.push_back((note.into(), version.into()));
+        while inner.edited.len() > REMEMBERED {
+            inner.edited.pop_front();
         }
     }
 
     pub fn was_edited(&self, note: &str, version: &str) -> bool {
-        self.0
-            .lock()
-            .is_ok_and(|inner| inner.edited.iter().any(|(n, v)| n == note && v == version))
+        self.held()
+            .edited
+            .iter()
+            .any(|(n, v)| n == note && v == version)
     }
 
     pub fn begin(self: &Arc<Self>, note: &str, gap: Duration) -> Result<Reading, Refused> {
-        let mut inner = self.0.lock().map_err(|_| Refused::Busy)?;
+        let mut inner = self.held();
         if inner.busy {
             return Err(Refused::Busy);
         }
@@ -1558,19 +1558,17 @@ impl Reads {
         if soon {
             return Err(Refused::Soon);
         }
-        inner.busy = true;
         inner.last.retain(|(n, _)| n != note);
         inner.last.push_back((note.into(), Instant::now()));
         while inner.last.len() > REMEMBERED {
             inner.last.pop_front();
         }
+        inner.busy = true;
         Ok(Reading(Arc::clone(self)))
     }
 
     pub fn unseen(&self, note: &str, blocks: Vec<String>) -> Vec<String> {
-        let Ok(mut inner) = self.0.lock() else {
-            return Vec::new();
-        };
+        let mut inner = self.held();
         if inner.seen.len() >= REMEMBERED && !inner.seen.contains_key(note) {
             inner.seen.clear();
         }
@@ -1589,36 +1587,29 @@ impl Reads {
     }
 
     pub fn forget_blocks(&self, note: &str, blocks: &[String]) {
-        if let Ok(mut inner) = self.0.lock() {
-            if let Some(seen) = inner.seen.get_mut(note) {
-                let dropped: Vec<u64> = blocks.iter().map(|b| hash_of(b)).collect();
-                seen.retain(|hash| !dropped.contains(hash));
-            }
+        if let Some(seen) = self.held().seen.get_mut(note) {
+            let dropped: Vec<u64> = blocks.iter().map(|b| hash_of(b)).collect();
+            seen.retain(|hash| !dropped.contains(hash));
         }
     }
 
     pub fn replying(self: &Arc<Self>, thread: &str) -> Option<Replying> {
-        let mut inner = self.0.lock().ok()?;
-        inner
+        self.held()
             .replying
             .insert(thread.into())
             .then(|| Replying(Arc::clone(self), thread.into()))
     }
 
     pub fn is_replying(&self, thread: &str) -> bool {
-        self.0
-            .lock()
-            .is_ok_and(|inner| inner.replying.contains(thread))
+        self.held().replying.contains(thread)
     }
 
     pub fn problem(&self) -> Option<String> {
-        self.0.lock().ok()?.problem.clone()
+        self.held().problem.clone()
     }
 
     pub fn set_problem(&self, problem: Option<String>) {
-        if let Ok(mut inner) = self.0.lock() {
-            inner.problem = problem;
-        }
+        self.held().problem = problem;
     }
 }
 
@@ -2572,5 +2563,47 @@ mod tests {
                 .unwrap();
             assert_eq!(modes_left, 1, "{table}");
         }
+    }
+
+    fn poisoned() -> Arc<Reads> {
+        let reads = Arc::new(Reads::default());
+        let held = Arc::clone(&reads);
+        let _ = std::thread::spawn(move || {
+            let _guard = held.0.lock().unwrap();
+            panic!("poisoned on purpose");
+        })
+        .join();
+        assert!(reads.0.is_poisoned());
+        reads
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_lets_felix_read() {
+        let reads = poisoned();
+        let began = reads.begin("n", Duration::ZERO);
+        assert!(began.is_ok(), "a poisoned lock refuses every read as busy");
+        drop(began);
+        assert!(reads.replying("t").is_some());
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_ends_a_read_and_a_reply() {
+        let reads = poisoned();
+        let reading = reads.begin("n", Duration::ZERO);
+        assert!(reading.is_ok());
+        drop(reading);
+        assert!(reads.begin("n", Duration::ZERO).is_ok());
+        let replying = reads.replying("t");
+        assert!(replying.is_some());
+        drop(replying);
+        assert!(reads.replying("t").is_some());
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_remembers_seen_blocks() {
+        let reads = poisoned();
+        let blocks = vec!["one".to_string(), "two".to_string()];
+        assert_eq!(reads.unseen("n", blocks.clone()), blocks);
+        assert!(reads.unseen("n", blocks).is_empty());
     }
 }

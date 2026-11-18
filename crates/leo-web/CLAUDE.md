@@ -692,6 +692,8 @@ Felix (2026-10-19).
   refuses a stale version (409), a note not `along` or not edited in this engine
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a
   streaming reply, the gap, overlapping reads and the daily cap (429 with `why`).
+  `Reads` takes its lock the way `Db::with` does, so a crash inside it fails one
+  read, not every later one.
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is saved even if another read used the last one).
   A read-along never refuses for a full margin (2026-11-14, the user's call): it saves
   with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it frees
