@@ -467,8 +467,12 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
-- Outline: at most 300 headings (excluding code, maths, quotes, tables), shown on
-  the rail 24 at a time (`OUTLINE_PAGE`) with Earlier/Later arrows; preview
+- Outline (2026-11-17, the user's call: no fixed limit on data): every heading
+  (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
+  (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
+  each heading row names its `block`, and the current heading is found by binary
+  search over those blocks' positions, touching only the previous and new
+  button and tick; preview
   ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
   never redraw the editor.
 

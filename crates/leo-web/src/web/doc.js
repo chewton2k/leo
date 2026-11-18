@@ -178,6 +178,9 @@
     const outlineUpArrow = outlineNav ? document.createElement('button') : null;
     const outlineDownArrow = outlineNav ? document.createElement('button') : null;
     let outlineStart = 0;
+    let outlineAt = -1;
+    let outlineButton = null;
+    let outlineTick = null;
     let outlineFollowed = null;
     let outlineLanding = null;
     let outlineIndex = null;
@@ -305,7 +308,7 @@
       outlineIndex = index;
       for (const [i, tick] of Array.from(outlineTicks.children).entries()) {
         if (index === null) tick.removeAttribute('data-distance');
-        else tick.dataset.distance = String(Math.min(3, Math.abs(i - index)));
+        else tick.dataset.distance = String(Math.min(3, Math.abs(outlineStart + i - index)));
       }
       const row = index === null ? null : outlineRows[index];
       const room = row ? outlineRoom() : null;
@@ -328,7 +331,7 @@
       outlinePreview.style.left = `${room.left}px`;
       outlinePreview.style.width = `${room.width}px`;
       outlinePreview.style.top = '0px';
-      const tick = outlineTicks.children[index].getBoundingClientRect();
+      const tick = outlineTicks.children[index - outlineStart].getBoundingClientRect();
       const rect = outline.getBoundingClientRect();
       const height = outlinePreview.getBoundingClientRect().height;
       const top = Math.max(0, Math.min(tick.top + tick.height / 2 - rect.top - height / 2, root.innerHeight - rect.top - height - 12));
@@ -350,13 +353,24 @@
 
     function outlinePage(start) {
       outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
-      for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
+      outlineTicks.innerHTML = outlineRows.slice(outlineStart, outlineStart + OUTLINE_PAGE).map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+      outlineMark();
       outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length));
       outlineUpArrow.hidden = outlineDownArrow.hidden = outlineRows.length <= OUTLINE_PAGE;
       outlineUpArrow.disabled = outlineStart === 0;
       outlineDownArrow.disabled = outlineStart + OUTLINE_PAGE >= outlineRows.length;
       for (const [arrow, other] of [[outlineUpArrow, outlineDownArrow], [outlineDownArrow, outlineUpArrow]]) if (arrow.disabled && document.activeElement === arrow) other.focus({ preventScroll: true });
-      if (outlineIndex !== null && !outlineShows(outlineIndex)) outlinePeek(null);
+      if (outlineIndex !== null) outlinePeek(outlineShows(outlineIndex) ? outlineIndex : null);
+    }
+
+    function outlineMark() {
+      outlineTick = outlineShows(outlineAt) ? outlineTicks.children[outlineAt - outlineStart] || null : null;
+      if (outlineTick) outlineTick.classList.add('on');
+    }
+
+    function outlineBlock(row) {
+      const el = rendered[row.block]?.el;
+      return el && el.isConnected && el.dataset.start === String(row.line) ? el : container.querySelector(`.blk[data-start="${row.line}"]`);
     }
 
     function outlineEscape(e) {
@@ -378,7 +392,7 @@
 
     function outlineFocus() {
       if (outlineIndex !== null) return;
-      const current = Math.max(0, outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick));
+      const current = Math.max(0, outlineAt);
       outlinePeek(outlineShows(current) ? current : outlineStart);
     }
 
@@ -407,24 +421,36 @@
       const top = outlineTop();
       outline.style.setProperty('--outline-top', `${top}px`);
       outline.style.setProperty('--outline-center', `${Math.max(top, (root.innerHeight - outline.offsetHeight) / 2)}px`);
-      let current = outlineRows[0];
       const bottom = root.scrollY > 0 && root.scrollY + root.innerHeight >= document.documentElement.scrollHeight - 2;
-      for (const row of outlineRows) {
-        const block = container.querySelector(`.blk[data-start="${row.line}"]`);
-        if (block && block.getBoundingClientRect().top <= (bottom ? root.innerHeight : top + 24)) current = row;
+      const limit = bottom ? root.innerHeight : top + 24;
+      let low = 0;
+      let high = outlineRows.length - 1;
+      let at = 0;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const block = outlineBlock(outlineRows[middle]);
+        if (block && block.getBoundingClientRect().top <= limit) {
+          at = middle;
+          low = middle + 1;
+        } else high = middle - 1;
       }
-      let selected = current && outlineNav.querySelector(`button[data-line="${current.line}"]`);
-      let hidden = selected && selected.closest('ul[hidden]');
-      while (hidden) {
-        selected = outlineNav.querySelector(`button[data-line="${hidden.dataset.parent}"]`);
-        hidden = selected && selected.closest('ul[hidden]');
+      const current = outlineRows[at];
+      if (at !== outlineAt) {
+        let selected = current && outlineNav.querySelector(`button[data-line="${current.line}"]`);
+        let hidden = selected && selected.closest('ul[hidden]');
+        while (hidden) {
+          selected = outlineNav.querySelector(`button[data-line="${hidden.dataset.parent}"]`);
+          hidden = selected && selected.closest('ul[hidden]');
+        }
+        if (selected !== outlineButton) {
+          if (outlineButton) outlineButton.removeAttribute('aria-current');
+          if (selected) selected.setAttribute('aria-current', 'location');
+          outlineButton = selected;
+        }
+        if (outlineTick) outlineTick.classList.remove('on');
+        outlineAt = at;
+        outlineMark();
       }
-      for (const button of outlineNav.querySelectorAll('button[data-line]')) {
-        if (button === selected) button.setAttribute('aria-current', 'location');
-        else button.removeAttribute('aria-current');
-      }
-      for (const tick of outlineTicks.children) tick.classList.toggle('on', Boolean(current) && tick.dataset.tick === String(current.line));
-      const at = current ? outlineRows.indexOf(current) : 0;
       if (outlineLanding && (current?.line === outlineLanding.line || bottom || performance.now() > outlineLanding.until)) outlineLanding = null;
       if (!outlineLanding && current?.key !== outlineFollowed) {
         outlineFollowed = current?.key;
@@ -468,7 +494,9 @@
         outlineKey = key;
         outlineNav.innerHTML = outlineList(ed.headingTree(outlineRows));
         outlinePeek(null);
-        outlineTicks.innerHTML = outlineRows.map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+        outlineAt = -1;
+        outlineButton = null;
+        outlineTick = null;
         outlinePage(outlineStart);
         if (focused) {
           const button = outlineNav.querySelector(`[data-${focused.type}="${focused.line}"]`) || outlineNav.querySelector('button[data-line]');

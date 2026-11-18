@@ -63,17 +63,14 @@
     return blocks;
   }
 
-  const MOST_HEADINGS = 300;
-
   function headings(lines) {
     const out = [];
-    for (const block of splitBlocks(lines)) {
+    for (const [index, block] of splitBlocks(lines).entries()) {
       if (block.kind !== 'line') continue;
       const found = lines[block.start].match(/^\s*(#{1,6})\s+(.+?)\s*$/);
       if (!found) continue;
       const text = found[2].replace(/\s+#+\s*$/, '').trim();
-      if (text) out.push({ line: block.start, level: found[1].length, text });
-      if (out.length === MOST_HEADINGS) break;
+      if (text) out.push({ line: block.start, level: found[1].length, text, block: index });
     }
     return out;
   }
@@ -81,7 +78,7 @@
   function headingTree(rows) {
     const tree = [];
     const stack = [];
-    for (const row of rows.slice(0, MOST_HEADINGS)) {
+    for (const row of rows) {
       if (!Number.isInteger(row.level) || row.level < 1 || row.level > 6) continue;
       const node = { ...row, children: [] };
       while (stack.length && stack[stack.length - 1].level >= row.level) stack.pop();
