@@ -384,3 +384,91 @@ fn a_failed_profile_line_is_a_warning_after_a_complete_install() {
         .join("bin with 'quote' and $dollar/leo")
         .is_symlink());
 }
+
+fn uninstall(dir: &Path, cli: &Path) -> Output {
+    Command::new(cli)
+        .args(["uninstall", "--yes"])
+        .env("LEO_HOME", dir.join("config"))
+        .env("HOME", dir.join("home"))
+        .env_remove("LEO_USE_KEYCHAIN")
+        .env("LEO_NO_UPDATE_CHECK", "1")
+        .env("LEO_INSTALL_NO_MODEL", "1")
+        .env("LEO_NO_MICROPHONE", "1")
+        .output()
+        .unwrap()
+}
+
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+fn kept_notes(dir: &Path) -> PathBuf {
+    let notes = dir.join("config/notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(notes.join("Keep.md"), "My own notes").unwrap();
+    notes.join("Keep.md")
+}
+
+#[test]
+fn uninstall_keeps_the_app_when_a_step_fails_and_a_second_run_finishes() {
+    let dir = fixture();
+    assert!(install(dir.path(), Some("/bin/zsh"), false)
+        .status
+        .success());
+    let note = kept_notes(dir.path());
+    let bin = dir.path().join("bin with 'quote' and $dollar");
+    let cli = bin.join("leo");
+    let app = dir.path().join("Applications with spaces/Leo.app");
+    let rc = dir.path().join("home/.zshrc");
+    set_mode(&bin, 0o555);
+    let out = uninstall(dir.path(), &cli);
+    set_mode(&bin, 0o755);
+    assert!(!out.status.success(), "{}", said(&out));
+    assert!(said(&out).contains("terminal command"), "{}", said(&out));
+    assert!(app.is_dir(), "the app went while a step failed");
+    assert!(cli.is_symlink());
+    assert!(!std::fs::read_to_string(&rc)
+        .unwrap()
+        .contains("Added by the leo installer"));
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
+
+    let out = uninstall(dir.path(), &cli);
+    assert!(out.status.success(), "{}", said(&out));
+    assert!(!app.exists());
+    assert!(!cli.is_symlink());
+    assert_eq!(
+        names(&dir.path().join("Applications with spaces")),
+        Vec::<String>::new()
+    );
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
+}
+
+#[test]
+fn uninstall_keeps_the_command_when_a_later_step_fails() {
+    let dir = fixture();
+    assert!(install(dir.path(), None, true).status.success());
+    let note = kept_notes(dir.path());
+    let config = dir.path().join("config");
+    std::fs::write(config.join("config.toml"), "").unwrap();
+    let record = config.join("app-cli-dir");
+    let cli = dir.path().join("bin with 'quote' and $dollar/leo");
+    let app = dir.path().join("Applications with spaces/Leo.app");
+    set_mode(&config, 0o555);
+    let out = uninstall(dir.path(), &cli);
+    set_mode(&config, 0o755);
+    assert!(!out.status.success(), "{}", said(&out));
+    assert!(
+        cli.is_symlink(),
+        "the terminal command went while a step failed"
+    );
+    assert!(record.is_file(), "the record of the terminal folder went");
+    assert!(app.is_dir());
+
+    let out = uninstall(dir.path(), &cli);
+    assert!(out.status.success(), "{}", said(&out));
+    assert!(!cli.is_symlink());
+    assert!(!app.exists());
+    assert_eq!(names(&config), ["notes"]);
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
+}

@@ -189,11 +189,8 @@ pub fn run(yes: bool) -> Result<()> {
     } else {
         home.join(".local/bin")
     };
-    let command_dir = super::installation::cli_dir(
-        &exe,
-        &leo_core::paths::config_dir()?.join("app-cli-dir"),
-        &fallback,
-    )?;
+    let record = leo_core::paths::config_dir()?.join(own::CLI_DIR);
+    let command_dir = super::installation::cli_dir(&exe, &record, &fallback)?;
     if !dirs.contains(&command_dir) {
         dirs.push(command_dir.clone());
     }
@@ -240,27 +237,22 @@ pub fn run(yes: bool) -> Result<()> {
 
     let providers: Vec<String> = Config::load().providers.keys().cloned().collect();
 
-    if let Some(bundle) = &bundle {
-        super::installation::remove_login_item(&home, bundle)?;
-        super::installation::remove_bundle(bundle)?;
-        let link = command_dir.join(if cfg!(windows) { "leo.cmd" } else { "leo" });
-        if super::installation::is_cli_link(&link, bundle) {
-            remove(&link)?;
-        }
-        if !exe.starts_with(bundle) {
-            remove_program(&exe)?;
-        }
-    } else {
-        remove_program(&exe)?;
-    }
+    let mut left = Left::default();
     println!();
-    println!("  Removed {}", pretty(&exe, &home));
-
-    for path in &doomed {
-        match remove(path) {
-            Ok(()) => println!("  Removed {}", pretty(path, &home)),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-            Err(e) => println!("  Could not remove {}: {e}", pretty(path, &home)),
+    if let Some(bundle) = &bundle {
+        left.step(
+            "remove the login item",
+            super::installation::remove_login_item(&home, bundle),
+        );
+    }
+    let (later, now): (Vec<&PathBuf>, Vec<&PathBuf>) =
+        doomed.iter().partition(|path| record.starts_with(path));
+    for path in now {
+        remove_listed(&mut left, path, &home);
+    }
+    for path in later.iter().filter(|path| **path != &record) {
+        for inside in gather(path, std::slice::from_ref(&record), true) {
+            remove_listed(&mut left, &inside, &home);
         }
     }
 
@@ -278,7 +270,8 @@ pub fn run(yes: bool) -> Result<()> {
 
     if cfg!(windows) {
         for dir in &dirs {
-            if remove_from_windows_path(dir) {
+            let what = format!("remove {} from your PATH", pretty(dir, &home));
+            if let Ok(true) = left.attempt(&what, remove_from_windows_path(dir)) {
                 println!("  Removed {} from your PATH", pretty(dir, &home));
             }
         }
@@ -292,28 +285,62 @@ pub fn run(yes: bool) -> Result<()> {
         ".config/fish/config.fish",
     ] {
         let path = home.join(rc);
-        if path.is_symlink() {
-            continue;
-        }
-        let Ok(text) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        if let Some(kept) = dirs
-            .iter()
-            .find_map(|dir| without_installer_lines(&text, dir))
-        {
-            use std::io::Write;
-            let mut temp = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-            temp.as_file()
-                .set_permissions(std::fs::metadata(&path)?.permissions())?;
-            temp.write_all(kept.as_bytes())?;
-            temp.as_file().sync_all()?;
-            temp.persist(&path).map_err(|error| error.error)?;
+        let what = format!("remove the PATH line from {}", pretty(&path, &home));
+        if let Ok(true) = left.attempt(&what, clean_profile(&path, &dirs)) {
             println!("  Removed the PATH line from {}", pretty(&path, &home));
         }
     }
 
+    let mut app_aside = None;
+    if last_steps(&left) {
+        let resolved = exe.canonicalize().unwrap_or_else(|_| exe.clone());
+        match &bundle {
+            Some(bundle) if resolved.starts_with(bundle) => {}
+            _ => {
+                left.step("remove the leo program", remove_program(&exe));
+            }
+        }
+    }
+    if let Some(bundle) = bundle.as_ref().filter(|_| last_steps(&left)) {
+        let link = command_dir.join(if cfg!(windows) { "leo.cmd" } else { "leo" });
+        if super::installation::is_cli_link(&link, bundle) {
+            let what = format!("remove the terminal command {}", pretty(&link, &home));
+            left.step(&what, remove(&link).map_err(Into::into));
+        }
+    }
+    if last_steps(&left) {
+        for path in later {
+            remove_listed(&mut left, path, &home);
+        }
+    }
+    if let Some(bundle) = bundle.as_ref().filter(|_| last_steps(&left)) {
+        if !left.step("remove the app", super::installation::remove_bundle(bundle)) {
+            app_aside = Some(super::installation::aside(bundle)).filter(|aside| aside.exists());
+        }
+    }
+    if last_steps(&left) {
+        println!("  Removed {}", pretty(&exe, &home));
+    }
+
     println!();
+    if !last_steps(&left) {
+        match app_aside {
+            Some(aside) => println!(
+                "  Not finished: {}. Delete {} yourself.",
+                left.0.join(", "),
+                pretty(&aside, &home)
+            ),
+            None => println!(
+                "  Not finished: {}. The app was left in place; fix that and run leo uninstall again.",
+                left.0.join(", ")
+            ),
+        }
+        println!();
+        anyhow::bail!(
+            "{} step(s) could not be finished; your notes were not touched.",
+            left.0.len()
+        );
+    }
     println!(
         "  Your notes are still in {}, with their original files and recording transcripts.",
         pretty(&notes, &home)
@@ -326,6 +353,59 @@ pub fn run(yes: bool) -> Result<()> {
     println!("  Thank you for using leo!");
     println!();
     Ok(())
+}
+
+#[derive(Default)]
+struct Left(Vec<String>);
+
+impl Left {
+    fn attempt<T>(&mut self, what: &str, result: Result<T>) -> Result<T, ()> {
+        result.map_err(|error| {
+            println!("  Could not {what}: {error:#}");
+            self.0.push(what.to_string());
+        })
+    }
+
+    fn step(&mut self, what: &str, result: Result<()>) -> bool {
+        self.attempt(what, result).is_ok()
+    }
+}
+
+fn last_steps(left: &Left) -> bool {
+    left.0.is_empty()
+}
+
+fn remove_listed(left: &mut Left, path: &Path, home: &Path) {
+    match remove(path) {
+        Ok(()) => println!("  Removed {}", pretty(path, home)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            left.step(&format!("remove {}", pretty(path, home)), Err(e.into()));
+        }
+    }
+}
+
+fn clean_profile(path: &Path, dirs: &[PathBuf]) -> Result<bool> {
+    use std::io::Write;
+    if path.is_symlink() {
+        return Ok(false);
+    }
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Ok(false);
+    };
+    let Some(kept) = dirs
+        .iter()
+        .find_map(|dir| without_installer_lines(&text, dir))
+    else {
+        return Ok(false);
+    };
+    let mut temp = tempfile::NamedTempFile::new_in(path.parent().context("no folder")?)?;
+    temp.as_file()
+        .set_permissions(std::fs::metadata(path)?.permissions())?;
+    temp.write_all(kept.as_bytes())?;
+    temp.as_file().sync_all()?;
+    temp.persist(path).map_err(|error| error.error)?;
+    Ok(true)
 }
 
 fn remove_program(exe: &Path) -> Result<()> {
@@ -372,22 +452,21 @@ pub fn windows_path_without(path: &str, dir: &str) -> Option<String> {
     )
 }
 
-fn remove_from_windows_path(dir: &Path) -> bool {
+fn remove_from_windows_path(dir: &Path) -> Result<bool> {
     let read = leo_core::children::quiet_command("powershell")
         .args([
             "-NoProfile",
             "-Command",
             "[Environment]::GetEnvironmentVariable('Path','User')",
         ])
-        .output();
-    let Ok(read) = read else {
-        return false;
-    };
+        .output()
+        .context("your PATH could not be read")?;
+    anyhow::ensure!(read.status.success(), "your PATH could not be read");
     let current = String::from_utf8_lossy(&read.stdout).trim().to_string();
     let Some(kept) = windows_path_without(&current, &dir.to_string_lossy()) else {
-        return false;
+        return Ok(false);
     };
-    leo_core::children::quiet_command("powershell")
+    let written = leo_core::children::quiet_command("powershell")
         .args([
             "-NoProfile",
             "-Command",
@@ -397,7 +476,9 @@ fn remove_from_windows_path(dir: &Path) -> bool {
             ),
         ])
         .status()
-        .is_ok_and(|s| s.success())
+        .is_ok_and(|s| s.success());
+    anyhow::ensure!(written, "your PATH could not be changed");
+    Ok(true)
 }
 
 fn without_installer_lines(text: &str, dir: &Path) -> Option<String> {
@@ -641,6 +722,24 @@ mod tests {
                 .iter()
                 .any(|p| root.starts_with(p) || p.starts_with(&root)));
         }
+    }
+
+    #[test]
+    fn a_run_with_no_failed_step_reports_nothing_left() {
+        let mut left = Left::default();
+        assert!(left.step("remove the login item", Ok(())));
+        assert_eq!(left.attempt("remove a PATH line", Ok(true)), Ok(true));
+        assert!(left.0.is_empty());
+        assert!(!left.step("remove the app", Err(anyhow::anyhow!("busy"))));
+        assert_eq!(left.0, ["remove the app"]);
+    }
+
+    #[test]
+    fn the_retry_steps_run_only_when_nothing_is_left() {
+        let mut left = Left::default();
+        assert!(last_steps(&left));
+        left.step("remove ~/config.toml", Err(anyhow::anyhow!("denied")));
+        assert!(!last_steps(&left));
     }
 
     #[test]

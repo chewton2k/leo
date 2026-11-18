@@ -263,10 +263,31 @@ pub fn remove_login_item(home: &Path, bundle: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn aside(bundle: &Path) -> PathBuf {
+    bundle.with_file_name(".Leo.app.removing")
+}
+
 pub fn remove_bundle(bundle: &Path) -> Result<()> {
     #[cfg(not(windows))]
-    std::fs::remove_dir_all(bundle)
-        .context("The app could not be removed. Check its folder permissions and try again.")?;
+    {
+        let aside = aside(bundle);
+        if std::fs::symlink_metadata(&aside).is_ok_and(|meta| meta.is_dir()) {
+            std::fs::remove_dir_all(&aside).with_context(|| {
+                format!(
+                    "An earlier removal left {}; delete it yourself.",
+                    aside.display()
+                )
+            })?;
+        }
+        std::fs::rename(bundle, &aside)
+            .context("The app could not be removed. Check its folder permissions and try again.")?;
+        std::fs::remove_dir_all(&aside).with_context(|| {
+            format!(
+                "The app was only partly removed. Delete {} yourself.",
+                aside.display()
+            )
+        })?;
+    }
     #[cfg(windows)]
     {
         let script = "$ErrorActionPreference='Stop'; Wait-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -Timeout 30 -ErrorAction SilentlyContinue; if(Get-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -ErrorAction SilentlyContinue){exit 1}; $uninstaller=Join-Path $env:LEO_UNINSTALL_APP 'uninstall.exe'; $p=Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru; if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){exit 1}; $bin=Join-Path $env:LEO_UNINSTALL_APP 'bin'; if((Test-Path -LiteralPath $bin -PathType Container) -and -not (Get-ChildItem -LiteralPath $bin -Force)){Remove-Item -LiteralPath $bin}; if((Test-Path -LiteralPath $env:LEO_UNINSTALL_APP -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LEO_UNINSTALL_APP -Force)){Remove-Item -LiteralPath $env:LEO_UNINSTALL_APP}";

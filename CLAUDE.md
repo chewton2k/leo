@@ -276,7 +276,9 @@ models: first-launch setup owns that choice.
 
 The CLI is bundled with the app; macOS links to it, Windows uses a UTF-8 cmd shim
 that preserves its caller's code page. Uninstall validates bundle identity, refuses
-active apps, removes owned login entries and links, keeps notes, their original
+active apps, removes owned login entries and links, runs every step, removes the
+app last and only when every other step worked, and lists what it could not do;
+it keeps notes, their original
 files and recording transcripts, and unrelated files; in a folder not named `leo`
 it removes only the names in `leo_core::paths::own`: what today's code writes,
 plus a legacy list of what earlier versions wrote, which only ever shrinks
