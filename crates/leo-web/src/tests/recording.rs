@@ -1241,6 +1241,23 @@ fn a_recording_takes_more_than_two_hundred_points() {
 }
 
 #[test]
+fn a_long_point_is_kept() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.listener = Some(saving_quickly());
+    let id = json_of(start_recording(&state, record::Source::Microphone))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(&state, |s| s == "recording");
+    let long = "界".repeat(20_000);
+    assert_eq!(add_point(&state, &id, &long).status(), StatusCode::OK);
+    let view = json_of(run(record::status(State(state.clone()), Path(id.clone()))));
+    assert_eq!(view["points"][0][1], long.as_str());
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done");
+}
+
+#[test]
 fn earlier_points_come_fifty_at_a_time() {
     let (mut state, _d, _ids) = state_with(&[]);
     let id = two_hundred_and_two_points(&mut state);
@@ -1562,10 +1579,17 @@ fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
         serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 7, "text": "x"}]}),
     );
     assert_eq!(missing.status(), StatusCode::BAD_REQUEST);
-    let long = put(
-        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 1, "text": "x".repeat(8001)}]}),
+    let long = "x".repeat(300_000);
+    let kept_whole = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 2, "changes": [{"kind": "point", "seq": 1, "text": long}]}),
     );
-    assert_eq!(long.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(kept_whole.status(), StatusCode::OK);
+    assert_eq!(kept(&notes, &ids[0])[0].points[0].text, long);
+    let line = put(
+        serde_json::json!({"source": "rec-fixed1", "base": 3, "changes": [{"kind": "passage", "seq": 1, "text": long}]}),
+    );
+    assert_eq!(line.status(), StatusCode::OK);
+    assert_eq!(kept(&notes, &ids[0])[0].passages[0].text, long);
     let all = kept(&notes, &ids[0]);
     assert_eq!(
         all[0]
@@ -1573,9 +1597,9 @@ fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
             .iter()
             .map(|p| p.text.as_str())
             .collect::<Vec<_>>(),
-        ["Dijkstra", "untouched"]
+        [long.as_str(), "untouched"]
     );
-    assert_eq!(all[0].points[0].text, "typed beside dykstra");
+    assert_eq!(all[0].points[0].text, long);
 }
 
 #[test]

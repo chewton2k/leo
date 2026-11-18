@@ -218,15 +218,6 @@ pub(crate) async fn edit_sources(
     Path(id): Path<String>,
     Json(body): Json<Fix>,
 ) -> Response {
-    if body.changes.iter().any(|c| {
-        c.text.len()
-            > match c.kind {
-                recording::Kind::Passage => 100_000,
-                recording::Kind::Point => 8000,
-            }
-    }) {
-        return error(StatusCode::BAD_REQUEST, "A transcript line is too long");
-    }
     if state.source_writing.swap(true, Ordering::AcqRel) {
         return error(
             StatusCode::CONFLICT,

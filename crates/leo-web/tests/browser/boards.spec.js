@@ -71,7 +71,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       if((m=url.match(/^\\/api\\/boards\\/([^/]+)\\/cards$/))){const card={id:body.id||'cmade'+(++made)+'00000',board:m[1],column:body.column||db.boards.find(b=>b.id===m[1]).columns[0].id,title:body.title,subheading:body.subheading||'',description:body.description||'',priority:body.priority||''};place(card,undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/move$/))){const card=db.cards.find(c=>c.id===m[1]);const from=db.boards.find(b=>b.id===card.board);if(body.board&&body.board!==card.board){const to=db.boards.find(b=>b.id===body.board);const name=from.columns.find(c=>c.id===card.column)?.name;card.board=to.id;card.column=body.column||(to.columns.find(c=>c.name===name)||to.columns[0]).id;}else if(body.column)card.column=body.column;place(card,'after' in body?body.after:undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/undelete$/))){const card=window.goneCards[m[1]];place(card,undefined);return {...card,rank:0};}
-      if((m=url.match(/^\\/api\\/cards\\/([^/]+)$/))){const card=db.cards.find(c=>c.id===m[1]);if(method==='GET')return {...card,rank:0};if(method==='DELETE'){(window.goneCards||(window.goneCards={}))[card.id]=card;db.cards=db.cards.filter(c=>c!==card);return {...card,rank:0};}if([...(body.description||'')].length>8000){const e=new Error('Keep the description within 8,000 characters.');e.status=400;throw e;}Object.assign(card,body);return {...card,rank:0};}
+      if((m=url.match(/^\\/api\\/cards\\/([^/]+)$/))){const card=db.cards.find(c=>c.id===m[1]);if(method==='GET')return {...card,rank:0};if(method==='DELETE'){(window.goneCards||(window.goneCards={}))[card.id]=card;db.cards=db.cards.filter(c=>c!==card);return {...card,rank:0};}Object.assign(card,body);return {...card,rank:0};}
       throw new Error('No fake for '+method+' '+url);
     }
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
@@ -468,34 +468,17 @@ test('Escape and Close each leave a card at one press', async ({ browser }) => {
   });
 });
 
-test('details past the limit stay on screen with the reason until they fit', async ({ browser }) => {
+test('a long description is saved whole', async ({ browser }) => {
   await boardsFixture(browser, async page => {
     const panel = page.locator('#kanban-panel');
-    const problem = page.locator('#kanban-card-problem');
     const description = () => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description);
     await page.locator('[data-card="cread00001"]').click();
     await page.locator('#kanban-card-description').click();
     await page.keyboard.insertText('x'.repeat(8010));
-    await expect(problem).toContainText('8,000 characters');
-    await expect(problem).toContainText('10 over');
-    await page.keyboard.press('Escape');
-    await page.keyboard.press('Escape');
-    await page.locator('#kanban-panel [data-kanban="close"]').click();
-    await expect(panel).toBeVisible();
-    await page.locator('[data-card="cessay0001"]').click();
-    await expect(page.locator('#kanban-card-title')).toHaveValue('Read chapter 3');
-    await expect(page.locator('#kanban-card-description')).toContainText('x'.repeat(8010));
-    await expect(problem).toBeVisible();
-    expect(await description()).toBe('');
-    expect(await page.evaluate(() => window.calls.filter(call => call.startsWith('PATCH')).length)).toBe(0);
-
-    await page.locator('#kanban-card-description .blk').click();
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowRight' : 'End');
-    for (let i = 0; i < 10; i++) await page.keyboard.press('Backspace');
-    await expect(problem).toBeHidden();
+    await expect(page.locator('#kanban-card-problem')).toBeHidden();
     await page.locator('#kanban-panel [data-kanban="close"]').click();
     await expect(panel).toBeHidden();
-    expect(await description()).toBe('x'.repeat(8000));
+    expect(await description()).toBe('x'.repeat(8010));
   });
 });
 

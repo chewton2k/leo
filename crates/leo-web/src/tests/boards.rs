@@ -228,15 +228,6 @@ fn cards_are_edited_validated_and_deleted_with_undo() {
         400
     );
     assert_eq!(
-        add(
-            &state,
-            id,
-            serde_json::json!({ "title": "x", "description": "y".repeat(8_001) })
-        )
-        .status(),
-        400
-    );
-    assert_eq!(
         add(&state, "bmissing0000", serde_json::json!({ "title": "x" })).status(),
         404
     );
@@ -473,6 +464,40 @@ fn a_board_answer_carries_card_faces_not_descriptions() {
         let _ = crate::boards::places_of(&state.chats, &board);
     });
     assert_eq!(read, 0);
+}
+
+#[test]
+fn long_titles_names_and_descriptions_are_kept_whole() {
+    let (state, _d, _) = state_with(&[]);
+    let name = "n".repeat(1_000);
+    let board = new_board(&state, &name);
+    assert_eq!(board["name"], name);
+    let id = board["id"].as_str().unwrap();
+    let (title, sub, description) = ("t".repeat(1_000), "s".repeat(1_000), "界".repeat(50_000));
+    let made = json_of(add(
+        &state,
+        id,
+        serde_json::json!({"title": title, "subheading": sub, "description": description}),
+    ));
+    let card = json_of(run(get_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+    )));
+    assert_eq!(card["title"], title);
+    assert_eq!(card["subheading"], sub);
+    assert_eq!(card["description"], description);
+    let longer = "x".repeat(400_000);
+    let changed = run(change_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+        Json(serde_json::from_value(serde_json::json!({"description": longer})).unwrap()),
+    ));
+    assert_eq!(changed.status(), StatusCode::OK);
+    let card = json_of(run(get_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+    )));
+    assert_eq!(card["description"], longer);
 }
 
 #[test]

@@ -386,7 +386,7 @@ async function quickGo(at) {
   try {
     if (row.kind === 'task') {
       row.request = row.request || requestId();
-      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time, request: row.request } });
+      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title, date: row.date, time: row.time, request: row.request } });
       closeSheet();
       loadTasksWindow().catch(() => {});
       toast(`Added “${made.title}” · ${quickWhen(row.date, row.time)}`, {
@@ -399,7 +399,7 @@ async function quickGo(at) {
       return;
     }
     const [first, ...rest] = row.title.split('\n');
-    const note = await api('/api/notes', { method: 'POST', body: { title: first.trim().slice(0, 120) || 'Quick note', body: rest.join('\n').trim() } });
+    const note = await api('/api/notes', { method: 'POST', body: { title: first.trim() || 'Quick note', body: rest.join('\n').trim() } });
     closeSheet();
     toast(`Saved “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
     if (state.view === 'workspace') showLatest().catch(() => {});

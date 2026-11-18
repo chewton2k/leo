@@ -876,7 +876,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
 
 - POST `/api/import` runs the `Importer` on a thread; "What do you want" goes in
   `<what_the_user_wants>`. Several files make a note each (`run_each`); a failed
-  file is listed in `error` and the rest are made. `into` (a note id, 404 if
+  file is listed in `error` and the rest are made. The box takes any length; the importer reads its first 2,000 characters (`MOST_WANTS`, a model budget) and the sheet says so under the box. `into` (a note id, 404 if
   gone, never with `each`) never touches the note: the job returns `section`
   and the page appends it through version-checked `/insert`, passing the job's id (`job`), not its text, so a section of any length is added (2026-11-18, the owner's principle 1; a job that is gone or not done is 404 with a sentence), so typing during an
   upload never makes a conflict copy.
@@ -982,7 +982,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   JSON line per save through `jsonline.rs` (one generic reader/writer for any
   `Line`: `DIR`, `id`, `stamp`; shared with boards and cards), written atomically; the newest `updated_at`
   wins; deletes write a tombstone (`deleted`). Rows in the old leo.db `tasks`
-  table are not read. Descriptions are optional plain text ≤4,000 characters.
+  table are not read. Descriptions are optional plain text with no fixed length, and so are titles (2026-11-17, the owner's principle 1); a one-line file is read up to 64 MB (`MOST_FILE_BYTES`), a guard against a damaged or planted file that no typed text reaches.
   One mutex (`tasks::writing`) serialises task writes; task and board file work
   runs on blocking workers and never holds the notes store lock.
 - No fixed number of tasks (2026-11-18, the owner's principle 1): tasks are kept in memory like boards and
@@ -1006,9 +1006,9 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   promoted ones (`note_tasks`, located by text and neighbours, never the wrong
   box). A date change is written into the checkbox (409 with a preview when the
   old date is gone); checkbox descriptions never rewrite note content.
-- Repeating: `repeat` weekdays 0 (Mon)…6, `done_on` ≤ `MOST_DONE_DAYS`, never
+- Repeating: `repeat` weekdays 0 (Mon)…6, `done_on` holds every day ticked, never
   overdue. `moved` maps an occurrence's original date to `{date, time, end}`
-  (≤ `MOST_MOVED`, absent when empty so old files are unchanged); `on` stays the
+  (every move kept, absent when empty so old files are unchanged); `on` stays the
   original date. `tasks::occurs_on` and `schedule.occurrences` apply it; .ics
   adds EXDATE + RECURRENCE-ID; Google gets the weekly rule only.
 - Felix's task tools preserve missing descriptions, an explicit empty update
@@ -1072,7 +1072,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 
 - Files `<notes>/.leo/boards/<b…>.json` (name, columns `{id, name}`, 1–12) and
   `<notes>/.leo/cards/<c…>.json` (board, column, `rank`, title, subheading,
-  description ≤8,000, priority `""|low|medium|high`), read and written through
+  description with no fixed length (2026-11-17, the owner's principle 1), priority `""|low|medium|high`), read and written through
   `jsonline.rs` like tasks: one JSON line per save, atomic, nofollow reads,
   newest `updated_at` wins, tombstone deletes; a file counts only when its name
   is its id. No fixed count of boards or cards (2026-11-17, the owner's principle 1). Not calendar tasks.
@@ -1113,8 +1113,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   answered with the first result (`insert::remembered_creation`, scope
   `card:<board>`) and applies nothing twice. Moves take none (nothing retries them).
 - `description` stays plain Markdown. Leaving the card panel settles every field;
-  a failed save or over-limit description (`KANBAN_MOST_DESCRIPTION`) keeps the
-  panel, address and text, so a 400 never costs text; Discard is the only way
+  a failed save keeps the
+  panel, address and text, so a 400 never costs text; Discard (shown with the refusal) is the only way
   out that drops it. A board fetched after a change is dropped if a write began
   meanwhile.
   A card move (keyboard, status menu), a priority, a delete and ticking a task done apply and redraw

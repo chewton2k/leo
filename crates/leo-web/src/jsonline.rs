@@ -9,7 +9,7 @@ use leo_core::watch::{Leo, LeoChanged};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
-const MOST_FILE_BYTES: u64 = 256 * 1024;
+const MOST_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MOST_FORGOTTEN_SCAN: usize = 100_000;
 const MOST_WAITING: usize = 4096;
 const LOOK_AGAIN: Duration = Duration::from_secs(60);
@@ -336,7 +336,7 @@ pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> 
     let line = serde_json::to_string(item)? + "\n";
     anyhow::ensure!(
         line.len() as u64 <= MOST_FILE_BYTES,
-        "That is too large to save. Shorten its description and try again."
+        "That is too large to save."
     );
     let path = file_path(chats, T::DIR, &format!("{}.json", item.id()))?;
     leo_core::paths::write_atomic(&path, line)?;

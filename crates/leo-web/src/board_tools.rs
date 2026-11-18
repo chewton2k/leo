@@ -416,7 +416,7 @@ pub fn column_names(text: &str) -> Result<Vec<String>, String> {
     };
     let listed: Vec<String> = listed
         .into_iter()
-        .map(|n| boards::clean_line(&n, boards::MOST_NAME))
+        .map(|n| boards::clean_line(&n))
         .filter(|n| !n.is_empty())
         .collect();
     if listed.is_empty() {
@@ -549,7 +549,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
     match call.name.as_str() {
         "add_card" => {
             let board = find_board(chats, &call.text("board"))?;
-            let title = boards::clean_line(&call.text("title"), boards::MOST_TITLE);
+            let title = boards::clean_line(&call.text("title"));
             if title.is_empty() {
                 return Err("give the card a title".into());
             }
@@ -561,8 +561,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
                     .ok_or_else(|| format!("{} has no columns", quoted(&board.name)))?,
                 wanted => find_column(&board, wanted)?,
             };
-            let description = boards::description_of(&call.text("description"))
-                .map_err(|e| e.trim_end_matches('.').to_lowercase())?;
+            let description = call.text("description").trim().to_string();
             Ok(Proposal::AddCard {
                 summary: format!(
                     "Add the card {} to {} on {}",
@@ -573,7 +572,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
                 board: board.id,
                 column,
                 title,
-                subheading: boards::clean_line(&call.text("subheading"), boards::MOST_SUBHEADING),
+                subheading: boards::clean_line(&call.text("subheading")),
                 description,
                 priority: priority_of(&call.text("priority"))?,
                 top: yes(&call.text("top")),
@@ -583,18 +582,11 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             let (card, _) = find_card(chats, &call.text("card"), &call.text("board"))?;
             let title = match given(call, "title") {
                 Some(t) if t.trim().is_empty() => return Err("a card needs a title".into()),
-                Some(t) => Some(boards::clean_line(&t, boards::MOST_TITLE)),
+                Some(t) => Some(boards::clean_line(&t)),
                 None => None,
             };
-            let subheading =
-                given(call, "subheading").map(|s| boards::clean_line(&s, boards::MOST_SUBHEADING));
-            let description = match given(call, "description") {
-                Some(d) => Some(
-                    boards::description_of(&d)
-                        .map_err(|e| e.trim_end_matches('.').to_lowercase())?,
-                ),
-                None => None,
-            };
+            let subheading = given(call, "subheading").map(|s| boards::clean_line(&s));
+            let description = given(call, "description").map(|d| d.trim().to_string());
             let priority = match given(call, "priority") {
                 Some(p) => Some(priority_of(&p)?),
                 None => None,
@@ -703,7 +695,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             })
         }
         "add_board" => {
-            let name = boards::clean_line(&call.text("title"), boards::MOST_NAME);
+            let name = boards::clean_line(&call.text("title"));
             if name.is_empty() {
                 return Err("give the board a name".into());
             }
@@ -729,7 +721,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             let board = find_board(chats, &call.text("board"))?;
             let name = match given(call, "new_name") {
                 Some(n) if n.trim().is_empty() => None,
-                Some(n) => Some(boards::clean_line(&n, boards::MOST_NAME)),
+                Some(n) => Some(boards::clean_line(&n)),
                 None => None,
             };
             let columns = match call.text("columns").trim() {

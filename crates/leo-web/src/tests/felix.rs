@@ -4226,7 +4226,7 @@ pub(super) fn big_board(state: &AppState, columns: usize) -> crate::boards::Boar
                 rank: i as f64,
                 title: format!("Card {i}"),
                 subheading: String::new(),
-                description: "d".repeat(crate::boards::MOST_DESCRIPTION),
+                description: "d".repeat(8_000),
                 priority: String::new(),
                 created_at: now,
                 updated_at: now,
@@ -4261,9 +4261,7 @@ fn a_very_large_board_deletes_and_comes_back() {
     let back = crate::boards::board(&state.chats, &board.id).unwrap();
     let cards = crate::boards::cards_of(&state.chats, &back);
     assert_eq!(cards.len(), 300);
-    assert!(cards
-        .iter()
-        .all(|c| c.description.len() == crate::boards::MOST_DESCRIPTION));
+    assert!(cards.iter().all(|c| c.description.len() == 8_000));
 }
 
 #[test]

@@ -849,9 +849,6 @@ pub(crate) async fn point(
     if text.is_empty() {
         return error(StatusCode::BAD_REQUEST, "Write the point first.");
     }
-    if text.len() > 8000 {
-        return error(StatusCode::BAD_REQUEST, "Keep a point under 8,000 bytes.");
-    }
     append_point(&state, &id, text, None, None).await
 }
 

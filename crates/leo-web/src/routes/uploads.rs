@@ -901,12 +901,8 @@ pub(crate) async fn start_import(
             .files
             .iter()
             .any(|file| file.name.len() > 512 || file.mime.len() > 128)
-        || body.title.as_ref().is_some_and(|title| title.len() > 4_000)
     {
-        return refused(
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "Use short file names and a short title.",
-        );
+        return refused(StatusCode::PAYLOAD_TOO_LARGE, "Use short file names.");
     }
     let dir = body.directory.trim().to_string();
     let checked = state.read_store({

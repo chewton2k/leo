@@ -69,7 +69,7 @@ pub(crate) async fn create_board(
     State(state): State<AppState>,
     Json(body): Json<NewBoard>,
 ) -> Response {
-    let name = boards::clean_line(&body.name, boards::MOST_NAME);
+    let name = boards::clean_line(&body.name);
     let request = insert::requested(body.request);
     blocking(&state, move |chats| {
         let _writing = boards::writing();
@@ -159,7 +159,7 @@ pub(crate) async fn change_board(
         };
         let mut board = before.clone();
         if let Some(name) = change.name {
-            let name = boards::clean_line(&name, boards::MOST_NAME);
+            let name = boards::clean_line(&name);
             if name.is_empty() {
                 return error(StatusCode::BAD_REQUEST, "Give the board a name.");
             }
@@ -300,7 +300,7 @@ pub(crate) async fn restore_board(
     blocking(&state, move |chats| {
         let _writing = boards::writing();
         let now = Utc::now();
-        let name = boards::clean_line(&board.name, boards::MOST_NAME);
+        let name = boards::clean_line(&board.name);
         let restored = Board {
             id: board.id,
             name: if name.is_empty() {
@@ -321,17 +321,15 @@ pub(crate) async fn restore_board(
             if card.board != restored.id || !boards::valid_id(&card.id) {
                 continue;
             }
-            let Ok(description) = boards::description_of(&card.description) else {
-                continue;
-            };
+            let description = card.description.trim().to_string();
             let column = if restored.columns.iter().any(|c| c.id == card.column) {
                 card.column
             } else {
                 first.clone()
             };
             let back = Card {
-                title: boards::clean_line(&card.title, boards::MOST_TITLE),
-                subheading: boards::clean_line(&card.subheading, boards::MOST_SUBHEADING),
+                title: boards::clean_line(&card.title),
+                subheading: boards::clean_line(&card.subheading),
                 description,
                 priority: boards::clean_priority(&card.priority),
                 column,
@@ -386,14 +384,11 @@ pub(crate) async fn create_card(
     Path(board_id): Path<String>,
     Json(body): Json<NewCard>,
 ) -> Response {
-    let title = boards::clean_line(&body.title, boards::MOST_TITLE);
+    let title = boards::clean_line(&body.title);
     if title.is_empty() {
         return error(StatusCode::BAD_REQUEST, "Give the card a title.");
     }
-    let description = match boards::description_of(&body.description) {
-        Ok(text) => text,
-        Err(message) => return error(StatusCode::BAD_REQUEST, message),
-    };
+    let description = body.description.trim().to_string();
     let id = match body.id {
         Some(id) if boards::valid_id(&id) && id.starts_with('c') => id,
         Some(_) => return error(StatusCode::BAD_REQUEST, "That card id is not valid."),
@@ -429,7 +424,7 @@ pub(crate) async fn create_card(
             column,
             rank: 0.0,
             title,
-            subheading: boards::clean_line(&body.subheading, boards::MOST_SUBHEADING),
+            subheading: boards::clean_line(&body.subheading),
             description,
             priority: boards::clean_priority(&body.priority),
             created_at: now,
@@ -483,20 +478,17 @@ pub(crate) async fn change_card(
             return no_card();
         };
         if let Some(title) = change.title {
-            let title = boards::clean_line(&title, boards::MOST_TITLE);
+            let title = boards::clean_line(&title);
             if title.is_empty() {
                 return error(StatusCode::BAD_REQUEST, "Give the card a title.");
             }
             card.title = title;
         }
         if let Some(subheading) = change.subheading {
-            card.subheading = boards::clean_line(&subheading, boards::MOST_SUBHEADING);
+            card.subheading = boards::clean_line(&subheading);
         }
         if let Some(description) = change.description {
-            card.description = match boards::description_of(&description) {
-                Ok(text) => text,
-                Err(message) => return error(StatusCode::BAD_REQUEST, message),
-            };
+            card.description = description.trim().to_string();
         }
         if let Some(priority) = change.priority {
             card.priority = boards::clean_priority(&priority);

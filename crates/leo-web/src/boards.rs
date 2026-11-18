@@ -16,10 +16,6 @@ use serde::{Deserialize, Serialize};
 use crate::jsonline::{load, read_all, write_file, Index, Line};
 
 pub const MOST_COLUMNS: usize = 12;
-pub const MOST_NAME: usize = 80;
-pub const MOST_TITLE: usize = 300;
-pub const MOST_SUBHEADING: usize = 200;
-pub const MOST_DESCRIPTION: usize = 8_000;
 pub const FACE_CHARS: usize = 240;
 /// "" is no priority.
 pub const PRIORITIES: [&str; 4] = ["", "low", "medium", "high"];
@@ -234,21 +230,8 @@ fn new_column_id() -> String {
 }
 
 /// One line of text: runs of whitespace (line breaks too) become one space.
-pub fn clean_line(text: &str, most: usize) -> String {
-    text.split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(most)
-        .collect()
-}
-
-pub fn description_of(text: &str) -> Result<String, &'static str> {
-    let text = text.trim();
-    if text.chars().count() > MOST_DESCRIPTION {
-        return Err("Keep the description within 8,000 characters.");
-    }
-    Ok(text.to_string())
+pub fn clean_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub fn clean_priority(priority: &str) -> String {
@@ -286,7 +269,7 @@ pub fn clean_columns(input: Vec<ColumnInput>) -> Result<Vec<Column>, &'static st
         if !seen.insert(id.clone()) {
             return Err("Two columns have the same id.");
         }
-        let name = clean_line(&column.name, MOST_NAME);
+        let name = clean_line(&column.name);
         out.push(Column {
             id,
             name: if name.is_empty() {

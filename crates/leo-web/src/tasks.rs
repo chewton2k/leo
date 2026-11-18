@@ -11,22 +11,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::jsonline;
 
-pub const MOST_TITLE: usize = 300;
-pub const MOST_DESCRIPTION: usize = 4_000;
-
 static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 pub fn writing() -> std::sync::MutexGuard<'static, ()> {
     WRITING.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-pub fn description_of(text: &str) -> Result<String, &'static str> {
-    let text = text.trim();
-    if text.chars().count() > MOST_DESCRIPTION {
-        return Err("Keep the task description within 4,000 characters.");
-    }
-    Ok(text.to_string())
-}
 pub const LISTED_PAGE: usize = 500;
 pub const KINDS: [&str; 6] = [
     "assignment",
@@ -78,9 +68,6 @@ pub struct Slot {
     pub end: Option<NaiveTime>,
 }
 
-pub const MOST_DONE_DAYS: usize = 400;
-pub const MOST_MOVED: usize = 400;
-
 pub fn clean_repeat(days: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = days.iter().copied().filter(|d| *d < 7).collect();
     out.sort_unstable();
@@ -115,9 +102,6 @@ pub fn move_occurrence(task: &mut Task, on: NaiveDate, slot: Slot) {
         task.moved.remove(&on);
     } else {
         task.moved.insert(on, slot);
-    }
-    while task.moved.len() > MOST_MOVED {
-        task.moved.pop_first();
     }
 }
 
@@ -348,7 +332,7 @@ fn listed(
         id: id.to_string(),
         source: "note",
         description: String::new(),
-        title: text.trim().chars().take(MOST_TITLE).collect(),
+        title: text.trim().to_string(),
         kind: kind.unwrap_or_else(|| kind_of(text)),
         done,
         date: due.map(|d| d.date),
@@ -1029,7 +1013,7 @@ mod tests {
             },
         );
         assert!(task.moved.is_empty(), "moving it back forgets the move");
-        for week in 0..(MOST_MOVED as i64 + 5) {
+        for week in 0..1_200i64 {
             let on = monday + chrono::Duration::weeks(week);
             move_occurrence(
                 &mut task,
@@ -1041,11 +1025,8 @@ mod tests {
                 },
             );
         }
-        assert_eq!(task.moved.len(), MOST_MOVED);
-        assert!(
-            !task.moved.contains_key(&monday),
-            "the oldest moves go first"
-        );
+        assert_eq!(task.moved.len(), 1_200);
+        assert!(task.moved.contains_key(&monday), "no move is forgotten");
     }
 
     #[test]

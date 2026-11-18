@@ -131,11 +131,8 @@ pub(crate) async fn create_task(
     State(state): State<AppState>,
     Json(body): Json<NewTask>,
 ) -> Response {
-    let description = match tasks::description_of(&body.description) {
-        Ok(text) => text,
-        Err(message) => return error(StatusCode::BAD_REQUEST, message),
-    };
-    let title: String = body.title.trim().chars().take(tasks::MOST_TITLE).collect();
+    let description = body.description.trim().to_string();
+    let title = body.title.trim().to_string();
     if title.is_empty() {
         return error(StatusCode::BAD_REQUEST, "Give the task a title.");
     }
@@ -241,15 +238,10 @@ pub(crate) async fn change_task(
     ) else {
         return error(StatusCode::BAD_REQUEST, "Write times like 14:30.");
     };
-    let description = match change
+    let description = change
         .description
         .as_deref()
-        .map(tasks::description_of)
-        .transpose()
-    {
-        Ok(text) => text,
-        Err(message) => return error(StatusCode::BAD_REQUEST, message),
-    };
+        .map(|text| text.trim().to_string());
     let chats = state.chats.clone();
     let standalone = {
         let (chats, id, description) = (chats.clone(), id.clone(), description.clone());
@@ -259,7 +251,7 @@ pub(crate) async fn change_task(
                 return Err(Box::new(change));
             };
             if let Some(title) = change.title {
-                let title: String = title.trim().chars().take(tasks::MOST_TITLE).collect();
+                let title = title.trim().to_string();
                 if title.is_empty() {
                     return Ok(error(StatusCode::BAD_REQUEST, "Give the task a title."));
                 }
@@ -291,8 +283,6 @@ pub(crate) async fn change_task(
                     if done {
                         task.done_on.push(day);
                         task.done_on.sort_unstable();
-                        let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
-                        task.done_on.drain(..extra);
                     }
                 }
             }
@@ -605,17 +595,12 @@ fn restore_piece(chats: &std::path::Path, piece: Vec<Task>) -> (usize, usize) {
         if !tasks::valid_id(&task.id) || task.id.starts_with('n') || task.title.trim().is_empty() {
             continue;
         }
-        let Ok(description) = tasks::description_of(&task.description) else {
-            continue;
-        };
-        task.description = description;
-        task.title = task.title.trim().chars().take(tasks::MOST_TITLE).collect();
+        task.description = task.description.trim().to_string();
+        task.title = task.title.trim().to_string();
         task.kind = tasks::clean_kind(&task.kind);
         task.repeat = tasks::clean_repeat(&task.repeat);
         task.done_on.sort_unstable();
         task.done_on.dedup();
-        let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
-        task.done_on.drain(..extra);
         task.deleted = false;
         match tasks::load(chats, &task.id) {
             Some(mine) if mine.updated_at >= task.updated_at => kept += 1,

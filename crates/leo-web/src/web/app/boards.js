@@ -10,7 +10,6 @@ const KANBAN_EDGE = 56;
 const KANBAN_OTHERS = '.kanban-card:not(.kanban-placeholder)';
 const KANBAN_SAVE_MS = 600;
 const KANBAN_RETRY_MS = 3000;
-const KANBAN_MOST_DESCRIPTION = 8000;
 const KANBAN_PRIORITIES = [['', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const KANBAN_ICON = {
   pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
@@ -139,7 +138,7 @@ function kanbanColumnHtml(column) {
   const cards = kanbanCardsIn(column.id);
   return `<section class="kanban-col" data-col="${esc(column.id)}" data-tone="${kanbanTone(column)}" aria-label="${esc(column.name)}">
     <header class="kanban-col-head" title="Drag to move this column">
-      <input class="kanban-col-name" data-kanban-name="${esc(column.id)}" value="${esc(column.name)}" size="${column.name.length + 1}" maxlength="80" aria-label="Column name" spellcheck="false" autocomplete="off">
+      <input class="kanban-col-name" data-kanban-name="${esc(column.id)}" value="${esc(column.name)}" size="${column.name.length + 1}" aria-label="Column name" spellcheck="false" autocomplete="off">
       <span class="badge kanban-count" data-count-col="${esc(column.id)}">${cards.length}</span>
       <button class="icon-btn kanban-col-more" data-action="kanban-column-menu" data-col="${esc(column.id)}" aria-haspopup="menu" aria-expanded="false" aria-label="Options for ${esc(column.name)}" title="Column options">${ICON.more}</button>
     </header>
@@ -152,7 +151,7 @@ function kanbanTabsHtml() {
   const here = kanban.board;
   return kanban.boards.map((b) => {
     const on = b.id === here.id;
-    if (on) return `<div class="kanban-tab on" data-kanban-drop="${esc(b.id)}" aria-current="page"><input class="kanban-title" data-kanban-name="board" value="${esc(here.name)}" size="${here.name.length + 1}" maxlength="80" aria-label="Board name" spellcheck="false" autocomplete="off"></div>`;
+    if (on) return `<div class="kanban-tab on" data-kanban-drop="${esc(b.id)}" aria-current="page"><input class="kanban-title" data-kanban-name="board" value="${esc(here.name)}" size="${here.name.length + 1}" aria-label="Board name" spellcheck="false" autocomplete="off"></div>`;
     return `<a class="kanban-tab" href="#/boards/${enc(b.id)}" data-kanban-drop="${esc(b.id)}"><span class="kanban-tab-name">${esc(b.name)}</span></a>`;
   }).join('');
 }
@@ -313,7 +312,7 @@ function kanbanSyncTab() {
 async function kanbanNewBoard() {
   const box = sheet(`<div class="kanban-start">
     <h3>New board</h3>
-    <label class="field">${ICON.board}<input id="kanban-board-name" maxlength="80" placeholder="Name, e.g. Coursework" aria-label="Board name" autocomplete="off" aria-describedby="kanban-start-help"></label>
+    <label class="field">${ICON.board}<input id="kanban-board-name" placeholder="Name, e.g. Coursework" aria-label="Board name" autocomplete="off" aria-describedby="kanban-start-help"></label>
     <div class="kanban-start-preview" aria-label="Starting columns">
       ${[['todo', 'To do'], ['doing', 'In progress'], ['done', 'Done']].map(([tone, name]) => `<div class="kanban-start-column" data-tone="${tone}"><span><i class="kanban-dot"></i>${name}</span><div class="kanban-start-card" aria-hidden="true"><i></i><i></i></div></div>`).join('')}
     </div>
@@ -513,7 +512,7 @@ function kanbanComposer(columnId, { text: typed = '', start = null, end = null, 
   const form = document.createElement('div');
   form.className = 'kanban-composer';
   form.dataset.composer = columnId;
-  form.innerHTML = `<div class="kanban-composer-box"><textarea class="set-input" rows="2" maxlength="300" placeholder="What needs doing?" aria-label="New card title"></textarea>${segmented({ label: 'Priority', action: 'kanban-priority', key: 'priority', current: chosen, choices: KANBAN_PRIORITIES })}</div><div class="kanban-composer-row"><button type="button" class="btn sm primary" data-kanban="add">Add card</button><button type="button" class="btn sm plain" data-kanban="cancel">Cancel</button></div>`;
+  form.innerHTML = `<div class="kanban-composer-box"><textarea class="set-input" rows="2" placeholder="What needs doing?" aria-label="New card title"></textarea>${segmented({ label: 'Priority', action: 'kanban-priority', key: 'priority', current: chosen, choices: KANBAN_PRIORITIES })}</div><div class="kanban-composer-row"><button type="button" class="btn sm primary" data-kanban="add">Add card</button><button type="button" class="btn sm plain" data-kanban="cancel">Cancel</button></div>`;
   button.replaceWith(form);
   const text = form.querySelector('textarea');
   // Cards save one after another, so typing the next one while the last saves loses nothing.
@@ -656,8 +655,8 @@ async function kanbanCardPanel(id) {
   box.dataset.tone = column ? kanbanTone(column) : '';
   box.innerHTML = `<div class="kanban-sheet">
     <div class="kanban-panel-bar"><span class="kanban-panel-where"><span class="kanban-dot" aria-hidden="true"></span><span>${esc(board.name)}</span></span><span class="hint grow" id="kanban-card-saved" role="status"></span><button type="button" class="icon-btn danger" data-kanban="delete" aria-label="Delete card" title="Delete card">${ICON.trash}</button><button type="button" class="icon-btn" data-kanban="close" aria-label="Close" title="Close (Esc)">${ICON.close}</button></div>
-    <textarea class="kanban-sheet-title" id="kanban-card-title" rows="1" maxlength="300" aria-label="Card title" spellcheck="true">${esc(card.title)}</textarea>
-    <input class="kanban-sheet-sub" id="kanban-card-sub" maxlength="200" placeholder="Add a subheading" aria-label="Subheading" autocomplete="off" value="${esc(card.subheading || '')}">
+    <textarea class="kanban-sheet-title" id="kanban-card-title" rows="1" aria-label="Card title" spellcheck="true">${esc(card.title)}</textarea>
+    <input class="kanban-sheet-sub" id="kanban-card-sub" placeholder="Add a subheading" aria-label="Subheading" autocomplete="off" value="${esc(card.subheading || '')}">
     <div class="kanban-props">
       <div class="set-row"><span class="set-label">Status</span><label class="select-control kanban-status"><span class="kanban-dot" aria-hidden="true"></span><select id="kanban-card-column" aria-label="Status">${kanbanStatusOptions(card)}</select>${ICON.chevron}</label></div>
       <div class="set-row kanban-priorities"><span class="set-label">Priority</span>${segmented({ label: 'Priority', action: 'kanban-priority', key: 'priority', current: card.priority || '', choices: KANBAN_PRIORITIES })}</div>
@@ -688,13 +687,6 @@ async function kanbanCardPanel(id) {
     clearTimeout(timers[name]);
     timers[name] = setTimeout(() => save(name).catch(fail), KANBAN_SAVE_MS);
   };
-  const over = () => Array.from(doc.source().trim()).length - KANBAN_MOST_DESCRIPTION;
-  const tellOver = () => {
-    const extra = over();
-    tell(extra > 0 ? `Keep the description within ${KANBAN_MOST_DESCRIPTION.toLocaleString('en')} characters. It is ${extra.toLocaleString('en')} over, so this text is not saved yet.` : '');
-    discard.hidden = extra <= 0;
-    return extra > 0;
-  };
   description.innerHTML = skeleton(3, 'board');
   const opening = kanban.opening = {};
   try {
@@ -709,7 +701,7 @@ async function kanbanCardPanel(id) {
   }
   if (kanban.opening !== opening || !box.isConnected || box.hidden) return;
   kanban.opening = null;
-  const doc = leoDoc.mount(description, { source: card.description || '', placeholder: 'Add details, steps or links…', onChange: () => { tellOver(); queue('description'); } });
+  const doc = leoDoc.mount(description, { source: card.description || '', placeholder: 'Add details, steps or links…', onChange: () => queue('description') });
   const valueOf = (name) => name === 'description' ? doc.source().trim() : fields[name].value.replace(/\s+/g, ' ').trim();
   const dirty = () => names.some((name) => valueOf(name) !== (card[name] || '') && (name !== 'title' || valueOf(name)));
   const running = {};
@@ -723,13 +715,15 @@ async function kanbanCardPanel(id) {
     const value = valueOf(name);
     if (value === (card[name] || '')) { retrying[name] = false; return true; }
     if (name === 'title' && !value) { title.value = card.title; fit(title); return true; }
-    if (name === 'description' && tellOver()) return false;
     try {
       const done = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { [name]: value } });
       kanbanUpdate(card, done);
       retrying[name] = false;
       if (saved.isConnected) saved.textContent = 'Saved';
-      if (problem.isConnected) tellOver();
+      if (problem.isConnected) {
+        tell('');
+        discard.hidden = true;
+      }
       return true;
     } catch (e) {
       if (e instanceof Locked) throw e;
@@ -741,7 +735,10 @@ async function kanbanCardPanel(id) {
         return false;
       }
       toast(e.message, { bad: true });
-      if (problem.isConnected) tell(e.message);
+      if (problem.isConnected) {
+        tell(e.message);
+        discard.hidden = false;
+      }
       return false;
     }
   };

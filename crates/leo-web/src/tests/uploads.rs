@@ -590,6 +590,41 @@ fn a_third_upload_waits_and_then_runs() {
 }
 
 #[test]
+fn an_upload_with_a_very_long_title_makes_a_note_with_that_title() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            Ok(Made {
+                title: "Made".into(),
+                body: "Body".into(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let title = "界".repeat(5_000);
+    let body = ImportBody {
+        title: Some(title.clone()),
+        ..making(&state, &[("a.txt", "text/plain", b"test")])
+    };
+    let response = run(start_import(State(state.clone()), Json(body)));
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let id = json_of(response)["id"].as_str().unwrap().to_string();
+    let job = wait_for(&state, &id);
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    assert_eq!(note.title, title);
+    let names: Vec<String> = std::fs::read_dir(&state.notes_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".md"))
+        .collect();
+    assert_eq!(names.len(), 1);
+    let stem = names[0].trim_end_matches(".md");
+    assert!(stem.len() <= 200 && stem.chars().count() <= 100, "{stem}");
+}
+
+#[test]
 fn thirty_files_make_thirty_notes() {
     let (mut state, _home, _) = state_with(&[]);
     state.importer = Some(Arc::new(

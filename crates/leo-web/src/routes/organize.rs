@@ -592,12 +592,7 @@ fn repeat_of(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn add_task(call: &Call) -> Result<Proposal, String> {
-    let title: String = call
-        .text("title")
-        .trim()
-        .chars()
-        .take(tasks::MOST_TITLE)
-        .collect();
+    let title = call.text("title").trim().to_string();
     if title.is_empty() {
         return Err("give the task a title".into());
     }
@@ -631,7 +626,7 @@ fn add_task(call: &Call) -> Result<Proposal, String> {
             }
         ),
         title,
-        description: tasks::description_of(&call.text("description"))?,
+        description: call.text("description").trim().to_string(),
         date: date.map(|d| d.to_string()),
         time: time.map(|t| t.format("%H:%M").to_string()),
         task_kind: kind,
@@ -646,8 +641,7 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
         .args
         .get("description")
         .and_then(|v| v.as_str())
-        .map(tasks::description_of)
-        .transpose()?;
+        .map(|text| text.trim().to_string());
     let done = match call.text("done").trim().to_lowercase().as_str() {
         "" => None,
         "yes" | "true" | "done" => Some(true),

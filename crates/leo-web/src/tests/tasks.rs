@@ -242,37 +242,66 @@ fn descriptions_are_optional_preserved_clearable_and_restored_with_tasks() {
         json_of(change(&state, id, serde_json::json!({"description": "  "})))["description"],
         ""
     );
-    let long = "界".repeat(crate::tasks::MOST_DESCRIPTION + 1);
+}
+
+#[test]
+fn long_titles_and_descriptions_are_kept_whole() {
+    let (state, _dir, _) = state_with(&[]);
+    let title = "界".repeat(1_000);
+    let description = "界".repeat(50_000);
+    let made = json_of(run(create_task(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({"title": title, "description": description}))
+                .unwrap(),
+        ),
+    )));
+    let id = made["id"].as_str().unwrap();
+    let kept = crate::tasks::load(&state.chats, id).unwrap();
     assert_eq!(
-        change(&state, id, serde_json::json!({"description": long})).status(),
-        400
+        (kept.title.as_str(), kept.description.as_str()),
+        (title.as_str(), description.as_str())
     );
-    assert_eq!(
-        crate::tasks::load(&state.chats, id).unwrap().description,
-        ""
+    let longer = "x".repeat(400_000);
+    let changed = json_of(change(
+        &state,
+        id,
+        serde_json::json!({"title": longer, "description": longer}),
+    ));
+    assert_eq!(changed["title"], longer);
+    assert_eq!(changed["description"], longer);
+    let kept = crate::tasks::load(&state.chats, id).unwrap();
+    assert_eq!((kept.title, kept.description), (longer.clone(), longer));
+}
+
+#[test]
+fn a_repeating_task_keeps_every_done_day() {
+    let (state, _dir, _) = state_with(&[]);
+    let first = chrono::NaiveDate::from_ymd_opt(2026, 1, 5).unwrap();
+    let made = json_of(run(create_task(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "title": "Daily", "date": "2026-01-05", "repeat": [0, 1, 2, 3, 4, 5, 6]
+            }))
+            .unwrap(),
+        ),
+    )));
+    let id = made["id"].as_str().unwrap();
+    let mut task = crate::tasks::load(&state.chats, id).unwrap();
+    task.done_on = (0..1_200)
+        .map(|day| first + chrono::Duration::days(day))
+        .collect();
+    crate::tasks::put(&state.chats, &task).unwrap();
+    let answer = change(
+        &state,
+        id,
+        serde_json::json!({"done": true, "on": "2026-01-04"}),
     );
-    assert_eq!(
-        run(create_task(
-            State(state.clone()),
-            Json(
-                serde_json::from_value(
-                    serde_json::json!({"title": "Too much", "description": long})
-                )
-                .unwrap()
-            )
-        ))
-        .status(),
-        400
-    );
-    let at_limit = "界".repeat(crate::tasks::MOST_DESCRIPTION);
-    assert_eq!(
-        json_of(change(
-            &state,
-            id,
-            serde_json::json!({"description": at_limit})
-        ))["description"],
-        at_limit
-    );
+    assert_eq!(answer.status(), 200);
+    let kept = crate::tasks::load(&state.chats, id).unwrap();
+    assert_eq!(kept.done_on.len(), 1_201);
+    assert_eq!(kept.done_on[0], first - chrono::Duration::days(1));
 }
 
 #[test]
