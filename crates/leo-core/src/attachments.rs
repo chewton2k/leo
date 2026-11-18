@@ -1,10 +1,11 @@
-use std::io::Write as _;
+use std::io::{Read, Write as _};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
 pub const DIR: &str = "attachments";
 pub const MOST_BYTES: usize = 20 * 1024 * 1024;
+pub const HEAD_BYTES: usize = 16;
 
 pub fn kind_of(bytes: &[u8]) -> Option<&'static str> {
     if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
@@ -108,14 +109,22 @@ fn stem_of(name: &str) -> String {
 }
 
 pub fn save(notes_dir: &Path, name: &str, bytes: &[u8]) -> Result<String> {
-    let Some(extension) = kind_of(bytes) else {
+    let (head, rest) = bytes.split_at(bytes.len().min(HEAD_BYTES));
+    save_from(notes_dir, name, head, rest)
+}
+
+pub fn save_from(notes_dir: &Path, name: &str, head: &[u8], mut rest: impl Read) -> Result<String> {
+    let Some(extension) = kind_of(head) else {
         bail!("{name} is not a picture leo can show: use PNG, JPEG, GIF or WebP");
     };
-    if bytes.len() > MOST_BYTES {
-        bail!("{name} is larger than {} MB", MOST_BYTES / (1024 * 1024));
-    }
     let dir = crate::paths::contained_path(notes_dir, Path::new(DIR))?;
     std::fs::create_dir_all(&dir).with_context(|| format!("could not make {}", dir.display()))?;
+    let mut temp = tempfile::NamedTempFile::new_in(&dir)
+        .with_context(|| format!("could not write in {}", dir.display()))?;
+    temp.write_all(head)
+        .and_then(|()| std::io::copy(&mut rest, &mut temp).map(drop))
+        .and_then(|()| temp.as_file().sync_all())
+        .with_context(|| format!("could not write {name}"))?;
     let base = format!(
         "{}-{}",
         chrono::Local::now().format("%Y%m%d-%H%M%S"),
@@ -127,21 +136,11 @@ pub fn save(notes_dir: &Path, name: &str, bytes: &[u8]) -> Result<String> {
         } else {
             format!("{base}-{n}.{extension}")
         };
-        let path = dir.join(&file);
-        let mut out = match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(out) => out,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e).with_context(|| format!("could not write {}", path.display())),
-        };
-        if let Err(e) = out.write_all(bytes).and_then(|()| out.sync_all()) {
-            let _ = std::fs::remove_file(&path);
-            return Err(e).with_context(|| format!("could not write {}", path.display()));
+        match temp.persist_noclobber(dir.join(&file)) {
+            Ok(_) => return Ok(format!("{DIR}/{file}")),
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => temp = e.file,
+            Err(e) => return Err(e.error).with_context(|| format!("could not write {name}")),
         }
-        return Ok(format!("{DIR}/{file}"));
     }
     bail!("could not find a free name for {name}")
 }
@@ -285,7 +284,78 @@ mod tests {
         assert_ne!(first, second);
         assert!(dir.path().join(&second).is_file());
         assert!(save(dir.path(), "x.svg", b"<svg/>").is_err());
-        assert!(save(dir.path(), "x.png", &vec![0; MOST_BYTES + 1]).is_err());
+    }
+
+    struct Chunks {
+        left: usize,
+        asked: usize,
+        fail_at: Option<usize>,
+    }
+
+    impl Read for Chunks {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.fail_at.is_some_and(|at| self.asked >= at) {
+                return Err(std::io::Error::other("the connection dropped"));
+            }
+            let n = self.left.min(4096).min(buf.len());
+            buf[..n].fill(7);
+            self.left -= n;
+            self.asked += n;
+            Ok(n)
+        }
+    }
+
+    fn files_in(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir.join(DIR))
+            .map(|d| {
+                d.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn a_large_picture_is_written_as_it_arrives() {
+        let dir = tempfile::tempdir().unwrap();
+        let size = 30 * 1024 * 1024;
+        let rest = Chunks {
+            left: size - PNG.len(),
+            asked: 0,
+            fail_at: None,
+        };
+        let saved = save_from(dir.path(), "scan.png", PNG, rest).unwrap();
+        let written = std::fs::read(dir.path().join(&saved)).unwrap();
+        assert_eq!(written.len(), size);
+        assert_eq!(&written[..PNG.len()], PNG);
+        assert!(written[PNG.len()..].iter().all(|b| *b == 7));
+        assert_eq!(files_in(dir.path()).len(), 1);
+    }
+
+    #[test]
+    fn a_file_that_is_not_a_picture_is_refused_after_its_first_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut rest = Chunks {
+            left: usize::MAX,
+            asked: 0,
+            fail_at: Some(0),
+        };
+        let refused = save_from(dir.path(), "x.svg", b"<svg onload=alert(1)>", &mut rest);
+        assert!(refused.is_err());
+        assert_eq!(rest.asked, 0, "nothing past the first bytes was read");
+        assert!(files_in(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn a_picture_that_stops_arriving_leaves_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let rest = Chunks {
+            left: 1 << 20,
+            asked: 0,
+            fail_at: Some(100_000),
+        };
+        assert!(save_from(dir.path(), "x.png", PNG, rest).is_err());
+        assert!(files_in(dir.path()).is_empty());
     }
 
     #[test]
