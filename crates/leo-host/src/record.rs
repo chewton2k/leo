@@ -277,17 +277,13 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
             });
         }
         drop(tx);
+        let mut last_others = 0.0;
         for (speaker, event) in rx {
+            if let Some(clock) = clock_of(speaker, &event, &mut last_others) {
+                heard(clock);
+                continue;
+            }
             match event {
-                Event::Clock {
-                    secs,
-                    paused,
-                    level,
-                } => heard(Heard::Clock {
-                    secs,
-                    paused,
-                    level,
-                }),
                 Event::Transcript(text) => heard(Heard::Transcript(format!("{speaker}: {text}"))),
                 Event::Warning(text) | Event::Failed(text) => {
                     warnings.push(format!("{speaker}: {text}"))
@@ -302,6 +298,26 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
         }
     });
     finish_tracks(dirs, warnings, id, profile, wants, heard)
+}
+
+fn clock_of(speaker: &str, event: &Event, last_others: &mut f32) -> Option<Heard> {
+    let Event::Clock {
+        secs,
+        paused,
+        level,
+    } = *event
+    else {
+        return None;
+    };
+    if speaker == "Others" {
+        *last_others = level;
+        return None;
+    }
+    Some(Heard::Clock {
+        secs,
+        paused,
+        level: level.max(*last_others),
+    })
 }
 
 fn finish_tracks(
@@ -549,6 +565,33 @@ mod tests {
         };
         assert_eq!(super::labelled("", passage.clone()).speaker, "Microphone");
         assert_eq!(super::labelled("You", passage).speaker, "You");
+    }
+
+    #[test]
+    fn the_call_meter_keeps_one_reading() {
+        use leo_services::session::recorder::Event;
+        let clock = |secs, level| Event::Clock {
+            secs,
+            paused: false,
+            level,
+        };
+        let mut last_others = 0.0;
+        let mut shown = Vec::new();
+        for (speaker, event) in [
+            ("You", clock(1, 0.2)),
+            ("Others", clock(1, 0.7)),
+            ("You", clock(2, 0.1)),
+            ("Others", clock(2, 0.05)),
+            ("You", clock(3, 0.4)),
+            ("You", Event::Transcript("hello".into())),
+        ] {
+            if let Some(leo_web::record::Heard::Clock { secs, level, .. }) =
+                super::clock_of(speaker, &event, &mut last_others)
+            {
+                shown.push((secs, level));
+            }
+        }
+        assert_eq!(shown, [(1, 0.2), (2, 0.7), (3, 0.4)]);
     }
 
     #[test]
