@@ -25,20 +25,141 @@ fn tracks_of(root: &Path, id: &str) -> Result<Vec<std::path::PathBuf>> {
     );
     let mut dirs = Vec::new();
     for found in session::find(root, id) {
-        let lock = leo_core::paths::contained_path(&found.dir, Path::new("lock"))?;
-        if lock.exists() {
-            anyhow::ensure!(
-                std::fs::metadata(lock)?.len() <= 64,
-                "The recording lock could not be checked. Try again later."
-            );
-        }
-        anyhow::ensure!(
-            !session::locked(&found.dir),
-            "The recording is still finishing. Try again in a moment."
-        );
+        unlocked(&found.dir)?;
         dirs.push(found.dir.clone());
     }
     Ok(dirs)
+}
+
+fn unlocked(dir: &Path) -> Result<()> {
+    let lock = leo_core::paths::contained_path(dir, Path::new("lock"))?;
+    if lock.exists() {
+        anyhow::ensure!(
+            std::fs::metadata(lock)?.len() <= 64,
+            "The recording lock could not be checked. Try again later."
+        );
+    }
+    anyhow::ensure!(
+        !session::locked(dir),
+        "The recording is still finishing. Try again in a moment."
+    );
+    Ok(())
+}
+
+fn kept_by(root: &Path, owned: impl Fn(&str) -> bool) -> Vec<session::Brief> {
+    session::scan(root, session::Walk::All)
+        .sessions
+        .into_iter()
+        .filter(|b| b.saved && b.owner().is_some_and(&owned))
+        .collect()
+}
+
+fn session_dir(root: &Path, name: &str) -> Result<std::path::PathBuf> {
+    anyhow::ensure!(
+        session::folder_name(name),
+        "That is not a recording leo knows."
+    );
+    let dir = leo_core::paths::contained_path(root, Path::new(name))?;
+    anyhow::ensure!(
+        std::fs::symlink_metadata(&dir)?.is_dir(),
+        "Recording folders cannot use symbolic links"
+    );
+    Ok(dir)
+}
+
+fn name_of(dir: &Path) -> String {
+    dir.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn remove_kept(root: &Path, dir: &Path, notes: &[String]) -> Result<bool> {
+    let dir = session_dir(root, &name_of(dir))?;
+    let found = Session::open(&dir)?;
+    if !found.manifest.saved || !found.owner().is_some_and(|o| notes.contains(&o)) {
+        return Ok(false);
+    }
+    unlocked(&dir)?;
+    std::fs::remove_dir_all(dir)?;
+    Ok(true)
+}
+
+fn discard_kept_for_notes(root: &Path, notes: &[String]) -> Result<Vec<String>> {
+    if !recordings_root(root)? {
+        return Ok(Vec::new());
+    }
+    let mut retry: Vec<String> = kept_by(root, |owner| notes.iter().any(|n| n == owner))
+        .into_iter()
+        .filter(|brief| remove_kept(root, &brief.dir, notes).is_err())
+        .filter_map(|brief| brief.owner().map(String::from))
+        .collect();
+    retry.sort();
+    retry.dedup();
+    Ok(retry)
+}
+
+fn kept_for_notes(root: &Path) -> Vec<String> {
+    if !recordings_root(root).unwrap_or(false) {
+        return Vec::new();
+    }
+    let mut owners: Vec<String> = kept_by(root, |_| true)
+        .into_iter()
+        .filter_map(|brief| brief.owner().map(String::from))
+        .collect();
+    owners.sort();
+    owners.dedup();
+    owners
+}
+
+fn retarget_kept(root: &Path, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
+    if from == target || !recordings_root(root)? {
+        return Ok(Vec::new());
+    }
+    let mut sessions = Vec::new();
+    for brief in kept_by(root, |owner| owner == from) {
+        let Ok(found) = Session::open(&session_dir(root, &name_of(&brief.dir))?) else {
+            continue;
+        };
+        if !found.manifest.saved || found.owner().as_deref() != Some(from) {
+            continue;
+        }
+        anyhow::ensure!(
+            !session::locked(&found.dir),
+            "A recording of this note is being recovered; try again in a moment."
+        );
+        sessions.push(found);
+    }
+    let mut moved = Vec::new();
+    for mut found in sessions {
+        let previous = found.manifest.note.replace(target.to_owned());
+        if let Err(e) = found.save() {
+            let _ = restore_kept(root, &moved);
+            return Err(e);
+        }
+        moved.push(leo_web::record::Moved {
+            session: name_of(&found.dir),
+            previous,
+            target: target.to_owned(),
+        });
+    }
+    Ok(moved)
+}
+
+fn restore_kept(root: &Path, moved: &[leo_web::record::Moved]) -> Result<()> {
+    for each in moved {
+        let Ok(dir) = session_dir(root, &each.session) else {
+            continue;
+        };
+        let Ok(mut found) = Session::open(&dir) else {
+            continue;
+        };
+        if found.manifest.note.as_deref() != Some(each.target.as_str()) {
+            continue;
+        }
+        found.manifest.note = each.previous.clone();
+        found.save()?;
+    }
+    Ok(())
 }
 
 fn remove_tracks(dirs: Vec<std::path::PathBuf>) -> Result<()> {
@@ -181,11 +302,238 @@ impl Housekeeper for Housekeeping {
     fn expire_kept_audio(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
         session::root().map_or(0, |root| expire_kept_audio(&root, before))
     }
+    fn discard_kept_for_notes(&self, notes: &[String]) -> Result<Vec<String>> {
+        discard_kept_for_notes(&session::root()?, notes)
+    }
+    fn kept_for_notes(&self) -> Vec<String> {
+        session::root().map_or_else(|_| Vec::new(), |root| kept_for_notes(&root))
+    }
+    fn retarget_kept(&self, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
+        retarget_kept(&session::root()?, from, target)
+    }
+    fn restore_kept(&self, moved: &[leo_web::record::Moved]) -> Result<()> {
+        restore_kept(&session::root()?, moved)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn kept(
+        root: &Path,
+        minute: i64,
+        note: Option<&str>,
+        trace: Option<&str>,
+    ) -> std::path::PathBuf {
+        let mut manifest = session::Manifest::new(None, None, "", false);
+        manifest.id = format!("kept-{minute:04}");
+        manifest.saved = true;
+        manifest.note = note.map(String::from);
+        manifest.started =
+            chrono::Utc::now() - chrono::Duration::days(2) + chrono::Duration::minutes(minute);
+        let found = Session::create(root, manifest).unwrap();
+        if let Some(note) = trace {
+            found.trace("saved", &format!("Note {note} saved"));
+        }
+        settle(&found.dir);
+        found.dir
+    }
+
+    fn settle(dir: &Path) {
+        std::fs::File::options()
+            .write(true)
+            .open(dir.join("session.json"))
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3600))
+            .unwrap();
+    }
+
+    fn note_of(dir: &Path) -> Option<String> {
+        Session::open(dir).unwrap().manifest.note
+    }
+
+    fn hold(dir: &Path) {
+        std::fs::write(dir.join("lock"), std::process::id().to_string()).unwrap();
+    }
+
+    const A: &str = "note-aaaa";
+    const B: &str = "note-bbbb";
+    const C: &str = "note-cccc";
+
+    #[test]
+    fn an_old_kept_recording_is_tied_through_its_trace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let tied = kept(tmp.path(), 0, None, Some(A));
+        let other = kept(tmp.path(), 1, None, Some(B));
+        let none = kept(tmp.path(), 2, None, None);
+        assert_eq!(
+            discard_kept_for_notes(tmp.path(), &[A.into()]).unwrap(),
+            Vec::<String>::new()
+        );
+        assert!(!tied.exists());
+        assert!(other.exists() && none.exists());
+        std::fs::remove_file(other.join("trace.jsonl")).unwrap();
+        std::fs::create_dir(other.join("trace.jsonl")).unwrap();
+        assert_eq!(kept_for_notes(tmp.path()), [B]);
+        assert!(discard_kept_for_notes(tmp.path(), &[A.into()])
+            .unwrap()
+            .is_empty());
+        assert!(other.exists() && none.exists());
+    }
+
+    #[test]
+    fn kept_audio_leaves_with_its_note_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        let b = kept(tmp.path(), 1, Some(B), None);
+        let old = kept(tmp.path(), 2, None, None);
+        let busy = kept(tmp.path(), 3, Some(A), None);
+        hold(&busy);
+        assert_eq!(
+            discard_kept_for_notes(tmp.path(), &[A.into()]).unwrap(),
+            [A]
+        );
+        assert!(!a.exists());
+        assert!(b.exists() && old.exists() && busy.exists());
+    }
+
+    #[test]
+    fn kept_audio_follows_a_combined_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        assert_eq!(retarget_kept(tmp.path(), A, B).unwrap().len(), 1);
+        assert!(discard_kept_for_notes(tmp.path(), &[A.into()])
+            .unwrap()
+            .is_empty());
+        assert!(a.exists());
+        assert_eq!(note_of(&a).as_deref(), Some(B));
+    }
+
+    #[test]
+    fn a_retarget_moves_only_the_absorbed_notes_sessions() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        let b = kept(tmp.path(), 1, Some(B), None);
+        let before = std::fs::read(b.join("session.json")).unwrap();
+        let moved = retarget_kept(tmp.path(), A, B).unwrap();
+        assert_eq!(
+            moved,
+            [leo_web::record::Moved {
+                session: name_of(&a),
+                previous: Some(A.into()),
+                target: B.into(),
+            }]
+        );
+        assert_eq!(std::fs::read(b.join("session.json")).unwrap(), before);
+    }
+
+    #[test]
+    fn restoring_a_retarget_gives_the_audio_back() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        let b = kept(tmp.path(), 1, Some(B), None);
+        let moved = retarget_kept(tmp.path(), A, B).unwrap();
+        restore_kept(tmp.path(), &moved).unwrap();
+        assert!(discard_kept_for_notes(tmp.path(), &[B.into()])
+            .unwrap()
+            .is_empty());
+        assert!(!b.exists());
+        assert!(a.exists());
+        assert_eq!(note_of(&a).as_deref(), Some(A));
+    }
+
+    #[test]
+    fn restore_puts_back_an_old_session_without_a_note_field() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, None, Some(A));
+        let moved = retarget_kept(tmp.path(), A, B).unwrap();
+        assert_eq!(moved[0].previous, None);
+        assert_eq!(note_of(&a).as_deref(), Some(B));
+        restore_kept(tmp.path(), &moved).unwrap();
+        assert_eq!(note_of(&a), None);
+        assert_eq!(Session::open(&a).unwrap().owner().as_deref(), Some(A));
+    }
+
+    #[test]
+    fn restore_leaves_a_folder_owned_by_another_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        let moved = retarget_kept(tmp.path(), A, B).unwrap();
+        let mut found = Session::open(&a).unwrap();
+        found.manifest.note = Some(C.into());
+        found.save().unwrap();
+        restore_kept(tmp.path(), &moved).unwrap();
+        assert_eq!(note_of(&a).as_deref(), Some(C));
+        let outside = [leo_web::record::Moved {
+            session: "../x".into(),
+            previous: None,
+            target: C.into(),
+        }];
+        restore_kept(tmp.path(), &outside).unwrap();
+        assert_eq!(note_of(&a).as_deref(), Some(C));
+    }
+
+    #[test]
+    fn a_retarget_refuses_while_a_recording_is_locked() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = kept(tmp.path(), 0, Some(A), None);
+        let busy = kept(tmp.path(), 1, Some(A), None);
+        hold(&busy);
+        let before = std::fs::read(a.join("session.json")).unwrap();
+        let refused = retarget_kept(tmp.path(), A, B).unwrap_err().to_string();
+        assert_eq!(
+            refused,
+            "A recording of this note is being recovered; try again in a moment."
+        );
+        assert_eq!(std::fs::read(a.join("session.json")).unwrap(), before);
+        assert_eq!(note_of(&busy).as_deref(), Some(A));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_half_done_retarget_puts_back_what_it_changed() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let older = kept(tmp.path(), 0, Some(A), None);
+        let newer = kept(tmp.path(), 1, Some(A), None);
+        use std::os::unix::fs::MetadataExt;
+        let inode = || std::fs::metadata(newer.join("session.json")).unwrap().ino();
+        let first = inode();
+        std::fs::set_permissions(&older, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = retarget_kept(tmp.path(), A, B);
+        std::fs::set_permissions(&older, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        assert_ne!(
+            inode(),
+            first,
+            "the newer session was written, then put back"
+        );
+        assert_eq!(note_of(&newer).as_deref(), Some(A));
+        assert_eq!(note_of(&older).as_deref(), Some(A));
+    }
+
+    #[test]
+    fn an_owner_changed_on_disk_is_read_before_deleting() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = kept(tmp.path(), 0, Some(A), None);
+        assert_eq!(kept_for_notes(tmp.path()), [A]);
+        let path = dir.join("session.json");
+        let old = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let text = std::fs::read_to_string(&path).unwrap().replace(A, B);
+        std::fs::write(&path, text).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        assert!(discard_kept_for_notes(tmp.path(), &[A.into()])
+            .unwrap()
+            .is_empty());
+        assert!(dir.exists());
+        assert_eq!(note_of(&dir).as_deref(), Some(B));
+    }
 
     #[test]
     fn discarding_a_call_removes_both_tracks_and_keeps_other_recordings() {

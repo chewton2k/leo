@@ -360,7 +360,7 @@ fn finish_tracks(
         commit: Some(Arc::new(move |notes, note| {
             leo_core::recording::save_merged(notes, note, &committed)?;
             for (_, dir) in &dirs {
-                leo_services::session::Session::open(dir)?.finish()?;
+                leo_services::session::Session::open(dir)?.finish(note)?;
             }
             Ok(())
         })),
@@ -908,6 +908,41 @@ mod tests {
     fn silent_part(dir: &std::path::Path) {
         leo_services::session::wav::write(&dir.join("seg-00000.wav"), &vec![0i16; 16_000 * 2])
             .unwrap();
+    }
+
+    #[test]
+    fn a_call_names_its_note_on_both_tracks() {
+        in_scratch_home(
+            "record::tests::a_call_names_its_note_on_both_tracks",
+            || {
+                let tracks = [
+                    ("You", track("call-named-you", false)),
+                    ("Others", track("call-named-others", true)),
+                ];
+                for (_, dir) in &tracks {
+                    std::fs::write(dir.join("seg-00000.err"), "failed").unwrap();
+                    leo_services::session::wav::write(&dir.join("seg-00000.wav"), &[1, 2, 3])
+                        .unwrap();
+                }
+                let dirs: Vec<_> = tracks.iter().map(|(s, d)| (*s, d.clone())).collect();
+                let recorded = super::finish_tracks(
+                    dirs,
+                    vec![],
+                    "call-named".into(),
+                    Default::default(),
+                    Default::default(),
+                    &mut |_| {},
+                )
+                .unwrap();
+                let notes = leo_core::paths::data_dir().unwrap().join("notes");
+                (recorded.commit.unwrap())(&notes, "call-note-01").unwrap();
+                for (_, dir) in &tracks {
+                    let kept = leo_services::session::Session::open(dir).unwrap().manifest;
+                    assert!(kept.saved);
+                    assert_eq!(kept.note.as_deref(), Some("call-note-01"));
+                }
+            },
+        );
     }
 
     #[test]

@@ -31,5 +31,10 @@ page at a time, every folder reachable; metadata is remembered until its file ch
 `pending_recording` (one by id), `old_recordings` (older than the Keeping cutoff) and
 `discard_recording` (validated id, contained paths, refuses a locked session). Settings →
 Keeping's audio expiry calls it, so a recording that is running or being recovered (its
-session is locked) is never discarded. `discard_recordings` deletes a batch, finding each recording by id and rereading its metadata before removing it (expiry uses it). The Storage page, its areas and actions were removed
+session is locked) is never discarded. `discard_recordings` deletes a batch, finding each recording by id and rereading its metadata before removing it (expiry uses it). A saved session that kept audio names its note (`Manifest.note`);
+`discard_kept_for_notes` removes it when that note is deleted for good (for the trash's removal
+pass); a session saved before `note` existed is matched through its trace line `Note {id} saved`.
+`retarget_kept` moves a combined note's sessions to the note that remains (all or none, refused
+while one is locked) and `restore_kept` gives them back on Undo; every delete or move rereads the
+manifest from disk. The Storage page, its areas and actions were removed
 on 2026-11-05; files they managed stay on disk.
