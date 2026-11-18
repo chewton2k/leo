@@ -425,14 +425,6 @@ pub fn column_names(text: &str) -> Result<Vec<String>, String> {
     Ok(listed)
 }
 
-fn clip(text: &str, most: usize) -> String {
-    if text.chars().count() <= most {
-        return text.to_string();
-    }
-    let cut: String = text.chars().take(most).collect();
-    format!("{cut}…")
-}
-
 fn card_line(card: &Card, full: bool) -> String {
     let mut line = format!("- [{}] {}", card.id, quoted(&card.title));
     if !card.priority.is_empty() {
@@ -445,7 +437,7 @@ fn card_line(card: &Card, full: bool) -> String {
         let shown = if full {
             card.description.clone()
         } else {
-            clip(&card.description, DESCRIPTION_SHOWN)
+            crate::chats::clipped(&card.description, DESCRIPTION_SHOWN)
         };
         line.push_str(&format!("\n  description: {}", quoted(&shown)));
     }
@@ -494,7 +486,10 @@ pub fn read(chats: &Path, call: &Call) -> Done {
     if !wanted_card.trim().is_empty() {
         return match find_card(chats, &wanted_card, &call.text("board")) {
             Ok((card, board)) => read_done(
-                format!("Opened the card {}", quoted(&clip(&card.title, 60))),
+                format!(
+                    "Opened the card {}",
+                    quoted(&crate::chats::clipped(&card.title, 60))
+                ),
                 format!(
                     "Card on {} [{}], column {} [{}]:\n{}",
                     quoted(&board.name),

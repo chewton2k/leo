@@ -1799,31 +1799,50 @@ pub(crate) struct Applied {
     pub(crate) before: String,
 }
 
+pub(crate) fn change_body<X>(
+    store: &mut leo_core::store::Store,
+    id: &str,
+    base: Option<&str>,
+    change: impl FnOnce(&str) -> Result<(String, X), StatusCode>,
+) -> Result<(Applied, X), StatusCode> {
+    let note = store.find_note_mut(id).ok_or(StatusCode::NOT_FOUND)?;
+    if base.is_some_and(|base| base != crate::routes::notes::version_of(note)) {
+        return Err(StatusCode::CONFLICT);
+    }
+    let (next, extra) = change(&note.body)?;
+    let before = std::mem::replace(&mut note.body, next);
+    note.updated_at = chrono::Utc::now();
+    Ok((
+        Applied {
+            note: NoteResponse::from_note(note),
+            before,
+        },
+        extra,
+    ))
+}
+
 pub(crate) fn change_note(
     store: &mut leo_core::store::Store,
     id: &str,
     find: &str,
     replace: &str,
 ) -> Result<Applied, StatusCode> {
-    let note = store.find_note_mut(id).ok_or(StatusCode::NOT_FOUND)?;
-    let body = if find.is_empty() {
-        let base = note.body.trim_end();
-        if base.is_empty() {
-            replace.to_string()
+    change_body(store, id, None, |body| {
+        let next = if find.is_empty() {
+            let base = body.trim_end();
+            if base.is_empty() {
+                replace.to_string()
+            } else {
+                format!("{base}\n\n{}", replace.trim_start())
+            }
+        } else if body.matches(find).count() == 1 {
+            body.replacen(find, replace, 1)
         } else {
-            format!("{base}\n\n{}", replace.trim_start())
-        }
-    } else if note.body.matches(find).count() == 1 {
-        note.body.replacen(find, replace, 1)
-    } else {
-        return Err(StatusCode::CONFLICT);
-    };
-    let before = std::mem::replace(&mut note.body, body);
-    note.updated_at = chrono::Utc::now();
-    Ok(Applied {
-        note: NoteResponse::from_note(note),
-        before,
+            return Err(StatusCode::CONFLICT);
+        };
+        Ok((next, ()))
     })
+    .map(|(applied, ())| applied)
 }
 
 fn apply_now(state: &AppState, proposal: &tools::Proposal) -> Result<serde_json::Value, String> {

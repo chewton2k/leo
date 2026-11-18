@@ -7,8 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::routes::felix::Applied;
-use crate::routes::notes::{save, version_of, NoteResponse};
+use crate::routes::felix::change_body;
+use crate::routes::notes::save;
 use crate::AppState;
 
 pub(crate) const MOST_INSERT: usize = 200_000;
@@ -105,17 +105,9 @@ pub(crate) async fn insert_into_note(
     let note_id = id.clone();
     let done = state
         .with_store(move |store| {
-            let note = store.find_note_mut(&note_id).ok_or(StatusCode::NOT_FOUND)?;
-            if version_of(note) != body.base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let next = inserted(&note.body, &body.text, body.line);
-            let before = std::mem::replace(&mut note.body, next);
-            note.updated_at = chrono::Utc::now();
-            let applied = Applied {
-                note: NoteResponse::from_note(note),
-                before,
-            };
+            let (applied, ()) = change_body(store, &note_id, Some(&body.base), |text| {
+                Ok((inserted(text, &body.text, body.line), ()))
+            })?;
             save(store)?;
             Ok(applied)
         })

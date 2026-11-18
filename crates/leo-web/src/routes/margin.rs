@@ -10,9 +10,9 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::margin::{self, Prefs, Refused, Thread};
-use crate::routes::felix::Applied;
+use crate::routes::felix::change_body;
 use crate::routes::insert;
-use crate::routes::notes::{save, version_of, NoteResponse};
+use crate::routes::notes::{save, version_of};
 use crate::usage::Purpose;
 use crate::AppState;
 
@@ -1159,20 +1159,13 @@ pub(crate) async fn weave(
     let (base, note_id) = (body.base, id.clone());
     let done = state
         .with_store(move |store| {
-            let note = store.find_note_mut(&note_id).ok_or(StatusCode::NOT_FOUND)?;
-            if version_of(note) != base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let line = note.body[..from].matches('\n').count() + 1;
-            let next = format!("{}{text}{}", &note.body[..from], &note.body[to..]);
-            let before = std::mem::replace(&mut note.body, next);
-            note.updated_at = Utc::now();
-            let applied = Applied {
-                note: NoteResponse::from_note(note),
-                before,
-            };
+            let (applied, (first, last)) = change_body(store, &note_id, Some(&base), |body| {
+                let line = body[..from].matches('\n').count() + 1;
+                let next = format!("{}{text}{}", &body[..from], &body[to..]);
+                Ok((next, (line, line + text.matches('\n').count())))
+            })?;
             save(store)?;
-            Ok((applied, line, line + text.matches('\n').count()))
+            Ok((applied, first, last))
         })
         .await;
     match done {

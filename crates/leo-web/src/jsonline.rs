@@ -11,6 +11,7 @@ pub(crate) trait Line: Serialize + DeserializeOwned {
     const DIR: &'static str;
     fn id(&self) -> &str;
     fn stamp(&self) -> DateTime<Utc>;
+    fn deleted_at(&mut self, now: DateTime<Utc>);
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -78,6 +79,16 @@ pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> 
     leo_core::paths::write_atomic(&path, line)
 }
 
+pub(crate) fn write_gone<T: Line + Clone>(
+    chats: &Path,
+    item: &T,
+    now: DateTime<Utc>,
+) -> anyhow::Result<()> {
+    let mut gone = item.clone();
+    gone.deleted_at(now);
+    write_file(chats, &gone)
+}
+
 /// Every file of one kind, tombstones included. A file counts only when its
 /// name is its id, so a copied or renamed file cannot pose as another item.
 /// Boards pass no cap on the scan: deletes leave a tombstone behind (so a backup
@@ -139,7 +150,7 @@ pub(crate) fn load<T: Line>(chats: &Path, id: &str) -> Option<T> {
 mod tests {
     use super::*;
 
-    #[derive(Serialize, serde::Deserialize)]
+    #[derive(Clone, Serialize, serde::Deserialize)]
     struct Item {
         id: String,
         title: String,
@@ -156,6 +167,28 @@ mod tests {
         fn stamp(&self) -> DateTime<Utc> {
             self.at
         }
+        fn deleted_at(&mut self, now: DateTime<Utc>) {
+            self.deleted = true;
+            self.at = now;
+        }
+    }
+
+    #[test]
+    fn a_tombstone_keeps_everything_but_the_mark_and_the_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let made = Utc::now() - chrono::Duration::days(3);
+        let now = Utc::now();
+        let live = item("Keep these words", made, false);
+        write_file(&chats, &live).unwrap();
+        write_gone(&chats, &live, now).unwrap();
+        let path = file_path(&chats, "items", "item-0001.json").unwrap();
+        let back: Item = read_file(&chats, &path).unwrap();
+        assert_eq!(
+            (back.id.as_str(), back.title.as_str(), back.at, back.deleted),
+            ("item-0001", "Keep these words", now, true)
+        );
+        assert!(!live.deleted && live.at == made);
     }
 
     fn item(title: &str, at: DateTime<Utc>, deleted: bool) -> Item {

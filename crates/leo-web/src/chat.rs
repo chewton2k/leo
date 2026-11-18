@@ -887,11 +887,7 @@ pub fn memory_fits(memory: &crate::chats::Memory, messages: &[Turn], start: usiz
 fn line_of(turn: &Turn, most: usize) -> String {
     let who = if turn.role == "user" { "User" } else { "Felix" };
     let flat = turn.text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut text: String = flat.chars().take(most).collect();
-    if flat.chars().count() > most {
-        text.push('…');
-    }
-    format!("{who}: {text}")
+    format!("{who}: {}", crate::chats::clipped(&flat, most))
 }
 
 pub fn earlier_of(

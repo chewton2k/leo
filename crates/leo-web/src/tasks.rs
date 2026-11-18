@@ -505,6 +505,10 @@ impl jsonline::Line for Task {
     fn stamp(&self) -> DateTime<Utc> {
         self.updated_at
     }
+    fn deleted_at(&mut self, now: DateTime<Utc>) {
+        self.deleted = true;
+        self.updated_at = now;
+    }
 }
 
 fn read_all(chats: &Path) -> Vec<Task> {
@@ -537,12 +541,10 @@ pub fn put(chats: &Path, task: &Task) -> anyhow::Result<()> {
 }
 
 pub fn remove(chats: &Path, id: &str) -> bool {
-    let Some(mut task) = load(chats, id) else {
+    let Some(task) = load(chats, id) else {
         return false;
     };
-    task.deleted = true;
-    task.updated_at = Utc::now();
-    jsonline::write_file(chats, &task).is_ok()
+    jsonline::write_gone(chats, &task, Utc::now()).is_ok()
 }
 
 pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {

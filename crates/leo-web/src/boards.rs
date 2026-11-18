@@ -80,6 +80,10 @@ impl Line for Board {
     fn stamp(&self) -> DateTime<Utc> {
         self.updated_at
     }
+    fn deleted_at(&mut self, now: DateTime<Utc>) {
+        self.deleted = true;
+        self.updated_at = now;
+    }
 }
 
 impl Line for Card {
@@ -89,6 +93,10 @@ impl Line for Card {
     }
     fn stamp(&self) -> DateTime<Utc> {
         self.updated_at
+    }
+    fn deleted_at(&mut self, now: DateTime<Utc>) {
+        self.deleted = true;
+        self.updated_at = now;
     }
 }
 
@@ -529,10 +537,7 @@ pub fn matching_column(board: &Board, name: Option<&str>) -> Option<String> {
 }
 
 pub fn remove_board(chats: &Path, board: &Board, now: DateTime<Utc>) -> anyhow::Result<()> {
-    let mut gone = board.clone();
-    gone.deleted = true;
-    gone.updated_at = now;
-    put_board(chats, &gone)?;
+    crate::jsonline::write_gone(chats, board, now)?;
     for card in all_cards(chats).iter().filter(|c| c.board == board.id) {
         let _ = remove_card(chats, card, now);
     }
@@ -540,10 +545,8 @@ pub fn remove_board(chats: &Path, board: &Board, now: DateTime<Utc>) -> anyhow::
 }
 
 pub fn remove_card(chats: &Path, card: &Card, now: DateTime<Utc>) -> anyhow::Result<()> {
-    let mut gone = card.clone();
-    gone.deleted = true;
-    gone.updated_at = now;
-    put_card(chats, &gone)
+    anyhow::ensure!(card.rank.is_finite(), "That card's place is not valid.");
+    crate::jsonline::write_gone(chats, card, now)
 }
 
 #[cfg(test)]

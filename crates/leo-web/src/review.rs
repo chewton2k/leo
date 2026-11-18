@@ -105,14 +105,6 @@ fn plain(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn clip(text: &str, most: usize) -> String {
-    let mut out: String = text.chars().take(most).collect();
-    if text.chars().count() > most {
-        out.push('…');
-    }
-    out
-}
-
 fn question_in(text: &str) -> String {
     let text = verdict_off(text).map_or(text, |(_, rest)| rest);
     let paragraphs: Vec<&str> = text
@@ -127,7 +119,7 @@ fn question_in(text: &str) -> String {
         .or(paragraphs.last())
         .copied()
         .unwrap_or("");
-    clip(&plain(asked), 300)
+    chats::clipped(&plain(asked), 300)
 }
 
 fn cited_in(message: &serde_json::Value) -> Vec<Ref> {
@@ -189,13 +181,13 @@ fn missed_cards(chat: &Chat, message: &serde_json::Value, now: DateTime<Utc>) ->
                 .is_some_and(|t| matches!(verdict_off(&t), Some(("incorrect", _)))),
         })
         .map(|q| {
-            let question = clip(&plain(&text(q, "question")), 200);
+            let question = chats::clipped(&plain(&text(q, "question")), 200);
             let given = text(q, "given");
             Missed {
                 key: key_of(&chat.id, &format!("{question}\n{given}")),
                 chat: chat.id.clone(),
                 question,
-                answer: clip(&plain(&given), 200),
+                answer: chats::clipped(&plain(&given), 200),
                 notes: cited_in(message),
                 due: at <= now - Duration::hours(DUE_AFTER_HOURS),
                 at,
@@ -223,10 +215,10 @@ fn missed_in(chat: &Chat, now: DateTime<Utc>) -> Vec<Missed> {
         let field = |key: &str| {
             quiz.and_then(|q| q.get(key))
                 .and_then(|v| v.as_str())
-                .map(|v| clip(&plain(v), 200))
+                .map(|v| chats::clipped(&plain(v), 200))
         };
         let answer = field("given")
-            .or_else(|| said.map(|m| clip(&plain(text_of(m)), 200)))
+            .or_else(|| said.map(|m| chats::clipped(&plain(text_of(m)), 200)))
             .unwrap_or_default();
         let asked = i
             .checked_sub(2)

@@ -95,9 +95,7 @@ pub fn dir_for(notes_dir: &Path) -> PathBuf {
     notes_dir.parent().unwrap_or(notes_dir).join("chats")
 }
 
-pub fn valid_id(id: &str) -> bool {
-    (8..=64).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-}
+pub use crate::jsonline::valid_id;
 
 fn first_of<'a>(messages: &'a [serde_json::Value], role: &str) -> Option<&'a serde_json::Value> {
     messages
@@ -111,13 +109,16 @@ fn first_text<'a>(messages: &'a [serde_json::Value], role: &str) -> Option<&'a s
         .and_then(|t| t.as_str())
 }
 
-fn clipped(text: &str, most: usize) -> String {
-    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = line.chars().take(most).collect();
-    if line.chars().count() > most {
+pub(crate) fn clipped(text: &str, most: usize) -> String {
+    let mut out: String = text.chars().take(most).collect();
+    if text.chars().count() > most {
         out.push('…');
     }
     out
+}
+
+fn one_line(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn note_of(refs: &[Ref], messages: &[serde_json::Value]) -> Option<String> {
@@ -156,9 +157,12 @@ fn note_of(refs: &[Ref], messages: &[serde_json::Value]) -> Option<String> {
 
 fn title_of(given: &str, refs: &[Ref], messages: &[serde_json::Value]) -> String {
     if !given.trim().is_empty() {
-        return clipped(given, MOST_TITLE);
+        return clipped(&one_line(given), MOST_TITLE);
     }
-    let asked = clipped(first_text(messages, "user").unwrap_or(""), MOST_TITLE);
+    let asked = clipped(
+        &one_line(first_text(messages, "user").unwrap_or("")),
+        MOST_TITLE,
+    );
     if asked.is_empty() {
         return "New chat".to_string();
     }
@@ -166,7 +170,7 @@ fn title_of(given: &str, refs: &[Ref], messages: &[serde_json::Value]) -> String
     match note_of(refs, messages) {
         Some(note) if short && !asked.to_lowercase().contains(&note.to_lowercase()) => {
             let asked = asked.trim_end_matches(['?', '.', '!', ' ']);
-            clipped(&format!("{asked}: {note}"), MOST_TITLE)
+            clipped(&one_line(&format!("{asked}: {note}")), MOST_TITLE)
         }
         _ => asked,
     }
@@ -205,11 +209,14 @@ fn about_of(messages: &[serde_json::Value]) -> String {
             cleaned.push(c);
         }
     }
-    clipped(&cleaned.replace(" .", ".").replace(" ,", ","), MOST_ABOUT)
+    clipped(
+        &one_line(&cleaned.replace(" .", ".").replace(" ,", ",")),
+        MOST_ABOUT,
+    )
 }
 
 pub fn rename(dir: &Path, id: &str, title: &str) -> bool {
-    let title = clipped(title, MOST_TITLE);
+    let title = clipped(&one_line(title), MOST_TITLE);
     if title.is_empty() || !valid_id(id) {
         return false;
     }
@@ -229,8 +236,14 @@ pub fn rename(dir: &Path, id: &str, title: &str) -> bool {
 }
 
 pub fn name_prompt(chat: &Chat) -> (String, String) {
-    let asked = clipped(first_text(&chat.messages, "user").unwrap_or(""), 600);
-    let answered = clipped(first_text(&chat.messages, "assistant").unwrap_or(""), 900);
+    let asked = clipped(
+        &one_line(first_text(&chat.messages, "user").unwrap_or("")),
+        600,
+    );
+    let answered = clipped(
+        &one_line(first_text(&chat.messages, "assistant").unwrap_or("")),
+        900,
+    );
     let system = "You name a conversation for a list of past chats. Reply with a title of 3 to 7 words that says what it is about, so it stands apart from other chats on similar subjects: name the topic, not the request (\"Dijkstra vs BFS on weighted graphs\", not \"Explain this simply\"). Use interpretable language. Plain text only: no quotes, no full stop, no preamble.".to_string();
     let user = format!(
         "<question>\n{asked}\n</question>\n<answer>\n{answered}\n</answer>\n\nWrite the title only."
@@ -248,7 +261,9 @@ pub fn clean_name(reply: &str) -> Option<String> {
         .trim_end_matches('.')
         .trim();
     let words = line.split_whitespace().count();
-    (1..=12).contains(&words).then(|| clipped(line, MOST_TITLE))
+    (1..=12)
+        .contains(&words)
+        .then(|| clipped(&one_line(line), MOST_TITLE))
 }
 
 fn stamp(at: DateTime<Utc>) -> String {
