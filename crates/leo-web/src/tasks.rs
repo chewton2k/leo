@@ -623,7 +623,7 @@ struct Table {
 
 fn table(chats: &Path) -> Arc<Table> {
     static TABLES: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<Table>>>> = OnceLock::new();
-    let key = chats.parent().unwrap_or(chats).to_path_buf();
+    let key = crate::db::beside_of(chats, None).to_path_buf();
     let mut all = TABLES
         .get_or_init(Default::default)
         .lock()

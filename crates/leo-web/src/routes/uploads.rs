@@ -120,14 +120,14 @@ fn incoming_name(name: &str) -> bool {
 }
 
 fn incoming_root(notes_dir: &std::path::Path) -> std::path::PathBuf {
-    notes_dir.parent().unwrap_or(notes_dir).join(INCOMING)
+    crate::db::beside_of(notes_dir, None).join(INCOMING)
 }
 
 fn incoming_dir(notes_dir: &std::path::Path, upload: &str) -> Option<std::path::PathBuf> {
     if !incoming_name(upload) {
         return None;
     }
-    let data = notes_dir.parent().unwrap_or(notes_dir);
+    let data = crate::db::beside_of(notes_dir, None);
     leo_core::paths::contained_path(data, &std::path::Path::new(INCOMING).join(upload)).ok()
 }
 
@@ -369,7 +369,7 @@ pub(crate) fn originals_dir(notes_dir: &std::path::Path, note: &str) -> Option<s
     if note.is_empty() || !note.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }
-    let data = notes_dir.parent().unwrap_or(notes_dir);
+    let data = crate::db::beside_of(notes_dir, None);
     leo_core::paths::contained_path(data, &std::path::Path::new("attachments").join(note)).ok()
 }
 
@@ -383,7 +383,7 @@ pub(crate) fn original_path(
     }
     originals_dir(notes_dir, note)?;
     let relative = std::path::Path::new("attachments").join(note).join(name);
-    leo_core::paths::contained_path(notes_dir.parent().unwrap_or(notes_dir), &relative).ok()
+    leo_core::paths::contained_path(crate::db::beside_of(notes_dir, None), &relative).ok()
 }
 
 fn stage_originals(files: &[UploadFile]) -> std::io::Result<Vec<(String, std::path::PathBuf)>> {

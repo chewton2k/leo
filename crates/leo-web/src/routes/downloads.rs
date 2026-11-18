@@ -182,7 +182,7 @@ pub(crate) async fn originals_zip(
             }
             export::write_folder_from(
                 file,
-                notes_dir.parent().unwrap_or(&notes_dir),
+                crate::db::beside_of(&notes_dir, None),
                 &checked,
                 &base,
             )

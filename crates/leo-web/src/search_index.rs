@@ -132,7 +132,7 @@ enum Op {
 
 impl SearchIndex {
     pub fn for_notes(notes_dir: &Path) -> SearchIndex {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
+        let base = crate::db::beside_of(notes_dir, None);
         SearchIndex::new(crate::db::at(&base.join(crate::db::FILE)))
     }
 

@@ -931,7 +931,7 @@ pub(crate) async fn start_in(
 
 fn sweep_leftover_temps(notes: &std::path::Path) -> usize {
     use leo_core::paths::{own, sweep_stale_temps};
-    let data = notes.parent().unwrap_or(notes);
+    let data = db::beside_of(notes, None);
     sweep_stale_temps(&notes.join(".leo"), 1)
         + sweep_stale_temps(data, 0)
         + sweep_stale_temps(&data.join(own::ORIGINALS), 2)
