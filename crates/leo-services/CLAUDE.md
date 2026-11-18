@@ -280,8 +280,10 @@ PowerPoint one slide at a time, into the import's text spill (2026-11-17,
 principle 1: no part, total, table or output limit); each piece keeps the
 `nodes_limit` and depth bounds; a part over 4 GiB uncompressed is refused and
 reading stops before the disk's free space falls under 1 GB; relationships
-stay inside the ZIP and external links are never fetched. PDF text uses
-`lopdf::extract_text_with_limit` per page; a page number must not hide a scan and
+stay inside the ZIP and external links are never fetched. PDF text is read
+by page id (`pdf_page_text`, the same text and the same per-page limit as
+`lopdf::extract_text_with_limit`, without walking the page list for every
+page); a page number must not hide a scan and
 text on another page must not suppress one; an unreadable scan fails with its
 page number. Scans over 16 million pixels get a 4,000 px reading copy (the PDF is
 never rewritten). Source images ≤64 million pixels, 32,768 px per side, 20 MB
