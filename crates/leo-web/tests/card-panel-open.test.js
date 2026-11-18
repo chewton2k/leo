@@ -3,40 +3,78 @@ const { test } = require('node:test');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync(require('node:path').join(__dirname, '../src/web/app/boards.js'), 'utf8').replace(/\r\n/g, '\n');
-const start = source.indexOf("  description.innerHTML = skeleton(3, 'board');");
-const end = source.indexOf('  const doc = leoDoc.mount(', start);
-assert.ok(start > 0 && end > start);
 
-function run(api) {
-  const card = { id: 'c1', description: 'x'.repeat(240) };
-  const description = { innerHTML: '' };
-  const box = { isConnected: true, hidden: false, innerHTML: 'panel' };
-  const mounted = [];
-  const context = {
-    card, description, box, id: 'c1', kanban: { opening: null }, enc: (s) => s, api,
-    skeleton: () => 'lines', document: { body: { classList: { remove() {} } } },
-    leoDoc: { mount: (_, options) => mounted.push(options.source) },
-  };
-  vm.createContext(context);
-  const done = vm.runInContext(`(async () => {\n${source.slice(start, end)}\nleoDoc.mount(null, { source: card.description });\n})()`, context);
-  return { card, description, box, mounted, done };
+function between(from, to) {
+  const start = source.indexOf(from);
+  const end = source.indexOf(to, start);
+  assert.ok(start >= 0 && end > start, `${from} … ${to}`);
+  return source.slice(start, end);
 }
 
-test('the panel loads the whole description before it can be edited', async () => {
-  let release;
-  const open = run(() => new Promise((resolve) => { release = resolve; }));
-  assert.equal(open.description.innerHTML, 'lines');
-  assert.deepEqual(open.mounted, [], 'nothing is mounted while the card loads');
-  release({ description: 'y'.repeat(8000) });
-  await open.done;
-  assert.equal(open.mounted[0].length, 8000);
-  assert.equal(open.card.description.length, 8000);
+const loader = between('const kanbanFaceIsWhole', '\n// The card just before');
+
+function load(api) {
+  const context = { api, enc: (s) => s };
+  vm.createContext(context);
+  vm.runInContext(`${loader}\n;globalThis.whole = kanbanFaceIsWhole; globalThis.load = kanbanLoadWhole;`, context);
+  return context;
+}
+
+test('a card whose description fits its face, or is empty, is editable at once', () => {
+  const { whole } = load(() => assert.fail('no read needed'));
+  assert.equal(whole({ description: '' }), true);
+  assert.equal(whole({}), true);
+  assert.equal(whole({ description: 'x'.repeat(240), description_more: false }), true);
+  assert.equal(whole({ description: 'x'.repeat(240), description_more: true }), false);
 });
 
-test('a card that cannot be loaded closes the panel and leaves the face alone', async () => {
-  const open = run(() => Promise.reject(new Error('gone')));
-  await assert.rejects(open.done, /gone/);
-  assert.equal(open.box.hidden, true);
-  assert.deepEqual(open.mounted, []);
-  assert.equal(open.card.description.length, 240);
+test('the whole description replaces the face once the card read returns', async () => {
+  const { load: run } = load(() => Promise.resolve({ description: 'y'.repeat(8000) }));
+  const card = { id: 'c1', description: 'x'.repeat(240), description_more: true };
+  assert.equal(await run(card, () => true), true);
+  assert.equal(card.description.length, 8000);
+  assert.equal(card.description_more, false);
+});
+
+test('a card read that returns after the panel closed changes nothing', async () => {
+  const { load: run } = load(() => Promise.resolve({ description: 'y'.repeat(8000) }));
+  const card = { id: 'c1', description: 'x'.repeat(240), description_more: true };
+  assert.equal(await run(card, () => false), false);
+  assert.equal(card.description.length, 240);
+  assert.equal(card.description_more, true);
+});
+
+test('a card read that fails leaves the card as it was and says why', async () => {
+  const { load: run } = load(() => Promise.reject(new Error('gone')));
+  const card = { id: 'c1', description: 'x'.repeat(240), description_more: true };
+  await assert.rejects(run(card, () => true), /gone/);
+  assert.equal(card.description.length, 240);
+  assert.equal(card.description_more, true);
+});
+
+test('a card read that answers without a description field leaves an empty one', async () => {
+  const { load: run } = load(() => Promise.resolve({ id: 'c1' }));
+  const card = { id: 'c1', description: 'x'.repeat(240), description_more: true };
+  await run(card, () => true);
+  assert.equal(card.description, '');
+});
+
+test('a title typed before the card read returns is saved alone and never sends the face as the description', async () => {
+  const face = 'x'.repeat(240);
+  const card = { id: 'c1', title: 'Old', subheading: '', description: face, description_more: true };
+  const field = { value: 'New  title' };
+  const bodies = [];
+  const context = {
+    card, doc: null, fields: { title: field, subheading: { value: '' } }, names: ['title', 'subheading', 'description'],
+    clearTimeout, timers: {}, saved: { isConnected: false }, problem: { isConnected: false }, title: field, fit() {}, tellOver: () => false, tell() {}, toast() {}, enc: (s) => s,
+    Locked: class extends Error {}, Offline: class extends Error {}, KANBAN_RETRY_MS: 3000,
+    kanbanWrite: async (url, { body }) => { bodies.push(body); return { ...card, ...body, description: 'the whole description' }; },
+    kanbanUpdate: (c, done) => Object.assign(c, done),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${between('  const valueOf =', '  const names = [')}\n;globalThis.__save = save; globalThis.__dirty = dirty;`, context);
+  assert.equal(context.__dirty(), true);
+  await context.__save('title');
+  await context.__save('description');
+  assert.equal(JSON.stringify(bodies), JSON.stringify([{ title: 'New title' }]));
 });

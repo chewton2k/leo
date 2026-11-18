@@ -22,7 +22,7 @@ const KANBAN_TONES = [
   [/\b(to do|todo|tasks?|backlog|ideas?|next|planned|new)\b/i, 'todo'],
 ];
 const KANBAN_NEAR = ['todo hue0', 'done hue1', 'blocked hue2', 'hue1 hue3'];
-const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null, opening: null, drawnHtml: null };
+const kanban = { boards: [], board: null, cards: [], loaded: false, drag: null, suppressClick: false, redrawing: false, panel: null, drawnHtml: null };
 
 const kanbanClash = (a, b) => a === b || KANBAN_NEAR.includes(`${a} ${b}`) || KANBAN_NEAR.includes(`${b} ${a}`);
 
@@ -639,6 +639,16 @@ function kanbanClosePanel(refocus = true) {
   }
 }
 
+const kanbanFaceIsWhole = (card) => !card.description_more;
+
+async function kanbanLoadWhole(card, alive) {
+  const whole = await api(`/api/cards/${enc(card.id)}`);
+  if (!alive()) return false;
+  card.description = whole.description || '';
+  card.description_more = false;
+  return true;
+}
+
 // A card opens beside the board, like a note: edits save as you type and the board stays
 // in view, so the next card is one click away.
 async function kanbanCardPanel(id) {
@@ -687,22 +697,10 @@ async function kanbanCardPanel(id) {
     clearTimeout(timers[name]);
     timers[name] = setTimeout(() => save(name).catch(fail), KANBAN_SAVE_MS);
   };
-  description.innerHTML = skeleton(3, 'board');
-  const opening = kanban.opening = {};
-  try {
-    card.description = (await api(`/api/cards/${enc(id)}`)).description || '';
-  } catch (e) {
-    if (kanban.opening === opening && box.isConnected) {
-      box.hidden = true;
-      box.innerHTML = '';
-      document.body.classList.remove('kanban-panel-on');
-    }
-    throw e;
-  }
-  if (kanban.opening !== opening || !box.isConnected || box.hidden) return;
-  kanban.opening = null;
-  const doc = leoDoc.mount(description, { source: card.description || '', placeholder: 'Add details, steps or links…', onChange: () => queue('description') });
-  const valueOf = (name) => name === 'description' ? doc.source().trim() : fields[name].value.replace(/\s+/g, ' ').trim();
+  let doc = null;
+  let closed = false;
+  const showDescription = () => { doc = leoDoc.mount(description, { source: card.description || '', placeholder: 'Add details, steps or links…', onChange: () => queue('description') }); };
+  const valueOf = (name) => name === 'description' ? (doc ? doc.source().trim() : (card.description || '')) : fields[name].value.replace(/\s+/g, ' ').trim();
   const dirty = () => names.some((name) => valueOf(name) !== (card[name] || '') && (name !== 'title' || valueOf(name)));
   const running = {};
   const retrying = {};
@@ -745,18 +743,19 @@ async function kanbanCardPanel(id) {
   const names = [...Object.keys(fields), 'description'];
   const flush = () => Promise.all(names.map(save));
   const settle = async () => {
-    doc.stop();
+    doc?.stop();
     const done = await flush();
     return done.every(Boolean) && !names.some((name) => timers[name]);
   };
   const end = () => {
-    doc.stop();
+    closed = true;
+    doc?.stop();
     for (const name of names) if (timers[name]) save(name).catch(fail);
-    doc.destroy();
+    doc?.destroy();
   };
   kanban.panel = { id, end, settle, flush, dirty };
   discard.addEventListener('click', () => {
-    doc.stop();
+    doc?.stop();
     clearTimeout(timers.description);
     timers.description = 0;
     kanbanClosePanel();
@@ -773,7 +772,7 @@ async function kanbanCardPanel(id) {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); sub.focus(); }
   });
   sub.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doc.editStart(); }
+    if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doc?.editStart(); }
   });
   box.onkeydown = (e) => {
     if (e.key !== 'Escape' || e.isComposing || e.target.closest('.line-edit')) return;
@@ -816,6 +815,16 @@ async function kanbanCardPanel(id) {
   box.querySelector('[data-kanban="close"]').addEventListener('click', () => kanbanLeavePanel());
   title.focus();
   title.setSelectionRange(title.value.length, title.value.length);
+  if (kanbanFaceIsWhole(card)) return showDescription();
+  description.innerHTML = skeleton(3, 'board');
+  try {
+    if (await kanbanLoadWhole(card, () => !closed)) showDescription();
+  } catch (e) {
+    if (closed) return;
+    description.innerHTML = '';
+    tell('This card’s description could not be loaded, so it is not shown and cannot be changed here. Close the card and open it again.');
+    throw e;
+  }
 }
 
 // The card just before this one in its column, or null at the top.
