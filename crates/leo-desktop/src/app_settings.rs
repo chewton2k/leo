@@ -313,7 +313,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
             Some(action @ ("check_updates" | "download_update" | "restart_update")) => {
                 self.updates
                     .get()
-                    .context("Updates are unavailable. Reopen Leo and try again.")?
+                    .context("Updates are unavailable. Reopen leo and try again.")?
                     .change(action)?;
             }
             _ => anyhow::bail!("Choose an action in Settings."),
