@@ -219,8 +219,7 @@ function drawActivity() {
       const typical = seen.steps.length ? seen.steps.reduce((a, b) => a + b, 0) / seen.steps.length : 20;
       const creep = 1 - Math.exp(-((now - seen.stepSince) / 1000) / Math.max(3, typical));
       const share = t.total ? Math.max(4, Math.min(99, Math.round(((Math.min(t.done, t.total) + (t.done < t.total ? 0.9 * creep : 0)) / t.total) * 100))) : 0;
-      const took = Math.round((now - seen.since) / 1000);
-      const count = t.ready ? '' : `${t.kind === 'combine' ? ` · ${t.done}%` : t.total ? ` · ${t.done}/${t.total}` : ''} · ${took >= 60 ? `${Math.floor(took / 60)}:${String(took % 60).padStart(2, '0')}` : `${took} s`}`;
+      const count = t.ready ? '' : `${t.kind === 'combine' ? ` · ${t.done}%` : t.total ? ` · ${t.done}/${t.total}` : ''} · ${leoChat.tookFor(now - seen.since)}`;
       return `<button class="activity-row" data-action="activity-open" data-href="${esc(t.href)}">
         <span class="activity-label">${esc(t.label)}</span>
         <span class="activity-step">${esc(t.step)}${count}</span>

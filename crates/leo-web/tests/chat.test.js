@@ -1495,3 +1495,15 @@ test('an eleventh document is queued and no limit on documents is left in the pa
   assert.deepEqual(queued, ['eleventh.txt', 'twelfth.txt']);
   assert.deepEqual(notices, []);
 });
+
+test('elapsed time is worded 42 s below a minute and 1:05 from a minute up', () => {
+  assert.equal(C.tookFor(42000), '42 s');
+  assert.equal(C.tookFor(65000), '1:05');
+  assert.equal(C.tookFor(0), '0 s');
+  assert.equal(C.tookFor(-3000), '0 s');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const name of ['app/events.js', 'app/uploads.js']) {
+    assert.ok(!fs.readFileSync(path.join(__dirname, '../src/web', name), 'utf8').includes("padStart(2, '0')"), `${name} words elapsed time itself`);
+  }
+});

@@ -176,10 +176,9 @@ function uploadProgress(text, done, total) {
   const typical = uploadClock.steps.length ? uploadClock.steps.reduce((a, b) => a + b, 0) / uploadClock.steps.length : 20;
   const creep = 1 - Math.exp(-((now - uploadClock.stepSince) / 1000) / Math.max(3, typical));
   const bar = total ? Math.round(((Math.min(done, total) + (done < total ? 0.9 * creep : 0)) / total) * 100) : Math.round(60 * creep);
-  const took = Math.round((now - uploadClock.since) / 1000);
   const box = $('#upload-progress');
   if (!box) return;
-  box.innerHTML = `<div class="upload-step">${esc(text)} <span class="hint">· ${took >= 60 ? `${Math.floor(took / 60)}:${String(took % 60).padStart(2, '0')}` : `${took} s`}</span></div><div class="upload-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(6, Math.min(99, bar))}"><i style="width:${Math.max(6, Math.min(99, bar))}%"></i></div>`;
+  box.innerHTML = `<div class="upload-step">${esc(text)} <span class="hint">· ${leoChat.tookFor(now - uploadClock.since)}</span></div><div class="upload-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(6, Math.min(99, bar))}"><i style="width:${Math.max(6, Math.min(99, bar))}%"></i></div>`;
 }
 
 async function uploadGo() {

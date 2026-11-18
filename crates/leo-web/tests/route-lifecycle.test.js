@@ -147,6 +147,7 @@ test('the background panel updates in place and announces only its state', () =>
   const context = {
     $: () => box, activity: { tasks: [{ kind: 'combine', label: 'Combining a', step: 'Felix is writing one note', done: 10, total: 100, href: '#combine/1', ready: false }], folded: false, route: '', seen: new Map() },
     hiddenHere: () => false, esc: String, Math, Date: { now: () => now }, refreshPanel: (_, html) => painted.push(html),
+    leoChat: (require('../src/web/chat.js'), globalThis.leoChat),
   };
   vm.createContext(context);
   vm.runInContext(`${code}\n;globalThis.drawActivity = drawActivity;`, context);
