@@ -345,6 +345,42 @@ fn load_in(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Chat>>
     .optional()
 }
 
+struct Facts {
+    title: String,
+    named: bool,
+    memory: Option<Memory>,
+    count: usize,
+    last: Option<serde_json::Value>,
+    created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
+}
+
+fn facts_in(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Facts>> {
+    use rusqlite::OptionalExtension;
+    c.query_row(
+        "SELECT title, named, memory, count, created_at, updated_at,
+                CASE WHEN json_valid(messages) THEN json_extract(messages, '$[#-1]') END
+         FROM chats WHERE id = ?1",
+        [id],
+        |row| {
+            Ok(Facts {
+                title: row.get(0)?,
+                named: row.get(1)?,
+                memory: row
+                    .get::<_, Option<String>>(2)?
+                    .and_then(|m| serde_json::from_str(&m).ok()),
+                count: row.get::<_, i64>(3)? as usize,
+                created_at: when(&row.get::<_, String>(4)?),
+                updated_at: when(&row.get::<_, String>(5)?),
+                last: row
+                    .get::<_, Option<String>>(6)?
+                    .and_then(|m| serde_json::from_str(&m).ok()),
+            })
+        },
+    )
+    .optional()
+}
+
 pub fn load(dir: &Path, id: &str) -> Option<Chat> {
     if !valid_id(id) {
         return None;
@@ -416,16 +452,16 @@ pub fn save(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Result<
     let db = db_of(dir);
     let saved = db.with(|c| {
         let tx = c.transaction()?;
-        let old = load_in(&tx, id)?;
+        let old = facts_in(&tx, id)?;
         if saving.existed && old.is_none() {
             return Ok(None);
         }
         let created_at = old.as_ref().map_or(now, |old| old.created_at);
         let memory = old.as_ref().and_then(|old| old.memory.clone());
         let engaged = old.as_ref().is_none_or(|old| {
-            saving.messages.len() > old.messages.len()
+            saving.messages.len() > old.count
                 || (saving.messages.len() >= MOST_MESSAGES
-                    && saving.messages.last() != old.messages.last())
+                    && saving.messages.last() != old.last.as_ref())
         });
         let updated_at = match &old {
             Some(old) if !engaged => old.updated_at,
@@ -508,11 +544,15 @@ pub fn tidy(dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
     let Some(days) = days else {
         return 0;
     };
-    let cutoff = now - chrono::Duration::days(i64::from(days));
-    list(dir)
-        .iter()
-        .filter(|c| c.updated_at < cutoff && remove(dir, &c.id))
-        .count()
+    let cutoff = stamp(now - chrono::Duration::days(i64::from(days)));
+    let old: Vec<String> = db_of(dir)
+        .with(|c| {
+            let mut found = c.prepare("SELECT id FROM chats WHERE updated_at < ?1")?;
+            let rows = found.query_map([&cutoff], |r| r.get(0))?;
+            rows.collect()
+        })
+        .unwrap_or_default();
+    old.iter().filter(|id| remove(dir, id)).count()
 }
 
 pub fn remove(dir: &Path, id: &str) -> bool {
@@ -1017,5 +1057,104 @@ mod tests {
             })
             .unwrap();
         assert_eq!(left, keys[3..].to_vec());
+    }
+
+    #[test]
+    fn tidy_removes_only_chats_past_the_cutoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let now = at(0) + chrono::Duration::days(30);
+        let cutoff = at(0);
+        for (id, when) in [
+            (
+                "chat-tidy-before",
+                cutoff - chrono::Duration::microseconds(1),
+            ),
+            ("chat-tidy-exactly", cutoff),
+            ("chat-tidy-after1", cutoff + chrono::Duration::seconds(1)),
+        ] {
+            save(&dir, id, saving(vec![said("user", "hi")]), when).unwrap();
+        }
+        assert_eq!(tidy(&dir, Some(30), now), 1);
+        let mut left: Vec<String> = list(&dir).into_iter().map(|c| c.id).collect();
+        left.sort();
+        assert_eq!(left, ["chat-tidy-after1", "chat-tidy-exactly"]);
+        assert_eq!(tidy(&dir, Some(30), now), 0);
+    }
+
+    fn timed<R>(runs: u32, mut work: impl FnMut() -> R) -> f64 {
+        let started = std::time::Instant::now();
+        for _ in 0..runs {
+            std::hint::black_box(work());
+        }
+        started.elapsed().as_secs_f64() * 1000.0 / f64::from(runs)
+    }
+
+    fn log_bytes(dir: &Path) -> u64 {
+        let mut name = db_of(dir).path().as_os_str().to_owned();
+        name.push("-wal");
+        std::fs::metadata(PathBuf::from(name)).map_or(0, |m| m.len())
+    }
+
+    fn emptied_log(dir: &Path) {
+        db_of(dir)
+            .with(|c| c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(())))
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "audit benchmark"]
+    fn audit_p16_saving_a_long_chat_parses_the_old_copy() {
+        for n in [400usize, 4_000, 40_000] {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("chats");
+            let id = "chat-audit-long1";
+            let mut all: Vec<_> = (0..n)
+                .map(|i| {
+                    said(
+                        if i % 2 == 0 { "user" } else { "assistant" },
+                        &format!("message {i} {}", "about heaps and trees ".repeat(20)),
+                    )
+                })
+                .collect();
+            save(&dir, id, saving(all.clone()), at(0)).unwrap();
+            emptied_log(&dir);
+            all.push(said("user", "one more"));
+            save(&dir, id, saving(all.clone()), at(1)).unwrap();
+            let written = log_bytes(&dir);
+            let save_ms = timed(7, || {
+                all.push(said("user", "again"));
+                save(&dir, id, saving(all.clone()), at(2)).unwrap()
+            });
+            println!("audit_eng13 messages={n} save_ms={save_ms:.3} log_bytes_written={written}");
+        }
+    }
+
+    #[test]
+    #[ignore = "audit benchmark"]
+    fn audit_bench_chat_tidy() {
+        for n in [1_000usize, 10_000] {
+            for expired in [0usize, n / 10] {
+                let tmp = tempfile::tempdir().unwrap();
+                let dir = tmp.path().join("chats");
+                let now = at(0) + chrono::Duration::days(100);
+                for i in 0..n {
+                    let when = if i < expired { at(0) } else { now };
+                    save(
+                        &dir,
+                        &format!("chat-tidy-{i:06}"),
+                        saving(vec![said("user", "hi")]),
+                        when,
+                    )
+                    .unwrap();
+                }
+                let started = std::time::Instant::now();
+                let gone = tidy(&dir, Some(30), now);
+                let first = started.elapsed().as_secs_f64() * 1000.0;
+                assert_eq!(gone, expired);
+                let again = timed(20, || tidy(&dir, Some(30), now));
+                println!("audit_bench_chat_tidy chats={n} expired={expired} first_ms={first:.3} none_left_ms={again:.4}");
+            }
+        }
     }
 }
