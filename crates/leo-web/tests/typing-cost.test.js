@@ -358,3 +358,50 @@ test('undo and redo after bursts of typing, pastes and rewrites give back the re
     assert.equal(api.source(), last);
   }
 });
+
+const marginNotes = read('app/margin-notes.js');
+const typingOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'stop', 'draw', 'selectSpan', 'editSpan', 'told', 'tell', 'look', 'fit', 'slashSeen', 'editLine', 'ed',
+  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\n${lookups}\n${doc.slice(doc.indexOf('function onInput(e) {'), doc.indexOf('function singleRow('))}\nreturn { onInput, source: joinedText };`);
+
+function notePage(body) {
+  const timers = [];
+  const shown = { textContent: '' };
+  const page = { md, $: () => shown, window: {}, setTimeout: (fn) => { timers.push(fn); return timers.length; }, clearTimeout: () => {}, cleanTitle: (t) => String(t).trim(), saving: null };
+  vm.createContext(page);
+  vm.runInContext(`${core.slice(core.indexOf('function snapshot('), core.indexOf('function flush('))}\n${core.slice(core.indexOf('function readLine('), core.indexOf('async function showNote('))}\n${marginNotes.slice(marginNotes.indexOf('function marginIdle('), marginNotes.indexOf('function marginSettle('))}`, page);
+  const local = storage();
+  const sent = [];
+  const note = { id: 'one', title: 'Note', body, directory: '', version: 'v1' };
+  page.saving = leoSaving.create({ api: async (_, { body: b }) => { sent.push(b.body); return { ...note, ...b, version: 'v2' }; }, storage: local, schedule: () => 1, cancel: () => {}, now: () => 1000 });
+  const s = page.saving.open(note);
+  s.title = { textContent: 'Note' };
+  const area = { value: '', selectionStart: 0, selectionEnd: 0, closest: () => ({ style: {} }) };
+  const editing = { area, start: 2, end: 3, prefix: '', kind: 'line' };
+  const lines = body.split('\n');
+  const noop = () => {};
+  const d = typingOf(lines, editing, { classList: { toggle: noop } }, (text) => { page.changed(s, text); page.readSoon(text); }, noop, Date, noop, noop, noop, noop, false, noop, noop, noop, noop, noop, ed);
+  s.doc = { source: d.source };
+  const settle = () => { while (timers.length) timers.shift()(); };
+  const draft = () => JSON.parse(local.getItem(s.key)).edit.body;
+  return { s, d, area, shown, settle, draft, sent, saving: page.saving };
+}
+
+test('an edit made in one input event, or pasted, reaches the reading time, the draft and the save', async () => {
+  const body = '# Title\n\nFirst paragraph.\n\n' + 'Reading material here.\n\n'.repeat(80) + 'Last paragraph.';
+  const typed = '## Newly typed heading\n' + 'w '.repeat(300);
+  const pasted = 'First paragraph.\n\npasted one\npasted two ' + 'p '.repeat(300);
+  for (const [kind, value] of [['one input', typed], ['paste', pasted]]) {
+    const page = notePage(body);
+    const before = md.readTime(page.d.source());
+    page.area.value = value;
+    page.d.onInput({ inputType: kind === 'paste' ? 'insertFromPaste' : 'insertText' });
+    const whole = body.replace('First paragraph.', value);
+    assert.equal(page.d.source(), whole, `${kind}: the editor's text`);
+    page.settle();
+    assert.equal(page.shown.textContent, ` · ${md.readTime(whole)}`, `${kind}: the reading time`);
+    assert.notEqual(page.shown.textContent, ` · ${before}`, `${kind}: the reading time moved`);
+    assert.equal(page.draft(), whole, `${kind}: the browser draft`);
+    await page.saving.flush(page.s);
+    assert.deepEqual(page.sent, [whole], `${kind}: the save`);
+  }
+});
