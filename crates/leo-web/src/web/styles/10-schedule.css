@@ -20,8 +20,6 @@
 .sched-people { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; min-width: 0; }
 .sched-people .chip { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pick-quick, .task-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
-.pick-chip { height: 32px; padding: 0 12px; font-size: var(--fs-sm); cursor: pointer; }
-.pick-chip.on { background: var(--accent); color: var(--accent-text); }
 .task-repeat { gap: 8px; margin-top: 10px; }
 .repeat-days { display: flex; gap: 6px; flex-wrap: wrap; }
 .repeat-day { width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }

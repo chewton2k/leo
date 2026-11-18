@@ -127,7 +127,6 @@
 .chat-refs .file-foot { flex: 1; min-width: 0; flex-direction: column; align-items: flex-start; gap: 3px; padding: 0 10px 0 0; background: none; }
 .chat-refs .file-name { order: -1; max-width: 100%; font-size: var(--fs-xs); }
 .chat-refs .file-x { top: 50%; right: 6px; width: 22px; height: 22px; margin-top: -11px; }
-.chat-refs .file-reading { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .note-img { display: block; max-width: 100%; height: auto; margin: 10px 0; border-radius: var(--r-md); border: 1px solid var(--line); background: var(--card, transparent); }
 .msg .note-img { margin: 6px 0; }
 .msg-steps { display: grid; gap: 2px; margin-bottom: 8px; padding: 6px 8px; border-radius: var(--r-md); background: var(--surface-2); }
@@ -279,7 +278,6 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 #doc .code-copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #doc .code-copy.copied svg { display: none; }
 #doc .code-copy .pencil-tick { color: var(--text); }
-.code-said { position: fixed; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media print { #doc .code::before, #doc .code-copy { display: none; } #doc .code > pre { padding-top: 8pt; } }
 .prose blockquote { margin: 1em 0; padding: 2px 14px; border-left: 3px solid color-mix(in srgb, var(--text) 22%, transparent); color: var(--muted); background: var(--surface); border-radius: 0 10px 10px 0; }
 #doc blockquote { position: relative; padding-left: 17px; border-left: 0; }

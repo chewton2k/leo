@@ -240,3 +240,25 @@ test('the reduced-motion rule covers pseudo-elements', () => {
   assert.match(rule.selector, /\*::before/);
   assert.match(rule.selector, /\*::after/);
 });
+
+test('the visually hidden rule is written once', () => {
+  const css = pageCss();
+  assert.equal(css.split('clip-path: inset(50%)').length, 2);
+  const hidden = all.filter((r) => r.body.includes('clip-path: inset(50%)'));
+  assert.equal(hidden.length, 1);
+  const selectors = hidden[0].selector.split(',').map((s) => s.trim());
+  assert.deepEqual(selectors.sort(), ['.chat-refs .file-reading', '.code-said', '.fa-sr', '.hc-sr', '.home-tally-said', '.kanban-priority-word', '.margin-said-aloud', '.said'].sort());
+  assert.ok(declarations(hidden[0].body).some(([name, value]) => name === 'white-space' && value === 'nowrap'));
+  const fixed = all.filter((r) => r.selector === '.code-said');
+  assert.equal(fixed.length, 1);
+  assert.deepEqual(declarations(fixed[0].body), [['position', 'fixed']]);
+  assert.ok(all.indexOf(fixed[0]) > all.indexOf(hidden[0]));
+});
+
+test('the later chip rule is the only one', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const schedule = fs.readFileSync(path.join(__dirname, '../src/web/styles/10-schedule.css'), 'utf8');
+  assert.ok(!/\.pick-chip/.test(schedule));
+  assert.equal(all.filter((r) => r.selector === '.pick-chip').length, 1);
+});

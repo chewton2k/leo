@@ -92,7 +92,6 @@
 .margin-ink path.tether.sketching { stroke-dasharray: 1; animation: pencil-draw 450ms var(--ease-pencil) both; }
 .margin-ink path.spine.sketching { animation-duration: 350ms; animation-delay: 450ms; }
 @keyframes margin-wipe { from { clip-path: inset(-4px 100% -4px 0); } to { clip-path: inset(-4px 0 -4px 0); } }
-.margin-said-aloud, #save-state .said { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 .margin-note { position: absolute; left: 0; top: 0; width: var(--margin-w); color: var(--text); border-radius: var(--r-md); }
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color .14s ease-out, box-shadow .14s ease-out, opacity .14s ease-out; }

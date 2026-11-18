@@ -242,7 +242,6 @@ button.choice-pick .felix { cursor: inherit; }
 .set-card .btn.plain, .set-card .set-input, .set-card .set-row select, .set-card .set-key-form input, .set-card .select-menu-button, .set-card .picker-button { background: var(--raised); }
 .fa-card > header { flex-wrap: wrap; margin-bottom: 6px; }
 @container (max-width: 420px) { .fa-card > header .segmented { flex: 1 0 100%; margin-left: 0; } }
-.fa-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .fa-stats { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 20px; }
 .fa-top { display: contents; }
 .fa-cap { display: none; }
@@ -351,7 +350,6 @@ button.choice-pick .felix { cursor: inherit; }
 .hc-ts .hc-g.ready { color: var(--text); }
 .hc-g.warn { color: var(--hue-amber); }
 .hc-g.missing { color: var(--danger); }
-.hc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .hc-card code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; padding: 1px 5px; border-radius: 5px; background: var(--tint); }
 .hc-sum { display: flex; align-items: flex-start; gap: 12px; }
 .hc-sum > .hc-g { width: 20px; height: 20px; margin-top: 1px; }
