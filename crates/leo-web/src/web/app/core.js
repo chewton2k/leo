@@ -846,12 +846,14 @@ function readLine(text) {
 }
 
 let readTimer = 0;
+let readWanted = 0;
 function readSoon(text) {
   const line = $('#note-read');
+  const mine = ++readWanted;
   clearTimeout(readTimer);
-  readTimer = setTimeout(() => {
-    if (line) line.textContent = readLine(text());
-  }, 300);
+  readTimer = setTimeout(() => marginIdle(() => {
+    if (line && mine === readWanted) line.textContent = readLine(text());
+  }), 300);
 }
 
 async function showNote(id, { fresh = null, draft = null } = {}) {
