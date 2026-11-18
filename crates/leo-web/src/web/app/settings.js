@@ -9,6 +9,8 @@ const TASK_USE = {
   speech: 'Turns what was said into text while you record.',
 };
 
+const SETTINGS_WANTS = { shortcuts: ['dictation'], dictation: ['dictation'], models: ['speech'], calendar: ['calendar'], felix: ['margin'] };
+
 async function showSettings(section) {
   section = settingsSection(section);
   // Trash is a page of notes rather than a setting, so a bare #/settings never reopens it.
@@ -22,12 +24,15 @@ async function showSettings(section) {
   $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
   refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
-  const [page, calendar, speech, dictation, margin] = await Promise.all([api('/api/settings'), api('/api/calendar').catch(() => null), api('/api/speech').catch(() => null), api('/api/dictation').catch(() => null), section === 'felix' ? api('/api/margin').catch(() => null) : null]);
+  const wants = SETTINGS_WANTS[section] || [];
+  const ask = (name, url) => (wants.includes(name) ? api(url).catch(() => null) : null);
+  const [page, calendar, speech, dictation, margin] = await Promise.all([api('/api/settings'), ask('calendar', '/api/calendar'), ask('speech', '/api/speech'), ask('dictation', '/api/dictation'), ask('margin', '/api/margin')]);
   if (mine !== seq) return;
   state.margin = margin;
   state.calendar = calendar;
   state.speech = speech;
   state.dictation = dictation;
+  if (dictation) dictateKeysSeen(dictation);
   drawSettings(page);
   if (section === 'health') loadHealth().catch(fail);
   startSpeechPolling(mine);

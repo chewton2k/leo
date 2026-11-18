@@ -724,9 +724,14 @@ function pressed(e, name) {
 function shortcutAria(keys) {
   return keys.split('+').map((key) => ({ cmd: 'Meta', ctrl: 'Control', alt: 'Alt', shift: 'Shift' })[key] || key.toUpperCase()).join('+');
 }
+let dictateKeys = null;
+function dictateKeysSeen(view) {
+  dictateKeys = view?.settings?.shortcut || null;
+}
 async function dictateHint(el) {
   try {
-    const keys = (await api('/api/dictation'))?.settings?.shortcut;
+    if (dictateKeys === null) dictateKeysSeen(await api('/api/dictation'));
+    const keys = dictateKeys;
     if (keys && el?.isConnected) { el.textContent = `Press ${shortcutText(keys)} anywhere to dictate.`; el.hidden = false; }
   } catch (e) {}
 }

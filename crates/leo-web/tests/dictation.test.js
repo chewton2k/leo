@@ -200,7 +200,7 @@ function editContext(words, recent) {
       const edited = context.state.dictation.recent.map((item) => item.id === options.body.id ? { ...item, text: options.body.text, edited: true } : item);
       return { settings: { custom_words: words }, recent: edited };
     },
-    seq: 1, updateDictationStatus() {}, appVisible: () => false, pulse() {},
+    seq: 1, dictateKeysSeen() {}, updateDictationStatus() {}, appVisible: () => false, pulse() {},
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/dictation.js'), 'utf8'), context);

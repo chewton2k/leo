@@ -141,6 +141,7 @@ async function dictationChange(change, mine = seq) {
   const view = await api('/api/dictation', { method: 'POST', body: change });
   if (mine !== seq || generation !== dictationGeneration || state.view !== 'settings') return;
   state.dictation = view;
+  dictateKeysSeen(view);
   pruneDictationOffers(view);
   updateDictationStatus(view);
   const recent = $('#dictation-recent');
@@ -215,6 +216,7 @@ async function pollDictation(mine, generation) {
     const view = await api('/api/dictation');
     if (mine !== seq || generation !== dictationGeneration || state.view !== 'settings') return;
     state.dictation = view;
+    dictateKeysSeen(view);
     pruneDictationOffers(view);
     updateDictationStatus(view);
     const recent = $('#dictation-recent');
