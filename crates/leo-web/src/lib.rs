@@ -913,7 +913,9 @@ fn store_access<R>(
     let force = state
         .refresh_requested
         .swap(false, std::sync::atomic::Ordering::AcqRel);
-    let check = writing || force || store.changes.as_mut().is_none_or(|changes| changes.due());
+    let check = force
+        || store.changes.as_mut().is_none_or(|changes| changes.due())
+        || (writing && !quiet_watcher_trusted());
     if store.reload || (check && store.changed_on_disk()) {
         if store.reload {
             store.forget_changes();
@@ -942,10 +944,17 @@ fn store_access<R>(
     result
 }
 
+fn quiet_watcher_trusted() -> bool {
+    cfg!(not(windows))
+}
+
 fn store_now<R>(
     state: &AppState,
     work: impl FnOnce(&mut Store) -> Result<R, StatusCode>,
 ) -> Result<R, StatusCode> {
+    state
+        .refresh_requested
+        .store(true, std::sync::atomic::Ordering::Release);
     store_access(state, true, work)
 }
 

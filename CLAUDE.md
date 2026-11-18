@@ -150,7 +150,10 @@ settings and credentials are excluded from note exports.
   whose note differs in memory; the result equals a fresh load.
   `Store::changes_since(seen)` hands readers the ids changed since their last
   look, or `Everything`.
-  Engine mutations reconcile before writing; hot read-only
+  A save never absorbs an unread outside edit (its fingerprint moves only by the
+  files it wrote); `store_now` reconciles first, other mutations when the watcher
+  reported a change, the 60 s check is due, there is no watcher, or on Windows
+  (2026-11-17, the owner's call: the most efficient and scalable method); hot read-only
   paths use the existing filesystem watcher with a 60 s reconciliation fallback.
   Returning to the native window forces a check before serving cached reads.
 - Never slice strings by byte offsets computed from lengths: use char indices

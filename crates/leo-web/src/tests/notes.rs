@@ -65,6 +65,16 @@ fn saving_another_note_preserves_external_creates_and_edits_before_watch_deliver
             Ok(())
         }))
         .unwrap();
+        let outside = if creating {
+            root.join("Added.md")
+        } else {
+            root.join("External.md")
+        };
+        assert!(std::fs::read_to_string(&outside)
+            .unwrap()
+            .contains("Outside edit"));
+        assert!(state.store.lock().unwrap().changed_on_disk());
+        state.store.lock().unwrap().changes = None;
         let seen = run(state.read_store(|store| {
             Ok(store
                 .notes
@@ -1270,4 +1280,225 @@ fn audit_p14_title_and_matching_work() {
     println!(
         "P-C12 notes={n} title_lookup_miss_ms={lookup_miss:.4} title_lookup_hit_ms={lookup_hit:.4} title_sort_ms={sort:.2} excerpt_1000_no_words_ms={excerpts:.3}"
     );
+}
+
+fn held_back(state: &AppState) {
+    state.store.lock().unwrap().changes = Some(crate::store_refresh::Changes::delayed());
+}
+
+fn loaded(state: &AppState, text: &'static str) -> bool {
+    run(state.read_store(move |store| Ok(store.notes.iter().any(|note| note.body.contains(text)))))
+        .unwrap()
+}
+
+#[test]
+fn a_save_does_not_walk_while_the_watcher_is_quiet() {
+    let walks = |watcher: Option<bool>, forced: bool| {
+        let (state, _dir, ids) = state_with(&[("Local", ""), ("External", "")]);
+        let root = state.fresh().notes_dir.clone();
+        match watcher {
+            Some(_) => held_back(&state),
+            None => state.store.lock().unwrap().changes = None,
+        }
+        let path = root.join("External.md");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("Outside edit");
+        std::fs::write(&path, text).unwrap();
+        if forced {
+            state
+                .refresh_requested
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        let local = ids[0].clone();
+        let read_first = run(state.with_store(move |store| {
+            let read = store.notes.iter().any(|n| n.body.contains("Outside edit"));
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(read)
+        }))
+        .unwrap();
+        usize::from(read_first)
+    };
+    let quiet = if cfg!(windows) { 1 } else { 0 };
+    assert_eq!(walks(Some(true), false), quiet);
+    assert_eq!(walks(None, false), 1);
+    assert_eq!(walks(Some(true), true), 1);
+}
+
+#[test]
+fn an_outside_edit_to_the_saved_note_just_before_the_save_becomes_a_conflict_copy() {
+    let (state, _dir, ids) = state_with(&[("Local", "")]);
+    let root = state.fresh().notes_dir.clone();
+    held_back(&state);
+    let path = root.join("Local.md");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\nOutside edit");
+    std::fs::write(&path, &text).unwrap();
+    let local = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    let copy = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .contains("(conflict from leo)")
+        })
+        .expect("a conflict copy");
+    assert!(std::fs::read_to_string(copy.path())
+        .unwrap()
+        .contains("Saved in Leo"));
+    state.store.lock().unwrap().changes = None;
+    assert!(loaded(&state, "Outside edit"));
+    assert!(loaded(&state, "Saved in Leo"));
+}
+
+fn folders_on_disk(root: &std::path::Path) -> Vec<String> {
+    let text = std::fs::read_to_string(root.join("directories.json")).unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn folder_outside(root: &std::path::Path, change: impl FnOnce(&mut Vec<String>)) {
+    let mut list = folders_on_disk(root);
+    change(&mut list);
+    std::fs::write(
+        root.join("directories.json"),
+        serde_json::to_string_pretty(&list).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_folder_added_outside_just_before_a_save_is_kept() {
+    for leo_first in [false, true] {
+        let (state, _dir, ids) = state_with(&[("Local", "")]);
+        let root = state.fresh().notes_dir.clone();
+        held_back(&state);
+        let local = ids[0].clone();
+        let outside_root = root.clone();
+        let add_outside = move || {
+            let root = &outside_root;
+            std::fs::create_dir_all(root.join("outside")).unwrap();
+            folder_outside(root, |list| list.push("outside".into()));
+        };
+        if !leo_first {
+            add_outside();
+        }
+        let add_outside = add_outside.clone();
+        run(state.with_store(move |store| {
+            store.create_dir("mine");
+            if leo_first {
+                add_outside();
+            }
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let disk = folders_on_disk(&root);
+        assert!(
+            disk.contains(&"outside".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        assert!(
+            disk.contains(&"mine".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        state.store.lock().unwrap().changes = None;
+        let shown = run(state.read_store(|store| Ok(store.dir_exists("outside")))).unwrap();
+        assert!(shown, "leo first={leo_first}");
+    }
+}
+
+#[test]
+fn a_folder_removed_outside_just_before_a_save_stays_removed() {
+    for leo_first in [false, true] {
+        let (state, _dir, ids) = state_with(&[("Local", "")]);
+        let root = state.fresh().notes_dir.clone();
+        run(state.with_store(|store| {
+            store.create_dir("gone");
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        assert!(folders_on_disk(&root).contains(&"gone".to_string()));
+        held_back(&state);
+        let local = ids[0].clone();
+        let outside_root = root.clone();
+        let remove_outside = move || {
+            let root = &outside_root;
+            let _ = std::fs::remove_dir_all(root.join("gone"));
+            folder_outside(root, |list| list.retain(|f| f != "gone"));
+        };
+        if !leo_first {
+            remove_outside();
+        }
+        let remove_outside = remove_outside.clone();
+        run(state.with_store(move |store| {
+            store.create_dir("mine");
+            if leo_first {
+                remove_outside();
+            }
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let disk = folders_on_disk(&root);
+        assert!(
+            !disk.contains(&"gone".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        assert!(
+            disk.contains(&"mine".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        state.store.lock().unwrap().changes = None;
+        let shown = run(state.read_store(|store| Ok(store.dir_exists("gone")))).unwrap();
+        assert!(!shown, "leo first={leo_first}");
+    }
+}
+
+#[test]
+#[ignore = "run on the Windows CI runner before the walk is skipped there"]
+fn a_burst_of_outside_edits_is_never_missed_by_the_watcher() {
+    let (state, _dir, ids) = state_with(&[("Local", "")]);
+    let root = state.fresh().notes_dir.clone();
+    state.store.lock().unwrap().changes = Some(crate::store_refresh::Changes::new(&root));
+    run(state.read_store(|_| Ok(()))).unwrap();
+    for i in 0..2_000 {
+        std::fs::write(root.join(format!("Burst {i}.md")), format!("burst {i}")).unwrap();
+    }
+    let local = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    let waited = std::time::Instant::now();
+    loop {
+        let count = run(state.read_store(|store| {
+            Ok(store
+                .notes
+                .iter()
+                .filter(|n| n.body.starts_with("burst "))
+                .count())
+        }))
+        .unwrap();
+        if count == 2_000 {
+            break;
+        }
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "{count} of 2000 loaded"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
 }

@@ -1143,8 +1143,11 @@ AI uses a pen icon, never a sparkle.
 - `read_store` takes an immutable Store callback and coalesces filesystem scans
   with core's Watch: it checks first, on relevant/rescan notifications, every
   60 s and after native foreground return; a missing watcher checks every access, a broken one at most every 2 s, until it reports events again.
-  `with_store` and `store_now` always reconcile before mutations: a save must
-  never absorb an unread external edit into its fingerprint.
+  A save never absorbs an unread external edit: its fingerprint moves only by
+  the files it wrote (per-file stamps). `store_now` always reconciles first;
+  `with_store` reconciles when the watcher reported a change, the 60 s check is
+  due or there is no watcher, and always on Windows (2026-11-17, the owner's
+  call on ENG-D6: the most efficient and scalable method).
 - GET `/api/rev[?foreground=1]` answers `{rev}`, 16 hex digits over the store's fingerprint and a
   stamp of `.leo/tasks`, `.leo/boards` and `.leo/cards` (each regular file's name, length and
   modified time, so a file rewritten in place moves it). `foreground=1` forces a disk check first.
