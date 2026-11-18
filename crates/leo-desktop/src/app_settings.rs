@@ -324,13 +324,11 @@ impl leo_web::app_settings::AppApi for AppSettings {
     fn event_starting(&self, event: leo_web::app_settings::EventStarting) {
         crate::notify::starting(&self.app, event);
     }
-    fn health(&self, notes: &Path) -> Result<Value> {
-        use leo_web::dictation::DictationApi;
-        let mut view = leo_host::health::scan(notes)?;
+    fn health(&self, notes: &Path, fresh: bool) -> Result<Value> {
+        let mut view = leo_host::health::scan(notes, fresh)?;
         let permissions = self.permission_view(true);
         let model = leo_services::speech::library::library()?.selected().is_ok();
-        let dictation = self.dictation.view()?;
-        let shortcut = dictation["shortcut"].clone();
+        let (shortcut, keys) = self.dictation.shortcut_health();
         let mut checks = vec![
             json!({"name":"Microphone permission","state":if permissions["microphone"]=="allowed" {"ready"} else {"missing"},"fix":"Allow Leo to use the microphone in your system privacy settings.","action":"microphone"}),
             json!({"name":"Accessibility permission","state":if permissions["accessibility"]==true {"ready"} else {"missing"},"fix":"Allow Leo in System Settings → Privacy & Security → Accessibility to paste into other apps.","action":"accessibility"}),
@@ -343,11 +341,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
         if let Some(problem) = self.preferences.problem() {
             checks.push(json!({"name":"App preferences","state":"missing","fix":problem,"section":"general"}));
         }
-        if crate::permissions::shortcut_clash(
-            dictation["settings"]["shortcut"]
-                .as_str()
-                .unwrap_or_default(),
-        ) {
+        if crate::permissions::shortcut_clash(&keys) {
             checks.push(json!({"name":"Shortcut clash","state":"warn","fix":if cfg!(target_os="macos") { "Alfred may also use Option+Space. Change its shortcut, or record another one in Dictation." } else { "Ctrl+Space may switch the current input method. Choose another shortcut in Dictation if it clashes." },"section":"dictation"}));
         }
         view["sections"]

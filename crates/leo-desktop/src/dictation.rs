@@ -196,6 +196,12 @@ impl Dictation {
             .unwrap_or_else(|e| e.into_inner())
             .clone()
     }
+    pub fn shortcut_health(&self) -> (Value, String) {
+        (
+            self.shortcut.get().map(|s| s.view()).unwrap_or(Value::Null),
+            self.preferences().shortcut,
+        )
+    }
     pub fn popup(&self) -> Value {
         let mut value = self.state.lock().unwrap_or_else(|e| e.into_inner()).clone();
         self.decorate(&mut value);
