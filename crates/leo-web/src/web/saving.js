@@ -3,6 +3,7 @@
 
   const PREFIX = 'leo-draft-v1:';
   const copy = (value) => JSON.parse(JSON.stringify(value));
+  const copyEdit = (e) => ({ title: e.title, body: e.body });
   const draftId = () => Array.from(root.crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(16).padStart(8, '0')).join('');
 
   function create({ api, storage, mark = () => {}, recovered = () => {}, conflict = () => {}, created = () => {}, storageError = () => {}, retryable = () => false, schedule = setTimeout, cancel = clearTimeout }) {
@@ -31,7 +32,7 @@
       if (pending.has(key)) return pending.get(key);
       const s = {
         key, note: copy(draft ? draft.note : note),
-        edit: copy(draft ? draft.edit : { title: note.title, body: note.body }),
+        edit: copyEdit(draft ? draft.edit : note),
         dirty: Boolean(draft), revision: 0, timer: null, saving: null, persisted: Boolean(draft),
       };
       if (s.dirty) pending.set(key, s);
@@ -55,7 +56,7 @@
     }
 
     function changed(s, edit) {
-      s.edit = copy(edit);
+      s.edit = copyEdit(edit);
       s.revision++;
       s.dirty = true;
       persist(s);
@@ -95,7 +96,7 @@
       if (!s.dirty) return Promise.resolve();
       s.saving = (async () => {
         while (s.dirty) {
-          const edit = copy(s.edit);
+          const edit = copyEdit(s.edit);
           if (!s.note.id && !edit.title.trim() && !edit.body.trim()) {
             s.dirty = false;
             remove(s);
@@ -139,7 +140,7 @@
         return existing || session(note);
       },
       get: (key) => pending.get(key),
-      drafts: () => [...pending.values()].map((s) => ({ key: s.key, note: copy(s.note), edit: copy(s.edit) })),
+      drafts: () => [...pending.values()].map((s) => ({ key: s.key, note: copy(s.note), edit: copyEdit(s.edit) })),
       changed, flush,
       unsaved: () => pending.size > 0,
       discardAll: () => {

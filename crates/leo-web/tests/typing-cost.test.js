@@ -211,4 +211,5 @@ test('typing cost: every step of a keystroke, and undo memory, at the sizes the 
 test('a keystroke joins the note once and copies it without turning it into text', () => {
   const { counts } = keystroke(20000);
   assert.equal(counts.joins, 1);
+  assert.equal(counts.parse, 0);
 });
