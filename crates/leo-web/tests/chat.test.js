@@ -1650,3 +1650,23 @@ test('scrolling to the top loads the page before', async () => {
   await context.remember();
   assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1]]);
 });
+
+test('a refused save while Felix is answering waits for the reply instead of redrawing the chat', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const streaming = { role: 'assistant', text: 'Thinking', pending: true };
+  const state = { id: 'chat-long-0003', messages: [...page.messages, { role: 'user', text: 'mine' }, streaming], refs: [], busy: {} };
+  const { context } = savingSlice(server, state, []);
+  context.marks.set(state.id, C.markOf(page));
+  server.set(server.rows().slice(0, 998));
+  await context.remember();
+  assert.ok(state.messages.includes(streaming), 'the answer being written stays on screen');
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1]]);
+  state.busy = null;
+  streaming.pending = false;
+  await context.remember();
+  assert.deepEqual(server.puts.slice(1).map((p) => [p.from, p.messages.length]), [[1000, 2], [998, 2]]);
+  assert.equal(server.rows().length, 1000);
+  assert.deepEqual(server.rows().slice(-2).map((m) => m.text), ['mine', 'Thinking']);
+  assert.equal(state.messages.at(-1), streaming, 'the same message object stays on screen');
+});

@@ -1422,15 +1422,18 @@
         notify('Felix could not save this chat, so it may be missing from your history.');
         return;
       }
+      const showing = id === state.id;
+      if (showing && (state.busy || state.preparingSend)) return;
       const theirs = Array.isArray(page.messages) ? page.messages : [];
       const seen = theirs.map((m) => JSON.stringify(m));
       const last = local.findLastIndex((m) => seen.includes(JSON.stringify(m)));
-      const unsent = mark ? local.slice(Math.max(0, mark.saved - mark.first)) : local.slice(last + 1);
+      const cut = mark ? Math.max(0, mark.saved - mark.first) : last + 1;
+      const unsent = local.slice(cut);
       const earlier = Boolean(mark) && toSave(mark, local).from < mark.saved;
       const fresh = markOf(page);
       marks.set(id, fresh);
-      if (id === state.id) {
-        state.messages = [...theirs, ...unsent];
+      if (showing) {
+        state.messages = [...theirs, ...state.messages.slice(cut)];
         persist();
         draw(false);
       }
@@ -1462,7 +1465,7 @@
           if (!response.ok) return;
           const page = await response.json();
           const older = Array.isArray(page.messages) ? page.messages : [];
-          if (state.id !== id || marks.get(id) !== mark || !older.length || page.from + older.length !== mark.first) return;
+          if (state.id !== id || state.busy || state.preparingSend || marks.get(id) !== mark || !older.length || page.from + older.length !== mark.first) return;
           const height = body.scrollHeight;
           const top = body.scrollTop;
           state.messages = [...older, ...state.messages];
