@@ -1,5 +1,6 @@
 const S = window.leoSchedule;
 const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, peek: null, scrolled: '', suppressClick: false };
+const CAL_TRAY_ROWS = 50;
 const CAL_DONE_KEY = 'leo-calendar-hide-done';
 const CAL_VIEW_KEY = 'leo-calendar-view';
 const CAL_VIEWS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
@@ -72,7 +73,7 @@ async function loadSchedule(mine = seq) {
   const taskRevision = tasksWin.revision;
   let data;
   try {
-    data = await api(`/api/schedule?from=${enc(from)}&to=${enc(to)}&live=1`);
+    data = await api(`/api/schedule?from=${enc(from)}&to=${enc(to)}&live=1&limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`);
   } catch (e) {
     if (e instanceof Locked) throw e;
     if (mine === seq && state.view === 'calendar') {
@@ -101,6 +102,8 @@ async function loadSchedule(mine = seq) {
   cal.failed = false;
   cal.data = data;
   tasksWin.tasks = data.tasks || tasksWin.tasks;
+  tasksWin.window = data.window || [];
+  tasksWin.total = data.total ?? (tasksWin.tasks || []).length;
   tasksWin.at = Date.now();
   tasksWin.stale = false;
   cal.loadedAt = Date.now();
@@ -211,7 +214,14 @@ function calRange(start, end) {
 }
 
 function calFind(id) {
-  return ((cal.data && cal.data.tasks) || []).find((t) => t.id === id) || null;
+  return ((cal.data && cal.data.tasks) || []).find((t) => t.id === id) || (tasksWin.window || []).find((t) => t.id === id) || null;
+}
+
+function withWindow(page) {
+  const extra = tasksWin.window || [];
+  if (!extra.length) return page;
+  const held = new Set(page.map((t) => t.id));
+  return page.concat(extra.filter((t) => !held.has(t.id)));
 }
 
 function calMovable(task) {
@@ -224,7 +234,7 @@ function calShown(item) {
 
 function calPlan(days) {
   const today = S.dayKey(new Date());
-  return S.plan((cal.data && cal.data.tasks) || [], (cal.data && cal.data.events) || [], today, { from: days[0], to: days[days.length - 1] });
+  return S.plan(withWindow((cal.data && cal.data.tasks) || []), (cal.data && cal.data.events) || [], today, { from: days[0], to: days[days.length - 1] });
 }
 
 function calLabel(item) {
@@ -436,11 +446,20 @@ function calTrayRow(task) {
 function calTray(plan, today) {
   const d = cal.data;
   const connect = d && !d.connected ? '<p class="set-note cal-connect">Show your Google Calendar here · <a href="#/settings/calendar">Connect it in Settings</a></p>' : '';
-  const list = (title, tasks, late) => tasks.length ? `<section class="cal-tray-list"><h2${late ? ' class="late"' : ''}>${title} <span class="cal-count">${tasks.length}</span></h2>${tasks.slice(0, 50).map(calTrayRow).join('')}</section>` : '';
+  const list = (title, tasks, late) => tasks.length ? `<section class="cal-tray-list"><h2${late ? ' class="late"' : ''}>${title} <span class="cal-count">${tasks.length}</span></h2>${tasks.slice(0, cal.trayRows || CAL_TRAY_ROWS).map(calTrayRow).join('')}</section>` : '';
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
+  const rows = cal.trayRows || CAL_TRAY_ROWS;
+  const more = Math.max(plan.overdue.length, plan.undated.length) > rows || (tasksWin.tasks || []).length < tasksWin.total ? '<button type="button" class="btn plain cal-tray-more" data-action="cal-tray-more">Show more</button>' : '';
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${more}${toggle}${connect}`;
+}
+
+async function calTrayMore() {
+  cal.trayRows = (cal.trayRows || CAL_TRAY_ROWS) + CAL_TRAY_ROWS;
+  const plan = calPlan(calDays());
+  if (Math.max(plan.overdue.length, plan.undated.length) < cal.trayRows && (tasksWin.tasks || []).length < tasksWin.total) await tasksMore();
+  drawCalendar();
 }
 
 function drawCalendar() {
@@ -1719,7 +1738,7 @@ function finishTaskInWindow(id, done, on) {
 }
 
 function tasksDue() {
-  const tasks = tasksWin.tasks || (cal.data && cal.data.tasks) || [];
+  const tasks = withWindow(tasksWin.tasks || (cal.data && cal.data.tasks) || []);
   const groups = new Map(tasksGroups(tasks));
   const late = (groups.get('Overdue') || []).length;
   return { late, due: late + (groups.get('Today') || []).length };
@@ -1768,7 +1787,7 @@ function drawHomeToday() {
   if (!box) return;
   const now = new Date();
   const known = tasksWin.tasks || (cal.data && cal.data.tasks);
-  const tasks = known || [];
+  const tasks = known ? withWindow(known) : [];
   const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
   const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
   const day = today.slice(0, HOME_ROWS - early.length);
@@ -1828,7 +1847,7 @@ function drawHomeWeek() {
   const today = S.dayKey(new Date());
   const days = S.daysOf('week', today, S.weekStart(calLocale()));
   if (homeWeek.from && homeWeek.from !== days[0]) loadHomeWeek();
-  const plan = S.plan(tasksWin.tasks || (cal.data && cal.data.tasks) || [], homeWeek.events || [], today, { from: days[0], to: days[6] });
+  const plan = S.plan(withWindow(tasksWin.tasks || (cal.data && cal.data.tasks) || []), homeWeek.events || [], today, { from: days[0], to: days[6] });
   const focus = tasksFocus(box);
   const held = focus && days.includes(focus.id) ? focus.id : today;
   const html = days.map((key) => {
@@ -1953,7 +1972,7 @@ async function loadTasksWindow() {
     const home = tasksAtHome();
     const now = new Date();
     const data = home
-      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
+      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}&limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
       : await api(`/api/tasks?limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`);
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
@@ -1961,6 +1980,7 @@ async function loadTasksWindow() {
       if (home && ((tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) || Date.now() - homeWeek.at > HOME_WEEK_FRESH)) loadHomeWeek();
       tasksWin.events = data.events;
       tasksWin.eventsAt = Date.now();
+      tasksWin.window = data.window || [];
     }
     if (revision === tasksWin.revision) {
       tasksWin.tasks = tasks;
@@ -1985,6 +2005,7 @@ async function tasksMore() {
     if (revision !== tasksWin.revision || tasksWin.tasks !== held) return;
     tasksWin.tasks = held.concat(data.tasks || []);
     tasksWin.total = data.total ?? tasksWin.tasks.length;
+    if (cal.data) cal.data = { ...cal.data, tasks: tasksWin.tasks };
     drawTasksWindow();
   } catch (e) {
     if (!(e instanceof Locked)) fail(e);

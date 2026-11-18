@@ -940,6 +940,8 @@ pub(crate) struct Window {
     to: String,
     #[serde(default)]
     live: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 fn window_of(w: &Window, now: DateTime<Utc>) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
@@ -993,10 +995,15 @@ pub(crate) async fn schedule(
             });
         }
     }
-    let tasks = match crate::routes::tasks::all_listed(&state).await {
-        Ok(all) => all,
+    let listed = match crate::routes::tasks::listed_index(&state).await {
+        Ok(index) => index,
         Err(code) => return code.into_response(),
     };
+    let limit = window.limit.unwrap_or(crate::tasks::LISTED_PAGE);
+    let (first, last) = (
+        from.date_naive() - Duration::days(1),
+        to.date_naive() + Duration::days(1),
+    );
     let calendar = Arc::clone(&state.calendar);
     let busy = state.calendar.busy.load(Ordering::Acquire);
     let shown = tokio::task::spawn_blocking(move || {
@@ -1006,7 +1013,7 @@ pub(crate) async fn schedule(
             .into_iter()
             .map(|(feed, name, event)| {
                 let task = marker_of(&event.context).and_then(|m| {
-                    tasks
+                    listed
                         .iter()
                         .find(|t| t.id.starts_with(m))
                         .map(|t| t.id.clone())
@@ -1019,13 +1026,20 @@ pub(crate) async fn schedule(
                 value
             })
             .collect();
+        let page = listed.len().min(limit);
+        let window: Vec<&crate::tasks::Listed> = listed[page..]
+            .iter()
+            .filter(|t| !t.repeat.is_empty() || t.date.is_some_and(|d| d >= first && d <= last))
+            .collect();
         serde_json::json!({
             "connected": !linking.calendars.is_empty(),
             "calendars": calendars_json(&notes, &linking),
             "synced": synced(&notes, &linking),
             "refreshing": busy,
             "events": events,
-            "tasks": tasks,
+            "tasks": &listed[..page],
+            "window": window,
+            "total": listed.len(),
         })
     })
     .await;

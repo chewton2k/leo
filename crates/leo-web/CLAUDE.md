@@ -972,7 +972,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `offset`, `limit` (500 by default), `q` (a word of the title) and `note` (a note id), and answers
   `{tasks, total}`; the Tasks card ends with Show more while it holds fewer than `total`, and a poll
   asks for as many as it already holds. Felix's task tools look through every task. The Calendar's
-  schedule answer still carries the first 500.
+  schedule answer (`GET /api/schedule`) carries the first page of the list as `tasks` (`limit`, 500
+  by default, the page asks for as many as it already holds), `total`, and as `window` every task
+  past that page that is dated within a day of the asked dates or repeats (2026-11-18, no limit on
+  data); an event's task link looks through every task. The page reads page and window together
+  (`withWindow`); the Calendar's tray shows 50 rows of Earlier and No date and Show more reveals
+  50 more, asking for the next page when every loaded row is shown. Quick Leo reads `/api/tasks`
+  50 at a time until six due rows are known or the list passes today.
 - Note tasks: checkboxes under Action items (or To do, Next steps, Deadlines) plus
   promoted ones (`note_tasks`, located by text and neighbours, never the wrong
   box). A date change is written into the checkbox (409 with a preview when the

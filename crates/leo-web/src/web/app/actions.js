@@ -71,6 +71,7 @@ const actions = {
     cal.polls = 0;
     return api('/api/calendar/refresh', { method: 'POST' }).catch(() => null).then(() => loadSchedule(seq));
   },
+  'cal-tray-more': () => calTrayMore(),
   'cal-done': () => {
     cal.showDone = !cal.showDone;
     try {

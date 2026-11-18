@@ -866,11 +866,11 @@ fn audit_bench_all_listed() {
             all.len()
         };
         let first = median_ms(1, || {
-            rt.block_on(crate::routes::tasks::all_listed(&state))
+            rt.block_on(crate::routes::tasks::listed_index(&state))
                 .unwrap();
         });
         let repeat = median_ms(11, || {
-            rt.block_on(crate::routes::tasks::all_listed(&state))
+            rt.block_on(crate::routes::tasks::listed_index(&state))
                 .unwrap();
         });
         let mut paired = [Vec::new(), Vec::new()];
@@ -879,7 +879,7 @@ fn audit_bench_all_listed() {
                 before(&state);
             }));
             paired[1].push(median_ms(1, || {
-                rt.block_on(crate::routes::tasks::all_listed(&state))
+                rt.block_on(crate::routes::tasks::listed_index(&state))
                     .unwrap();
             }));
         }

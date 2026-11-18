@@ -128,6 +128,81 @@ fn the_schedule_shows_a_month_of_events_with_all_day_items_and_tasks_linked_by_m
     );
 }
 
+#[test]
+fn the_schedule_carries_every_task_of_its_window_and_the_count_of_them_all() {
+    let (mut state, _dir, _ids) = state_with(&[]);
+    let fake = Arc::new(Fake::default());
+    let make = |body: serde_json::Value| {
+        json_of(run(crate::routes::tasks::create_task(
+            State(state.clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        )))
+    };
+    for i in 0..600 {
+        make(serde_json::json!({"title": format!("Old {i:03}"), "date": "2020-01-01"}));
+    }
+    let repeating =
+        make(serde_json::json!({"title": "Every week", "date": "2021-01-04", "repeat": [0, 2]}));
+    let inside = make(serde_json::json!({"title": "In the window", "date": "2026-12-03"}));
+    let next_day = make(serde_json::json!({"title": "Just after", "date": "2026-12-31"}));
+    let beyond = make(serde_json::json!({"title": "Far off", "date": "2027-06-01"}));
+    let marker: String = inside["id"].as_str().unwrap().chars().take(12).collect();
+    let feed = format!("BEGIN:VCALENDAR\nX-WR-CALNAME:Classes\nBEGIN:VEVENT\nUID:lab\nSUMMARY:Due\nDTSTART:20261204T073000Z\nDURATION:PT30M\nDESCRIPTION:From leo · leo-task:{marker}\nEND:VEVENT\nEND:VCALENDAR\n");
+    fake.pages.lock().unwrap().insert(LINK.into(), feed);
+    state.calendar_access = Some(fake.clone());
+    assert_eq!(add(&state, LINK).status(), StatusCode::OK);
+    let month = json_of(run(crate::calendar::schedule(
+        State(state.clone()),
+        Query(
+            serde_json::from_value(serde_json::json!({
+                "from": "2026-12-01T00:00:00-08:00", "to": "2026-12-31T00:00:00-08:00", "live": "1"
+            }))
+            .unwrap(),
+        ),
+    )));
+    assert_eq!(month["total"], 604);
+    assert_eq!(month["tasks"].as_array().unwrap().len(), 500);
+    let window: Vec<&str> = month["window"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["id"].as_str().unwrap())
+        .collect();
+    let ids = |t: &serde_json::Value| t["id"].as_str().unwrap().to_string();
+    assert!(
+        window.contains(&ids(&repeating).as_str()),
+        "a repeating task"
+    );
+    assert!(
+        window.contains(&ids(&inside).as_str()),
+        "a task dated in it"
+    );
+    assert!(
+        window.contains(&ids(&next_day).as_str()),
+        "a day either side stays"
+    );
+    assert!(
+        !window.contains(&ids(&beyond).as_str()),
+        "a task far outside it"
+    );
+    assert_eq!(window.len(), 3);
+    assert_eq!(
+        month["events"][0]["task"], inside["id"],
+        "an event links to a task past the first page"
+    );
+    let longer = json_of(run(crate::calendar::schedule(
+        State(state.clone()),
+        Query(
+            serde_json::from_value(serde_json::json!({
+                "from": "2026-12-01T00:00:00-08:00", "to": "2026-12-31T00:00:00-08:00", "limit": 601
+            }))
+            .unwrap(),
+        ),
+    )));
+    assert_eq!(longer["tasks"].as_array().unwrap().len(), 601);
+    assert_eq!(longer["window"].as_array().unwrap().len(), 2);
+}
+
 struct Flipping {
     inside: Arc<Fake>,
     settings: std::path::PathBuf,

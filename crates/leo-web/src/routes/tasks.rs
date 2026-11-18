@@ -89,7 +89,7 @@ pub(crate) async fn list_tasks(
     Json(serde_json::json!({ "tasks": tasks, "total": total })).into_response()
 }
 
-async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, StatusCode> {
+pub(crate) async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, StatusCode> {
     let chats = state.chats.clone();
     let (metas, stored) =
         tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::load_all(&chats)))
@@ -100,11 +100,6 @@ async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, Statu
     state
         .read_store(move |store| Ok(listed.index(&generation, store, &metas, &stored)))
         .await
-}
-
-pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, StatusCode> {
-    let index = listed_index(state).await?;
-    Ok(index.iter().take(tasks::LISTED_PAGE).cloned().collect())
 }
 
 #[derive(Deserialize)]
