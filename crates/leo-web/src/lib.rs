@@ -552,6 +552,9 @@ impl AppState {
     fn fresh(&self) -> MutexGuard<'_, Storage> {
         let mut store = lock_storage(&self.store);
         if store.reload || store.changed_on_disk() {
+            if store.reload {
+                store.forget_changes();
+            }
             store.refresh().unwrap();
             store.reload = false;
         }
@@ -853,6 +856,9 @@ fn store_access<R>(
         .swap(false, std::sync::atomic::Ordering::AcqRel);
     let check = writing || force || store.changes.as_mut().is_none_or(|changes| changes.due());
     if store.reload || (check && store.changed_on_disk()) {
+        if store.reload {
+            store.forget_changes();
+        }
         store
             .refresh()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
