@@ -491,7 +491,7 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         "This recording cannot be recovered."
     );
     let mut dirs = Vec::new();
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
     for (saved, dir) in selected {
         let speaker = if saved.ends_with("-you") {
             "You"
@@ -508,8 +508,11 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
             points: Default::default(),
             wants: listening.wants.clone(),
         };
-        resume_retained(&dir, &controls, heard)?;
-        dirs.push((speaker, dir));
+        match resume_retained(&dir, &controls, heard) {
+            Ok(()) => dirs.push((speaker, dir)),
+            Err(e) if !speaker.is_empty() => warnings.push(format!("{speaker}: {e}")),
+            Err(e) => return Err(e),
+        }
     }
     finish_tracks(
         dirs,
@@ -538,7 +541,15 @@ fn resume_retained(
         _ => {}
     });
     if let Some(problem) = failed.into_inner() {
-        anyhow::bail!("This recording could not be recovered: {problem}. Its available audio is kept until Settings → Keeping says it can go.");
+        let kept = if dir.exists() {
+            " Its available audio is kept until Settings → Keeping says it can go."
+        } else {
+            ""
+        };
+        anyhow::bail!(
+            "This recording could not be recovered: {}.{kept}",
+            problem.trim_end_matches('.')
+        );
     }
     anyhow::ensure!(
         finished.get(),
@@ -762,5 +773,120 @@ mod tests {
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+    }
+
+    fn in_scratch_home(test: &str, check: impl FnOnce()) {
+        if std::env::var_os("LEO_SCRATCH_HOME_CHILD").is_some() {
+            check();
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        let missing = home.path().join("missing");
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!(
+                "[chat]\nchain = [\"ollama\"]\n[providers.codex]\nbin = {0}\n[providers.claude_code]\nbin = {0}\n[providers.ollama]\nbase_url = \"\"\n",
+                serde_json::to_string(&missing).unwrap()
+            ),
+        )
+        .unwrap();
+        let output = leo_core::children::quiet_command(std::env::current_exe().unwrap())
+            .args(["--exact", test, "--nocapture"])
+            .env("LEO_SCRATCH_HOME_CHILD", "1")
+            .env("LEO_HOME", home.path())
+            .env("LEO_NO_MICROPHONE", "1")
+            .env_remove("LEO_USE_KEYCHAIN")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    fn listening(recover: &str) -> leo_web::record::Listening {
+        leo_web::record::Listening {
+            preview: Default::default(),
+            recover: Some(recover.into()),
+            id: recover.into(),
+            profile: Default::default(),
+            call: false,
+            screen: false,
+            directory: String::new(),
+            title: None,
+            stop: Default::default(),
+            finish_now: Default::default(),
+            pause: Default::default(),
+            points: Default::default(),
+            wants: Default::default(),
+        }
+    }
+
+    fn track(id: &str, screen: bool) -> std::path::PathBuf {
+        use leo_services::session::{Manifest, Session};
+        let mut manifest = Manifest::new(None, None, "", screen);
+        manifest.id = id.into();
+        Session::create(&leo_services::session::root().unwrap(), manifest)
+            .unwrap()
+            .dir
+    }
+
+    fn silent_part(dir: &std::path::Path) {
+        leo_services::session::wav::write(&dir.join("seg-00000.wav"), &vec![0i16; 16_000 * 2])
+            .unwrap();
+    }
+
+    #[test]
+    fn a_call_with_a_silent_side_recovers_the_other_side_at_once() {
+        in_scratch_home(
+            "record::tests::a_call_with_a_silent_side_recovers_the_other_side_at_once",
+            || {
+                let you = track("x-you", false);
+                std::fs::write(you.join("seg-00000.txt"), "hello from my side").unwrap();
+                silent_part(&track("x-others", true));
+                let mut warnings = Vec::new();
+                let first = super::recover(listening("x"), &mut |heard| {
+                    if let leo_web::record::Heard::Warning(w) = heard {
+                        warnings.push(w)
+                    }
+                });
+                let source = first.unwrap().source.unwrap();
+                assert_eq!(source.passages.len(), 1);
+                assert_eq!(source.passages[0].speaker, "You");
+                let others: Vec<&String> = warnings
+                    .iter()
+                    .filter(|w| w.starts_with("Others: "))
+                    .collect();
+                assert_eq!(others.len(), 1, "{warnings:?}");
+                assert!(others[0].contains("No sound was recorded from the computer"));
+            },
+        );
+    }
+
+    #[test]
+    fn a_failed_recovery_says_audio_is_kept_only_when_it_is() {
+        in_scratch_home(
+            "record::tests::a_failed_recovery_says_audio_is_kept_only_when_it_is",
+            || {
+                let dir = track("y", false);
+                silent_part(&dir);
+                let error = super::recover(listening("y"), &mut |_| {})
+                    .err()
+                    .unwrap()
+                    .to_string();
+                assert!(!dir.exists());
+                assert!(
+                    error.starts_with(
+                        "This recording could not be recovered: No sound was recorded."
+                    ),
+                    "{error}"
+                );
+                assert!(!error.contains("kept"), "{error}");
+                assert!(!error.contains(".."), "{error}");
+                assert!(error.ends_with('.'), "{error}");
+            },
+        );
     }
 }
