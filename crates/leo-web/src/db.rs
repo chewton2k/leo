@@ -903,12 +903,16 @@ pub fn for_chats(chats_dir: &Path) -> Arc<Db> {
     try_for_chats(chats_dir).unwrap_or_else(|e| panic!("{e:#}"))
 }
 
-pub fn data_dir(chats_dir: &Path) -> &Path {
-    if chats_dir.file_name().is_some_and(|n| n == "chats") {
-        chats_dir.parent().unwrap_or(chats_dir)
+pub fn beside_of<'a>(dir: &'a Path, only_named: Option<&str>) -> &'a Path {
+    if only_named.is_some_and(|name| dir.file_name().is_none_or(|n| n != name)) {
+        dir
     } else {
-        chats_dir
+        dir.parent().unwrap_or(dir)
     }
+}
+
+pub fn data_dir(chats_dir: &Path) -> &Path {
+    beside_of(chats_dir, Some("chats"))
 }
 
 pub fn try_for_chats(chats_dir: &Path) -> Result<Arc<Db>> {
@@ -929,6 +933,74 @@ pub fn put_aside(path: &Path) {
 
 #[cfg(test)]
 mod tests {
+    use super::{beside_of, data_dir};
+    use std::path::Path;
+
+    #[test]
+    fn the_data_folder_is_the_parent_except_for_a_chats_folder_by_another_name() {
+        assert_eq!(beside_of(Path::new("/d/notes"), None), Path::new("/d"));
+        assert_eq!(
+            beside_of(Path::new("/d/chats"), Some("chats")),
+            Path::new("/d")
+        );
+        assert_eq!(
+            beside_of(Path::new("/d/other"), Some("chats")),
+            Path::new("/d/other")
+        );
+        assert_eq!(beside_of(Path::new("/"), None), Path::new("/"));
+        assert_eq!(beside_of(Path::new("/"), Some("chats")), Path::new("/"));
+    }
+
+    #[test]
+    fn every_helper_finds_the_same_folder_as_before_for_a_default_and_a_custom_data_folder() {
+        for data in [
+            "/home/u/.local/share/leo",
+            "/mnt/my disk/leo notes data",
+            "rel/leo",
+            "/leo",
+        ] {
+            let data = Path::new(data);
+            let notes = data.join("notes");
+            let chats = data.join("chats");
+            let old_parent = |p: &Path| p.parent().unwrap_or(p).to_path_buf();
+            assert_eq!(crate::keeping::data_dir(&notes), old_parent(&notes));
+            assert_eq!(
+                crate::chats::dir_for(&notes),
+                old_parent(&notes).join("chats")
+            );
+            assert_eq!(
+                crate::calendar::settings_path(&notes),
+                old_parent(&notes).join("calendars.json")
+            );
+            assert_eq!(data_dir(&chats), old_parent(&chats));
+            assert_eq!(data_dir(&notes), notes);
+            assert_eq!(beside_of(&chats, None), old_parent(&chats));
+        }
+        assert_eq!(data_dir(Path::new("/")), Path::new("/"));
+        assert_eq!(crate::keeping::data_dir(Path::new("/")), Path::new("/"));
+    }
+
+    #[test]
+    fn the_stores_and_files_kept_beside_the_notes_land_in_the_same_folder_as_before() {
+        let tmp = tempfile::tempdir().unwrap();
+        for data in [tmp.path().join("leo"), tmp.path().join("my custom data")] {
+            let notes = data.join("notes");
+            std::fs::create_dir_all(&notes).unwrap();
+            assert_eq!(
+                crate::graph::Graphs::for_notes(&notes, None).path(),
+                data.join("graph.json")
+            );
+            let _ = crate::vectors::Vectors::for_notes(&notes);
+            let _ = crate::captions::Captions::for_notes(&notes);
+            assert!(data.join(FILE).is_file(), "{data:?}");
+            assert!(!notes.join(FILE).exists());
+            assert_eq!(
+                crate::jsonline::checked_dir(&data.join("chats"), "cards").unwrap(),
+                data.join("notes/.leo/cards")
+            );
+        }
+    }
+
     #[test]
     fn opening_the_database_preserves_expired_retired_problem_recovery_rows() {
         let dir = tempfile::tempdir().unwrap();

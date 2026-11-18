@@ -33,7 +33,7 @@ pub struct Captions {
 
 impl Captions {
     pub fn for_notes(notes_dir: &Path) -> Captions {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
+        let base = crate::db::beside_of(notes_dir, None);
         Captions::at(base.join("captions.json"))
     }
 

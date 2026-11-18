@@ -859,7 +859,7 @@ impl Graphs {
     }
 
     pub fn for_notes(notes_dir: &Path, writer: Option<Writer>) -> Graphs {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
+        let base = crate::db::beside_of(notes_dir, None);
         Graphs::new(base.join("graph.json"), writer)
     }
 

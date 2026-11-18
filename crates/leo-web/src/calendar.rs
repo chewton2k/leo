@@ -54,7 +54,7 @@ struct Feed {
 }
 
 fn db_for(notes: &Path) -> Arc<crate::db::Db> {
-    crate::db::at(&data(notes).join(crate::db::FILE))
+    crate::db::at(&crate::db::beside_of(notes, None).join(crate::db::FILE))
 }
 
 fn time_of(text: Option<String>) -> Option<DateTime<Utc>> {
@@ -102,7 +102,7 @@ fn safe(id: &str) -> bool {
 }
 
 fn feeds_dir(notes: &Path) -> PathBuf {
-    data(notes).join(leo_core::paths::own::CALENDAR)
+    crate::db::beside_of(notes, None).join(leo_core::paths::own::CALENDAR)
 }
 
 const KEPT_IN_A_FILE: &str = "leo-file:";
@@ -345,12 +345,8 @@ struct Linking {
     offer: Option<bool>,
 }
 
-fn data(notes: &Path) -> PathBuf {
-    notes.parent().unwrap_or(notes).to_path_buf()
-}
-
 pub fn settings_path(notes: &Path) -> PathBuf {
-    data(notes).join("calendars.json")
+    crate::db::beside_of(notes, None).join("calendars.json")
 }
 
 fn account(id: &str) -> String {

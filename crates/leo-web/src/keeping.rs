@@ -9,7 +9,7 @@ use crate::AppState;
 const DISCARD_BATCH: usize = 256;
 
 pub fn data_dir(notes_dir: &Path) -> PathBuf {
-    notes_dir.parent().unwrap_or(notes_dir).to_path_buf()
+    crate::db::beside_of(notes_dir, None).to_path_buf()
 }
 
 fn older(path: &Path, cutoff: SystemTime) -> bool {

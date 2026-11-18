@@ -32,7 +32,7 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 fn root(chats: &Path) -> &Path {
-    chats.parent().unwrap_or(chats)
+    crate::db::beside_of(chats, None)
 }
 
 pub(crate) fn checked_dir(chats: &Path, kind: &str) -> anyhow::Result<PathBuf> {

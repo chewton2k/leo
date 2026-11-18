@@ -195,7 +195,7 @@ pub struct Work {
 
 impl Vectors {
     pub fn for_notes(notes_dir: &Path) -> Vectors {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
+        let base = crate::db::beside_of(notes_dir, None);
         Vectors::at(base.join("meaning.json"))
     }
 

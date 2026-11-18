@@ -94,7 +94,7 @@ impl std::fmt::Display for Gone {
 impl std::error::Error for Gone {}
 
 pub fn dir_for(notes_dir: &Path) -> PathBuf {
-    notes_dir.parent().unwrap_or(notes_dir).join("chats")
+    crate::db::beside_of(notes_dir, None).join("chats")
 }
 
 pub use crate::jsonline::valid_id;
