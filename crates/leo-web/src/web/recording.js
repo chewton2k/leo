@@ -142,7 +142,7 @@
   }
 
   function create(deps) {
-    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields } = deps;
+    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields, bytes } = deps;
     const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
@@ -382,7 +382,7 @@
       const missing = speakersOn() && model && !model.verified;
       const note = !missing ? '' : getting
         ? `Downloading the speaker model… ${Math.floor((100 * job.bytes) / Math.max(1, job.total))}%`
-        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${Math.round(model.size / 1048576)} MB, stays on this computer).`;
+        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${bytes(model.size)}, stays on this computer).`;
       return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span>${settingsSwitch('id="rec-speakers"', speakersOn())}</label>`
         + (missing ? `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>` : '');
     }

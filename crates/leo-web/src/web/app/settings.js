@@ -1173,7 +1173,7 @@ function speechCards(view) {
 }
 function speechBytes(bytes) {
   bytes = Math.max(0, Number(bytes) || 0);
-  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + ' GB' : bytes >= 1048576 ? Math.round(bytes / 1048576) + ' MB' : bytes + ' B';
+  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + ' GB' : bytes >= 1048576 ? Math.round(bytes / 1048576) + ' MB' : bytes >= 1024 ? Math.round(bytes / 1024) + ' KB' : bytes + ' B';
 }
 function speechUseLanguage(model) {
   if (model.detects_language !== false) return 'auto';

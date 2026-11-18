@@ -3,8 +3,6 @@ const UPLOAD_MOST = 90 * 1024 * 1024;
 let picked = [];
 let uploadPoll = 0;
 
-const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-
 async function shrink(file) {
   if (!/^image\//.test(file.type) || file.type === 'image/gif') return { name: file.name, type: file.type, blob: file };
   try {
@@ -104,7 +102,7 @@ function drawPicked() {
   if (!list) return;
   const adding = addingToNote();
   list.innerHTML = picked
-    .map((f, i) => `<div class="upload-file">${/^image\//.test(f.type) ? ICON.image : ICON.note}<span class="grow">${esc(f.name)}<span class="sub">${size(f.size)}</span></span><button class="icon-btn" data-action="upload-drop" data-i="${i}" aria-label="Remove ${esc(f.name)}">${ICON.close}</button></div>`)
+    .map((f, i) => `<div class="upload-file">${/^image\//.test(f.type) ? ICON.image : ICON.note}<span class="grow">${esc(f.name)}<span class="sub">${speechBytes(f.size)}</span></span><button class="icon-btn" data-action="upload-drop" data-i="${i}" aria-label="Remove ${esc(f.name)}">${ICON.close}</button></div>`)
     .join('');
   $('#upload-go').disabled = !picked.length;
   $('#upload-pick-label').textContent = picked.length ? 'Add more files' : 'Choose, drop or paste files';

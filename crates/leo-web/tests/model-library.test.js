@@ -64,3 +64,11 @@ test('Detect language is offered only for models that detect language', () => {
   assert.ok(!html({ detects_language: false }).includes('<option value="auto">'));
   assert.ok(html({ detects_language: false }).includes('<option value="de">'));
 });
+test('sizes under a megabyte are written in KB', () => {
+  const h = helpers();
+  assert.equal(h.speechBytes(921600), '900 KB');
+  assert.equal(h.speechBytes(1048576), '1 MB');
+  assert.equal(h.speechBytes(2400000), '2 MB');
+  assert.equal(h.speechBytes(1610612736), '1.5 GB');
+  assert.equal(h.speechBytes(512), '512 B');
+});
