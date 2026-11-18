@@ -94,6 +94,7 @@ pub fn powers() -> leo_web::Powers {
                         name: f.name,
                         mime: f.mime,
                         bytes: f.bytes,
+                        path: f.path,
                     })
                     .collect();
                 let made = leo_services::import::import(&uploads, wants, progress)?;
@@ -129,6 +130,7 @@ pub fn powers() -> leo_web::Powers {
                         name: file.name,
                         mime: file.mime,
                         bytes: file.bytes,
+                        path: file.path,
                     },
                     &|prompt, images, most| {
                         leo_services::ai::see(prompt, images, most).map_err(crate::felix::said)
