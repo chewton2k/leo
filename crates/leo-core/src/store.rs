@@ -16,7 +16,6 @@ use crate::paths::write_atomic;
 struct NoteFrontmatter {
     id: String,
     title: String,
-    tags: Vec<String>,
     created_at: chrono::DateTime<chrono::Utc>,
     updated_at: chrono::DateTime<chrono::Utc>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -29,7 +28,6 @@ fn note_to_markdown(note: &Note) -> Result<String> {
     let fm = NoteFrontmatter {
         id: note.id.clone(),
         title: note.title.clone(),
-        tags: note.tags.clone(),
         created_at: note.created_at,
         updated_at: note.updated_at,
         pinned: note.pinned,
@@ -67,8 +65,8 @@ fn split_front_matter(text: &str) -> Result<(Option<serde_yaml::Mapping>, String
     } else if rest == "---" {
         ("", "")
     } else if let Some(end) = rest.find("\n---\n") {
-        (&rest[..end], &rest[end + 5..])
-    } else if let Some(yaml) = rest.strip_suffix("\n---") {
+        (&rest[..=end], &rest[end + 5..])
+    } else if let Some(yaml) = rest.strip_suffix("---").filter(|y| y.ends_with('\n')) {
         (yaml, "")
     } else {
         return Ok((None, text.to_string()));
@@ -81,32 +79,6 @@ fn split_front_matter(text: &str) -> Result<(Option<serde_yaml::Mapping>, String
         _ => return Ok((None, text.to_string())),
     };
     Ok((Some(props), body.trim_start_matches('\n').to_string()))
-}
-
-fn tags_from(value: serde_yaml::Value) -> Vec<String> {
-    let raw: Vec<String> = match value {
-        serde_yaml::Value::Sequence(items) => items
-            .into_iter()
-            .filter_map(|item| match item {
-                serde_yaml::Value::String(s) => Some(s),
-                serde_yaml::Value::Number(n) => Some(n.to_string()),
-                _ => None,
-            })
-            .collect(),
-        serde_yaml::Value::String(s) => s
-            .split(|c: char| c == ',' || c.is_whitespace())
-            .map(str::to_string)
-            .collect(),
-        _ => Vec::new(),
-    };
-    let mut tags: Vec<String> = Vec::new();
-    for tag in raw {
-        let tag = tag.trim().trim_start_matches('#').to_string();
-        if !tag.is_empty() && !tags.contains(&tag) {
-            tags.push(tag);
-        }
-    }
-    tags
 }
 
 fn date_from(value: serde_yaml::Value) -> Option<DateTime<Utc>> {
@@ -159,12 +131,12 @@ fn head_and_renamed(props: &mut serde_yaml::Mapping, relative_path: &Path) -> (H
         .unwrap_or("note")
         .to_string();
 
-    let id = match props.remove("id") {
+    let id = match props.shift_remove("id") {
         Some(serde_yaml::Value::Number(n)) => Some(n.to_string()),
         other => text_from(other),
     }
     .unwrap_or_else(|| stable_id(relative_path));
-    let header_title = text_from(props.remove("title")).unwrap_or_else(|| stem.clone());
+    let header_title = text_from(props.shift_remove("title")).unwrap_or_else(|| stem.clone());
     let named =
         uuid::Uuid::parse_str(&stem).is_ok() || filename::matches_title(&stem, &header_title);
     let title = if named { header_title } else { stem.clone() };
@@ -262,17 +234,16 @@ fn parse_note(
         },
         renamed,
     ) = head_and_renamed(&mut props, relative_path);
-    let tags = props.remove("tags").map(tags_from).unwrap_or_default();
     let created_at = props
-        .remove("created_at")
+        .shift_remove("created_at")
         .and_then(date_from)
         .unwrap_or(modified);
     let updated_at = props
-        .remove("updated_at")
+        .shift_remove("updated_at")
         .and_then(date_from)
         .unwrap_or(modified);
     let pinned = props
-        .remove("pinned")
+        .shift_remove("pinned")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -281,7 +252,7 @@ fn parse_note(
             id,
             title,
             body,
-            tags,
+            tags: Vec::new(),
             directory,
             created_at,
             updated_at,
@@ -322,7 +293,6 @@ fn hash_note(note: &Note) -> u64 {
         &note.id,
         &note.title,
         &note.body,
-        &note.tags,
         note.created_at,
         note.updated_at,
         note.pinned,
@@ -1365,33 +1335,13 @@ impl Store {
         Ok(self.notes.last().unwrap())
     }
 
-    /// Searches across ALL directories.
-    pub fn list_notes(&self, tag: Option<&str>, limit: usize) -> Vec<&Note> {
+    pub fn list_notes(&self, dir: Option<&str>) -> Vec<&Note> {
         let mut notes: Vec<&Note> = self
             .notes
             .iter()
-            .filter(|n| match tag {
-                Some(t) => n.tags.iter().any(|tag| tag == t),
-                None => true,
-            })
+            .filter(|n| dir.is_none_or(|dir| n.directory == dir))
             .collect();
         notes.sort_by_key(|n| (std::cmp::Reverse(n.pinned), std::cmp::Reverse(n.updated_at)));
-        notes.truncate(limit);
-        notes
-    }
-
-    pub fn list_notes_in_dir(&self, dir: &str, tag: Option<&str>, limit: usize) -> Vec<&Note> {
-        let mut notes: Vec<&Note> = self
-            .notes
-            .iter()
-            .filter(|n| n.directory == dir)
-            .filter(|n| match tag {
-                Some(t) => n.tags.iter().any(|tag| tag == t),
-                None => true,
-            })
-            .collect();
-        notes.sort_by_key(|n| (std::cmp::Reverse(n.pinned), std::cmp::Reverse(n.updated_at)));
-        notes.truncate(limit);
         notes
     }
 
@@ -1449,22 +1399,15 @@ impl Store {
         before - self.notes.len()
     }
 
-    /// The one search: every directory, titles, bodies and tags.
+    /// The one search: every directory, titles and bodies.
     ///
-    /// Every word must appear somewhere in the note; a `#word` must be the start
-    /// of one of its tags, so a partly typed tag already narrows. Notes whose
+    /// Every word must appear somewhere in the note. Notes whose
     /// title holds all the words come first, then other matches, then notes
     /// whose title only fuzzy-matches (`grtrv` for "Graph traversals"). Newest
     /// first within each group. Case never matters.
     pub fn find(&self, query: &str) -> Vec<&Note> {
         let query = query.to_lowercase();
-        let (tags, words): (Vec<&str>, Vec<&str>) =
-            query.split_whitespace().partition(|w| w.starts_with('#'));
-        let tags: Vec<&str> = tags
-            .iter()
-            .map(|t| &t[1..])
-            .filter(|t| !t.is_empty())
-            .collect();
+        let words: Vec<&str> = query.split_whitespace().collect();
 
         let mut matcher = nucleo::Matcher::new(nucleo::Config::DEFAULT);
         let fuzzy = nucleo::pattern::Pattern::parse(
@@ -1475,19 +1418,10 @@ impl Store {
 
         let mut ranked: Vec<(u8, &Note)> = Vec::new();
         for note in &self.notes {
-            let note_tags: Vec<String> = note.tags.iter().map(|t| t.to_lowercase()).collect();
-            if !tags
-                .iter()
-                .all(|t| note_tags.iter().any(|nt| nt.starts_with(t)))
-            {
-                continue;
-            }
             let title = note.title.to_lowercase();
             let body = note.body.to_lowercase();
             let in_title = words.iter().all(|w| title.contains(w));
-            let anywhere = words.iter().all(|w| {
-                title.contains(w) || body.contains(w) || note_tags.iter().any(|t| t.contains(w))
-            });
+            let anywhere = words.iter().all(|w| title.contains(w) || body.contains(w));
             let group = if in_title {
                 0
             } else if anywhere {
@@ -1725,12 +1659,69 @@ mod tests {
     use super::*;
     use crate::notes::Note;
 
+    #[test]
+    #[ignore = "benchmark"]
+    fn tags_header_load_and_find_benchmark() {
+        use std::time::Instant;
+        let count: usize = std::env::var("LEO_BENCH_NOTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5000);
+        let words = [
+            "graph", "queue", "heap", "lemma", "cell", "price", "river", "verb",
+        ];
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("notes");
+        fs::create_dir_all(&dir).unwrap();
+        for i in 0..count {
+            let body: String = (0..800)
+                .map(|w| words[(i * 7 + w * 13) % words.len()])
+                .collect::<Vec<_>>()
+                .join(" ");
+            fs::write(
+                dir.join(format!("Note {i}.md")),
+                format!(
+                    "---\nid: {}\ntitle: Note {i}\ntags:\n  - '#exam'\n  - week{}\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\naliases:\n- Short {i}\ncssclasses: [wide]\n---\n\n{body}\n",
+                    uuid::Uuid::new_v4(),
+                    i % 12
+                ),
+            )
+            .unwrap();
+        }
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        let median = |mut v: Vec<f64>| {
+            v.sort_by(f64::total_cmp);
+            v[v.len() / 2]
+        };
+        let mut loads = Vec::new();
+        let mut store = None;
+        for _ in 0..5 {
+            let t = Instant::now();
+            store = Some(Store::load_from(&dir).unwrap());
+            loads.push(ms(t.elapsed()));
+        }
+        let store = store.unwrap();
+        assert_eq!(store.notes.len(), count);
+        let finds: Vec<f64> = (0..9)
+            .map(|_| {
+                let t = Instant::now();
+                std::hint::black_box(store.find("queue lemma").len());
+                ms(t.elapsed())
+            })
+            .collect();
+        println!(
+            "P-C02 notes={count} load_ms={:.1} find_ms={:.2} loads={loads:.1?}",
+            median(loads.clone()),
+            median(finds)
+        );
+    }
+
     fn make_note() -> Note {
         Note {
             id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             title: "Test Note".to_string(),
             body: "Hello **world**".to_string(),
-            tags: vec!["rust".to_string(), "test".to_string()],
+            tags: vec![],
             directory: "".to_string(),
             created_at: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
                 .unwrap()
@@ -1902,7 +1893,6 @@ mod tests {
         assert_eq!(parsed.id, note.id);
         assert_eq!(parsed.title, note.title);
         assert_eq!(parsed.body, note.body);
-        assert_eq!(parsed.tags, note.tags);
         assert_eq!(parsed.directory, "");
     }
 
@@ -1957,10 +1947,9 @@ mod tests {
     #[test]
     fn a_change_to_any_field_of_a_saved_note_reaches_its_file() {
         type Change = fn(&mut Note);
-        let changes: [Change; 7] = [
+        let changes: [Change; 6] = [
             |n| n.title = "Renamed".into(),
             |n| n.body = "new body".into(),
-            |n| n.tags = vec!["tagged".into()],
             |n| n.created_at -= chrono::Duration::days(1),
             |n| n.updated_at += chrono::Duration::days(1),
             |n| n.pinned = true,
@@ -1986,7 +1975,6 @@ mod tests {
                 (
                     &saved.title,
                     &saved.body,
-                    &saved.tags,
                     saved.created_at,
                     saved.updated_at,
                     saved.pinned,
@@ -1995,7 +1983,6 @@ mod tests {
                 (
                     &wanted.title,
                     &wanted.body,
-                    &wanted.tags,
                     wanted.created_at,
                     wanted.updated_at,
                     wanted.pinned,
@@ -2114,12 +2101,7 @@ mod tests {
         let (mut store, d) = temp_store();
         store.create_dir("cs130");
         store
-            .create_note(
-                "Rust ownership",
-                "borrow checker rules",
-                vec!["rust".into()],
-                "",
-            )
+            .create_note("Rust ownership", "borrow checker rules", vec![], "")
             .unwrap();
         store
             .create_note(
@@ -2130,12 +2112,7 @@ mod tests {
             )
             .unwrap();
         store
-            .create_note(
-                "Lecture 4",
-                "graphs: BFS, then DFS",
-                vec!["exam".into()],
-                "cs130",
-            )
+            .create_note("Lecture 4", "graphs: BFS, then DFS", vec![], "cs130")
             .unwrap();
         (store, d)
     }
@@ -2163,13 +2140,22 @@ mod tests {
     }
 
     #[test]
-    fn a_hash_word_means_a_tag() {
-        let (store, _d) = store_for_find();
-        assert_eq!(titles(store.find("#exam")), vec!["Lecture 4"]);
-        // Narrowed further by ordinary words.
+    fn a_hash_word_is_an_ordinary_word() {
+        let (store, _d) = temp_store();
+        fs::write(
+            store.notes_dir.join("Tagged.md"),
+            "---\nid: tagged-1\ntitle: Tagged\ntags: [exam]\n---\n\nnothing to see\n",
+        )
+        .unwrap();
+        fs::write(
+            store.notes_dir.join("Revision.md"),
+            "---\nid: revision-1\ntitle: Revision\n---\n\n#exam on Friday\n",
+        )
+        .unwrap();
+        let store = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(titles(store.find("#exam")), vec!["Revision"]);
+        assert_eq!(titles(store.find("exam")), vec!["Revision"]);
         assert!(store.find("#exam borrow").is_empty());
-        // A partly typed tag already narrows, since this runs on every keystroke.
-        assert_eq!(titles(store.find("#ex")), vec!["Lecture 4"]);
     }
 
     /// Fuzzy title matching, which the Ctrl-P finder used to offer, still finds
@@ -2402,7 +2388,7 @@ mod tests {
     fn a_restored_note_comes_back_where_it_was_and_leaves_the_trash() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "BFS", vec!["exam".into()], "cs130")
+            .create_note("Lecture 4", "BFS", vec![], "cs130")
             .unwrap()
             .id
             .clone();
@@ -2416,7 +2402,6 @@ mod tests {
         let note = reloaded.find_note(&id).expect("not restored");
         assert_eq!(note.directory, "cs130");
         assert_eq!(note.body, "BFS");
-        assert_eq!(note.tags, vec!["exam".to_string()]);
         assert!(reloaded.trashed().is_empty(), "still in the trash");
         assert!(reloaded.directories.contains(&"cs130".to_string()));
     }
@@ -2894,7 +2879,7 @@ mod tests {
 
         let reloaded = Store::load_from(&store.notes_dir).unwrap();
         let titles: Vec<&str> = reloaded
-            .list_notes_in_dir("cs130", None, usize::MAX)
+            .list_notes(Some("cs130"))
             .iter()
             .map(|n| n.title.as_str())
             .collect();
@@ -3417,7 +3402,7 @@ mod tests {
         assert_eq!(note.title, "Office hours");
         assert_eq!(note.directory, "cs130");
         assert_eq!(note.body, "Tuesday 3-5pm\n\n- [ ] bring questions\n");
-        assert!(note.tags.is_empty());
+        assert!(note.extra.is_empty());
     }
 
     #[test]
@@ -3444,15 +3429,18 @@ mod tests {
     fn obsidian_properties_become_leo_fields() {
         let text = "---\ntags:\n  - '#exam'\n  - graphs\npinned: true\n---\nBody\n";
         let note = parse("Notes.md", text);
-        assert_eq!(note.tags, vec!["exam", "graphs"]);
+        assert_eq!(
+            note.extra["tags"],
+            serde_yaml::from_str::<serde_yaml::Value>("['#exam', graphs]").unwrap()
+        );
         assert!(note.pinned);
         assert_eq!(note.body, "Body\n");
     }
 
     #[test]
-    fn tags_written_as_one_string_are_split() {
+    fn tags_written_as_one_string_are_kept_as_written() {
         let note = parse("A.md", "---\ntags: \"exam, graphs #bfs\"\n---\nx");
-        assert_eq!(note.tags, vec!["exam", "graphs", "bfs"]);
+        assert_eq!(note.extra["tags"], "exam, graphs #bfs");
     }
 
     #[test]
@@ -3728,7 +3716,6 @@ mod tests {
         assert_eq!(
             findings,
             [
-                "property \"line\\n---\\nmore\\n\" reads back as \"line\\n---\\nmore\"",
                 "body \"\\n\\nlead\" reads back as \"lead\"",
                 "body \"a\\r\\nb\" reads back as \"a\\nb\"",
             ]
@@ -3931,6 +3918,100 @@ mod tests {
         assert!(text.starts_with("---\n"), "{text}");
         assert!(text.contains(&format!("id: {id}")), "{text}");
         assert!(text.contains("after"), "{text}");
+    }
+
+    #[test]
+    fn a_tags_entry_is_kept_through_save_trash_and_conflict() {
+        let id = "0c9d1f4e-6b1a-4d55-9a0e-2f3c4b5a6d7e";
+        let shapes = [
+            "tags:\n  - '#exam'\n  - graphs\n",
+            "tags: [exam, graphs]\n",
+            "tags: exam, graphs #bfs\n",
+            "tags: []\n",
+            "tags:\n- exam\n- graphs\n",
+            "tags:\n  - exam\n# later\n  - graphs\n",
+        ];
+        for (shape, newline) in shapes
+            .iter()
+            .flat_map(|shape| [(shape, "\n"), (shape, "\r\n")])
+        {
+            let file = format!(
+                "---\nid: {id}\ntitle: Graphs\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-02T00:00:00Z\naliases:\n- Short\n{shape}cssclasses:\n- wide\nnotes: |\n  one\n  two\n---\n\nBFS by layers\n"
+            )
+            .replace('\n', newline);
+            let wanted: serde_yaml::Mapping = serde_yaml::from_str(shape).unwrap();
+            let (store, _tmp) = temp_store();
+            let path = store.notes_dir.join("Graphs.md");
+            fs::write(&path, &file).unwrap();
+            let mut store = Store::load_from(&store.notes_dir).unwrap();
+            assert_eq!(store.notes[0].extra["tags"], wanted["tags"], "{shape:?}");
+            store.save().unwrap();
+            assert_eq!(fs::read_to_string(&path).unwrap(), file, "{shape:?}");
+
+            store.delete_notes(&[id.to_string()]);
+            store.save().unwrap();
+            assert_eq!(store.restore(id).as_deref(), Some("Graphs"));
+            store.save().unwrap();
+            let mut store = Store::load_from(&store.notes_dir).unwrap();
+            assert_eq!(store.notes[0].extra["tags"], wanted["tags"], "{shape:?}");
+
+            fs::write(&path, fs::read_to_string(&path).unwrap() + "elsewhere\n").unwrap();
+            store.find_note_mut(id).unwrap().body = "leo's own edit\n".into();
+            store.save().unwrap();
+            let copy = Store::load_from(&store.notes_dir).unwrap();
+            let copy = copy
+                .notes
+                .iter()
+                .find(|n| n.title.ends_with(CONFLICT_SUFFIX))
+                .unwrap();
+            assert_eq!(copy.extra["tags"], wanted["tags"], "{shape:?}");
+            assert_eq!(copy.extra["notes"], "one\ntwo\n", "{shape:?}");
+            assert_eq!(copy.body, "leo's own edit\n");
+        }
+    }
+
+    #[test]
+    fn a_last_multiline_entry_keeps_its_final_newline() {
+        let note = parse("A.md", "---\ntitle: A\nnotes: |\n  one\n  two\n---\nbody");
+        assert_eq!(note.extra["notes"], "one\ntwo\n");
+        let fallback = "---\nid: fall-1\ntitle: A\nbase: &b x\nother: *b\nnotes: |\n  one\n  two\n---\n\nbody\n";
+        let note = parse("A.md", fallback);
+        assert_eq!(note.extra["notes"], "one\ntwo\n");
+        let (store, _tmp) = temp_store();
+        fs::write(store.notes_dir.join("A.md"), fallback).unwrap();
+        let mut store = Store::load_from(&store.notes_dir).unwrap();
+        store.find_note_mut("fall-1").unwrap().body = "edited\n".into();
+        store.save().unwrap();
+        let back = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(back.notes[0].extra["notes"], "one\ntwo\n");
+    }
+
+    #[test]
+    fn a_header_leo_cannot_split_keeps_its_values() {
+        let text = "---\nid: anchor-1\ntitle: A\nbase: &shared\n  - one\n  - two\nother: *shared\ntags: [exam]\n---\n\nbody\n";
+        let (store, _tmp) = temp_store();
+        fs::write(store.notes_dir.join("A.md"), text).unwrap();
+        let mut store = Store::load_from(&store.notes_dir).unwrap();
+        let extra = store.notes[0].extra.clone();
+        store.find_note_mut("anchor-1").unwrap().body = "edited\n".into();
+        store.save().unwrap();
+        let back = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(back.notes[0].extra, extra);
+        assert_eq!(back.notes[0].body, "edited\n");
+    }
+
+    #[test]
+    fn unknown_properties_keep_their_file_order() {
+        let text = "---\nzeta: 1\nid: order-1\nalpha: 2\ntitle: A\nmiddle: [x]\ncreated_at: 2026-01-01T00:00:00Z\nbeta: 3\n---\n\nbody\n";
+        let note = parse("A.md", text);
+        let keys: Vec<&str> = note.extra.keys().filter_map(|k| k.as_str()).collect();
+        assert_eq!(keys, ["zeta", "alpha", "middle", "beta"]);
+        let written = note_to_markdown(&note).unwrap();
+        let order: Vec<usize> = ["zeta:", "alpha:", "middle:", "beta:"]
+            .iter()
+            .map(|k| written.find(k).unwrap())
+            .collect();
+        assert!(order.windows(2).all(|w| w[0] < w[1]), "{written}");
     }
 
     #[test]

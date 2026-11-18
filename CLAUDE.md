@@ -96,8 +96,8 @@ Notes are stored as one Markdown file per note, with YAML frontmatter, under
 the platform data directory (`<data_dir>/leo/notes/`). `store.rs` derives a
 note's `directory` from its path on disk, and `directories.json` tracks empty
 directories. Each `Note` has `id` (UUID v4), `title`,
-`body` (Markdown), `tags`, `directory` (empty string = root), `created_at`, and
-`updated_at`.
+`body` (Markdown), `directory` (empty string = root), `created_at`, and
+`updated_at`; `extra` keeps the front matter leo does not own, `tags` included.
 
 `config.toml` lives in `<config_dir>/leo/`, separately from notes. Machine-local
 settings and credentials are excluded from note exports.
@@ -135,8 +135,8 @@ settings and credentials are excluded from note exports.
   When two files share an id, the one still named after its header title
   keeps it; the other gets a new id, written on the next save.
 - Headerless `.md` files load as notes: title = stem, id = `stable_id(path)`
-  (FNV-1a 128 → UUID v8, golden-tested: never change it), dates = mtime, tags
-  from list or string. `Note.extra` keeps unknown front matter.
+  (FNV-1a 128 → UUID v8, golden-tested: never change it), dates = mtime. `Note.extra` keeps unknown front matter, `tags` included,
+  as values in file order (a note leo edits is written back in leo's layout).
 - `Store.seen: id → Seen { path, disk, model }`: save writes only notes whose
   rendered hash changed; if the file on disk no longer matches `disk`
   (edited/renamed/deleted elsewhere) and leo changed the note too, it writes
@@ -197,10 +197,9 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   are one-JSON-line-per-save files (newest line wins, tombstone deletes); boards
   are not calendar tasks. Calendar, boards and their Felix tools: see
   crates/leo-web/CLAUDE.md.
-- Tags are hidden everywhere a person looks (decided 2026-10-08: folders,
-  search and note connections cover it): no tag column, completion, Tags page or
-  chips on the web. Tags already in files are kept and still searchable with `#word`
-  (Obsidian).
+- Tags (2026-11-17, the owner's call, replacing the 2026-10-08 line): leo does
+  not read, filter or search tags. A `tags:` entry in a file is kept like every
+  front-matter property leo does not own; `#word` searches the word.
 - Felix in the margin: threads in `leo.db`, never note files or git; reads use
   `Powers.toolless` (no tools at all). See crates/leo-web/CLAUDE.md.
 - Menu bar, study order, idle compaction and in-app drag and drop
