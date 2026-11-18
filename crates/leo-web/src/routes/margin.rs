@@ -674,6 +674,13 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         {
             continue;
         }
+        if !blocks
+            .iter()
+            .any(|b| b.contains(found.quote.as_str()) && now.body.contains(b.as_str()))
+            && now.body.matches(found.quote.as_str()).count() != 1
+        {
+            continue;
+        }
         let quote = margin::whole_sentences(&now.body, &found.quote, &blocks);
         if margin::crowded(&now.body, &quote, &blocks, &quotes)
             || !through && margin::crowded(&now.body, &quote, &blocks, &facts.dismissed)
