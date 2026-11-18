@@ -277,6 +277,46 @@ impl Db {
             .sum()
     }
 
+    pub fn give_back(&self) -> Result<bool> {
+        let (mode, mut free): (i64, i64) = self.with(|c| {
+            Ok((
+                c.query_row("PRAGMA auto_vacuum", [], |r| r.get(0))?,
+                c.query_row("PRAGMA freelist_count", [], |r| r.get(0))?,
+            ))
+        })?;
+        if mode != 2 || free < GIVE_BACK_PAGES {
+            return Ok(false);
+        }
+        while free > 0 {
+            let now = self.step_back()?;
+            if now >= free {
+                break;
+            }
+            free = now;
+        }
+        self.checkpoint()?;
+        Ok(true)
+    }
+
+    fn step_back(&self) -> Result<i64> {
+        self.with(|c| {
+            let mut step = c.prepare(&format!("PRAGMA incremental_vacuum({GIVE_BACK_STEP})"))?;
+            let mut rows = step.query([])?;
+            while rows.next()?.is_some() {}
+            drop(rows);
+            c.query_row("PRAGMA freelist_count", [], |r| r.get(0))
+        })
+    }
+
+    fn checkpoint(&self) -> Result<bool> {
+        self.with(|c| {
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |r| {
+                r.get::<_, i64>(0)
+            })
+        })
+        .map(|busy| busy != 0)
+    }
+
     pub fn tidy(&self) -> Result<()> {
         self.with(|c| c.execute_batch("PRAGMA wal_checkpoint(TRUNCATE); VACUUM;"))
     }
@@ -338,10 +378,10 @@ fn classify(e: rusqlite::Error) -> anyhow::Error {
 }
 
 fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
+    conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
     conn.pragma_update(None, "journal_mode", "WAL")?;
     conn.pragma_update(None, "synchronous", "NORMAL")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
-    conn.pragma_update(None, "auto_vacuum", "INCREMENTAL")?;
     let tx = conn.transaction()?;
     tx.execute_batch(SCHEMA)?;
     add_column(&tx, "note_tasks", "description", "TEXT NOT NULL DEFAULT ''")?;
@@ -390,6 +430,8 @@ fn add_column(
 }
 
 const MOST_OPEN: usize = 32;
+const GIVE_BACK_PAGES: i64 = 1_024;
+const GIVE_BACK_STEP: i64 = 256;
 
 static OPEN: OnceLock<Mutex<HashMap<PathBuf, Arc<Db>>>> = OnceLock::new();
 
@@ -952,6 +994,190 @@ mod task_descriptions {
                 Ok(())
             })
             .unwrap();
+        }
+    }
+}
+
+#[cfg(test)]
+mod giving_back {
+    use super::*;
+
+    fn filled(path: &Path, rows: usize) -> Db {
+        let db = Db::open(path).unwrap();
+        db.with(|c| {
+            let tx = c.transaction()?;
+            tx.execute_batch("CREATE TABLE filler (id INTEGER PRIMARY KEY, body TEXT NOT NULL)")?;
+            for n in 0..rows {
+                tx.execute(
+                    "INSERT INTO filler (id, body) VALUES (?1, ?2)",
+                    rusqlite::params![n as i64, format!("{n:06}{}", "x".repeat(1_994))],
+                )?;
+            }
+            tx.commit()?;
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+        })
+        .unwrap();
+        db
+    }
+
+    fn delete_below(db: &Db, below: usize) {
+        db.with(|c| {
+            c.execute("DELETE FROM filler WHERE id < ?1", [below as i64])?;
+            c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))
+        })
+        .unwrap();
+    }
+
+    fn sound(db: &Db) {
+        let answer: String = db
+            .with(|c| c.query_row("PRAGMA integrity_check", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(answer, "ok");
+    }
+
+    fn kept(db: &Db) -> Vec<(i64, String)> {
+        db.with(|c| {
+            let mut rows = c.prepare("SELECT id, body FROM filler ORDER BY id")?;
+            let found = rows.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?;
+            found.collect()
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_new_database_is_made_with_incremental_vacuum() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Db::open(&dir.path().join(FILE)).unwrap();
+        let mode: i64 = db
+            .with(|c| c.query_row("PRAGMA auto_vacuum", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(mode, 2);
+    }
+
+    #[test]
+    fn deleted_rows_give_their_space_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = filled(&dir.path().join(FILE), 4_010);
+        delete_below(&db, 4_000);
+        let before = db.bytes();
+        let left = kept(&db);
+        assert_eq!(left.len(), 10);
+        assert!(db.give_back().unwrap());
+        let after = db.bytes();
+        eprintln!("given back: {before} bytes before, {after} after");
+        assert!(after < 1_000_000, "{after}");
+        assert_eq!(kept(&db), left);
+        sound(&db);
+    }
+
+    #[test]
+    fn a_little_slack_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = filled(&dir.path().join(FILE), 2_000);
+        delete_below(&db, 1_000);
+        let before = db.bytes();
+        assert!(!db.give_back().unwrap());
+        assert_eq!(db.bytes(), before);
+        sound(&db);
+    }
+
+    #[test]
+    fn an_old_database_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        {
+            let old = Connection::open(&path).unwrap();
+            old.execute_batch("PRAGMA journal_mode = WAL; CREATE TABLE filler (id INTEGER PRIMARY KEY, body TEXT NOT NULL);")
+                .unwrap();
+        }
+        let db = Db::open(&path).unwrap();
+        let mode: i64 = db
+            .with(|c| c.query_row("PRAGMA auto_vacuum", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(mode, 0);
+        db.with(|c| {
+            for n in 0..4_000i64 {
+                c.execute(
+                    "INSERT INTO filler (id, body) VALUES (?1, ?2)",
+                    rusqlite::params![n, "x".repeat(2_000)],
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        delete_below(&db, 4_000);
+        assert!(!db.give_back().unwrap());
+        sound(&db);
+    }
+
+    #[test]
+    fn saves_and_reads_carry_on_while_space_is_given_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(filled(&dir.path().join(FILE), 6_000));
+        delete_below(&db, 5_990);
+        let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let writer = {
+            let (db, done) = (Arc::clone(&db), Arc::clone(&done));
+            std::thread::spawn(move || {
+                let mut n = 10_000i64;
+                while !done.load(std::sync::atomic::Ordering::Relaxed) {
+                    db.with(|c| {
+                        c.execute(
+                            "INSERT INTO filler (id, body) VALUES (?1, ?2)",
+                            rusqlite::params![n, format!("saved {n}")],
+                        )?;
+                        c.query_row("SELECT body FROM filler WHERE id = ?1", [n], |r| {
+                            r.get::<_, String>(0)
+                        })
+                    })
+                    .unwrap();
+                    n += 1;
+                }
+                n - 10_000
+            })
+        };
+        assert!(db.give_back().unwrap());
+        done.store(true, std::sync::atomic::Ordering::Relaxed);
+        let saved = writer.join().unwrap();
+        let rows = kept(&db);
+        assert_eq!(rows.len(), 10 + saved as usize);
+        assert!(rows[..10]
+            .iter()
+            .all(|(id, body)| body.starts_with(&format!("{id:06}"))));
+        sound(&db);
+    }
+
+    #[test]
+    #[ignore]
+    fn audit_bench_give_back() {
+        for megabytes in [50usize, 200, 1_000] {
+            let dir = tempfile::tempdir().unwrap();
+            let rows = megabytes * 500;
+            let db = filled(&dir.path().join(FILE), rows);
+            delete_below(&db, rows / 2);
+            let before = db.bytes();
+            let started = std::time::Instant::now();
+            let mut longest = 0f64;
+            let mut steps = 0;
+            let mut free = i64::MAX;
+            loop {
+                let at = std::time::Instant::now();
+                let now = db.step_back().unwrap();
+                longest = longest.max(at.elapsed().as_secs_f64() * 1e3);
+                steps += 1;
+                if now == 0 || now >= free {
+                    break;
+                }
+                free = now;
+            }
+            let busy = db.checkpoint().unwrap();
+            let total = started.elapsed().as_secs_f64() * 1e3;
+            sound(&db);
+            eprintln!(
+                "give back {megabytes} MB: {before} -> {} bytes, {steps} steps, longest step {longest:.2} ms, whole {total:.0} ms, checkpoint busy {busy}",
+                db.bytes()
+            );
+            assert!(!busy);
         }
     }
 }

@@ -292,6 +292,30 @@ const GRAPH_CHECK: std::time::Duration = std::time::Duration::from_secs(30);
 const PICTURES_PER_TICK: usize = 4;
 const KEEPING_EVERY: std::time::Duration = std::time::Duration::from_secs(86_400);
 const IDLE_CHECK: std::time::Duration = std::time::Duration::from_secs(30);
+const GIVE_BACK_EVERY: std::time::Duration = std::time::Duration::from_secs(3_600);
+const GIVE_BACK_IDLE: std::time::Duration = std::time::Duration::from_secs(600);
+
+async fn give_back_when_idle(state: AppState) {
+    let mut tick = tokio::time::interval_at(
+        tokio::time::Instant::now() + GIVE_BACK_EVERY,
+        GIVE_BACK_EVERY,
+    );
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        if state.activity.idle() < GIVE_BACK_IDLE
+            || state.capture_activity.busy()
+            || record::live(&state.recording)
+        {
+            continue;
+        }
+        let chats = state.chats.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            db::try_for_chats(&chats).and_then(|db| db.give_back())
+        })
+        .await;
+    }
+}
 
 async fn keep_graph_current(state: AppState) {
     let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + GRAPH_CHECK, GRAPH_CHECK);
@@ -503,6 +527,7 @@ struct Background {
     idle: tokio::task::JoinHandle<()>,
     expiry: tokio::task::JoinHandle<()>,
     calendar: tokio::task::JoinHandle<()>,
+    give_back: tokio::task::JoinHandle<()>,
 }
 
 impl Background {
@@ -511,6 +536,7 @@ impl Background {
         self.idle.abort();
         self.expiry.abort();
         self.calendar.abort();
+        self.give_back.abort();
     }
 }
 
@@ -680,6 +706,7 @@ pub(crate) async fn start_in(
         idle: tokio::spawn(stop_idle_sessions(Arc::clone(&state.warm))),
         expiry,
         calendar: tokio::spawn(calendar::offer_to_record(state.clone())),
+        give_back: tokio::spawn(give_back_when_idle(state.clone())),
     };
     let app = routes::router(state.clone()).layer(axum::middleware::from_fn(
         move |request: axum::extract::Request, next: axum::middleware::Next| {
