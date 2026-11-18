@@ -1472,11 +1472,11 @@
           drawChats();
           return false;
         }
-        if (!response.ok) throw new Error('Leo could not open that conversation. Try again.');
+        if (!response.ok) throw new Error('leo could not open that conversation. Try again.');
         chat = await response.json();
         if (mine !== resumeSeq) return null;
       } catch (e) {
-        if (mine === resumeSeq) notify('Leo could not open that conversation. Check your connection and try again.');
+        if (mine === resumeSeq) notify('leo could not open that conversation. Check your connection and try again.');
         return null;
       }
       state.id = chat.id;
@@ -1525,7 +1525,7 @@
         const response = await request(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if (!response.ok) throw new Error('delete failed');
       } catch (e) {
-        notify('Leo could not delete that conversation. Try again.');
+        notify('leo could not delete that conversation. Try again.');
         return;
       } finally {
         deleting.delete(id);
@@ -1703,7 +1703,7 @@
         state.files = [...state.files.slice(0, at), file, ...state.files.slice(at)];
         drawRefs();
       }
-      notify(`Leo could not remove ${file?.name || 'that document'}. Try again.`);
+      notify(`leo could not remove ${file?.name || 'that document'}. Try again.`);
     }
 
     let pickTimer = 0;
@@ -2573,7 +2573,7 @@
         const response = await request(`/api/chats/${encodeURIComponent(id)}/drop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2, total: stored().length }) });
         if (!response.ok) throw new Error();
       } catch (e) {
-        notify('Leo could not take back that reply. Try again.');
+        notify('leo could not take back that reply. Try again.');
         return null;
       } finally {
         state.preparingSend = false;

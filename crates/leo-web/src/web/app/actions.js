@@ -147,7 +147,7 @@ const actions = {
     go(dir ? `#/new/${enc(dir)}` : '#/new');
   },
   'search-ask': (el) => {
-    if (!chat.askNew(el.dataset.query)) toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+    if (!chat.askNew(el.dataset.query)) toast('Felix is still answering. Try again in a moment.', { bad: true });
   },
   'search-new': async (el) => {
     el.disabled = true;

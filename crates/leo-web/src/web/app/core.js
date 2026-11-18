@@ -581,7 +581,7 @@ window.addEventListener('hashchange', () => {
 function showSaveFailure(s, error, retry, current) {
   history.replaceState(history.state, '', s.note.id ? noteHash(s.note.id) : s.note.directory ? `#/new/${enc(s.note.directory)}` : '#/new');
   if (!s.persisted || error instanceof Locked) return fail(error);
-  toast(error instanceof Offline ? "Can't reach leo. Your draft is kept in this browser." : error.message || 'Leo could not save this note. Your draft is kept in this browser.', {
+  toast(error instanceof Offline ? "Can't reach leo. Your draft is kept in this browser." : error.message || 'leo could not save this note. Your draft is kept in this browser.', {
     bad: true,
     action: 'Leave, draft kept',
     run: () => { if (current() && s.persisted) return retry(s); },

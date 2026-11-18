@@ -343,7 +343,7 @@ async function quickGo(at) {
   }
   if (row.kind === 'ask') {
     closeSheet();
-    if (!chat.askNew(row.text)) toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+    if (!chat.askNew(row.text)) toast('Felix is still answering. Try again in a moment.', { bad: true });
     return;
   }
   if (row.kind === 'open' || row.kind === 'place' || row.kind === 'folder' || row.kind === 'search') {
@@ -354,7 +354,7 @@ async function quickGo(at) {
   }
   if (row.kind === 'chat') {
     if (chat.isBusy()) {
-      toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+      toast('Felix is still answering. Try again in a moment.', { bad: true });
       return;
     }
     closeSheet();
@@ -481,7 +481,7 @@ async function saveFolder(name, parent) {
     await loadSideFolders();
     return { kind: 'folder', dir: path };
   } catch (e) {
-    if (e.status === 409) toast('That folder already exists. Choose another name.', { bad: true });
+    if (e.status === 409) toast('That folder name is already in use. Choose another name.', { bad: true });
     else fail(e);
     return false;
   }
