@@ -865,6 +865,8 @@ fn a_very_long_search_uses_every_word_and_does_not_hold_the_notes_lock() {
         .chain(["zebra".to_string()])
         .collect::<Vec<_>>()
         .join(" ");
+    state.graphs.load();
+    searched(&state, serde_json::json!({ "q": "warm" }));
     let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let searching = {
         let state = state.clone();
