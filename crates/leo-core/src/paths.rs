@@ -123,9 +123,192 @@ pub fn open_regular(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     Ok(file)
 }
 
+pub mod own {
+    use std::path::{Path, PathBuf};
+
+    pub const CONFIG: &str = "config.toml";
+    pub const CREDENTIALS: &str = "credentials.json";
+    pub const CREDENTIALS_LOCK: &str = ".credentials.lock";
+    pub const SERVE_TOKEN: &str = "serve-token";
+    pub const APP_SESSIONS: &str = "app-sessions.json";
+    pub const DICTATION_LOCK: &str = ".dictation.lock";
+    pub const SPEECH_MODEL: &str = "speech-model.json";
+    pub const SPEECH_VERIFIED: &str = "speech-verified.json";
+    pub const SPEECH_LOCK: &str = ".speech.lock";
+    pub const SHADERS_READY: &str = "speech-shaders-ready";
+    pub const USAGE: &str = "usage.json";
+    pub const APP_PORT: &str = "app-port";
+    pub const APP_LAUNCHED: &str = "app-launched";
+    pub const APP_SETTINGS: &str = "app-settings.json";
+    pub const DICTATION: &str = "dictation.json";
+    pub const ACCESSIBILITY: &str = "accessibility-version";
+    pub const UPDATE_FOREGROUND: &str = "update-foreground";
+    pub const LOGIN_PATH: &str = "login-path";
+    pub const CLI_DIR: &str = "app-cli-dir";
+
+    pub const DATABASE: &str = "leo.db";
+    pub const KEEP: &str = "keep.json";
+    pub const UI_PREFS: &str = "ui-prefs.json";
+    pub const CALENDARS: &str = "calendars.json";
+    pub const CAPTIONS: &str = "captions.json";
+    pub const GRAPH: &str = "graph.json";
+    pub const MEANING: &str = "meaning.json";
+    pub const RECORDINGS: &str = "recordings";
+    pub const MODELS: &str = "models";
+    pub const ENV: &str = ".env";
+
+    pub const ORIGINALS: &str = "attachments";
+    pub const SOURCES: &str = "recording-sources";
+
+    pub const ALL: &[&str] = &[
+        CONFIG,
+        CREDENTIALS,
+        CREDENTIALS_LOCK,
+        SERVE_TOKEN,
+        APP_SESSIONS,
+        DICTATION_LOCK,
+        SPEECH_MODEL,
+        SPEECH_VERIFIED,
+        SPEECH_LOCK,
+        SHADERS_READY,
+        USAGE,
+        APP_PORT,
+        APP_LAUNCHED,
+        APP_SETTINGS,
+        DICTATION,
+        ACCESSIBILITY,
+        UPDATE_FOREGROUND,
+        LOGIN_PATH,
+        CLI_DIR,
+        DATABASE,
+        KEEP,
+        UI_PREFS,
+        CALENDARS,
+        CAPTIONS,
+        GRAPH,
+        MEANING,
+        RECORDINGS,
+        MODELS,
+        ENV,
+    ];
+    pub const MIGRATED: &[&str] = &[CAPTIONS, GRAPH, MEANING];
+    pub const BEFORE: &str = ".before-database";
+    pub const DATABASE_SIDES: &[&str] = &["-wal", "-shm"];
+    pub const DATABASE_REWRITE: &str = "leo.db.rewrite";
+    pub const DATABASE_REWRITE_READY: &str = "leo.db.rewrite-ready";
+    pub const KEPT_WITH_NOTES: &[&str] = &[ORIGINALS, SOURCES];
+    pub const LEGACY: &[&str] = &[
+        "serve-sessions.json",
+        "config.toml.new",
+        "update-check.json",
+        "recent.json",
+        ".manual-installed",
+        ".tour-completed",
+        "notes.json",
+        "notes.json.bak",
+    ];
+    pub const LEGACY_TEMP: &[&str] = &["leo-recording", "leo-live-", "leo-mic-probe-"];
+
+    pub fn damaged_stamp(at: chrono::DateTime<chrono::Utc>) -> String {
+        at.format("%Y%m%dT%H%M%SZ").to_string()
+    }
+
+    pub fn damaged_copy(database: &str, stamp: &str, n: usize) -> String {
+        if n > 1 {
+            format!("{database}.damaged-{stamp}-{n}")
+        } else {
+            format!("{database}.damaged-{stamp}")
+        }
+    }
+
+    fn is_damaged_copy(name: &str) -> bool {
+        let digits = |s: Option<&str>, len: usize| {
+            s.is_some_and(|s| s.len() == len && s.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let Some(rest) = name.strip_prefix("leo.db.damaged-") else {
+            return false;
+        };
+        if !digits(rest.get(..8), 8)
+            || rest.get(8..9) != Some("T")
+            || !digits(rest.get(9..15), 6)
+            || rest.get(15..16) != Some("Z")
+        {
+            return false;
+        }
+        let Some(rest) = rest.get(16..) else {
+            return false;
+        };
+        let rest = DATABASE_SIDES
+            .iter()
+            .find_map(|side| rest.strip_suffix(side))
+            .unwrap_or(rest);
+        match rest.strip_prefix('-') {
+            None => rest.is_empty(),
+            Some(n) => {
+                !n.starts_with('0')
+                    && n.bytes().all(|b| b.is_ascii_digit())
+                    && n.parse::<usize>().is_ok_and(|n| n >= 2)
+            }
+        }
+    }
+
+    pub fn listed(name: &str) -> bool {
+        let database = |base: &str| {
+            name.strip_prefix(base)
+                .is_some_and(|side| side.is_empty() || DATABASE_SIDES.contains(&side))
+        };
+        ALL.contains(&name)
+            || LEGACY.contains(&name)
+            || MIGRATED
+                .iter()
+                .any(|m| name.strip_prefix(m) == Some(BEFORE))
+            || [DATABASE, DATABASE_REWRITE, DATABASE_REWRITE_READY]
+                .into_iter()
+                .any(database)
+            || is_damaged_copy(name)
+    }
+
+    pub fn kept_with(notes: &Path) -> Vec<PathBuf> {
+        let beside = notes.parent().unwrap_or(notes);
+        std::iter::once(notes.to_path_buf())
+            .chain(KEPT_WITH_NOTES.iter().map(|name| beside.join(name)))
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_database_and_its_copies_are_listed_and_nothing_like_them() {
+        let stamp = own::damaged_stamp(chrono::Utc::now());
+        for n in [1, 2, 3, 12] {
+            for side in ["", "-wal", "-shm"] {
+                let name = own::damaged_copy("leo.db", &stamp, n) + side;
+                assert!(own::listed(&name), "{name}");
+            }
+        }
+        for name in [
+            "leo.db",
+            "leo.db-wal",
+            "leo.db.rewrite",
+            "leo.db.rewrite-ready",
+        ] {
+            assert!(own::listed(name), "{name}");
+        }
+        for name in [
+            "leo.db.damaged-",
+            "leo.db.damaged-20261117T101500",
+            "leo.db.damaged-20261117T101500Z-1",
+            "leo.db.damaged-20261117T101500Z-02",
+            "leo.db.damaged-20261117T101500Z.bak",
+            "leo.dbx",
+            "my-leo.db.damaged-20261117T101500Z",
+        ] {
+            assert!(!own::listed(name), "{name}");
+        }
+    }
 
     #[test]
     fn leo_home_holds_everything() {
