@@ -5312,7 +5312,23 @@ mod tests {
     }
 
     fn append(path: &Path, text: &str) {
-        let old = fs::read_to_string(path).unwrap();
+        let old = fs::read_to_string(path).unwrap_or_else(|error| {
+            let folder = path.parent().unwrap();
+            let mut names: Vec<String> = fs::read_dir(folder)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                        .collect()
+                })
+                .unwrap_or_default();
+            names.sort();
+            panic!(
+                "appending {text:?}: {} is missing ({error}); {} holds {names:?}",
+                path.display(),
+                folder.display()
+            )
+        });
         fs::write(path, format!("{old}{text}\n")).unwrap();
     }
 
