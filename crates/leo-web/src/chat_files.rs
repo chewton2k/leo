@@ -1,12 +1,16 @@
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, ensure, Result};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
 use crate::chats::valid_id;
 
 pub const UPLOAD_BYTES: usize = 40 * 1024 * 1024;
+pub const KEPT_WHOLE: usize = 2_000_000;
+pub const PIECE_CHARS: usize = 64_000;
+const PIECES_AT_ONCE: usize = 16;
+const CUT_NOTE: &str = "\n\n[…the rest of this document is left out]";
 pub const ORPHAN_HOURS: i64 = 24;
 pub const EXCERPT_CHARS: usize = 320;
 
@@ -192,13 +196,12 @@ pub fn texts(
                 )?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
-            let mut read = c.prepare("SELECT substr(text, 1, ?2) FROM chat_docs WHERE id = ?1")?;
             named
                 .into_iter()
                 .enumerate()
                 .map(|(i, doc)| {
                     let head = if i < heads {
-                        read.query_row(rusqlite::params![doc.id, most as i64], |r| r.get(0))?
+                        range(c, &doc.id, 0, most)?
                     } else {
                         String::new()
                     };
@@ -209,17 +212,68 @@ pub fn texts(
         .unwrap_or_default()
 }
 
+fn cuts_of(c: &rusqlite::Connection, doc: &str) -> rusqlite::Result<Option<Vec<usize>>> {
+    let stored: Option<String> =
+        c.query_row("SELECT cuts FROM chat_docs WHERE id = ?1", [doc], |r| {
+            r.get(0)
+        })?;
+    Ok(stored.and_then(|json| serde_json::from_str(&json).ok()))
+}
+
+fn range(
+    c: &rusqlite::Connection,
+    doc: &str,
+    from: usize,
+    chars: usize,
+) -> rusqlite::Result<String> {
+    let Some(cuts) = cuts_of(c, doc)? else {
+        return c.query_row(
+            "SELECT substr(text, ?2, ?3) FROM chat_docs WHERE id = ?1",
+            rusqlite::params![doc, from as i64 + 1, chars as i64],
+            |r| r.get(0),
+        );
+    };
+    let end = from.saturating_add(chars);
+    let mut out = String::new();
+    let mut start = 0usize;
+    for (n, len) in cuts.iter().enumerate() {
+        let stop = start + len;
+        if stop > from && start < end {
+            let piece: String = c.query_row(
+                "SELECT text FROM chat_doc_parts WHERE doc = ?1 AND n = ?2",
+                rusqlite::params![doc, n as i64],
+                |r| r.get(0),
+            )?;
+            out.extend(
+                piece
+                    .chars()
+                    .skip(from.saturating_sub(start))
+                    .take(end.min(stop) - start.max(from)),
+            );
+        }
+        start = stop;
+        if start >= end {
+            break;
+        }
+    }
+    Ok(out)
+}
+
 pub fn part(dir: &Path, chat: &str, doc: &str, from: usize, chars: usize) -> Option<String> {
     if !valid_id(chat) || !valid_doc(doc) {
         return None;
     }
     crate::chats::db_of(dir)
         .with(|c| {
-            c.query_row(
-                "SELECT substr(text, ?3, ?4) FROM chat_docs WHERE id = ?1 AND chat = ?2",
-                rusqlite::params![doc, chat, from as i64, chars as i64],
+            let here: i64 = c.query_row(
+                "SELECT COUNT(*) FROM chat_docs WHERE id = ?1 AND chat = ?2",
+                [doc, chat],
                 |r| r.get(0),
-            )
+            )?;
+            if here == 0 {
+                return Err(rusqlite::Error::QueryReturnedNoRows);
+            }
+            range(c, doc, from.saturating_sub(1), chars)
         })
         .ok()
 }
@@ -265,6 +319,221 @@ pub fn held(dir: &Path) -> Vec<Held> {
         .unwrap_or_default()
 }
 
+static ARRIVING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+fn arriving() -> std::sync::MutexGuard<'static, Vec<String>> {
+    ARRIVING.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub struct Intake {
+    dir: std::path::PathBuf,
+    chat: String,
+    name: String,
+    doc: String,
+    started: bool,
+    carry: Vec<u8>,
+    pending: String,
+    pending_chars: usize,
+    pieces: bool,
+    head: String,
+    cuts: Vec<usize>,
+    text_bytes: u64,
+    batch: Vec<(i64, String)>,
+    stored: i64,
+    done: bool,
+}
+
+impl Intake {
+    pub fn new(dir: &Path, chat: &str, name: &str) -> Result<Intake> {
+        ensure!(valid_id(chat), "that is not a chat");
+        let doc = uuid::Uuid::new_v4().simple().to_string();
+        arriving().push(doc.clone());
+        Ok(Intake {
+            dir: dir.to_path_buf(),
+            chat: chat.to_string(),
+            name: name.chars().take(120).collect(),
+            doc,
+            started: false,
+            carry: Vec::new(),
+            pending: String::new(),
+            pending_chars: 0,
+            pieces: false,
+            head: String::new(),
+            cuts: Vec::new(),
+            text_bytes: 0,
+            batch: Vec::new(),
+            stored: 0,
+            done: false,
+        })
+    }
+
+    fn push(&mut self, text: &str) -> Result<()> {
+        let text = if self.started {
+            text
+        } else {
+            text.trim_start()
+        };
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.started = true;
+        self.pending.push_str(text);
+        self.pending_chars += text.chars().count();
+        if !self.pieces && self.pending_chars > KEPT_WHOLE {
+            self.pieces = true;
+            self.head = self.pending.chars().take(KEPT_WHOLE).collect();
+        }
+        if self.pieces {
+            while self.pending_chars > PIECE_CHARS {
+                self.cut()?;
+            }
+        }
+        Ok(())
+    }
+
+    fn cut(&mut self) -> Result<()> {
+        let end = self
+            .pending
+            .char_indices()
+            .nth(PIECE_CHARS)
+            .map_or(self.pending.len(), |(at, _)| at);
+        let at = [
+            self.pending[..end].rfind("\n\n").map(|i| i + 2),
+            self.pending[..end].rfind('\n').map(|i| i + 1),
+        ]
+        .into_iter()
+        .flatten()
+        .find(|at| *at > end / 2)
+        .unwrap_or(end);
+        let rest = self.pending.split_off(at);
+        let piece = std::mem::replace(&mut self.pending, rest);
+        self.pending_chars -= piece.chars().count();
+        self.keep(piece)
+    }
+
+    fn keep(&mut self, piece: String) -> Result<()> {
+        self.cuts.push(piece.chars().count());
+        self.text_bytes += piece.len() as u64;
+        self.batch.push((self.stored, piece));
+        self.stored += 1;
+        if self.batch.len() >= PIECES_AT_ONCE {
+            self.flush()?;
+        }
+        Ok(())
+    }
+
+    fn flush(&mut self) -> Result<()> {
+        let batch = std::mem::take(&mut self.batch);
+        if batch.is_empty() {
+            return Ok(());
+        }
+        let doc = &self.doc;
+        crate::chats::db_of(&self.dir).with(|c| {
+            let t = c.transaction()?;
+            {
+                let mut put =
+                    t.prepare("INSERT INTO chat_doc_parts (doc, n, text) VALUES (?1, ?2, ?3)")?;
+                for (n, text) in &batch {
+                    put.execute(rusqlite::params![doc, n, text])?;
+                }
+            }
+            t.commit()
+        })
+    }
+
+    pub fn finish(mut self, now: DateTime<Utc>) -> Result<Doc> {
+        if !self.carry.is_empty() {
+            let rest = String::from_utf8_lossy(&std::mem::take(&mut self.carry)).into_owned();
+            self.push(&rest)?;
+        }
+        let tail = self.pending.trim_end().to_string();
+        if !self.pieces {
+            ensure!(
+                !tail.is_empty(),
+                "there is no text in {} for Felix to read",
+                self.name
+            );
+            let doc = add(&self.dir, &self.chat, &self.name, &tail, now)?;
+            self.done = true;
+            return Ok(doc);
+        }
+        self.pending.clear();
+        if !tail.is_empty() {
+            self.keep(tail)?;
+        }
+        self.flush()?;
+        let chars: usize = self.cuts.iter().sum();
+        let doc = Doc {
+            id: self.doc.clone(),
+            chars,
+            bytes: self.text_bytes + self.name.len() as u64,
+            name: self.name.clone(),
+            added_at: now,
+            excerpt: excerpt_of(&self.head),
+        };
+        let kept = format!("{}{CUT_NOTE}", self.head);
+        let cuts = serde_json::to_string(&self.cuts)?;
+        crate::chats::db_of(&self.dir).with(|c| {
+            insert(c, &self.chat, &doc, &kept)?;
+            c.execute(
+                "UPDATE chat_docs SET cuts = ?2 WHERE id = ?1",
+                rusqlite::params![doc.id, cuts],
+            )
+        })?;
+        self.done = true;
+        Ok(doc)
+    }
+}
+
+impl std::io::Write for Intake {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.carry.extend_from_slice(bytes);
+        let whole = match std::str::from_utf8(&self.carry) {
+            Ok(_) => self.carry.len(),
+            Err(e) if e.error_len().is_none() => e.valid_up_to(),
+            Err(_) => self.carry.len(),
+        };
+        let rest = self.carry.split_off(whole);
+        let text = String::from_utf8_lossy(&std::mem::replace(&mut self.carry, rest)).into_owned();
+        self.push(&text).map_err(std::io::Error::other)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for Intake {
+    fn drop(&mut self) {
+        if !self.done && self.stored > 0 {
+            let doc = self.doc.clone();
+            let _ = crate::chats::db_of(&self.dir)
+                .with(|c| c.execute("DELETE FROM chat_doc_parts WHERE doc = ?1", [&doc]));
+        }
+        arriving().retain(|doc| *doc != self.doc);
+    }
+}
+
+fn sweep_parts(c: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let docs: Vec<String> = {
+        let mut found = c.prepare("SELECT DISTINCT doc FROM chat_doc_parts")?;
+        let rows = found.query_map([], |r| r.get(0))?;
+        rows.collect::<rusqlite::Result<_>>()?
+    };
+    for doc in docs {
+        let live: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM chat_docs WHERE id = ?1)",
+            [&doc],
+            |r| r.get(0),
+        )?;
+        if !live && !arriving().contains(&doc) {
+            c.execute("DELETE FROM chat_doc_parts WHERE doc = ?1", [&doc])?;
+        }
+    }
+    Ok(())
+}
+
 pub fn tidy_orphans(dir: &Path, now: DateTime<Utc>) -> usize {
     let cutoff = (now - chrono::Duration::hours(ORPHAN_HOURS))
         .to_rfc3339_opts(chrono::SecondsFormat::Micros, true);
@@ -282,6 +551,7 @@ pub fn tidy_orphans(dir: &Path, now: DateTime<Utc>) -> usize {
                 [&cutoff],
             )?;
             t.commit()?;
+            sweep_parts(c)?;
             Ok(orphans as usize)
         })
         .unwrap_or(0)
@@ -543,5 +813,181 @@ mod tests {
         let tomorrow = at(1) + chrono::Duration::hours(25);
         assert_eq!(tidy_orphans(dir, tomorrow), 0);
         assert_eq!(list(dir, "chat-kept-0002").len(), 1);
+    }
+
+    fn long_text(chars: usize) -> String {
+        let mut out = String::with_capacity(chars + 64);
+        let mut n = 0;
+        while out.len() < chars {
+            out.push_str(&format!("line {n} of the long document\n"));
+            n += 1;
+        }
+        out.truncate(chars);
+        out.trim_end().to_string()
+    }
+
+    fn taken(dir: &Path, chat: &str, name: &str, text: &str) -> Doc {
+        use std::io::Write;
+        let mut intake = Intake::new(dir, chat, name).unwrap();
+        for piece in text.as_bytes().chunks(50_000) {
+            intake.write_all(piece).unwrap();
+        }
+        intake.finish(at(1)).unwrap()
+    }
+
+    fn count(dir: &Path, sql: &str) -> i64 {
+        crate::chats::db_of(dir)
+            .with(|c| c.query_row(sql, [], |r| r.get(0)))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_long_document_is_kept_whole_and_read_to_its_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let text = long_text(5_000_000);
+        let doc = taken(&dir, "chat-aaaa-1", "book.txt", &text);
+        assert_eq!(doc.chars, text.len());
+        let listed = list(&dir, "chat-aaaa-1");
+        assert_eq!(listed[0].chars, doc.chars);
+        assert_eq!(listed[0].bytes, text.len() as u64 + 8);
+        let last = part(&dir, "chat-aaaa-1", &doc.id, doc.chars - 999, 5_000).unwrap();
+        assert_eq!(last, text[text.len() - 1000..]);
+        let across = part(&dir, "chat-aaaa-1", &doc.id, 63_990, 40).unwrap();
+        assert_eq!(across, text[63_989..64_029]);
+        assert!(count(&dir, "SELECT MAX(length(text)) FROM chat_doc_parts") <= PIECE_CHARS as i64);
+        let texts = texts(
+            &dir,
+            "chat-aaaa-1",
+            std::slice::from_ref(&doc.id),
+            100_000,
+            1,
+        );
+        assert_eq!(texts[0].1, text[..100_000]);
+        assert_eq!(texts[0].0.chars, doc.chars);
+    }
+
+    #[test]
+    fn an_older_leo_still_sees_the_first_two_million_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let text = long_text(2_100_000);
+        let doc = taken(&dir, "chat-aaaa-1", "book.txt", &text);
+        let kept: String = crate::chats::db_of(&dir)
+            .with(|c| {
+                c.query_row("SELECT text FROM chat_docs WHERE id = ?1", [&doc.id], |r| {
+                    r.get(0)
+                })
+            })
+            .unwrap();
+        assert_eq!(kept.chars().count(), KEPT_WHOLE + CUT_NOTE.chars().count());
+        assert!(kept.starts_with(&text[..KEPT_WHOLE]));
+        assert!(kept.ends_with("[…the rest of this document is left out]"));
+        assert_eq!(doc.chars, text.len());
+    }
+
+    #[test]
+    fn a_short_document_keeps_its_one_text_and_no_pieces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let doc = taken(&dir, "chat-aaaa-1", "a.txt", "  Week 3\n\nHeaps.\n\n  ");
+        assert_eq!(doc.chars, 14);
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 0);
+        assert_eq!(part(&dir, "chat-aaaa-1", &doc.id, 1, 6).unwrap(), "Week 3");
+    }
+
+    #[test]
+    fn a_removed_document_takes_its_pieces() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let text = long_text(2_300_000);
+        let first = taken(&dir, "chat-aaaa-1", "a.txt", &text);
+        taken(&dir, "chat-aaaa-1", "b.txt", &text);
+        taken(&dir, "chat-bbbb-1", "c.txt", &text);
+        let held = count(&dir, "SELECT COUNT(*) FROM chat_doc_parts");
+        assert!(remove(&dir, "chat-aaaa-1", &first.id));
+        assert_eq!(
+            count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"),
+            held / 3 * 2
+        );
+        assert!(remove_all(&dir, "chat-aaaa-1"));
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), held / 3);
+        raw(&dir, "DELETE FROM chat_docs");
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 0);
+        raw(&dir, "INSERT INTO chat_doc_parts VALUES ('stray', 0, 'x')");
+        let arriving = Intake::new(&dir, "chat-aaaa-1", "d.txt").unwrap();
+        raw(
+            &dir,
+            &format!(
+                "INSERT INTO chat_doc_parts VALUES ('{}', 0, 'y')",
+                arriving.doc
+            ),
+        );
+        tidy_orphans(&dir, at(23));
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 1);
+        drop(arriving);
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 1);
+    }
+
+    #[test]
+    fn a_read_that_fails_leaves_no_pieces() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let text = long_text(3_000_000);
+        let mut intake = Intake::new(&dir, "chat-aaaa-1", "a.txt").unwrap();
+        for piece in text.as_bytes().chunks(50_000) {
+            intake.write_all(piece).unwrap();
+        }
+        assert!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts") > 0);
+        drop(intake);
+        assert_eq!(count(&dir, "SELECT COUNT(*) FROM chat_doc_parts"), 0);
+        assert!(list(&dir, "chat-aaaa-1").is_empty());
+        assert!(taken_empty(&dir));
+    }
+
+    fn taken_empty(dir: &Path) -> bool {
+        use std::io::Write;
+        let mut intake = Intake::new(dir, "chat-aaaa-1", "blank.txt").unwrap();
+        intake.write_all(b"   \n ").unwrap();
+        intake.finish(at(1)).is_err()
+    }
+
+    #[test]
+    fn an_exported_long_document_is_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let text = long_text(4_500_000);
+        let doc = taken(&dir, "chat-aaaa-1", "book.txt", &text);
+        let whole = |doc: &str| {
+            let mut out = String::new();
+            loop {
+                let piece =
+                    part(&dir, "chat-aaaa-1", doc, out.chars().count() + 1, 1_000_000).unwrap();
+                if piece.is_empty() {
+                    return out;
+                }
+                out.push_str(&piece);
+            }
+        };
+        assert_eq!(whole(&doc.id), text);
+        let short = taken(&dir, "chat-aaaa-1", "a.txt", "Heaps keep the minimum.");
+        assert_eq!(whole(&short.id), "Heaps keep the minimum.");
+    }
+
+    #[test]
+    fn a_character_split_between_writes_is_kept_whole() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let mut intake = Intake::new(&dir, "chat-aaaa-1", "a.txt").unwrap();
+        for byte in "héllo wörld ✓".as_bytes() {
+            intake.write_all(&[*byte]).unwrap();
+        }
+        let doc = intake.finish(at(1)).unwrap();
+        assert_eq!(
+            part(&dir, "chat-aaaa-1", &doc.id, 1, 100).unwrap(),
+            "héllo wörld ✓"
+        );
     }
 }

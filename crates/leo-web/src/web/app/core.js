@@ -88,7 +88,7 @@ const chat = felix.create({
   onOriginal: (note, name, at) => showPassage(note, name, at).catch(fail),
   prepare: async (file) => {
     const ready = await shrink(file);
-    return { name: ready.name, type: ready.type, data: await base64(ready.blob) };
+    return { name: ready.name, type: ready.type, blob: ready.blob };
   },
   notify: (message) => toast(message, { bad: true }),
   onLocked: () => showLocked(),

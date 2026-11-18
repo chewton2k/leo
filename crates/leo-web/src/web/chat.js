@@ -1785,11 +1785,10 @@
       };
       let reply;
       try {
-        const body = await prepare(file);
-        reply = await request(`/api/chats/${encodeURIComponent(chat)}/files`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+        const ready = await prepare(file);
+        reply = await request(`/api/chats/${encodeURIComponent(chat)}/files/${encodeURIComponent(ready.name)}?type=${encodeURIComponent(ready.type || '')}`, {
+          method: 'PUT',
+          body: ready.blob,
         });
       } catch (e) {
         notify(e.message || `Felix could not read ${file.name}.`);
@@ -1797,7 +1796,7 @@
       }
       if (!reply.ok) {
         const said = await sentenceOf(reply);
-        notify(said ? `Felix could not read ${file.name}: ${said}` : reply.status === 413 ? `${file.name} is too large for Felix.` : `Felix could not read ${file.name}.`);
+        notify(said ? `Felix could not read ${file.name}: ${said}` : `Felix could not read ${file.name}.`);
         return drop();
       }
       const doc = { ...(await reply.json()), key, status: 'ready', thumb };

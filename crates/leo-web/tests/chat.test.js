@@ -1670,3 +1670,39 @@ test('a refused save while Felix is answering waits for the reply instead of red
   assert.deepEqual(server.rows().slice(-2).map((m) => m.text), ['mine', 'Thinking']);
   assert.equal(state.messages.at(-1), streaming, 'the same message object stays on screen');
 });
+
+test('an attached file of any size is sent as one streamed PUT of its blob and never refused for its size', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const from = source.indexOf('    async function readFile(');
+  const code = source.slice(from, source.indexOf('    function cardOf(', from));
+  const requests = [];
+  const notices = [];
+  const big = { name: 'book.pdf', type: 'application/pdf', size: 3 * 1024 * 1024 * 1024 };
+  const context = {
+    encodeURIComponent,
+    JSON,
+    state: { id: 'chat-12345678', files: [{ key: 'k', name: 'book.pdf', status: 'reading' }] },
+    drawRefs() {},
+    thumbOf: async () => null,
+    prepare: async (file) => ({ name: file.name, type: file.type, blob: file }),
+    request: async (url, init) => {
+      requests.push({ url, init });
+      return { ok: true, status: 201, json: async () => ({ id: 'doc-1', name: 'book.pdf', chars: 9 }) };
+    },
+    sentenceOf: async () => '',
+    notify: (text) => notices.push(text),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\nthis.readFile = readFile;`, context);
+  const doc = await context.readFile(big, 'k', 'chat-12345678');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/chats/chat-12345678/files/book.pdf?type=application%2Fpdf');
+  assert.equal(requests[0].init.method, 'PUT');
+  assert.equal(requests[0].init.body, big);
+  assert.equal('headers' in requests[0].init, false);
+  assert.deepEqual(notices, []);
+  assert.equal(doc.id, 'doc-1');
+});

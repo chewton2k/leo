@@ -70,6 +70,15 @@ CREATE TABLE IF NOT EXISTS chat_docs (
     text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS chat_docs_by_chat ON chat_docs(chat, added_at);
+CREATE TABLE IF NOT EXISTS chat_doc_parts (
+    doc TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    PRIMARY KEY (doc, n)
+) WITHOUT ROWID;
+CREATE TRIGGER IF NOT EXISTS chat_docs_take_their_parts AFTER DELETE ON chat_docs BEGIN
+    DELETE FROM chat_doc_parts WHERE doc = old.id;
+END;
 CREATE TABLE IF NOT EXISTS reviewed (
     key TEXT PRIMARY KEY,
     n INTEGER NOT NULL
@@ -727,6 +736,7 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     add_column(&tx, "chat_docs", "chars", "INTEGER")?;
     add_column(&tx, "chat_docs", "bytes", "INTEGER")?;
     add_column(&tx, "chat_docs", "excerpt", "TEXT")?;
+    add_column(&tx, "chat_docs", "cuts", "TEXT")?;
     add_column(
         &tx,
         "margin_threads",

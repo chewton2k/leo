@@ -113,6 +113,73 @@ pub(crate) async fn add_chat_file(
     }
 }
 
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct FileKind {
+    #[serde(default, rename = "type")]
+    mime: String,
+}
+
+pub(crate) async fn put_chat_file(
+    State(state): State<AppState>,
+    Path((id, name)): Path<(String, String)>,
+    axum::extract::Query(kind): axum::extract::Query<FileKind>,
+    body: axum::body::Body,
+) -> Response {
+    let refuse = |status: StatusCode, message: String| {
+        (status, Json(serde_json::json!({ "error": message }))).into_response()
+    };
+    if !chats::valid_id(&id) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let Some(reader) = state.original_reader() else {
+        return refuse(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "This copy of leo cannot read files.".into(),
+        );
+    };
+    let name = safe_file_name(&name);
+    let (upload, item) = (
+        uuid::Uuid::new_v4().simple().to_string(),
+        uuid::Uuid::new_v4().simple().to_string(),
+    );
+    let sent = crate::routes::uploads::put_file(
+        State(state.clone()),
+        Path((upload.clone(), item.clone())),
+        axum::extract::Query(crate::routes::uploads::Named { name: name.clone() }),
+        body,
+    )
+    .await;
+    if !sent.status().is_success() {
+        return sent;
+    }
+    let folder = state
+        .notes_dir
+        .parent()
+        .unwrap_or(&state.notes_dir)
+        .join(leo_core::paths::own::INCOMING)
+        .join(&upload);
+    let dir = state.chats.clone();
+    let mime = kind.mime;
+    let (_guard, stop) = crate::stop_when_dropped();
+    let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
+        let made = (|| {
+            let mut intake = chat_files::Intake::new(&dir, &id, &name)?;
+            leo_core::children::with_stop(stop, || {
+                reader(&folder.join(&item), &name, &mime, &mut |_| {}, &mut intake)
+            })?;
+            intake.finish(chrono::Utc::now())
+        })();
+        let _ = std::fs::remove_dir_all(&folder);
+        made
+    })
+    .await;
+    match done {
+        Ok(Ok(doc)) => (StatusCode::CREATED, Json(doc)).into_response(),
+        Ok(Err(e)) => refuse(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    }
+}
+
 pub(crate) async fn remove_chat_file(
     State(state): State<AppState>,
     Path((id, doc)): Path<(String, String)>,

@@ -4472,3 +4472,111 @@ fn every_tool_that_organizes_or_lists_is_carried_out_by_the_engine() {
         );
     }
 }
+
+fn text_stream(megabytes: usize) -> impl futures_util::Stream<Item = std::io::Result<Vec<u8>>> {
+    futures_util::stream::iter((0..megabytes * 16).map(|n| {
+        let mut piece = String::new();
+        for line in 0..1024 {
+            piece.push_str(&format!("line {} of the long document\n", n * 1024 + line));
+        }
+        piece.truncate(64 * 1024);
+        piece.extend(std::iter::repeat_n('.', 64 * 1024 - piece.len()));
+        Ok(piece.into_bytes())
+    }))
+}
+
+fn copying_reader() -> crate::ReaderTo {
+    Arc::new(
+        |path: &std::path::Path,
+         _: &str,
+         _: &str,
+         _: &mut dyn FnMut(&str),
+         out: &mut dyn std::io::Write| {
+            std::io::copy(&mut std::fs::File::open(path)?, out)?;
+            Ok(())
+        },
+    )
+}
+
+fn put_document(state: &AppState, chat: &str, name: &str, megabytes: usize) -> Response {
+    run(crate::routes::felix::put_chat_file(
+        State(state.clone()),
+        Path((chat.into(), name.into())),
+        Query(crate::routes::felix::FileKind::default()),
+        axum::body::Body::from_stream(text_stream(megabytes)),
+    ))
+}
+
+#[test]
+fn a_document_of_any_size_is_attached_by_a_streamed_put_and_read_to_its_end() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(copying_reader());
+    let added = put_document(&state, "chat-docs-0003", "../book.txt", 5);
+    assert_eq!(added.status(), StatusCode::CREATED);
+    let doc = json_of(added);
+    assert_eq!(doc["name"], "book.txt");
+    let id = doc["id"].as_str().unwrap();
+    let chars = doc["chars"].as_u64().unwrap() as usize;
+    assert_eq!(chars, 5 * 1024 * 1024);
+    let last =
+        crate::chat_files::part(&state.chats, "chat-docs-0003", id, chars - 99, 500).unwrap();
+    assert_eq!(last.chars().count(), 100);
+    assert!(last.ends_with('.'));
+    let incoming = state.notes_dir.parent().unwrap().join("incoming");
+    assert!(
+        std::fs::read_dir(&incoming).map_or(true, |mut d| d.next().is_none()),
+        "the file that arrived is removed once it is read"
+    );
+    assert_eq!(
+        json_of(run(list_chat_files(
+            State(state.clone()),
+            Path("chat-docs-0003".into())
+        )))[0]["chars"],
+        doc["chars"]
+    );
+}
+
+#[test]
+fn a_document_leo_cannot_read_is_refused_with_its_name_and_leaves_nothing() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(Arc::new(
+        |_: &std::path::Path,
+         name: &str,
+         _: &str,
+         _: &mut dyn FnMut(&str),
+         _: &mut dyn std::io::Write| { anyhow::bail!("leo cannot read {name} yet") },
+    ));
+    let refused = put_document(&state, "chat-docs-0004", "song.mp3", 1);
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json_of(refused)["error"]
+        .as_str()
+        .unwrap()
+        .contains("song.mp3"));
+    assert!(crate::chat_files::list(&state.chats, "chat-docs-0004").is_empty());
+    let incoming = state.notes_dir.parent().unwrap().join("incoming");
+    assert!(std::fs::read_dir(&incoming).map_or(true, |mut d| d.next().is_none()));
+}
+
+#[test]
+#[ignore]
+fn a_big_document_is_attached_in_constant_memory() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(copying_reader());
+    let megabytes: usize = std::env::var("DOCUMENT_MB").unwrap().parse().unwrap();
+    let started = std::time::Instant::now();
+    let added = put_document(&state, "chat-docs-0005", "book.txt", megabytes);
+    assert_eq!(added.status(), StatusCode::CREATED);
+    println!("attached {megabytes} MB in {:?}", started.elapsed());
+    let doc = json_of(added);
+    let chars = doc["chars"].as_u64().unwrap() as usize;
+    let started = std::time::Instant::now();
+    crate::chat_files::part(
+        &state.chats,
+        "chat-docs-0005",
+        doc["id"].as_str().unwrap(),
+        chars - 999,
+        1_000,
+    )
+    .unwrap();
+    println!("last part in {:?}", started.elapsed());
+}

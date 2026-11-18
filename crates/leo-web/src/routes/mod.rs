@@ -31,7 +31,7 @@ use crate::routes::downloads::{export_zip, originals_zip};
 use crate::routes::felix::{
     add_chat_file, apply_suggestion, change_answer_access, chat_reply, delete_chat,
     drop_last_messages, get_chat, get_review, list_chat_files, list_chats, mark_reviewed, put_chat,
-    remove_chat_file, steer_answer,
+    put_chat_file, remove_chat_file, steer_answer,
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
@@ -273,7 +273,9 @@ pub(crate) fn router(state: AppState) -> Router {
         )
         .route(
             "/api/chats/{id}/files/{doc}",
-            axum::routing::delete(remove_chat_file),
+            axum::routing::delete(remove_chat_file)
+                .put(put_chat_file)
+                .layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route("/api/keep", get(get_keep).post(set_keep))
         .route("/api/keep/preview", post(housekeeping::preview_keep))

@@ -635,7 +635,9 @@ read (root CLAUDE.md, 2026-11-17).
   names who really answered. `Prefs.auto_model` turns it off.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
-- Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, deleted with the
+- Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed
+  `PUT /api/chats/{id}/files/{name}` into `<data>/incoming/`, is read through `Powers.reader_to` into `chat_files::Intake`, and a text over
+  `KEPT_WHOLE` (2,000,000 characters) is kept in pieces of at most `PIECE_CHARS` (64,000) in `chat_doc_parts` (`chat_docs.cuts` lists their lengths; `text` still holds the first 2,000,000 characters and the closing note, which is all an older leo reads); `part`, `texts` and the export read a piece at a time; a document's pieces go with its row (a trigger), and strays are swept by `tidy_orphans`; deleted with the
   chat, with its review marks. Add to note (`routes/insert.rs`) is version-checked and request ids
   dedupe. Chat titles are local; history shows titles only.
 - Felix draws only when asked to see, draw or visualize something (2026-11-14,
