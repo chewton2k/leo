@@ -1534,14 +1534,24 @@ async function deleteTask(id) {
   }
 }
 
-async function noteTasksSheet() {
+const NOTE_TASKS_PAGE = 100;
+var noteTasks = null;
+
+async function noteTasksSheet(keep = false) {
   const s = state.view === 'note' ? state.session : null;
   if (!s || !s.note.id) return;
   const ready = await ready_();
   if (!ready) return;
-  let listed = [];
+  const tracked = new Map();
   try {
-    listed = (await api(`/api/tasks?note=${enc(s.note.id)}&limit=500`)).tasks.filter((t) => t.note && t.note.id === s.note.id);
+    let offset = 0;
+    for (;;) {
+      const answer = await api(`/api/tasks?note=${enc(s.note.id)}&offset=${offset}&limit=500`);
+      const tasks = answer.tasks || [];
+      for (const t of tasks) if (t.note && t.note.id === s.note.id && !tracked.has(t.line)) tracked.set(t.line, t);
+      offset += tasks.length;
+      if (!tasks.length || offset >= (answer.total ?? 0)) break;
+    }
   } catch (e) {
     if (e instanceof Locked) throw e;
   }
@@ -1551,14 +1561,35 @@ async function noteTasksSheet() {
   const boxes = lines
     .map((line, n) => ({ n, m: line.match(task)?.groups }))
     .filter((b) => b.m && b.m.text.trim());
-  const rows = boxes.slice(0, 200).map((b) => {
-    const tracked = listed.find((t) => t.line === b.n);
-    return `<div class="set-row"><span class="grow">${b.m.mark !== ' ' ? '<s>' : ''}${esc(b.m.text.trim())}${b.m.mark !== ' ' ? '</s>' : ''}</span>${tracked ? `<button type="button" class="btn plain sm" data-action="task-open-here" data-id="${esc(tracked.id)}">In your tasks</button>` : `<button type="button" class="btn sm" data-action="task-promote" data-line="${b.n}">Add to tasks</button>`}</div>`;
-  }).join('');
+  const held = keep && noteTasks && noteTasks.note === s.note.id ? noteTasks.shown : 0;
+  noteTasks = { note: s.note.id, boxes, tracked, shown: Math.min(boxes.length, Math.max(NOTE_TASKS_PAGE, held)) };
   sheet(`<h3>Tasks in this note</h3>
     <p class="hint">Checkboxes under an Action items heading are tasks already. Add any other checkbox to show it on the Calendar.</p>
-    ${rows || '<p class="hint">This note has no checkboxes yet.</p>'}
+    ${boxes.length ? `<div id="note-task-rows">${noteTaskRows(0, noteTasks.shown)}</div>${noteTaskFoot()}` : '<p class="hint">This note has no checkboxes yet.</p>'}
     ${sheetButtons(['Open the Calendar', 'data-action="calendar"'], { cancel: 'Close' })}`);
+}
+
+function noteTaskRows(from, to) {
+  return noteTasks.boxes.slice(from, to).map((b) => {
+    const tracked = noteTasks.tracked.get(b.n);
+    return `<div class="set-row"><span class="grow">${b.m.mark !== ' ' ? '<s>' : ''}${esc(b.m.text.trim())}${b.m.mark !== ' ' ? '</s>' : ''}</span>${tracked ? `<button type="button" class="btn plain sm" data-action="task-open-here" data-id="${esc(tracked.id)}">In your tasks</button>` : `<button type="button" class="btn sm" data-action="task-promote" data-line="${b.n}">Add to tasks</button>`}</div>`;
+  }).join('');
+}
+
+function noteTaskFoot() {
+  const left = noteTasks.boxes.length - noteTasks.shown;
+  return left > 0 ? `<div id="note-task-foot"><button type="button" class="btn plain" id="note-task-more" data-action="note-tasks-more">Show more</button> <span class="hint">${left} more</span></div>` : '';
+}
+
+function noteTasksMore() {
+  const rows = $('#note-task-rows');
+  const foot = $('#note-task-foot');
+  if (!noteTasks || !rows || !foot) return;
+  const from = noteTasks.shown;
+  noteTasks.shown = Math.min(noteTasks.boxes.length, from + NOTE_TASKS_PAGE);
+  rows.insertAdjacentHTML('beforeend', noteTaskRows(from, noteTasks.shown));
+  if (noteTasks.shown >= noteTasks.boxes.length) foot.remove();
+  else foot.innerHTML = noteTaskFoot().replace(/^<div[^>]*>|<\/div>$/g, '');
 }
 
 async function ready_() {
@@ -1577,7 +1608,7 @@ async function promoteTask(line) {
   try {
     const task = await api('/api/tasks/promote', { method: 'POST', body: { note: s.note.id, line: Number(line) } });
     toast(`Added “${task?.title || 'Untitled'}” to your tasks`, { action: 'Calendar', run: () => go('#/calendar') });
-    await noteTasksSheet();
+    await noteTasksSheet(true);
   } catch (e) {
     if (e instanceof Locked) throw e;
     toast(e.status === 400 ? 'That line is not a checkbox any more.' : e.message, { bad: true });

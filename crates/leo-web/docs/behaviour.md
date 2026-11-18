@@ -1329,6 +1329,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   top). The Tasks card starts folded every time and opens only while the mouse
   is over it or keyboard focus is inside it (`:hover`, `:focus-within`); nothing
   is saved and a click never pins it open.
+- A note's Tasks sheet (the note menu's Tasks) lists every checkbox, 100 rows at a time with
+  Show more (2026-11-17, no limit on data). It learns which checkboxes are tracked from
+  `/api/tasks?note=<id>` read 500 at a time until `total` is covered, into a table by line.
 
 PDF export keeps Windows' native print function (Tauri calls it internally),
 uses the native bridge on macOS, and reports bridge errors without losing the
