@@ -78,6 +78,7 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
+Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
 Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
 never for call tracks; omitted from JSON when off, so old cache keys hold):

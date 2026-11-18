@@ -75,13 +75,36 @@ pub struct Request {
     pub screen: bool,
     pub input: Source,
     pub draft: Option<DraftFn>,
+    pub turns: bool,
 }
 
 pub fn transcribe_segment() -> TranscribeFn {
     Arc::new(|path: &Path| {
         let session = Session::open(path.parent().unwrap_or(Path::new("."))).ok();
         let start = Instant::now();
-        let outcome = crate::ai::transcribe_outcome(path).map_err(|e| e.to_string());
+        let turns = session
+            .as_ref()
+            .filter(|s| s.manifest.turns)
+            .zip(path.file_name().and_then(|name| name.to_str()))
+            .and_then(|(s, name)| match session::index_of(name) {
+                Some((index, "wav")) => Some(s.dir.join(session::turns_name(index))),
+                _ => None,
+            });
+        let outcome = match turns {
+            Some(file) => crate::ai::transcribe_turns(path)
+                .and_then(|timed| {
+                    leo_core::paths::write_atomic(&file, &serde_json::to_string(&timed)?)?;
+                    let texts: Vec<&str> = timed.iter().map(|(_, text)| text.as_str()).collect();
+                    Ok(crate::ai::chain::ChainOutcome {
+                        value: crate::speech::chunking::join_transcripts(&texts),
+                        provider: "local speech with times".into(),
+                        fallbacks: Vec::new(),
+                        spent: None,
+                    })
+                })
+                .map_err(|e| e.to_string()),
+            None => crate::ai::transcribe_outcome(path).map_err(|e| e.to_string()),
+        };
         if let Some(session) = session {
             let detail = match &outcome {
                 Ok(o) => format!(
@@ -809,6 +832,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         screen,
         input,
         draft,
+        turns,
     } = request;
     let labelled = profile.as_ref().is_some_and(|p| p.speakers);
     let drafting = draft.is_some() && append_to.is_none() && !labelled;
@@ -823,6 +847,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         if let Some(profile) = profile {
             manifest.profile = profile;
         }
+        manifest.turns = turns;
         let session = Session::create(&root, manifest)?;
         session.trace("capture", "Recording started");
         session.trace("drafting", if drafting { "on" } else { "off" });

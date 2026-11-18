@@ -6,7 +6,7 @@ use regex::Regex;
 use std::sync::LazyLock as Lazy;
 
 use super::constants;
-use super::vad::SpeechScorer;
+use super::vad::{SpeechScorer, SILERO_VAD_THRESHOLD};
 
 const RATE: usize = constants::WHISPER_SAMPLE_RATE as usize;
 
@@ -140,6 +140,26 @@ fn plan_cuts(candidates: &[CutCandidate], samples: usize, from: usize) -> Vec<us
 
 pub type MakeScorer = Box<dyn Fn() -> Result<Box<dyn SpeechScorer>> + Send>;
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct Piece {
+    pub pcm: Vec<f32>,
+    pub start: u64,
+    pub onset: u64,
+}
+
+impl std::ops::Deref for Piece {
+    type Target = [f32];
+    fn deref(&self) -> &[f32] {
+        &self.pcm
+    }
+}
+
+impl std::borrow::Borrow<[f32]> for Piece {
+    fn borrow(&self) -> &[f32] {
+        &self.pcm
+    }
+}
+
 pub struct Chunker {
     make_scorer: MakeScorer,
     scorer: Option<Box<dyn SpeechScorer>>,
@@ -169,7 +189,7 @@ impl Chunker {
         self.len
     }
 
-    pub fn push(&mut self, pcm: impl Into<Vec<f32>>) -> Vec<Vec<f32>> {
+    pub fn push(&mut self, pcm: impl Into<Vec<f32>>) -> Vec<Piece> {
         let pcm = pcm.into();
         self.len += pcm.len();
         if self.pending.is_empty() {
@@ -202,7 +222,7 @@ impl Chunker {
         chunks
     }
 
-    pub fn finish(&mut self) -> Vec<Vec<f32>> {
+    pub fn finish(&mut self) -> Vec<Piece> {
         let mut chunks = Vec::new();
         if !self.uncut && self.len - self.start > MAX_CHUNK_SAMPLES {
             match self.score(true) {
@@ -258,15 +278,26 @@ impl Chunker {
         self.uncut = true;
     }
 
-    fn take_until(&mut self, cut: usize) -> Vec<f32> {
+    fn take_until(&mut self, cut: usize) -> Piece {
         debug!(
             "Long-form chunk: {:.1}-{:.1}s",
             seconds(self.start),
             seconds(cut)
         );
-        let chunk = self.pending.drain(..cut - self.start).collect();
+        let start = self.start;
+        let onset = match self.frame_samples {
+            0 => start,
+            frame => (start / frame..cut.div_ceil(frame).min(self.probs.len()))
+                .find(|&i| self.probs[i] >= SILERO_VAD_THRESHOLD)
+                .map_or(start, |i| (i * frame).max(start)),
+        };
+        let pcm = self.pending.drain(..cut - start).collect();
         self.start = cut;
-        chunk
+        Piece {
+            pcm,
+            start: start as u64,
+            onset: onset as u64,
+        }
     }
 }
 
@@ -337,11 +368,11 @@ mod tests {
             .collect()
     }
 
-    fn lengths(chunks: &[Vec<f32>]) -> Vec<usize> {
-        chunks.iter().map(Vec::len).collect()
+    fn lengths(chunks: &[Piece]) -> Vec<usize> {
+        chunks.iter().map(|chunk| chunk.len()).collect()
     }
 
-    fn cuts(chunks: &[Vec<f32>]) -> Vec<f64> {
+    fn cuts(chunks: &[Piece]) -> Vec<f64> {
         let mut end = 0;
         chunks[..chunks.len().saturating_sub(1)]
             .iter()
@@ -519,5 +550,22 @@ mod tests {
         chunks.extend(chunker.finish());
         assert_eq!(cuts(&chunks), vec![29.5]);
         assert_eq!(chunks.concat(), pcm, "no audio lost");
+    }
+
+    #[test]
+    fn a_piece_is_stamped_at_its_first_speech() {
+        let pcm = clip(&probs_with_pauses(60.0, &[(0.0, 20.0), (35.0, 36.0)]));
+        let (mut chunker, _) = chunker();
+        let mut pieces = chunker.push(&pcm[..]);
+        pieces.extend(chunker.finish());
+        assert_eq!(cuts(&pieces), vec![35.5]);
+        assert_eq!(pieces[0].start, 0);
+        assert_eq!(pieces[0].onset, s(20.0) as u64);
+        assert_eq!(pieces[1].start, pieces[0].len() as u64);
+        assert_eq!(
+            pieces[1].onset,
+            s(36.0).div_ceil(FRAME) as u64 * FRAME as u64
+        );
+        assert_eq!(pieces.concat(), pcm);
     }
 }

@@ -113,6 +113,24 @@ pub fn transcribe_outcome(audio_path: &Path) -> Result<chain::ChainOutcome<Strin
     transcribe::run(&cfg, &store, audio_path)
 }
 
+pub fn transcribe_turns(audio_path: &Path) -> Result<Vec<(u64, String)>> {
+    use provider::TranscribeProvider;
+    let cfg = Config::load();
+    let Some(speech) = cfg.transcribe.chain.iter().find_map(|name| {
+        cfg.provider(name)
+            .filter(|p| p.kind == Some(crate::config::provider::ProviderKind::Parakeet))
+            .map(|p| provider::local_speech::LocalSpeech::new(name.clone(), p))
+    }) else {
+        anyhow::bail!(
+            "no AI for speech is chosen — open Settings in leo and pick one under speech"
+        );
+    };
+    anyhow::ensure!(speech.available(), "{}", speech.unavailable_reason());
+    speech
+        .transcribe_timed(audio_path)
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
 /// One chat completion through the configured chain, without printing.
 pub fn chat_outcome(prompt: chat::Prompt, max_tokens: u32) -> Result<chain::ChainOutcome<String>> {
     outcome_with(Config::clone, prompt, max_tokens)

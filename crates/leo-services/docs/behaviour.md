@@ -76,6 +76,7 @@ order. `recover_parts` seals a crash's `.part.wav` and clears `.err` for retry.
 `ai::long::structure_recording` groups parts by a `words_per_group` limit (`long::groups`), one
 request per group plus a title/summary request; every failure falls back to
 the raw transcript, so it cannot fail.
+Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
 Drafting while recording (2026-11-11, for every writing provider; off when the recording
 labels speakers, since the labelled transcript only exists after Finish): the time after Stop was

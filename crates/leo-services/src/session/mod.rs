@@ -56,6 +56,8 @@ pub struct Manifest {
     pub stopped: bool,
     #[serde(default)]
     pub saved: bool,
+    #[serde(default)]
+    pub turns: bool,
 }
 
 impl Manifest {
@@ -78,6 +80,7 @@ impl Manifest {
             points: Vec::new(),
             stopped: false,
             saved: false,
+            turns: false,
         }
     }
 
@@ -190,6 +193,10 @@ impl Drop for Lock {
         }
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+pub fn turns_name(index: u32) -> String {
+    format!("seg-{index:05}.turns.json")
 }
 
 fn index_of(name: &str) -> Option<(u32, &str)> {
@@ -481,6 +488,20 @@ impl Session {
         self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
     }
 
+    fn turns(&self, assembled: &Assembled) -> Option<Vec<Vec<(u64, String)>>> {
+        if !self.manifest.turns {
+            return None;
+        }
+        assembled
+            .parts
+            .iter()
+            .map(|p| {
+                let bytes = std::fs::read(self.dir.join(turns_name(p.index))).ok()?;
+                serde_json::from_slice(&bytes).ok()
+            })
+            .collect()
+    }
+
     fn labels(&self, assembled: &Assembled) -> Option<Vec<speakers::Spoken>> {
         (assembled.failed.is_empty() && assembled.pending == 0)
             .then(|| speakers::read(&self.dir))
@@ -534,24 +555,56 @@ impl Session {
                     speaker: format!("Speaker {}", s.speaker),
                 })
                 .collect(),
-            None => assembled
-                .parts
-                .iter()
-                .map(|p| leo_core::recording::Passage {
-                    start_secs: p.start_secs,
-                    end_secs: self
-                        .manifest
+            None => {
+                let speaker = if self.manifest.screen {
+                    "Computer audio"
+                } else {
+                    "Microphone"
+                };
+                let end_of = |p: &Part| {
+                    self.manifest
                         .duration_secs
-                        .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs)),
-                    text: p.text.clone(),
-                    speaker: if self.manifest.screen {
-                        "Computer audio"
-                    } else {
-                        "Microphone"
-                    }
-                    .into(),
-                })
-                .collect(),
+                        .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
+                };
+                match self.turns(&assembled) {
+                    Some(turns) => assembled
+                        .parts
+                        .iter()
+                        .zip(turns)
+                        .flat_map(|(p, entries)| {
+                            let end = end_of(p);
+                            let starts: Vec<u64> = entries
+                                .iter()
+                                .map(|(ms, _)| p.start_secs + ms / 1000)
+                                .collect();
+                            entries
+                                .into_iter()
+                                .enumerate()
+                                .map(|(i, (_, text))| leo_core::recording::Passage {
+                                    start_secs: starts[i],
+                                    end_secs: starts
+                                        .get(i + 1)
+                                        .copied()
+                                        .unwrap_or(end)
+                                        .max(starts[i]),
+                                    text,
+                                    speaker: speaker.into(),
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .collect(),
+                    None => assembled
+                        .parts
+                        .iter()
+                        .map(|p| leo_core::recording::Passage {
+                            start_secs: p.start_secs,
+                            end_secs: end_of(p),
+                            text: p.text.clone(),
+                            speaker: speaker.into(),
+                        })
+                        .collect(),
+                }
+            }
         };
         leo_core::recording::Archive {
             id: self.manifest.id.clone(),
@@ -896,5 +949,57 @@ mod tests {
         s2.finish().unwrap();
         assert!(dir2.exists());
         assert!(Session::open(&dir2).unwrap().manifest.saved);
+    }
+
+    fn call_track(parts: &[&str]) -> (Session, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.turns = true;
+        manifest.duration_secs = Some(600);
+        let s = Session::create(tmp.path(), manifest).unwrap();
+        for (i, text) in parts.iter().enumerate() {
+            std::fs::write(s.dir.join(format!("seg-{i:05}.txt")), text).unwrap();
+        }
+        (s, tmp)
+    }
+
+    #[test]
+    fn speech_crossing_a_part_boundary_is_kept() {
+        let (s, _tmp) = call_track(&["Before the turn.", "A long answer that runs on. Then more."]);
+        std::fs::write(
+            s.dir.join(turns_name(0)),
+            r#"[[290000,"Before the turn."]]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            s.dir.join(turns_name(1)),
+            r#"[[500,"A long answer that runs on."],[20500,"Then more."]]"#,
+        )
+        .unwrap();
+        let passages = s.archive().passages;
+        let spans: Vec<(u64, u64, &str)> = passages
+            .iter()
+            .map(|p| (p.start_secs, p.end_secs, p.text.as_str()))
+            .collect();
+        assert_eq!(
+            spans,
+            [
+                (290, 300, "Before the turn."),
+                (300, 320, "A long answer that runs on."),
+                (320, 600, "Then more."),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_call_without_turns_files_keeps_one_passage_per_part() {
+        let (s, _tmp) = call_track(&["First part.", "Second part."]);
+        std::fs::write(s.dir.join(turns_name(0)), r#"[[0,"First part."]]"#).unwrap();
+        let passages = s.archive().passages;
+        let spans: Vec<(u64, &str)> = passages
+            .iter()
+            .map(|p| (p.start_secs, p.text.as_str()))
+            .collect();
+        assert_eq!(spans, [(0, "First part."), (300, "Second part.")]);
     }
 }

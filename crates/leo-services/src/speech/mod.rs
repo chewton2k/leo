@@ -26,7 +26,7 @@ pub fn run_worker() -> i32 {
     worker::run()
 }
 
-pub fn prepare(pcm: Vec<f32>) -> anyhow::Result<Vec<Vec<f32>>> {
+pub fn prepare(pcm: Vec<f32>) -> anyhow::Result<Vec<chunking::Piece>> {
     anyhow::ensure!(
         pcm.len() <= 320 * 16_000 && pcm.iter().all(|s| s.is_finite()),
         "This audio is too long or damaged. Try a shorter recording."

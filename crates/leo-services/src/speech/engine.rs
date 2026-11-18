@@ -6,8 +6,9 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{ensure, Context, Result};
-use transcribe_cpp::{Backend, RunOptions};
+use transcribe_cpp::{Backend, RunOptions, TimestampKind, Transcript};
 
+use super::chunking::Piece;
 use super::library::Selected;
 use super::protocol::DeviceSelector;
 use super::supervisor::{lock, EngineError, EngineSupervisor, Fed, LoadSpec};
@@ -16,6 +17,8 @@ use super::vad::{detector, CaptureVad, VAD_OFFLINE_HANGOVER_MS};
 pub const STOPPED: &str = "Transcription stopped. Your recorded audio is kept.";
 pub const STOPPING: &str = "The speech engine is stopping. Reopen Leo to transcribe again.";
 pub const BUSY: &str = "The speech engine is busy.";
+
+type Timed = Vec<(u64, String)>;
 
 const QUEUED: usize = 8;
 const SHADERS_MARKER: &str = "speech-shaders-ready";
@@ -44,12 +47,13 @@ pub enum Priority {
 struct Job {
     _admission: Pin,
     selected: Selected,
-    chunks: VecDeque<Vec<f32>>,
+    chunks: VecDeque<Piece>,
     text: Vec<String>,
+    timed: Timed,
     priority: Priority,
     words: Vec<String>,
     cancels: u64,
-    reply: mpsc::SyncSender<Result<String>>,
+    reply: mpsc::SyncSender<Result<(String, Timed)>>,
 }
 
 enum Message {
@@ -179,6 +183,26 @@ impl Engine {
         priority: Priority,
         words: Vec<String>,
     ) -> Result<String> {
+        Ok(self.heard(selected, pcm, priority, words)?.0)
+    }
+
+    pub fn transcribe_timed(
+        &self,
+        selected: Selected,
+        pcm: Vec<f32>,
+        priority: Priority,
+        words: Vec<String>,
+    ) -> Result<Timed> {
+        Ok(self.heard(selected, pcm, priority, words)?.1)
+    }
+
+    fn heard(
+        &self,
+        selected: Selected,
+        pcm: Vec<f32>,
+        priority: Priority,
+        words: Vec<String>,
+    ) -> Result<(String, Timed)> {
         let cancels = self.dictation_cancels.load(Ordering::Acquire);
         ensure!(!self.stopped.load(Ordering::Acquire), "{STOPPING}");
         #[allow(deprecated)]
@@ -200,6 +224,7 @@ impl Engine {
                 selected,
                 chunks,
                 text: Vec::new(),
+                timed: Vec::new(),
                 priority,
                 words,
                 cancels,
@@ -215,7 +240,7 @@ impl Engine {
         .context("Transcription took too long. Your audio is kept; try a faster speech model.")?
     }
 
-    fn checked_once(&self, pcm: Vec<f32>, remember: bool) -> Result<VecDeque<Vec<f32>>> {
+    fn checked_once(&self, pcm: Vec<f32>, remember: bool) -> Result<VecDeque<Piece>> {
         let gain = speech_gain(&pcm);
         let audio = remember.then(|| {
             use std::hash::{Hash, Hasher};
@@ -224,7 +249,7 @@ impl Engine {
             hasher.finish()
         });
         let chunks = speech_chunks(pcm, gain)?;
-        let pieces: Vec<usize> = chunks.iter().map(Vec::len).collect();
+        let pieces: Vec<usize> = chunks.iter().map(|chunk| chunk.pcm.len()).collect();
         let known = audio.and_then(|audio| {
             lock(&self.checked)
                 .iter()
@@ -235,7 +260,7 @@ impl Engine {
             return Ok(chunks
                 .into_iter()
                 .zip(heard)
-                .map(|(chunk, heard)| if heard { chunk } else { Vec::new() })
+                .map(|(chunk, heard)| if heard { chunk } else { silent(chunk) })
                 .collect());
         }
         let sent = gated(chunks, gain, self.hears).context(UNFINISHED)?;
@@ -247,7 +272,7 @@ impl Engine {
             checked.push_back(Checked {
                 audio,
                 pieces,
-                heard: sent.iter().map(|piece| !piece.is_empty()).collect(),
+                heard: sent.iter().map(|piece| !piece.pcm.is_empty()).collect(),
             });
         }
         Ok(sent)
@@ -567,38 +592,68 @@ fn frame_level(frame: &[f32]) -> f32 {
     (frame.iter().map(|n| n * n).sum::<f32>() / frame.len() as f32).sqrt()
 }
 
-fn speech_chunks(pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
+fn speech_chunks(pcm: Vec<f32>, gain: f32) -> Result<Vec<Piece>> {
     chunks_with(pcm, gain, super::prepare)
 }
 
 fn chunks_with(
     mut pcm: Vec<f32>,
     gain: f32,
-    prepare: fn(Vec<f32>) -> Result<Vec<Vec<f32>>>,
-) -> Result<Vec<Vec<f32>>> {
+    prepare: fn(Vec<f32>) -> Result<Vec<Piece>>,
+) -> Result<Vec<Piece>> {
     pcm.iter_mut().for_each(|n| *n *= gain);
     let mut chunks = prepare(pcm)?;
     for chunk in &mut chunks {
-        chunk.iter_mut().for_each(|n| *n /= gain);
+        chunk.pcm.iter_mut().for_each(|n| *n /= gain);
     }
     Ok(chunks)
 }
 
+fn silent(piece: Piece) -> Piece {
+    Piece {
+        pcm: Vec::new(),
+        ..piece
+    }
+}
+
 fn gated(
-    chunks: Vec<Vec<f32>>,
+    chunks: Vec<Piece>,
     gain: f32,
     hears: fn(&[f32], f32) -> Result<bool>,
-) -> Result<VecDeque<Vec<f32>>> {
+) -> Result<VecDeque<Piece>> {
     chunks
         .into_iter()
         .map(|chunk| {
-            Ok(if hears(&chunk, gain)? {
+            Ok(if hears(&chunk.pcm, gain)? {
                 chunk
             } else {
-                Vec::new()
+                silent(chunk)
             })
         })
         .collect()
+}
+
+fn ms(samples: u64) -> u64 {
+    samples * 1000 / super::constants::WHISPER_SAMPLE_RATE as u64
+}
+
+fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, onset_ms: u64) -> Timed {
+    if filtered == transcript.text
+        && transcript.timestamp_kind != TimestampKind::None
+        && !transcript.segments.is_empty()
+    {
+        transcript
+            .segments
+            .iter()
+            .map(|segment| (start_ms + segment.t0_ms.max(0) as u64, segment.text.trim()))
+            .filter(|(_, text)| !text.is_empty())
+            .map(|(at, text)| (at, text.to_string()))
+            .collect()
+    } else if filtered.trim().is_empty() {
+        Vec::new()
+    } else {
+        vec![(onset_ms, filtered.to_string())]
+    }
 }
 
 fn heard_speech(pcm: &[f32], gain: f32) -> Result<bool> {
@@ -828,10 +883,11 @@ fn run(
         let result = (|| -> Result<()> {
             load(&supervisor, &mut model, &job.selected.path)?;
             if let Some(chunk) = job.chunks.pop_front() {
+                let (start, onset) = (ms(chunk.start), ms(chunk.onset));
                 let pcm = if job.priority == Priority::Dictation {
-                    padded(chunk)
+                    padded(chunk.pcm)
                 } else {
-                    chunk
+                    chunk.pcm
                 };
                 if !pcm.is_empty() {
                     let mark = {
@@ -850,7 +906,10 @@ fn run(
                     let echo = run.vocabulary.clone();
                     let heard = supervisor.transcribe_since(mark, pcm, run);
                     *lock(&serving) = false;
-                    job.text.push(without_echo(heard?.text, &echo));
+                    let heard = heard?;
+                    let filtered = without_echo(heard.text.clone(), &echo);
+                    job.timed.extend(timed_of(&heard, &filtered, start, onset));
+                    job.text.push(filtered);
                 }
             }
             Ok(())
@@ -862,7 +921,8 @@ fn run(
             }
             Ok(()) if job.chunks.is_empty() => {
                 let refs = job.text.iter().map(String::as_str).collect::<Vec<_>>();
-                let _ = job.reply.send(Ok(super::chunking::join_transcripts(&refs)));
+                let text = super::chunking::join_transcripts(&refs);
+                let _ = job.reply.send(Ok((text, std::mem::take(&mut job.timed))));
             }
             Ok(()) => pending.push(job),
         }
@@ -887,11 +947,19 @@ mod audio_level_tests {
             })
             .collect();
         let gain = speech_gain(&pcm);
-        let split: fn(Vec<f32>) -> Result<Vec<Vec<f32>>> =
-            |pcm| Ok(pcm.chunks(7 * 16_000).map(<[f32]>::to_vec).collect());
+        let split: fn(Vec<f32>) -> Result<Vec<Piece>> = |pcm| {
+            Ok(pcm
+                .chunks(7 * 16_000)
+                .map(|pcm| Piece {
+                    pcm: pcm.to_vec(),
+                    start: 0,
+                    onset: 0,
+                })
+                .collect())
+        };
         let mut old = split(raised(&pcm, gain)).unwrap();
         for chunk in &mut old {
-            chunk.iter_mut().for_each(|n| *n /= gain);
+            chunk.pcm.iter_mut().for_each(|n| *n /= gain);
         }
         let new = chunks_with(pcm, gain, split).unwrap();
         assert_eq!(old.len(), new.len());
@@ -904,14 +972,14 @@ mod audio_level_tests {
     }
 
     fn the_old_gate(
-        chunks: &[Vec<f32>],
+        chunks: &[Piece],
         gain: f32,
         hears: fn(&[f32], f32) -> Result<bool>,
     ) -> Vec<Vec<f32>> {
         let mut sent = Vec::new();
         for chunk in chunks {
             let pcm = if hears(chunk, gain).unwrap() {
-                chunk.clone()
+                chunk.pcm.clone()
             } else {
                 Vec::new()
             };
@@ -944,7 +1012,7 @@ mod audio_level_tests {
                     .eq(b.iter().map(|n| n.to_bits())));
             }
             if n == 0 {
-                assert!(after.iter().any(Vec::is_empty));
+                assert!(after.iter().any(|piece| piece.is_empty()));
                 assert!(after.iter().any(|piece| !piece.is_empty()));
             }
         }
@@ -1006,6 +1074,61 @@ mod audio_level_tests {
         std::fs::write(&marker, "1.0.0").unwrap();
         assert!(shaders_ready(&marker, "1.0.0"));
         assert!(!shaders_ready(&marker, "1.0.1"));
+    }
+
+    fn spoken(kind: TimestampKind, at: &[i64]) -> Transcript {
+        let segments: Vec<transcribe_cpp::Segment> = at
+            .iter()
+            .map(|t0_ms| transcribe_cpp::Segment {
+                t0_ms: *t0_ms,
+                text: format!(" turn at {t0_ms} "),
+                ..Default::default()
+            })
+            .collect();
+        Transcript {
+            text: segments
+                .iter()
+                .map(|s| s.text.trim())
+                .collect::<Vec<_>>()
+                .join(" "),
+            timestamp_kind: kind,
+            segments,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn quick_turns_inside_one_piece_stay_in_order() {
+        let heard = spoken(TimestampKind::Segment, &[0, 5_000, 10_000, 15_000]);
+        let timed = timed_of(&heard, &heard.text, 60_000, 61_000);
+        assert_eq!(
+            timed,
+            [
+                (60_000, "turn at 0".to_string()),
+                (65_000, "turn at 5000".to_string()),
+                (70_000, "turn at 10000".to_string()),
+                (75_000, "turn at 15000".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_model_without_times_falls_back_to_the_piece_onset() {
+        let heard = spoken(TimestampKind::None, &[0, 5_000]);
+        assert_eq!(
+            timed_of(&heard, &heard.text, 60_000, 64_000),
+            [(64_000, heard.text.clone())]
+        );
+    }
+
+    #[test]
+    fn an_echo_filtered_piece_keeps_one_entry() {
+        let heard = spoken(TimestampKind::Segment, &[0, 5_000]);
+        assert_eq!(
+            timed_of(&heard, "turn at 5000", 60_000, 62_000),
+            [(62_000, "turn at 5000".to_string())]
+        );
+        assert!(timed_of(&heard, "", 60_000, 62_000).is_empty());
     }
 }
 

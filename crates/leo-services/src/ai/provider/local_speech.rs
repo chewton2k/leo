@@ -24,23 +24,41 @@ impl TranscribeProvider for LocalSpeech {
         "Download a model in Settings → Speech models. Your recorded audio is kept until one is ready.".into()
     }
     fn transcribe(&self, path: &Path) -> ProviderResult<String> {
-        let run = || -> anyhow::Result<String> {
-            let selected = crate::speech::library::library()?.selected()?;
-            anyhow::ensure!(
-                std::fs::metadata(path)?.len() <= 32 * 1024 * 1024,
-                "This audio is too long. Record in shorter parts."
-            );
-            let pcm = {
-                let bytes = std::fs::read(path)?;
-                super::audio::read_wav(&bytes).map_err(anyhow::Error::msg)?
-            };
-            crate::speech::engine::engine().transcribe(
-                selected,
-                pcm,
-                crate::speech::engine::Priority::Segment,
-                Vec::new(),
-            )
-        };
-        run().map_err(|e| ProviderError::Retryable(e.to_string()))
+        read(path)
+            .and_then(|(selected, pcm)| {
+                crate::speech::engine::engine().transcribe(
+                    selected,
+                    pcm,
+                    crate::speech::engine::Priority::Segment,
+                    Vec::new(),
+                )
+            })
+            .map_err(|e| ProviderError::Retryable(e.to_string()))
     }
+}
+
+impl LocalSpeech {
+    pub fn transcribe_timed(&self, path: &Path) -> ProviderResult<Vec<(u64, String)>> {
+        read(path)
+            .and_then(|(selected, pcm)| {
+                crate::speech::engine::engine().transcribe_timed(
+                    selected,
+                    pcm,
+                    crate::speech::engine::Priority::Segment,
+                    Vec::new(),
+                )
+            })
+            .map_err(|e| ProviderError::Retryable(e.to_string()))
+    }
+}
+
+fn read(path: &Path) -> anyhow::Result<(crate::speech::library::Selected, Vec<f32>)> {
+    let selected = crate::speech::library::library()?.selected()?;
+    anyhow::ensure!(
+        std::fs::metadata(path)?.len() <= 32 * 1024 * 1024,
+        "This audio is too long. Record in shorter parts."
+    );
+    let bytes = std::fs::read(path)?;
+    let pcm = super::audio::read_wav(&bytes).map_err(anyhow::Error::msg)?;
+    Ok((selected, pcm))
 }
