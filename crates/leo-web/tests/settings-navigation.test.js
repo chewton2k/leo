@@ -166,3 +166,17 @@ test('a chord is read from the key event in a fixed modifier order, and aria nam
   assert.equal(blocked.shortcutKeys('quick'), 'cmd+k');
   assert.equal(blocked.shortcutAria('cmd+ctrl+alt+shift+k'), 'Meta+Control+Alt+Shift+K');
 });
+
+test('a choice that cannot work is disabled and says so, and a group can keep its own radio name', () => {
+  const h = helpers();
+  const html = h.choiceCards({ label: 'What to record', name: 'rec-kind', current: 'microphone', choices: [['microphone', 'Microphone', 'Your voice'], ['screen', 'Screen', 'Not on this computer', '', '', { disabled: true }]] });
+  assert.equal((html.match(/name="rec-kind"/g) || []).length, 2);
+  assert.ok(html.includes('value="screen" disabled aria-disabled="true">'));
+  assert.ok(html.includes('Not on this computer'));
+  assert.ok(!html.includes('value="microphone" checked disabled'));
+  const buttons = h.choiceCards({ label: 'L', action: 'pick', key: 'v', current: 'a', choices: [['a', 'A'], ['b', 'B', '', '', '', { disabled: true }]] });
+  assert.ok(buttons.includes('data-v="b" aria-pressed="false" disabled aria-disabled="true">'));
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/recording.js'), 'utf8');
+  assert.ok(source.includes("choiceCards({ label: 'What to record', name: 'rec-kind'"));
+  assert.ok(!source.includes('class="rec-kind"'));
+});

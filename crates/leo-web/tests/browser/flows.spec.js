@@ -2620,8 +2620,8 @@ test.describe('recording', () => {
     await page.goto('/');
     await control(page, 'record').click();
     await expect(page).toHaveURL(/#\/record$/);
-    await expect(page.locator('.rec-kind')).toHaveCount(3);
-    await expect(page.locator('.rec-kind b')).toHaveText(['Microphone', 'Screen', 'Call']);
+    await expect(page.locator('.rec-kinds .choice-pick')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
     await page.locator('#rec-title').fill('Graphs');
     await page.locator('#rec-wants').fill('Focus on BFS');
     await page.locator('[data-action="rec-start"]').click();
@@ -2712,7 +2712,7 @@ test.describe('recording', () => {
     await page.evaluate(() => {
       navigator.mediaDevices.getDisplayMedia = async () => { throw new Error('Browser capture must stay closed'); };
     });
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.source).toBe('screen');
@@ -2726,7 +2726,7 @@ test.describe('recording', () => {
     seen.source = 'screen';
     seen.levels = Array(12).fill(0.1);
     await page.goto('/#/record');
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('#rec-wave')).toBeVisible();
     await expect(page.locator('#rec-hear')).toHaveText('Hearing sound');
@@ -2741,7 +2741,7 @@ test.describe('recording', () => {
       ? { status:400, json:{error:'Allow Leo to record computer sound in System Settings, then try again.'} }
       : { json:{available:true,local:true,job:null} }));
     await page.goto('/#/record');
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('.toast.bad')).toContainText('Allow Leo to record computer sound');
     await expect(page.locator('[data-action="rec-start"]')).toBeEnabled();
@@ -2751,12 +2751,12 @@ test.describe('recording', () => {
   test('recording always uses this computer for microphone screen and call', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     await page.goto('/#/record');
-    await expect(page.locator('.rec-kind b')).toHaveText(['Microphone', 'Screen', 'Call']);
-    await expect(page.locator('.rec-kind', { hasText: 'Screen' })).toContainText('Records what this computer plays');
-    await expect(page.locator('.rec-kind .choice-diagram > svg')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
+    await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
+    await expect(page.locator('.rec-kinds .choice-diagram > svg')).toHaveCount(3);
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
     await expect(page.locator('.rec-card .note-fields #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside the shared field group').toBeVisible();
-    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.source).toBe('nativecall');
@@ -2776,9 +2776,9 @@ test.describe('recording', () => {
     await page.reload();
     await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
     await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
-    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
-    await page.locator('.rec-kind', { hasText: 'Microphone' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Microphone' }).click();
     await expect(page.locator('#rec-speakers-box')).toBeVisible();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();

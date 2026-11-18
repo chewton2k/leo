@@ -142,7 +142,7 @@
   }
 
   function create(deps) {
-    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields, bytes } = deps;
+    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields, choiceCards, syncChoiceCards, bytes } = deps;
     const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
@@ -350,16 +350,14 @@
       return `${icon.replace('<svg ', `<svg x="12" y="${y - 8}" width="16" height="16" `)}<path class="d-wave" d="${bars}"/>`;
     }
 
-    function kindChoices() {
+    function kindChoices(current = 'microphone') {
       const art = {
         microphone: track(icons.mic, 26),
         screen: track(icons.screen, 26),
         call: track(icons.mic, 16) + track(icons.screen, 36),
       };
-      return `<div class="rec-kinds" role="radiogroup" aria-label="What to record">${['microphone', 'screen', 'call']
-        .map((kind, i) => `<label class="rec-kind"><input type="radio" name="rec-kind" value="${kind}"${i === 0 ? ' checked' : ''}>
-            <span class="rec-kind-body choice-pick"><span class="choice-diagram" aria-hidden="true"><svg viewBox="0 0 120 52">${art[kind]}</svg></span><b class="choice-title">${KINDS[kind].title}</b><span class="sub choice-about">${esc(KINDS[kind].about)}</span></span></label>`)
-        .join('')}</div>`;
+      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, KINDS[kind].about, `<svg viewBox="0 0 120 52">${art[kind]}</svg>`]);
+      return choiceCards({ label: 'What to record', name: 'rec-kind', className: 'rec-kinds', current, choices });
     }
 
     function speakersOn() {
@@ -426,7 +424,7 @@
       if (back) back.focus();
     }
 
-    function drawIdle(folders, here) {
+    function drawIdle(folders, here, kind) {
       const ov = s.overview || {};
       const upcoming = (s.calendar && s.calendar.events) || [];
       const picked = s.event !== null ? upcoming[s.event] : null;
@@ -446,7 +444,7 @@
         <div class="section-title">Record</div>
         ${recover ? `<section class="set-card"><header><h3>Not saved yet</h3></header>${recover}</section>` : ''}
         <section class="set-card rec-card">
-          ${kindChoices()}
+          ${kindChoices(kind)}
           ${noteFields({ id: 'rec', folders, here, most: 4000, before: event })}
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
@@ -564,6 +562,8 @@
       if (fill && call && wants && !wants.value.trim()) wants.value = MEETING_WANTS;
       const speakers = box.querySelector('#rec-speakers-box');
       if (speakers) speakers.hidden = call;
+      const group = box.querySelector('.rec-kinds');
+      if (group) syncChoiceCards(group);
     }
 
     function preselect(box, asked) {
@@ -628,7 +628,7 @@
       s.page = page;
       s.paused = page === 'live' ? v.state === 'paused' : undefined;
       const paint = () => {
-        if (page === 'idle') box.innerHTML = drawIdle(folders, here);
+        if (page === 'idle') box.innerHTML = drawIdle(folders, here, form && form.kind);
         else if (page === 'live') {
           box.innerHTML = drawLive();
           s.heard = '';
