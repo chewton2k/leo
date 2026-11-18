@@ -43,7 +43,10 @@ This file holds the rules. How each screen behaves, area by area, is in
   brought in on first open and renamed `*.before-database` (browser tests seed
   note connections this way). Writes touch only what changed. New databases
   give deleted space back in small steps when leo is idle and not recording
-  (`Db::give_back`, hourly, 256 pages a step, from 1,024 free pages). A damaged leo.db
+  (`Db::give_back`, hourly, 256 pages a step, from 1,024 free pages). A database
+  made before 2026-11 is rewritten once while idle into a new file and swapped in
+  (`Db::rewrite`, just before `give_back`); the swap is the only step that holds the
+  connection, and it is abandoned if any other connection to the file is open. A damaged leo.db
   is set aside as `leo.db.damaged-<stamp>` (Health says where); one from a
   newer leo is refused before it is opened.
 

@@ -371,10 +371,24 @@ async fn give_back_when_idle(state: AppState) {
             continue;
         }
         let chats = state.chats.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            db::try_for_chats(&chats).and_then(|db| db.give_back())
-        })
-        .await;
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let _stop_on_drop = leo_core::children::StopOnDrop(Arc::clone(&stop));
+        let asked = Arc::clone(&stop);
+        let mut work = tokio::task::spawn_blocking(move || {
+            let db = db::try_for_chats(&chats)?;
+            let _ = db.rewrite(&asked);
+            db.give_back()
+        });
+        loop {
+            tokio::select! {
+                _ = &mut work => break,
+                _ = tokio::time::sleep(std::time::Duration::from_secs(1)) => {
+                    if state.capture_activity.busy() || record::live(&state.recording) {
+                        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+            }
+        }
     }
 }
 
