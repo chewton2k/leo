@@ -66,7 +66,9 @@
 
     async function send(s, edit) {
       if (!s.note.id) {
-        const note = await api('/api/notes', { method: 'POST', body: { ...edit, directory: s.note.directory } });
+        s.note.request ||= draftId();
+        persist(s);
+        const note = await api('/api/notes', { method: 'POST', body: { ...edit, directory: s.note.directory, request: s.note.request } });
         created(s, note);
         return note;
       }
@@ -77,7 +79,9 @@
       } catch (error) {
         if (error.status !== 409) throw error;
         const title = `${edit.title} (conflict from leo)`;
-        const note = await api('/api/notes', { method: 'POST', body: { ...edit, title, directory: s.note.directory } });
+        s.note.copyRequest ||= draftId();
+        persist(s);
+        const note = await api('/api/notes', { method: 'POST', body: { ...edit, title, directory: s.note.directory, request: s.note.copyRequest } });
         s.edit.title = `${s.edit.title} (conflict from leo)`;
         conflict(s, note);
         return note;

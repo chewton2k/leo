@@ -117,6 +117,61 @@ test('blank new notes are not created and unrelated local storage is untouched',
 });
 
 
+test('a retried first save sends the same request id, and a reloaded draft keeps it', async () => {
+  const local = storage();
+  const bodies = [];
+  const lost = async (_, { body }) => { bodies.push(body); throw Object.assign(new Error('answer lost'), { status: 500 }); };
+  const m = manager(lost, local);
+  const s = m.open({ ...note(), id: null, version: null });
+  m.changed(s, edit('Same'));
+  await assert.rejects(m.flush(s));
+  await assert.rejects(m.flush(s));
+  assert.equal(bodies.length, 2);
+  assert.ok(bodies[0].request);
+  assert.equal(bodies[1].request, bodies[0].request);
+  const reloaded = manager(async (_, { body }) => { bodies.push(body); return { ...note(), ...body, id: 'made', version: 'v1' }; }, local);
+  await reloaded.flush(reloaded.get(reloaded.drafts()[0].key));
+  assert.equal(bodies.length, 3);
+  assert.equal(bodies[2].request, bodies[0].request);
+});
+
+test('a conflict copy that is retried keeps its request id', async () => {
+  const posts = [];
+  const m = manager(async (path, options) => {
+    if (options.method === 'PATCH') throw Object.assign(new Error('conflict'), { status: 409 });
+    posts.push(options.body);
+    if (posts.length === 1) throw Object.assign(new Error('answer lost'), { status: 500 });
+    return { ...note(), ...options.body, id: 'copy', version: 'copy-v1' };
+  });
+  const s = m.open(note());
+  m.changed(s, edit('Phone draft'));
+  await assert.rejects(m.flush(s));
+  await m.flush(s);
+  assert.equal(posts.length, 2);
+  assert.ok(posts[0].request);
+  assert.equal(posts[1].request, posts[0].request);
+  assert.equal(s.note.id, 'copy');
+});
+
+test('the next new note after a saved one gets a new request id', async () => {
+  const requests = [];
+  const m = manager(async (_, { body }) => {
+    requests.push(body.request);
+    const { request, ...saved } = body;
+    return { ...note(), ...saved, id: 'made' + requests.length, version: 'v1' };
+  });
+  const first = m.open({ ...note(), id: null, version: null });
+  m.changed(first, edit('One'));
+  await m.flush(first);
+  const second = m.open({ ...note(), id: null, version: null });
+  m.changed(second, edit('Two'));
+  await m.flush(second);
+  assert.equal(requests.length, 2);
+  assert.ok(requests[0] && requests[1]);
+  assert.notEqual(requests[1], requests[0]);
+  assert.equal(first.note.request, undefined);
+});
+
 test('new-note drafts work on HTTP origins without randomUUID', async () => {
   const vm = require('node:vm');
   const fs = require('node:fs');
