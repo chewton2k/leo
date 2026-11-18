@@ -33,8 +33,27 @@ fn streamer_of(run: Streaming) -> leo_web::Streamer {
     )
 }
 
+fn sweep_leftover_temps() {
+    let models = leo_services::config::choice::models_dir();
+    let folders = [
+        leo_core::paths::config_dir().ok(),
+        Some(models.join("vad")),
+        Some(leo_services::meaning::dir()),
+        Some(models.join("speech")),
+    ];
+    for folder in folders.into_iter().flatten() {
+        leo_core::paths::sweep_stale_temps(&folder, 0);
+    }
+    if let Ok(root) = leo_services::session::root() {
+        leo_services::session::sweep_temps(&root);
+    }
+}
+
 pub fn powers() -> leo_web::Powers {
-    std::thread::spawn(leo_services::ai::tidy_rooms);
+    std::thread::spawn(|| {
+        leo_services::ai::tidy_rooms();
+        sweep_leftover_temps();
+    });
     let usage = std::sync::Arc::new(leo_web::usage::Usage::default());
     let writer = crate::felix::writer(
         std::sync::Arc::clone(&usage),
