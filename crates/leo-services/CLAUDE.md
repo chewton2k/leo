@@ -383,11 +383,14 @@ window (120 s), then ends unsaved with audio kept, releasing its guards, and the
 recording stays recoverable. `recorder::resume_with_controls` exposes the finish
 control in recovery; leo-host refuses to write a note when recovery failed.
 Saving a recovered recording's sources, and the call commit, merge with an
-existing archive of the same id (`recording::save_merged`): other speakers,
+existing archive of the same id (`recording::merge_into`, streamed): other speakers,
 points, warnings and context are kept, and a passage already there by time and
 text keeps its stored label, so running a recovery twice changes nothing. Plain
-`recording::save` replaces (a new recording, `Session::commit`, transcript
-corrections), so a corrected point never brings back its old wording.
+`recording::save` replaces (a new recording, `Session::commit`), so a corrected
+point never brings back its old wording; transcript corrections go through
+`recording::edit`. `recording::save_from(notes, note, head, passages, points)`
+takes iterators, so a caller holding its points in `points.jsonl` can save
+without holding them whole.
 While recording, the transcriber finds the next part by name and lists the
 folder only at start, when recording ends and once a minute; the drafter reads
 each transcript once.

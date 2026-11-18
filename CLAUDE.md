@@ -228,7 +228,10 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
 
 Recording sources live in `leo-core::recording` (`Archive`, and `Profile {context,
 wants}`: calendar-event details and what the user wants from the notes), shared by
-the app. Saved recording session IDs make new notes and appends idempotent;
+the app, kept per recording as a small header and one-per-line passage and point
+files; listed by header and read a page at a time, with no limit on their number
+or size (an older single-file recording is read as it is and rewritten in the new
+form, keeping it as `<id>.original`, the first time it is fixed or added to). Saved recording session IDs make new notes and appends idempotent;
 retain sources before saving the note, then commit the session after the note is
 durable. Default AI gap-filling and merging of typed points always stay, whatever
 the user asks for. Note workflows (folder defaults, note formats, vocabulary, saved

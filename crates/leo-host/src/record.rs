@@ -141,7 +141,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
 
 pub fn regenerator() -> leo_web::record::Regenerator {
     Arc::new(|sources, profile| {
-        let written = write_sources(sources, &profile);
+        let written = parts_of(&sources)?.write(&profile);
         if !written.problems.is_empty() {
             anyhow::bail!(written.problems.join("; "));
         }
@@ -149,61 +149,109 @@ pub fn regenerator() -> leo_web::record::Regenerator {
     })
 }
 
-fn write_sources(
-    sources: Vec<leo_core::recording::Archive>,
-    profile: &leo_core::recording::Profile,
-) -> leo_services::ai::long::Structured {
-    let speakers: std::collections::HashSet<&str> = sources
-        .iter()
-        .flat_map(|s| s.passages.iter().map(|p| p.speaker.as_str()))
-        .collect();
-    let named = speakers.len() > 1;
-    let mut parts = Vec::new();
-    let mut points = Vec::new();
-    let mut offset = 0;
-    for source in sources {
-        let end = source
-            .passages
-            .iter()
-            .map(|p| p.end_secs)
-            .max()
-            .unwrap_or(0);
-        for p in source.passages {
-            parts.push(leo_services::session::Part {
-                index: parts.len() as u32,
-                start_secs: offset + p.start_secs,
-                end_secs: offset + p.end_secs,
-                text: if named && !p.speaker.is_empty() {
-                    format!("[{}] {}", p.speaker, p.text)
-                } else {
-                    p.text
-                },
-            });
+#[derive(Debug, PartialEq)]
+struct Parts {
+    named: bool,
+    offset: u64,
+    end: u64,
+    parts: Vec<leo_services::session::Part>,
+    points: Vec<Jotted>,
+}
+
+impl Parts {
+    fn new<'a>(speakers: impl Iterator<Item = &'a str>) -> Parts {
+        Parts {
+            named: speakers.collect::<std::collections::HashSet<_>>().len() > 1,
+            offset: 0,
+            end: 0,
+            parts: Vec::new(),
+            points: Vec::new(),
         }
-        for p in source.points {
-            points.push(Jotted {
-                at_secs: offset + p.at_secs,
-                text: p.text,
-            });
-        }
-        offset += end;
     }
-    leo_services::ai::long::structure_recording(
-        &parts,
-        &points,
-        None,
-        None,
-        "Recording",
-        &|prompt, max| {
-            leo_services::ai::chat_outcome(
-                leo_services::ai::long::with_profile(prompt, profile),
-                max,
-            )
-            .map(|o| o.value)
-        },
-        &|_, _| {},
-        leo_services::ai::writing_budget(),
-    )
+
+    fn passage(&mut self, p: leo_core::recording::Passage) {
+        self.end = self.end.max(p.end_secs);
+        self.parts.push(leo_services::session::Part {
+            index: self.parts.len() as u32,
+            start_secs: self.offset + p.start_secs,
+            end_secs: self.offset + p.end_secs,
+            text: if self.named && !p.speaker.is_empty() {
+                format!("[{}] {}", p.speaker, p.text)
+            } else {
+                p.text
+            },
+        });
+    }
+
+    fn point(&mut self, p: leo_core::recording::Point) {
+        self.points.push(Jotted {
+            at_secs: self.offset + p.at_secs,
+            text: p.text,
+        });
+    }
+
+    fn next_source(&mut self) {
+        self.offset += self.end;
+        self.end = 0;
+    }
+
+    fn write(&self, profile: &leo_core::recording::Profile) -> leo_services::ai::long::Structured {
+        leo_services::ai::long::structure_recording(
+            &self.parts,
+            &self.points,
+            None,
+            None,
+            "Recording",
+            &|prompt, max| {
+                leo_services::ai::chat_outcome(
+                    leo_services::ai::long::with_profile(prompt, profile),
+                    max,
+                )
+                .map(|o| o.value)
+            },
+            &|_, _| {},
+            leo_services::ai::writing_budget(),
+        )
+    }
+}
+
+fn parts_of(sources: &leo_core::recording::Sources) -> Result<Parts> {
+    let mut parts = Parts::new(
+        sources
+            .heads
+            .iter()
+            .flat_map(|h| h.speakers.iter().map(String::as_str)),
+    );
+    for head in &sources.heads {
+        let mut typed = Vec::new();
+        sources.rows(
+            head,
+            |_, p| {
+                parts.passage(p);
+                Ok(true)
+            },
+            |_, p| {
+                typed.push(p);
+                Ok(true)
+            },
+        )?;
+        for p in typed {
+            parts.point(p);
+        }
+        parts.next_source();
+    }
+    Ok(parts)
+}
+
+fn parts_of_archive(source: &leo_core::recording::Archive) -> Parts {
+    let mut parts = Parts::new(source.passages.iter().map(|p| p.speaker.as_str()));
+    for p in source.passages.iter().cloned() {
+        parts.passage(p);
+    }
+    for p in source.points.iter().cloned() {
+        parts.point(p);
+    }
+    parts
 }
 
 fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
@@ -349,7 +397,7 @@ fn finish_tracks(
         profile.wants = latest;
     }
     source.wants = profile.wants.clone();
-    let written = write_sources(vec![source.clone()], &profile);
+    let written = parts_of_archive(&source).write(&profile);
     for problem in &written.problems {
         heard(Heard::Warning(problem.clone()));
     }
@@ -362,7 +410,7 @@ fn finish_tracks(
         source: Some(source),
         into: None,
         commit: Some(Arc::new(move |notes, note| {
-            leo_core::recording::save_merged(notes, note, &committed)?;
+            leo_core::recording::merge_into(notes, note, &committed)?;
             for (_, dir) in &dirs {
                 leo_services::session::Session::open(dir)?.finish(note)?;
             }
@@ -628,6 +676,62 @@ fn draft_fn() -> Option<recorder::DraftFn> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn write_sources_gives_the_same_parts_from_saved_recordings_as_from_the_archives() {
+        use leo_core::recording::{save, Archive, Passage, Point, Sources};
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let source = |id: &str, at: i64, speaker: &str, end: u64| Archive {
+            id: id.into(),
+            started: chrono::Utc::now() + chrono::Duration::seconds(at),
+            passages: vec![Passage {
+                start_secs: 1,
+                end_secs: end,
+                text: format!("said in {id}"),
+                speaker: speaker.into(),
+            }],
+            points: vec![Point {
+                at_secs: 2,
+                text: format!("typed in {id}"),
+            }],
+            context: String::new(),
+            wants: String::new(),
+            warnings: vec![],
+            trace: vec![],
+            from: String::new(),
+        };
+        save(&notes, "note-0001", &source("rec-first1", 0, "You", 30)).unwrap();
+        let old = source("rec-second", 5, "Others", 10);
+        let dir = leo_core::recording::folder(&notes, "note-0001").unwrap();
+        std::fs::write(
+            dir.join("rec-second.json"),
+            serde_json::to_vec(&old).unwrap(),
+        )
+        .unwrap();
+        let parts = super::parts_of(&Sources::of(&notes, "note-0001").unwrap()).unwrap();
+        assert_eq!(
+            parts
+                .parts
+                .iter()
+                .map(|p| (p.index, p.start_secs, p.end_secs, p.text.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                (0, 1, 30, "[You] said in rec-first1"),
+                (1, 31, 40, "[Others] said in rec-second")
+            ]
+        );
+        assert_eq!(
+            parts
+                .points
+                .iter()
+                .map(|p| (p.at_secs, p.text.as_str()))
+                .collect::<Vec<_>>(),
+            [(2, "typed in rec-first1"), (32, "typed in rec-second")]
+        );
+        let one = super::parts_of_archive(&old);
+        assert_eq!(one.parts[0].text, "said in rec-second");
+    }
     #[test]
     fn a_single_recording_keeps_its_own_speaker_and_a_call_track_takes_its_side() {
         let passage = leo_core::recording::Passage {
@@ -771,7 +875,7 @@ mod tests {
 
     #[test]
     fn the_call_commit_keeps_both_sides() {
-        use leo_core::recording::{load, save, Archive, Passage, Point};
+        use leo_core::recording::{each_point, rows, save, Archive, Passage, Point, Sources};
         use leo_services::session::{Manifest, Session};
         if let Some(order) = std::env::var_os("LEO_CALL_COMMIT_CHILD") {
             let (first, second) = if order == "you" {
@@ -823,9 +927,27 @@ mod tests {
                 )
                 .unwrap();
                 (recorded.commit.unwrap())(&notes, "call-0001").unwrap();
-                let saved = load(&notes, "call-0001").unwrap();
-                assert_eq!(saved.len(), 1);
-                (saved[0].passages.clone(), saved[0].points.clone())
+                let saved = Sources::of(&notes, "call-0001").unwrap();
+                assert_eq!(saved.heads.len(), 1);
+                let mut passages = Vec::new();
+                rows(
+                    &notes,
+                    "call-0001",
+                    &saved.heads[0],
+                    |_, p| {
+                        passages.push(p);
+                        Ok(true)
+                    },
+                    |_, _| Ok(false),
+                )
+                .unwrap();
+                let mut points = Vec::new();
+                each_point(&notes, "call-0001", |_, _, p| {
+                    points.push(p.clone());
+                    Ok(())
+                })
+                .unwrap();
+                (passages, points)
             };
             let (passages, points) = commit_once();
             assert_eq!(
