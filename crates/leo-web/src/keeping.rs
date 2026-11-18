@@ -197,6 +197,7 @@ pub(crate) async fn expire_now(state: &AppState) {
     let housekeeper = state.housekeeper.clone();
     let chats = state.chats.clone();
     let recording = state.recording.clone();
+    let originals = state.originals.clone();
     let active = state
         .recording
         .lock()
@@ -217,6 +218,7 @@ pub(crate) async fn expire_now(state: &AppState) {
         crate::chat_files::tidy_orphans(&chats, now);
         crate::routes::combine::forget_old_combines(&chats, now - chrono::Duration::days(1));
         expire_uploads(&notes_dir, keep.upload_days, now);
+        originals.forget_missing();
         expire_transcripts(&notes_dir, keep.transcript_days, now, active.as_deref());
         crate::dependents::clear(&chats, &notes_dir, Vec::new(), active.clone(), &owners);
         if let Some(housekeeper) = housekeeper {

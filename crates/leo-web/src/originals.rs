@@ -70,6 +70,20 @@ fn mime_of(name: &str) -> &'static str {
 }
 
 impl Originals {
+    pub fn forget_missing(&self) {
+        self.read
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|((path, _, _), _)| std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()));
+    }
+
+    pub fn forget_note(&self, folder: &Path) {
+        self.read
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .retain(|((path, _, _), _)| !path.starts_with(folder));
+    }
+
     pub fn text(&self, reader: &crate::Reader, path: &Path, name: &str) -> Result<Arc<String>> {
         use std::io::Read;
         let file = match leo_core::paths::open_regular(path) {
@@ -83,6 +97,7 @@ impl Originals {
             bail!("{name} is too big for leo to read");
         }
         let key: Key = (path.to_path_buf(), meta.len(), meta.modified().ok());
+        self.forget_missing();
         let cached = self
             .read
             .lock()
@@ -188,6 +203,54 @@ mod tests {
         assert_eq!(passage(SLIDES, "p9"), None);
         assert_eq!(passage(SLIDES, "L99"), None);
         assert_eq!(passage(SLIDES, "nonsense"), None);
+    }
+
+    fn plain() -> crate::Reader {
+        Arc::new(|file: crate::UploadFile, _: &mut dyn FnMut(&str)| {
+            Ok(String::from_utf8_lossy(&file.bytes).into_owned())
+        })
+    }
+
+    fn entries(originals: &Originals) -> usize {
+        originals.read.lock().unwrap().len()
+    }
+
+    #[test]
+    fn a_deleted_files_text_is_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (one, two) = (dir.path().join("one.txt"), dir.path().join("two.txt"));
+        std::fs::write(&one, "first").unwrap();
+        std::fs::write(&two, "second").unwrap();
+        let originals = Originals::default();
+        originals.text(&plain(), &one, "one.txt").unwrap();
+        originals.text(&plain(), &two, "two.txt").unwrap();
+        assert_eq!(entries(&originals), 2);
+        std::fs::remove_file(&one).unwrap();
+        assert_eq!(
+            *originals.text(&plain(), &two, "two.txt").unwrap(),
+            "second"
+        );
+        assert_eq!(entries(&originals), 1);
+    }
+
+    #[test]
+    fn a_notes_texts_are_dropped_with_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gone, kept) = (dir.path().join("note-gone"), dir.path().join("note-kept"));
+        for folder in [&gone, &kept] {
+            std::fs::create_dir_all(folder).unwrap();
+            std::fs::write(folder.join("a.txt"), "words").unwrap();
+        }
+        let originals = Originals::default();
+        originals
+            .text(&plain(), &gone.join("a.txt"), "a.txt")
+            .unwrap();
+        originals
+            .text(&plain(), &kept.join("a.txt"), "a.txt")
+            .unwrap();
+        originals.forget_note(&gone);
+        assert_eq!(entries(&originals), 1);
+        assert_eq!(originals.read.lock().unwrap()[0].0 .0, kept.join("a.txt"));
     }
 
     #[test]

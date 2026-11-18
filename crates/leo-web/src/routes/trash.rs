@@ -170,8 +170,16 @@ pub(crate) async fn delete_from_trash(
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .map(|job| job.session_id());
+    let originals = state.originals.clone();
     tokio::task::spawn_blocking(move || {
-        crate::dependents::clear(&chats, &notes, forgotten, active, &owners)
+        let folders: Vec<_> = forgotten
+            .iter()
+            .filter_map(|id| crate::routes::uploads::originals_dir(&notes, id))
+            .collect();
+        crate::dependents::clear(&chats, &notes, forgotten, active, &owners);
+        for folder in folders {
+            originals.forget_note(&folder);
+        }
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
