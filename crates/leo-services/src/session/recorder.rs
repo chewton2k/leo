@@ -436,14 +436,6 @@ fn live_model_ready() -> bool {
             .is_ok_and(|m| m.live)
 }
 
-fn live_pace() -> Duration {
-    if crate::ai::parallel_transcriptions() == 1 {
-        live::ROLL_INTERVAL
-    } else {
-        live::CLOUD_ROLL_INTERVAL
-    }
-}
-
 fn hear(samples: &[i16]) -> Option<String> {
     let selected = crate::speech::library::library().ok()?.selected().ok()?;
     let pcm = samples.iter().map(|s| *s as f32 / 32768.0).collect();
@@ -642,6 +634,13 @@ pub fn finish(
     });
 }
 
+fn policy_for(session: &Session) -> Policy {
+    Policy {
+        keep_parts: kept_parts(session),
+        ..Policy::default()
+    }
+}
+
 fn kept_parts(session: &Session) -> u32 {
     if session.manifest.profile.speakers {
         (session::speakers::MOST_SECS / session.manifest.segment_secs.max(1)) as u32 + 1
@@ -745,11 +744,7 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
     let transcriber = Transcriber::start(
         &session.dir,
         transcribe_segment(),
-        Policy {
-            workers: crate::ai::parallel_transcriptions(),
-            keep_parts: kept_parts(&session),
-            ..Policy::default()
-        },
+        policy_for(&session),
         false,
         updates_tx,
     );
@@ -839,16 +834,12 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     let transcriber = Transcriber::start(
         &session.dir,
         transcribe_segment(),
-        Policy {
-            workers: crate::ai::parallel_transcriptions(),
-            keep_parts: kept_parts(&session),
-            ..Policy::default()
-        },
+        policy_for(&session),
         true,
         updates_tx,
     );
     let segment_samples = session.manifest.segment_secs * wav::RATE as u64;
-    let mut state = Live::new(live_pace());
+    let mut state = Live::new(live::ROLL_INTERVAL);
     let mut last_roll = Instant::now() - live::ROLL_INTERVAL;
     let mut last_draft = Instant::now();
     let mut saved_points = 0;
@@ -1249,6 +1240,17 @@ mod tests {
             println!("trial={trial} previews=8 audio_secs=20 before_us={} after_us={} before_syncs=8 after_syncs=0", before.as_micros(), start.elapsed().as_micros());
         }
     }
+    #[test]
+    fn a_recording_without_a_model_uses_one_worker_and_the_local_pace() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", false)).unwrap();
+        assert_eq!(policy_for(&session).workers, 1);
+        assert_eq!(
+            Live::new(live::ROLL_INTERVAL).interval,
+            Duration::from_secs(3)
+        );
+    }
+
     #[test]
     fn hiding_only_disables_preview_and_resume_keeps_capture_controls_intact() {
         let mut controls = Controls::default();

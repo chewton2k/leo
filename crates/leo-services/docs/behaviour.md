@@ -109,8 +109,8 @@ sessions are resumed by the app (`recorder::resume`).
 `session/stress.rs` simulates 3 h and (ignored) 24 h with a flaky provider and
 a crash copy.
 
-The live transcript, for catalog models marked fast enough, shows finished segment texts plus a live tail: every `ROLL_INTERVAL` (3 s local, `CLOUD_ROLL_INTERVAL`
-8 s cloud) it re-transcribes from `settled_at`, at most `LIVE_MOST_SECS` (20 s),
+The live transcript, for catalog models marked fast enough, shows finished segment texts plus a live tail: every `ROLL_INTERVAL` (3 s)
+it re-transcribes from `settled_at`, at most `LIVE_MOST_SECS` (20 s),
 and once that is `SETTLE_AFTER_SECS` (12) long it settles at `live::quietest`
 between 6 s and end − 2 s, so the unsettled end is rewritten rather than glued.
 Only while no segment is waiting for transcription. Typed points go to

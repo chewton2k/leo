@@ -48,7 +48,7 @@ impl Default for Policy {
             most_wait: Duration::from_secs(300),
             attempts_after_stop: 6,
             idle: Duration::from_millis(500),
-            workers: 3,
+            workers: 1,
             finish_limit: Duration::from_secs(120),
             keep_parts: 0,
         }
@@ -66,14 +66,6 @@ pub struct Transcriber {
     cancel: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
-}
-
-pub fn rate_limited(error: &str) -> bool {
-    let e = error.to_lowercase();
-    e.contains("429")
-        || e.contains("rate limit")
-        || e.contains("rate-limit")
-        || e.contains("too many requests")
 }
 
 pub fn waiting_for_model(error: &str) -> bool {
@@ -359,9 +351,7 @@ fn settle(
                 .is_some_and(|at| at.elapsed() >= policy.finish_limit);
             if finishing
                 && (expired
-                    || (attempt >= policy.attempts_after_stop
-                        && !rate_limited(&error)
-                        && !waiting_for_model(&error)))
+                    || (attempt >= policy.attempts_after_stop && !waiting_for_model(&error)))
             {
                 if waiting_for_model(&error)
                     || write_atomic(&dir.join(format!("seg-{index:05}.err")), &error).is_err()
@@ -706,37 +696,6 @@ mod tests {
             std::fs::read_to_string(dir.path().join("seg-00001.txt")).unwrap(),
             "late"
         );
-    }
-
-    #[test]
-    fn a_rate_limit_is_waited_out_rather_than_given_up_on() {
-        let dir = tempfile::tempdir().unwrap();
-        loud(dir.path(), 0);
-        let calls = Arc::new(AtomicU32::new(0));
-        let seen = Arc::clone(&calls);
-        let (tx, _rx) = mpsc::channel();
-        let t = Transcriber::start(
-            dir.path(),
-            Arc::new(move |_: &Path| {
-                if seen.fetch_add(1, Ordering::Relaxed) < 12 {
-                    Err("groq: 429 Too Many Requests".to_string())
-                } else {
-                    Ok("patient".to_string())
-                }
-            }),
-            quick(),
-            false,
-            tx,
-        );
-        t.wait();
-        assert!(calls.load(Ordering::Relaxed) > quick().attempts_after_stop);
-        assert_eq!(
-            std::fs::read_to_string(dir.path().join("seg-00000.txt")).unwrap(),
-            "patient"
-        );
-        assert!(rate_limited("429"));
-        assert!(rate_limited("Rate limit reached for model"));
-        assert!(!rate_limited("401 unauthorized"));
     }
 
     #[test]

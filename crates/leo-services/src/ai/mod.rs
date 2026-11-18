@@ -96,23 +96,6 @@ fn warm(config: &Config, store: &dyn crate::config::secret::SecretStore) {
     }
 }
 
-pub fn parallel_transcriptions() -> usize {
-    let (cfg, store) = context();
-    let chain = provider::build_transcribe_chain(&cfg, store.as_ref());
-    use crate::config::provider::ProviderKind;
-    let local = chain.iter().find(|p| p.available()).is_some_and(|p| {
-        matches!(
-            cfg.provider(p.name()).and_then(|pc| pc.kind),
-            Some(ProviderKind::Parakeet)
-        )
-    });
-    if local {
-        1
-    } else {
-        3
-    }
-}
-
 pub fn transcribe_outcome(audio_path: &Path) -> Result<chain::ChainOutcome<String>> {
     let (cfg, store) = context();
     transcribe::run(&cfg, &store, audio_path)

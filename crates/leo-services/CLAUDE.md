@@ -72,7 +72,7 @@ in tests). `wav::Writer` writes `seg-NNNNN.part.wav`, renamed to `.wav` every
 `SEGMENT_SECS` (300) with `OVERLAP_SECS` prefilled. Paused audio is never
 written. `transcriber::Transcriber` writes `.txt` atomically, deletes the audio,
 never gives up while recording, gives up after `attempts_after_stop` (writes
-`.err`, keeps audio) unless rate-limited. `recover_parts` seals a crash's
+`.err`, keeps audio). `recover_parts` seals a crash's
 `.part.wav`. `structure_recording` groups parts by `words_per_group`
 (`long::groups`); every failure falls back to the raw transcript, so it cannot
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
@@ -112,8 +112,8 @@ left out) at most 5 points above the same model's plain transcript. Words kept
 against the plain path is only printed: Whisper's plain 5-minute parts can run
 long (whisper-large-v3: 706 words where most models give about 575).
 
-Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s;
-`CLOUD_ROLL_INTERVAL` 8 s) re-transcribe from `settled_at`, at most
+Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
+re-transcribe from `settled_at`, at most
 `LIVE_MOST_SECS` (20); at `SETTLE_AFTER_SECS` (12) settle at `live::quietest`
 between 6 s and end − 2 s; only while no segment is waiting. Typed
 points go through `Controls.points` (`recorder::points_of`) into the manifest.
