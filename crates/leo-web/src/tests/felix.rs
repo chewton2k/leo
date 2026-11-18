@@ -3304,6 +3304,92 @@ fn an_abandoned_quiz_mark_stops_its_work() {
     assert!(at.duration_since(dropped) < std::time::Duration::from_secs(1));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_quiz_mark_whose_connection_closes_stops_its_work() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let started = Arc::new(AtomicBool::new(false));
+    let returned = Arc::new(Mutex::new(None::<std::time::Instant>));
+    let (begun, ended) = (Arc::clone(&started), Arc::clone(&returned));
+    let quick: crate::graph::Writer = Arc::new(move |_: &str, _: &str, _| {
+        begun.store(true, Ordering::Release);
+        let since = std::time::Instant::now();
+        while !leo_core::children::current_stop().is_some_and(|s| s.asked())
+            && since.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        *ended.lock().unwrap() = Some(std::time::Instant::now());
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let places = crate::Places {
+        store: Store::load_from(&dir.path().join("notes")).unwrap(),
+        sessions: dir.path().join("sessions.json"),
+    };
+    let options = crate::StartOptions {
+        port: 0,
+        token: TOKEN.into(),
+    };
+    let powers = Powers {
+        quick: Some(quick),
+        ..Default::default()
+    };
+    let running = crate::start_in(places, options, powers).await.unwrap();
+    let port = running.port();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!("GET /?token={TOKEN} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut signed_in = Vec::new();
+    stream.read_to_end(&mut signed_in).await.unwrap();
+    let cookie = String::from_utf8_lossy(&signed_in)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("set-cookie: ")
+                .or_else(|| line.strip_prefix("Set-Cookie: "))
+                .and_then(|value| value.split(';').next())
+                .map(str::to_string)
+        })
+        .unwrap();
+    let body = serde_json::json!({"question": "Why a queue?", "answer": "Order", "given": "Order"})
+        .to_string();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "POST /api/quiz/mark HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let waited = std::time::Instant::now();
+    while !started.load(Ordering::Acquire) && waited.elapsed() < std::time::Duration::from_secs(5) {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(started.load(Ordering::Acquire), "the mark never started");
+    drop(stream);
+    let closed = std::time::Instant::now();
+    while returned.lock().unwrap().is_none() && closed.elapsed() < std::time::Duration::from_secs(5)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let at = returned.lock().unwrap().expect("the writer never returned");
+    assert!(at.duration_since(closed) < std::time::Duration::from_secs(1));
+    running.stop().await;
+}
+
 #[test]
 fn an_idle_chat_is_compacted_so_the_next_message_sends_a_summary_and_the_last_turns() {
     let (mut state, _dir, _) = state_with(&[]);
