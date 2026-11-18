@@ -92,7 +92,7 @@ a test, or leave it unset to see the user's own data.
 - Sign in (2026-11-09, `sign_in.rs`, AppApi `{action:"sign_in",provider}`, only
   `claude_code`/`codex`): Codex runs `codex login` quietly (it opens the browser; one at
   a time, reaped, stopped after 10 min); Claude Code opens a terminal running the resolved
-  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself) opened with
+  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
   `open` on macOS, and on Windows `cmd /c start "" cmd /k claude`, the one intentional
   visible console. The command lines are pure functions with unit tests.
 - Downloads save to `~/Downloads` under a free name (`links::download_path`)

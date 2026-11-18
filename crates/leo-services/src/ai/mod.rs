@@ -30,11 +30,21 @@ fn tidy_rooms_in(dir: &std::path::Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if (name.starts_with("leo-writing-") || name.starts_with("leo-usage-"))
-            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let room =
+            (name.starts_with("leo-writing-") || name.starts_with("leo-usage-")) && kind.is_dir();
+        let helper =
+            name.starts_with("leo-sign-in-") && name.ends_with(".command") && kind.is_file();
+        if (room || helper)
             && crate::providers::older_than(&entry, std::time::Duration::from_secs(86_400))
         {
-            let _ = std::fs::remove_dir_all(entry.path());
+            let _ = if room {
+                std::fs::remove_dir_all(entry.path())
+            } else {
+                std::fs::remove_file(entry.path())
+            };
         }
     }
 }
@@ -445,6 +455,34 @@ mod tests {
         let kept = [aged("leo-writing-new", false), aged("someone-else", true)];
         super::tidy_rooms_in(temp.path());
         assert!(stale.iter().all(|path| !path.exists()));
+        assert!(kept.iter().all(|path| path.exists()));
+    }
+
+    #[test]
+    fn an_old_sign_in_helper_is_swept_and_a_new_one_kept() {
+        let temp = tempfile::tempdir().unwrap();
+        let helper = |name: &str, old: bool| {
+            let path = temp.path().join(name);
+            std::fs::write(&path, "#!/bin/zsh -l\nrm -f -- \"$0\"\n").unwrap();
+            if old {
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_modified(
+                        std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400),
+                    )
+                    .unwrap();
+            }
+            path
+        };
+        let stale = helper("leo-sign-in-x.command", true);
+        let kept = [
+            helper("leo-sign-in-y.command", false),
+            helper("someone-else.command", true),
+        ];
+        super::tidy_rooms_in(temp.path());
+        assert!(!stale.exists());
         assert!(kept.iter().all(|path| path.exists()));
     }
 
