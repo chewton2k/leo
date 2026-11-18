@@ -477,10 +477,27 @@ test('an edit whose marks would hide a change of line breaks or indentation give
   assert.deepEqual(md.wordDiff('a b', 'a b\n'), [{ kind: 'same', text: 'a b' }, { kind: 'ins', text: '\n' }]);
 });
 
-test('a long run of unmatched ![[ openers stays fast', () => {
-  const started = Date.now();
-  render('![['.repeat(7000));
-  assert.ok(Date.now() - started < 1000);
+test('a long run of unmatched openers grows linearly', () => {
+  for (const opener of ['![[', '[', '![a|', '[a](', '![a](']) {
+    for (const tail of ['', ']', ')', '])']) {
+      const time = (n) => {
+        const started = performance.now();
+        render(opener.repeat(n) + tail);
+        md.plain(opener.repeat(n) + tail);
+        return performance.now() - started;
+      };
+      const small = time(20000);
+      const large = time(40000);
+      assert.ok(large < 1000 && large <= Math.max(small * 4, 50), `${opener} ${tail} ${small} ${large}`);
+    }
+  }
+});
+
+test('links, pictures and embeds read the same beside unclosed brackets', () => {
+  assert.equal(render('[a [b](https://a.b)'), '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">a [b</a></p>');
+  assert.equal(render('[a] [b](https://a.b) [c'), '<p>[a] <a href="https://a.b" target="_blank" rel="noopener noreferrer">b</a> [c</p>');
+  assert.equal(render('![x](javascript:1)'), '<p>![x](javascript:1)</p>');
+  assert.equal(md.plain('[a] ![[b]] ![c](d) [e](f) [g'), '[a] e [g');
 });
 
 setImmediate(() => {

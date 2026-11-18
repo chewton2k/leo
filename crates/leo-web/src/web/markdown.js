@@ -120,6 +120,22 @@
 
   const noteIcon = (name, hidden = false) => `<svg class="note-icon" data-tone="${NOTE_ICONS[name][1]}" viewBox="0 0 24 24" ${hidden ? 'aria-hidden="true"' : `role="img" aria-label="${NOTE_ICONS[name][0]}"`}>${NOTE_ICONS[name][2]}</svg>`;
 
+  function bracketed(s, opener, pattern, change, bang = false) {
+    const last = Math.min(s.lastIndexOf(']'), opener === '![[' ? Infinity : s.lastIndexOf(')'));
+    let out = '';
+    let at = 0;
+    for (let from = s.indexOf(opener); from >= 0 && from < last; from = s.indexOf(opener, from)) {
+      const start = bang && from > at && s[from - 1] === '!' ? from - 1 : from;
+      pattern.lastIndex = start;
+      const found = pattern.exec(s);
+      if (found) {
+        out += s.slice(at, start) + change(...found);
+        at = from = pattern.lastIndex;
+      } else from += 1;
+    }
+    return out + s.slice(at);
+  }
+
   function inline(text) {
     const slots = [];
     const MARK = /\u0000(\d+)\u0000/g;
@@ -135,7 +151,8 @@
     s = s.replace(/\\\(([\s\S]+?)\\\)/g, (whole, tex) => shown(tex, false, whole));
     s = s.replace(/(^|[^\\])\$\$([^$\n]+?)\$\$/g, (whole, lead, tex) => lead + shown(tex, true, whole.slice(lead.length)));
     s = s.replace(/(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (whole, lead, tex) => lead + shown(tex, false, whole.slice(lead.length)));
-    s = s.replace(/!\[\[([^\]|\[]+)(?:\|([^\]]*))?\]\]/g, (whole, name, option) => {
+    s = bracketed(s, '![[', /!\[\[([^\]|\[]+)(?:\|([^\]]*))?\](\])?/y, (whole, name, option, closed) => {
+      if (!closed) return whole;
       const file = raw(name).trim();
       const img = picture(file, option && /^\s*\d/.test(option) ? `${file}|${raw(option)}` : file);
       return img ? keep(img, whole) : whole;
@@ -144,14 +161,15 @@
       const name = raw(title).trim();
       return keep(`<a class="wiki-link" href="#/search/${encodeURIComponent(name)}" data-action="open-title" data-title="${escape(name)}">${label ? escape(label.trim()) : escape(name)}</a>`, whole);
     });
-    s = s.replace(/!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\)/g, (whole, alt, target) => {
+    s = bracketed(s, '![', /!\[([^\]]*)\](?:\((<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\))?/y, (whole, alt, target) => {
+      if (target === undefined) return whole;
       const img = picture(raw(target), raw(alt));
       return img ? keep(img, whole) : whole;
     });
-    s = s.replace(/!?\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g, (whole, label, url) => {
-      const safe = safeUrl(raw(url));
+    s = bracketed(s, '[', /!?\[([^\]]*)\](?:\(([^)\s]+)(?:\s+"[^"]*")?\))?/y, (whole, label, url) => {
+      const safe = url === undefined ? null : safeUrl(raw(url));
       return safe ? keep(link(safe, emphasis(escape(label || safe))), whole) : whole;
-    });
+    }, true);
     s = s.replace(/\bhttps?:\/\/[^\s<>()]+[^\s<>().,;:!?'"\]]/g, (whole) => keep(link(raw(whole), escape(raw(whole))), whole));
     s = s.replace(/:([a-z]+):/g, (whole, name, at, all) => (Object.hasOwn(NOTE_ICONS, name) && !/[\w:]/.test(all[at - 1] || '') && !/[\w:]/.test(all[at + whole.length] || '') ? keep(noteIcon(name), whole) : whole));
     s = emphasis(escape(s));
@@ -435,7 +453,7 @@
   }
 
   function plain(markdown) {
-    return String(markdown || '')
+    let s = String(markdown || '')
       .replace(/```[\s\S]*?```/g, ' ')
       .replace(/^[^\S\n]*(?:-{3,}|\*{3,}|_{3,})[^\S\n]*$/gm, ' ')
       .replace(/^[^\S\n]*\|?[^\S\n]*:?-+:?[^\S\n]*(\|[^\S\n]*:?-+:?[^\S\n]*)*\|?[^\S\n]*$/gm, ' ')
@@ -444,10 +462,11 @@
         return i < all.length - 1 ? head.trimEnd() : head;
       }).join(' ')
       .replace(new RegExp(String.raw`^[^\S\n]*(?:#{1,6}|>|${MARKER})\s+`, 'gm'), (head) => (/^\s*[a-z]/i.test(head) && !listable(head, false) ? head : ''))
-      .replace(/\[( |x|X)\]\s+/g, '')
-      .replace(/!\[\[[^\]]*\]\]/g, ' ')
-      .replace(/!\[([^\]]*)\]\([^)]*\)/g, ' ')
-      .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[( |x|X)\]\s+/g, '');
+    s = bracketed(s, '![[', /!\[\[[^\]]*\](\])?/y, (whole, closed) => (closed ? ' ' : whole));
+    s = bracketed(s, '![', /!\[[^\]]*\](\([^)]*\))?/y, (whole, target) => (target ? ' ' : whole));
+    s = bracketed(s, '[', /\[([^\]]*)\](\([^)]*\))?/y, (whole, label, target) => (target ? label : whole));
+    return s
       .replace(/<\/?u>/g, '')
       .replace(/[*_~`]/g, '')
       .replace(/\s+/g, ' ')
