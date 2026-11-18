@@ -369,7 +369,8 @@ pub(crate) async fn create_card(
                 None => return error(StatusCode::BAD_REQUEST, "That board has no columns."),
             },
         };
-        if boards::all_cards(chats).len() >= boards::MOST_CARDS {
+        let all = boards::all_cards(chats);
+        if all.len() >= boards::MOST_CARDS {
             return error(
                 StatusCode::CONFLICT,
                 "Leo keeps up to 5,000 cards. Delete finished ones first.",
@@ -396,7 +397,7 @@ pub(crate) async fn create_card(
             }
             None => {
                 let spot = if body.top { Spot::Top } else { Spot::End };
-                boards::settle(chats, &board, card, spot, now)
+                boards::settle_in(chats, &board, card, spot, now, &all)
             }
         };
         match saved {

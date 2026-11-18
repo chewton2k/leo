@@ -297,11 +297,23 @@ fn between(prev: Option<f64>, next: Option<f64>) -> Option<f64> {
 pub fn settle(
     chats: &Path,
     board: &Board,
-    mut card: Card,
+    card: Card,
     spot: Spot,
     now: DateTime<Utc>,
 ) -> anyhow::Result<Card> {
-    let others: Vec<Card> = cards_of(chats, board)
+    settle_in(chats, board, card, spot, now, &all_cards(chats))
+}
+
+/// `settle` over cards already read, so a request that has read them does not read them again.
+pub fn settle_in(
+    chats: &Path,
+    board: &Board,
+    mut card: Card,
+    spot: Spot,
+    now: DateTime<Utc>,
+    all: &[Card],
+) -> anyhow::Result<Card> {
+    let others: Vec<Card> = cards_in(board, all)
         .into_iter()
         .filter(|c| c.column == card.column && c.id != card.id)
         .collect();
@@ -454,6 +466,25 @@ mod tests {
         settle(&chats, &board, across, Spot::Top, now).unwrap();
         assert_eq!(order(&chats, &board, 2), ["card-0001"]);
         assert_eq!(order(&chats, &board, 0), ["card-0003", "card-0002"]);
+    }
+
+    #[test]
+    fn settling_in_cards_already_read_lands_where_settle_does() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = new_board("Work", now);
+        put_board(&chats, &board).unwrap();
+        for (id, rank) in [("card-0001", 1.0), ("card-0002", 1.0)] {
+            put_card(&chats, &card_in(&board, 0, id, rank, now)).unwrap();
+        }
+        let all = all_cards(&chats);
+        let fresh = card_in(&board, 0, "card-0003", 0.0, now);
+        settle_in(&chats, &board, fresh, Spot::After("card-0001"), now, &all).unwrap();
+        assert_eq!(
+            order(&chats, &board, 0),
+            ["card-0001", "card-0003", "card-0002"]
+        );
     }
 
     #[test]

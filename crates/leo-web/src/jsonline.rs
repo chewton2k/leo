@@ -31,11 +31,23 @@ pub(crate) fn file_path(chats: &Path, kind: &str, name: &str) -> anyhow::Result<
 }
 
 pub(crate) fn read_file<T: Line>(chats: &Path, path: &Path) -> Option<T> {
-    use std::io::Read;
     let checked = file_path(chats, T::DIR, path.file_name()?.to_str()?).ok()?;
     if checked != path {
         return None;
     }
+    read_checked(path)
+}
+
+fn read_in<T: Line>(dir: &Path, path: &Path) -> Option<T> {
+    let checked = leo_core::paths::contained_path(dir, Path::new(path.file_name()?)).ok()?;
+    if checked != path {
+        return None;
+    }
+    read_checked(path)
+}
+
+fn read_checked<T: Line>(path: &Path) -> Option<T> {
+    use std::io::Read;
     let meta = std::fs::symlink_metadata(path).ok()?;
     if !meta.is_file() || meta.len() > MOST_FILE_BYTES {
         return None;
@@ -76,7 +88,7 @@ pub(crate) fn read_all<T: Line>(chats: &Path, most: Option<usize>) -> Vec<T> {
     let Ok(dir) = checked_dir(chats, T::DIR) else {
         return Vec::new();
     };
-    let Ok(entries) = std::fs::read_dir(dir) else {
+    let Ok(entries) = std::fs::read_dir(&dir) else {
         return Vec::new();
     };
     entries
@@ -87,7 +99,7 @@ pub(crate) fn read_all<T: Line>(chats: &Path, most: Option<usize>) -> Vec<T> {
             (!name.starts_with('.') && valid_id(&id)).then(|| (id, entry.path()))
         })
         .take(most.unwrap_or(usize::MAX))
-        .filter_map(|(id, path)| read_file::<T>(chats, &path).filter(|item| item.id() == id))
+        .filter_map(|(id, path)| read_in::<T>(&dir, &path).filter(|item| item.id() == id))
         .collect()
 }
 
@@ -216,5 +228,33 @@ mod tests {
         )
         .unwrap();
         assert!(!load::<Item>(&chats, "item-0001").unwrap().deleted);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_scan_skips_a_linked_file_and_a_dot_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        write_file(&chats, &item("Kept", Utc::now(), false)).unwrap();
+        let folder = checked_dir(&chats, "items").unwrap();
+        let outside = dir.path().join("outside.json");
+        std::fs::write(
+            &outside,
+            serde_json::to_string(&Item {
+                id: "item-0002".into(),
+                ..item("Linked", Utc::now(), false)
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(&outside, folder.join("item-0002.json")).unwrap();
+        std::fs::copy(
+            folder.join("item-0001.json"),
+            folder.join(".item-0003.json"),
+        )
+        .unwrap();
+        let found = read_all::<Item>(&chats, None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].title, "Kept");
     }
 }
