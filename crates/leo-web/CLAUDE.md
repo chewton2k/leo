@@ -1190,7 +1190,12 @@ a modal.
   without a job. The Storage page and `/api/storage` are gone; files only it
   managed stay untouched.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
-  Restore tasks refuses a zip or file without task ids.
+  Restore tasks refuses a zip or file without task ids. An export has no item or size limit
+  (2026-11-17, the owner's principle 1); it is streamed entry by entry into a temporary file
+  the response then sends (a file in 64 KB pieces, a chat's messages and a board's cards a page
+  or a card at a time, a chat document a million characters at a time, zip64 when needed), skips
+  a folder it has already entered or one deeper than leo reads (`MOST_DEPTH`, 64), and stops, removing its
+  file, when the request is abandoned. Tasks and margin threads are still held whole while written.
 - Appearance keys are per browser (`leo-theme`, `leo-note-width`,
   `leo-text-size`, `leo-felix-letters`, `leo-page-width`) and set before paint by `/theme.js`;
   only reading text multiplies `--read`. Page width (2026-11-16, the user's call): two `.page-mark` separators at the note's top corners (drag.js) set

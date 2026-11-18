@@ -39,22 +39,33 @@ async fn zip_download_with_slots(
             Json(serde_json::json!({"error": "Two downloads are still being prepared or sent. Finish or close one, then try again."})),
         ).into_response();
     };
+    let (_stop_on_leave, stop) = crate::stop_when_dropped();
     let made = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         use std::io::Seek;
         let tmp = temporary()?;
-        build(tmp.as_file())?;
+        leo_core::children::with_stop(stop, || build(tmp.as_file()))?;
         let (mut file, path) = tmp.into_parts();
         file.rewind()?;
         let size = file.metadata()?.len();
         Ok((file, path, size, permit))
     })
     .await;
-    let Ok(Ok((file, path, size, permit))) = made else {
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "The zip could not be made. Export fewer parts, check folder permissions and free disk space, then try again. Each export allows up to 10 GiB, 100,000 items and 64 folder levels." })),
-        )
-            .into_response();
+    let (file, path, size, permit) = match made {
+        Ok(Ok(made)) => made,
+        Ok(Err(error)) if disk_is_full(&error) => {
+            return (
+                StatusCode::INSUFFICIENT_STORAGE,
+                Json(serde_json::json!({ "error": "The disk is full, so the zip could not be made. Free some space and try again." })),
+            )
+                .into_response();
+        }
+        _ => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "The zip could not be made. Check folder permissions and free disk space, then try again." })),
+            )
+                .into_response();
+        }
     };
     let held = ZipStream {
         file: tokio::fs::File::from_std(file),
@@ -85,6 +96,18 @@ async fn zip_download_with_slots(
         headers.insert(header::CONTENT_DISPOSITION, value);
     }
     response
+}
+
+fn disk_is_full(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .or_else(|| match cause.downcast_ref::<zip::result::ZipError>() {
+                Some(zip::result::ZipError::Io(io)) => Some(io),
+                _ => None,
+            })
+            .is_some_and(|io| io.kind() == std::io::ErrorKind::StorageFull)
+    })
 }
 
 pub(crate) fn attachment_header(file_name: &str) -> String {
@@ -267,6 +290,38 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(slots.available_permits(), 1);
+        assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn an_abandoned_download_tells_its_builder_to_stop_and_leaves_no_file() {
+        let folder = tempfile::tempdir().unwrap();
+        let slots = Arc::new(Semaphore::new(1));
+        let temporary = folder.path().to_path_buf();
+        let (started, began) = tokio::sync::oneshot::channel();
+        let request = tokio::spawn(zip_download_with_slots(
+            Arc::clone(&slots),
+            move || tempfile::NamedTempFile::new_in(temporary),
+            move |_| {
+                started.send(()).unwrap();
+                let give_up = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                while !leo_core::children::current_stop().is_some_and(|stop| stop.asked()) {
+                    anyhow::ensure!(std::time::Instant::now() < give_up, "never told to stop");
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                anyhow::bail!("stopped")
+            },
+            "example.zip".into(),
+        ));
+        began.await.unwrap();
+        request.abort();
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            while slots.available_permits() == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
         assert_eq!(std::fs::read_dir(folder.path()).unwrap().count(), 0);
     }
 }
