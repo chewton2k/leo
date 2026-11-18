@@ -136,6 +136,7 @@ pub struct Drafter {
     cancel: Arc<AtomicBool>,
     failures: usize,
     ended: bool,
+    read: std::collections::BTreeMap<u32, session::Segment>,
 }
 
 impl Drafter {
@@ -149,6 +150,7 @@ impl Drafter {
             cancel: Default::default(),
             failures: 0,
             ended: false,
+            read: Default::default(),
         }
     }
 
@@ -170,11 +172,21 @@ impl Drafter {
             self.profile = session.manifest.profile.clone();
         }
         let upto = self.done.as_ref().map_or(0, |d| d.upto);
-        let segments: Vec<session::Segment> = session
-            .segments()
-            .into_iter()
-            .filter(|s| s.index >= upto)
-            .collect();
+        for index in session.settled().0 {
+            if self.read.contains_key(&index) {
+                continue;
+            }
+            if let Some(segment) = session.segment(index).filter(|s| {
+                matches!(
+                    s.state,
+                    session::SegmentState::Done(_) | session::SegmentState::Failed(_)
+                )
+            }) {
+                self.read.insert(index, segment);
+            }
+        }
+        let segments: Vec<session::Segment> =
+            self.read.range(upto..).map(|(_, s)| s.clone()).collect();
         let run: Vec<session::Segment> = segments
             .iter()
             .enumerate()
@@ -196,7 +208,8 @@ impl Drafter {
             return;
         }
         let fresh = session::assemble(&run, session.manifest.segment_secs).parts;
-        let all = session.assemble().parts;
+        let read: Vec<session::Segment> = self.read.values().cloned().collect();
+        let all = session::assemble(&read, session.manifest.segment_secs).parts;
         let points = session.manifest.jotted();
         let profile = self.profile.clone();
         let dir = session.dir.clone();
@@ -885,7 +898,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             lost_up_to = lost;
         }
         let secs = capture.recorded_secs() as u64;
-        let backlog = session::transcriber::waiting(&session.dir).len();
+        let backlog = transcriber.backlog();
         if let Some(drafter) = drafter
             .as_mut()
             .filter(|_| last_draft.elapsed() >= DRAFT_EVERY)
@@ -1484,6 +1497,30 @@ mod tests {
 
     fn budget() -> crate::ai::budget::Budget {
         crate::ai::budget::Budget::AGENT
+    }
+
+    #[test]
+    fn the_drafter_reads_each_transcript_once() {
+        let root = tempfile::tempdir().unwrap();
+        let session = drafting_session(root.path(), &[("seg-00000.txt", "first stretch")]);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut drafter = Drafter::new(counting(&calls, "## First\n- one"), budget());
+        drafter.tick(&session, 0);
+        settle(&mut drafter, &session);
+        std::fs::write(session.dir.join("seg-00001.txt"), "second stretch").unwrap();
+        let all = session.assemble().parts;
+        std::fs::remove_file(session.dir.join("seg-00000.txt")).unwrap();
+        std::fs::create_dir(session.dir.join("seg-00000.txt")).unwrap();
+        drafter.tick(&session, 0);
+        settle(&mut drafter, &session);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let done = drafter.done.clone().unwrap();
+        assert_eq!(done.upto, 2);
+        let points = session.manifest.jotted();
+        assert_eq!(
+            done.key,
+            draft_key(&all, &points, &session.manifest.profile, 2)
+        );
     }
 
     #[test]

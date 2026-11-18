@@ -377,6 +377,9 @@ points, warnings and context are kept, and a passage already there by time and
 text keeps its stored label, so running a recovery twice changes nothing. Plain
 `recording::save` replaces (a new recording, `Session::commit`, transcript
 corrections), so a corrected point never brings back its old wording.
+While recording, the transcriber finds the next part by name and lists the
+folder only at start, when recording ends and once a minute; the drafter reads
+each transcript once.
 Capture queues are bounded; shutdown never waits on an active transcription;
 lock heartbeats join on drop. Live previews pass PCM directly (never a temp
 live.wav); `Controls.preview` false skips only new preview passes.

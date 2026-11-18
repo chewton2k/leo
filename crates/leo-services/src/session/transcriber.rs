@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -39,6 +39,7 @@ pub struct Policy {
     pub workers: usize,
     pub finish_limit: Duration,
     pub keep_parts: u32,
+    pub relist: Duration,
 }
 
 impl Default for Policy {
@@ -51,6 +52,7 @@ impl Default for Policy {
             workers: 1,
             finish_limit: Duration::from_secs(120),
             keep_parts: 0,
+            relist: Duration::from_secs(60),
         }
     }
 }
@@ -66,6 +68,7 @@ pub struct Transcriber {
     cancel: Arc<AtomicBool>,
     recording: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
+    work: Arc<Work>,
 }
 
 pub fn waiting_for_model(error: &str) -> bool {
@@ -75,33 +78,58 @@ pub fn waiting_for_model(error: &str) -> bool {
 }
 
 pub fn waiting(dir: &Path) -> Vec<u32> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut out: Vec<u32> = entries
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let digits = name.strip_prefix("seg-")?.strip_suffix(".wav")?;
-            if digits.contains('.') {
-                return None;
-            }
-            let index: u32 = digits.parse().ok()?;
-            let settled = dir.join(format!("seg-{index:05}.txt")).exists()
-                || dir.join(format!("seg-{index:05}.err")).exists();
-            (!settled).then_some(index)
-        })
-        .collect();
-    out.sort();
-    out
+    listing(dir).waiting
 }
 
-fn recording_now(dir: &Path) -> bool {
-    std::fs::read_dir(dir).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|e| e.file_name().to_string_lossy().ends_with(".part.wav"))
-    })
+struct Listing {
+    waiting: Vec<u32>,
+    next: u32,
+    recording: BTreeSet<u32>,
+}
+
+fn listing(dir: &Path) -> Listing {
+    let mut found = Listing {
+        waiting: Vec::new(),
+        next: 0,
+        recording: BTreeSet::new(),
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return found;
+    };
+    let mut done = BTreeSet::new();
+    let mut settled = HashSet::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some(rest) = name.strip_prefix("seg-") else {
+            continue;
+        };
+        let Some((digits, ext)) = rest.split_once('.') else {
+            continue;
+        };
+        let Ok(index) = digits.parse::<u32>() else {
+            continue;
+        };
+        match ext {
+            "wav" => {
+                done.insert(index);
+            }
+            "txt" | "err" => {
+                settled.insert(index);
+            }
+            "part.wav" => {
+                found.recording.insert(index);
+                continue;
+            }
+            _ => continue,
+        }
+        found.next = found.next.max(index + 1);
+    }
+    found.waiting = done.into_iter().filter(|i| !settled.contains(i)).collect();
+    found
+}
+
+fn settled_on_disk(dir: &Path, index: u32) -> bool {
+    text_path(dir, index).exists() || error_path(dir, index).exists()
 }
 
 #[cfg(test)]
@@ -121,6 +149,10 @@ fn text_path(dir: &Path, index: u32) -> PathBuf {
     dir.join(format!("seg-{index:05}.txt"))
 }
 
+fn error_path(dir: &Path, index: u32) -> PathBuf {
+    dir.join(format!("seg-{index:05}.err"))
+}
+
 impl Transcriber {
     pub fn start(
         dir: &Path,
@@ -131,19 +163,30 @@ impl Transcriber {
     ) -> Transcriber {
         let cancel = Arc::new(AtomicBool::new(false));
         let live_flag = Arc::new(AtomicBool::new(recording));
+        let work = Arc::new(Work::default());
         let thread = {
             let dir = dir.to_path_buf();
             let (cancel, live_flag) = (Arc::clone(&cancel), Arc::clone(&live_flag));
+            let work = Arc::clone(&work);
             std::thread::Builder::new()
                 .name("leo-transcriber".into())
-                .spawn(move || run(&dir, transcribe, policy, &cancel, &live_flag, &events))
+                .spawn(move || {
+                    run(
+                        &dir, transcribe, policy, &cancel, &live_flag, &events, &work,
+                    )
+                })
                 .ok()
         };
         Transcriber {
             cancel,
             recording: live_flag,
             thread,
+            work,
         }
+    }
+
+    pub fn backlog(&self) -> usize {
+        lock(&self.work.seen).waiting.len()
     }
 
     pub fn recording_ended(&self) {
@@ -176,6 +219,18 @@ impl Drop for Transcriber {
     }
 }
 
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+#[derive(Default)]
+struct Seen {
+    next: u32,
+    waiting: BTreeSet<u32>,
+    recording: BTreeSet<u32>,
+    listed_at: Option<Instant>,
+}
+
 #[derive(Default)]
 struct Work {
     attempts: Mutex<HashMap<u32, (u32, Instant)>>,
@@ -183,40 +238,103 @@ struct Work {
     terminal: Mutex<HashSet<u32>>,
     stop_seen: AtomicBool,
     stopped_at: Mutex<Option<Instant>>,
+    seen: Mutex<Seen>,
 }
 
 impl Work {
-    fn pending(&self, dir: &Path) -> Vec<u32> {
-        let terminal = self
-            .terminal
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .clone();
-        waiting(dir)
-            .into_iter()
-            .filter(|i| !terminal.contains(i))
-            .collect()
-    }
-    fn claim(&self, dir: &Path) -> Option<u32> {
-        let pending = self.pending(dir);
-        let mut busy = self.busy.lock().ok()?;
-        let attempts = self.attempts.lock().ok()?;
-        let now = Instant::now();
-        let index = pending
-            .into_iter()
-            .find(|i| !busy.contains(i) && attempts.get(i).is_none_or(|(_, next)| now >= *next))?;
-        busy.insert(index);
-        Some(index)
-    }
-
-    fn release(&self, index: u32) {
-        if let Ok(mut busy) = self.busy.lock() {
-            busy.remove(&index);
+    fn refresh(&self, dir: &Path, relist: Duration) {
+        let (due, next) = {
+            let seen = lock(&self.seen);
+            (
+                seen.listed_at.is_none_or(|at| at.elapsed() >= relist),
+                seen.next,
+            )
+        };
+        if due {
+            let found = listing(dir);
+            let mut seen = lock(&self.seen);
+            seen.waiting = found.waiting.into_iter().collect();
+            seen.next = found.next;
+            seen.recording = found.recording;
+            seen.listed_at = Some(Instant::now());
+            return;
+        }
+        let mut at = next;
+        let mut found = Vec::new();
+        while dir.join(wav::done_name(at)).exists() {
+            if !settled_on_disk(dir, at) {
+                found.push(at);
+            }
+            at += 1;
+        }
+        if at != next {
+            let mut seen = lock(&self.seen);
+            if seen.next == next {
+                seen.waiting.extend(found);
+                seen.next = at;
+            }
         }
     }
 
+    fn relist_soon(&self) {
+        lock(&self.seen).listed_at = None;
+    }
+
+    fn forget(&self, index: u32) {
+        lock(&self.seen).waiting.remove(&index);
+    }
+
+    fn recording_now(&self, dir: &Path) -> bool {
+        let indices: Vec<u32> = {
+            let seen = lock(&self.seen);
+            seen.recording.iter().copied().chain([seen.next]).collect()
+        };
+        indices
+            .into_iter()
+            .any(|index| dir.join(wav::part_name(index)).exists())
+    }
+
+    fn pending(&self) -> Vec<u32> {
+        let terminal = lock(&self.terminal).clone();
+        lock(&self.seen)
+            .waiting
+            .iter()
+            .copied()
+            .filter(|i| !terminal.contains(i))
+            .collect()
+    }
+
+    fn claim(&self, dir: &Path, relist: Duration) -> Option<u32> {
+        self.refresh(dir, relist);
+        let ready: Vec<u32> = {
+            let busy = lock(&self.busy);
+            let attempts = lock(&self.attempts);
+            let now = Instant::now();
+            self.pending()
+                .into_iter()
+                .filter(|i| {
+                    !busy.contains(i) && attempts.get(i).is_none_or(|(_, next)| now >= *next)
+                })
+                .collect()
+        };
+        for index in ready {
+            if settled_on_disk(dir, index) {
+                self.forget(index);
+                continue;
+            }
+            if lock(&self.busy).insert(index) {
+                return Some(index);
+            }
+        }
+        None
+    }
+
+    fn release(&self, index: u32) {
+        lock(&self.busy).remove(&index);
+    }
+
     fn idle(&self) -> bool {
-        self.busy.lock().is_ok_and(|b| b.is_empty())
+        lock(&self.busy).is_empty()
     }
 }
 
@@ -227,11 +345,11 @@ fn run(
     cancel: &AtomicBool,
     recording: &AtomicBool,
     events: &Sender<Update>,
+    work: &Work,
 ) {
-    let work = Work::default();
     std::thread::scope(|scope| {
         for _ in 0..policy.workers.max(1) {
-            scope.spawn(|| worker(dir, &transcribe, policy, cancel, recording, events, &work));
+            scope.spawn(|| worker(dir, &transcribe, policy, cancel, recording, events, work));
         }
     });
 }
@@ -257,11 +375,12 @@ fn worker(
             if let Ok(mut attempts) = work.attempts.lock() {
                 attempts.clear();
             }
+            work.relist_soon();
         }
-        let Some(index) = work.claim(dir) else {
-            if work.pending(dir).is_empty()
+        let Some(index) = work.claim(dir, policy.relist) else {
+            if work.pending().is_empty()
                 && !still_recording
-                && !recording_now(dir)
+                && !work.recording_now(dir)
                 && work.idle()
             {
                 return;
@@ -308,6 +427,7 @@ fn settle(
                     if let Ok(mut terminal) = work.terminal.lock() {
                         terminal.insert(index);
                     }
+                    work.forget(index);
                     let _ = events.send(Update::Failed {
                         index,
                         error: format!("Could not save transcript: {e}; audio retained"),
@@ -326,6 +446,7 @@ fn settle(
                 });
                 return;
             }
+            work.forget(index);
             if index >= policy.keep_parts {
                 let _ = std::fs::remove_file(&path);
             }
@@ -354,12 +475,13 @@ fn settle(
                     || (attempt >= policy.attempts_after_stop && !waiting_for_model(&error)))
             {
                 if waiting_for_model(&error)
-                    || write_atomic(&dir.join(format!("seg-{index:05}.err")), &error).is_err()
+                    || write_atomic(&error_path(dir, index), &error).is_err()
                 {
                     if let Ok(mut terminal) = work.terminal.lock() {
                         terminal.insert(index);
                     }
                 }
+                work.forget(index);
                 work.attempts
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -517,6 +639,7 @@ mod tests {
             workers: 3,
             finish_limit: Duration::from_secs(120),
             keep_parts: 0,
+            relist: Duration::from_secs(60),
         }
     }
 
@@ -734,6 +857,169 @@ mod tests {
         }
     }
 
+    fn hourly() -> Policy {
+        Policy {
+            relist: Duration::from_secs(3600),
+            workers: 1,
+            ..quick()
+        }
+    }
+
+    fn done_within(updates: &mpsc::Receiver<Update>, index: u32, limit: Duration) -> bool {
+        let until = Instant::now() + limit;
+        while let Some(left) = until.checked_duration_since(Instant::now()) {
+            match updates.recv_timeout(left) {
+                Ok(Update::Done { index: i, .. }) if i == index => return true,
+                Ok(_) => {}
+                Err(_) => return false,
+            }
+        }
+        false
+    }
+
+    #[test]
+    fn a_resumed_labelled_recording_keeps_its_finished_parts() {
+        let dir = tempfile::tempdir().unwrap();
+        for i in 0..4 {
+            loud(dir.path(), i);
+            std::fs::write(text_path(dir.path(), i), format!("part {i}")).unwrap();
+        }
+        loud(dir.path(), 4);
+        std::fs::write(dir.path().join("seg-00004.err"), "offline").unwrap();
+        loud(dir.path(), 6);
+        let stamp = |i: u32| {
+            let path = text_path(dir.path(), i);
+            (
+                std::fs::read(&path).unwrap(),
+                std::fs::metadata(&path).unwrap().modified().unwrap(),
+            )
+        };
+        let before: Vec<_> = (0..4).map(stamp).collect();
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let seen = asked.clone();
+        let (tx, _rx) = mpsc::channel();
+        Transcriber::start(
+            dir.path(),
+            Arc::new(move |p: &Path| {
+                seen.lock().unwrap().push(named(p));
+                Ok("new".into())
+            }),
+            Policy {
+                keep_parts: 10,
+                ..hourly()
+            },
+            false,
+            tx,
+        )
+        .wait();
+        assert_eq!(*asked.lock().unwrap(), ["seg-00006.wav"]);
+        assert_eq!((0..4).map(stamp).collect::<Vec<_>>(), before);
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("seg-00004.err")).unwrap(),
+            "offline"
+        );
+        assert_eq!(
+            std::fs::read_to_string(text_path(dir.path(), 6)).unwrap(),
+            "new"
+        );
+    }
+
+    #[test]
+    fn a_new_part_is_found_by_name() {
+        let dir = tempfile::tempdir().unwrap();
+        loud(dir.path(), 0);
+        let (tx, rx) = mpsc::channel();
+        let worker = Transcriber::start(
+            dir.path(),
+            Arc::new(|p: &Path| Ok(named(p))),
+            hourly(),
+            true,
+            tx,
+        );
+        assert!(done_within(&rx, 0, Duration::from_secs(5)));
+        loud(dir.path(), 1);
+        assert!(done_within(&rx, 1, Duration::from_secs(5)));
+        worker.wait();
+    }
+
+    #[test]
+    fn a_part_written_out_of_order_is_found_by_the_relist() {
+        let dir = tempfile::tempdir().unwrap();
+        loud(dir.path(), 0);
+        let (tx, rx) = mpsc::channel();
+        let worker = Transcriber::start(
+            dir.path(),
+            Arc::new(|p: &Path| Ok(named(p))),
+            Policy {
+                relist: Duration::from_millis(50),
+                ..hourly()
+            },
+            true,
+            tx,
+        );
+        assert!(done_within(&rx, 0, Duration::from_secs(5)));
+        loud(dir.path(), 3);
+        assert!(done_within(&rx, 3, Duration::from_millis(200)));
+        worker.wait();
+    }
+
+    #[test]
+    fn the_backlog_comes_from_the_transcriber() {
+        let dir = tempfile::tempdir().unwrap();
+        loud(dir.path(), 0);
+        loud(dir.path(), 1);
+        let release = Arc::new(AtomicBool::new(false));
+        let open = release.clone();
+        let (tx, _rx) = mpsc::channel();
+        let worker = Transcriber::start(
+            dir.path(),
+            Arc::new(move |p: &Path| {
+                while !open.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Ok(named(p))
+            }),
+            hourly(),
+            true,
+            tx,
+        );
+        let until = Instant::now() + Duration::from_secs(5);
+        while worker.backlog() != 2 && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(worker.backlog(), 2);
+        release.store(true, Ordering::SeqCst);
+        worker.wait();
+    }
+
+    #[test]
+    fn the_worker_still_exits_when_recording_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        loud(dir.path(), 0);
+        std::fs::write(dir.path().join(wav::part_name(1)), "recording").unwrap();
+        let (tx, _rx) = mpsc::channel();
+        let worker = Transcriber::start(
+            dir.path(),
+            Arc::new(|p: &Path| Ok(named(p))),
+            hourly(),
+            true,
+            tx,
+        );
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(!worker.is_finished());
+        std::fs::remove_file(dir.path().join(wav::part_name(1))).unwrap();
+        loud(dir.path(), 1);
+        worker.recording_ended();
+        let until = Instant::now() + Duration::from_secs(5);
+        while !worker.is_finished() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(worker.is_finished());
+        for i in 0..2 {
+            assert!(text_path(dir.path(), i).exists());
+        }
+    }
+
     #[test]
     fn waits_grow_and_are_capped() {
         let p = Policy::default();
@@ -773,6 +1059,7 @@ mod model_wait_tests {
                 workers: 1,
                 finish_limit: Duration::from_millis(50),
                 keep_parts: 0,
+                relist: Duration::from_secs(60),
             },
             false,
             send,

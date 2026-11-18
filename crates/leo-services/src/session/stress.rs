@@ -16,6 +16,7 @@ fn quick() -> Policy {
         workers: 3,
         finish_limit: Duration::from_secs(30),
         keep_parts: 0,
+        relist: Duration::from_secs(60),
     }
 }
 

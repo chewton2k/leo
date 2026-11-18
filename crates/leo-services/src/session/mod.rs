@@ -402,6 +402,22 @@ impl Session {
         (settled, all.len())
     }
 
+    pub fn segment(&self, index: u32) -> Option<Segment> {
+        let path = |ext: &str| self.dir.join(format!("seg-{index:05}.{ext}"));
+        let state = if let Ok(text) = std::fs::read_to_string(path("txt")) {
+            SegmentState::Done(text)
+        } else if path("err").exists() {
+            SegmentState::Failed(std::fs::read_to_string(path("err")).unwrap_or_default())
+        } else if path("wav").exists() {
+            SegmentState::Waiting
+        } else if path("part.wav").exists() {
+            SegmentState::Recording
+        } else {
+            return None;
+        };
+        Some(Segment { index, state })
+    }
+
     pub fn segments(&self) -> Vec<Segment> {
         let mut found: std::collections::BTreeMap<u32, SegmentState> = Default::default();
         let Ok(entries) = std::fs::read_dir(&self.dir) else {
