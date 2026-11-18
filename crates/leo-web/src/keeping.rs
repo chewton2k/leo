@@ -225,6 +225,10 @@ pub(crate) async fn expire_now(state: &AppState) {
     let chats = state.chats.clone();
     let recording = state.recording.clone();
     let originals = state.originals.clone();
+    let stop = leo_core::children::Stop {
+        flag: state.quitting.clone(),
+        deadline: None,
+    };
     let active = state
         .recording
         .lock()
@@ -246,7 +250,12 @@ pub(crate) async fn expire_now(state: &AppState) {
         crate::chats::tidy(&chats, keep.chat_days, now);
         crate::chat_files::tidy_orphans(&chats, now);
         crate::routes::combine::forget_old_combines(&chats, now - chrono::Duration::days(1));
-        expire_uploads(&notes_dir, keep.upload_days, now);
+        leo_core::children::with_stop(stop.clone(), || {
+            expire_uploads(&notes_dir, keep.upload_days, now);
+        });
+        if stop.asked() {
+            return;
+        }
         originals.forget_missing();
         expire_transcripts(&notes_dir, keep.transcript_days, now, active.as_deref());
         crate::dependents::clear(&chats, &notes_dir, Vec::new(), active.clone(), &owners);
@@ -454,6 +463,55 @@ mod tests {
             leo_core::children::with_stop(stop, || old_upload_count(&notes, Some(30), Utc::now()));
         assert!(counted < GIVE_WAY_EVERY, "{counted}");
         assert_eq!(old_upload_count(&notes, Some(30), Utc::now()), 2_500);
+    }
+
+    #[tokio::test]
+    async fn upload_expiry_gives_way_on_quit_and_can_run_again() {
+        let (tmp, notes) = data();
+        let running = crate::start_in(
+            crate::Places {
+                store: leo_core::store::Store::load_from(&notes).unwrap(),
+                sessions: tmp.path().join("sessions.json"),
+            },
+            crate::StartOptions {
+                port: 0,
+                token: crate::fresh_token(),
+            },
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let state = running.state.clone();
+        running.stop().await;
+
+        leo_core::keep::save(
+            &notes,
+            &leo_core::keep::Keep {
+                upload_days: Some(30),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let old = 5_000;
+        for n in 0..old {
+            upload(&notes, "note-one", &format!("{n}.pdf"), 40, 0);
+        }
+        let fresh = upload(&notes, "note-one", "fresh.pdf", 1, 0);
+
+        expire_now(&state).await;
+        assert!(fresh.is_file());
+        let remaining = uploads_left(&notes) - 1;
+        assert!(
+            (old - GIVE_WAY_EVERY + 1..=old).contains(&remaining),
+            "{remaining} of {old} old uploads remain"
+        );
+        let state = AppState {
+            quitting: Default::default(),
+            ..state
+        };
+        expire_now(&state).await;
+        assert_eq!(uploads_left(&notes), 1);
+        assert!(fresh.is_file());
     }
 
     #[cfg(unix)]
