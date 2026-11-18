@@ -252,7 +252,7 @@ fn remove_with_logs(path: &Path) {
 }
 
 fn put_back_finished_rewrite(path: &Path) -> Result<()> {
-    if rewriting() {
+    if rewriting(path) {
         return Ok(());
     }
     let (copy, ready) = rewrite_files(path);
@@ -418,7 +418,7 @@ impl Db {
         if !one_handle(&self.path) {
             return Ok(Rewritten::Stopped);
         }
-        let _running = Running::start();
+        let _running = Running::start(&self.path);
         if self.checkpoint()? {
             return Ok(Rewritten::Changed);
         }
@@ -525,25 +525,35 @@ fn rewrite_files(path: &Path) -> (PathBuf, PathBuf) {
     )
 }
 
-static REWRITING: AtomicBool = AtomicBool::new(false);
+static REWRITING: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 static UNCACHED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
-pub fn rewriting() -> bool {
-    REWRITING.load(Ordering::SeqCst)
+fn rewriting(path: &Path) -> bool {
+    REWRITING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .any(|p| p == path)
 }
 
-struct Running;
+struct Running(PathBuf);
 
 impl Running {
-    fn start() -> Running {
-        REWRITING.store(true, Ordering::SeqCst);
-        Running
+    fn start(path: &Path) -> Running {
+        REWRITING
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(path.to_path_buf());
+        Running(path.to_path_buf())
     }
 }
 
 impl Drop for Running {
     fn drop(&mut self) {
-        REWRITING.store(false, Ordering::SeqCst);
+        let mut running = REWRITING.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(at) = running.iter().position(|p| *p == self.0) {
+            running.swap_remove(at);
+        }
     }
 }
 
