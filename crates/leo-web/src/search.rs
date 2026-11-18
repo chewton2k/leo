@@ -121,10 +121,6 @@ impl<'n> Text<'n> {
     }
 }
 
-pub fn tagged(query: &str) -> bool {
-    query.split_whitespace().any(|w| w.starts_with('#'))
-}
-
 pub fn counted(words: Vec<String>) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
     let mut at: HashMap<String, usize> = HashMap::new();
@@ -226,13 +222,6 @@ pub fn finish<'a>(store: &'a Store, query: &str, mut hits: Vec<Hit<'a>>) -> Vec<
 }
 
 pub fn search<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<Hit<'a>> {
-    if tagged(query) {
-        return store
-            .find(query)
-            .into_iter()
-            .map(|note| Hit { note, why: None })
-            .collect();
-    }
     let words = words_of(query);
     if words.is_empty() {
         return Vec::new();
@@ -249,13 +238,9 @@ pub fn search<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<Hit<'a>> 
 
 pub fn with_meaning<'a>(
     store: &'a Store,
-    query: &str,
     mut hits: Vec<Hit<'a>>,
     close: &[(String, f32)],
 ) -> Vec<Hit<'a>> {
-    if tagged(query) {
-        return hits;
-    }
     let mut close: Vec<&(String, f32)> = close.iter().collect();
     close.sort_by(|(ia, sa), (ib, sb)| sb.total_cmp(sa).then(ia.cmp(ib)));
     let mut taken: HashSet<String> = hits.iter().map(|h| h.note.id.clone()).collect();
@@ -507,18 +492,18 @@ mod tests {
     }
 
     #[test]
-    fn a_tag_search_and_a_misspelt_title_still_work() {
-        let (_d, mut store) = library(&[("Algorithms", ""), ("Tagged", "")]);
-        let tagged = store
-            .notes
-            .iter()
-            .find(|n| n.title == "Tagged")
-            .unwrap()
-            .id
-            .clone();
-        store.find_note_mut(&tagged).unwrap().tags = vec!["exam".into()];
+    fn a_hash_word_and_a_misspelt_title_still_work() {
+        let (_d, store) = library(&[("Algorithms", ""), ("Revision", "The exam is on Friday")]);
+        store.save().unwrap();
+        std::fs::write(
+            store.notes_dir.join("Tagged.md"),
+            "---\nid: tagged-note\ntitle: Tagged\ntags: [exam]\n---\n\nnothing here\n",
+        )
+        .unwrap();
+        let store = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(store.notes.len(), 3);
         let cache = Cache::default();
-        assert_eq!(titles(&search(&store, &cache, "#exam")), ["Tagged"]);
+        assert_eq!(titles(&search(&store, &cache, "#exam")), ["Revision"]);
         assert_eq!(titles(&search(&store, &cache, "algrthms")), ["Algorithms"]);
         assert!(search(&store, &cache, "  ").is_empty());
     }

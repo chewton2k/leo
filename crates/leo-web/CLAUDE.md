@@ -477,8 +477,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   never redraw the editor.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens
-(2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags hidden on
-the web (root CLAUDE.md).
+(2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags are not
+read (root CLAUDE.md, 2026-11-17).
 
 ## Felix (`chat.rs`, `routes/felix.rs`, `tools.rs`, `routing.rs`, `web/chat.js`)
 

@@ -809,7 +809,7 @@ const saving = window.leoSaving.create({
 function snapshot(s) {
   const body = s.doc.source();
   const title = cleanTitle(s.title.textContent) || (s.note.id ? s.note.title : md.plain(body).slice(0, 60));
-  return { title, body, tags: [...s.tags] };
+  return { title, body };
 }
 
 function changed(s) { saving.changed(s, snapshot(s)); }
@@ -866,7 +866,6 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     if (source.note && source.note !== note.id) closeSource();
     if (state.session && state.session.doc) state.session.doc.destroy();
     s = draft || saving.open(note);
-    s.tags = [...s.edit.tags];
     if (side.openedNote !== note.id) side.target = null;
     side.openedNote = note.id;
     state = { view: 'note', dir: note.directory, session: s };
@@ -928,7 +927,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
 
 
 function newNote(dir) {
-  return showNote(null, { fresh: { id: null, title: '', body: '', tags: [], directory: dir || '', pinned: false, version: null } });
+  return showNote(null, { fresh: { id: null, title: '', body: '', directory: dir || '', pinned: false, version: null } });
 }
 
 async function ready() {

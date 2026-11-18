@@ -2583,7 +2583,6 @@ impl Desk {
                 let close = self.close.take().unwrap_or_else(|| self.near(&query));
                 let hits = crate::search::with_meaning(
                     store,
-                    &query,
                     crate::search::search(store, cache, &query),
                     &close,
                 );

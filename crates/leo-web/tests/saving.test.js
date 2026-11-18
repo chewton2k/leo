@@ -13,11 +13,11 @@ function storage() {
     removeItem: (key) => values.delete(key),
   };
 }
-const note = () => ({ id: 'one', title: 'Note', body: 'Original', tags: [], directory: '', version: 'v1' });
+const note = () => ({ id: 'one', title: 'Note', body: 'Original', directory: '', version: 'v1' });
 function manager(api, local = storage(), extra = {}) {
   return leoSaving.create({ api, storage: local, schedule: () => 1, cancel: () => {}, ...extra });
 }
-const edit = (body) => ({ title: 'Note', body, tags: [] });
+const edit = (body) => ({ title: 'Note', body });
 
 test('a failed save remains tracked and recovers after a reload', async () => {
   const local = storage();
@@ -77,17 +77,30 @@ test('a recovered draft uses its original base so external edits create a confli
   assert.equal(local.length, 0);
 });
 
-test('offline new-note drafts recover with their folder and tags', async () => {
+test('offline new-note drafts recover with their folder', async () => {
   const local = storage();
   const m = manager(async () => { throw new Error('offline'); }, local);
   const s = m.open({ ...note(), id: null, directory: 'cs130', version: null });
-  m.changed(s, { title: 'Lecture', body: 'BFS', tags: ['exam'] });
+  m.changed(s, { title: 'Lecture', body: 'BFS' });
   await assert.rejects(m.flush(s));
   const again = manager(async () => {}, local);
   const [draft] = again.drafts();
   assert.equal(draft.note.id, null);
   assert.equal(draft.note.directory, 'cs130');
-  assert.deepEqual(draft.edit.tags, ['exam']);
+  assert.deepEqual(draft.edit, { title: 'Lecture', body: 'BFS' });
+});
+
+test('a draft saved with tags by an older page still loads and saves', async () => {
+  const local = storage();
+  local.setItem('leo-draft-v1:one', JSON.stringify({ note: { ...note(), tags: ['exam'] }, edit: { title: 'Note', body: 'Kept', tags: ['exam'] } }));
+  local.setItem('leo-draft-v1:two', JSON.stringify({ note: { ...note(), id: 'two' }, edit: { title: 'Two', body: 'Also kept' } }));
+  const sent = [];
+  const m = manager(async (url, { body }) => { sent.push(body); return { ...note(), id: url.split('/').pop(), ...body, version: 'v2' }; }, local);
+  const drafts = m.drafts();
+  assert.deepEqual(drafts.map((d) => d.edit.body).sort(), ['Also kept', 'Kept']);
+  for (const draft of drafts) await m.flush(m.get(draft.key));
+  assert.deepEqual(sent.map((b) => b.body).sort(), ['Also kept', 'Kept']);
+  assert.equal(local.length, 0);
 });
 
 test('storage failure is visible and the draft stays in memory until saved', async () => {
@@ -110,7 +123,7 @@ test('blank new notes are not created and unrelated local storage is untouched',
   local.setItem('other-app', 'keep');
   const m = manager(async () => { assert.fail('blank note was sent'); }, local);
   const s = m.open({ ...note(), id: null, title: '', body: '' });
-  m.changed(s, { title: '', body: '', tags: [] });
+  m.changed(s, { title: '', body: '' });
   await m.flush(s);
   assert.equal(m.unsaved(), false);
   assert.equal(local.getItem('other-app'), 'keep');

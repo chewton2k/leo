@@ -11,7 +11,6 @@ use crate::AppState;
 
 #[derive(Deserialize)]
 pub(crate) struct ListParams {
-    pub(crate) tag: Option<String>,
     pub(crate) limit: Option<usize>,
     pub(crate) dir: Option<String>,
     #[serde(default)]
@@ -37,7 +36,6 @@ pub(crate) struct SearchParams {
 pub(crate) struct CreateBody {
     pub(crate) title: String,
     pub(crate) body: Option<String>,
-    pub(crate) tags: Option<Vec<String>>,
     pub(crate) directory: Option<String>,
     #[serde(default)]
     pub(crate) request: Option<String>,
@@ -83,7 +81,6 @@ pub(crate) struct NoteResponse {
     pub(crate) body: String,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
-    pub(crate) tags: Vec<String>,
     pub(crate) directory: String,
     pub(crate) pinned: bool,
     pub(crate) version: String,
@@ -117,7 +114,6 @@ impl NoteResponse {
             body: n.body.clone(),
             created_at: n.created_at.to_rfc3339(),
             updated_at: n.updated_at.to_rfc3339(),
-            tags: n.tags.clone(),
             directory: n.directory.clone(),
             pinned: n.pinned,
             version: version_of(n),
@@ -210,12 +206,10 @@ pub(crate) async fn list_notes(
     let (total, notes) = state
         .read_store(move |store| {
             let limit = params.limit.unwrap_or(100).min(1000);
-            let mut notes = if let Some(ref dir) = params.dir {
+            if let Some(ref dir) = params.dir {
                 directory(store, dir)?;
-                store.list_notes_in_dir(dir, params.tag.as_deref(), usize::MAX)
-            } else {
-                store.list_notes(params.tag.as_deref(), usize::MAX)
-            };
+            }
+            let mut notes = store.list_notes(params.dir.as_deref());
             crate::browse::only(&mut notes, params.show.as_deref(), chrono::Utc::now())?;
             crate::browse::order(&mut notes, params.sort.as_deref())?;
             let total = notes.len();
@@ -283,22 +277,12 @@ pub(crate) fn make_note(
     body: &str,
     dir: &str,
 ) -> Result<NoteResponse, StatusCode> {
-    make_tagged_note(store, title, body, Vec::new(), dir)
-}
-
-fn make_tagged_note(
-    store: &mut Store,
-    title: &str,
-    body: &str,
-    tags: Vec<String>,
-    dir: &str,
-) -> Result<NoteResponse, StatusCode> {
     directory(store, dir)?;
     if !store.dir_exists(dir) && !store.create_dir(dir) {
         return Err(StatusCode::BAD_REQUEST);
     }
     let note = store
-        .create_note(title.to_string(), body.to_string(), tags, dir)
+        .create_note(title.to_string(), body.to_string(), Vec::new(), dir)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(NoteResponse::from_note(note))
 }
@@ -316,11 +300,10 @@ pub(crate) async fn create_note(
             {
                 return Ok((StatusCode::OK, Json(first)));
             }
-            let resp = make_tagged_note(
+            let resp = make_note(
                 store,
                 &body.title,
                 body.body.as_deref().unwrap_or_default(),
-                body.tags.unwrap_or_default(),
                 body.directory.as_deref().unwrap_or_default(),
             )?;
             save(store)?;
@@ -598,12 +581,11 @@ async fn fresh_search(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
     let graph = Arc::downgrade(&cache);
-    let (kept, page) = if crate::search::tagged(&q) || words.len() <= WORDS_UNDER_LOCK {
+    let (kept, page) = if words.len() <= WORDS_UNDER_LOCK {
         state
             .read_store(move |store| {
                 let hits = crate::search::with_meaning(
                     store,
-                    &q,
                     crate::search::search(store, &cache, &q),
                     &close,
                 );
@@ -668,7 +650,6 @@ async fn fresh_search(
                     .collect();
                 let hits = crate::search::with_meaning(
                     store,
-                    &q,
                     crate::search::finish(store, &q, hits),
                     &close,
                 );

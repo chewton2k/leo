@@ -17,7 +17,7 @@
           if (!key || !key.startsWith(PREFIX)) continue;
           try {
             const value = JSON.parse(storage.getItem(key));
-            if (value && value.note && value.edit && typeof value.edit.title === 'string' && typeof value.edit.body === 'string' && Array.isArray(value.edit.tags) && value.edit.tags.every((tag) => typeof tag === 'string') && typeof value.note.directory === 'string' && (value.note.id === null || typeof value.note.id === 'string')) {
+            if (value && value.note && value.edit && typeof value.edit.title === 'string' && typeof value.edit.body === 'string' && typeof value.note.directory === 'string' && (value.note.id === null || typeof value.note.id === 'string')) {
               found.push({ key, ...value });
             }
           } catch (_) {}
@@ -31,7 +31,7 @@
       if (pending.has(key)) return pending.get(key);
       const s = {
         key, note: copy(draft ? draft.note : note),
-        edit: copy(draft ? draft.edit : { title: note.title, body: note.body, tags: note.tags }),
+        edit: copy(draft ? draft.edit : { title: note.title, body: note.body }),
         dirty: Boolean(draft), revision: 0, timer: null, saving: null, persisted: Boolean(draft),
       };
       if (s.dirty) pending.set(key, s);
@@ -96,7 +96,7 @@
       s.saving = (async () => {
         while (s.dirty) {
           const edit = copy(s.edit);
-          if (!s.note.id && !edit.title.trim() && !edit.body.trim() && !edit.tags.length) {
+          if (!s.note.id && !edit.title.trim() && !edit.body.trim()) {
             s.dirty = false;
             remove(s);
             return;
@@ -112,7 +112,7 @@
               s.dirty = true;
               persist(s);
             } else {
-              s.edit = { title: s.note.title, body: s.note.body, tags: [...s.note.tags] };
+              s.edit = { title: s.note.title, body: s.note.body };
               remove(s);
               mark(s, 'Saved');
             }

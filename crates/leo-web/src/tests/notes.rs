@@ -101,7 +101,6 @@ fn creating_a_note_in_a_new_directory_registers_it() {
     let body = CreateBody {
         title: "Lecture".to_string(),
         body: None,
-        tags: None,
         directory: Some("cs162".to_string()),
         request: None,
     };
@@ -261,7 +260,6 @@ fn web_note_creation_directory_creation_and_moves_reject_traversal() {
             Json(CreateBody {
                 title: "Escape".into(),
                 body: None,
-                tags: None,
                 directory: Some(path.into()),
                 request: None,
             }),
@@ -300,7 +298,6 @@ fn a_reload_failure_is_reported_instead_of_serving_a_stale_store() {
     let result = run(list_notes(
         State(state),
         Query(ListParams {
-            tag: None,
             limit: None,
             dir: None,
             offset: 0,
@@ -349,7 +346,6 @@ fn a_large_folder_comes_in_pages_with_its_total_and_short_cards() {
         let response = run(list_notes(
             State(state.clone()),
             Query(ListParams {
-                tag: None,
                 limit: Some(limit),
                 dir: Some("big".into()),
                 offset,
@@ -554,7 +550,6 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
             Json(CreateBody {
                 title: "Idea".into(),
                 body: None,
-                tags: None,
                 directory: Some(bad.into()),
                 request: None,
             }),
@@ -568,7 +563,6 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
         Json(CreateBody {
             title: "Idea".into(),
             body: None,
-            tags: None,
             directory: Some("Week 1".into()),
             request: None,
         }),
