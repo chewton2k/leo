@@ -3819,7 +3819,7 @@ test('dropping one note on another combines them in the background with progress
   const a = await (await page.request.post('/api/notes', { data: { title: `BFS ${tag}`, body: 'BFS uses a queue.', directory: folder } })).json();
   const b = await (await page.request.post('/api/notes', { data: { title: `Graphs ${tag}`, body: 'A graph has nodes and edges.', directory: folder } })).json();
   const versions = async (id) => (await (await page.request.get(`/api/notes/${id}`)).json()).version;
-  const job = { id: `job-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working' };
+  const job = { id: `job-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working', parts: 3 };
   let percent = 30;
   let forgotten = false;
   await page.route(`**/api/notes/${b.id}/combine`, (route) => {
@@ -3861,6 +3861,35 @@ test('dropping one note on another combines them in the background with progress
   await page.locator('.toast button', { hasText: 'Undo' }).click();
   await expect(page.locator('.toast')).toContainText('Both notes are back');
   expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toBe('A graph has nodes and edges.');
+});
+
+test('a combine of many requests names the count, shows its part, and Stop deletes it and says neither note changed', async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const a = await (await page.request.post('/api/notes', { data: { title: `Long A ${tag}`, body: 'First note.' } })).json();
+  const b = await (await page.request.post('/api/notes', { data: { title: `Long B ${tag}`, body: 'Second note.' } })).json();
+  const job = { id: `long-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working', parts: 313 };
+  let done = 0;
+  let stopped = false;
+  await page.route(`**/api/notes/${b.id}/combine`, (route) => route.fulfill({ json: job }));
+  await page.route(`**/api/combines/${job.id}`, (route) => {
+    if (route.request().method() === 'DELETE') { stopped = true; return route.fulfill({ status: 204 }); }
+    return route.fulfill({ json: stopped ? { error: 'gone' } : { ...job, done }, status: stopped ? 404 : 200 });
+  });
+  await page.route('**/api/activity', (route) => route.fulfill({ json: { tasks: [] } }));
+  await page.goto('/#/search/' + tag);
+  await dragBetween(page, page.locator(`.card[data-id="${a.id}"]`), page.locator(`.card[data-id="${b.id}"]`));
+  await page.locator('.sheet #combine-go').click();
+  const sheet = page.locator('.sheet');
+  await expect(sheet.locator('h3')).toHaveText('This combine takes 313 requests to the AI');
+  await expect(sheet.locator('#combine-part')).toHaveText('Part 1 of 313');
+  done = 41;
+  await expect(sheet.locator('#combine-part')).toHaveText('Part 42 of 313', { timeout: 6000 });
+  await sheet.locator('#combine-stop').click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('.toast')).toHaveText('Combining was stopped. Neither note was changed.');
+  expect(stopped).toBe(true);
+  expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toBe('Second note.');
+  expect((await (await page.request.get(`/api/notes/${a.id}`)).json()).body).toBe('First note.');
 });
 
 test('Combine into… reaches the 51st of many same-titled notes in different folders through Show more', async ({ page }) => {

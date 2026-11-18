@@ -213,9 +213,31 @@ async function combineNow(from, into) {
     return;
   }
   if ($('.scrim .combine')) closeSheet();
-  toast('Combining in the background. Its progress is in the Background panel; you’ll review it before anything changes.');
+  if (job.parts > LONG_COMBINE) longCombine(job);
+  else toast('Combining in the background. Its progress is in the Background panel; you’ll review it before anything changes.');
   checkActivity();
   watchCombine(job.id);
+}
+
+const LONG_COMBINE = 20;
+
+const combinePart = (job) => `Part ${Math.min((job.done || 0) + 1, job.parts)} of ${job.parts}`;
+
+function longCombine(job) {
+  const box = sheet(`<div class="combine combine-long">
+    <h3>This combine takes ${job.parts} requests to the AI</h3>
+    <p>The AI works through the notes one part at a time. You can carry on meanwhile: its progress is in the Background panel, and you’ll review it before anything changes.</p>
+    <p class="hint" id="combine-part" role="status">${combinePart(job)}</p>
+    ${sheetButtons(['Stop combining', 'id="combine-stop"'], { cancel: 'Keep going', kind: 'danger' })}
+  </div>`);
+  $('#combine-stop', box).addEventListener('click', () => stopCombine(job.id).catch(fail));
+}
+
+async function stopCombine(id) {
+  await api(`/api/combines/${enc(id)}`, { method: 'DELETE' });
+  closeSheet();
+  checkActivity();
+  toast('Combining was stopped. Neither note was changed.');
 }
 
 const combinesWatched = new Set();
@@ -233,7 +255,13 @@ function watchCombine(id) {
       combinesWatched.delete(id);
       return;
     }
-    if (job.state === 'working') { setTimeout(look, 1500); return; }
+    const line = $('#combine-part');
+    if (job.state === 'working') {
+      if (line) line.textContent = combinePart(job);
+      setTimeout(look, 1500);
+      return;
+    }
+    if (line) closeSheet();
     combinesWatched.delete(id);
     checkActivity();
     if (job.state === 'ready') toast(`“${job.with_title}” and “${job.into_title}” are ready to review`, { action: 'Review', run: () => reviewCombine(id).catch(fail) });
