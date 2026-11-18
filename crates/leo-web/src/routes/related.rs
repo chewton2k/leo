@@ -38,6 +38,7 @@ fn linked_titles(body: &str) -> Vec<String> {
 pub(crate) fn related(
     store: &Store,
     cache: &crate::graph::Cache,
+    titles: &crate::titles::Titles,
     id: &str,
     limit: usize,
 ) -> Vec<serde_json::Value> {
@@ -52,7 +53,7 @@ pub(crate) fn related(
     }
     if let Some(this) = store.notes.iter().find(|n| n.id == id) {
         for title in linked_titles(&this.body) {
-            if let Some(note) = store.notes.iter().find(|n| n.title.to_lowercase() == title) {
+            if let Some(note) = titles.exact(store, &title) {
                 if seen.insert(note.id.clone()) {
                     out.push(serde_json::json!({ "id": note.id, "title": note.title, "folder": note.directory, "why": "Linked from this note" }));
                 }
@@ -70,13 +71,14 @@ pub(crate) async fn related_notes(
 ) -> Response {
     let limit = query.limit.unwrap_or(4).clamp(1, MOST_RELATED);
     let graphs = Arc::clone(&state.graphs);
+    let titles = Arc::clone(&state.titles);
     let found = state
         .read_store(move |store| {
             if !store.notes.iter().any(|n| n.id == id) {
                 return Err(StatusCode::NOT_FOUND);
             }
             let cache = graphs.load();
-            Ok(related(store, &cache, &id, limit + 1))
+            Ok(related(store, &cache, &titles, &id, limit + 1))
         })
         .await;
     match found {

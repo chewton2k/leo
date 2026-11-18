@@ -2114,6 +2114,7 @@ pub struct Desk {
         std::sync::Arc<crate::vectors::Vectors>,
     )>,
     close: Option<Vec<(String, f32)>>,
+    pub(crate) titles: Option<crate::titles::Table>,
 }
 
 impl Desk {
@@ -2137,6 +2138,7 @@ impl Desk {
             reply: None,
             meaning: None,
             close: None,
+            titles: None,
         }
     }
 
@@ -2513,14 +2515,22 @@ impl Desk {
             return Ok(note);
         }
         let lower = wanted.to_lowercase();
-        if let Some(note) = store.notes.iter().find(|x| x.title.to_lowercase() == lower) {
+        let table = self.titles.as_deref();
+        let exact = table.and_then(|t| crate::titles::exact_in(store, t, &lower));
+        if let Some(note) =
+            exact.unwrap_or_else(|| store.notes.iter().find(|x| x.title.to_lowercase() == lower))
+        {
             return Ok(note);
         }
-        let near: Vec<&Note> = store
-            .notes
-            .iter()
-            .filter(|x| x.title.to_lowercase().contains(&lower))
-            .collect();
+        let near = table
+            .and_then(|t| crate::titles::containing(store, t, &lower))
+            .unwrap_or_else(|| {
+                store
+                    .notes
+                    .iter()
+                    .filter(|x| x.title.to_lowercase().contains(&lower))
+                    .collect()
+            });
         match near.as_slice() {
             [one] => Ok(one),
             [] => Err(format!(

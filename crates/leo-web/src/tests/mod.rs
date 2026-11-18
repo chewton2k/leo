@@ -108,6 +108,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         originals: Default::default(),
         activity: Default::default(),
         steering: Default::default(),
+        titles: Default::default(),
         vectors: Arc::new(vectors::Vectors::at(dir.path().join("meaning.json"))),
         searched: Default::default(),
     };

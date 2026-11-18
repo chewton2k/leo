@@ -1224,3 +1224,47 @@ fn search_and_review_marks_benchmark() {
         );
     }
 }
+
+fn median_ms<R>(runs: usize, mut f: impl FnMut() -> R) -> f64 {
+    let mut times: Vec<f64> = (0..runs)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            std::hint::black_box(f());
+            bench_ms(started)
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times[times.len() / 2]
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn audit_p14_title_and_matching_work() {
+    let n: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    let (state, _dir, _other) = bench_state(n);
+    let store = state.store.lock().unwrap();
+    let store = &store.store;
+    let hit = store.notes[n / 2].title.clone();
+    let titles = crate::titles::Titles::default();
+    let lookup = |title: &str| titles.exact(store, title).map(|x| x.id.len());
+    lookup(&hit);
+    let lookup_miss = median_ms(51, || lookup("no such note title"));
+    let lookup_hit = median_ms(51, || lookup(&hit));
+    let sort = median_ms(11, || {
+        let mut notes: Vec<&leo_core::notes::Note> = store.notes.iter().collect();
+        crate::browse::order(&mut notes, Some("title")).unwrap();
+        notes.len()
+    });
+    let page: Vec<&leo_core::notes::Note> = store.notes.iter().take(1000).collect();
+    let excerpts = median_ms(101, || {
+        page.iter()
+            .map(|note| excerpt(&note.body, &[]).len())
+            .sum::<usize>()
+    });
+    println!(
+        "P-C12 notes={n} title_lookup_miss_ms={lookup_miss:.4} title_lookup_hit_ms={lookup_hit:.4} title_sort_ms={sort:.2} excerpt_1000_no_words_ms={excerpts:.3}"
+    );
+}

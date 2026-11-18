@@ -164,6 +164,9 @@ pub(crate) fn tasks_in(body: &str) -> [usize; 2] {
 }
 
 pub(crate) fn excerpt(body: &str, words: &[String]) -> String {
+    if words.is_empty() {
+        return body.chars().take(EXCERPT_CHARS).collect();
+    }
     let lower = body.to_lowercase();
     let at = words
         .iter()
@@ -821,4 +824,20 @@ pub(crate) async fn create_dir(
             ))
         })
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_excerpt_without_words_is_the_start_of_the_note() {
+        let body = format!("{}🦊 tail", "é".repeat(EXCERPT_CHARS - 1));
+        assert_eq!(
+            excerpt(&body, &[]),
+            body.chars().take(EXCERPT_CHARS).collect::<String>()
+        );
+        assert_eq!(excerpt("Short note", &[]), "Short note");
+        assert_eq!(excerpt("Short note", &["absent".into()]), "Short note");
+    }
 }

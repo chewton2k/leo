@@ -14,21 +14,35 @@ pub(crate) fn order(notes: &mut [&Note], sort: Option<&str>) -> Result<(), Statu
     ) {
         return Err(StatusCode::BAD_REQUEST);
     }
+    let tie = |a: &Note, b: &Note| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    };
+    if sort == "title" || sort == "title-desc" {
+        let mut keyed: Vec<(String, &Note)> =
+            notes.iter().map(|n| (n.title.to_lowercase(), *n)).collect();
+        keyed.sort_by(|(at, a), (bt, b)| {
+            let by = if sort == "title" {
+                at.cmp(bt)
+            } else {
+                bt.cmp(at)
+            };
+            (!a.pinned).cmp(&!b.pinned).then(by).then_with(|| tie(a, b))
+        });
+        for (slot, (_, note)) in notes.iter_mut().zip(keyed) {
+            *slot = note;
+        }
+        return Ok(());
+    }
     notes.sort_by(|a, b| {
-        let title = |note: &Note| note.title.to_lowercase();
         let by = match sort {
             "oldest" => a.updated_at.cmp(&b.updated_at),
             "created" => b.created_at.cmp(&a.created_at),
             "created-asc" => a.created_at.cmp(&b.created_at),
-            "title" => title(a).cmp(&title(b)),
-            "title-desc" => title(b).cmp(&title(a)),
             _ => std::cmp::Ordering::Equal,
         };
-        (!a.pinned)
-            .cmp(&!b.pinned)
-            .then(by)
-            .then(b.updated_at.cmp(&a.updated_at))
-            .then(a.id.cmp(&b.id))
+        (!a.pinned).cmp(&!b.pinned).then(by).then_with(|| tie(a, b))
     });
     Ok(())
 }
@@ -174,6 +188,48 @@ mod tests {
         order(&mut list, None).unwrap();
         assert_eq!(titles(&list), ["Cherry", "Date", "banana", "Apple"]);
         assert_eq!(order(&mut list, Some("size")), Err(StatusCode::BAD_REQUEST));
+    }
+
+    #[test]
+    fn a_title_sort_keeps_pins_first_and_breaks_ties_as_before() {
+        fn before(notes: &mut [&Note], sort: &str) {
+            notes.sort_by(|a, b| {
+                let title = |note: &Note| note.title.to_lowercase();
+                let by = match sort {
+                    "title" => title(a).cmp(&title(b)),
+                    _ => title(b).cmp(&title(a)),
+                };
+                (!a.pinned)
+                    .cmp(&!b.pinned)
+                    .then(by)
+                    .then(b.updated_at.cmp(&a.updated_at))
+                    .then(a.id.cmp(&b.id))
+            });
+        }
+        let mut z = note("Zebra", 5, 5);
+        z.pinned = true;
+        let a = note("Apple", 5, 5);
+        let older = note("same Title", 4, 4);
+        let newer = note("Same title", 1, 1);
+        let mut twin = note("SAME TITLE", 1, 1);
+        twin.updated_at = newer.updated_at;
+        let mut m = note("Mango", 2, 2);
+        m.pinned = true;
+        let all = [&a, &older, &z, &newer, &twin, &m];
+        for sort in ["title", "title-desc"] {
+            let mut ours = all.to_vec();
+            let mut theirs = all.to_vec();
+            order(&mut ours, Some(sort)).unwrap();
+            before(&mut theirs, sort);
+            let ids = |l: &[&Note]| l.iter().map(|n| n.id.clone()).collect::<Vec<_>>();
+            assert_eq!(ids(&ours), ids(&theirs), "{sort}");
+            assert!(ours[0].pinned && ours[1].pinned, "{sort}");
+        }
+        let mut list = all.to_vec();
+        order(&mut list, Some("title")).unwrap();
+        assert_eq!(titles(&list[..2]), ["Mango", "Zebra"]);
+        assert_eq!(list[3].id, newer.id.clone().min(twin.id.clone()));
+        assert_eq!(list[5].id, older.id);
     }
 
     #[test]

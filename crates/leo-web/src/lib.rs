@@ -39,6 +39,7 @@ pub mod steer;
 mod tasks;
 #[cfg(test)]
 mod tests;
+mod titles;
 mod token;
 pub mod tools;
 pub mod usage;
@@ -204,6 +205,7 @@ struct AppState {
     steering: steer::Steering,
     vectors: Arc<vectors::Vectors>,
     searched: Arc<Mutex<Option<Searched>>>,
+    titles: Arc<titles::Titles>,
 }
 
 #[derive(Clone)]
@@ -655,6 +657,7 @@ pub(crate) async fn start_in(
         steering: Default::default(),
         vectors,
         searched: Default::default(),
+        titles: Default::default(),
     };
 
     let expiry = tokio::spawn({

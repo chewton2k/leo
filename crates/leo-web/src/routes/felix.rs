@@ -879,8 +879,11 @@ pub(crate) fn execute_tool(
     } else {
         desk.ready(call);
         let cache = state.graphs.load();
-        read_now(state, |store| Ok(desk.run(store, &cache, call)))
-            .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?
+        read_now(state, |store| {
+            desk.titles = Some(state.titles.of(store));
+            Ok(desk.run(store, &cache, call))
+        })
+        .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?
     };
     if desk.marking
         && matches!(call.name.as_str(), "quiz" | "end_session")
