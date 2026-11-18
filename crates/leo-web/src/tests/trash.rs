@@ -614,3 +614,14 @@ fn deleting_the_absorbed_note_for_good_keeps_the_remaining_notes_original() {
     )
     .is_none());
 }
+
+#[test]
+fn the_daily_keeping_pass_retries_a_pending_removal() {
+    let (state, _d, _) = state_with(&[("Readable", "")]);
+    let id = "a1b2c3d4-0000-4000-8000-00000000f00d".to_string();
+    let folder = sources_of(&state, &id);
+    crate::margin::set_state(&state.chats, "deleting", &[&id]);
+    run(crate::keeping::expire_now(&state));
+    assert!(!folder.exists());
+    assert!(deleting(&state).is_empty());
+}

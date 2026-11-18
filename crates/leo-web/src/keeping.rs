@@ -182,11 +182,12 @@ pub(crate) fn expire_audio(
 }
 
 pub(crate) async fn expire_now(state: &AppState) {
-    let Ok((notes_dir, keep)) = state
+    let Ok((notes_dir, keep, owners)) = state
         .read_store(|store| {
             Ok((
                 store.notes_dir.clone(),
                 leo_core::keep::load(&store.notes_dir),
+                crate::dependents::Owners::of(store),
             ))
         })
         .await
@@ -217,6 +218,7 @@ pub(crate) async fn expire_now(state: &AppState) {
         crate::routes::combine::forget_old_combines(&chats, now - chrono::Duration::days(1));
         expire_uploads(&notes_dir, keep.upload_days, now);
         expire_transcripts(&notes_dir, keep.transcript_days, now, active.as_deref());
+        crate::dependents::clear(&chats, &notes_dir, Vec::new(), active.clone(), &owners);
         if let Some(housekeeper) = housekeeper {
             expire_audio(&*housekeeper, keep.audio_days, now, &recording);
         }
