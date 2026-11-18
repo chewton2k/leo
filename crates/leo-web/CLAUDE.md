@@ -1028,7 +1028,7 @@ a modal.
   `/api/keep` (`keeping::expire_now`): chats past the choice and orphan chat
   documents, uploads by file mtime (the folder and note
   never touched), transcripts in `recording-sources/`, unfinished audio through
-  `Housekeeper::pending_recordings` + `discard_recording` and
+  `Housekeeper::pending_recordings` + `discard_recordings` (one batch) and
   `expire_kept_audio`, skipping the session in use (`RecordJob::session_id`) and
   locked sessions. DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it

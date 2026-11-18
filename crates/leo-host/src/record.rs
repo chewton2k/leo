@@ -401,7 +401,11 @@ fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Ar
         let mut joined: Vec<leo_core::recording::Passage> = Vec::new();
         for passage in std::mem::take(&mut source.passages) {
             match joined.last_mut() {
-                Some(last) if last.speaker == passage.speaker => {
+                Some(last)
+                    if last.speaker == passage.speaker
+                        && passage.end_secs.saturating_sub(last.start_secs)
+                            <= leo_services::session::SEGMENT_SECS =>
+                {
                     last.end_secs = last.end_secs.max(passage.end_secs);
                     last.text = leo_services::speech::chunking::join_transcripts(&[
                         &last.text,
@@ -650,6 +654,44 @@ mod tests {
         std::fs::write(single.dir.join("seg-00001.txt"), "Second part.").unwrap();
         let kept = super::merged(&[("", single.dir.clone())]).unwrap();
         assert_eq!(kept.passages.len(), 2, "a single recording keeps its parts");
+    }
+
+    #[test]
+    fn one_side_talking_through_a_call_is_not_one_passage() {
+        use leo_services::session::{turns_name, Manifest, Session, SEGMENT_SECS};
+        let root = tempfile::tempdir().unwrap();
+        let mut dirs = Vec::new();
+        for (speaker, screen, parts) in [("You", false, 3u32), ("Others", true, 0)] {
+            let mut manifest = Manifest::new(None, None, "", screen);
+            manifest.duration_secs = Some(900);
+            manifest.turns = true;
+            let session = Session::create(&root.path().join(speaker), manifest).unwrap();
+            for part in 0..parts {
+                let turns: Vec<(u64, String)> = (0..3)
+                    .map(|n| (n * 100_000, format!("Part {part} turn {n}.")))
+                    .collect();
+                let text: Vec<&str> = turns.iter().map(|(_, text)| text.as_str()).collect();
+                std::fs::write(
+                    session.dir.join(format!("seg-{part:05}.txt")),
+                    text.join(" "),
+                )
+                .unwrap();
+                std::fs::write(
+                    session.dir.join(turns_name(part)),
+                    serde_json::to_string(&turns).unwrap(),
+                )
+                .unwrap();
+            }
+            dirs.push((speaker, session.dir.clone()));
+        }
+        let source = super::merged(&dirs).unwrap();
+        assert!(source.passages.len() >= 3, "{:?}", source.passages.len());
+        assert!(source
+            .passages
+            .iter()
+            .all(|p| p.end_secs - p.start_secs <= SEGMENT_SECS));
+        let said: Vec<&str> = source.passages.iter().map(|p| p.text.as_str()).collect();
+        assert!(said.join(" ").contains("Part 2 turn 2."));
     }
 
     #[test]
