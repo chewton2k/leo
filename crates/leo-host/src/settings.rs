@@ -86,9 +86,17 @@ impl leo_web::ollama::OllamaApi for WebSettings {
     }
 }
 
+fn too_big(error: anyhow::Error) -> anyhow::Error {
+    if error.to_string().contains("more than leo will read") {
+        leo_web::TooBig.into()
+    } else {
+        error
+    }
+}
+
 impl leo_web::CalendarAccess for WebSettings {
     fn fetch(&self, url: &str) -> Result<Vec<u8>> {
-        leo_services::web::fetch_public(url, leo_web::CALENDAR_BYTES)
+        leo_services::web::fetch_public(url, leo_web::CALENDAR_BYTES).map_err(too_big)
     }
     fn fetch_since(
         &self,
@@ -97,7 +105,8 @@ impl leo_web::CalendarAccess for WebSettings {
         modified: Option<&str>,
     ) -> Result<leo_web::Fetched> {
         let got =
-            leo_services::web::fetch_public_since(url, leo_web::CALENDAR_BYTES, etag, modified)?;
+            leo_services::web::fetch_public_since(url, leo_web::CALENDAR_BYTES, etag, modified)
+                .map_err(too_big)?;
         Ok(leo_web::Fetched {
             body: got.body,
             etag: got.etag,
@@ -114,6 +123,19 @@ impl leo_web::CalendarAccess for WebSettings {
     }
     fn delete(&self, account: &str) -> Result<()> {
         default_store().delete(account)
+    }
+}
+
+#[cfg(test)]
+mod calendar_tests {
+    #[test]
+    fn an_oversize_answer_is_the_too_big_message() {
+        let said = super::too_big(anyhow::anyhow!(
+            "that address sent back more than leo will read"
+        ));
+        assert!(said.downcast_ref::<leo_web::TooBig>().is_some());
+        let other = super::too_big(anyhow::anyhow!("offline"));
+        assert!(other.downcast_ref::<leo_web::TooBig>().is_none());
     }
 }
 
