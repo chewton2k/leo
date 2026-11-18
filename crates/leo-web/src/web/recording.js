@@ -118,6 +118,17 @@
     return { ...page, pending: [...(shown.pending || []), ...(page.pending || []).filter((p) => !ids.has(p.id))], more: page.more, after: page.after };
   }
 
+  function earlierFirst(earlier, shown) {
+    const seen = new Set();
+    return [...earlier, ...shown].filter(([at]) => !seen.has(at) && seen.add(at)).sort((a, b) => a[0] - b[0]);
+  }
+
+  function placed(view) {
+    const points = view.points || [];
+    const first = (view.points_total ?? points.length) - points.length;
+    return points.map(([at, text], k) => [first + k, at, text]);
+  }
+
   function unsavedLine(n, more) {
     if (more) return `${n} or more recordings weren't saved`;
     return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
@@ -177,6 +188,7 @@
           return true;
         }
       })(),
+      earlier: [],
       wantsDraft: null,
       wantsState: '',
       wantsTimer: 0,
@@ -226,6 +238,7 @@
     function accept(view) {
       const before = s.view;
       const warnings = before && before.id === view.id ? before.warnings.filter((w) => !view.warnings.includes(w)) : [];
+      s.earlier = before && before.id === view.id && s.earlier.length ? earlierFirst(s.earlier, placed(before)) : before && before.id === view.id ? s.earlier : [];
       s.view = { ...view, warnings: [...view.warnings, ...warnings] };
       if (view.state === 'failed' && !(before && before.state === 'failed')) api('/api/record').then((ov) => { s.overview = ov; draw(); }).catch(() => {});
       feedFromServer(view);
@@ -242,7 +255,8 @@
 
     async function start(source, directory, title, profile) {
       const made = await api('/api/record', { method: 'POST', body: { source, directory, title, profile } });
-      s.view = { id: made.id, source, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], note: null, error: null };
+      s.view = { id: made.id, source, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], points_total: 0, note: null, error: null };
+      s.earlier = [];
       s.wantsDraft = null;
       s.wantsState = '';
       s.follow = true;
@@ -472,7 +486,9 @@
       const v = s.view;
       const paused = v.state === 'paused';
       const transcript = v.transcript ? esc(v.transcript) : `<span class="hint">${paused ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
-      const points = v.points.length ? `<ul class="rec-points">${v.points.map(([at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
+      const listed = earlierFirst(s.earlier, placed(v));
+      const more = listed.length && listed[0][0] > 0 ? '<button type="button" class="btn plain sm" data-action="rec-earlier">Show earlier points</button>' : '';
+      const points = listed.length ? `${more}<ul class="rec-points">${listed.map(([, at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
       const warnings = v.warnings.map((w) => `<p class="set-note warn">${esc(w)}</p>`).join('');
       const kind = v.source === 'nativecall' ? 'Call · You + Others' : v.source === 'microphone' ? 'Microphone' : 'Screen';
       const controls = `<div class="rec-buttons">
@@ -743,7 +759,7 @@
       const text = area.value;
       area.value = '';
       addPoint(text).catch((e) => {
-        area.value = text;
+        if (e.status !== 503) area.value = text;
         toast(e.message, { bad: true });
       });
     }
@@ -848,6 +864,16 @@
         draw();
       },
 
+      async earlier() {
+        if (!s.view) return;
+        const listed = earlierFirst(s.earlier, placed(s.view));
+        if (!listed.length || listed[0][0] <= 0) return;
+        const id = s.view.id;
+        const page = await api(`/api/record/${id}/points?before=${listed[0][0]}`);
+        if (!s.view || s.view.id !== id) return;
+        s.earlier = earlierFirst(page.points.map(([at, text], k) => [page.from + k, at, text]), s.earlier);
+        draw();
+      },
       point: submitPoint,
       dismiss() {
         if (!s.view || s.view.state !== 'failed') return;
@@ -881,5 +907,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -310,6 +310,10 @@ pub(crate) fn router(state: AppState) -> Router {
         )
         .route("/api/record/{id}/pause", post(crate::record::pause))
         .route("/api/record/{id}/point", post(crate::record::point))
+        .route(
+            "/api/record/{id}/points",
+            get(crate::record::earlier_points),
+        )
         .route("/api/record/{id}/wants", post(crate::record::wants))
         .route(
             "/api/record/{id}/snapshot",

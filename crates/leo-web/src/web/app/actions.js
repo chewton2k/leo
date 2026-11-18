@@ -126,6 +126,7 @@ const actions = {
   'rec-finish': () => recorder.finishAvailable().catch(fail),
   'rec-recover': (el) => recorder.recover(el.dataset.id).catch(fail),
   'rec-older': () => recorder.older().catch(fail),
+  'rec-earlier': () => recorder.earlier().catch(fail),
   close: () => closeSheet(),
   'open-folder': openFolder,
   'open-note': openExplorerNote,

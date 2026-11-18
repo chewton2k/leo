@@ -5,6 +5,8 @@ fn hearing() -> record::Listener {
         |listening: record::Listening, heard: &mut dyn FnMut(record::Heard)| {
             use std::sync::atomic::Ordering;
             while !listening.stop.load(Ordering::Relaxed) {
+                let kept = listening.points.lock().unwrap().len();
+                listening.saved_points.store(kept, Ordering::Release);
                 heard(record::Heard::Clock {
                     secs: 1,
                     paused: listening.pause.load(Ordering::Relaxed),
@@ -1132,4 +1134,190 @@ fn recovering_a_leftover_call_track_keeps_the_other_sides_passages() {
         first,
         "recovering the same side again changes nothing"
     );
+}
+
+fn saving_quickly() -> record::Listener {
+    Arc::new(
+        |listening: record::Listening, heard: &mut dyn FnMut(record::Heard)| {
+            use std::sync::atomic::Ordering;
+            while !listening.stop.load(Ordering::Relaxed) {
+                let kept = listening.points.lock().unwrap().len();
+                listening.saved_points.store(kept, Ordering::Release);
+                heard(record::Heard::Clock {
+                    secs: 28_800,
+                    paused: false,
+                    level: 0.25,
+                });
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+            Ok(record::Recorded {
+                title: "Lecture".into(),
+                body: "points".into(),
+                ..Default::default()
+            })
+        },
+    )
+}
+
+#[test]
+#[ignore]
+fn benchmark_many_points() {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let text = "x".repeat(1000);
+    for total in [200usize, 2_000, 10_000] {
+        let (mut state, _d, _ids) = state_with(&[]);
+        state.listener = Some(saving_quickly());
+        let id = json_of(start_recording(&state, record::Source::Microphone))["id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        recording_until(&state, |s| s == "recording");
+        let mut last = std::time::Duration::ZERO;
+        let mut refused = None;
+        for n in 0..total {
+            let started = std::time::Instant::now();
+            let answer = runtime.block_on(record::point(
+                State(state.clone()),
+                Path(id.clone()),
+                Json(serde_json::from_value(serde_json::json!({ "text": text })).unwrap()),
+            ));
+            last = started.elapsed();
+            if answer.status() != StatusCode::OK {
+                refused = Some((n + 1, answer.status()));
+                break;
+            }
+        }
+        let status = runtime.block_on(record::status(State(state.clone()), Path(id.clone())));
+        let bytes = runtime
+            .block_on(axum::body::to_bytes(status.into_body(), usize::MAX))
+            .unwrap()
+            .len();
+        println!("{total} points: status {bytes} bytes, last add {last:?}, refused {refused:?}");
+        run(record::stop(State(state.clone()), Path(id)));
+        recording_until(&state, |s| s == "done" || s == "failed");
+    }
+}
+
+fn add_point(state: &AppState, id: &str, text: &str) -> Response {
+    run(record::point(
+        State(state.clone()),
+        Path(id.to_string()),
+        Json(serde_json::from_value(serde_json::json!({ "text": text })).unwrap()),
+    ))
+}
+
+fn two_hundred_and_two_points(state: &mut AppState) -> String {
+    state.listener = Some(saving_quickly());
+    let id = json_of(start_recording(state, record::Source::Microphone))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(state, |s| s == "recording");
+    for n in 0..201 {
+        let answer = add_point(state, &id, &format!("point {n}"));
+        assert_eq!(answer.status(), StatusCode::OK, "point {n}");
+    }
+    let pasted = run(record::snapshot(
+        State(state.clone()),
+        Path(id.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({ "at": 0, "data": "iVBORw0KGgo=" })).unwrap(),
+        ),
+    ));
+    assert_eq!(pasted.status(), StatusCode::OK);
+    id
+}
+
+#[test]
+fn a_recording_takes_more_than_two_hundred_points() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    let id = two_hundred_and_two_points(&mut state);
+    let view = json_of(run(record::status(State(state.clone()), Path(id.clone()))));
+    assert_eq!(view["points_total"], 202);
+    let shown = view["points"].as_array().unwrap();
+    assert_eq!(shown.len(), record::VIEW_POINTS);
+    assert_eq!(shown[0][1], "point 152");
+    assert!(shown[49][1].as_str().unwrap().starts_with("Slide at"));
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done");
+}
+
+#[test]
+fn earlier_points_come_fifty_at_a_time() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    let id = two_hundred_and_two_points(&mut state);
+    let page = |before: &str| {
+        run(record::earlier_points(
+            State(state.clone()),
+            Path(id.clone()),
+            axum::extract::Query(
+                serde_json::from_value(serde_json::json!({ "before": before })).unwrap(),
+            ),
+        ))
+    };
+    let newest = json_of(page("202"));
+    assert_eq!(newest["from"], 152);
+    assert_eq!(newest["points"].as_array().unwrap().len(), 50);
+    assert_eq!(newest["points"][0][1], "point 152");
+    let first = json_of(page("2"));
+    assert_eq!(first["from"], 0);
+    assert_eq!(first["points"][0][1], "point 0");
+    assert_eq!(first["points"][1][1], "point 1");
+    assert_eq!(first["points"].as_array().unwrap().len(), 2);
+    let bad = page("x");
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    assert!(json_of(bad)["error"].is_string());
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done");
+}
+
+#[test]
+fn a_point_is_answered_only_after_it_is_saved() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut state, _d, _ids) = state_with(&[]);
+    let release = Arc::new(AtomicBool::new(false));
+    let held = release.clone();
+    state.listener = Some(Arc::new(
+        move |listening: record::Listening, heard: &mut dyn FnMut(record::Heard)| {
+            while !listening.stop.load(Ordering::Relaxed) {
+                if held.load(Ordering::Acquire) {
+                    let kept = listening.points.lock().unwrap().len();
+                    listening.saved_points.store(kept, Ordering::Release);
+                }
+                heard(record::Heard::Clock {
+                    secs: 1,
+                    paused: false,
+                    level: 0.25,
+                });
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(record::Recorded {
+                title: "Lecture".into(),
+                body: "points".into(),
+                ..Default::default()
+            })
+        },
+    ));
+    let id = json_of(start_recording(&state, record::Source::Microphone))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(&state, |s| s == "recording");
+    let started = std::time::Instant::now();
+    let waiting = add_point(&state, &id, "held back");
+    assert!(started.elapsed() >= std::time::Duration::from_secs(4));
+    assert_eq!(waiting.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(json_of(waiting)["error"]
+        .as_str()
+        .unwrap()
+        .contains("still being saved"));
+    let view = json_of(run(record::status(State(state.clone()), Path(id.clone()))));
+    assert_eq!(view["points_total"], 1);
+    assert_eq!(view["points"][0][1], "held back");
+    release.store(true, Ordering::Release);
+    let saved = add_point(&state, &id, "let through");
+    assert_eq!(saved.status(), StatusCode::OK);
+    assert_eq!(json_of(saved)["points_total"], 2);
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done");
 }

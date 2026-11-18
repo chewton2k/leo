@@ -1280,7 +1280,11 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   audio from the page. Native jobs have no page heartbeat lifetime.
   Housekeeper's `pending_page` supplies retained native sessions, newest first, 50 a page
   (`/api/record?after=<last folder name>`, any other cursor is refused with 400): the Record
-  page shows the newest 50, then Show older appends the next 50 once each; recovery
+  page shows the newest 50, then Show older appends the next 50 once each. Typed points and screenshots have no count limit
+  (2026-11-17, principle 1): Your notes lists the newest 50 points, then Show earlier points
+  loads 50 more at a time (`/api/record/{id}/points?before=<index>`); a point is answered once
+  the recorder has saved it, or with 503 after 5 s, when it is kept and the page does not resend
+  it. Recovery
   starts in Writing state and supports Finish available, and anything the
   Housekeeper does not list is not found.
   When no writing AI could write the notes (`long::Structured.writer_failed`, every

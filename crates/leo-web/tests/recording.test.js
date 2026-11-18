@@ -130,7 +130,7 @@ test('a recording saved without written notes says so where the user lands', () 
     const went = [];
     const toasts = [];
     const accept = require('node:vm').runInNewContext(`(function(){${source.slice(start, end)} return accept;})()`, {
-      s: { view: { id: 'r1', state: 'writing', warnings: [] }, container: { isConnected: true } },
+      s: { view: { id: 'r1', state: 'writing', warnings: [] }, earlier: [], container: { isConnected: true } },
       api: () => Promise.resolve(), feedFromServer: () => {}, draw: () => {}, pill: () => {}, noteReady: null,
       go: (hash) => went.push(hash), noteHash: (id) => `#/n/${id}`, toast: (text, opts) => toasts.push({ text, ...opts }), root: {},
     });
@@ -207,8 +207,8 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'screen', false, true), 'Hearing sound');
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
   const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, clock: L.clock, stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
+    esc, icons, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -282,4 +282,16 @@ test('the quit warning says when there are more than one page', () => {
   assert.equal(L.unsavedLine(1, false), "1 recording wasn't saved");
   assert.equal(L.unsavedLine(50, false), "50 recordings weren't saved");
   assert.equal(L.unsavedLine(50, true), "50 or more recordings weren't saved");
+});
+
+test('earlier points go before the shown ones, once', () => {
+  const shown = [[50, 300, 'same words'], [51, 310, 'newest']];
+  const earlier = [[48, 280, 'same words'], [49, 290, 'older'], [50, 300, 'same words']];
+  assert.deepEqual(L.earlierFirst(earlier, shown), [
+    [48, 280, 'same words'],
+    [49, 290, 'older'],
+    [50, 300, 'same words'],
+    [51, 310, 'newest'],
+  ]);
+  assert.deepEqual(L.earlierFirst([], shown), shown);
 });

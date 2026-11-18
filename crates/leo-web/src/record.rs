@@ -1,4 +1,4 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -15,7 +15,6 @@ use crate::reply::error;
 use crate::routes::notes::{directory as valid_directory, save};
 use crate::{store_now, AppState};
 
-pub const MOST_POINTS: usize = 200;
 pub const MOST_TRANSCRIPT_CHARS: usize = 200_000;
 pub const LEVELS_KEPT: usize = 48;
 const DISCARDS_KEPT: usize = 1000;
@@ -25,6 +24,9 @@ const WARNING_CHARS: usize = 2_000;
 const SLIDE_TEXT_CHARS: usize = 6500;
 const NOTE_GONE: &str = "The note this recording belongs to is not in your notes; restore it from the trash, then recover again.";
 pub const RECORD_PAGE: usize = 50;
+pub const VIEW_POINTS: usize = 50;
+const STILL_SAVING: &str =
+    "The point is kept in this recording and is still being saved; it shows in the list once it is.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -145,6 +147,7 @@ pub struct Listening {
     pub finish_now: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     pub points: Arc<Mutex<Vec<(u64, String)>>>,
+    pub saved_points: Arc<AtomicUsize>,
     pub wants: Arc<Mutex<Option<String>>>,
 }
 
@@ -196,6 +199,7 @@ pub struct RecordView {
     pub transcript: String,
     pub warnings: Vec<String>,
     pub points: Vec<(u64, String)>,
+    pub points_total: usize,
     pub wants: String,
     pub levels: Vec<f32>,
     pub levels_start: u64,
@@ -232,6 +236,7 @@ pub(crate) struct RecordJob {
     finish_now: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     points: Arc<Mutex<Vec<(u64, String)>>>,
+    saved_points: Arc<AtomicUsize>,
     wants: Arc<Mutex<Option<String>>>,
 }
 
@@ -487,6 +492,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     let pause = Arc::new(AtomicBool::new(false));
     let finish_now = Arc::new(AtomicBool::new(false));
     let points: Arc<Mutex<Vec<(u64, String)>>> = Default::default();
+    let saved_points: Arc<AtomicUsize> = Default::default();
     let wants: Arc<Mutex<Option<String>>> = Default::default();
     {
         let mut held = state.recording.lock().unwrap_or_else(|e| e.into_inner());
@@ -522,6 +528,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
                 transcript: String::new(),
                 warnings: Vec::new(),
                 points: Vec::new(),
+                points_total: 0,
                 wants: profile.wants.clone(),
                 levels: Vec::new(),
                 levels_start: 0,
@@ -533,6 +540,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
             finish_now: finish_now.clone(),
             pause: Arc::clone(&pause),
             points: Arc::clone(&points),
+            saved_points: Arc::clone(&saved_points),
             wants: Arc::clone(&wants),
         });
     }
@@ -549,6 +557,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
         finish_now,
         pause,
         points,
+        saved_points,
         wants,
     };
     let worker = state.clone();
@@ -842,7 +851,7 @@ async fn append_point(
 ) -> Response {
     writes_done(state, id).await;
     let input = match with_job(state, id, |job| -> anyhow::Result<_> {
-        if !job.live() || job.view.points.len() >= MOST_POINTS {
+        if !job.live() {
             anyhow::bail!("This recording is not taking points.");
         }
         let lease = Writing::take(job)?;
@@ -862,11 +871,51 @@ async fn append_point(
     })
     .await;
     match result {
-        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Ok(kept)) => acknowledged(kept).await,
         _ => error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "The point could not be saved. Check free disk space and retry.",
         ),
+    }
+}
+
+type Kept = (RecordView, usize, Arc<AtomicUsize>);
+
+async fn acknowledged((view, position, saved): Kept) -> Response {
+    let until = Instant::now() + WAIT_FOR_WRITES;
+    while saved.load(Ordering::Acquire) < position {
+        if Instant::now() >= until {
+            return error(StatusCode::SERVICE_UNAVAILABLE, STILL_SAVING);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    Json(view).into_response()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Earlier {
+    before: Option<String>,
+}
+
+pub(crate) async fn earlier_points(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(page): Query<Earlier>,
+) -> Response {
+    let Some(before) = page.before.as_deref().and_then(|b| b.parse::<usize>().ok()) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "That page of points does not exist.",
+        );
+    };
+    match with_job(&state, &id, |job| {
+        let points = job.points.lock().unwrap_or_else(|e| e.into_inner());
+        let end = before.min(points.len());
+        let from = end.saturating_sub(VIEW_POINTS);
+        serde_json::json!({ "from": from, "points": points.get(from..end).unwrap_or_default() })
+    }) {
+        Ok(page) => Json(page).into_response(),
+        Err((status, message)) => error(status, message),
     }
 }
 
@@ -881,17 +930,21 @@ fn persist_point(
     text: String,
     at: u64,
     warning: Option<String>,
-) -> Result<RecordView> {
+) -> Result<Kept> {
     with_job(state, id, |job| {
-        job.points
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((at, text.clone()));
+        let position = {
+            let mut points = job.points.lock().unwrap_or_else(|e| e.into_inner());
+            points.push((at, text.clone()));
+            points.len()
+        };
         job.view.points.push((at, text));
+        let extra = job.view.points.len().saturating_sub(VIEW_POINTS);
+        job.view.points.drain(..extra);
+        job.view.points_total = position;
         if let Some(warning) = warning {
             job.view.warn(warning);
         }
-        job.view.clone()
+        (job.view.clone(), position, Arc::clone(&job.saved_points))
     })
     .map_err(|(_, message)| anyhow::anyhow!(message))
 }
@@ -984,6 +1037,7 @@ mod tests {
             transcript: String::new(),
             warnings: Vec::new(),
             points: Vec::new(),
+            points_total: 0,
             wants: String::new(),
             levels: Vec::new(),
             levels_start: 0,
@@ -1022,10 +1076,7 @@ pub(crate) async fn snapshot(
     writes_done(&state, &id).await;
     let notes = state.notes_dir.clone();
     let input = with_job(&state, &id, |job| -> anyhow::Result<_> {
-        anyhow::ensure!(
-            job.live() && job.view.points.len() < MOST_POINTS,
-            "Start a recording before pasting a screenshot."
-        );
+        anyhow::ensure!(job.live(), "Start a recording before pasting a screenshot.");
         Ok((Writing::take(job)?, body.at.min(job.view.secs)))
     });
     let (lease, at) = match input {
@@ -1033,7 +1084,7 @@ pub(crate) async fn snapshot(
         Ok(Err(problem)) => return error(StatusCode::CONFLICT, problem.to_string()),
         Err((status, problem)) => return error(status, problem),
     };
-    let saved = tokio::task::spawn_blocking(move || -> Result<RecordView> {
+    let saved = tokio::task::spawn_blocking(move || -> Result<Kept> {
         let _lease = lease;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&body.data)
@@ -1069,7 +1120,7 @@ pub(crate) async fn snapshot(
     })
     .await;
     match saved {
-        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Ok(kept)) => acknowledged(kept).await,
         Ok(Err(problem)) => error(StatusCode::BAD_REQUEST, problem.to_string()),
         Err(_) => error(
             StatusCode::INTERNAL_SERVER_ERROR,
