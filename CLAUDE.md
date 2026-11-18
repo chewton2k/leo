@@ -215,7 +215,7 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   theirs); the first-run manual note is gone; the legacy fallbacks and
   one-time migrations are gone (`notes.json`, old tasks and chats, the direct
   Anthropic wire, `codex exec`, the sign-in device list, AGY/Copilot cleanup,
-  stored cloud speech key retirement).
+  stored cloud speech key retirement, the old Google calendar sign-in clean-up).
 
 Recording sources live in `leo-core::recording` (`Archive`, and `Profile {context,
 wants}`: calendar-event details and what the user wants from the notes), shared by

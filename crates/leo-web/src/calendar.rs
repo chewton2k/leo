@@ -31,11 +31,6 @@ const OFFER_BEFORE_MINUTES: i64 = 2;
 const OFFER_AFTER_MINUTES: i64 = 10;
 const PROMPTED_KEPT_DAYS: i64 = 2;
 const OFFER_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
-const OLD_FILES: [&str; 3] = [
-    "calendar-google.json",
-    "calendar-status.json",
-    "calendar-events.json",
-];
 
 type Expansion = (String, Arc<Vec<Event>>);
 
@@ -210,10 +205,6 @@ pub fn settings_path(notes: &Path) -> PathBuf {
     data(notes).join("calendars.json")
 }
 
-pub fn cache_path(notes: &Path) -> PathBuf {
-    data(notes).join("calendar-cache.json")
-}
-
 fn account(id: &str) -> String {
     format!("calendar-link-{id}")
 }
@@ -320,7 +311,6 @@ fn refresh(notes: &Path, access: &dyn crate::CalendarAccess, now: DateTime<Utc>)
         }
         Ok(())
     });
-    let _ = std::fs::remove_file(cache_path(notes));
 }
 
 fn synced(notes: &Path, linking: &Linking) -> Option<DateTime<Utc>> {
@@ -469,21 +459,6 @@ fn stale(notes: &Path, now: DateTime<Utc>, minutes: i64) -> bool {
     })
 }
 
-fn forget_old_google(notes: &Path, access: &dyn crate::CalendarAccess) {
-    let old = data(notes).join(OLD_FILES[0]);
-    if let Some(value) = std::fs::read(&old)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-    {
-        if let Some(id) = value["secret_id"].as_str() {
-            let _ = access.delete(id);
-        }
-    }
-    for name in OLD_FILES {
-        let _ = std::fs::remove_file(data(notes).join(name));
-    }
-}
-
 struct Busy(Arc<AtomicBool>);
 
 impl Busy {
@@ -501,10 +476,6 @@ impl Drop for Busy {
 pub(crate) async fn get(State(state): State<AppState>) -> Response {
     let notes = state.notes_dir.clone();
     let now = Utc::now();
-    if let Some(access) = state.calendar_access.clone() {
-        let old = notes.clone();
-        let _ = tokio::task::spawn_blocking(move || forget_old_google(&old, access.as_ref())).await;
-    }
     let access = state.calendar_access.clone();
     let calendar = Arc::clone(&state.calendar);
     let shown = tokio::task::spawn_blocking(move || {
@@ -1170,26 +1141,6 @@ pub(crate) mod tests {
             "https:// spaced",
         ] {
             assert!(link_of(bad).is_err(), "{bad}");
-        }
-    }
-
-    #[test]
-    fn an_old_google_sign_in_is_forgotten_with_its_stored_secret() {
-        let dir = tempfile::tempdir().unwrap();
-        let notes = dir.path().join("notes");
-        std::fs::write(
-            dir.path().join("calendar-google.json"),
-            r#"{"client_id":"x","secret_id":"google-calendar-1","calendar_id":"primary"}"#,
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("calendar-events.json"), "{}").unwrap();
-        let fake = Fake::default();
-        crate::CalendarAccess::set(&fake, "google-calendar-1", "{\"refresh_token\":\"t\"}")
-            .unwrap();
-        forget_old_google(&notes, &fake);
-        assert!(fake.secrets.lock().unwrap().is_empty());
-        for name in OLD_FILES {
-            assert!(!dir.path().join(name).exists(), "{name}");
         }
     }
 }
