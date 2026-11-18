@@ -381,15 +381,13 @@ fn read_manifest(dir: &Path) -> std::io::Result<Vec<u8>> {
 fn read_seen(dir: &Path) -> Seen {
     match read_manifest(dir) {
         Ok(bytes) => match serde_json::from_slice::<Manifest>(&bytes) {
-            Ok(manifest) => match Session::with_manifest(dir, manifest) {
-                Ok(session) => Seen::Parsed(Brief {
-                    dir: session.dir,
-                    id: session.manifest.id,
-                    saved: session.manifest.saved,
-                    started: session.manifest.started,
-                }),
-                Err(_) => Seen::Unreadable,
-            },
+            Ok(manifest) if manifest.id.is_empty() => Seen::Unreadable,
+            Ok(manifest) => Seen::Parsed(Brief {
+                dir: dir.to_path_buf(),
+                id: manifest.id,
+                saved: manifest.saved,
+                started: manifest.started,
+            }),
             Err(_) => Seen::Malformed,
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Seen::Malformed,
@@ -561,17 +559,6 @@ impl Session {
             read_manifest(dir).with_context(|| format!("no recording in {}", dir.display()))?;
         let manifest = serde_json::from_slice(&bytes)
             .with_context(|| format!("unreadable recording in {}", dir.display()))?;
-        Session::with_manifest(dir, manifest)
-    }
-
-    fn with_manifest(dir: &Path, mut manifest: Manifest) -> Result<Session> {
-        if manifest.id.is_empty() {
-            manifest.id = uuid::Uuid::new_v4().to_string();
-            write_atomic(
-                &dir.join("session.json"),
-                &serde_json::to_string_pretty(&manifest)?,
-            )?;
-        }
         Ok(Session {
             dir: dir.to_path_buf(),
             manifest,
@@ -1258,6 +1245,29 @@ mod tests {
         let (third, after) = Session::unfinished_page(tmp.path(), after, 1);
         assert_eq!(ids(third), ["single-c"]);
         assert!(after.is_none());
+    }
+
+    #[test]
+    fn a_recording_without_an_id_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.id.clear();
+        manifest.started = chrono::Utc::now() - chrono::Duration::days(40);
+        let dir = settled_folder(tmp.path(), &manifest);
+        let path = dir.join("session.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        assert!(Session::unfinished(tmp.path()).is_empty());
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        let found = scan(tmp.path(), Walk::OlderThan(cutoff));
+        assert!(found.sessions.is_empty() && found.malformed.is_empty());
+        assert_eq!(found.unreadable, 1);
+        assert!(!malformed(&dir));
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().modified().unwrap(),
+            modified
+        );
     }
 
     #[test]
