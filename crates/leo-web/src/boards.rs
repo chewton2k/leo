@@ -7,13 +7,13 @@
 //! Deleting writes a tombstone line; the file goes when the Trash period ends.
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
-use std::sync::Mutex;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::jsonline::{load, read_all, write_file, Line};
+use crate::jsonline::{load, read_all, write_file, Index, Line};
 
 pub const MOST_BOARDS: usize = 100;
 pub const MOST_COLUMNS: usize = 12;
@@ -22,6 +22,7 @@ pub const MOST_NAME: usize = 80;
 pub const MOST_TITLE: usize = 300;
 pub const MOST_SUBHEADING: usize = 200;
 pub const MOST_DESCRIPTION: usize = 8_000;
+pub const FACE_CHARS: usize = 240;
 /// "" is no priority.
 pub const PRIORITIES: [&str; 4] = ["", "low", "medium", "high"];
 pub const DEFAULT_COLUMNS: [&str; 3] = ["To do", "In progress", "Done"];
@@ -98,6 +99,124 @@ impl Line for Card {
         self.deleted = true;
         self.updated_at = now;
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(from = "Card")]
+pub struct Placed {
+    pub id: String,
+    pub board: String,
+    pub column: String,
+    pub rank: f64,
+    pub title: String,
+    pub subheading: String,
+    #[serde(rename = "description")]
+    pub start: String,
+    #[serde(rename = "description_more")]
+    pub more: bool,
+    pub priority: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(skip)]
+    pub deleted: bool,
+}
+
+impl From<Card> for Placed {
+    fn from(card: Card) -> Self {
+        let mut rest = card.description.chars();
+        let start: String = rest.by_ref().take(FACE_CHARS).collect();
+        Self {
+            id: card.id,
+            board: card.board,
+            column: card.column,
+            rank: card.rank,
+            title: card.title,
+            subheading: card.subheading,
+            start,
+            more: rest.next().is_some(),
+            priority: card.priority,
+            created_at: card.created_at,
+            updated_at: card.updated_at,
+            deleted: card.deleted,
+        }
+    }
+}
+
+impl Line for Placed {
+    const DIR: &'static str = "cards";
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn stamp(&self) -> DateTime<Utc> {
+        self.updated_at
+    }
+    fn deleted_at(&mut self, now: DateTime<Utc>) {
+        self.deleted = true;
+        self.updated_at = now;
+    }
+}
+
+pub trait Seat: Clone {
+    fn seat_column(&self) -> &str;
+    fn seat_on(&self) -> &str;
+    fn seat_id(&self) -> &str;
+    fn seat_rank(&self) -> f64;
+    fn seat_born(&self) -> DateTime<Utc>;
+    fn seat_move(&mut self, column: String);
+}
+
+macro_rules! seat {
+    ($kind:ty) => {
+        impl Seat for $kind {
+            fn seat_column(&self) -> &str {
+                &self.column
+            }
+            fn seat_on(&self) -> &str {
+                &self.board
+            }
+            fn seat_id(&self) -> &str {
+                &self.id
+            }
+            fn seat_rank(&self) -> f64 {
+                self.rank
+            }
+            fn seat_born(&self) -> DateTime<Utc> {
+                self.created_at
+            }
+            fn seat_move(&mut self, column: String) {
+                self.column = column;
+            }
+        }
+    };
+}
+seat!(Card);
+seat!(Placed);
+
+#[derive(Default)]
+struct Tables {
+    boards: Index<Board>,
+    cards: Index<Placed>,
+}
+
+fn tables(chats: &Path) -> Arc<Tables> {
+    static TABLES: OnceLock<Mutex<HashMap<PathBuf, Arc<Tables>>>> = OnceLock::new();
+    let key = chats.parent().unwrap_or(chats).to_path_buf();
+    let mut all = TABLES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(all.entry(key).or_default())
+}
+
+pub fn generation(chats: &Path) -> u64 {
+    let held = tables(chats);
+    held.boards
+        .generation(chats)
+        .wrapping_add(held.cards.generation(chats))
+}
+
+pub fn look_again(chats: &Path) {
+    crate::jsonline::hub(chats).everything();
 }
 
 pub use crate::jsonline::valid_id;
@@ -201,10 +320,13 @@ pub fn new_board(name: &str, now: DateTime<Utc>) -> Board {
 
 /// Boards, oldest first, so the tabs keep their places.
 pub fn boards(chats: &Path) -> Vec<Board> {
-    let mut all: Vec<Board> = read_all::<Board>(chats, None)
-        .into_iter()
-        .filter(|b| !b.deleted)
-        .collect();
+    let mut all: Vec<Board> = tables(chats).boards.view(chats, |held| {
+        held.values()
+            .map(|(_, board)| board)
+            .filter(|board| !board.deleted)
+            .cloned()
+            .collect()
+    });
     all.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
     all.truncate(MOST_BOARDS);
     all
@@ -215,33 +337,48 @@ pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
         return 0;
     };
     let before = now - chrono::Duration::days(i64::from(days));
-    let held: HashSet<String> = all_cards(chats).into_iter().map(|c| c.board).collect();
+    let held: HashSet<String> = tables(chats).cards.view(chats, |held| {
+        held.values()
+            .map(|(_, card)| card)
+            .filter(|card| !card.deleted)
+            .map(|card| card.board.clone())
+            .collect()
+    });
     let boards = crate::jsonline::forget_deleted::<Board>(chats, before, |b| {
         b.deleted && !held.contains(&b.id)
     });
-    let waiting: HashSet<String> = read_all::<Board>(chats, None)
-        .into_iter()
-        .filter(|b| b.deleted)
-        .map(|b| b.id)
-        .collect();
+    let waiting = deleted_boards(chats);
     boards
         + crate::jsonline::forget_deleted::<Card>(chats, before, |c| {
-            c.deleted && !waiting.contains(&c.board)
+            c.deleted && !waiting.contains_key(&c.board)
         })
 }
 
+fn deleted_boards(chats: &Path) -> HashMap<String, DateTime<Utc>> {
+    tables(chats).boards.view(chats, |held| {
+        held.values()
+            .map(|(_, board)| board)
+            .filter(|board| board.deleted)
+            .map(|board| (board.id.clone(), board.updated_at))
+            .collect()
+    })
+}
+
 pub fn finish_deletes(chats: &Path) -> usize {
-    let deleted: HashMap<String, DateTime<Utc>> = read_all::<Board>(chats, None)
-        .into_iter()
-        .filter(|b| b.deleted)
-        .map(|b| (b.id, b.updated_at))
-        .collect();
+    let deleted = deleted_boards(chats);
     if deleted.is_empty() {
         return 0;
     }
-    all_cards(chats)
+    let waiting: Vec<(String, DateTime<Utc>)> = tables(chats).cards.view(chats, |held| {
+        held.values()
+            .map(|(_, card)| card)
+            .filter(|card| !card.deleted)
+            .filter_map(|card| deleted.get(&card.board).map(|at| (card.id.clone(), *at)))
+            .collect()
+    });
+    waiting
         .into_iter()
-        .filter_map(|card| deleted.get(&card.board).map(|at| (card, *at)))
+        .filter_map(|(id, at)| card(chats, &id).map(|card| (card, at)))
         .filter(|(card, at)| remove_card(chats, card, *at).is_ok())
         .count()
 }
@@ -255,18 +392,40 @@ pub fn undelete(chats: &Path, id: &str, now: DateTime<Utc>) -> anyhow::Result<Op
     }
     finish_deletes(chats);
     let stamp = board.updated_at;
-    for mut card in read_all::<Card>(chats, None)
-        .into_iter()
-        .filter(|c| c.board == board.id && c.deleted && c.updated_at == stamp)
-    {
-        card.deleted = false;
-        card.updated_at = now;
-        put_card(chats, &card)?;
+    let deleted: Vec<String> = tables(chats).cards.view(chats, |held| {
+        held.values()
+            .map(|(_, card)| card)
+            .filter(|c| c.board == board.id && c.deleted && c.updated_at == stamp)
+            .map(|c| c.id.clone())
+            .collect()
+    });
+    for id in deleted {
+        if let Some(mut card) = load::<Card>(chats, &id) {
+            card.deleted = false;
+            card.updated_at = now;
+            put_card(chats, &card)?;
+        }
     }
     board.deleted = false;
     board.updated_at = now;
     put_board(chats, &board)?;
     Ok(Some(board))
+}
+
+pub fn undelete_card(chats: &Path, id: &str, now: DateTime<Utc>) -> anyhow::Result<Option<Card>> {
+    let Some(mut card) = load::<Card>(chats, id) else {
+        return Ok(None);
+    };
+    if !card.deleted {
+        return Ok(Some(card));
+    }
+    if board(chats, &card.board).is_none() {
+        return Ok(None);
+    }
+    card.deleted = false;
+    card.updated_at = now;
+    put_card(chats, &card)?;
+    Ok(Some(card))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -365,7 +524,12 @@ pub fn forget_changes(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
 }
 
 pub fn board(chats: &Path, id: &str) -> Option<Board> {
-    load::<Board>(chats, id).filter(|b| !b.deleted)
+    tables(chats).boards.view(chats, |held| {
+        held.get(id)
+            .map(|(_, board)| board)
+            .filter(|board| !board.deleted)
+            .cloned()
+    })
 }
 
 pub fn card(chats: &Path, id: &str) -> Option<Card> {
@@ -379,6 +543,32 @@ pub fn all_cards(chats: &Path) -> Vec<Card> {
         .collect()
 }
 
+pub fn live_counts(chats: &Path) -> HashMap<String, usize> {
+    tables(chats).cards.view(chats, |held| {
+        let mut counts: HashMap<String, usize> = HashMap::new();
+        for (_, card) in held.values().filter(|(_, card)| !card.deleted) {
+            *counts.entry(card.board.clone()).or_default() += 1;
+        }
+        counts
+    })
+}
+
+fn live_where(chats: &Path, wanted: impl Fn(&Placed) -> bool) -> Vec<Placed> {
+    tables(chats).cards.view(chats, |held| {
+        held.values()
+            .map(|(_, card)| card)
+            .filter(|card| !card.deleted && wanted(card))
+            .cloned()
+            .collect()
+    })
+}
+
+/// A board's cards in order, as their faces. A card whose column is gone
+/// (deleted on another computer) shows in the first column.
+pub fn places_of(chats: &Path, board: &Board) -> Vec<Placed> {
+    arranged(board, live_where(chats, |card| card.board == board.id))
+}
+
 /// A board's cards in order. A card whose column is gone (deleted on another
 /// computer) shows in the first column; it is only rewritten when it moves.
 pub fn cards_of(chats: &Path, board: &Board) -> Vec<Card> {
@@ -387,30 +577,44 @@ pub fn cards_of(chats: &Path, board: &Board) -> Vec<Card> {
 
 /// `cards_of` over cards already read, so a caller going through several boards
 /// reads the card files once.
-pub fn cards_in(board: &Board, all: &[Card]) -> Vec<Card> {
+pub fn cards_in<S: Seat>(board: &Board, all: &[S]) -> Vec<S> {
+    arranged(
+        board,
+        all.iter()
+            .filter(|c| c.seat_on() == board.id)
+            .cloned()
+            .collect(),
+    )
+}
+
+fn arranged<S: Seat>(board: &Board, mut cards: Vec<S>) -> Vec<S> {
     let first = board
         .columns
         .first()
         .map(|c| c.id.clone())
         .unwrap_or_default();
-    let mut cards: Vec<Card> = all
-        .iter()
-        .filter(|c| c.board == board.id)
-        .cloned()
-        .map(|mut card| {
-            if !board.columns.iter().any(|c| c.id == card.column) {
-                card.column = first.clone();
-            }
-            card
-        })
-        .collect();
+    for card in &mut cards {
+        if !board.columns.iter().any(|c| c.id == card.seat_column()) {
+            card.seat_move(first.clone());
+        }
+    }
     cards.sort_by(|a, b| {
-        a.rank
-            .total_cmp(&b.rank)
-            .then(a.created_at.cmp(&b.created_at))
-            .then(a.id.cmp(&b.id))
+        a.seat_rank()
+            .total_cmp(&b.seat_rank())
+            .then(a.seat_born().cmp(&b.seat_born()))
+            .then(a.seat_id().cmp(b.seat_id()))
     });
     cards
+}
+
+fn column_places(chats: &Path, board: &Board, column: &str) -> Vec<Placed> {
+    let first = board.columns.first().map(|c| c.id.as_str());
+    let here = |card: &Placed| {
+        card.board == board.id
+            && (card.column == column
+                || (first == Some(column) && !board.columns.iter().any(|c| c.id == card.column)))
+    };
+    arranged(board, live_where(chats, here))
 }
 
 pub fn put_board(chats: &Path, board: &Board) -> anyhow::Result<()> {
@@ -450,25 +654,13 @@ fn between(prev: Option<f64>, next: Option<f64>) -> Option<f64> {
 pub fn settle(
     chats: &Path,
     board: &Board,
-    card: Card,
-    spot: Spot,
-    now: DateTime<Utc>,
-) -> anyhow::Result<Card> {
-    settle_in(chats, board, card, spot, now, &all_cards(chats))
-}
-
-/// `settle` over cards already read, so a request that has read them does not read them again.
-pub fn settle_in(
-    chats: &Path,
-    board: &Board,
     mut card: Card,
     spot: Spot,
     now: DateTime<Utc>,
-    all: &[Card],
 ) -> anyhow::Result<Card> {
-    let others: Vec<Card> = cards_in(board, all)
+    let others: Vec<Placed> = column_places(chats, board, &card.column)
         .into_iter()
-        .filter(|c| c.column == card.column && c.id != card.id)
+        .filter(|c| c.id != card.id)
         .collect();
     let at = match spot {
         Spot::Top => 0,
@@ -488,10 +680,11 @@ pub fn settle_in(
                 let place = if i < at { i } else { i + 1 };
                 let rank = (place as f64 + 1.0) * STEP;
                 if other.rank != rank {
-                    let mut other = other.clone();
-                    other.rank = rank;
-                    other.updated_at = now;
-                    put_card(chats, &other)?;
+                    if let Some(mut other) = self::card(chats, &other.id) {
+                        other.rank = rank;
+                        other.updated_at = now;
+                        put_card(chats, &other)?;
+                    }
                 }
             }
             card.rank = (at as f64 + 1.0) * STEP;
@@ -507,20 +700,22 @@ pub fn append_all(
     chats: &Path,
     board: &Board,
     column: &str,
-    cards: Vec<Card>,
+    cards: Vec<Placed>,
     now: DateTime<Utc>,
 ) -> anyhow::Result<()> {
     let moving: HashSet<String> = cards.iter().map(|c| c.id.clone()).collect();
-    let last = cards_of(chats, board)
+    let last = column_places(chats, board, column)
         .iter()
-        .filter(|c| c.column == column && !moving.contains(&c.id))
+        .filter(|c| !moving.contains(&c.id))
         .map(|c| c.rank)
         .fold(0.0_f64, f64::max);
-    for (i, mut card) in cards.into_iter().enumerate() {
-        card.column = column.to_string();
-        card.rank = last + (i as f64 + 1.0) * STEP;
-        card.updated_at = now;
-        put_card(chats, &card)?;
+    for (i, moved) in cards.into_iter().enumerate() {
+        if let Some(mut card) = self::card(chats, &moved.id) {
+            card.column = column.to_string();
+            card.rank = last + (i as f64 + 1.0) * STEP;
+            card.updated_at = now;
+            put_card(chats, &card)?;
+        }
     }
     Ok(())
 }
@@ -538,8 +733,10 @@ pub fn matching_column(board: &Board, name: Option<&str>) -> Option<String> {
 
 pub fn remove_board(chats: &Path, board: &Board, now: DateTime<Utc>) -> anyhow::Result<()> {
     crate::jsonline::write_gone(chats, board, now)?;
-    for card in all_cards(chats).iter().filter(|c| c.board == board.id) {
-        let _ = remove_card(chats, card, now);
+    for placed in live_where(chats, |card| card.board == board.id) {
+        if let Some(card) = card(chats, &placed.id) {
+            let _ = remove_card(chats, &card, now);
+        }
     }
     Ok(())
 }
@@ -612,7 +809,7 @@ mod tests {
     }
 
     #[test]
-    fn settling_in_cards_already_read_lands_where_settle_does() {
+    fn a_card_settled_after_another_lands_just_after_it() {
         let dir = tempfile::tempdir().unwrap();
         let chats = dir.path().join("chats");
         let now = Utc::now();
@@ -621,9 +818,8 @@ mod tests {
         for (id, rank) in [("card-0001", 1.0), ("card-0002", 1.0)] {
             put_card(&chats, &card_in(&board, 0, id, rank, now)).unwrap();
         }
-        let all = all_cards(&chats);
         let fresh = card_in(&board, 0, "card-0003", 0.0, now);
-        settle_in(&chats, &board, fresh, Spot::After("card-0001"), now, &all).unwrap();
+        settle(&chats, &board, fresh, Spot::After("card-0001"), now).unwrap();
         assert_eq!(
             order(&chats, &board, 0),
             ["card-0001", "card-0003", "card-0002"]

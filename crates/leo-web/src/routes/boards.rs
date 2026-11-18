@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -42,10 +42,7 @@ fn no_card() -> Response {
 pub(crate) async fn list_boards(State(state): State<AppState>) -> Response {
     blocking(&state, move |chats| {
         let all = boards::boards(chats);
-        let mut counts: HashMap<String, usize> = HashMap::new();
-        for card in boards::all_cards(chats) {
-            *counts.entry(card.board).or_default() += 1;
-        }
+        let counts = boards::live_counts(chats);
         let listed: Vec<serde_json::Value> = all
             .into_iter()
             .map(|board| {
@@ -113,8 +110,34 @@ pub(crate) async fn get_board(State(state): State<AppState>, Path(id): Path<Stri
         let Some(board) = boards::board(chats, &id) else {
             return no_board();
         };
-        let cards = boards::cards_of(chats, &board);
+        let cards = boards::places_of(chats, &board);
         Json(json!({ "board": board, "cards": cards })).into_response()
+    })
+    .await
+}
+
+pub(crate) async fn get_card(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+    blocking(&state, move |chats| match boards::card(chats, &id) {
+        Some(card) => Json(json!(card)).into_response(),
+        None => no_card(),
+    })
+    .await
+}
+
+pub(crate) async fn undelete_card(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    blocking(&state, move |chats| {
+        let _writing = boards::writing();
+        match boards::undelete_card(chats, &id, Utc::now()) {
+            Ok(Some(card)) => Json(json!(card)).into_response(),
+            Ok(None) => error(
+                StatusCode::NOT_FOUND,
+                "That card is no longer in leo's trash.",
+            ),
+            Err(_) => not_saved(),
+        }
     })
     .await
 }
@@ -176,14 +199,14 @@ pub(crate) async fn change_board(
             }
             board.columns = columns;
         }
-        let cards = boards::cards_of(chats, &before);
+        let cards = boards::places_of(chats, &before);
         let now = Utc::now();
         board.updated_at = now;
         if boards::put_board(chats, &board).is_err() {
             return not_saved();
         }
         if let Some((target, removed)) = leaving {
-            let moving: Vec<Card> = cards
+            let moving: Vec<boards::Placed> = cards
                 .into_iter()
                 .filter(|c| removed.contains(&c.column))
                 .collect();
@@ -349,7 +372,7 @@ pub(crate) async fn restore_board(
                 return not_saved();
             }
         }
-        let cards = boards::cards_of(chats, &restored);
+        let cards = boards::places_of(chats, &restored);
         Json(json!({ "board": restored, "cards": cards })).into_response()
     })
     .await
@@ -420,8 +443,7 @@ pub(crate) async fn create_card(
                 None => return error(StatusCode::BAD_REQUEST, "That board has no columns."),
             },
         };
-        let all = boards::all_cards(chats);
-        if all.len() >= boards::MOST_CARDS {
+        if boards::live_counts(chats).values().sum::<usize>() >= boards::MOST_CARDS {
             return error(
                 StatusCode::CONFLICT,
                 "Leo keeps up to 5,000 cards. Delete finished ones first.",
@@ -448,7 +470,7 @@ pub(crate) async fn create_card(
             }
             None => {
                 let spot = if body.top { Spot::Top } else { Spot::End };
-                boards::settle_in(chats, &board, card, spot, now, &all)
+                boards::settle(chats, &board, card, spot, now)
             }
         };
         match saved {

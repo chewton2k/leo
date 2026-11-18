@@ -202,9 +202,12 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/boards/{id}/cards", post(boards::create_card))
         .route(
             "/api/cards/{id}",
-            axum::routing::patch(boards::change_card).delete(boards::delete_card),
+            get(boards::get_card)
+                .patch(boards::change_card)
+                .delete(boards::delete_card),
         )
         .route("/api/cards/{id}/move", post(boards::move_card))
+        .route("/api/cards/{id}/undelete", post(boards::undelete_card))
         .route("/api/schedule", get(crate::calendar::schedule))
         .route("/api/search", get(search_notes))
         .route(

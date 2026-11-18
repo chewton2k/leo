@@ -15,8 +15,12 @@ pub struct Changes {
 
 impl Changes {
     pub fn new(notes: &Path) -> Self {
+        let watch = Watch::start(notes);
+        if let Some(watch) = &watch {
+            crate::jsonline::watched(notes, watch.leo());
+        }
         Self {
-            watch: Watch::start(notes),
+            watch,
             checked: None,
             #[cfg(test)]
             delayed: false,

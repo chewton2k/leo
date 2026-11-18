@@ -726,7 +726,8 @@ pub(crate) async fn get_rev(
     State(state): State<AppState>,
     Query(params): Query<RevParams>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    if matches!(params.foreground.as_deref(), Some("1" | "true")) {
+    let foreground = matches!(params.foreground.as_deref(), Some("1" | "true"));
+    if foreground {
         state
             .refresh_requested
             .store(true, std::sync::atomic::Ordering::Release);
@@ -734,7 +735,13 @@ pub(crate) async fn get_rev(
     let fingerprint = state.read_store(|store| Ok(store.fingerprint())).await?;
     let chats = state.chats.clone();
     let stamps = tokio::task::spawn_blocking(move || {
-        ["tasks", "boards", "cards"].map(|kind| crate::jsonline::stamp_of(&chats, kind))
+        if foreground {
+            crate::boards::look_again(&chats);
+        }
+        [
+            crate::jsonline::stamp_of(&chats, "tasks"),
+            crate::boards::generation(&chats),
+        ]
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;

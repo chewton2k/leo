@@ -1040,6 +1040,19 @@ every note after "start over"); whether a build is due is asked every time.
   `jsonline.rs` like tasks: one JSON line per save, atomic, nofollow reads,
   newest `updated_at` wins, tombstone deletes; a file counts only when its name
   is its id. Limits: 100 boards, 5,000 cards. Not calendar tasks.
+- Tables (P-C52): boards and the faces of cards (`boards::Placed`: place, title, subheading,
+  priority, the first 240 characters of the description and `description_more`) are kept in memory
+  (`jsonline::Index`, one per kind per data folder, found by `boards::tables`). A file is trusted without
+  being read only while its size, modified time and change time (unix) are as they were. The notes
+  watcher also reports changes under `<notes>/.leo/` with their paths (`leo_core::watch::Leo`; at most
+  4,096 paths, past that or on an error "everything"), kept per folder in `jsonline::Hub`; leo's own writes
+  and removals add their path too. A request after a quiet moment lists no folder and reads no file; a
+  reported path is looked at alone. The folder is listed, one stamp per file and only changed files read,
+  when there is no watcher, it reported an error, on Windows (until `a_burst_of_changes_under_leos_folder_is_never_missed`
+  passes on the runner) and once a minute. A board's answer (`GET /api/boards/{id}`) carries faces;
+  `GET /api/cards/{id}` reads the whole card, and the card panel loads it before the description can be
+  edited. Undo of a deleted card is `POST /api/cards/{id}/undelete`. Felix's board tools and export still
+  read whole cards (`boards::all_cards`).
 - Order is `rank` (f64): a move writes only the moved card (`boards::between`)
   unless the gap is gone, then `settle` renumbers that column. A card whose
   column vanished shows in the first column and is rewritten only when it moves.
@@ -1167,9 +1180,12 @@ AI uses a pen icon, never a sparkle.
   due or there is no watcher, and always on Windows (2026-11-17, the owner's
   call on ENG-D6: the most efficient and scalable method).
 - GET `/api/rev[?foreground=1]` answers `{rev}`, 16 hex digits over the store's fingerprint and a
-  stamp of `.leo/tasks`, `.leo/boards` and `.leo/cards` (each regular file's name, length and
-  modified time, so a file rewritten in place moves it). `foreground=1` forces a disk check first.
+  stamp of `.leo/tasks` (each regular file's name, length and modified time, so a file rewritten in
+  place moves it) and the board and card tables' generation numbers (moved whenever an entry is added,
+  replaced or dropped). `foreground=1` forces a disk check first.
   It is signed in like every API route and, as a GET, does not count as use.
+- The watcher's `.leo` signal is separate from the notes' one: a change under `.leo` never marks the
+  notes as changed (`leo_core::watch::Watch::leo`, taken by `jsonline::Hub` for the board and card tables).
 - App-status polling stops while the document or window is hidden and drops late
   responses on visibility changes; return refreshes once. Automatic status GETs
   do not reset user-idle time. Dictation, model-download and recording display

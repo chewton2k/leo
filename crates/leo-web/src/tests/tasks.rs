@@ -739,7 +739,14 @@ fn the_revision_moves_when_a_note_or_task_changes() {
         .set_modified(before.modified().unwrap() + std::time::Duration::from_secs(10))
         .unwrap();
     assert_eq!(std::fs::metadata(&path).unwrap().len(), before.len());
-    let rewritten = rev_of(&state, none.clone());
+    let started = std::time::Instant::now();
+    let rewritten = loop {
+        let now = rev_of(&state, none.clone());
+        if now != carded || started.elapsed() > std::time::Duration::from_secs(10) {
+            break now;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
     assert_ne!(
         rewritten, carded,
         "a card file rewritten in place with the same length and a new time moves it"
