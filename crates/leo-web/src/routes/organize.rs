@@ -245,6 +245,8 @@ pub(crate) fn summary_of(p: &Proposal) -> String {
         | Proposal::ChangeBoard { summary, .. }
         | Proposal::DeleteBoard { summary, .. }
         | Proposal::RestoreBoard { summary, .. }
+        | Proposal::UndeleteBoard { summary, .. }
+        | Proposal::UndoBoardChange { summary, .. }
         | Proposal::RestoreFolder { summary, .. } => summary.clone(),
         Proposal::Edit { title, .. } => format!("Change “{title}”"),
         Proposal::Create { title, .. } => format!("Make the note “{title}”"),
@@ -1702,8 +1704,9 @@ pub(crate) async fn act(
             move_to,
             ..
         } => {
-            let (before, cards) = crate::board_tools::snapshot(&state.chats, board)
-                .ok_or("that board is not there any more")?;
+            let before =
+                boards::board(&state.chats, board).ok_or("that board is not there any more")?;
+            let places = card_places(&state.chats, &before);
             let mut change = serde_json::Map::new();
             if let Some(name) = name {
                 change.insert("name".into(), serde_json::json!(name));
@@ -1725,11 +1728,24 @@ pub(crate) async fn act(
             .await?;
             Ok((
                 serde_json::json!({ "board": board }),
-                Proposal::RestoreBoard {
-                    summary: format!("Put the board “{}” back as it was", before.name),
-                    board: before,
-                    cards,
-                },
+                remembered(&state.chats, &before, places)?,
+            ))
+        }
+        Proposal::UndoBoardChange { board, undo, .. } => {
+            let before =
+                boards::board(&state.chats, board).ok_or("that board is not there any more")?;
+            let places = card_places(&state.chats, &before);
+            reply_of(
+                board_routes::undo_board_change(
+                    State(state.clone()),
+                    Path((board.clone(), undo.clone())),
+                )
+                .await,
+            )
+            .await?;
+            Ok((
+                serde_json::json!({ "board": board }),
+                remembered(&state.chats, &before, places)?,
             ))
         }
         Proposal::DeleteBoard { board, .. } => {
@@ -1738,13 +1754,25 @@ pub(crate) async fn act(
             )
             .await?;
             let board: boards::Board = parse(gone["board"].clone())?;
-            let cards: Vec<boards::Card> = parse(gone["cards"].clone())?;
             Ok((
                 serde_json::json!({ "board": board.id }),
-                Proposal::RestoreBoard {
+                Proposal::UndeleteBoard {
                     summary: format!("Bring the board “{}” back", board.name),
-                    board,
-                    cards,
+                    board: board.id,
+                },
+            ))
+        }
+        Proposal::UndeleteBoard { board, .. } => {
+            let back = reply_of(
+                board_routes::undelete_board(State(state.clone()), Path(board.clone())).await,
+            )
+            .await?;
+            let board: boards::Board = parse(back["board"].clone())?;
+            Ok((
+                serde_json::json!({ "board": board.id }),
+                Proposal::DeleteBoard {
+                    summary: format!("Delete the board “{}”", board.name),
+                    board: board.id,
                 },
             ))
         }
@@ -1776,6 +1804,42 @@ pub(crate) async fn act(
             Err("that change has its own Apply".into())
         }
     }
+}
+
+fn card_places(
+    chats: &std::path::Path,
+    board: &crate::boards::Board,
+) -> Vec<(String, String, f64)> {
+    crate::boards::cards_of(chats, board)
+        .into_iter()
+        .map(|c| (c.id, c.column, c.rank))
+        .collect()
+}
+
+fn remembered(
+    chats: &std::path::Path,
+    before: &crate::boards::Board,
+    places: Vec<(String, String, f64)>,
+) -> Result<Proposal, Refused> {
+    let after: std::collections::HashMap<String, (String, f64)> = card_places(chats, before)
+        .into_iter()
+        .map(|(id, column, rank)| (id, (column, rank)))
+        .collect();
+    let moved: Vec<(String, String, f64)> = places
+        .into_iter()
+        .filter(|(id, column, rank)| {
+            after
+                .get(id)
+                .is_some_and(|(c, r)| c != column || r.to_bits() != rank.to_bits())
+        })
+        .collect();
+    let undo = crate::boards::remember_change(chats, before, &moved, chrono::Utc::now())
+        .map_err(|_| "leo could not keep the Undo for that change")?;
+    Ok(Proposal::UndoBoardChange {
+        summary: format!("Put the board “{}” back as it was", before.name),
+        board: before.id.clone(),
+        undo,
+    })
 }
 
 pub(crate) async fn act_route(State(state): State<AppState>, Json(p): Json<Proposal>) -> Response {

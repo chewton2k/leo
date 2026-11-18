@@ -6,7 +6,7 @@
 //! save, written atomically, and read as the line with the newest `updated_at`.
 //! Deleting writes a tombstone line; the file goes when the Trash period ends.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -207,8 +207,153 @@ pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
         return 0;
     };
     let before = now - chrono::Duration::days(i64::from(days));
-    crate::jsonline::forget_deleted::<Board>(chats, before, |b| b.deleted)
-        + crate::jsonline::forget_deleted::<Card>(chats, before, |c| c.deleted)
+    let held: HashSet<String> = all_cards(chats).into_iter().map(|c| c.board).collect();
+    let boards = crate::jsonline::forget_deleted::<Board>(chats, before, |b| {
+        b.deleted && !held.contains(&b.id)
+    });
+    let waiting: HashSet<String> = read_all::<Board>(chats, None)
+        .into_iter()
+        .filter(|b| b.deleted)
+        .map(|b| b.id)
+        .collect();
+    boards
+        + crate::jsonline::forget_deleted::<Card>(chats, before, |c| {
+            c.deleted && !waiting.contains(&c.board)
+        })
+}
+
+pub fn finish_deletes(chats: &Path) -> usize {
+    let deleted: HashMap<String, DateTime<Utc>> = read_all::<Board>(chats, None)
+        .into_iter()
+        .filter(|b| b.deleted)
+        .map(|b| (b.id, b.updated_at))
+        .collect();
+    if deleted.is_empty() {
+        return 0;
+    }
+    all_cards(chats)
+        .into_iter()
+        .filter_map(|card| deleted.get(&card.board).map(|at| (card, *at)))
+        .filter(|(card, at)| remove_card(chats, card, *at).is_ok())
+        .count()
+}
+
+pub fn undelete(chats: &Path, id: &str, now: DateTime<Utc>) -> anyhow::Result<Option<Board>> {
+    let Some(mut board) = load::<Board>(chats, id) else {
+        return Ok(None);
+    };
+    if !board.deleted {
+        return Ok(Some(board));
+    }
+    finish_deletes(chats);
+    let stamp = board.updated_at;
+    for mut card in read_all::<Card>(chats, None)
+        .into_iter()
+        .filter(|c| c.board == board.id && c.deleted && c.updated_at == stamp)
+    {
+        card.deleted = false;
+        card.updated_at = now;
+        put_card(chats, &card)?;
+    }
+    board.deleted = false;
+    board.updated_at = now;
+    put_board(chats, &board)?;
+    Ok(Some(board))
+}
+
+#[derive(Serialize, Deserialize)]
+struct Change {
+    name: String,
+    columns: Vec<Column>,
+    cards: Vec<(String, String, f64)>,
+}
+
+fn stamp_of(at: DateTime<Utc>) -> String {
+    at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+}
+
+pub fn remember_change(
+    chats: &Path,
+    before: &Board,
+    moved: &[(String, String, f64)],
+    now: DateTime<Utc>,
+) -> anyhow::Result<String> {
+    let id = new_id('u');
+    let data = serde_json::to_string(&Change {
+        name: before.name.clone(),
+        columns: before.columns.clone(),
+        cards: moved.to_vec(),
+    })?;
+    crate::db::try_for_chats(chats)?.with(|c| {
+        c.execute(
+            "INSERT INTO board_undos (id, board, at, data) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, before.id, stamp_of(now), data],
+        )
+    })?;
+    Ok(id)
+}
+
+pub fn undo_change(
+    chats: &Path,
+    board: &str,
+    undo: &str,
+    now: DateTime<Utc>,
+) -> anyhow::Result<Option<Board>> {
+    use rusqlite::OptionalExtension;
+    let db = crate::db::try_for_chats(chats)?;
+    let data: Option<String> = db.with(|c| {
+        c.query_row(
+            "SELECT data FROM board_undos WHERE id = ?1 AND board = ?2",
+            [undo, board],
+            |r| r.get(0),
+        )
+        .optional()
+    })?;
+    let (Some(data), Some(mut live)) = (data, self::board(chats, board)) else {
+        return Ok(None);
+    };
+    let change: Change = serde_json::from_str(&data)?;
+    live.name = change.name;
+    live.columns = change.columns;
+    live.updated_at = now;
+    put_board(chats, &live)?;
+    for (id, column, rank) in change.cards {
+        if let Some(mut moved) = card(chats, &id).filter(|c| c.board == live.id) {
+            moved.column = column;
+            moved.rank = rank;
+            moved.updated_at = now;
+            put_card(chats, &moved)?;
+        }
+    }
+    db.with(|c| c.execute("DELETE FROM board_undos WHERE id = ?1", [undo]))?;
+    Ok(Some(live))
+}
+
+pub fn forget_changes(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
+    let days = days.unwrap_or(leo_core::keep::DEFAULT_TRASH_DAYS);
+    let before = stamp_of(now - chrono::Duration::days(i64::from(days)));
+    let Ok(db) = crate::db::try_for_chats(chats) else {
+        return 0;
+    };
+    let Ok(named) = db.with(|c| {
+        c.prepare("SELECT DISTINCT board FROM board_undos")?
+            .query_map([], |r| r.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()
+    }) else {
+        return 0;
+    };
+    let gone: Vec<String> = named
+        .into_iter()
+        .filter(|b| load::<Board>(chats, b).is_none())
+        .collect();
+    db.with(|c| {
+        let mut forgotten = c.execute("DELETE FROM board_undos WHERE at < ?1", [&before])?;
+        for board in &gone {
+            forgotten += c.execute("DELETE FROM board_undos WHERE board = ?1", [board])?;
+        }
+        Ok(forgotten)
+    })
+    .unwrap_or(0)
 }
 
 pub fn board(chats: &Path, id: &str) -> Option<Board> {
@@ -383,20 +528,15 @@ pub fn matching_column(board: &Board, name: Option<&str>) -> Option<String> {
         .map(|c| c.id.clone())
 }
 
-/// Delete a board and its cards (tombstones); returns them for Undo.
-pub fn remove_board(chats: &Path, board: &Board, now: DateTime<Utc>) -> anyhow::Result<Vec<Card>> {
-    let cards = cards_of(chats, board);
-    for card in &cards {
-        let mut gone = card.clone();
-        gone.deleted = true;
-        gone.updated_at = now;
-        put_card(chats, &gone)?;
-    }
+pub fn remove_board(chats: &Path, board: &Board, now: DateTime<Utc>) -> anyhow::Result<()> {
     let mut gone = board.clone();
     gone.deleted = true;
     gone.updated_at = now;
     put_board(chats, &gone)?;
-    Ok(cards)
+    for card in all_cards(chats).iter().filter(|c| c.board == board.id) {
+        let _ = remove_card(chats, card, now);
+    }
+    Ok(())
 }
 
 pub fn remove_card(chats: &Path, card: &Card, now: DateTime<Utc>) -> anyhow::Result<()> {
@@ -629,5 +769,214 @@ mod tests {
         assert!(clean_columns(twice).is_err());
         assert_eq!(clean_priority("HIGH"), "high");
         assert_eq!(clean_priority("urgent"), "");
+    }
+
+    fn trip(chats: &Path, cards: usize, now: DateTime<Utc>) -> Board {
+        let board = new_board("Trip", now);
+        put_board(chats, &board).unwrap();
+        for i in 0..cards {
+            let mut card = card_in(&board, 0, &format!("card-{i:04}"), i as f64, now);
+            card.description = format!("Notes for card {i}");
+            put_card(chats, &card).unwrap();
+        }
+        board
+    }
+
+    fn live_titles(chats: &Path, board: &Board) -> Vec<String> {
+        let mut titles: Vec<String> = all_cards(chats)
+            .into_iter()
+            .filter(|c| c.board == board.id)
+            .map(|c| c.title)
+            .collect();
+        titles.sort();
+        titles
+    }
+
+    #[test]
+    fn undo_brings_back_the_board_and_only_the_cards_deleted_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 3, now);
+        remove_card(
+            &chats,
+            &card(&chats, "card-0000").unwrap(),
+            now + chrono::Duration::seconds(1),
+        )
+        .unwrap();
+        remove_board(&chats, &board, now + chrono::Duration::seconds(2)).unwrap();
+        assert!(self::board(&chats, &board.id).is_none());
+        assert!(live_titles(&chats, &board).is_empty());
+        let back = undelete(&chats, &board.id, now + chrono::Duration::seconds(3))
+            .unwrap()
+            .unwrap();
+        assert!(!back.deleted);
+        assert!(self::board(&chats, &board.id).is_some());
+        assert_eq!(live_titles(&chats, &board), ["card-0001", "card-0002"]);
+        assert!(card(&chats, "card-0000").is_none());
+    }
+
+    #[test]
+    fn a_second_undo_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 2, now);
+        remove_board(&chats, &board, now).unwrap();
+        let first = undelete(&chats, &board.id, now + chrono::Duration::seconds(1))
+            .unwrap()
+            .unwrap();
+        let cards = all_cards(&chats);
+        let second = undelete(&chats, &board.id, now + chrono::Duration::seconds(2))
+            .unwrap()
+            .unwrap();
+        assert_eq!(first, second);
+        assert_eq!(all_cards(&chats).len(), cards.len());
+        assert!(all_cards(&chats).iter().all(|c| cards.contains(c)));
+        assert!(undelete(&chats, "b-not-there-at-all", now)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn a_delete_stopped_after_some_cards_is_finished_and_can_be_undone() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 5, now);
+        let at = now + chrono::Duration::seconds(1);
+        let mut gone = board.clone();
+        gone.deleted = true;
+        gone.updated_at = at;
+        put_board(&chats, &gone).unwrap();
+        for id in ["card-0000", "card-0001"] {
+            remove_card(&chats, &card(&chats, id).unwrap(), at).unwrap();
+        }
+        assert_eq!(finish_deletes(&chats), 3);
+        assert!(live_titles(&chats, &board).is_empty());
+        assert_eq!(finish_deletes(&chats), 0);
+        undelete(&chats, &board.id, at + chrono::Duration::seconds(1))
+            .unwrap()
+            .unwrap();
+        let back = all_cards(&chats);
+        assert_eq!(back.len(), 5);
+        assert!(back
+            .iter()
+            .all(|c| c.description == format!("Notes for card {}", c.rank)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_card_that_cannot_be_marked_does_not_fail_the_delete() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 3, now);
+        let cards = dir.path().join("notes/.leo/cards");
+        std::fs::set_permissions(&cards, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let removed = remove_board(&chats, &board, now + chrono::Duration::seconds(1));
+        let still = live_titles(&chats, &board);
+        let back = undelete(&chats, &board.id, now + chrono::Duration::seconds(2));
+        std::fs::set_permissions(&cards, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(removed.is_ok());
+        assert_eq!(still.len(), 3);
+        assert!(back.unwrap().is_some());
+        assert!(self::board(&chats, &board.id).is_some());
+        assert_eq!(live_titles(&chats, &board).len(), 3);
+    }
+
+    #[test]
+    fn an_unfinished_delete_is_never_expired() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let long_ago = now - chrono::Duration::days(400);
+        let board = trip(&chats, 2, long_ago);
+        let mut gone = board.clone();
+        gone.deleted = true;
+        gone.updated_at = long_ago;
+        put_board(&chats, &gone).unwrap();
+        remove_card(&chats, &card(&chats, "card-0000").unwrap(), long_ago).unwrap();
+        assert_eq!(forget_deleted(&chats, Some(30), now), 0);
+        assert!(load::<Board>(&chats, &board.id).is_some());
+        assert!(load::<Card>(&chats, "card-0000").is_some());
+        assert_eq!(finish_deletes(&chats), 1);
+        assert_eq!(forget_deleted(&chats, Some(30), now), 3);
+        assert!(load::<Board>(&chats, &board.id).is_none());
+        assert!(read_all::<Card>(&chats, None).is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_delete_whose_first_write_fails_changes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 2, now);
+        let boards = dir.path().join("notes/.leo/boards");
+        std::fs::set_permissions(&boards, std::fs::Permissions::from_mode(0o555)).unwrap();
+        let removed = remove_board(&chats, &board, now + chrono::Duration::seconds(1));
+        std::fs::set_permissions(&boards, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(removed.is_err());
+        assert!(self::board(&chats, &board.id).is_some());
+        assert_eq!(live_titles(&chats, &board).len(), 2);
+    }
+
+    #[test]
+    fn undo_leaves_cards_added_since_where_they_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 1, now);
+        let undo = remember_change(
+            &chats,
+            &board,
+            &[("card-0000".into(), board.columns[0].id.clone(), 0.0)],
+            now,
+        )
+        .unwrap();
+        let mut changed = board.clone();
+        changed.name = "Holiday".into();
+        changed.columns.truncate(2);
+        put_board(&chats, &changed).unwrap();
+        let mut moved = card(&chats, "card-0000").unwrap();
+        moved.column = board.columns[1].id.clone();
+        moved.rank = 9.0;
+        put_card(&chats, &moved).unwrap();
+        put_card(&chats, &card_in(&board, 1, "card-late", 5.0, now)).unwrap();
+        let back = undo_change(&chats, &board.id, &undo, now).unwrap().unwrap();
+        assert_eq!(
+            (back.name.as_str(), &back.columns),
+            ("Trip", &board.columns)
+        );
+        let first = card(&chats, "card-0000").unwrap();
+        assert_eq!(
+            (first.column.as_str(), first.rank),
+            (board.columns[0].id.as_str(), 0.0)
+        );
+        assert_eq!(
+            card(&chats, "card-late").unwrap().column,
+            board.columns[1].id
+        );
+    }
+
+    #[test]
+    fn an_undo_record_is_used_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let now = Utc::now();
+        let board = trip(&chats, 1, now);
+        let undo = remember_change(&chats, &board, &[], now).unwrap();
+        assert!(undo_change(&chats, "b-some-other-board", &undo, now)
+            .unwrap()
+            .is_none());
+        assert!(undo_change(&chats, &board.id, &undo, now)
+            .unwrap()
+            .is_some());
+        assert!(undo_change(&chats, &board.id, &undo, now)
+            .unwrap()
+            .is_none());
     }
 }

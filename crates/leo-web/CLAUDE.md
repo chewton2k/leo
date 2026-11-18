@@ -967,8 +967,18 @@ is hidden or the capture activity gate is busy.
   column vanished shows in the first column and is rewritten only when it moves.
   One mutex (`boards::writing`) serialises writes.
 - API: GET/POST `/api/boards`, GET/PATCH/DELETE `/api/boards/{id}` (removed
-  columns' cards go to `move_to` or the first column; DELETE returns
-  `{board, cards}`), POST `/api/boards/restore`, POST `/api/boards/{id}/cards`,
+  columns' cards go to `move_to` or the first column). DELETE returns
+  `{board, undo}` and marks the board and its cards deleted or changes nothing;
+  a board's own mark is written first, its cards' marks are finished later if
+  interrupted (`boards::finish_deletes`, at each Keeping pass and before Undo),
+  and neither is removed for good before the other. POST
+  `/api/boards/{id}/undelete` (Undo of a delete, by id: the board and the cards
+  deleted with it, for as long as the trash period keeps them);
+  `/api/boards/restore` remains for undoing a column change saved in older
+  chats. Felix's Undo of a board change is by id too: `board_undos` in leo.db
+  keeps the board's name, columns and moved cards' places, used once by POST
+  `/api/boards/{id}/undo/{undo}` and expired with the trash period (30 days when
+  it is Forever) or when its board is gone. POST `/api/boards/{id}/cards`,
   PATCH/DELETE `/api/cards/{id}`, POST `/api/cards/{id}/move`
   `{board?, column?, after?}` (missing = end, null = top). Export adds
   `leo/boards.json`. Card create takes `request` (a uuid per user action,

@@ -2056,6 +2056,15 @@ pub enum Proposal {
         #[serde(default)]
         cards: Vec<crate::boards::Card>,
     },
+    UndeleteBoard {
+        summary: String,
+        board: String,
+    },
+    UndoBoardChange {
+        summary: String,
+        board: String,
+        undo: String,
+    },
 }
 
 impl Proposal {

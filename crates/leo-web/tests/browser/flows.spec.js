@@ -3169,6 +3169,8 @@ test.describe('the kinds of bugs that reached people before', () => {
     await call('GET', '/api/boards');
     await call('GET', `/api/boards/${board.id}`);
     await call('DELETE', `/api/cards/${card.id}`);
+    await call('DELETE', `/api/boards/${board.id}`);
+    await call('POST', `/api/boards/${board.id}/undelete`);
     const gone = json(await call('DELETE', `/api/boards/${board.id}`));
     await call('POST', '/api/boards/restore', gone);
     await call('DELETE', `/api/boards/${board.id}`);

@@ -4007,3 +4007,125 @@ fn the_search_tool_embeds_outside_the_notes_lock() {
     execute_tool(&state, &mut desk, &call, &|_| {}).unwrap();
     assert_eq!(*free.lock().unwrap(), Some(true));
 }
+
+pub(super) fn big_board(state: &AppState, columns: usize) -> crate::boards::Board {
+    let mut board = crate::boards::new_board("Huge", chrono::Utc::now());
+    board.columns.truncate(columns.max(1));
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    for i in 0..300 {
+        let now = chrono::Utc::now();
+        crate::boards::put_card(
+            &state.chats,
+            &crate::boards::Card {
+                id: format!("card-{i:04}"),
+                board: board.id.clone(),
+                column: board.columns[i % board.columns.len()].id.clone(),
+                rank: i as f64,
+                title: format!("Card {i}"),
+                subheading: String::new(),
+                description: "d".repeat(crate::boards::MOST_DESCRIPTION),
+                priority: String::new(),
+                created_at: now,
+                updated_at: now,
+                deleted: false,
+            },
+        )
+        .unwrap();
+    }
+    board
+}
+
+#[test]
+fn a_very_large_board_deletes_and_comes_back() {
+    let (state, _d, _) = state_with(&[]);
+    let board = big_board(&state, 3);
+    let gone = run(crate::routes::organize::act_route(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({ "kind": "delete_board", "summary": "x", "board": board.id }),
+            )
+            .unwrap(),
+        ),
+    ));
+    assert_eq!(gone.status(), StatusCode::OK);
+    let gone = json_of(gone);
+    assert!(crate::boards::board(&state.chats, &board.id).is_none());
+    assert_eq!(gone["undo"]["kind"], "undelete_board");
+    assert!(gone["undo"].to_string().len() < 1024);
+    let back = act(&state, &gone["undo"]);
+    assert_eq!(back["undo"]["kind"], "delete_board");
+    let back = crate::boards::board(&state.chats, &board.id).unwrap();
+    let cards = crate::boards::cards_of(&state.chats, &back);
+    assert_eq!(cards.len(), 300);
+    assert!(cards
+        .iter()
+        .all(|c| c.description.len() == crate::boards::MOST_DESCRIPTION));
+}
+
+#[test]
+fn a_column_change_on_a_very_large_board_can_be_undone() {
+    let (state, _d, _) = state_with(&[]);
+    let board = big_board(&state, 3);
+    let places = |state: &AppState| -> Vec<(String, String, f64)> {
+        let mut all: Vec<_> = crate::boards::all_cards(&state.chats)
+            .into_iter()
+            .map(|c| (c.id, c.column, c.rank))
+            .collect();
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        all
+    };
+    let before = places(&state);
+    let kept: Vec<serde_json::Value> = board.columns[..2]
+        .iter()
+        .map(|c| serde_json::json!({ "id": c.id, "name": c.name }))
+        .collect();
+    let changed = act(
+        &state,
+        &serde_json::json!({
+            "kind": "change_board", "summary": "x", "board": board.id,
+            "columns": kept, "move_to": board.columns[0].id,
+        }),
+    );
+    assert_eq!(changed["undo"]["kind"], "undo_board_change");
+    assert!(changed["undo"].to_string().len() < 1024);
+    assert_eq!(
+        crate::boards::board(&state.chats, &board.id)
+            .unwrap()
+            .columns
+            .len(),
+        2
+    );
+    let undone = act(&state, &changed["undo"]);
+    let back = crate::boards::board(&state.chats, &board.id).unwrap();
+    assert_eq!(back.columns, board.columns);
+    assert_eq!(places(&state), before);
+    act(&state, &undone["undo"]);
+    assert_eq!(
+        crate::boards::board(&state.chats, &board.id)
+            .unwrap()
+            .columns
+            .len(),
+        2
+    );
+    assert!(crate::boards::all_cards(&state.chats)
+        .iter()
+        .all(|c| c.column != board.columns[2].id));
+}
+
+#[test]
+fn a_saved_restore_board_card_still_applies() {
+    let (state, _d, _) = state_with(&[]);
+    let board = sprint(&state);
+    let card = board_card(&state, "Login").unwrap();
+    crate::boards::remove_board(&state.chats, &board, chrono::Utc::now()).unwrap();
+    let restored = act(
+        &state,
+        &serde_json::json!({
+            "kind": "restore_board", "summary": "Bring it back", "board": board, "cards": [card],
+        }),
+    );
+    assert_eq!(restored["undo"]["kind"], "delete_board");
+    assert!(crate::boards::board(&state.chats, &board.id).is_some());
+    assert!(board_card(&state, "Login").is_some());
+}

@@ -213,7 +213,52 @@ pub(crate) async fn delete_board(
             return no_board();
         };
         match boards::remove_board(chats, &board, Utc::now()) {
-            Ok(cards) => Json(json!({ "board": board, "cards": cards })).into_response(),
+            Ok(()) => {
+                Json(json!({ "board": board, "undo": { "board": board.id } })).into_response()
+            }
+            Err(_) => not_saved(),
+        }
+    })
+    .await
+}
+
+pub(crate) async fn undelete_board(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Response {
+    blocking(&state, move |chats| {
+        let _writing = boards::writing();
+        if boards::board(chats, &id).is_none() && boards::boards(chats).len() >= boards::MOST_BOARDS
+        {
+            return error(
+                StatusCode::CONFLICT,
+                "Leo keeps up to 100 boards. Delete one you no longer use first.",
+            );
+        }
+        match boards::undelete(chats, &id, Utc::now()) {
+            Ok(Some(board)) => Json(json!({ "board": board })).into_response(),
+            Ok(None) => error(
+                StatusCode::NOT_FOUND,
+                "That board is no longer in leo's trash.",
+            ),
+            Err(_) => not_saved(),
+        }
+    })
+    .await
+}
+
+pub(crate) async fn undo_board_change(
+    State(state): State<AppState>,
+    Path((id, undo)): Path<(String, String)>,
+) -> Response {
+    blocking(&state, move |chats| {
+        let _writing = boards::writing();
+        match boards::undo_change(chats, &id, &undo, Utc::now()) {
+            Ok(Some(board)) => Json(json!({ "board": board })).into_response(),
+            Ok(None) => error(
+                StatusCode::NOT_FOUND,
+                "That change can no longer be undone.",
+            ),
             Err(_) => not_saved(),
         }
     })

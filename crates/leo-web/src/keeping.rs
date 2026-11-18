@@ -214,7 +214,9 @@ pub(crate) async fn expire_now(state: &AppState) {
         }
         {
             let _writing = crate::boards::writing();
+            crate::boards::finish_deletes(&chats);
             crate::boards::forget_deleted(&chats, keep.trash_days, now);
+            crate::boards::forget_changes(&chats, keep.trash_days, now);
         }
         crate::chats::tidy(&chats, keep.chat_days, now);
         crate::chat_files::tidy_orphans(&chats, now);

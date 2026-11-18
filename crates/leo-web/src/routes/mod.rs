@@ -158,6 +158,11 @@ pub(crate) fn router(state: AppState) -> Router {
             get(boards::list_boards).post(boards::create_board),
         )
         .route("/api/boards/restore", post(boards::restore_board))
+        .route("/api/boards/{id}/undelete", post(boards::undelete_board))
+        .route(
+            "/api/boards/{id}/undo/{undo}",
+            post(boards::undo_board_change),
+        )
         .route(
             "/api/boards/{id}",
             get(boards::get_board)

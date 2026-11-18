@@ -41,6 +41,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
         {id:'cread00001',board:'bwork00001',column:'ktodo00001',title:'Read chapter 3',subheading:'',description:'',priority:''},
         {id:'cemail0001',board:'bwork00001',column:'kdoing0001',title:'Email tutor <b>now</b>',subheading:'',description:'',priority:'low'}]};
     let made=0;
+    const gone={};
     const ranked=board=>db.cards.filter(c=>c.board===board).map((c,i)=>({...c,rank:i+1}));
     const place=(card,after)=>{db.cards=db.cards.filter(c=>c.id!==card.id);const same=db.cards.filter(c=>c.board===card.board&&c.column===card.column);let at;if(after===undefined)at=same.length?db.cards.indexOf(same[same.length-1])+1:db.cards.length;else if(after===null)at=same.length?db.cards.indexOf(same[0]):db.cards.length;else at=db.cards.findIndex(c=>c.id===after)+1;db.cards.splice(at,0,card);};
     window.calls=[];
@@ -59,12 +60,13 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       let m;
       if(url==='/api/boards'&&method==='GET')return {boards:db.boards.map(b=>({...b,cards:db.cards.filter(c=>c.board===b.id).length}))};
       if(url==='/api/boards'&&method==='POST'){const b={id:'bnew'+(++made)+'00000',name:body.name||'New board',columns:[{id:'kn'+made+'a000000',name:'To do'},{id:'kn'+made+'b000000',name:'In progress'},{id:'kn'+made+'c000000',name:'Done'}]};db.boards.push(b);return structuredClone(b);}
+      if((m=url.match(/^\\/api\\/boards\\/([^/]+)\\/undelete$/))&&method==='POST'){const g=gone[m[1]];if(!g){const e=new Error("That board is no longer in leo's trash.");e.status=404;throw e;}delete gone[m[1]];db.boards.push(g.board);db.cards.push(...g.cards);return {board:g.board};}
       if(url==='/api/boards/restore'){db.boards.push(body.board);db.cards.push(...body.cards);return {board:body.board,cards:body.cards};}
       if((m=url.match(/^\\/api\\/boards\\/([^/]+)$/))){
         const b=db.boards.find(x=>x.id===m[1]);if(!b){const e=new Error('That board is not there any more.');e.status=404;throw e;}
         if(method==='GET')return {board:structuredClone(b),cards:ranked(b.id)};
         if(method==='PATCH'){if(body.name!==undefined)b.name=body.name;if(body.columns){const before=b.columns;b.columns=body.columns.map((c,i)=>({id:c.id||'kadd'+(++made)+'0000000',name:c.name}));const kept=new Set(b.columns.map(c=>c.id));for(const c of db.cards)if(c.board===b.id&&!kept.has(c.column))c.column=body.move_to||b.columns[0].id;}return structuredClone(b);}
-        if(method==='DELETE'){const cards=ranked(b.id);db.boards=db.boards.filter(x=>x!==b);db.cards=db.cards.filter(c=>c.board!==b.id);return {board:b,cards};}
+        if(method==='DELETE'){gone[b.id]={board:b,cards:db.cards.filter(c=>c.board===b.id)};db.boards=db.boards.filter(x=>x!==b);db.cards=db.cards.filter(c=>c.board!==b.id);return {board:b,undo:{board:b.id}};}
       }
       if((m=url.match(/^\\/api\\/boards\\/([^/]+)\\/cards$/))){const card={id:body.id||'cmade'+(++made)+'00000',board:m[1],column:body.column||db.boards.find(b=>b.id===m[1]).columns[0].id,title:body.title,subheading:body.subheading||'',description:body.description||'',priority:body.priority||''};place(card,undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/move$/))){const card=db.cards.find(c=>c.id===m[1]);const from=db.boards.find(b=>b.id===card.board);if(body.board&&body.board!==card.board){const to=db.boards.find(b=>b.id===body.board);const name=from.columns.find(c=>c.id===card.column)?.name;card.board=to.id;card.column=body.column||(to.columns.find(c=>c.name===name)||to.columns[0]).id;}else if(body.column)card.column=body.column;place(card,'after' in body?body.after:undefined);return {...card,rank:0};}

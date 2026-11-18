@@ -192,6 +192,13 @@ CREATE TABLE IF NOT EXISTS usage_tools (
     reused INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS usage_tools_by_time ON usage_tools(at);
+CREATE TABLE IF NOT EXISTS board_undos (
+    id TEXT PRIMARY KEY,
+    board TEXT NOT NULL,
+    at TEXT NOT NULL,
+    data TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS board_undos_by_board ON board_undos(board);
 ";
 
 pub struct Db {

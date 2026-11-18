@@ -232,3 +232,41 @@ fn a_write_failure_reads_as_a_write_failure() {
     ));
     assert_eq!(not_a_picture.status(), StatusCode::BAD_REQUEST);
 }
+
+#[test]
+fn old_board_undo_records_expire_with_the_trash_period() {
+    let (state, dir, _) = state_with(&[]);
+    let now = chrono::Utc::now();
+    let board = crate::boards::new_board("Plan", now);
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    let old =
+        crate::boards::remember_change(&state.chats, &board, &[], now - chrono::Duration::days(31))
+            .unwrap();
+    let fresh = crate::boards::remember_change(&state.chats, &board, &[], now).unwrap();
+    let orphan = crate::boards::new_board("Gone", now);
+    let lost = crate::boards::remember_change(&state.chats, &orphan, &[], now).unwrap();
+    leo_core::keep::save(
+        &dir.path().join("notes"),
+        &leo_core::keep::Keep {
+            trash_days: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    run(keeping::expire_now(&state));
+    assert!(
+        crate::boards::undo_change(&state.chats, &orphan.id, &lost, now)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        crate::boards::undo_change(&state.chats, &board.id, &old, now)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        crate::boards::undo_change(&state.chats, &board.id, &fresh, now)
+            .unwrap()
+            .is_some()
+    );
+}

@@ -3,7 +3,7 @@
 // people rename, add, delete and drag into order; cards are dragged between columns,
 // and onto another board's tab to move them there.
 const KANBAN_KEY = 'leo-board';
-const BOARD_KINDS = ['add_card', 'update_card', 'move_card', 'delete_card', 'restore_card', 'add_board', 'change_board', 'delete_board', 'restore_board'];
+const BOARD_KINDS = ['add_card', 'update_card', 'move_card', 'delete_card', 'restore_card', 'add_board', 'change_board', 'delete_board', 'restore_board', 'undelete_board', 'undo_board_change'];
 const KANBAN_MOST_COLUMNS = 12;
 const KANBAN_HOLD_MS = 300;
 const KANBAN_EDGE = 56;
@@ -486,10 +486,10 @@ function kanbanBoardMenu(owner) {
 }
 
 async function kanbanDeleteBoard(board) {
-  const gone = await kanbanWrite(`/api/boards/${enc(board.id)}`, { method: 'DELETE' });
+  await kanbanWrite(`/api/boards/${enc(board.id)}`, { method: 'DELETE' });
   toast(`Deleted “${board.name}”`, {
     action: 'Undo',
-    run: () => kanbanWrite('/api/boards/restore', { method: 'POST', body: gone }).then((back) => go(`#/boards/${enc(back.board.id)}`)).catch(fail),
+    run: () => kanbanWrite(`/api/boards/${enc(board.id)}/undelete`, { method: 'POST' }).then((back) => go(`#/boards/${enc(back.board.id)}`)).catch(fail),
   });
   const left = kanban.boards.filter((b) => b.id !== board.id);
   go(left.length ? `#/boards/${enc(left[0].id)}` : '#/boards', { replace: true });

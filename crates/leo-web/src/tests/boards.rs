@@ -1,7 +1,7 @@
 use super::*;
 use crate::routes::boards::{
     change_board, change_card, create_board, create_card, delete_board, delete_card, get_board,
-    list_boards, move_card, restore_board,
+    list_boards, move_card, restore_board, undelete_board,
 };
 
 fn new_board(state: &AppState, name: &str) -> serde_json::Value {
@@ -296,8 +296,10 @@ fn a_deleted_board_takes_its_cards_and_undo_brings_both_back() {
         &id,
         serde_json::json!({ "title": "Book train", "column": column(&board, 1) }),
     );
+    let card = shown(&state, &id)["cards"][0].clone();
     let gone = json_of(run(delete_board(State(state.clone()), Path(id.clone()))));
-    assert_eq!(gone["cards"].as_array().unwrap().len(), 1);
+    assert_eq!(gone["undo"]["board"], id.as_str());
+    assert!(gone.get("cards").is_none());
     assert_eq!(
         run(get_board(State(state.clone()), Path(id.clone()))).status(),
         404
@@ -307,9 +309,17 @@ fn a_deleted_board_takes_its_cards_and_undo_brings_both_back() {
         .unwrap()
         .is_empty());
 
+    let back = json_of(run(undelete_board(State(state.clone()), Path(id.clone()))));
+    assert_eq!(back["board"]["name"], "Trip");
+    assert_eq!(titles_in(&state, &id, &column(&board, 1)), ["Book train"]);
+
+    run(delete_board(State(state.clone()), Path(id.clone())));
     let back = json_of(run(restore_board(
         State(state.clone()),
-        Json(serde_json::from_value(gone).unwrap()),
+        Json(
+            serde_json::from_value(serde_json::json!({ "board": gone["board"], "cards": [card] }))
+                .unwrap(),
+        ),
     )));
     assert_eq!(back["board"]["name"], "Trip");
     assert_eq!(titles_in(&state, &id, &column(&board, 1)), ["Book train"]);
@@ -358,4 +368,37 @@ fn a_repeated_request_id_creates_one_card_and_a_move_ignores_it() {
     moved(&state, card, serde_json::json!({"column": todo}));
     json_of(moved(&state, card, to_doing));
     assert_eq!(titles_in(&state, &id, &doing), ["Essay"]);
+}
+
+#[test]
+fn an_expired_board_cannot_be_undone() {
+    let (state, _d, _) = state_with(&[]);
+    let board = new_board(&state, "Old");
+    let id = board["id"].as_str().unwrap().to_string();
+    run(delete_board(State(state.clone()), Path(id.clone())));
+    crate::boards::forget_deleted(
+        &state.chats,
+        Some(30),
+        chrono::Utc::now() + chrono::Duration::days(31),
+    );
+    let response = run(undelete_board(State(state.clone()), Path(id)));
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        json_of(response)["error"],
+        "That board is no longer in leo's trash."
+    );
+}
+
+#[test]
+fn a_very_large_board_deletes_and_comes_back() {
+    let (state, _d, _) = state_with(&[]);
+    let board = super::felix::big_board(&state, 3);
+    let gone = run(delete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(gone.status(), StatusCode::OK);
+    let gone = json_of(gone);
+    assert!(gone.to_string().len() < 2048, "{}", gone.to_string().len());
+    let back = run(undelete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(back.status(), StatusCode::OK);
+    let cards = shown(&state, &board.id)["cards"].as_array().unwrap().len();
+    assert_eq!(cards, 300);
 }
