@@ -1231,6 +1231,7 @@ fn search_and_review_marks_benchmark() {
         &state.chats,
         chat,
         crate::chats::Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages: vec![serde_json::json!({ "role": "user", "text": "quiz me" })],

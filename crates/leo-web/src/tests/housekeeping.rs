@@ -8,6 +8,7 @@ fn keeping_choices_are_saved_and_applied_right_away() {
         &state.chats,
         "chat-old-0001",
         chats::Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages: vec![serde_json::json!({"role": "user", "text": "hi"})],
@@ -112,6 +113,7 @@ fn the_daily_expiry_removes_an_old_chat_and_its_documents() {
         &state.chats,
         "chat-old-audit1",
         chats::Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages: vec![serde_json::json!({"role": "user", "text": "photosynthesis in leaves"})],

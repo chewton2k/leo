@@ -332,6 +332,7 @@ mod tests {
             dir,
             id,
             chats::Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![],
                 messages,

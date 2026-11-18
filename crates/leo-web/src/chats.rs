@@ -76,7 +76,20 @@ pub struct Saving {
     pub refs: Vec<Ref>,
     #[serde(default)]
     pub messages: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub existed: bool,
 }
+
+#[derive(Debug)]
+pub struct Gone;
+
+impl std::fmt::Display for Gone {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("that chat was removed")
+    }
+}
+
+impl std::error::Error for Gone {}
 
 pub fn dir_for(notes_dir: &Path) -> PathBuf {
     notes_dir.parent().unwrap_or(notes_dir).join("chats")
@@ -386,9 +399,12 @@ pub fn search(dir: &Path, query: &str) -> Vec<Summary> {
 pub fn save(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Result<Chat> {
     anyhow::ensure!(valid_id(id), "that is not a chat id");
     let db = db_of(dir);
-    db.with(|c| {
+    let saved = db.with(|c| {
         let tx = c.transaction()?;
         let old = load_in(&tx, id)?;
+        if saving.existed && old.is_none() {
+            return Ok(None);
+        }
         let created_at = old.as_ref().map_or(now, |old| old.created_at);
         let memory = old.as_ref().and_then(|old| old.memory.clone());
         let engaged = old.as_ref().is_none_or(|old| {
@@ -425,8 +441,9 @@ pub fn save(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Result<
         };
         write_in(&tx, &chat)?;
         tx.commit()?;
-        Ok(chat)
-    })
+        Ok(Some(chat))
+    })?;
+    saved.ok_or_else(|| anyhow::Error::new(Gone))
 }
 
 pub fn drop_last(dir: &Path, id: &str, count: usize, total: usize) -> Result<Option<Chat>> {
@@ -518,6 +535,7 @@ mod tests {
                 &dir,
                 &id,
                 Saving {
+                    existed: false,
                     title: "Saved practice".into(),
                     refs: vec![],
                     messages: messages.clone(),
@@ -540,6 +558,7 @@ mod tests {
                 &dir,
                 &id,
                 Saving {
+                    existed: false,
                     title: "Saved practice".into(),
                     refs: vec![],
                     messages: messages.clone(),
@@ -571,6 +590,7 @@ mod tests {
             &dir,
             "chat-order-0001",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![],
                 messages: one.clone(),
@@ -582,6 +602,7 @@ mod tests {
             &dir,
             "chat-order-0001",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![],
                 messages: one.clone(),
@@ -599,6 +620,7 @@ mod tests {
             &dir,
             "chat-order-0001",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![],
                 messages: two,
@@ -619,6 +641,7 @@ mod tests {
 
     fn saving(messages: Vec<serde_json::Value>) -> Saving {
         Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages,
@@ -799,6 +822,7 @@ mod tests {
             &dir,
             "chat-aaaa-1",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![Ref {
                     id: "n1".into(),
@@ -817,6 +841,7 @@ mod tests {
             &dir,
             "chat-bbbb-2",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: vec![],
                 messages: vec![],
@@ -828,6 +853,7 @@ mod tests {
             &dir,
             "chat-aaaa-1",
             Saving {
+                existed: false,
                 title: String::new(),
                 refs: first.refs.clone(),
                 messages: vec![
@@ -861,6 +887,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("chats");
         let empty = || Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages: vec![said("user", "hi")],
@@ -891,6 +918,7 @@ mod tests {
                 &dir,
                 bad,
                 Saving {
+                    existed: false,
                     title: String::new(),
                     refs: vec![],
                     messages: vec![]
@@ -909,6 +937,7 @@ mod tests {
             &dir,
             "chat-long-123",
             Saving {
+                existed: false,
                 title: long,
                 refs: vec![],
                 messages,

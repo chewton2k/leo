@@ -217,6 +217,7 @@ pub(crate) async fn put_chat(
     .await
     {
         Ok(Ok(chat)) => Json(chat.summary()).into_response(),
+        Ok(Err(e)) if e.is::<chats::Gone>() => StatusCode::GONE.into_response(),
         _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

@@ -3808,6 +3808,7 @@ fn taking_back_the_last_reply_removes_it_and_refuses_a_stale_count() {
         &state.chats,
         "chat-take-0001",
         chats::Saving {
+            existed: false,
             title: String::new(),
             refs: vec![],
             messages: vec![said("user"), said("assistant")],
@@ -4128,4 +4129,69 @@ fn a_saved_restore_board_card_still_applies() {
     assert_eq!(restored["undo"]["kind"], "delete_board");
     assert!(crate::boards::board(&state.chats, &board.id).is_some());
     assert!(board_card(&state, "Login").is_some());
+}
+
+fn put_saved(
+    state: &AppState,
+    id: &str,
+    existed: bool,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let body: crate::chats::Saving = serde_json::from_value(serde_json::json!({
+        "messages": [{ "role": "user", "text": "hello" }],
+        "existed": existed,
+    }))
+    .unwrap();
+    let response = run(crate::routes::felix::put_chat(
+        State(state.clone()),
+        Path(id.into()),
+        Json(body),
+    ));
+    (response.status(), json_of(response))
+}
+
+#[test]
+fn a_save_that_says_the_chat_existed_creates_nothing_when_leo_no_longer_has_it() {
+    let (state, _d, _) = state_with(&[]);
+    let (status, _) = put_saved(&state, "chat-gone-0001", true);
+    assert_eq!(status, axum::http::StatusCode::GONE);
+    assert!(crate::chats::load(&state.chats, "chat-gone-0001").is_none());
+}
+
+#[test]
+fn a_save_that_says_the_chat_existed_still_saves_when_leo_has_it() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-kept-0001", false).0,
+        axum::http::StatusCode::OK
+    );
+    let (status, summary) = put_saved(&state, "chat-kept-0001", true);
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(summary["id"], "chat-kept-0001");
+    assert!(crate::chats::load(&state.chats, "chat-kept-0001").is_some());
+}
+
+#[test]
+fn a_first_save_without_the_flag_still_creates_the_chat() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-new-00001", false).0,
+        axum::http::StatusCode::OK
+    );
+    assert!(crate::chats::load(&state.chats, "chat-new-00001").is_some());
+}
+
+#[test]
+fn a_chat_expired_by_tidy_is_not_recreated_by_a_later_save_that_carries_the_flag() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-aged-0001", false).0,
+        axum::http::StatusCode::OK
+    );
+    let later = chrono::Utc::now() + chrono::Duration::days(40);
+    assert_eq!(crate::chats::tidy(&state.chats, Some(30), later), 1);
+    assert_eq!(
+        put_saved(&state, "chat-aged-0001", true).0,
+        axum::http::StatusCode::GONE
+    );
+    assert!(crate::chats::load(&state.chats, "chat-aged-0001").is_none());
 }
