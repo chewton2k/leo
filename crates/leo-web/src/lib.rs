@@ -397,6 +397,9 @@ async fn give_back_when_idle(state: AppState) {
 async fn keep_search_current(state: AppState) {
     let index = Arc::clone(&state.search_index);
     loop {
+        while state.capture_activity.busy() || record::live(&state.recording) {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        }
         let asked = Arc::clone(&index);
         let work = state
             .read_store(move |store| Ok(asked.stale(store, search_index::MOST_COPIED)))
