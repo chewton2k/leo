@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0 };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0 };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -17,6 +17,7 @@ const SIDE_NOTES_AUTOMATIC = 32;
 const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
 const SIDE_NEW_MS = 60000;
+const SIDE_REV_MS = 60000;
 const SIDE_FRESH_MS = 30 * 60000;
 const SIDE_FRESH_GROUP = 1000;
 
@@ -304,9 +305,18 @@ async function loadSideFolders() {
   if (tasksAtHome()) loadHomeRecent();
   if ((!sideWide() && !sideActive()) || state.view === 'locked') return drawSide();
   const mine = seq, generation = ++side.generation;
+  const rev = await api('/api/rev').then((answer) => (typeof answer?.rev === 'string' ? answer.rev : null), () => null);
+  if (mine !== seq || generation !== side.generation) return;
+  if (rev && rev === side.rev && Date.now() - side.revAt < SIDE_REV_MS) {
+    const order = sideReadOrder();
+    for (const entry of side.notes.values()) if (entry.loaded && !entry.error && !entry.loading && entry.order === order) entry.seq = seq;
+    return drawSide();
+  }
   try {
     const folders = await api('/api/folders');
     if (mine !== seq || generation !== side.generation) return;
+    side.rev = rev;
+    side.revAt = Date.now();
     side.folders = folders;
     if (side.target && !folders.some((folder) => folder.name === side.target)) side.target = null;
     side.loaded = true;
@@ -316,6 +326,7 @@ async function loadSideFolders() {
     }
   } catch (e) {
     if (mine !== seq || generation !== side.generation) return;
+    side.rev = null;
     if (!side.loaded) side.folders = [];
   }
   drawSide();
@@ -424,6 +435,7 @@ function sideNoteRows(path, depth) {
 }
 
 async function refreshSideTree() {
+  side.rev = null;
   await loadSideFolders();
   for (const [path, entry] of [...side.notes]) loadSideNotes(path, entry.offset || 0, true);
 }
@@ -432,7 +444,7 @@ function loadSideNotes(path, offset = 0, force = false) {
   if (path !== '' && !side.folders.some((folder) => folder.name === path)) return;
   if (!Number.isSafeInteger(offset) || offset < 0) return;
   const previous = side.notes.get(path);
-  const order = `${SIDE_SORTS[side.sort].orders[side.flip ? 1 : 0]} ${side.tasks ? 'tasks' : 'all'}`;
+  const order = sideReadOrder();
   if (previous?.seq === seq && previous.order === order && (!force || (previous.loading && previous.offset === offset))) return;
   if (!previous && side.notes.size >= SIDE_NOTES_FOLDERS) {
     const oldest = [...side.notes.keys()].find((key) => !side.automatic.has(key));
@@ -444,6 +456,10 @@ function loadSideNotes(path, offset = 0, force = false) {
   side.pending.push({ path, entry });
   pumpSideNotes();
   if (force) drawSide();
+}
+
+function sideReadOrder() {
+  return `${SIDE_SORTS[side.sort].orders[side.flip ? 1 : 0]} ${side.tasks ? 'tasks' : 'all'}`;
 }
 
 function pumpSideNotes() {
