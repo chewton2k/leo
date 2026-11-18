@@ -144,7 +144,9 @@ settings and credentials are excluded from note exports.
   by later saves until the store reloads; the outside edit is then loaded)
   (`CONFLICT_SUFFIX`, listed by doctor) instead of overwriting; deleted notes are trashed only if their file
   is still what leo saw. Writes are temp-file + rename.
-- `Store::changed_on_disk`/`refresh` (fingerprint of paths, sizes, mtimes).
+- `Store::changed_on_disk`/`refresh` (fingerprint of paths, sizes, mtimes);
+  refresh re-reads only files whose size, modified or change time changed, or
+  whose note differs in memory; the result equals a fresh load.
   Engine mutations reconcile before writing; hot read-only
   paths use the existing filesystem watcher with a 60 s reconciliation fallback.
   Returning to the native window forces a check before serving cached reads.

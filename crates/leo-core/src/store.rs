@@ -279,6 +279,28 @@ struct Seen {
     fields: u64,
     place: u64,
     copy: Option<(PathBuf, u64)>,
+    stamp: Option<Stamp>,
+    renamed: bool,
+}
+
+type Stamp = (u64, u128, i64);
+
+fn stamp_of(meta: &fs::Metadata) -> Stamp {
+    let nanos = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_nanos());
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        meta.ctime()
+            .saturating_mul(1_000_000_000)
+            .saturating_add(meta.ctime_nsec())
+    };
+    #[cfg(not(unix))]
+    let changed = 0;
+    (meta.len(), nanos, changed)
 }
 
 const TIDY_TRASH_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -344,15 +366,18 @@ fn stamp_term(relative: &Path, meta: Option<&fs::Metadata>) -> u64 {
 }
 
 fn fingerprint_of(notes_dir: &Path) -> u64 {
-    let mut paths = Vec::new();
-    let _ = collect_md_paths(notes_dir, &mut paths);
-    let directories = notes_dir.join(FOLDER_LIST);
-    if let Ok(meta) = fs::metadata(&directories) {
-        paths.push((directories, Some(meta)));
-    }
-    paths.iter().fold(0u64, |sum, (path, meta)| {
+    let mut files = Vec::new();
+    let _ = walk(notes_dir, 0, &mut files, &mut Vec::new());
+    fingerprint_from(notes_dir, &files)
+}
+
+fn fingerprint_from(notes_dir: &Path, files: &[(PathBuf, fs::Metadata)]) -> u64 {
+    let listed = fs::metadata(notes_dir.join(FOLDER_LIST))
+        .ok()
+        .map_or(0, |meta| stamp_term(Path::new(FOLDER_LIST), Some(&meta)));
+    files.iter().fold(listed, |sum, (path, meta)| {
         let relative = path.strip_prefix(notes_dir).unwrap_or(path);
-        sum.wrapping_add(stamp_term(relative, meta.as_ref()))
+        sum.wrapping_add(stamp_term(relative, Some(meta)))
     })
 }
 
@@ -438,11 +463,6 @@ fn check_notes_root(notes_dir: &Path) -> Result<()> {
 
 const MOST_DEPTH: usize = 64;
 
-/// Collect absolute paths of all .md files under `dir`, skipping hidden dirs.
-fn collect_md_paths(dir: &Path, result: &mut Vec<(PathBuf, Option<fs::Metadata>)>) -> Result<()> {
-    collect_md_paths_at(dir, result, 0)
-}
-
 fn read_dir_or_empty(dir: &Path) -> std::io::Result<Option<fs::ReadDir>> {
     match fs::read_dir(dir) {
         Ok(entries) => Ok(Some(entries)),
@@ -451,35 +471,57 @@ fn read_dir_or_empty(dir: &Path) -> std::io::Result<Option<fs::ReadDir>> {
     }
 }
 
-fn collect_md_paths_at(
+fn walk(
     dir: &Path,
-    result: &mut Vec<(PathBuf, Option<fs::Metadata>)>,
     depth: usize,
-) -> Result<()> {
+    files: &mut Vec<(PathBuf, fs::Metadata)>,
+    errors: &mut Vec<(PathBuf, String)>,
+) -> std::io::Result<()> {
     if depth > MOST_DEPTH {
         return Ok(());
     }
-    let Some(entries) = read_dir_or_empty(dir)? else {
-        return Ok(());
+    let entries = match read_dir_or_empty(dir) {
+        Ok(Some(entries)) => entries,
+        Ok(None) => return Ok(()),
+        Err(error) if depth > 0 => {
+            errors.push((dir.to_path_buf(), error.to_string()));
+            return Ok(());
+        }
+        Err(error) => return Err(error),
     };
     for entry in entries {
-        let entry = entry?;
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                errors.push((dir.to_path_buf(), error.to_string()));
+                continue;
+            }
+        };
         let path = entry.path();
-        let kind = entry.file_type()?;
+        let kind = match entry.file_type() {
+            Ok(kind) => kind,
+            Err(error) => {
+                errors.push((path, error.to_string()));
+                continue;
+            }
+        };
         if kind.is_symlink() {
             continue;
         }
         if kind.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !name.starts_with('.') {
-                let _ = collect_md_paths_at(&path, result, depth + 1);
+                walk(&path, depth + 1, files, errors)?;
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
             #[cfg(windows)]
-            let meta = fs::metadata(&path).ok();
+            let meta = fs::metadata(&path);
             #[cfg(not(windows))]
-            let meta = entry.metadata().ok();
-            result.push((path, meta));
+            let meta = entry.metadata();
+            match meta {
+                Ok(meta) => files.push((path, meta)),
+                Err(error) => errors.push((path, error.to_string())),
+            }
         }
     }
     Ok(())
@@ -540,14 +582,14 @@ pub fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
     let Some(trash) = trash_dir(notes_dir) else {
         return Vec::new();
     };
-    let mut paths = Vec::new();
-    if collect_md_paths(&trash, &mut paths).is_err() {
+    let mut files = Vec::new();
+    if walk(&trash, 0, &mut files, &mut Vec::new()).is_err() {
         return Vec::new();
     }
-    paths
+    files
         .into_iter()
         .filter_map(|(path, meta)| {
-            let deleted_at = DateTime::<Utc>::from(meta?.modified().ok()?);
+            let deleted_at = DateTime::<Utc>::from(meta.modified().ok()?);
             let relative = path.strip_prefix(&trash).ok()?.to_path_buf();
             let head = read_head(&path, &relative);
             Some(TrashEntry {
@@ -664,16 +706,14 @@ fn add_with_parents(directories: &mut Vec<String>, dir: &str) {
     }
 }
 
-type Found = (PathBuf, Note, String, std::time::SystemTime, bool);
-
-/// Recursively parse all .md files under `dir` into `notes`.
-fn collect_notes(
-    notes_dir: &Path,
-    dir: &Path,
-    found: &mut Vec<Found>,
-    unreadable: &mut Vec<(PathBuf, String)>,
-) -> Result<()> {
-    collect_notes_at(notes_dir, dir, found, unreadable, 0)
+struct Found {
+    relative: PathBuf,
+    note: Note,
+    modified: std::time::SystemTime,
+    renamed: bool,
+    disk: u64,
+    stamp: Stamp,
+    kept: Option<Seen>,
 }
 
 fn skip(unreadable: &mut Vec<(PathBuf, String)>, path: &Path, error: &dyn std::fmt::Display) {
@@ -681,93 +721,62 @@ fn skip(unreadable: &mut Vec<(PathBuf, String)>, path: &Path, error: &dyn std::f
     unreadable.push((path.to_path_buf(), error.to_string()));
 }
 
-fn collect_notes_at(
-    notes_dir: &Path,
-    dir: &Path,
-    found: &mut Vec<Found>,
+fn read_found(
+    path: &Path,
+    relative: PathBuf,
+    meta: &fs::Metadata,
     unreadable: &mut Vec<(PathBuf, String)>,
-    depth: usize,
-) -> Result<()> {
-    if depth > MOST_DEPTH {
-        return Ok(());
-    }
-    let entries = match read_dir_or_empty(dir) {
-        Ok(Some(entries)) => entries,
-        Ok(None) => return Ok(()),
-        Err(error) if depth > 0 => {
-            skip(unreadable, dir, &error);
-            return Ok(());
+) -> Option<Found> {
+    let content = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) => {
+            skip(unreadable, path, &error);
+            return None;
         }
-        Err(error) => return Err(error.into()),
     };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(error) => {
-                skip(unreadable, dir, &error);
-                continue;
-            }
-        };
-        let path = entry.path();
-        let kind = match entry.file_type() {
-            Ok(kind) => kind,
-            Err(error) => {
-                skip(unreadable, &path, &error);
-                continue;
-            }
-        };
-        if kind.is_symlink() {
-            continue;
-        }
-        if kind.is_dir() {
-            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if !name.starts_with('.') {
-                collect_notes_at(notes_dir, &path, found, unreadable, depth + 1)?;
-            }
-        } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-            let content = match fs::read_to_string(&path) {
-                Ok(content) => content,
-                Err(error) => {
-                    skip(unreadable, &path, &error);
-                    continue;
-                }
-            };
-            let relative = path
-                .strip_prefix(notes_dir)
-                .context("path outside notes_dir")?
-                .to_path_buf();
-            let modified = entry.metadata().and_then(|m| m.modified()).ok();
-            let changed = modified.map_or_else(Utc::now, DateTime::<Utc>::from);
-            match parse_note(&content, &relative, changed) {
-                Ok((note, renamed)) => {
-                    found.push((
-                        relative,
-                        note,
-                        content,
-                        modified.unwrap_or(std::time::UNIX_EPOCH),
-                        renamed,
-                    ));
-                }
-                Err(e) => skip(unreadable, &path, &e),
-            }
+    let modified = meta.modified().ok();
+    let changed = modified.map_or_else(Utc::now, DateTime::<Utc>::from);
+    match parse_note(&content, &relative, changed) {
+        Ok((note, renamed)) => Some(Found {
+            disk: hash_str(&content),
+            relative,
+            note,
+            modified: modified.unwrap_or(std::time::UNIX_EPOCH),
+            renamed,
+            stamp: stamp_of(meta),
+            kept: None,
+        }),
+        Err(e) => {
+            skip(unreadable, path, &e);
+            None
         }
     }
-    Ok(())
 }
 
 fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
     let mut once = HashSet::new();
     let twins: HashSet<String> = found
         .iter()
-        .filter(|item| !once.insert(item.1.id.as_str()))
-        .map(|item| item.1.id.clone())
+        .filter(|item| !once.insert(item.note.id.as_str()))
+        .map(|item| item.note.id.clone())
         .collect();
     drop(once);
-    let last = |item: &Found| item.4 && twins.contains(&item.1.id);
-    found.sort_by(|a, b| (last(a), a.3, &a.0).cmp(&(last(b), b.3, &b.0)));
+    let last = |item: &Found| item.renamed && twins.contains(&item.note.id);
+    found.sort_by(|a, b| {
+        (last(a), a.modified, &a.relative).cmp(&(last(b), b.modified, &b.relative))
+    });
     let mut notes = Vec::with_capacity(found.len());
-    let mut seen = HashMap::new();
-    for (relative, mut note, content, _, _) in found {
+    let mut seen = HashMap::with_capacity(found.len());
+    for Found {
+        relative,
+        mut note,
+        renamed,
+        disk,
+        stamp,
+        kept,
+        ..
+    } in found
+    {
         let reassigned = seen.contains_key(&note.id);
         if reassigned {
             note.id = stable_id(&relative);
@@ -775,25 +784,27 @@ fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
                 note.id = uuid::Uuid::new_v4().to_string();
             }
         }
-        let (model, fields) = if reassigned {
-            (0, 0)
-        } else {
-            (
+        let (model, fields) = match &kept {
+            _ if reassigned => (0, 0),
+            Some(kept) => (kept.model, kept.fields),
+            None => (
                 note_to_markdown(&note)
                     .map(|text| hash_str(&text))
                     .unwrap_or(0),
                 hash_note(&note),
-            )
+            ),
         };
         seen.insert(
             note.id.clone(),
             Seen {
                 path: relative,
-                disk: hash_str(&content),
+                disk,
                 model,
                 fields,
-                place: place_of(&note),
+                place: kept.map_or_else(|| place_of(&note), |kept| kept.place),
                 copy: None,
+                stamp: Some(stamp),
+                renamed,
             },
         );
         notes.push(note);
@@ -839,19 +850,55 @@ impl Store {
     }
 
     pub fn load_from(notes_dir: &Path) -> Result<Self> {
-        Self::load_tidied(notes_dir, None)
+        Self::load_tidied(notes_dir, None, None)
     }
 
-    fn load_tidied(notes_dir: &Path, tidied: Option<std::time::Instant>) -> Result<Self> {
+    fn load_tidied(
+        notes_dir: &Path,
+        tidied: Option<std::time::Instant>,
+        old: Option<&mut Store>,
+    ) -> Result<Self> {
         check_notes_root(notes_dir)?;
         fs::create_dir_all(notes_dir)?;
-        let fingerprint = fingerprint_of(notes_dir);
+        let mut files = Vec::new();
+        let mut errors = Vec::new();
+        walk(notes_dir, 0, &mut files, &mut errors)?;
+        let fingerprint = fingerprint_from(notes_dir, &files);
         let (mut directories, dirs_seen) = load_directories(notes_dir)?;
         let dirs_base = directories.clone();
         directories.retain(|dir| crate::paths::validate_directory(dir).is_ok());
-        let mut found = Vec::new();
+        let files = files
+            .into_iter()
+            .map(|(path, meta)| {
+                let relative = path
+                    .strip_prefix(notes_dir)
+                    .context("path outside notes_dir")?
+                    .to_path_buf();
+                Ok((path, relative, meta))
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut unreadable = Vec::new();
-        collect_notes(notes_dir, notes_dir, &mut found, &mut unreadable)?;
+        for (path, why) in &errors {
+            skip(&mut unreadable, path, why);
+        }
+        let mut kept = old
+            .map(|old| old.take_unchanged(&files))
+            .unwrap_or_default();
+        let found = files
+            .into_iter()
+            .filter_map(|(path, relative, meta)| match kept.remove(&relative) {
+                Some((note, seen)) => Some(Found {
+                    relative,
+                    modified: meta.modified().unwrap_or(std::time::UNIX_EPOCH),
+                    renamed: seen.renamed,
+                    disk: seen.disk,
+                    stamp: stamp_of(&meta),
+                    note,
+                    kept: Some(seen),
+                }),
+                None => read_found(&path, relative, &meta, &mut unreadable),
+            })
+            .collect();
         let (notes, seen) = index_notes(found);
 
         // The directory list on disk only needs to remember empty directories:
@@ -980,7 +1027,8 @@ impl Store {
             if let Some(term) = replaced {
                 fp = fp.wrapping_sub(term);
             }
-            let added = stamp_term(&relative, Some(&fs::metadata(target)?));
+            let written = fs::metadata(target)?;
+            let added = stamp_term(&relative, Some(&written));
             fp = fp.wrapping_add(added);
             if let (Some(previous), Some(old_path)) = (&previous, old_path) {
                 if !same {
@@ -1008,6 +1056,11 @@ impl Store {
                     }
                 }
             }
+            let back = parse_note(&content, &relative, Utc::now()).ok();
+            let renamed = back.as_ref().is_some_and(|(_, renamed)| *renamed);
+            let exact = back.is_some_and(|(back, _)| {
+                hash_note(&back) == fields && back.directory == note.directory
+            });
             seen.insert(
                 note.id.clone(),
                 Seen {
@@ -1017,6 +1070,8 @@ impl Store {
                     fields,
                     place: place_of(note),
                     copy: previous.and_then(|previous| previous.copy),
+                    stamp: exact.then(|| stamp_of(&written)),
+                    renamed,
                 },
             );
         }
@@ -1241,6 +1296,9 @@ impl Store {
 
     pub fn touch_all(&mut self) {
         self.full.set(true);
+        self.dirty
+            .get_mut()
+            .extend(self.notes.iter().map(|n| n.id.clone()));
     }
 
     fn save_directories(&self, fp: &mut u64) -> Result<()> {
@@ -1282,8 +1340,54 @@ impl Store {
     }
 
     pub fn refresh(&mut self) -> Result<()> {
-        *self = Store::load_tidied(&self.notes_dir.clone(), self.tidied.get())?;
+        let notes_dir = self.notes_dir.clone();
+        let tidied = self.tidied.get();
+        *self = Store::load_tidied(&notes_dir, tidied, Some(self))?;
         Ok(())
+    }
+
+    fn take_unchanged(
+        &mut self,
+        files: &[(PathBuf, PathBuf, fs::Metadata)],
+    ) -> HashMap<PathBuf, (Note, Seen)> {
+        let stamps: HashMap<&Path, Stamp> = files
+            .iter()
+            .map(|(_, relative, meta)| (relative.as_path(), stamp_of(meta)))
+            .collect();
+        let seen = self.seen.get_mut();
+        let dirty = self.dirty.get_mut();
+        let unchanged: Vec<bool> = self
+            .notes
+            .iter()
+            .map(|note| {
+                let Some(entry) = seen.get(&note.id) else {
+                    return false;
+                };
+                let same = !dirty.contains(&note.id)
+                    && !(entry.model == 0 && entry.fields == 0)
+                    && entry.stamp.is_some()
+                    && stamps.get(entry.path.as_path()) == entry.stamp.as_ref();
+                #[cfg(debug_assertions)]
+                if same {
+                    assert!(
+                        entry.fields == hash_note(note) && entry.place == place_of(note),
+                        "\"{}\" changed without passing a marking point",
+                        note.title
+                    );
+                }
+                same
+            })
+            .collect();
+        let mut taken = HashMap::with_capacity(self.notes.len());
+        for (note, same) in std::mem::take(&mut self.notes).into_iter().zip(unchanged) {
+            if !same {
+                continue;
+            }
+            if let Some(entry) = seen.remove(&note.id) {
+                taken.insert(entry.path.clone(), (note, entry));
+            }
+        }
+        taken
     }
 
     fn conflict_copy(&self, note: &Note, again: Option<&(PathBuf, u64)>) -> Result<(PathBuf, u64)> {
@@ -2726,9 +2830,15 @@ mod tests {
     }
 
     fn trash_files(store: &Store) -> Vec<PathBuf> {
-        let mut paths = Vec::new();
-        collect_md_paths(&store.notes_dir.join(".trash"), &mut paths).unwrap();
-        paths.into_iter().map(|(path, _)| path).collect()
+        let mut files = Vec::new();
+        walk(
+            &store.notes_dir.join(".trash"),
+            0,
+            &mut files,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        files.into_iter().map(|(path, _)| path).collect()
     }
 
     #[test]
@@ -3590,7 +3700,7 @@ mod tests {
 
     fn note_files(store: &Store) -> Vec<String> {
         let mut paths = Vec::new();
-        collect_md_paths(&store.notes_dir, &mut paths).unwrap();
+        walk(&store.notes_dir, 0, &mut paths, &mut Vec::new()).unwrap();
         let mut names: Vec<String> = paths
             .iter()
             .map(|(p, _)| {
@@ -4949,5 +5059,303 @@ mod tests {
         assert!(store.changed_on_disk());
         store.refresh().unwrap();
         assert!(store.dir_exists("empty"));
+    }
+
+    #[test]
+    #[ignore = "benchmark: run by hand with --ignored --nocapture"]
+    fn verify_benchmark_refresh_costs() {
+        use std::time::Instant;
+        let counts: Vec<usize> = std::env::var("LEO_BENCH_NOTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .map_or_else(|| vec![1000, 5000, 10000], |n| vec![n]);
+        let big = std::env::var("LEO_BENCH_BIG").is_ok_and(|v| v == "1");
+        let body = "word ".repeat(1000);
+        for count in counts {
+            let tmp = tempfile::tempdir().unwrap();
+            let dir = tmp.path().join("notes");
+            fs::create_dir_all(&dir).unwrap();
+            let built = Instant::now();
+            for i in 0..count {
+                fs::write(
+                    dir.join(format!("Note {i}.md")),
+                    format!("---\nid: {}\ntitle: Note {i}\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n\n{body}\n", uuid::Uuid::new_v4()),
+                )
+                .unwrap();
+            }
+            let target = if big {
+                let path = dir.join("Big.md");
+                fs::write(
+                    &path,
+                    format!("---\nid: {}\ntitle: Big\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n\n{}\n", uuid::Uuid::new_v4(), "word ".repeat(4_000_000)),
+                )
+                .unwrap();
+                path
+            } else {
+                dir.join("Note 0.md")
+            };
+            let built = built.elapsed();
+            let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+            let t = Instant::now();
+            let mut store = Store::load_from(&dir).unwrap();
+            let load = t.elapsed();
+            let mut walks = Vec::new();
+            for _ in 0..5 {
+                let t = Instant::now();
+                assert!(!store.changed_on_disk());
+                walks.push(ms(t.elapsed()));
+            }
+            let mut reconciles = Vec::new();
+            for round in 0..3 {
+                let mut file = fs::OpenOptions::new().append(true).open(&target).unwrap();
+                std::io::Write::write_all(&mut file, format!("edit {round}\n").as_bytes()).unwrap();
+                drop(file);
+                let t = Instant::now();
+                assert!(store.changed_on_disk());
+                store.refresh().unwrap();
+                reconciles.push(ms(t.elapsed()));
+            }
+            assert!(store.notes.iter().any(|n| n.body.ends_with("edit 2\n")));
+            let t = Instant::now();
+            walk(&dir, 0, &mut Vec::new(), &mut Vec::new()).unwrap();
+            let walk = t.elapsed();
+            assert_eq!(store.notes.len(), count + usize::from(big));
+            println!(
+                "notes={count} big={big} fixture_s={:.1} load_ms={:.1} changed_on_disk_ms={walks:.1?} one_file_reconcile_ms={reconciles:.1?} walk_ms={:.1}",
+                built.as_secs_f64(),
+                ms(load),
+                ms(walk),
+            );
+        }
+    }
+
+    fn set_mtime(path: &Path, when: std::time::SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(when)
+            .unwrap();
+    }
+
+    fn mtime_of(path: &Path) -> std::time::SystemTime {
+        fs::metadata(path).unwrap().modified().unwrap()
+    }
+
+    type Snapshot = (
+        std::collections::BTreeSet<(String, String, String, String, String)>,
+        Vec<String>,
+        Vec<String>,
+    );
+
+    fn snapshot(store: &Store) -> Snapshot {
+        let seen = store.seen.borrow();
+        let notes = store
+            .notes
+            .iter()
+            .map(|note| {
+                let path = seen[&note.id].path.clone();
+                let in_file = read_head(&store.notes_dir.join(&path), &path).map(|head| head.id);
+                let id = if in_file.as_deref() != Some(note.id.as_str())
+                    && note.id != stable_id(&path)
+                {
+                    "loser".to_string()
+                } else {
+                    note.id.clone()
+                };
+                (
+                    path.to_string_lossy().replace('\\', "/"),
+                    id,
+                    note.title.clone(),
+                    note.body.clone(),
+                    note.directory.clone(),
+                )
+            })
+            .collect();
+        let mut unreadable: Vec<String> = store
+            .unreadable
+            .iter()
+            .map(|(path, _)| path.to_string_lossy().replace('\\', "/"))
+            .collect();
+        unreadable.sort();
+        let mut directories = store.directories.clone();
+        directories.sort();
+        (notes, unreadable, directories)
+    }
+
+    fn same_as_fresh(store: &mut Store, step: &str) {
+        store.refresh().unwrap();
+        let fresh = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(snapshot(store), snapshot(&fresh), "after {step}");
+    }
+
+    fn headed(title: &str, body: &str) -> String {
+        format!(
+            "---\nid: {}\ntitle: {title}\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n\n{body}\n",
+            uuid::Uuid::new_v4()
+        )
+    }
+
+    fn append(path: &Path, text: &str) {
+        let old = fs::read_to_string(path).unwrap();
+        fs::write(path, format!("{old}{text}\n")).unwrap();
+    }
+
+    fn copy_with_mtime(from: &Path, to: &Path, when: std::time::SystemTime) {
+        fs::create_dir_all(to.parent().unwrap()).unwrap();
+        fs::write(to, fs::read(from).unwrap()).unwrap();
+        set_mtime(to, when);
+    }
+
+    #[test]
+    fn refresh_equals_a_fresh_load_after_outside_changes() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("notes");
+        let folders = ["", "m", "m/deep"];
+        for folder in folders {
+            fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        let file = |i: usize| dir.join(folders[i % 3]).join(format!("Note {i}.md"));
+        for i in 0..50 {
+            fs::write(file(i), headed(&format!("Note {i}"), &format!("body {i}"))).unwrap();
+        }
+        let mut store = Store::load_from(&dir).unwrap();
+
+        fs::write(dir.join("m/Fresh.md"), headed("Fresh", "new")).unwrap();
+        same_as_fresh(&mut store, "an outside create");
+        append(&file(1), "edited");
+        same_as_fresh(&mut store, "an outside edit");
+        fs::rename(file(2), dir.join("m/deep/Renamed.md")).unwrap();
+        same_as_fresh(&mut store, "an outside rename");
+        fs::remove_file(file(3)).unwrap();
+        same_as_fresh(&mut store, "an outside delete");
+
+        let good = fs::read_to_string(file(4)).unwrap();
+        fs::write(file(4), "---\nid: [unclosed\n---\nbroken\n").unwrap();
+        same_as_fresh(&mut store, "a file made unparseable");
+        fs::write(file(5), "---\nid: [unclosed\n---\nbroken\n").unwrap();
+        fs::write(file(4), good).unwrap();
+        same_as_fresh(&mut store, "one file broken and another fixed");
+
+        let original = file(7);
+        let tied = mtime_of(&original);
+        copy_with_mtime(&original, &dir.join("a/Note 7.md"), tied);
+        same_as_fresh(&mut store, "a copy in an earlier folder with a tied time");
+        same_as_fresh(&mut store, "a second refresh after that copy");
+        copy_with_mtime(&original, &dir.join("z/Note 7.md"), tied);
+        same_as_fresh(&mut store, "a copy in a later folder with a tied time");
+        same_as_fresh(&mut store, "a second refresh after the later copy");
+
+        let named = file(8);
+        copy_with_mtime(
+            &named,
+            &named.with_file_name("Note 8 copy.md"),
+            mtime_of(&named),
+        );
+        same_as_fresh(&mut store, "a copy under another name with a tied time");
+
+        let restarted = file(10);
+        let id = read_head(&restarted, restarted.strip_prefix(&dir).unwrap())
+            .unwrap()
+            .id;
+        let holder = |store: &Store| store.seen.borrow()[&id].path.clone();
+        let before = holder(&store);
+        copy_with_mtime(
+            &restarted,
+            &dir.join("a/Note 10.md"),
+            mtime_of(&restarted) + std::time::Duration::from_secs(10),
+        );
+        store.refresh().unwrap();
+        let after = holder(&store);
+        let again = holder(&Store::load_from(&dir).unwrap());
+        assert_eq!(
+            before, after,
+            "a refresh before the first save moved the id"
+        );
+        assert_eq!(
+            before, again,
+            "a restart before the first save moved the id"
+        );
+        same_as_fresh(&mut store, "a copy before the first save");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let locked = file(11);
+            let length = fs::metadata(&locked).unwrap().len();
+            let when = mtime_of(&locked);
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+            assert_eq!(fs::metadata(&locked).unwrap().len(), length);
+            assert_eq!(mtime_of(&locked), when);
+            append(&file(12), "another change");
+            same_as_fresh(&mut store, "a file made unreadable by permission");
+            assert!(
+                store.unreadable.iter().any(|(path, _)| *path == locked),
+                "the locked file was not listed"
+            );
+            fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+            append(&file(13), "and another");
+            same_as_fresh(&mut store, "the permission given back");
+            assert!(store.unreadable.iter().all(|(path, _)| *path != locked));
+        }
+
+        for (title, body) in [
+            ("Twin", "first"),
+            ("Twin", "second"),
+            ("Odd: name? <with> *stars*", "odd"),
+            (&*"Long title ".repeat(30), "long"),
+            ("Windows lines", "one\r\ntwo\r\n"),
+            ("Blank first", "\n\nafter blank lines"),
+        ] {
+            store.create_note(title, body, vec![], "m").unwrap();
+        }
+        store.save().unwrap();
+        append(&file(14), "after leo saved");
+        same_as_fresh(&mut store, "notes leo saved itself");
+
+        let theirs = file(16);
+        let id = read_head(&theirs, theirs.strip_prefix(&dir).unwrap())
+            .unwrap()
+            .id;
+        store.find_note_mut(&id).unwrap().body = "mine, in memory".to_string();
+        append(&theirs, "theirs, on disk");
+        store.save().unwrap();
+        assert!(theirs
+            .with_file_name(format!("Note 16{CONFLICT_SUFFIX}.md"))
+            .exists());
+        same_as_fresh(&mut store, "a conflict copy");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_unchanged_stamp_is_not_read_again() {
+        let (mut store, _d) = temp_store();
+        let id = store
+            .create_note("Same size", "first text", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let path = store.notes_dir.join("Same size.md");
+        let when = mtime_of(&path);
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replace("first text", "other text")).unwrap();
+        set_mtime(&path, when);
+        store.refresh().unwrap();
+        assert_eq!(store.find_note(&id).unwrap().body, "first text");
+    }
+
+    #[test]
+    fn a_note_changed_in_memory_is_read_again_on_refresh() {
+        let (mut store, _d) = temp_store();
+        let id = store
+            .create_note("Kept", "on disk", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "only in memory".to_string();
+        store.refresh().unwrap();
+        assert_eq!(store.find_note(&id).unwrap().body, "on disk");
     }
 }
