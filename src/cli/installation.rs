@@ -67,6 +67,14 @@ pub fn validate_bundle(bundle: &Path, identifier: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn app_dir() -> Result<PathBuf> {
+    app_dir_in(std::env::var_os("LOCALAPPDATA"))
+}
+
+fn app_dir_in(local: Option<std::ffi::OsString>) -> Result<PathBuf> {
+    Ok(PathBuf::from(local.context("The Windows app folder could not be found.")?).join("Leo"))
+}
+
 pub fn installed_bundle(exe: &Path) -> Result<Option<PathBuf>> {
     let resolved = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
     if let Some(bundle) = bundle_for(&resolved) {
@@ -78,10 +86,7 @@ pub fn installed_bundle(exe: &Path) -> Result<Option<PathBuf>> {
     #[cfg(target_os = "macos")]
     let path = PathBuf::from("/Applications/Leo.app");
     #[cfg(windows)]
-    let path = PathBuf::from(
-        std::env::var_os("LOCALAPPDATA").context("The Windows app folder could not be found.")?,
-    )
-    .join("Leo");
+    let path = app_dir()?;
     #[cfg(not(any(target_os = "macos", windows)))]
     return Ok(None);
     #[cfg(any(target_os = "macos", windows))]
@@ -161,11 +166,7 @@ pub fn verify_installed_bundle(bundle: &Path) -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let expected = PathBuf::from(
-            std::env::var_os("LOCALAPPDATA")
-                .context("The Windows app folder could not be found.")?,
-        )
-        .join("Leo");
+        let expected = app_dir()?;
         ensure!(bundle == expected, "This app is outside the Leo installation folder. Use its Windows uninstaller; your notes were kept.");
         validate_bundle(bundle, super::open_app::BUNDLE_ID)?;
         ensure!(
@@ -311,6 +312,14 @@ pub fn is_cli_link(link: &Path, bundle: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn an_unset_local_app_data_is_an_error_not_a_relative_folder() {
+        assert!(app_dir_in(None).is_err());
+        assert_eq!(
+            app_dir_in(Some("data".into())).unwrap(),
+            PathBuf::from("data").join("Leo")
+        );
+    }
     #[test]
     fn terminal_link_removal_keeps_unrelated_files() {
         let dir = tempfile::tempdir().unwrap();

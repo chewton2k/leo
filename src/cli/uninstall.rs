@@ -126,7 +126,7 @@ pub fn run(yes: bool) -> Result<()> {
     let notes = Store::notes_dir()?;
     let bundle = super::installation::installed_bundle(&exe)?;
     let fallback = if cfg!(windows) {
-        home.join("AppData/Local/Leo/bin")
+        super::installation::app_dir()?.join("bin")
     } else {
         home.join(".local/bin")
     };
