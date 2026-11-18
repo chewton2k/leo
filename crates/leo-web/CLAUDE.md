@@ -652,6 +652,12 @@ Felix (2026-10-19).
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
   (`margin::room`, `n` counts only this note's open ids), passed to `put` and
   `set_status` as `limit`.
+- `marginDraw` keeps each thread's `find` answer (`marginPage.finds`, keyed by its
+  anchor) and, while typing, re-finds only threads whose passage or context the edit
+  touched (`marginKit.edited`, `carried`); a full pass runs 400 ms after typing stops,
+  in idle slices (`marginSettle`). `marginLoad` returns before drawing when the fetched
+  threads, resolved passages, mode, persona and instructions equal what is shown (a
+  return to the window).
 - Resolved passages stay findable (2026-11-14, the user's call: no Undo toast): GET
   `.../margin` adds `resolved: [{id, quote, prefix, suffix}]` (`margin::resolved_on`: status
   resolved, newest first, no messages, never dismissed). The page keeps them in

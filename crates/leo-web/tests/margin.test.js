@@ -78,6 +78,51 @@ test('anchor: a short or missing side never attaches to unrelated text', () => {
   assert.equal(M.find('anything at all here', { quote: 'old words', prefix: '', suffix: '' }), null);
 });
 
+test('edited: an insert, a delete, a replace and no change', () => {
+  assert.deepEqual(M.edited('abcdef', 'abcXdef'), { from: 3, to: 3, by: 1 });
+  assert.deepEqual(M.edited('abcdef', 'abef'), { from: 2, to: 4, by: -2 });
+  assert.deepEqual(M.edited('abcdef', 'abXYef'), { from: 2, to: 4, by: 0 });
+  assert.deepEqual(M.edited('abcdef', 'abcdef'), { from: 6, to: 6, by: 0 });
+  assert.deepEqual(M.edited('aaa', 'aaaa'), { from: 3, to: 3, by: 1 });
+});
+
+test('carried: a place before the edit stays, one after it moves by the edit, one touching its context is found again', () => {
+  const t = { quote: 'quote', prefix: 'say ', suffix: ' now' };
+  const before = 'Here we say quote now and then more text follows here.';
+  const at = M.find(before, t);
+  const text = before.slice(at.from, at.to);
+  const late = `${before}!!`;
+  assert.deepEqual(M.carried(late, at, M.edited(before, late), text, t), at);
+  const early = `XX${before}`;
+  assert.deepEqual(M.carried(early, at, M.edited(before, early), text, t), { ...at, from: at.from + 2, to: at.to + 2 });
+  const touching = before.replace('say ', 'said ');
+  assert.equal(M.carried(touching, at, M.edited(before, touching), text, t), null);
+  const inside = before.replace('quote', 'quota');
+  assert.equal(M.carried(inside, at, M.edited(before, inside), text, t), null);
+  assert.deepEqual(M.carried(before, at, null, text, t), at);
+});
+
+test('carried: a surrogate pair typed before a place shifts it by two units', () => {
+  const t = { quote: 'quote', prefix: 'say ', suffix: ' now' };
+  const before = 'Start. Here we say quote now.';
+  const at = M.find(before, t);
+  const after = `\u{1F600}${before}`;
+  const moved = M.carried(after, at, M.edited(before, after), before.slice(at.from, at.to), t);
+  assert.deepEqual(moved, { ...at, from: at.from + 2, to: at.to + 2 });
+  assert.equal(after.slice(moved.from, moved.to), 'quote');
+});
+
+test("carried: a context-found place keeps how 'context' when shifted", () => {
+  const t = { quote, prefix: 'table,\nthen login ', suffix: ', I think?\n\nSessions last' };
+  const edited = source.replace('just checks if it matches', 'only compares the two');
+  const at = M.find(edited, t);
+  assert.equal(at.how, 'context');
+  const after = `New first line.\n${edited}`;
+  const moved = M.carried(after, at, M.edited(edited, after), edited.slice(at.from, at.to), t);
+  assert.equal(moved.how, 'context');
+  assert.equal(after.slice(moved.from, moved.to), 'only compares the two');
+});
+
 test('around gives the words beside a selection on its own line', () => {
   const text = 'same words\n\nsame words';
   assert.deepEqual(M.around(text, 'same words', 3), { prefix: 'same words\n\n', suffix: '' });

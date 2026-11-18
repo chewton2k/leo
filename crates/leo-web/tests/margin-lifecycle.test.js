@@ -1154,3 +1154,114 @@ test('a kept note found by context is re-anchored once after the pause; an untou
   assert.equal(h.state.threads[0].reworded, true);
   assert.equal(h.state.threads[1], untouched);
 });
+
+function marginLibrary() {
+  const blocks = Array.from({ length: 1000 }, (_, i) => `Block ${i} carries marker-${i}-end among plenty of other plain words that pad it out to a long paragraph of ordinary note text.`);
+  const source = blocks.join('\n\n');
+  const threads = Array.from({ length: 48 }, (_, n) => {
+    const quote = `marker-${n * 20}-end`;
+    const from = source.indexOf(quote);
+    return { id: `t${n}`, quote, ...kit.contextAt(source, from, from + quote.length), status: 'open', source: 'ask', messages: [] };
+  });
+  return { blocks, source, threads };
+}
+
+function countingFinds(run) {
+  const find = kit.find;
+  const counted = { calls: 0 };
+  kit.find = (...args) => {
+    counted.calls++;
+    return find(...args);
+  };
+  try {
+    run(counted);
+  } finally {
+    kit.find = find;
+  }
+}
+
+test('a keystroke re-finds only the notes beside it', () => {
+  for (const mode of ['along', 'ask']) {
+    const h = harness();
+    const { blocks, source, threads } = marginLibrary();
+    Object.assign(h.state, { mode, threads, loaded: true });
+    countingFinds((counted) => {
+      const first = h.context.marginPlaced(source, threads);
+      assert.equal(first.placed.length, 48);
+      assert.equal(counted.calls, 48);
+      const at = source.indexOf(blocks[400]) + 5;
+      const typed = `${source.slice(0, at)}x${source.slice(at)}`;
+      h.state.s.doc.source = () => typed;
+      h.context.marginEdited(h.state.s);
+      counted.calls = 0;
+      const next = h.context.marginPlaced(typed, threads);
+      assert.ok(counted.calls <= 2, `${mode}: ${counted.calls} finds for one keystroke`);
+      assert.equal(counted.calls, 1, `${mode}: the note beside the edit is found again`);
+      assert.equal(next.placed.length, 48);
+      for (const { t, at: place } of next.placed) assert.equal(typed.slice(place.from, place.to), t.quote);
+      const settle = [...h.timers.values()].find((fn) => fn.delay === 400);
+      assert.ok(settle, `${mode}: the settle pass is armed`);
+      counted.calls = 0;
+      settle();
+      for (let left = h.timers.size; left; left = h.timers.size) {
+        const [id, fn] = [...h.timers].find(([, one]) => one.delay === 0) || [];
+        if (!fn) break;
+        h.timers.delete(id);
+        fn();
+      }
+      assert.equal(counted.calls, 48, `${mode}: the settle pass finds every note again`);
+      counted.calls = 0;
+      h.context.marginPlaced(typed, threads);
+      assert.equal(counted.calls, 0, `${mode}: the draw after the settle pass uses its finds`);
+    });
+  }
+});
+
+test('a re-anchored note is found afresh, never from its old place', () => {
+  const h = harness();
+  const { source, threads } = marginLibrary();
+  countingFinds((counted) => {
+    h.context.marginPlaced(source, threads);
+    counted.calls = 0;
+    h.context.marginPlaced(source, threads);
+    assert.equal(counted.calls, 0);
+    const quote = 'marker-100-end among';
+    const from = source.indexOf(quote);
+    threads[5] = { ...threads[5], quote, ...kit.contextAt(source, from, from + quote.length) };
+    h.context.marginPlaced(source, threads);
+    assert.equal(counted.calls, 1);
+  });
+});
+
+test('a return to the window with unchanged margin notes does not redraw', async () => {
+  const h = harness();
+  const { threads } = marginLibrary();
+  let draws = 0;
+  let status = 'open';
+  const view = () => ({ mode: 'along', persona: 'reader', instructions: '', threads: threads.slice(0, 2).map((t, i) => ({ ...t, status: i ? status : 'open' })), resolved: [] });
+  h.context.api = async (url) => (url === '/api/margin' ? { layout: 'both', pace: 'regular' } : view());
+  h.context.marginDraw = () => draws++;
+  const s = h.state.s;
+  await h.context.marginLoad(s);
+  assert.equal(draws, 1, 'a first load always draws');
+  await h.context.marginLoad(s);
+  assert.equal(draws, 1);
+  status = 'resolved';
+  await h.context.marginLoad(s);
+  assert.equal(draws, 2, 'a changed note draws again');
+  h.state.threads[0].ask = 'typed but not sent';
+  await h.context.marginLoad(s);
+  assert.equal(draws, 3, 'a page-only field draws again');
+});
+
+test('a margin load for another note session is still ignored', async () => {
+  const h = harness();
+  let draws = 0;
+  h.context.api = async (url) => (url === '/api/margin' ? { layout: 'both', pace: 'regular' } : { mode: 'along', threads: [], resolved: [] });
+  h.context.marginDraw = () => draws++;
+  await h.context.marginLoad(h.session());
+  await h.context.marginLoad(h.state.s, () => false);
+  assert.equal(draws, 0);
+  await h.context.marginLoad(h.state.s);
+  assert.equal(draws, 1);
+});

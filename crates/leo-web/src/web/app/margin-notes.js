@@ -3,6 +3,7 @@ const READ_GAP_SECONDS = 90;
 const READ_FACE_AFTER_MS = 200;
 const MARGIN_SETTLE_MS = 1400;
 const REANCHOR_MS = 2000;
+const FIND_SETTLE_MS = 400;
 const MARGIN_LAYOUT_KEY = 'leo-margin-layout';
 const GLOW_MS = 2200;
 const NO_COMMENT_MS = 4000;
@@ -46,7 +47,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0 };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -95,6 +96,7 @@ async function marginLoadPrefs() {
 function marginLeave() {
   clearTimeout(marginPage.timer);
   clearTimeout(marginPage.anchorTimer);
+  clearTimeout(marginPage.settle);
   clearTimeout(marginPage.faceTimer);
   clearTimeout(marginPage.statusTimer);
   cancelAnimationFrame(marginPage.frame);
@@ -106,7 +108,7 @@ function marginLeave() {
   marginPage.observer = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
-  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set() });
+  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), finds: new Map(), drawn: null, drawnAt: 0 });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.revisits.clear();
@@ -157,6 +159,9 @@ async function marginLoad(s, current = () => true, id = s.note.id) {
     return;
   }
   if (!current() || marginPage.s !== s || !view) return;
+  const was = marginPage.loaded;
+  const shown = (m) => JSON.stringify([m.mode, m.persona || 'reader', m.instructions || '', m.threads || [], m.resolved || []]);
+  if (was && shown(view) === shown(marginPage)) return;
   marginPage.mode = view.mode;
   marginPage.persona = view.persona || 'reader';
   marginPage.saved = marginPage.persona;
@@ -831,13 +836,7 @@ function marginDraw() {
   const source = s.doc.source();
   const faded = ['right', 'both'].includes(layer.parentElement.dataset.margin) ? [...marginPage.faded.values()] : [];
   const threads = [...marginPage.threads, ...faded, ...(marginPage.draft ? [marginPage.draft] : [])];
-  const placed = [];
-  const gone = [];
-  for (const t of threads) {
-    const at = marginKit.find(source, t);
-    if (at) placed.push({ t, at });
-    else gone.push(t.id);
-  }
+  const { placed, gone, edit } = marginPlaced(source, threads);
   marginPage.gone = gone;
   marginPage.moved = placed.filter(({ t, at }) => at.how === 'context' && marginPage.threads.includes(t) && marginKept(t));
   const layout = marginLayout(columns);
@@ -881,7 +880,7 @@ function marginDraw() {
     marginPage.rects.set(t.id, rects);
     marginInk(t, rects);
   }
-  marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at));
+  marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at), edit);
   marginPaint();
   inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
@@ -896,10 +895,60 @@ function marginDraw() {
   } else marginPage.arriving.clear();
 }
 
-function marginRevisits(source, origin, open) {
+function marginFind(source, t, edit) {
+  const key = `${t.quote}\u0000${t.prefix}\u0000${t.suffix}`;
+  const cached = marginPage.finds.get(t.id);
+  const now = marginPage.drawnAt;
+  const usable = cached?.key === key && cached.at && (cached.drawnAt === now || (edit && cached.drawnAt === now - 1));
+  const kept = usable ? marginKit.carried(source, cached.at, cached.drawnAt === now ? null : edit, cached.text, t) : null;
+  const at = kept || marginKit.find(source, t);
+  marginPage.finds.set(t.id, { key, at, text: at && source.slice(at.from, at.to), drawnAt: now });
+  return at;
+}
+
+function marginIdle(fn) {
+  if (window.requestIdleCallback) return window.requestIdleCallback(fn);
+  return setTimeout(() => {
+    const end = Date.now() + 8;
+    fn({ timeRemaining: () => end - Date.now() });
+  }, 0);
+}
+
+function marginSettle(s) {
+  const source = marginPage.drawn;
+  if (s !== marginPage.s || source === null) return;
+  const left = [...marginPage.resolved, ...marginPage.faded.values(), ...(marginPage.draft ? [marginPage.draft] : []), ...marginPage.threads];
+  const step = (deadline) => {
+    if (s !== marginPage.s || marginPage.drawn !== source) return;
+    do {
+      const t = left.pop();
+      if (!t) return marginRedraw();
+      marginPage.finds.delete(t.id);
+      marginFind(source, t, null);
+    } while (deadline.timeRemaining() > 0);
+    marginIdle(step);
+  };
+  marginIdle(step);
+}
+
+function marginPlaced(source, threads) {
+  const edit = marginPage.drawn === source ? null : marginKit.edited(marginPage.drawn ?? '', source);
+  if (edit) marginPage.drawnAt += 1;
+  marginPage.drawn = source;
+  const placed = [];
+  const gone = [];
+  for (const t of threads) {
+    const at = marginFind(source, t, edit);
+    if (at) placed.push({ t, at });
+    else gone.push(t.id);
+  }
+  return { placed, gone, edit };
+}
+
+function marginRevisits(source, origin, open, edit) {
   const live = new Set();
   for (const r of marginPage.resolved) {
-    const at = marginKit.find(source, r);
+    const at = marginFind(source, r, edit);
     const covered = at && open.some((o) => o.from < at.to && at.from < o.to);
     const rects = at && !covered ? marginPage.s.doc.spanRects(at.from, at.to) : [];
     if (!rects.length) continue;
@@ -1740,6 +1789,8 @@ function marginEdited(s) {
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
   clearTimeout(marginPage.anchorTimer);
   marginPage.anchorTimer = setTimeout(() => marginReanchor(s).catch(() => {}), REANCHOR_MS);
+  clearTimeout(marginPage.settle);
+  marginPage.settle = setTimeout(() => marginSettle(s), FIND_SETTLE_MS);
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
   marginArm(s);

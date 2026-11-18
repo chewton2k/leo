@@ -45,6 +45,22 @@
     return n;
   }
 
+  function edited(before, after) {
+    const from = sharedStart(before, after);
+    const to = before.length - sharedEnd(before.slice(from), after.slice(from));
+    return { from, to, by: after.length - before.length };
+  }
+
+  function carried(source, at, edit, text, t) {
+    if (!edit) return at;
+    const reach = [at.from - (t.prefix || '').length, at.to + (t.suffix || '').length];
+    if (reach[0] <= edit.to && edit.from <= reach[1]) return null;
+    const by = at.from >= edit.to ? edit.by : 0;
+    const from = at.from + by;
+    const to = at.to + by;
+    return source.slice(from, to) === text ? { ...at, from, to } : null;
+  }
+
   function byContext(source, quote, prefix, suffix) {
     const before = prefix.slice(-TAIL);
     const after = suffix.slice(0, TAIL);
@@ -249,7 +265,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, contextAt, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, edited, carried, around, contextAt, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);
