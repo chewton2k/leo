@@ -3241,3 +3241,62 @@ async fn a_dismissed_sentence_that_is_reworded_can_get_a_note() {
     assert_eq!((code, calls), (200, 1));
     assert!(reply["note"].is_object(), "{reply}");
 }
+
+async fn raced_read(meanwhile: &str) -> (u16, serde_json::Value, usize) {
+    let (asked, wait) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));
+    let (seen, held) = (Arc::clone(&asked), Arc::clone(&wait));
+    let engine = Arc::new(
+        Engine::with(Powers {
+            toolless: Some(Arc::new(move |_, _, _| {
+                seen.store(1, Ordering::SeqCst);
+                while held.load(Ordering::SeqCst) == 0 {
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                Ok(SAYS.to_string())
+            })),
+            ..Default::default()
+        })
+        .await,
+    );
+    let block = "then login just checks if it matches.";
+    let (id, _) = engine.note("Copies", "Intro words here.").await;
+    let version = engine
+        .edit(&id, &format!("Intro words here.\n\n{block}"))
+        .await;
+    let racing = Arc::clone(&engine);
+    let (read_id, read_version) = (id.clone(), version.clone());
+    let reading = tokio::spawn(async move { racing.read(&read_id, &read_version, &[block]).await });
+    while asked.load(Ordering::SeqCst) == 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    engine.edit(&id, meanwhile).await;
+    wait.store(1, Ordering::SeqCst);
+    let (code, reply) = reading.await.unwrap();
+    let open = margin::open_on(&engine.chats(), &id).len();
+    if let Ok(engine) = Arc::try_unwrap(engine) {
+        engine.stop().await;
+    }
+    (code, reply, open)
+}
+
+#[tokio::test]
+async fn a_read_never_lands_on_another_copy_of_its_quote() {
+    let (code, reply, open) = raced_read(
+        "then login just checks if it matches, said A.\n\nIntro words here.\n\nthen login just checks if it matches, said B.",
+    )
+    .await;
+    assert_eq!(code, 200);
+    assert!(reply["note"].is_null(), "stored on another copy: {reply}");
+    assert_eq!(open, 0);
+    let (code, reply, open) =
+        raced_read("then login just checks if it matches, said A.\n\nIntro words here.").await;
+    assert_eq!(code, 200);
+    assert!(reply["note"].is_object(), "{reply}");
+    assert_eq!(open, 1);
+}
+
+#[test]
+fn the_chat_tool_still_places_on_a_repeated_quote() {
+    let place = margin::placed("a b c here. x. a b c here.", "a b c", &[]).unwrap();
+    assert_eq!(place.prefix, "");
+}
