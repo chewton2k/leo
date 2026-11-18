@@ -163,8 +163,23 @@ pub type ReaderTo = Arc<
 #[derive(Debug, Clone, PartialEq)]
 pub struct Figure {
     pub place: String,
-    pub bytes: Vec<u8>,
+    pub path: std::path::PathBuf,
     pub photo: bool,
+}
+
+#[derive(Clone)]
+pub struct Scratch(pub Arc<dyn std::any::Any + Send + Sync>);
+
+impl std::fmt::Debug for Scratch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Scratch")
+    }
+}
+
+impl PartialEq for Scratch {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -172,6 +187,7 @@ pub struct Made {
     pub title: String,
     pub body: String,
     pub figures: Vec<Figure>,
+    pub scratch: Option<Scratch>,
 }
 
 pub type Importer = Arc<

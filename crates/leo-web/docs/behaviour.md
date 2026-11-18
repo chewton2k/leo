@@ -1270,7 +1270,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   pictures still goes in as pictures (`doc.js`); a drop with any other file goes
   to the sheet with every file. Originals are kept in
   `<data>/attachments/<note-id>/` (never synced); figures from pptx/docx/PDF
-  are offered to the AI (`leo_services::figures`). Originals open in
+  are offered to the AI per part (`leo_services::figures`); every figure the AI does not place
+  goes under More figures at the end of the note. Originals open in
   `#source-pane` beside the note on desktop (1000px and wider), with Felix
   always to its right. Both panes share the available width instead of falling
   back to a popup when chat is open. The original divider supports dragging,

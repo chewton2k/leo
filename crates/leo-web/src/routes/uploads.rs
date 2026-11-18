@@ -526,7 +526,6 @@ pub(crate) fn settle_figures(
     save: &mut dyn FnMut(&Figure) -> Option<String>,
 ) -> String {
     let mut saved: Vec<Option<Option<String>>> = vec![None; figures.len()];
-    let mut placed = false;
     let mut lines = Vec::new();
     for line in body.lines() {
         let found = attachments::pictures_in(line);
@@ -553,7 +552,6 @@ pub(crate) fn settle_figures(
             let path = save(figure);
             if let Some(path) = &path {
                 out.push_str(&format!("![{}]({path})", shown.alt));
-                placed = true;
             }
             *slot = Some(path);
         }
@@ -581,9 +579,7 @@ pub(crate) fn settle_figures(
             body.push_str(&format!("\n\n## {heading}\n\n{}", shown.join("\n\n")));
         }
     };
-    if !placed {
-        section("Figures", &|f| !f.photo);
-    }
+    section("More figures", &|f| !f.photo);
     section("Photos", &|f| f.photo);
     body
 }
@@ -654,6 +650,7 @@ fn write_upload(
         title: made_title,
         body,
         figures,
+        scratch,
     } = importer(files, wants, step).map_err(|e| missed(None, &e.to_string()))?;
     // Originals take free names, so a file of the same name in this upload or
     // an earlier one (and its citations) stays as it was.
@@ -695,7 +692,12 @@ fn write_upload(
     let pictures_dir = read_now(state, |store| Ok(store.notes_dir.clone()))
         .map_err(|_| missed(None, "The note could not be saved."))?;
     let body = settle_figures(&body, &figures, &mut |figure| {
-        let kind = attachments::kind_of(&figure.bytes)?;
+        let size = std::fs::metadata(&figure.path).ok()?.len();
+        if size > attachments::MOST_BYTES as u64 {
+            return None;
+        }
+        let bytes = std::fs::read(&figure.path).ok()?;
+        let kind = attachments::kind_of(&bytes)?;
         let name = if figure.photo {
             let named = figure
                 .place
@@ -705,8 +707,9 @@ fn write_upload(
         } else {
             format!("{stem} {}.{kind}", figure.place)
         };
-        attachments::save(&pictures_dir, &name, &figure.bytes).ok()
+        attachments::save(&pictures_dir, &name, &bytes).ok()
     });
+    drop(scratch);
     let made = store_now(state, |store| {
         if into.is_none() && !store.dir_exists(dir) {
             store.create_dir(dir);

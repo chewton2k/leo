@@ -34,6 +34,25 @@ fn making(state: &AppState, files: &[(&str, &str, &[u8])]) -> ImportBody {
     }
 }
 
+fn kept(figures: &[(&str, bool)]) -> (Vec<Figure>, crate::Scratch, std::path::PathBuf) {
+    let dir = Arc::new(tempfile::tempdir().unwrap());
+    let root = dir.path().to_path_buf();
+    let list = figures
+        .iter()
+        .enumerate()
+        .map(|(n, (place, photo))| {
+            let path = root.join(format!("{n:05}.png"));
+            std::fs::write(&path, PICTURE).unwrap();
+            Figure {
+                place: place.to_string(),
+                path,
+                photo: *photo,
+            }
+        })
+        .collect();
+    (list, crate::Scratch(dir), root)
+}
+
 fn bytes_of(file: &UploadFile) -> Vec<u8> {
     std::fs::read(file.path.as_ref().unwrap()).unwrap()
 }
@@ -116,6 +135,7 @@ fn an_upload_cannot_write_originals_through_a_linked_attachment_root() {
                 title: "Example".into(),
                 body: "Example body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -150,6 +170,7 @@ fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares
                 title: name.trim_end_matches(".pdf").to_string(),
                 body: format!("## From {name}"),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -214,21 +235,12 @@ fn an_upload_becomes_a_note_in_its_folder_and_keeps_the_original() {
             progress("Writing the note", 0, 1);
             assert_eq!(bytes_of(&files[0]), b"%PDF fake");
             assert!(files[0].bytes.is_empty(), "a file is read from its path");
+            let (figures, scratch, _) = kept(&[("slide 2", false), ("board.jpg", true)]);
             Ok(Made {
                 title: "Graph search".to_string(),
                 body: "## BFS\n- uses a queue\n\n![The BFS tree](figure:1)\n\n![again](figure:1)\n![nothing](figure:9)".to_string(),
-                figures: vec![
-                    Figure {
-                        place: "slide 2".into(),
-                        bytes: PICTURE.to_vec(),
-                        photo: false,
-                    },
-                    Figure {
-                        place: "board.jpg".into(),
-                        bytes: PICTURE.to_vec(),
-                        photo: true,
-                    },
-                ],
+                figures,
+                scratch: Some(scratch),
             })
         },
     ));
@@ -511,18 +523,7 @@ fn background_work_is_listed_until_it_is_done() {
 
 #[test]
 fn figures_the_ai_did_not_place_are_kept_under_their_own_heading() {
-    let figures = vec![
-        Figure {
-            place: "page 3".into(),
-            bytes: PICTURE.to_vec(),
-            photo: false,
-        },
-        Figure {
-            place: "page 5".into(),
-            bytes: PICTURE.to_vec(),
-            photo: false,
-        },
-    ];
+    let (figures, _scratch, _) = kept(&[("page 3", false), ("page 5", false)]);
     let mut n = 0;
     let mut save = |f: &Figure| {
         n += 1;
@@ -530,7 +531,7 @@ fn figures_the_ai_did_not_place_are_kept_under_their_own_heading() {
     };
     assert_eq!(
         settle_figures("## Heaps\n- tree", &figures, &mut save),
-        "## Heaps\n- tree\n\n## Figures\n\n![Figure from page 3](attachments/1.png)"
+        "## Heaps\n- tree\n\n## More figures\n\n![Figure from page 3](attachments/1.png)"
     );
     let kept = settle_figures(
         "Intro ![a heap](figure:2) and ![x](attachments/old.png)\n![the tree](figure:1)",
@@ -562,6 +563,7 @@ fn a_third_upload_waits_and_then_runs() {
                 title: "Upload".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         }
     }));
@@ -596,6 +598,7 @@ fn thirty_files_make_thirty_notes() {
                 title: files[0].name.trim_end_matches(".txt").to_string(),
                 body: String::from_utf8(bytes_of(&files[0])).unwrap(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -698,6 +701,7 @@ fn two_files_with_one_name_keep_both_contents() {
                 title: text,
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -757,6 +761,7 @@ fn files_dropped_on_a_note_are_added_to_it_under_their_own_heading() {
                 title: "Heap proofs".into(),
                 body: "Sift down keeps the heap order.".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -867,6 +872,7 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
                 title: "Slides".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -981,6 +987,7 @@ fn the_incoming_folder_is_gone_when_the_job_ends() {
                 title: "Fine".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -1064,6 +1071,7 @@ fn a_large_text_file_becomes_a_note() {
                 title: "Big".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -1106,4 +1114,68 @@ fn a_large_text_file_becomes_a_note() {
     assert_eq!(job.state, "done", "{job:?}");
     assert!(!home.path().join("incoming/big").exists());
     println!("receiving {MEGABYTES} MB grew memory by {received} KB; making the note by {made} KB");
+}
+
+#[test]
+fn unplaced_figures_are_kept_when_some_are_placed() {
+    let (mut state, _home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, _) =
+                kept(&[("page 1", false), ("page 2", false), ("page 3", false)]);
+            Ok(Made {
+                title: "Heaps".into(),
+                body: "## Heaps\n\n![the tree](figure:1)".into(),
+                figures,
+                scratch: Some(scratch),
+            })
+        },
+    ));
+    let body = making(&state, &[("heaps.pdf", "application/pdf", b"%PDF")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    assert!(
+        note.body
+            .starts_with("## Heaps\n\n![the tree](attachments/"),
+        "{}",
+        note.body
+    );
+    let (placed, more) = note.body.split_once("\n\n## More figures\n\n").unwrap();
+    assert_eq!(placed.matches("attachments/").count(), 1, "{placed}");
+    assert!(
+        more.contains("![Figure from page 2](attachments/"),
+        "{more}"
+    );
+    assert!(
+        more.contains("![Figure from page 3](attachments/"),
+        "{more}"
+    );
+    assert!(!more.contains("page 1"), "{more}");
+}
+
+#[test]
+fn the_scratch_folder_is_gone_after_the_upload() {
+    let (mut state, _home, _) = state_with(&[]);
+    let folder = Arc::new(Mutex::new(None));
+    state.importer = Some(Arc::new({
+        let folder = Arc::clone(&folder);
+        move |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, root) = kept(&[("page 1", false)]);
+            *folder.lock().unwrap() = Some(root);
+            Ok(Made {
+                title: "Heaps".into(),
+                body: "Body".into(),
+                figures,
+                scratch: Some(scratch),
+            })
+        }
+    }));
+    let body = making(&state, &[("heaps.pdf", "application/pdf", b"%PDF")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+    assert_eq!(job.state, "done", "{job:?}");
+    let root = folder.lock().unwrap().clone().unwrap();
+    assert!(!root.exists(), "{}", root.display());
 }
