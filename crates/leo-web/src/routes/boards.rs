@@ -71,6 +71,8 @@ pub(crate) async fn list_boards(State(state): State<AppState>) -> Response {
 pub(crate) struct NewBoard {
     #[serde(default)]
     name: String,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 pub(crate) async fn create_board(
@@ -78,8 +80,15 @@ pub(crate) async fn create_board(
     Json(body): Json<NewBoard>,
 ) -> Response {
     let name = boards::clean_line(&body.name, boards::MOST_NAME);
+    let request = insert::requested(body.request);
     blocking(&state, move |chats| {
         let _writing = boards::writing();
+        if let Some(first) = request
+            .as_deref()
+            .and_then(|r| insert::remembered_creation("board", r))
+        {
+            return Json(first).into_response();
+        }
         if boards::boards(chats).len() >= boards::MOST_BOARDS {
             return error(
                 StatusCode::CONFLICT,
@@ -97,7 +106,11 @@ pub(crate) async fn create_board(
         if boards::put_board(chats, &board).is_err() {
             return not_saved();
         }
-        (StatusCode::CREATED, Json(json!(board))).into_response()
+        let made = json!(board);
+        if let Some(r) = &request {
+            insert::remember_creation("board", r, &made);
+        }
+        (StatusCode::CREATED, Json(made)).into_response()
     })
     .await
 }

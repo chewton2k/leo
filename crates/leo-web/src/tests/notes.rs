@@ -103,6 +103,7 @@ fn creating_a_note_in_a_new_directory_registers_it() {
         body: None,
         tags: None,
         directory: Some("cs162".to_string()),
+        request: None,
     };
     run(create_note(State(state.clone()), Json(body)))
         .ok()
@@ -262,6 +263,7 @@ fn web_note_creation_directory_creation_and_moves_reject_traversal() {
                 body: None,
                 tags: None,
                 directory: Some(path.into()),
+                request: None,
             }),
         ));
         assert_eq!(created.err(), Some(StatusCode::BAD_REQUEST));
@@ -565,6 +567,7 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
                 body: None,
                 tags: None,
                 directory: Some(bad.into()),
+                request: None,
             }),
         ));
         assert_eq!(made.err(), Some(StatusCode::BAD_REQUEST), "{bad}");
@@ -578,6 +581,7 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
             body: None,
             tags: None,
             directory: Some("Week 1".into()),
+            request: None,
         }),
     ));
     assert!(fine.is_ok());
@@ -1020,6 +1024,57 @@ fn a_changed_library_drops_the_kept_ranking() {
     );
     assert_eq!(total, 1);
     assert!(next.is_empty(), "{next:?}");
+}
+
+#[test]
+fn a_retried_create_makes_one_note_and_one_board() {
+    let (state, _dir, _) = state_with(&[]);
+    let (note_request, board_request) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let mut notes_made = Vec::new();
+    for _ in 0..2 {
+        let made = run(create_note(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "title": "Same",
+                    "body": "typed",
+                    "request": note_request.to_string()
+                }))
+                .unwrap(),
+            ),
+        ))
+        .unwrap();
+        notes_made.push(axum::response::IntoResponse::into_response(made).status());
+    }
+    assert_eq!(notes_made, [StatusCode::CREATED, StatusCode::OK]);
+    let mut boards_made = Vec::new();
+    for _ in 0..2 {
+        let made = run(crate::routes::boards::create_board(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "name": "Plan",
+                    "request": board_request.to_string()
+                }))
+                .unwrap(),
+            ),
+        ));
+        boards_made.push(made.status());
+    }
+    assert_eq!(boards_made, [StatusCode::CREATED, StatusCode::OK]);
+    let store = state.fresh();
+    let files = std::fs::read_dir(&store.notes_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".md"))
+        .count();
+    let notes = store.notes.iter().filter(|n| n.title == "Same").count();
+    drop(store);
+    let boards = crate::boards::boards(&state.chats)
+        .iter()
+        .filter(|b| b.name == "Plan")
+        .count();
+    assert_eq!((notes, files, boards), (1, 1, 1));
 }
 
 const BENCH_WORDS: &[&str] = &[

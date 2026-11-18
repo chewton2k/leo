@@ -938,6 +938,8 @@ is hidden or the capture activity gate is busy.
   (`.cal-past`, under the events, no pointer events).
 - POST `/api/tasks` takes `request` (uuid, kept across a retry of the same quick-add): a
   repeated one is answered with the first task (`insert::remembered_creation`, scope `task`, a queue of its own beside the margin's `insert::remembered`).
+  POST `/api/notes` (scope `note`, answered 200 on a repeat) and POST `/api/boards` (scope
+  `board`) take `request` the same way, so a resent first save or board create makes one.
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
   copy is kept).
 

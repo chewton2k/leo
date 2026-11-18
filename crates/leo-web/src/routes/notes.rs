@@ -45,6 +45,8 @@ pub(crate) struct CreateBody {
     pub(crate) body: Option<String>,
     pub(crate) tags: Option<Vec<String>>,
     pub(crate) directory: Option<String>,
+    #[serde(default)]
+    pub(crate) request: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -316,6 +318,13 @@ pub(crate) async fn create_note(
 ) -> Result<impl IntoResponse, StatusCode> {
     state
         .with_store(move |store| {
+            let request = crate::routes::insert::requested(body.request.clone());
+            if let Some(first) = request
+                .as_deref()
+                .and_then(|r| crate::routes::insert::remembered_creation("note", r))
+            {
+                return Ok((StatusCode::OK, Json(first)));
+            }
             let resp = make_tagged_note(
                 store,
                 &body.title,
@@ -324,7 +333,11 @@ pub(crate) async fn create_note(
                 body.directory.as_deref().unwrap_or_default(),
             )?;
             save(store)?;
-            Ok((StatusCode::CREATED, Json(resp)))
+            let made = serde_json::json!(resp);
+            if let Some(r) = &request {
+                crate::routes::insert::remember_creation("note", r, &made);
+            }
+            Ok((StatusCode::CREATED, Json(made)))
         })
         .await
 }
