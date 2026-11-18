@@ -305,7 +305,7 @@ test('captured folder creation overrides another selection and note rename retai
   await options(page, folderRow(page, target), 'New folder here');
   await page.locator('#folder-name').fill('Child');
   await page.locator('#folder-name').press('Enter');
-  await expect(page.locator('.toast')).toContainText('already exists');
+  await expect(page.locator('.toast')).toContainText('already in use');
   await expect(page.locator('#folder-name')).toHaveValue('Child');
   await page.locator('#folder-name').press('Escape');
   await options(page, noteRow(page, note.id), 'Rename');
