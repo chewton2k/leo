@@ -30,6 +30,7 @@ const SPEECH_LEVEL: f32 = 0.1;
 const MOST_GAIN: f32 = 50.0;
 const SHORTEST_CLIP: usize = 16_000;
 const SHORT_CLIP_PADDED: usize = 20_000;
+const UNFINISHED: &str = "The speech model could not finish. Your recorded audio is kept; try again or choose a smaller model in Settings.";
 const _: () = assert!(MOST_FEEDS * 512 >= 300 * 16_000);
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -42,7 +43,6 @@ pub enum Priority {
 struct Job {
     _admission: Pin,
     selected: Selected,
-    gain: f32,
     chunks: VecDeque<Vec<f32>>,
     text: Vec<String>,
     priority: Priority,
@@ -88,6 +88,7 @@ pub struct Engine {
     admitted: Arc<AtomicUsize>,
     dictation_cancels: Arc<AtomicU64>,
     serving_dictation: Arc<Mutex<bool>>,
+    hears: fn(&[f32], f32) -> Result<bool>,
 }
 
 pub struct Pin(Arc<AtomicUsize>);
@@ -123,7 +124,7 @@ impl Engine {
         let serving_dictation = Arc::new(Mutex::new(false));
         let (worker, held, first) = (supervisor.clone(), pins.clone(), dictating.clone());
         let (cancels, serving) = (dictation_cancels.clone(), serving_dictation.clone());
-        std::thread::spawn(move || run(queue, worker, held, first, cancels, serving, hears));
+        std::thread::spawn(move || run(queue, worker, held, first, cancels, serving));
         Self {
             requests,
             supervisor,
@@ -133,6 +134,7 @@ impl Engine {
             admitted: Arc::new(AtomicUsize::new(0)),
             dictation_cancels,
             serving_dictation,
+            hears,
         }
     }
 
@@ -177,14 +179,14 @@ impl Engine {
             })
             .map_err(|_| anyhow::anyhow!("The speech engine is busy. Try again in a moment."))?;
         let admission = Pin(self.admitted.clone());
-        let gain = if priority == Priority::Dictation {
-            1.0
+        let chunks = if priority == Priority::Dictation {
+            speech_chunks(pcm, 1.0)?.into()
         } else {
-            speech_gain(&pcm)
+            let gain = speech_gain(&pcm);
+            gated(speech_chunks(pcm, gain)?, gain, self.hears).context(UNFINISHED)?
         };
-        let chunks = speech_chunks(pcm, gain)?.into();
         let (reply, answer) = mpsc::sync_channel(1);
-        self.requests.try_send(Message::Run(Job { _admission: admission, selected, gain, chunks, text: Vec::new(), priority, words, cancels, reply }))
+        self.requests.try_send(Message::Run(Job { _admission: admission, selected, chunks, text: Vec::new(), priority, words, cancels, reply }))
             .map_err(|_| anyhow::anyhow!("The speech engine is busy. Your recorded audio is kept; try again in a moment."))?;
         wait_for(&answer, || {
             priority == Priority::Dictation
@@ -516,6 +518,23 @@ fn speech_chunks(mut pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
     Ok(chunks)
 }
 
+fn gated(
+    chunks: Vec<Vec<f32>>,
+    gain: f32,
+    hears: fn(&[f32], f32) -> Result<bool>,
+) -> Result<VecDeque<Vec<f32>>> {
+    chunks
+        .into_iter()
+        .map(|chunk| {
+            Ok(if hears(&chunk, gain)? {
+                chunk
+            } else {
+                Vec::new()
+            })
+        })
+        .collect()
+}
+
 fn heard_speech(pcm: &[f32], gain: f32) -> Result<bool> {
     let mut vad = CaptureVad::new(detector()?, VAD_OFFLINE_HANGOVER_MS);
     for part in pcm.chunks(16_000) {
@@ -556,7 +575,6 @@ fn run(
     dictating: Arc<AtomicUsize>,
     dictation_cancels: Arc<AtomicU64>,
     serving: Arc<Mutex<bool>>,
-    hears: fn(&[f32], f32) -> Result<bool>,
 ) {
     let mut pending: Vec<Job> = Vec::new();
     let mut last_work = Instant::now();
@@ -747,11 +765,7 @@ fn run(
                 let pcm = if job.priority == Priority::Dictation {
                     padded(chunk)
                 } else {
-                    if hears(&chunk, job.gain)? {
-                        chunk
-                    } else {
-                        Vec::new()
-                    }
+                    chunk
                 };
                 if !pcm.is_empty() {
                     let mark = {
@@ -778,7 +792,7 @@ fn run(
         last_work = Instant::now();
         match result {
             Err(error) => {
-                let _ = job.reply.send(Err(error.context("The speech model could not finish. Your recorded audio is kept; try again or choose a smaller model in Settings.")));
+                let _ = job.reply.send(Err(error.context(UNFINISHED)));
             }
             Ok(()) if job.chunks.is_empty() => {
                 let refs = job.text.iter().map(String::as_str).collect::<Vec<_>>();
@@ -818,6 +832,53 @@ mod audio_level_tests {
                 .iter()
                 .map(|n| n.to_bits())
                 .eq(b.iter().map(|n| n.to_bits())));
+        }
+    }
+
+    fn the_old_gate(
+        chunks: &[Vec<f32>],
+        gain: f32,
+        hears: fn(&[f32], f32) -> Result<bool>,
+    ) -> Vec<Vec<f32>> {
+        let mut sent = Vec::new();
+        for chunk in chunks {
+            let pcm = if hears(chunk, gain).unwrap() {
+                chunk.clone()
+            } else {
+                Vec::new()
+            };
+            sent.push(pcm);
+        }
+        sent
+    }
+
+    #[test]
+    fn the_gate_sends_the_same_pieces_as_before() {
+        let noise =
+            |i: usize| ((i as u32).wrapping_mul(2_654_435_761) >> 16) as f32 / 65_536.0 - 0.5;
+        let level = 3000.0 / 32768.0;
+        let mut pcm: Vec<f32> = (0..50 * 16_000usize).map(|i| noise(i) * 0.3).collect();
+        pcm.extend(std::iter::repeat_n(0.0, 50 * 16_000));
+        pcm.extend((0..50 * 16_000usize).map(|i| if (i / 20) % 2 == 0 { level } else { -level }));
+        pcm.extend((0..50 * 16_000usize).map(|i| noise(i) * 0.002));
+        let by_level: fn(&[f32], f32) -> Result<bool> =
+            |pcm, gain| Ok(pcm.iter().any(|n| (n * gain).abs() > 0.1));
+        for (n, hears) in [by_level, heard_speech].into_iter().enumerate() {
+            let gain = speech_gain(&pcm);
+            let chunks = speech_chunks(pcm.clone(), gain).unwrap();
+            let before = the_old_gate(&chunks, gain, hears);
+            let after = gated(chunks, gain, hears).unwrap();
+            assert_eq!(before.len(), after.len());
+            for (a, b) in before.iter().zip(&after) {
+                assert!(a
+                    .iter()
+                    .map(|n| n.to_bits())
+                    .eq(b.iter().map(|n| n.to_bits())));
+            }
+            if n == 0 {
+                assert!(after.iter().any(Vec::is_empty));
+                assert!(after.iter().any(|piece| !piece.is_empty()));
+            }
         }
     }
 
@@ -1201,6 +1262,85 @@ mod cancel_tests {
             answer.unwrap_err().downcast_ref::<EngineError>(),
             Some(EngineError::Cancelled)
         )
+    }
+
+    static CHECKED_ON: Mutex<Vec<std::thread::ThreadId>> = Mutex::new(Vec::new());
+
+    #[test]
+    fn voice_detection_runs_on_the_callers_thread() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let _worker = Worker;
+        let dir = fake();
+        let engine = Engine::with(|_, _| {
+            lock(&CHECKED_ON).push(std::thread::current().id());
+            Ok(true)
+        });
+        let heard = engine.transcribe(
+            selected(dir.path(), "speech"),
+            vec![0.2; 1_600],
+            Priority::Segment,
+            Vec::new(),
+        );
+        assert_eq!(heard.unwrap(), "local words");
+        let checked = lock(&CHECKED_ON);
+        assert!(!checked.is_empty());
+        assert!(checked.iter().all(|id| *id == std::thread::current().id()));
+        drop(checked);
+        engine.stop().unwrap();
+    }
+
+    static CALLER: Mutex<Option<std::thread::ThreadId>> = Mutex::new(None);
+    static SHARES: Mutex<[Duration; 3]> = Mutex::new([Duration::ZERO; 3]);
+
+    fn timed_check(pcm: &[f32], gain: f32) -> Result<bool> {
+        let began = Instant::now();
+        let heard = heard_speech(pcm, gain);
+        let took = began.elapsed();
+        let on_caller = *lock(&CALLER) == Some(std::thread::current().id());
+        let mut shares = lock(&SHARES);
+        shares[usize::from(on_caller)] += took;
+        if !on_caller {
+            shares[2] = shares[2].max(took);
+        }
+        heard
+    }
+
+    #[test]
+    #[ignore = "benchmark; run by hand"]
+    fn benchmark_voice_detection_per_part() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let _worker = Worker;
+        let dir = fake();
+        *lock(&CALLER) = Some(std::thread::current().id());
+        let engine = Engine::with(timed_check);
+        let level = 3000.0 / 32768.0;
+        let part: Vec<f32> = (0..300 * 16_000usize)
+            .map(|i| if (i / 20) % 2 == 0 { level } else { -level })
+            .collect();
+        for parts in [1u32, 96] {
+            *lock(&SHARES) = [Duration::ZERO; 3];
+            let began = Instant::now();
+            for _ in 0..parts {
+                engine
+                    .transcribe(
+                        selected(dir.path(), "speech"),
+                        part.clone(),
+                        Priority::Segment,
+                        Vec::new(),
+                    )
+                    .unwrap();
+            }
+            let wall = began.elapsed();
+            let [actor, caller, longest] = *lock(&SHARES);
+            println!(
+                "voice detection parts={parts} actor_ms_per_part={:.0} caller_ms_per_part={:.0} longest_actor_check_ms={:.0} wall_ms_per_part={:.0}",
+                (actor / parts).as_secs_f64() * 1000.0,
+                (caller / parts).as_secs_f64() * 1000.0,
+                longest.as_secs_f64() * 1000.0,
+                (wall / parts).as_secs_f64() * 1000.0,
+            );
+        }
+        engine.stop().unwrap();
     }
 
     #[test]
