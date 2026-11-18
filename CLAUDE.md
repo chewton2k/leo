@@ -235,8 +235,11 @@ files. Combining notes keeps the full source label on copied recordings
 time, with no limit on their number or size (an older single-file recording is read as it is and rewritten in the new
 form, keeping it as `<id>.original`, the first time it is fixed or added to). Saved recording session IDs make new notes and appends idempotent;
 retain sources before saving the note, then commit the session after the note is
-durable. Default AI gap-filling and merging of typed points always stay, whatever
-the user asks for. Note workflows (folder defaults, note formats, vocabulary, saved
+durable. Transcript reads leave the files alone. A revision writer publishes
+line files without clobbering and only removes superseded lines whose bytes
+match the digests recorded when leo wrote them. Default AI gap-filling and
+merging of typed points always stay, whatever the user asks for. Note workflows
+(folder defaults, note formats, vocabulary, saved
 actions, chat scope) were removed on 2026-10-10, the user's call: the "What do you
 want from the notes?" box replaces formats.
 

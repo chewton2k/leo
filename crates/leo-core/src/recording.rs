@@ -1,9 +1,10 @@
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 pub const WANTS_READ_CHARS: usize = 4000;
 pub const CONTEXT_READ_CHARS: usize = 8000;
@@ -67,7 +68,9 @@ pub struct Archive {
     pub from: String,
 }
 const PAGE_BYTES: usize = 512 * 1024;
-const HOUR: u64 = 3600;
+const REVISION_ATTEMPTS: usize = 256;
+const LINE_KINDS: [Kind; 2] = [Kind::Passage, Kind::Point];
+type LineDigest = [u8; 32];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(from = "Stored")]
@@ -86,6 +89,8 @@ pub struct Head {
     pub passages: usize,
     pub points: usize,
     pub revision: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    line_digests: Option<[Option<LineDigest>; 2]>,
 }
 
 impl Head {
@@ -103,6 +108,7 @@ impl Head {
             passages: 0,
             points: 0,
             revision: 0,
+            line_digests: None,
         }
     }
 }
@@ -129,6 +135,8 @@ struct Stored {
     points: Rows,
     #[serde(default)]
     revision: u64,
+    #[serde(default)]
+    line_digests: Option<[Option<LineDigest>; 2]>,
 }
 
 impl From<Stored> for Head {
@@ -150,6 +158,7 @@ impl From<Stored> for Head {
             passages: s.passages.count,
             points: s.points.count,
             revision: s.revision,
+            line_digests: s.line_digests,
         }
     }
 }
@@ -344,16 +353,6 @@ fn lines_name(id: &str, revision: impl std::fmt::Display, kind: Kind) -> String 
     format!("{id}.{revision}.{}.jsonl", kind.word())
 }
 
-fn lines_of(name: &str) -> Option<(&str, u64)> {
-    let rest = name.strip_suffix(".jsonl")?;
-    let (rest, kind) = rest.rsplit_once('.')?;
-    if kind != "passages" && kind != "points" {
-        return None;
-    }
-    let (id, revision) = rest.split_once('.')?;
-    Some((id, revision.parse().ok()?))
-}
-
 fn head_at(path: &Path) -> Result<Head> {
     let mut file = crate::paths::open_regular(path)?;
     if file.metadata()?.len() <= 1 << 20 {
@@ -362,14 +361,6 @@ fn head_at(path: &Path) -> Result<Head> {
         return Ok(serde_json::from_slice(&bytes)?);
     }
     Ok(serde_json::from_reader(BufReader::new(file))?)
-}
-
-fn older_than_an_hour(path: &Path) -> bool {
-    std::fs::symlink_metadata(path)
-        .ok()
-        .and_then(|meta| meta.modified().ok())
-        .and_then(|at| at.elapsed().ok())
-        .is_some_and(|age| age.as_secs() > HOUR)
 }
 
 pub fn head(notes: &Path, note: &str, id: &str) -> Result<Head> {
@@ -452,6 +443,105 @@ fn remove_quietly(path: &Path) {
     }
 }
 
+fn digest(mut file: std::fs::File) -> std::io::Result<LineDigest> {
+    let mut hash = Sha256::new();
+    let mut buf = [0; 64 * 1024];
+    loop {
+        let count = file.read(&mut buf)?;
+        if count == 0 {
+            return Ok(hash.finalize().into());
+        }
+        hash.update(&buf[..count]);
+    }
+}
+
+fn matches_digest(path: &Path, expected: &LineDigest) -> bool {
+    let matches = || -> std::io::Result<bool> {
+        if !std::fs::symlink_metadata(path)?.is_file() {
+            return Ok(false);
+        }
+        let file = crate::paths::open_regular(path)?;
+        let before = file.metadata()?;
+        if digest(file)? != *expected {
+            return Ok(false);
+        }
+        let after = std::fs::symlink_metadata(path)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            if (
+                before.dev(),
+                before.ino(),
+                before.ctime(),
+                before.ctime_nsec(),
+            ) != (after.dev(), after.ino(), after.ctime(), after.ctime_nsec())
+            {
+                return Ok(false);
+            }
+        }
+        Ok(after.is_file()
+            && before.len() == after.len()
+            && before.modified()? == after.modified()?)
+    };
+    matches().unwrap_or(false)
+}
+
+fn owned_lines<'a>(dir: &'a Path, head: &'a Head) -> impl Iterator<Item = PathBuf> + 'a {
+    LINE_KINDS
+        .into_iter()
+        .zip(head.line_digests.iter().flatten())
+        .filter_map(|(kind, hash)| {
+            let path = dir.join(lines_name(&head.id, head.revision, kind));
+            matches_digest(&path, hash.as_ref()?).then_some(path)
+        })
+}
+
+fn publish_line(staged: &tempfile::NamedTempFile, path: &Path) -> std::io::Result<()> {
+    match std::fs::hard_link(staged.path(), path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(e),
+        Err(_) => {
+            let mut copy = tempfile::NamedTempFile::new_in(
+                path.parent()
+                    .ok_or_else(|| std::io::Error::other("Missing parent folder"))?,
+            )?;
+            std::io::copy(&mut staged.reopen()?, &mut copy)?;
+            copy.as_file().sync_all()?;
+            copy.persist_noclobber(path).map_err(|e| e.error)?;
+            Ok(())
+        }
+    }
+}
+
+fn publish_lines(dir: &Path, head: &mut Head, files: [&tempfile::NamedTempFile; 2]) -> Result<()> {
+    let hashes = [digest(files[0].reopen()?)?, digest(files[1].reopen()?)?];
+    'revisions: for revision in (head.revision..=u64::MAX).take(REVISION_ATTEMPTS) {
+        let paths = LINE_KINDS.map(|kind| dir.join(lines_name(&head.id, revision, kind)));
+        if paths.iter().zip(&hashes).any(|(path, hash)| {
+            std::fs::symlink_metadata(path).is_ok() && !matches_digest(path, hash)
+        }) {
+            continue;
+        }
+        let mut owned = [None, None];
+        for (((path, file), hash), own) in paths.iter().zip(files).zip(&hashes).zip(&mut owned) {
+            match publish_line(file, path) {
+                Ok(()) => *own = Some(*hash),
+                Err(e)
+                    if e.kind() == std::io::ErrorKind::AlreadyExists
+                        && matches_digest(path, hash) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue 'revisions,
+                Err(e) => return Err(e.into()),
+            }
+        }
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        head.revision = revision;
+        head.line_digests = Some(owned);
+        return Ok(());
+    }
+    bail!("Could not save the recording because its revision files are already in use")
+}
+
 fn commit(
     dir: &Path,
     old: Option<&Head>,
@@ -459,37 +549,65 @@ fn commit(
     backup: bool,
     fill: impl FnOnce(&mut Out, &mut Out) -> Result<()>,
 ) -> Result<()> {
-    let id = head.id.clone();
-    write_with(
-        &dir.join(lines_name(&id, head.revision, Kind::Passage)),
-        |pw| {
-            write_with(
-                &dir.join(lines_name(&id, head.revision, Kind::Point)),
-                |qw| {
-                    let mut passages = Out {
-                        w: pw,
-                        count: 0,
-                        speakers: Vec::new(),
-                    };
-                    let mut points = Out {
-                        w: qw,
-                        count: 0,
-                        speakers: Vec::new(),
-                    };
-                    fill(&mut passages, &mut points)?;
-                    head.passages = passages.count;
-                    head.points = points.count;
-                    head.speakers = passages.speakers;
-                    Ok(())
-                },
-            )
-        },
-    )?;
+    let saved = commit_revision(dir, old, head, backup, |head, pw, qw| {
+        write_rows(head, pw, qw, fill)
+    })?;
+    if !saved {
+        return Err(Refused::Stale.into());
+    }
+    Ok(())
+}
+
+fn write_rows(
+    head: &mut Head,
+    pw: &mut dyn Write,
+    qw: &mut dyn Write,
+    fill: impl FnOnce(&mut Out, &mut Out) -> Result<()>,
+) -> Result<()> {
+    let mut passages = Out {
+        w: pw,
+        count: 0,
+        speakers: Vec::new(),
+    };
+    let mut points = Out {
+        w: qw,
+        count: 0,
+        speakers: Vec::new(),
+    };
+    fill(&mut passages, &mut points)?;
+    head.passages = passages.count;
+    head.points = points.count;
+    head.speakers = passages.speakers;
+    Ok(())
+}
+
+fn commit_revision(
+    dir: &Path,
+    old: Option<&Head>,
+    head: &mut Head,
+    backup: bool,
+    fill: impl FnOnce(&mut Head, &mut dyn Write, &mut dyn Write) -> Result<()>,
+) -> Result<bool> {
+    prepare(dir)?;
+    let (mut passages, mut points) = (
+        tempfile::NamedTempFile::new_in(dir)?,
+        tempfile::NamedTempFile::new_in(dir)?,
+    );
+    {
+        let (mut pw, mut qw) = (BufWriter::new(&mut passages), BufWriter::new(&mut points));
+        fill(head, &mut pw, &mut qw)?;
+        pw.flush()?;
+        qw.flush()?;
+    }
+    passages.as_file().sync_all()?;
+    points.as_file().sync_all()?;
+    publish_lines(dir, head, [&passages, &points])?;
+    let id = &head.id;
     after("pair")?;
     if let Some(old) = old.filter(|o| o.revision == 0) {
         let (mut passages, mut points) = (0usize, 0usize);
         read_lines(
-            &dir.join(lines_name(&id, head.revision, Kind::Passage)),
+            &dir.join(lines_name(id, head.revision, Kind::Passage)),
             Some(0),
             &mut |_, _: Passage| {
                 passages += 1;
@@ -497,7 +615,7 @@ fn commit(
             },
         )?;
         read_lines(
-            &dir.join(lines_name(&id, head.revision, Kind::Point)),
+            &dir.join(lines_name(id, head.revision, Kind::Point)),
             Some(0),
             &mut |_, _: Point| {
                 points += 1;
@@ -516,14 +634,31 @@ fn commit(
         keep_backup(dir, old)?;
         after("backup")?;
     }
-    write_json(&dir.join(head_name(&id)), head)?;
+    let header = dir.join(head_name(id));
+    if let Some(old) = old {
+        if !head_at(&header).is_ok_and(|current| current == *old) {
+            return Ok(false);
+        }
+        write_json(&header, head)?;
+    } else {
+        let mut staged = tempfile::NamedTempFile::new_in(dir)?;
+        serde_json::to_writer_pretty(&mut staged, head)?;
+        staged.as_file().sync_all()?;
+        match staged.persist_noclobber(&header) {
+            Ok(_) => {}
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => return Ok(false),
+            Err(e) => return Err(e.error.into()),
+        }
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+    }
     after("header")?;
-    if let Some(old) = old.filter(|o| o.revision > 0 && o.revision != head.revision) {
-        for kind in [Kind::Passage, Kind::Point] {
-            remove_quietly(&dir.join(lines_name(&id, old.revision, kind)));
+    if let Some(old) = old {
+        for path in owned_lines(dir, old) {
+            remove_quietly(&path);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 pub fn save_from(
@@ -534,10 +669,12 @@ pub fn save_from(
     points: impl IntoIterator<Item = Point>,
 ) -> Result<()> {
     let dir = folder(notes, note)?;
-    let old = head_at(&dir.join(head_name(checked(&base.id)?))).ok();
+    let old = head_at(&dir.join(head_name(checked(&base.id)?)))
+        .ok()
+        .filter(|old| old.id == base.id);
     let mut head = base.clone();
     head.copied_from = String::new();
-    head.revision = old.as_ref().map_or(0, |o| o.revision) + 1;
+    head.revision = next_revision(old.as_ref().map_or(0, |o| o.revision))?;
     commit(&dir, old.as_ref(), &mut head, false, |pout, qout| {
         for (n, p) in passages.into_iter().enumerate() {
             pout.passage(n as u64 + 1, &p)?;
@@ -875,7 +1012,7 @@ pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change
     };
     let (mut said, mut typed) = (wanted(Kind::Passage), wanted(Kind::Point));
     let mut new = old.clone();
-    new.revision = old.revision + 1;
+    new.revision = next_revision(old.revision)?;
     commit(&dir, Some(&old), &mut new, true, |pout, qout| {
         rows(
             notes,
@@ -964,7 +1101,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
     if passages.is_empty() && points.is_empty() && new == old {
         return Ok(());
     }
-    new.revision = old.revision + 1;
+    new.revision = next_revision(old.revision)?;
     let backup = old.revision == 0;
     commit(&dir, Some(&old), &mut new, backup, |pout, qout| {
         let mut adding = passages.into_iter().peekable();
@@ -1003,41 +1140,52 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
     })
 }
 
+fn next_revision(revision: u64) -> Result<u64> {
+    revision
+        .checked_add(1)
+        .ok_or_else(|| anyhow::anyhow!("The recording has no more revision numbers"))
+}
+
 pub fn copy_to(notes: &Path, from: &str, into: &str, label: &str) -> Result<Vec<String>> {
-    let have: std::collections::HashSet<String> =
-        list(notes, into)?.into_iter().map(|s| s.id).collect();
     let (source, target) = (folder(notes, from)?, folder(notes, into)?);
     let mut copied = Vec::new();
     for head in list(notes, from)? {
-        if have.contains(&head.id) {
-            continue;
+        match std::fs::symlink_metadata(target.join(head_name(&head.id))) {
+            Ok(_) => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.into()),
         }
         let mut copy = head.clone();
         if copy.from.is_empty() {
             copy.from = label.to_owned();
         }
         copy.copied_from = from.to_string();
-        if head.revision == 0 {
-            copy.revision = 1;
-            commit(&target, None, &mut copy, false, |pout, qout| {
-                rows(
-                    notes,
-                    from,
-                    &head,
-                    |s, p| pout.passage(s, &p).map(|()| true),
-                    |s, p| qout.row(s, &p).map(|()| true),
-                )
-            })?;
-        } else {
-            prepare(&target)?;
-            for kind in [Kind::Passage, Kind::Point] {
-                let name = lines_name(&head.id, head.revision, kind);
-                remove_quietly(&target.join(&name));
-                keep_copy(&source.join(&name), &target.join(&name))?;
+        copy.revision = head.revision.max(1);
+        let saved = commit_revision(&target, None, &mut copy, false, |copy, pw, qw| {
+            if head.revision == 0 {
+                write_rows(copy, pw, qw, |passages, points| {
+                    rows(
+                        notes,
+                        from,
+                        &head,
+                        |s, p| passages.passage(s, &p).map(|()| true),
+                        |s, p| points.row(s, &p).map(|()| true),
+                    )
+                })?;
+            } else {
+                let copy_line = |kind, out: &mut dyn Write| -> Result<()> {
+                    let path = source.join(lines_name(&head.id, head.revision, kind));
+                    std::io::copy(&mut crate::paths::open_regular(&path)?, out)?;
+                    Ok(())
+                };
+                copy_line(Kind::Passage, pw)?;
+                copy_line(Kind::Point, qw)?;
             }
-            write_json(&target.join(head_name(&head.id)), &copy)?;
+            Ok(())
+        })?;
+        if saved {
+            copied.push(head.id);
         }
-        copied.push(head.id);
     }
     Ok(copied)
 }
@@ -1050,6 +1198,16 @@ pub fn remove(notes: &Path, note: &str, ids: &[String]) -> Result<()> {
     let Ok(entries) = std::fs::read_dir(&dir) else {
         return Ok(());
     };
+    for id in ids {
+        if let Ok(head) = head(notes, note, id) {
+            for path in owned_lines(&dir, &head) {
+                match std::fs::remove_file(path) {
+                    Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
+                    _ => {}
+                }
+            }
+        }
+    }
     let ids: std::collections::HashSet<&str> = ids.iter().map(String::as_str).collect();
     for entry in entries {
         let entry = entry?;
@@ -1061,7 +1219,6 @@ pub fn remove(notes: &Path, note: &str, ids: &[String]) -> Result<()> {
         };
         let ours = rest == "json"
             || rest == "original"
-            || lines_of(&name).is_some()
             || rest == "original.passages.jsonl"
             || rest == "original.points.jsonl";
         if ours && ids.contains(id) {
@@ -1094,54 +1251,30 @@ pub fn list(notes: &Path, note: &str) -> Result<Vec<Head>> {
         return Ok(Vec::new());
     }
     let mut heads = Vec::new();
-    let mut lines = Vec::new();
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let Some(name) = entry.file_name().to_str().map(str::to_string) else {
             continue;
         };
-        if name.starts_with(".tmp") {
-            if entry
-                .metadata()
-                .is_ok_and(|meta| crate::paths::stale_temp(&name, &meta))
-            {
-                if let Err(error) = std::fs::remove_file(entry.path()) {
-                    crate::diag::warn(format!(
-                        "could not remove the old temporary file {}: {error}",
-                        entry.path().display()
-                    ));
-                }
-            }
-            continue;
-        }
-        if !entry.file_type().is_ok_and(|kind| kind.is_file()) {
+        if name.starts_with(".tmp") || !entry.file_type().is_ok_and(|kind| kind.is_file()) {
             continue;
         }
         if name.ends_with(".json") {
             match head_at(&entry.path()) {
-                Ok(head) if valid_id(&head.id) => heads.push(head),
+                Ok(head) if valid_id(&head.id) && name == head_name(&head.id) => heads.push(head),
                 _ => crate::diag::warn(format!(
                     "skipped an unreadable recording source: {}",
                     entry.path().display()
                 )),
             }
-        } else if let Some((id, revision)) = lines_of(&name) {
-            lines.push((id.to_string(), revision, entry.path()));
-        }
-    }
-    let named: std::collections::HashMap<&str, u64> =
-        heads.iter().map(|h| (h.id.as_str(), h.revision)).collect();
-    let mut whole = std::collections::HashMap::new();
-    for (id, revision, path) in &lines {
-        match named.get(id.as_str()) {
-            Some(&current) if *revision == current => *whole.entry(id.as_str()).or_insert(0) += 1,
-            Some(&current) if *revision < current => remove_quietly(path),
-            _ if older_than_an_hour(path) => remove_quietly(path),
-            _ => {}
         }
     }
     heads.retain(|h| {
-        let kept = h.revision == 0 || whole.get(h.id.as_str()) == Some(&2);
+        let kept = h.revision == 0
+            || LINE_KINDS.into_iter().all(|kind| {
+                std::fs::symlink_metadata(dir.join(lines_name(&h.id, h.revision, kind)))
+                    .is_ok_and(|meta| meta.is_file())
+            });
         if !kept {
             crate::diag::warn(format!(
                 "skipped a recording source whose lines are missing: {}",
@@ -1447,7 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn stray_files_among_the_sources_are_left_out_and_old_temp_files_removed() {
+    fn listing_keeps_stray_files_including_old_temp_files() {
         let temp = tempfile::tempdir().unwrap();
         let notes = temp.path().join("notes");
         for id in ["one-0001", "two-0001", "three-0001"] {
@@ -1475,7 +1608,7 @@ mod tests {
         }
         assert_eq!(list(&notes, "note-0001").unwrap().len(), 3);
         for path in &stale {
-            assert!(!path.exists(), "{} survived", path.display());
+            assert!(path.exists(), "{} was removed", path.display());
         }
         for path in &kept {
             assert!(path.exists(), "{} was removed", path.display());
@@ -2192,7 +2325,7 @@ mod tests {
     }
 
     #[test]
-    fn lines_files_without_a_header_are_ignored_and_tidied() {
+    fn listing_keeps_line_files_that_do_not_match_a_header() {
         let temp = tempfile::tempdir().unwrap();
         let notes = temp.path().join("notes");
         save(
@@ -2232,10 +2365,14 @@ mod tests {
         let heads = list(&notes, "note-0001").unwrap();
         assert_eq!(heads.len(), 1);
         assert_eq!(whole(&notes, "note-0001")[0].passages[0].text, "one");
-        for gone in [&orphan_old, &older, &newer_old] {
-            assert!(!gone.exists(), "{}", gone.display());
-        }
-        for kept in [&orphan_new, &newer_fresh, &backup] {
+        for kept in [
+            &orphan_old,
+            &orphan_new,
+            &older,
+            &newer_old,
+            &newer_fresh,
+            &backup,
+        ] {
             assert!(kept.exists(), "{}", kept.display());
         }
         std::fs::remove_file(dir.join("rec-tidy01.1.points.jsonl")).unwrap();
@@ -2243,6 +2380,78 @@ mod tests {
             list(&notes, "note-0001").unwrap().is_empty(),
             "a header without its lines is skipped"
         );
+    }
+
+    #[test]
+    fn replacing_a_revision_only_removes_unchanged_owned_lines() {
+        for recorded in [true, false] {
+            let temp = tempfile::tempdir().unwrap();
+            let notes = temp.path().join("notes");
+            let note = "note-0001";
+            let id = "rec-00001";
+            let source = spoken(id, &[(0, "", "one")]);
+            save(&notes, note, &source).unwrap();
+            let dir = folder(&notes, note).unwrap();
+            if !recorded {
+                let header = dir.join(head_name(id));
+                let mut value: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&header).unwrap()).unwrap();
+                value.as_object_mut().unwrap().remove("line_digests");
+                write_json(&header, &value).unwrap();
+            }
+            let passage = dir.join(lines_name(id, 1, Kind::Passage));
+            let points = dir.join(lines_name(id, 1, Kind::Point));
+            let synced = b"[1,{\"start_secs\":0,\"end_secs\":1,\"text\":\"synced\"}]\n";
+            crate::paths::write_atomic(&passage, synced).unwrap();
+            save(&notes, note, &source).unwrap();
+            assert_eq!(list(&notes, note).unwrap()[0].revision, 2);
+            assert_eq!(std::fs::read(&passage).unwrap(), synced);
+            assert_eq!(points.exists(), !recorded);
+        }
+    }
+
+    #[test]
+    fn copying_a_transcript_keeps_conflicting_lines_at_the_destination() {
+        for legacy in [false, true] {
+            for kind in [Kind::Passage, Kind::Point] {
+                let temp = tempfile::tempdir().unwrap();
+                let notes = temp.path().join("notes");
+                let id = "rec-00001";
+                let mut source = spoken(id, &[(0, "", "copied")]);
+                source.points.push(typed(1, "also copied"));
+                if legacy {
+                    old_layout(&notes, "note-from", &source);
+                } else {
+                    save(&notes, "note-from", &source).unwrap();
+                }
+                let dir = folder(&notes, "note-into").unwrap();
+                std::fs::create_dir_all(&dir).unwrap();
+                let collision = dir.join(lines_name(id, 1, kind));
+                std::fs::write(&collision, "synced").unwrap();
+                assert_eq!(copy_to(&notes, "note-from", "note-into", "").unwrap(), [id]);
+                assert_eq!(std::fs::read_to_string(&collision).unwrap(), "synced");
+                assert_eq!(head(&notes, "note-into", id).unwrap().revision, 2);
+                let copied = &whole(&notes, "note-into")[0];
+                assert_eq!(copied.passages, source.passages);
+                assert_eq!(copied.points, source.points);
+            }
+        }
+    }
+
+    #[test]
+    fn undoing_a_copy_keeps_the_line_that_forced_a_new_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let id = "rec-00001";
+        save(&notes, "note-from", &spoken(id, &[(0, "", "copied")])).unwrap();
+        let dir = folder(&notes, "note-into").unwrap();
+        std::fs::create_dir_all(&dir).unwrap();
+        let collision = dir.join(lines_name(id, 1, Kind::Passage));
+        std::fs::write(&collision, "synced").unwrap();
+        let copied = copy_to(&notes, "note-from", "note-into", "").unwrap();
+        remove(&notes, "note-into", &copied).unwrap();
+        assert_eq!(std::fs::read_to_string(collision).unwrap(), "synced");
+        assert!(list(&notes, "note-into").unwrap().is_empty());
     }
 
     #[test]

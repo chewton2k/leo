@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use leo_core::watch::{Leo, LeoChanged};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 const MOST_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const MOST_FORGOTTEN_SCAN: usize = 100_000;
@@ -293,11 +294,12 @@ pub(crate) fn file_path(chats: &Path, kind: &str, name: &str) -> anyhow::Result<
 }
 
 pub(crate) fn read_file<T: Line>(chats: &Path, path: &Path) -> Option<T> {
-    let checked = file_path(chats, T::DIR, path.file_name()?.to_str()?).ok()?;
-    if checked != path {
-        return None;
-    }
-    read_checked(path)
+    read_checked(checked_file(chats, T::DIR, path)?)
+}
+
+fn checked_file<'a>(chats: &Path, dir: &str, path: &'a Path) -> Option<&'a Path> {
+    let checked = file_path(chats, dir, path.file_name()?.to_str()?).ok()?;
+    (checked == path).then_some(path)
 }
 
 fn read_in<T: Line>(dir: &Path, path: &Path) -> Option<T> {
@@ -309,6 +311,10 @@ fn read_in<T: Line>(dir: &Path, path: &Path) -> Option<T> {
 }
 
 fn read_checked<T: Line>(path: &Path) -> Option<T> {
+    newest(&read_text(path)?)
+}
+
+fn read_text(path: &Path) -> Option<String> {
     use std::io::Read;
     #[cfg(test)]
     READS.with(|reads| reads.set(reads.get() + 1));
@@ -324,9 +330,30 @@ fn read_checked<T: Line>(path: &Path) -> Option<T> {
     if text.len() as u64 > MOST_FILE_BYTES {
         return None;
     }
+    Some(text)
+}
+
+fn newest<T: Line>(text: &str) -> Option<T> {
     text.lines()
         .filter_map(|line| serde_json::from_str::<T>(line.trim()).ok())
         .max_by_key(|item| item.stamp())
+}
+
+fn unchanged(path: &Path, digest: &sha2::digest::Output<Sha256>) -> Option<bool> {
+    let before = std::fs::symlink_metadata(path).ok()?;
+    let text = read_text(path)?;
+    if Sha256::digest(text.as_bytes()) != *digest {
+        return Some(false);
+    }
+    let after = std::fs::symlink_metadata(path).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if (before.dev(), before.ino()) != (after.dev(), after.ino()) {
+            return Some(false);
+        }
+    }
+    Some(after.is_file() && stamp_meta(&before) == stamp_meta(&after))
 }
 
 pub(crate) fn write_file<T: Line>(chats: &Path, item: &T) -> anyhow::Result<()> {
@@ -391,15 +418,21 @@ pub(crate) fn forget_deleted<T: Line>(
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
         .take(MOST_FORGOTTEN_SCAN)
-        .filter(|path| {
-            read_file::<T>(chats, path).is_some_and(|item| {
-                deleted(&item)
-                    && item.stamp() < before
-                    && path.file_stem().and_then(|stem| stem.to_str()) == Some(item.id())
-            })
+        .filter_map(|path| {
+            let text = read_text(checked_file(chats, T::DIR, &path)?)?;
+            let item = newest::<T>(&text)?;
+            (item.stamp() < before
+                && path.file_stem().and_then(|stem| stem.to_str()) == Some(item.id())
+                && deleted(&item))
+            .then(|| (path, Sha256::digest(text.as_bytes())))
         })
-        .filter(|path| std::fs::remove_file(path).is_ok())
-        .inspect(|path| hub(chats).wrote(T::DIR, path.clone()))
+        .filter(|(path, digest)| {
+            checked_file(chats, T::DIR, path)
+                .and_then(|path| unchanged(path, digest))
+                .unwrap_or(false)
+                && std::fs::remove_file(path).is_ok()
+        })
+        .inspect(|(path, _)| hub(chats).wrote(T::DIR, path.clone()))
         .count()
 }
 
@@ -526,6 +559,31 @@ mod tests {
         )
         .unwrap();
         assert!(!load::<Item>(&chats, "item-0001").unwrap().deleted);
+    }
+
+    #[test]
+    fn expiry_preserves_a_replacement_written_after_reading_the_tombstone() {
+        for deleted in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let chats = dir.path().join("chats");
+            let now = Utc::now();
+            let old = now - chrono::Duration::days(1);
+            write_file(&chats, &item("Before sync", old, true)).unwrap();
+            let path = file_path(&chats, "items", "item-0001.json").unwrap();
+            let replacement = serde_json::to_string(&item("After sync", old, deleted)).unwrap();
+            assert_eq!(
+                forget_deleted::<Item>(&chats, now, |gone| {
+                    std::fs::write(&path, &replacement).unwrap();
+                    gone.deleted
+                }),
+                0
+            );
+            assert_eq!(std::fs::read_to_string(path).unwrap(), replacement);
+            assert_eq!(
+                forget_deleted::<Item>(&chats, now, |item| item.deleted),
+                usize::from(deleted)
+            );
+        }
     }
 
     #[cfg(unix)]

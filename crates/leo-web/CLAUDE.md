@@ -1205,6 +1205,9 @@ a modal.
   newer of modified and change time, regular files only). DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it
   managed stay untouched.
+  Chat expiry checks the saved update time and removes the chat and its related
+  rows in one transaction. Expiry removes task, board and card tombstones only
+  when a fresh digest under the writer lock matches the scan.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
   Restore tasks refuses a zip or file without task ids. An export has no item or size limit
   (2026-11-17, the owner's principle 1); it is streamed entry by entry into a temporary file

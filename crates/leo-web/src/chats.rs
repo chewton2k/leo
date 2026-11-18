@@ -888,14 +888,30 @@ pub fn tidy(dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
         return 0;
     };
     let cutoff = stamp(now - chrono::Duration::days(i64::from(days)));
-    let old: Vec<String> = db_of(dir)
+    db_of(dir)
         .with(|c| {
-            let mut found = c.prepare("SELECT id FROM chats WHERE updated_at < ?1")?;
-            let rows = found.query_map([&cutoff], |r| r.get(0))?;
-            rows.collect()
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let old: Vec<(String, String)> = {
+                let mut found =
+                    tx.prepare("SELECT id, updated_at FROM chats WHERE updated_at < ?1")?;
+                let rows = found.query_map([&cutoff], |r| Ok((r.get(0)?, r.get(1)?)))?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut gone = 0;
+            for (id, updated) in old {
+                if tx.execute(
+                    "DELETE FROM chats WHERE id = ?1 AND updated_at = ?2 AND updated_at < ?3",
+                    rusqlite::params![id, updated, cutoff],
+                )? != 0
+                {
+                    remove_related(&tx, &id)?;
+                    gone += 1;
+                }
+            }
+            tx.commit()?;
+            Ok(gone)
         })
-        .unwrap_or_default();
-    old.iter().filter(|id| remove(dir, id)).count()
+        .unwrap_or(0)
 }
 
 pub fn remove(dir: &Path, id: &str) -> bool {
@@ -903,17 +919,22 @@ pub fn remove(dir: &Path, id: &str) -> bool {
         .with(|c| {
             let tx = c.transaction()?;
             let gone = tx.execute("DELETE FROM chats WHERE id = ?1", [id])?;
-            tx.execute("DELETE FROM chats_text WHERE id = ?1", [id])?;
-            rows_from(&tx, id, 0)?;
-            tx.execute("DELETE FROM chat_docs WHERE chat = ?1", [id])?;
-            tx.execute(
-                "DELETE FROM reviewed WHERE substr(key, 1, length(?1) + 1) = ?1 || ':'",
-                [id],
-            )?;
+            remove_related(&tx, id)?;
             tx.commit()?;
             Ok(gone > 0)
         })
         .unwrap_or(false)
+}
+
+fn remove_related(tx: &rusqlite::Transaction<'_>, id: &str) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM chats_text WHERE id = ?1", [id])?;
+    rows_from(tx, id, 0)?;
+    tx.execute("DELETE FROM chat_docs WHERE chat = ?1", [id])?;
+    tx.execute(
+        "DELETE FROM reviewed WHERE substr(key, 1, length(?1) + 1) = ?1 || ':'",
+        [id],
+    )?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1470,6 +1491,32 @@ mod tests {
         left.sort();
         assert_eq!(left, ["chat-tidy-after1", "chat-tidy-exactly"]);
         assert_eq!(tidy(&dir, Some(30), now), 0);
+    }
+
+    #[test]
+    fn expiry_keeps_a_chat_updated_after_it_was_selected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let now = at(0) + chrono::Duration::days(31);
+        for id in ["chat-old-first", "chat-old-other"] {
+            save(&dir, id, saving(vec![said("user", "searchable")]), at(0)).unwrap();
+        }
+        db_of(&dir)
+            .with(|c| {
+                c.execute_batch(&format!(
+                    "CREATE TRIGGER refresh_other_chat AFTER DELETE ON chats BEGIN
+                        UPDATE chats SET updated_at = '{}' WHERE id != old.id;
+                    END;",
+                    stamp(now)
+                ))
+            })
+            .unwrap();
+        assert_eq!(tidy(&dir, Some(30), now), 1);
+        let chats = list(&dir);
+        assert_eq!(chats.len(), 1);
+        assert_eq!(chats[0].updated_at, now);
+        assert_eq!(load(&dir, &chats[0].id).unwrap().messages.len(), 1);
+        assert_eq!(search(&dir, "searchable").len(), 1);
     }
 
     fn talk(n: usize) -> Vec<serde_json::Value> {
