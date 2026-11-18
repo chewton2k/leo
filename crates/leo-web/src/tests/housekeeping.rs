@@ -163,3 +163,72 @@ fn the_daily_expiry_removes_an_old_chat_and_its_documents() {
         "the orphan document was left"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn a_write_failure_reads_as_a_write_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0u8; 64]);
+    let data = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(&png)
+    };
+    let keep = || leo_core::keep::Keep::default();
+    let picture = |state: &AppState| {
+        run(add_picture(
+            State(state.clone()),
+            Json(NewPicture {
+                name: "board.png".into(),
+                data: data.clone(),
+            }),
+        ))
+    };
+
+    let (control, _control_dir, _) = state_with(&[]);
+    assert_eq!(
+        run(set_keep(State(control.clone()), Json(keep()))).status(),
+        StatusCode::OK
+    );
+    assert_eq!(picture(&control).status(), StatusCode::CREATED);
+
+    let (state, folder, _) = state_with(&[]);
+    let notes = state.fresh().notes_dir.clone();
+    let read_only = |path: &std::path::Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    read_only(folder.path(), 0o555);
+    let kept = run(set_keep(State(state.clone()), Json(keep())));
+    read_only(folder.path(), 0o755);
+    assert_eq!(kept.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(json_of(kept)["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("leo could not save that"));
+
+    read_only(&notes, 0o555);
+    let added = picture(&state);
+    read_only(&notes, 0o755);
+    assert_eq!(added.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(json_of(added)["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("leo could not save the picture"));
+
+    let wrong = run(set_keep(
+        State(state.clone()),
+        Json(leo_core::keep::Keep {
+            trash_days: Some(3),
+            ..keep()
+        }),
+    ));
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    let not_a_picture = run(add_picture(
+        State(state),
+        Json(NewPicture {
+            name: "x.png".into(),
+            data: "aGVsbG8=".into(),
+        }),
+    ));
+    assert_eq!(not_a_picture.status(), StatusCode::BAD_REQUEST);
+}

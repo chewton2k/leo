@@ -49,21 +49,38 @@ pub(crate) async fn set_keep(
     State(state): State<AppState>,
     Json(keep): Json<leo_core::keep::Keep>,
 ) -> Response {
-    let done = state
-        .with_store(move |store| {
-            leo_core::keep::save(&store.notes_dir, &keep).map_err(|_| StatusCode::BAD_REQUEST)?;
-            store.tidy_trash_now();
-            Ok(keep_page(keep))
-        })
-        .await;
-    if done.is_ok() {
-        keeping::expire_now(&state).await;
-    }
-    match done {
-        Ok(page) => Json(page).into_response(),
-        Err(StatusCode::BAD_REQUEST) => (
+    let days = [
+        keep.trash_days,
+        keep.chat_days,
+        keep.upload_days,
+        keep.transcript_days,
+        keep.audio_days,
+    ];
+    if !days.iter().all(|d| leo_core::keep::CHOICES.contains(d)) {
+        return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "Pick one of the choices offered." })),
+        )
+            .into_response();
+    }
+    let done = state
+        .with_store(move |store| {
+            Ok(leo_core::keep::save(&store.notes_dir, &keep)
+                .map(|()| {
+                    store.tidy_trash_now();
+                    keep_page(keep)
+                })
+                .map_err(|e| format!("{e:#}")))
+        })
+        .await;
+    match done {
+        Ok(Ok(page)) => {
+            keeping::expire_now(&state).await;
+            Json(page).into_response()
+        }
+        Ok(Err(cause)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("leo could not save that: {cause}") })),
         )
             .into_response(),
         Err(code) => code.into_response(),

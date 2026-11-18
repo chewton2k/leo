@@ -64,18 +64,26 @@ pub(crate) async fn add_picture(
         )
             .into_response();
     };
-    let name = body.name;
-    match state
-        .with_store(move |store| {
-            attachments::save(&store.notes_dir, &name, &bytes).map_err(|_| StatusCode::BAD_REQUEST)
-        })
-        .await
-    {
-        Ok(path) => (StatusCode::CREATED, Json(serde_json::json!({ "path": path }))).into_response(),
-        Err(code) => (
-            code,
+    if attachments::kind_of(&bytes).is_none() || bytes.len() > attachments::MOST_BYTES {
+        return (
+            StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "leo can show PNG, JPEG, GIF and WebP pictures up to 20 MB." })),
         )
+            .into_response();
+    }
+    let name = body.name;
+    let notes_dir = state.notes_dir.clone();
+    match tokio::task::spawn_blocking(move || attachments::save(&notes_dir, &name, &bytes)).await {
+        Ok(Ok(path)) => (
+            StatusCode::CREATED,
+            Json(serde_json::json!({ "path": path })),
+        )
             .into_response(),
+        Ok(Err(e)) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": format!("leo could not save the picture: {e:#}") })),
+        )
+            .into_response(),
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
