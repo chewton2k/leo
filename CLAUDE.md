@@ -105,7 +105,8 @@ settings and credentials are excluded from note exports.
 ### Recent additions worth knowing
 
 - `leo_services::doctor::scan` (sections leo/notes/AI/recording; local checks
-  only, no network, microphone or AI probes) is shown in Settings → Health.
+  only, no network, microphone or AI probes, and the session's recent store
+  warnings (`diag::recent`)) is shown in Settings → Health.
 - Recording loop: `leo_services::session::recorder` (`record`, `resume`,
   `finish`, `write_up`, `Event`); `Capture` takes native microphone/screen audio.
 - `Store::unreadable`: files that failed to parse; `save` never deletes them.

@@ -28,7 +28,7 @@ pub fn scan(
         },
         Section {
             title: "notes",
-            checks: notes_checks(notes_dir),
+            checks: with_recent_problems(notes_checks(notes_dir)),
         },
         Section {
             title: "AI",
@@ -48,6 +48,18 @@ fn warn(what: &str, needed_for: &str, note: String) -> Check {
         state: State::Warn { note },
         detail: None,
     }
+}
+
+fn with_recent_problems(mut checks: Vec<Check>) -> Vec<Check> {
+    let recent = leo_core::diag::recent();
+    if !recent.is_empty() {
+        checks.push(warn(
+            "recent problems",
+            "knowing what leo could not do",
+            recent.join("\n"),
+        ));
+    }
+    checks
 }
 
 fn leo_checks(config_path: &Path) -> Vec<Check> {
@@ -384,6 +396,17 @@ mod tests {
                 assert!(note.contains("Shared (conflict from leo)"), "{note}");
                 assert!(note.contains("delete"), "{note}");
             }
+            other => panic!("expected a note, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_recent_warning_is_listed_under_recent_problems() {
+        let (_tmp, notes, config) = setup();
+        leo_core::diag::warn("x test marker");
+        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        match &check(section(&sections, "notes"), "recent problems").state {
+            State::Warn { note } => assert!(note.contains("x test marker"), "{note}"),
             other => panic!("expected a note, got {other:?}"),
         }
     }
