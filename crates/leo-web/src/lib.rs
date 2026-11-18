@@ -80,6 +80,7 @@ pub struct UploadFile {
     pub name: String,
     pub mime: String,
     pub bytes: Vec<u8>,
+    pub path: Option<std::path::PathBuf>,
 }
 
 pub type Room = Arc<dyn Fn() -> usize + Send + Sync>;
@@ -859,6 +860,11 @@ pub(crate) async fn start_in(
         listed: Default::default(),
         search_index: Arc::new(search_index::SearchIndex::for_notes(&notes)),
     };
+
+    tokio::task::spawn_blocking({
+        let notes = notes.clone();
+        move || routes::uploads::sweep_incoming(&notes)
+    });
 
     let expiry = tokio::spawn({
         let state = state.clone();

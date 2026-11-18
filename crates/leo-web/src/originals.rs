@@ -354,6 +354,7 @@ pub fn through(reader: crate::Reader) -> crate::ReaderTo {
                     name: name.to_string(),
                     mime: mime.to_string(),
                     bytes,
+                    path: None,
                 },
                 progress,
             )?;

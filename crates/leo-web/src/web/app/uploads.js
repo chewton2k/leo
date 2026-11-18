@@ -1,5 +1,5 @@
 const UPLOAD_ACCEPT = '.pdf,.docx,.pptx,.txt,.md,image/*';
-const UPLOAD_MOST = 90 * 1024 * 1024;
+const UPLOAD_PARALLEL = 2;
 let picked = [];
 let uploadPoll = 0;
 
@@ -163,6 +163,52 @@ async function uploadSheet(files, into, { add = false } = {}) {
   drawPicked();
 }
 
+async function sendFile(upload, item, ready) {
+  let response;
+  try {
+    response = await fetch(`/api/import/files/${enc(upload)}/${enc(item)}?name=${enc(ready.name)}`, { method: 'PUT', credentials: 'same-origin', body: ready.blob });
+  } catch (e) {
+    throw new Offline();
+  }
+  if (response.status === 401) throw new Locked();
+  if (response.ok) return;
+  let said = '';
+  try {
+    said = (await response.json()).error || '';
+  } catch (e) {
+    said = '';
+  }
+  throw new Error(said || `leo answered ${response.status}.`);
+}
+
+// Each file travels in its own request, two at a time, so nothing holds the
+// whole upload; a file that fails is named and the others still go on.
+async function sendFiles(upload, chosen) {
+  const results = new Array(chosen.length);
+  const unsent = [];
+  let next = 0;
+  let done = 0;
+  const lane = async () => {
+    while (next < chosen.length) {
+      const at = next++;
+      const file = chosen[at];
+      uploadProgress(`Sending ${file.name}`, done, chosen.length);
+      try {
+        const ready = await shrink(file);
+        const item = crypto.randomUUID();
+        await sendFile(upload, item, ready);
+        results[at] = { item, name: ready.name, type: ready.type };
+      } catch (e) {
+        if (e instanceof Locked || e instanceof Offline) throw e;
+        unsent.push(file.name);
+      }
+      done += 1;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, chosen.length) }, lane));
+  return { files: results.filter(Boolean), unsent };
+}
+
 const uploadClock = { since: 0, step: '', stepSince: 0, steps: [] };
 
 function uploadProgress(text, done, total) {
@@ -191,26 +237,26 @@ async function uploadGo() {
   const names = picked.map((f) => f.name);
   sheet(`<div class="upload-working">${felix.felix(72, 'idle think')}<h3>${into ? `Adding to “${esc(into.title)}”` : each ? `Making ${names.length} notes` : 'Making your note'}</h3><p>${esc(names.length === 1 ? names[0] : `${names.length} files`)}</p><div id="upload-progress"></div><p class="hint">This can take a minute for long files. You can close this; the note appears in the folder when it is ready.</p></div>`);
   Object.assign(uploadClock, { since: Date.now(), step: '', stepSince: Date.now(), steps: [] });
-  uploadProgress('Preparing the files', 0, 0);
-  const files = [];
-  let total = 0;
-  for (const file of picked) {
-    const ready = await shrink(file);
-    total += ready.blob.size;
-    if (total > UPLOAD_MOST) {
-      closeSheet();
-      return toast('That is too much to upload at once; send fewer files.', { bad: true });
-    }
-    files.push({ name: ready.name, type: ready.type, data: await base64(ready.blob) });
-  }
-  uploadProgress('Uploading', 0, 0);
-  let started;
+  const upload = crypto.randomUUID();
+  let sent;
   try {
-    started = await api('/api/import', { method: 'POST', body: { directory: dir, title: title || null, wants, files, each, into: into ? into.id : null } });
+    sent = await sendFiles(upload, picked);
   } catch (e) {
     closeSheet();
     throw e;
   }
+  if (!sent.files.length) {
+    closeSheet();
+    return toast(`${sent.unsent.join(', ')} could not be sent. Try again.`, { bad: true });
+  }
+  let started;
+  try {
+    started = await api('/api/import', { method: 'POST', body: { upload, directory: dir, title: title || null, wants, files: sent.files, each, into: into ? into.id : null } });
+  } catch (e) {
+    closeSheet();
+    throw e;
+  }
+  if (sent.unsent.length) toast(`${sent.unsent.join(', ')} could not be sent; leo is making notes from the rest.`, { bad: true });
   picked = [];
   watchUpload(started.id, dir, into);
   checkActivity();
@@ -223,6 +269,10 @@ function watchUpload(id, dir, into = null) {
     try {
       job = await api(`/api/import/${enc(id)}`);
     } catch (e) {
+      return watchUpload(id, dir, into);
+    }
+    if (job.state === 'waiting') {
+      uploadProgress('Waiting for another upload to finish…', 0, 0);
       return watchUpload(id, dir, into);
     }
     if (job.state === 'working') {

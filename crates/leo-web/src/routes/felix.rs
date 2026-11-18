@@ -98,6 +98,7 @@ pub(crate) async fn add_chat_file(
         name: name.clone(),
         mime: body.mime,
         bytes,
+        path: None,
     };
     let (_guard, stop) = crate::stop_when_dropped();
     let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {

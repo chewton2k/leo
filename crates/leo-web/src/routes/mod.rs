@@ -44,7 +44,7 @@ use crate::routes::trash::{
     delete_from_trash, list_trash, move_to_trash, restore_many, restore_note,
 };
 use crate::routes::uploads::{
-    get_original, import_status, list_originals, start_import, IMPORT_BYTES,
+    get_original, import_status, list_originals, put_file, start_import, IMPORT_JSON_BYTES,
 };
 use crate::AppState;
 
@@ -292,12 +292,11 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/processes", get(processes::list))
         .route(
             "/api/import",
-            post(start_import)
-                .layer(axum::extract::DefaultBodyLimit::max(IMPORT_BYTES))
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    uploads::import_limit,
-                )),
+            post(start_import).layer(axum::extract::DefaultBodyLimit::max(IMPORT_JSON_BYTES)),
+        )
+        .route(
+            "/api/import/files/{upload}/{item}",
+            axum::routing::put(put_file).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route("/api/import/{id}", get(import_status))
         .route("/api/activity", get(activity))

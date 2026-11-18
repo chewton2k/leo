@@ -877,6 +877,17 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   upload never makes a conflict copy.
 - Originals live in `<data>/attachments/<note-id>/` (never synced), named by
   `free_original_name`; figures go to the AI via `leo_services::figures`.
+- Uploads have no file count or size limit (2026-11-18, the owner's principle 1): each chosen file is
+  sent as its own streamed request (`PUT /api/import/files/{upload}/{item}`, body limit off, two at a
+  time from the page; `upload` and `item` are uuids the page makes, the file's name is not part of where
+  it is kept) and written 64 KB at a time through a temporary file into `<data>/incoming/<upload>/<item>`
+  (a second send of an item is 409; a full disk is 507; 60 s without a byte is 408). `POST /api/import`
+  carries `{upload, files: [{item, name, type}], …}` and no bytes (8 MiB of JSON at most); the importer
+  reads each `UploadFile.path`, and a note's originals are hard-linked (else copied) from there into
+  `attachments/<note-id>/` before the job ends. The `incoming/<upload>` folder is removed when the job
+  ends however it ends, and when `POST` refuses; any older than a day is removed at launch
+  (`sweep_incoming`). Two imports run at a time; a third is `waiting` in a queue (`ImportSlots`) and the
+  page says so. A PDF, Word or PowerPoint file is still read whole into memory by its reader.
 - An original of any size can be read (2026-11-18, the owner's principle 1): `Originals::lines`
   asks `Powers.reader_to` (leo-services `import::read_to`, which streams a text file in 64 KB pieces) to
   write into a writer that holds 1 MB and spills the rest to `<attachments>/<note>/.read/<name>.txt`

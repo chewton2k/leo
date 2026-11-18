@@ -1117,6 +1117,7 @@ pub(crate) async fn snapshot(
                         name: format!("slide.{kind}"),
                         mime: mime.into(),
                         bytes,
+                        path: None,
                     },
                     &mut |_| {},
                 )
