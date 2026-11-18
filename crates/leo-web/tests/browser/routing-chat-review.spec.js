@@ -351,3 +351,81 @@ test('a chat removed while a reply is running is not re-created', async ({ page 
   await page.waitForTimeout(300);
   expect(puts).toBe(1);
 });
+test('a streamed reply leaves the finished bubbles exactly as they were', async ({ page }) => {
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 1600, height: 900 });
+  const id = `streamed-${Date.now().toString(36)}`;
+  const messages = Array.from({ length: 100 }, (_, i) => (i % 2
+    ? { role: 'assistant', text: `Answer ${i} with **bold words** in it.\n\n- first point ${i}\n- second point ${i}\n\nA closing line for answer ${i}.` }
+    : { role: 'user', text: `Question ${i} about heaps and stacks` }));
+  messages[95].session = { ideas: ['Heaps'], outcomes: [{ state: 'open', misses: 0, right: 0 }], asked: 0, state: 'active' };
+  messages[97].quizzes = [{ kind: 'multiple_choice', question: 'Which keeps the smallest on top?', options: ['A min-heap', 'A stack'], answer: 'A min-heap', given: 'A min-heap', correct: true, held: true, told: true }];
+  messages[99].spent = { by: 'Ollama', model: 'llama' };
+  await page.addInitScript(([chat, seeded]) => {
+    if (sessionStorage.getItem('seeded-' + chat)) return;
+    sessionStorage.setItem('seeded-' + chat, '1');
+    localStorage.setItem('leo-chat-v1', JSON.stringify({ id: chat, messages: seeded, refs: [] }));
+  }, [id, messages]);
+  await page.goto('/');
+  await page.locator('#chat-toggle').click();
+  const chat = page.locator('#chat');
+  await expect(chat.locator('.chat-body > .msg')).toHaveCount(100);
+  await page.evaluate(() => {
+    const real = window.fetch;
+    const enc = new TextEncoder();
+    window.fetch = (url, init) => {
+      if (!String(url).endsWith('/api/chat')) return real(url, init);
+      let feed;
+      const body = new ReadableStream({ start(c) { feed = c; } });
+      window.__push = (event) => feed.enqueue(enc.encode(JSON.stringify(event) + '\n'));
+      window.__end = () => { feed.enqueue(enc.encode('{"done":true}\n')); feed.close(); };
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } }));
+    };
+  });
+  const pending = chat.locator('.chat-body > .msg.pending');
+  const finished = () => page.evaluate(() => [...document.querySelectorAll('#chat .chat-body > .msg:not(.pending)')].map((m) => m.outerHTML));
+  const frame = async (event, marker) => {
+    await page.evaluate(([e, t]) => window.__push({ ...e, t: ` ${t}` }), [event, marker]);
+    await expect(pending).toContainText(marker);
+    return finished();
+  };
+  const ask = async (text) => {
+    await chat.locator('#chat-input').fill(text);
+    await chat.locator('#chat-input').press('Enter');
+    await expect(pending).toHaveCount(1);
+    return finished();
+  };
+
+  let before = await ask('one more question');
+  expect(before).toHaveLength(101);
+  expect(await chat.locator('.quiz-next').count()).toBe(1);
+  for (const [event, marker] of [[{}, 'Alpha'], [{ step: 'Looked in your notes', tool: 'search_notes' }, 'Bravo'], [{ sources: [{ id: 'n1', title: 'Heap note' }] }, 'Charlie'], [{ proposal: { kind: 'create', title: 'Heap summary', body: 'Heaps keep order.', folder: '' } }, 'Delta']]) {
+    expect(await frame(event, marker), `finished bubbles after ${marker}`).toEqual(before);
+  }
+  before = await frame({ quiz: { kind: 'multiple_choice', question: 'Which is a heap?', options: ['A tree', 'A list'], answer: 'A tree' } }, 'Echo');
+  await expect(chat.locator('.quiz-next'), 'the older card loses Next question at once').toHaveCount(0);
+  expect(await frame({}, 'Foxtrot')).toEqual(before);
+  await page.evaluate(() => window.__end());
+  await expect(pending).toHaveCount(0);
+
+  await ask('second question');
+  await chat.locator('#chat-input').fill('Please also cover heaps');
+  await chat.locator('#chat-input').press('Enter');
+  await expect(chat.locator('.chat-body > .msg.user.queued')).toHaveCount(1);
+  before = await finished();
+  expect(await frame({}, 'Golf')).toEqual(before);
+  before = await frame({ steered: ['Please also cover heaps'] }, 'Hotel');
+  const above = pending.locator('xpath=preceding-sibling::div[contains(@class, "msg")][1]');
+  await expect(above).toContainText('Please also cover heaps');
+  await expect(above).toContainText('Sent while Felix worked');
+  expect(await frame({}, 'India')).toEqual(before);
+  await expect(chat.locator('.session-recap')).toHaveCount(0);
+  before = await frame({ session_end: true }, 'Juliet');
+  await expect(chat.locator('.session-recap'), 'the recap shows while the answer is still written').toHaveCount(1);
+  expect(await frame({}, 'Kilo')).toEqual(before);
+  before = await frame({ spent: { by: 'Claude Code', model: 'opus' } }, 'Lima');
+  await expect(chat.locator('.chat-switch', { hasText: 'Now answered by Claude Code' })).toHaveCount(1);
+  expect(await frame({}, 'Mike')).toEqual(before);
+  await page.evaluate(() => window.__end());
+  await expect(pending).toHaveCount(0);
+});

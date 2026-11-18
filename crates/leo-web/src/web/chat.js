@@ -2344,6 +2344,7 @@
         list.splice(list.indexOf(m), 1);
         const at = list.indexOf(work.answer);
         list.splice(at < 0 ? list.length : at, 0, m);
+        fullNext = true;
       }
     }
 
@@ -2675,15 +2676,19 @@
     }
 
     let liveFrame = 0;
+    let liveOnly = null;
+    let drawn = [];
+    let fullNext = false;
 
-    function draw(stick = true, live = false, later = false) {
+    function draw(stick = true, live = false, later = false, only = null) {
       if (later && root.requestAnimationFrame) {
         if (!liveFrame) {
+          liveOnly = only;
           liveFrame = root.requestAnimationFrame(() => {
             liveFrame = 0;
-            draw(false, true);
+            draw(false, true, false, liveOnly);
           });
-        }
+        } else if (liveOnly !== only) liveOnly = null;
         return;
       }
       if (liveFrame) root.cancelAnimationFrame?.(liveFrame);
@@ -2693,17 +2698,31 @@
         ? { box: document.activeElement.className.split(' ')[0], i: document.activeElement.dataset.i, k: document.activeElement.dataset.k, from: document.activeElement.selectionStart, to: document.activeElement.selectionEnd }
         : null;
       const kept = body.scrollTop;
-      const session = currentSession();
-      const recap = session && session.state === 'finished' ? recapCard(session) : '';
-      const html = state.messages.length ? `${state.messages.map((m, i) => switches(state.messages, i) + bubble(m, i)).join('')}${recap}` : welcome();
       const perched = !state.messages.length;
       const land = perched !== panel.classList.contains('perched') && !panel.hidden && root.leoMotion?.dock ? root.leoMotion.dock($('.chat-foot'), $('#chat-form')) : null;
-      const first = body.firstElementChild;
-      const next = document.createElement('div');
-      next.innerHTML = html;
-      const hello = Boolean(first) && first.classList.contains('chat-hello') && Boolean(next.firstElementChild) && next.firstElementChild.dataset.hello === first.dataset.hello;
-      if (hello || (live && body.querySelector(':scope > .msg'))) settle(body, next);
-      else body.innerHTML = html;
+      const at = only && !fullNext && drawn.length === state.messages.length && drawn.every((m, k) => m === state.messages[k]) ? state.messages.indexOf(only) : -1;
+      const existing = at >= 0 ? body.querySelector(`:scope > .msg[data-i="${at}"]`) : null;
+      if (existing) {
+        const scratch = document.createElement('div');
+        scratch.innerHTML = bubble(only, at);
+        const fresh = scratch.firstElementChild;
+        if (existing.outerHTML !== fresh.outerHTML) {
+          match(existing, fresh);
+          settle(existing, fresh);
+        }
+      } else {
+        const session = currentSession();
+        const recap = session && session.state === 'finished' ? recapCard(session) : '';
+        const html = state.messages.length ? `${state.messages.map((m, i) => switches(state.messages, i) + bubble(m, i)).join('')}${recap}` : welcome();
+        const first = body.firstElementChild;
+        const next = document.createElement('div');
+        next.innerHTML = html;
+        const hello = Boolean(first) && first.classList.contains('chat-hello') && Boolean(next.firstElementChild) && next.firstElementChild.dataset.hello === first.dataset.hello;
+        if (hello || (live && body.querySelector(':scope > .msg'))) settle(body, next);
+        else body.innerHTML = html;
+        drawn = state.messages.slice();
+        fullNext = false;
+      }
       panel.classList.toggle('perched', perched);
       body.setAttribute('aria-busy', String(Boolean(state.busy)));
       document.getElementById('chat-toggle')?.classList.toggle('working', Boolean(state.busy));
@@ -2873,14 +2892,17 @@
               const before = currentSession();
               if (before && before.state !== 'finished') before.dismissed = true;
               answer.session = startSession(e.plan.ideas);
+              fullNext = true;
             }
             if (e.session_end === true) {
               const s = currentSession();
               if (s && s.state !== 'finished') s.state = 'finished';
+              fullNext = true;
             }
             if (e.quiz && typeof e.quiz === 'object' && typeof e.quiz.question === 'string') {
               // A new question moves the practice on: older cards lose Next question.
               for (const m of thread.messages) if (m !== answer) for (const q of m.quizzes || []) if (q.told) q.held = false;
+              fullNext = true;
               const idea = Number(e.quiz.idea) || 0;
               const last = thread.messages.flatMap((m) => (m === answer ? [] : m.quizzes || [])).findLast((q) => q.idea && !q.predict && typeof q.given === 'string');
               const retold = Boolean(last && idea === last.idea && (last.correct === false || (last === card && grade(answer.text).verdict === 'incorrect')));
@@ -2901,7 +2923,10 @@
             if (e.restart) answer.text = '';
             if (typeof e.step === 'string') pose(e.tool);
             if (typeof e.step === 'string') answer.steps = [...(answer.steps || []), { text: e.step, at: answer.text.length, tool: typeof e.tool === 'string' ? e.tool : '', failed: e.failed === true, found: Array.isArray(e.found) ? e.found.filter((f) => typeof f === 'string').slice(0, 12) : [] }];
-            if (e.spent && typeof e.spent === 'object') answer.spent = e.spent;
+            if (e.spent && typeof e.spent === 'object') {
+              answer.spent = e.spent;
+              fullNext = true;
+            }
             if (e.proposal && typeof e.proposal === 'object') {
               const done = e.proposal.state === 'applied';
               const { auto, ...shown } = e.proposal;
@@ -2917,7 +2942,7 @@
             }
             if (e.error) answer.error = e.error;
           }
-          draw(false, true, true);
+          draw(false, true, true, answer);
         }
       } catch (e) {
         if (e.name === 'AbortError') controller.abort();
