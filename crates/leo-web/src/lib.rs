@@ -791,6 +791,8 @@ pub(crate) async fn start_in(
             .unwrap_or(&store.notes_dir)
             .join(db::FILE),
     )?;
+    let swept = notes.clone();
+    tokio::task::spawn_blocking(move || sweep_leftover_temps(&swept));
     let vectors = Arc::new(vectors::Vectors::for_notes(&store.notes_dir));
     let graphs = Arc::new(
         graph::Graphs::for_notes(&store.notes_dir, powers.writer.clone())
@@ -896,6 +898,60 @@ pub(crate) async fn start_in(
         background,
         grace: shutdown::GRACE,
     })
+}
+
+fn sweep_leftover_temps(notes: &std::path::Path) -> usize {
+    use leo_core::paths::{own, sweep_stale_temps};
+    let data = notes.parent().unwrap_or(notes);
+    sweep_stale_temps(&notes.join(".leo"), 1)
+        + sweep_stale_temps(data, 0)
+        + sweep_stale_temps(&data.join(own::ORIGINALS), 2)
+        + sweep_stale_temps(&data.join(own::SOURCES), 1)
+        + sweep_stale_temps(&data.join(own::CALENDAR), 0)
+}
+
+#[cfg(test)]
+mod leftover_temps {
+    #[test]
+    fn old_temporary_files_go_from_every_folder_leo_writes() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let old = [
+            "notes/.leo/tasks/.tmpAbC123",
+            "notes/.leo/boards/.tmpAbC123",
+            "notes/.leo/cards/.tmpAbC123",
+            ".tmpAbC123",
+            "attachments/note/.tmpAbC123",
+            "attachments/note/.read/.tmpAbC123",
+            "recording-sources/note/.tmpAbC123",
+            "calendar/.tmpAbC123",
+        ];
+        let kept = [
+            "notes/.tmpAbC123",
+            "notes/.leo/tasks/task-0001.json",
+            "attachments/note/slides.pdf",
+            "recording-sources/note/.tmpAbC12",
+            "models/.tmpAbC123",
+        ];
+        for name in old.iter().chain(&kept) {
+            let path = dir.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "x").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(7200))
+                .unwrap();
+        }
+        assert_eq!(super::sweep_leftover_temps(&notes), old.len());
+        for name in old {
+            assert!(!dir.path().join(name).exists(), "{name}");
+        }
+        for name in kept {
+            assert!(dir.path().join(name).exists(), "{name}");
+        }
+    }
 }
 
 async fn bind(wanted: u16) -> Result<(tokio::net::TcpListener, u16)> {
