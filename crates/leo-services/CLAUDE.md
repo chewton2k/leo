@@ -362,7 +362,9 @@ source.
 ### Durable recording workflows
 
 `Session::archive` keeps passages, points, event context, wants, warnings and
-metadata-only diagnostics. `recorder::write_up` caches by input hash; only a
+metadata-only diagnostics. A saved session that still holds a failed part's audio
+(`has_retry`) is offered for recovery; recovery adds the part to its note's sources and leaves the
+note's text. `recorder::write_up` caches by input hash; only a
 successful caller save permits `Session::commit` and audio cleanup. Finish
 retries have a bounded window; Finish available cancels queued work but lets the
 current request finish. `long::with_profile` adds `<recording_context>` and

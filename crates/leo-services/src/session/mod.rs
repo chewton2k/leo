@@ -397,6 +397,23 @@ fn traced_note(dir: &Path) -> Option<String> {
         })
 }
 
+pub fn has_retry(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let mut failed = std::collections::HashSet::new();
+    let mut audio = std::collections::HashSet::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        match index_of(&name) {
+            Some((index, "err")) => failed.insert(index),
+            Some((index, "wav")) => audio.insert(index),
+            _ => false,
+        };
+    }
+    failed.iter().any(|index| audio.contains(index))
+}
+
 pub fn kept_owned(root: &Path) -> Vec<(PathBuf, String)> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
@@ -522,7 +539,7 @@ pub fn scan(root: &Path, walk: Walk) -> Scan {
         match seen(&dir) {
             Seen::Parsed(brief) => {
                 if let Walk::Newest { limit, .. } = walk {
-                    if brief.saved || locked(&brief.dir) {
+                    if (brief.saved && !has_retry(&brief.dir)) || locked(&brief.dir) {
                         continue;
                     }
                     let recording = recording_id(&brief.id).to_string();
@@ -681,7 +698,7 @@ impl Session {
             .sessions
             .iter()
             .filter_map(|brief| Session::open(&brief.dir).ok())
-            .filter(|s| !s.manifest.saved)
+            .filter(|s| !s.manifest.saved || has_retry(&s.dir))
             .collect();
         (sessions, found.after)
     }
@@ -1225,6 +1242,59 @@ mod tests {
             .map(|s| s.dir)
             .collect();
         assert_eq!(found, expected);
+    }
+
+    #[test]
+    fn finish_now_audio_is_offered_for_retry() {
+        use super::recorder::{finish, Event, Live};
+        use super::transcriber::{Policy, Transcriber};
+        let root = tempfile::tempdir().unwrap();
+        let notes = tempfile::tempdir().unwrap();
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.id = "verify-rec01".into();
+        let session = Session::create(root.path(), manifest).unwrap();
+        let dir = session.dir.clone();
+        std::fs::write(dir.join("seg-00000.txt"), "the first part").unwrap();
+        wav::write(&dir.join(wav::done_name(1)), &vec![3000i16; 16_000]).unwrap();
+        let (tx, updates) = std::sync::mpsc::channel();
+        let transcriber = Transcriber::start(
+            &dir,
+            Arc::new(|_| Err("boom".into())),
+            Policy {
+                first_wait: Duration::from_millis(5),
+                idle: Duration::from_millis(5),
+                finish_limit: Duration::from_millis(40),
+                ..Policy::default()
+            },
+            false,
+            tx,
+        );
+        let events = std::sync::Mutex::new(Vec::new());
+        finish(
+            session,
+            transcriber,
+            &updates,
+            &mut Live::new(crate::ai::live::ROLL_INTERVAL),
+            &|event| events.lock().unwrap().push(event),
+            &AtomicBool::new(true),
+        );
+        let events = events.into_inner().unwrap();
+        assert!(
+            matches!(events.last(), Some(Event::Finished { .. })),
+            "{:?}",
+            events.last()
+        );
+        Session::open(&dir)
+            .unwrap()
+            .commit(notes.path(), "verify-rec01")
+            .unwrap();
+        let kept = Session::open(&dir).unwrap();
+        assert!(kept.manifest.saved && dir.join(wav::done_name(1)).exists());
+        let offered: Vec<PathBuf> = Session::unfinished(root.path())
+            .into_iter()
+            .map(|s| s.dir)
+            .collect();
+        assert_eq!(offered, [dir]);
     }
 
     fn settled_folder(root: &Path, manifest: &Manifest) -> PathBuf {
