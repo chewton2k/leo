@@ -1,5 +1,6 @@
-use std::cmp::Reverse;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+use chrono::{DateTime, Utc};
 
 use leo_core::notes::Note;
 use leo_core::store::Store;
@@ -54,11 +55,11 @@ fn initials(words: &[String]) -> Vec<String> {
     out
 }
 
-fn seen(note: &Note, read: Option<&Read>) -> Seen {
-    let title = flat(&note.title);
+fn seen(title: &str, body: &str, read: Option<&Read>) -> Seen {
+    let title = flat(title);
     let title_initials = initials(&parts(&title));
     Seen {
-        text: format!("{title}\n{}", flat(&note.body)),
+        text: format!("{title}\n{}", flat(body)),
         title,
         summary: read.map(|r| flat(&r.summary)).unwrap_or_default(),
         ideas: read
@@ -102,78 +103,148 @@ fn find_word(seen: &Seen, word: &str) -> Option<Found> {
     seen.summary.contains(word).then_some(Found::Summary)
 }
 
-pub fn search<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<Hit<'a>> {
-    let plain = |notes: Vec<&'a Note>| {
-        notes
-            .into_iter()
-            .map(|note| Hit { note, why: None })
-            .collect()
-    };
-    if query.split_whitespace().any(|w| w.starts_with('#')) {
-        return plain(store.find(query));
+pub struct Text<'n> {
+    pub id: &'n str,
+    pub title: &'n str,
+    pub body: &'n str,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl<'n> Text<'n> {
+    pub fn of(note: &'n Note) -> Self {
+        Text {
+            id: &note.id,
+            title: &note.title,
+            body: &note.body,
+            updated_at: note.updated_at,
+        }
     }
-    let words: Vec<String> = parts(&flat(query));
-    if words.is_empty() {
-        return Vec::new();
+}
+
+pub fn tagged(query: &str) -> bool {
+    query.split_whitespace().any(|w| w.starts_with('#'))
+}
+
+pub fn counted(words: Vec<String>) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    let mut at: HashMap<String, usize> = HashMap::new();
+    for word in words {
+        match at.get(&word) {
+            Some(&i) => out[i].1 += 1,
+            None => {
+                at.insert(word.clone(), out.len());
+                out.push((word, 1));
+            }
+        }
     }
-    let needed = (2 * words.len()).div_ceil(3);
-    let mut ranked: Vec<(u8, usize, &Note, Option<Why>)> = Vec::new();
-    for note in &store.notes {
-        let seen = seen(note, cache.notes.get(&note.id));
-        let found: Vec<Option<Found>> = words.iter().map(|w| find_word(&seen, w)).collect();
-        let hits = found.iter().flatten().count();
+    out
+}
+
+pub fn words_of(query: &str) -> Vec<(String, usize)> {
+    counted(parts(&flat(query)))
+}
+
+type Ranked<'n> = (u8, usize, DateTime<Utc>, &'n str, usize, Option<Why>);
+
+pub(crate) fn ranked<'n>(
+    notes: impl Iterator<Item = Text<'n>>,
+    cache: &Cache,
+    words: &[(String, usize)],
+) -> Vec<(usize, Option<Why>)> {
+    let typed: usize = words.iter().map(|(_, n)| n).sum();
+    let needed = (2 * typed).div_ceil(3);
+    let mut ranked: Vec<Ranked<'_>> = Vec::new();
+    for (at, note) in notes.enumerate() {
+        let seen = seen(note.title, note.body, cache.notes.get(note.id));
+        let found: Vec<(Option<Found>, usize)> = words
+            .iter()
+            .map(|(w, n)| (find_word(&seen, w), *n))
+            .collect();
+        let hits: usize = found
+            .iter()
+            .filter(|(f, _)| f.is_some())
+            .map(|(_, n)| n)
+            .sum();
         if hits == 0 {
             continue;
         }
         let score: usize = found
             .iter()
-            .flatten()
-            .map(|f| match f {
-                Found::Title => 3,
-                Found::Idea(_) => 3,
-                Found::Summary => 2,
-                Found::Text => 1,
+            .filter_map(|(f, n)| f.as_ref().map(|f| (f, n)))
+            .map(|(f, n)| {
+                n * match f {
+                    Found::Title => 3,
+                    Found::Idea(_) => 3,
+                    Found::Summary => 2,
+                    Found::Text => 1,
+                }
             })
             .sum();
-        let why = found.iter().flatten().find_map(|f| match f {
-            Found::Idea(idea) => Some(Why::Idea(idea.clone())),
-            Found::Summary => Some(Why::Summary),
+        let why = found.iter().find_map(|(f, _)| match f {
+            Some(Found::Idea(idea)) => Some(Why::Idea(idea.clone())),
+            Some(Found::Summary) => Some(Why::Summary),
             _ => None,
         });
-        let group = if found.iter().all(|f| matches!(f, Some(Found::Title))) {
+        let group = if found.iter().all(|(f, _)| matches!(f, Some(Found::Title))) {
             0
-        } else if hits == words.len() {
+        } else if hits == typed {
             1
-        } else if words.len() >= 3
+        } else if typed >= 3
             && hits >= needed
             && found
                 .iter()
-                .any(|f| matches!(f, Some(Found::Title | Found::Idea(_))))
+                .any(|(f, _)| matches!(f, Some(Found::Title | Found::Idea(_))))
         {
             2
         } else {
             continue;
         };
-        ranked.push((group, score, note, why));
+        ranked.push((group, score, note.updated_at, note.id, at, why));
     }
-    ranked.sort_by(|(ga, sa, a, _), (gb, sb, b, _)| {
+    ranked.sort_by(|(ga, sa, ua, ia, _, _), (gb, sb, ub, ib, _, _)| {
         ga.cmp(gb)
             .then(sb.cmp(sa))
-            .then(b.updated_at.cmp(&a.updated_at))
+            .then(ub.cmp(ua))
+            .then(ia.cmp(ib))
     });
-    let mut taken: HashSet<&str> = ranked.iter().map(|(_, _, n, _)| n.id.as_str()).collect();
-    let mut hits: Vec<Hit<'a>> = ranked
+    ranked
         .into_iter()
-        .map(|(_, _, note, why)| Hit { note, why })
-        .collect();
+        .map(|(_, _, _, _, at, why)| (at, why))
+        .collect()
+}
+
+pub fn finish<'a>(store: &'a Store, query: &str, mut hits: Vec<Hit<'a>>) -> Vec<Hit<'a>> {
+    let mut taken: HashSet<&str> = hits.iter().map(|h| h.note.id.as_str()).collect();
     let mut rest: Vec<&'a Note> = store
         .find(query)
         .into_iter()
         .filter(|n| taken.insert(n.id.as_str()))
         .collect();
-    rest.sort_by_key(|n| Reverse(n.updated_at));
-    hits.extend(plain(rest));
+    rest.sort_by(|a, b| b.updated_at.cmp(&a.updated_at).then(a.id.cmp(&b.id)));
+    hits.extend(rest.into_iter().map(|note| Hit { note, why: None }));
     hits
+}
+
+pub fn search<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<Hit<'a>> {
+    if tagged(query) {
+        return store
+            .find(query)
+            .into_iter()
+            .map(|note| Hit { note, why: None })
+            .collect();
+    }
+    let words = words_of(query);
+    if words.is_empty() {
+        return Vec::new();
+    }
+    let hits = ranked(store.notes.iter().map(Text::of), cache, &words)
+        .into_iter()
+        .map(|(at, why)| Hit {
+            note: &store.notes[at],
+            why,
+        })
+        .collect();
+    finish(store, query, hits)
 }
 
 pub fn with_meaning<'a>(
@@ -182,9 +253,11 @@ pub fn with_meaning<'a>(
     mut hits: Vec<Hit<'a>>,
     close: &[(String, f32)],
 ) -> Vec<Hit<'a>> {
-    if query.split_whitespace().any(|w| w.starts_with('#')) {
+    if tagged(query) {
         return hits;
     }
+    let mut close: Vec<&(String, f32)> = close.iter().collect();
+    close.sort_by(|(ia, sa), (ib, sb)| sb.total_cmp(sa).then(ia.cmp(ib)));
     let mut taken: HashSet<String> = hits.iter().map(|h| h.note.id.clone()).collect();
     for (id, _) in close {
         if let Some(note) = store.notes.iter().find(|n| &n.id == id) {
@@ -236,6 +309,116 @@ mod tests {
 
     fn titles(hits: &[Hit]) -> Vec<String> {
         hits.iter().map(|h| h.note.title.clone()).collect()
+    }
+
+    fn reference<'a>(store: &'a Store, cache: &Cache, query: &str) -> Vec<(&'a str, Option<Why>)> {
+        let words: Vec<String> = parts(&flat(query));
+        let needed = (2 * words.len()).div_ceil(3);
+        let mut ranked: Vec<(u8, usize, &Note, Option<Why>)> = Vec::new();
+        for note in &store.notes {
+            let seen = seen(&note.title, &note.body, cache.notes.get(&note.id));
+            let found: Vec<Option<Found>> = words.iter().map(|w| find_word(&seen, w)).collect();
+            let hits = found.iter().flatten().count();
+            if hits == 0 {
+                continue;
+            }
+            let score: usize = found
+                .iter()
+                .flatten()
+                .map(|f| match f {
+                    Found::Title => 3,
+                    Found::Idea(_) => 3,
+                    Found::Summary => 2,
+                    Found::Text => 1,
+                })
+                .sum();
+            let why = found.iter().flatten().find_map(|f| match f {
+                Found::Idea(idea) => Some(Why::Idea(idea.clone())),
+                Found::Summary => Some(Why::Summary),
+                _ => None,
+            });
+            let group = if found.iter().all(|f| matches!(f, Some(Found::Title))) {
+                0
+            } else if hits == words.len() {
+                1
+            } else if words.len() >= 3
+                && hits >= needed
+                && found
+                    .iter()
+                    .any(|f| matches!(f, Some(Found::Title | Found::Idea(_))))
+            {
+                2
+            } else {
+                continue;
+            };
+            ranked.push((group, score, note, why));
+        }
+        ranked.sort_by(|(ga, sa, a, _), (gb, sb, b, _)| {
+            ga.cmp(gb)
+                .then(sb.cmp(sa))
+                .then(b.updated_at.cmp(&a.updated_at))
+        });
+        let mut taken: HashSet<&str> = ranked.iter().map(|(_, _, n, _)| n.id.as_str()).collect();
+        let mut out: Vec<(&str, Option<Why>)> = ranked
+            .into_iter()
+            .map(|(_, _, note, why)| (note.id.as_str(), why))
+            .collect();
+        let mut rest: Vec<&Note> = store
+            .find(query)
+            .into_iter()
+            .filter(|n| taken.insert(n.id.as_str()))
+            .collect();
+        rest.sort_by_key(|n| std::cmp::Reverse(n.updated_at));
+        out.extend(rest.into_iter().map(|n| (n.id.as_str(), None)));
+        out
+    }
+
+    #[test]
+    fn repeated_words_rank_exactly_as_before() {
+        let (_d, mut store) = library(&[
+            ("Heaps", "A heap is a tree."),
+            ("Trees", "A tree has a root and a heap order."),
+            ("Lecture 4", "Heaps keep the minimum at the root of a tree."),
+            ("Priority queues", "Insert and pop."),
+            ("Forests", "Many trees."),
+            ("A heap tree", ""),
+            ("Unrelated", "Nothing here."),
+        ]);
+        let start = chrono::Utc::now();
+        let ids: Vec<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+        for (i, id) in ids.iter().enumerate() {
+            store.find_note_mut(id).unwrap().updated_at =
+                start - chrono::Duration::seconds(i as i64);
+        }
+        let cache = mapped(
+            &store,
+            &[
+                ("Priority queues", &["heaps", "binary tree"], "Heap order."),
+                ("Forests", &["tree"], ""),
+            ],
+        );
+        for query in [
+            "heap heap tree",
+            "a a a heap",
+            "heap tree zebra",
+            "tree heap tree heap root",
+            "heap",
+        ] {
+            let now: Vec<(&str, Option<Why>)> = search(&store, &cache, query)
+                .into_iter()
+                .map(|h| (h.note.id.as_str(), h.why))
+                .collect();
+            assert!(!now.is_empty(), "{query}");
+            assert_eq!(now, reference(&store, &cache, query), "{query}");
+        }
+    }
+
+    #[test]
+    fn repeated_words_are_counted_once_in_first_seen_order() {
+        assert_eq!(
+            counted(vec!["b".into(), "a".into(), "b".into(), "b".into()]),
+            vec![("b".to_string(), 3), ("a".to_string(), 1)]
+        );
     }
 
     #[test]

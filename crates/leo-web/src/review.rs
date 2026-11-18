@@ -9,7 +9,6 @@ use crate::chats::{self, Chat, Ref};
 
 pub const DUE_AFTER_HOURS: i64 = 20;
 pub const MOST_MISSED: usize = 20;
-const MOST_REMEMBERED: usize = 2000;
 
 pub fn count(dir: &Path) -> usize {
     chats::db_of(dir)
@@ -24,11 +23,10 @@ pub fn reset(dir: &Path) -> bool {
 }
 
 pub(crate) fn insert_all(c: &rusqlite::Connection, keys: &[String]) -> rusqlite::Result<()> {
-    for key in keys.iter().filter(|k| valid_key(k)) {
-        c.execute(
-            "INSERT OR IGNORE INTO reviewed (key, n) VALUES (?1, (SELECT coalesce(MAX(n), 0) + 1 FROM reviewed))",
-            [key],
-        )?;
+    let base: i64 = c.query_row("SELECT coalesce(MAX(n), 0) FROM reviewed", [], |r| r.get(0))?;
+    let mut insert = c.prepare("INSERT OR IGNORE INTO reviewed (key, n) VALUES (?1, ?2)")?;
+    for (i, key) in keys.iter().filter(|k| valid_key(k)).enumerate() {
+        insert.execute(rusqlite::params![key, base + 1 + i as i64])?;
     }
     Ok(())
 }
@@ -290,7 +288,15 @@ pub fn mark_reviewed(dir: &Path, keys: &[String]) -> Result<usize> {
     chats::db_of(dir).with(|c| {
         let tx = c.transaction()?;
         let before: i64 = tx.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get(0))?;
-        insert_all(&tx, keys)?;
+        let alive: Vec<String> = keys
+            .iter()
+            .filter(|key| {
+                key.rsplit_once(':')
+                    .is_some_and(|(chat, _)| live.contains(chat))
+            })
+            .cloned()
+            .collect();
+        insert_all(&tx, &alive)?;
         let after: i64 = tx.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get(0))?;
         let held: Vec<String> = {
             let mut found = tx.prepare("SELECT key FROM reviewed")?;
@@ -305,10 +311,6 @@ pub fn mark_reviewed(dir: &Path, keys: &[String]) -> Result<usize> {
                 tx.execute("DELETE FROM reviewed WHERE key = ?1", [&key])?;
             }
         }
-        tx.execute(
-            "DELETE FROM reviewed WHERE n <= (SELECT MAX(n) FROM reviewed) - ?1",
-            [MOST_REMEMBERED as i64],
-        )?;
         tx.commit()?;
         Ok((after - before).max(0) as usize)
     })
@@ -590,5 +592,37 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    fn marks_of(chat: &str, count: usize) -> Vec<String> {
+        (0..count).map(|i| format!("{chat}:{i:016x}")).collect()
+    }
+
+    #[test]
+    fn every_mark_is_kept_and_marks_of_a_deleted_chat_are_not() {
+        let dir = tempfile::tempdir().unwrap();
+        study(dir.path(), "chat-00000001", quiz(), at(5, 9));
+        let keys = marks_of("chat-00000001", 2500);
+        assert_eq!(mark_reviewed(dir.path(), &keys).unwrap(), 2500);
+        assert_eq!(count(dir.path()), 2500);
+        let unknown = marks_of("chat-00000002", 10);
+        assert_eq!(mark_reviewed(dir.path(), &unknown).unwrap(), 0);
+        assert_eq!(count(dir.path()), 2500);
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn marking_costs_in_step_with_the_count() {
+        let dir = tempfile::tempdir().unwrap();
+        study(dir.path(), "chat-00000001", quiz(), at(5, 9));
+        let mut took = Vec::new();
+        for size in [10_000, 40_000] {
+            reset(dir.path());
+            let keys = marks_of("chat-00000001", size);
+            let started = std::time::Instant::now();
+            assert_eq!(mark_reviewed(dir.path(), &keys).unwrap(), size);
+            took.push(started.elapsed());
+        }
+        assert!(took[1] < took[0] * 6, "{took:?}");
     }
 }

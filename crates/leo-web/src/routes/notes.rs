@@ -29,6 +29,8 @@ pub(crate) struct SearchParams {
     #[serde(default)]
     pub(crate) limit: Option<usize>,
     #[serde(default)]
+    pub(crate) offset: usize,
+    #[serde(default)]
     pub(crate) brief: bool,
 }
 
@@ -424,6 +426,7 @@ pub(crate) async fn move_note(
 }
 
 pub(crate) const SEARCH_MOST: usize = 300;
+pub(crate) const WORDS_UNDER_LOCK: usize = 16;
 
 #[derive(serde::Serialize)]
 pub(crate) struct SearchHit {
@@ -433,52 +436,245 @@ pub(crate) struct SearchHit {
     pub(crate) why: Option<crate::search::Why>,
 }
 
+type Page = (
+    usize,
+    Vec<(leo_core::notes::Note, Option<crate::search::Why>)>,
+);
+
+fn kept_page(
+    store: &Store,
+    kept: &crate::Searched,
+    now: (u64, u64, &Arc<crate::graph::Cache>),
+    offset: usize,
+    limit: usize,
+) -> Option<Page> {
+    let same = kept.stamps.0 == now.0
+        && kept.stamps.1 == now.1
+        && std::sync::Weak::ptr_eq(&kept.stamps.2, &Arc::downgrade(now.2));
+    if !same {
+        return None;
+    }
+    let page = kept
+        .hits
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .filter_map(|(id, at, why)| {
+            store
+                .notes
+                .get(*at)
+                .filter(|n| &n.id == id)
+                .or_else(|| store.find_note(id))
+                .map(|n| (n.clone(), why.clone()))
+        })
+        .collect();
+    Some((kept.hits.len(), page))
+}
+
+fn settle(
+    store: &Store,
+    hits: Vec<crate::search::Hit<'_>>,
+    query: String,
+    stamps: (u64, u64, std::sync::Weak<crate::graph::Cache>),
+    offset: usize,
+    limit: usize,
+) -> (crate::Searched, Page) {
+    let at: std::collections::HashMap<&str, usize> = if hits.is_empty() {
+        Default::default()
+    } else {
+        store
+            .notes
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.id.as_str(), i))
+            .collect()
+    };
+    let page = hits
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|h| (h.note.clone(), h.why.clone()))
+        .collect();
+    let kept = hits
+        .into_iter()
+        .map(|h| (h.note.id.clone(), at[h.note.id.as_str()], h.why))
+        .collect::<Vec<_>>();
+    let total = kept.len();
+    (
+        crate::Searched {
+            query,
+            stamps,
+            hits: Arc::new(kept),
+        },
+        (total, page),
+    )
+}
+
 pub(crate) async fn search_notes(
     State(state): State<AppState>,
     Query(params): Query<SearchParams>,
-) -> Result<Json<Vec<SearchHit>>, StatusCode> {
-    let graphs = state.graphs.clone();
+) -> Result<Response, StatusCode> {
     let q = params.q.clone().unwrap_or_default();
-    let close = {
+    let limit = params.limit.unwrap_or(SEARCH_MOST);
+    let offset = params.offset;
+    let kept = state
+        .searched
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+        .filter(|s| s.query == q);
+    let page = match kept {
+        Some(kept) => {
+            let graphs = Arc::clone(&state.graphs);
+            let vectors = Arc::clone(&state.vectors);
+            state
+                .read_store(move |store| {
+                    let cache = graphs.load();
+                    Ok(kept_page(
+                        store,
+                        &kept,
+                        (store.fingerprint(), vectors.version(), &cache),
+                        offset,
+                        limit,
+                    ))
+                })
+                .await?
+        }
+        None => None,
+    };
+    let (total, notes) = match page {
+        Some(page) => page,
+        None => fresh_search(&state, q.clone(), offset, limit).await?,
+    };
+    let mut seen = std::collections::HashSet::new();
+    let words: Vec<String> = q
+        .split_whitespace()
+        .map(|w| w.trim_start_matches('#').to_lowercase())
+        .filter(|w| !w.is_empty() && seen.insert(w.clone()))
+        .collect();
+    let brief = params.brief;
+    let found = tokio::task::spawn_blocking(move || {
+        notes
+            .into_iter()
+            .map(|(note, why)| SearchHit {
+                note: if brief {
+                    NoteResponse::brief(&note, &words)
+                } else {
+                    NoteResponse::from_note(&note)
+                },
+                why,
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(([("x-total", total.to_string())], Json(found)).into_response())
+}
+
+async fn fresh_search(
+    state: &AppState,
+    q: String,
+    offset: usize,
+    limit: usize,
+) -> Result<Page, StatusCode> {
+    let words = crate::search::words_of(&q);
+    let version = state.vectors.version();
+    let (close, cache) = {
         let meaning = state.meaning.clone();
-        let vectors = std::sync::Arc::clone(&state.vectors);
+        let vectors = Arc::clone(&state.vectors);
+        let graphs = Arc::clone(&state.graphs);
         let asked = q.clone();
         tokio::task::spawn_blocking(move || {
-            crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 20)
+            (
+                crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 20),
+                graphs.load(),
+            )
         })
         .await
-        .unwrap_or_default()
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
     };
-    state
-        .read_store(move |store| {
-            let cache = graphs.load();
-            let words: Vec<String> = q
-                .split_whitespace()
-                .map(|w| w.trim_start_matches('#').to_lowercase())
-                .filter(|w| !w.is_empty())
-                .collect();
-            let limit = params.limit.unwrap_or(SEARCH_MOST).min(SEARCH_MOST);
-            Ok(Json(
-                crate::search::with_meaning(
+    let graph = Arc::downgrade(&cache);
+    let (kept, page) = if crate::search::tagged(&q) || words.len() <= WORDS_UNDER_LOCK {
+        state
+            .read_store(move |store| {
+                let hits = crate::search::with_meaning(
                     store,
                     &q,
                     crate::search::search(store, &cache, &q),
                     &close,
-                )
-                .into_iter()
-                .take(limit)
-                .map(|hit| SearchHit {
-                    note: if params.brief {
-                        NoteResponse::brief(hit.note, &words)
-                    } else {
-                        NoteResponse::from_note(hit.note)
-                    },
-                    why: hit.why,
-                })
-                .collect(),
-            ))
+                );
+                let stamps = (store.fingerprint(), version, graph);
+                Ok(settle(store, hits, q, stamps, offset, limit))
+            })
+            .await?
+    } else {
+        let (copy, taken_at) = state
+            .read_store(|store| {
+                let copy: Vec<(String, String, String, chrono::DateTime<chrono::Utc>)> = store
+                    .notes
+                    .iter()
+                    .map(|n| (n.id.clone(), n.title.clone(), n.body.clone(), n.updated_at))
+                    .collect();
+                Ok((copy, store.fingerprint()))
+            })
+            .await?;
+        let (ids, ranked) = tokio::task::spawn_blocking(move || {
+            let ranked = crate::search::ranked(
+                copy.iter()
+                    .map(|(id, title, body, updated_at)| crate::search::Text {
+                        id,
+                        title,
+                        body,
+                        updated_at: *updated_at,
+                    }),
+                &cache,
+                &words,
+            );
+            let ids: Vec<String> = copy.into_iter().map(|(id, ..)| id).collect();
+            (ids, ranked)
         })
         .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        state
+            .read_store(move |store| {
+                let unmoved = store.fingerprint() == taken_at;
+                let mut by_id: Option<std::collections::HashMap<&str, usize>> = None;
+                let hits = ranked
+                    .into_iter()
+                    .filter_map(|(at, why)| {
+                        let id = ids[at].as_str();
+                        let here = if unmoved {
+                            store.notes.get(at).filter(|n| n.id == id)
+                        } else {
+                            None
+                        };
+                        let note = here.or_else(|| {
+                            let by_id = by_id.get_or_insert_with(|| {
+                                store
+                                    .notes
+                                    .iter()
+                                    .enumerate()
+                                    .map(|(i, n)| (n.id.as_str(), i))
+                                    .collect()
+                            });
+                            by_id.get(id).map(|i| &store.notes[*i])
+                        })?;
+                        Some(crate::search::Hit { note, why })
+                    })
+                    .collect();
+                let hits = crate::search::with_meaning(
+                    store,
+                    &q,
+                    crate::search::finish(store, &q, hits),
+                    &close,
+                );
+                let stamps = (store.fingerprint(), version, graph);
+                Ok(settle(store, hits, q, stamps, offset, limit))
+            })
+            .await?
+    };
+    *state.searched.lock().unwrap_or_else(|e| e.into_inner()) = Some(kept);
+    Ok(page)
 }
 
 #[derive(serde::Serialize)]

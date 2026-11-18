@@ -815,3 +815,380 @@ fn moving_a_task_in_felix_keeps_its_end_time_and_the_undo_does_too() {
         .unwrap();
     });
 }
+
+fn searched(state: &AppState, params: serde_json::Value) -> (usize, Vec<serde_json::Value>) {
+    let response = run(crate::routes::notes::search_notes(
+        State(state.clone()),
+        Query(serde_json::from_value(params).unwrap()),
+    ))
+    .unwrap();
+    let total = response.headers()["x-total"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let found = json_of(response).as_array().unwrap().clone();
+    (total, found)
+}
+
+fn ids_of(found: &[serde_json::Value]) -> Vec<String> {
+    found
+        .iter()
+        .map(|n| n["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_very_long_search_uses_every_word_and_does_not_hold_the_notes_lock() {
+    let filler: Vec<String> = (0..3000).map(|i| format!("filler{i}")).collect();
+    let body = filler.join(" ");
+    let mut notes: Vec<(String, &str)> = (0..40).map(|i| (format!("Note {i}"), "")).collect();
+    notes.push(("zebra".into(), ""));
+    let shaped: Vec<(&str, &str)> = notes.iter().map(|(t, d)| (t.as_str(), *d)).collect();
+    let (state, _dir, ids) = state_with(&shaped);
+    {
+        let mut store = state.fresh();
+        for id in &ids {
+            store.find_note_mut(id).unwrap().body = body.clone();
+        }
+        store.save().unwrap();
+    }
+    let query = filler
+        .iter()
+        .cycle()
+        .take(9499)
+        .cloned()
+        .chain(["zebra".to_string()])
+        .collect::<Vec<_>>()
+        .join(" ");
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let searching = {
+        let state = state.clone();
+        let done = Arc::clone(&done);
+        std::thread::spawn(move || {
+            let found = searched(&state, serde_json::json!({ "q": query, "brief": true }));
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            found
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let started = std::time::Instant::now();
+    run(state.read_store(|s| Ok(s.notes.len()))).unwrap();
+    let waited = started.elapsed();
+    let still_searching = !done.load(std::sync::atomic::Ordering::SeqCst);
+    let (total, found) = searching.join().unwrap();
+    assert!(
+        still_searching,
+        "the search ended before the read: nothing was measured"
+    );
+    assert!(
+        waited < std::time::Duration::from_millis(200),
+        "a read waited {waited:?} behind a long search"
+    );
+    assert_eq!(total, 1);
+    assert_eq!(found[0]["title"], "zebra");
+}
+
+#[test]
+fn search_results_are_read_a_page_at_a_time() {
+    let titles: Vec<String> = (0..350).map(|i| format!("Match {i}")).collect();
+    let notes: Vec<(&str, &str)> = titles.iter().map(|t| (t.as_str(), "")).collect();
+    let (state, _dir, _) = state_with(&notes);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "match", "limit": 61 }));
+    assert_eq!((total, first.len()), (350, 61));
+    let (total, late) = searched(
+        &state,
+        serde_json::json!({ "q": "match", "offset": 300, "limit": 61 }),
+    );
+    assert_eq!((total, late.len()), (350, 50));
+    let (total, all) = searched(&state, serde_json::json!({ "q": "match", "limit": 1000 }));
+    assert_eq!((total, all.len()), (350, 350));
+    let (total, plain) = searched(&state, serde_json::json!({ "q": "match" }));
+    assert_eq!((total, plain.len()), (350, 300));
+    let mut joined = Vec::new();
+    for offset in (0..350).step_by(61) {
+        let (_, page) = searched(
+            &state,
+            serde_json::json!({ "q": "match", "offset": offset, "limit": 61 }),
+        );
+        joined.extend(ids_of(&page));
+    }
+    assert_eq!(joined, ids_of(&all));
+}
+
+#[test]
+fn sixty_notes_with_one_title_are_all_reachable_and_none_repeats() {
+    let folders: Vec<String> = (0..60).map(|i| format!("F{i:02}")).collect();
+    let notes: Vec<(&str, &str)> = folders.iter().map(|f| ("Same", f.as_str())).collect();
+    let (state, _dir, ids) = state_with(&notes);
+    {
+        let mut store = state.fresh();
+        let at = chrono::Utc::now();
+        for id in &ids {
+            let note = store.find_note_mut(id).unwrap();
+            note.body = "the same text".into();
+            note.updated_at = at;
+        }
+        store.save().unwrap();
+    }
+    let pages = |state: &AppState| {
+        let (_, first) = searched(state, serde_json::json!({ "q": "same", "limit": 50 }));
+        let (_, second) = searched(
+            state,
+            serde_json::json!({ "q": "same", "offset": 50, "limit": 50 }),
+        );
+        (first, second)
+    };
+    let (first, second) = pages(&state);
+    assert_eq!((first.len(), second.len()), (50, 10));
+    let order: Vec<String> = ids_of(&first).into_iter().chain(ids_of(&second)).collect();
+    let distinct: std::collections::HashSet<&String> = order.iter().collect();
+    assert_eq!(distinct.len(), 60);
+    let places: std::collections::HashSet<&str> = first
+        .iter()
+        .chain(&second)
+        .map(|n| n["directory"].as_str().unwrap())
+        .collect();
+    assert_eq!(places.len(), 60);
+    state.store.lock().unwrap().reload = true;
+    *state.searched.lock().unwrap() = None;
+    let (first, second) = pages(&state);
+    let again: Vec<String> = ids_of(&first).into_iter().chain(ids_of(&second)).collect();
+    assert_eq!(again, order);
+}
+
+#[test]
+fn a_later_page_does_not_search_again() {
+    let (mut state, _dir, ids) = state_with(&[("Queues one", ""), ("Queues two", "")]);
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[0]).unwrap().body = "Take the oldest item first.".into();
+        store.find_note_mut(&ids[1]).unwrap().body = "A line of people.".into();
+        store.save().unwrap();
+    }
+    let inner = crate::vectors::fake_meaning();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let meaning: crate::vectors::Meaning = {
+        let asked = Arc::clone(&asked);
+        Arc::new(move |texts: &[String], query: bool| {
+            if query {
+                asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            inner(texts, query)
+        })
+    };
+    crate::vectors::catch_up(&state.fresh(), &state.vectors, &meaning, 100);
+    state.meaning = Some(meaning);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "queues", "limit": 1 }));
+    let (_, second) = searched(
+        &state,
+        serde_json::json!({ "q": "queues", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(total, 2);
+    assert_ne!(ids_of(&first), ids_of(&second));
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[1]).unwrap().body = "A line of people, waiting.".into();
+        store.save().unwrap();
+    }
+    searched(
+        &state,
+        serde_json::json!({ "q": "queues", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_changed_library_drops_the_kept_ranking() {
+    let (state, _dir, ids) = state_with(&[("Match one", ""), ("Match two", "")]);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "match", "limit": 1 }));
+    assert_eq!((total, first.len()), (2, 1));
+    let leaving = ids
+        .iter()
+        .find(|id| **id != ids_of(&first)[0])
+        .unwrap()
+        .clone();
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&leaving).unwrap().title = "Other".into();
+        store.save().unwrap();
+    }
+    let (total, next) = searched(
+        &state,
+        serde_json::json!({ "q": "match", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(total, 1);
+    assert!(next.is_empty(), "{next:?}");
+}
+
+const BENCH_WORDS: &[&str] = &[
+    "the", "graph", "search", "queue", "stack", "heap", "tree", "node", "edge", "visit", "order",
+    "breadth", "depth", "first", "lecture", "exam", "proof", "lemma", "theorem", "plant", "light",
+    "sugar", "cell", "energy", "market", "price", "supply", "demand", "history", "empire", "river",
+    "trade", "language", "grammar", "verb", "noun", "memory", "cache", "process", "thread", "lock",
+    "network", "packet", "route", "signal", "matrix", "vector", "integral", "limit", "series",
+    "function", "variable", "loop", "array", "list", "hash", "table", "sort", "merge", "split",
+];
+
+fn bench_body(seed: usize) -> String {
+    let mut at = (seed as u64).wrapping_mul(6_364_136_223_846_793_005) ^ 0x9e37_79b9;
+    let mut body = String::new();
+    while body.len() < 5000 {
+        at = at
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        body.push_str(BENCH_WORDS[(at >> 33) as usize % BENCH_WORDS.len()]);
+        body.push(if body.len() % 480 < 8 { '\n' } else { ' ' });
+    }
+    body
+}
+
+fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let notes_dir = dir.path().join("notes");
+    let mut store = Store::load_from(&notes_dir).unwrap();
+    for i in 0..n {
+        store
+            .create_note(
+                format!("Lecture {i} {}", BENCH_WORDS[i % BENCH_WORDS.len()]),
+                bench_body(i),
+                vec![],
+                &format!("Course {}", i % 20),
+            )
+            .unwrap();
+    }
+    store.save().unwrap();
+    let store = Store::load_from(&notes_dir).unwrap();
+    let (mut state, other, _) = state_with(&[]);
+    state.graphs = Arc::new(graph::Graphs::for_notes(&notes_dir, None));
+    state.notes_dir = notes_dir;
+    state.store = Arc::new(Mutex::new(Storage {
+        changes: Some(store_refresh::Changes::new(&state.notes_dir)),
+        store,
+        reload: false,
+    }));
+    while state.store.lock().unwrap().changes.as_mut().unwrap().due() {}
+    (state, dir, other)
+}
+
+fn bench_ms(started: std::time::Instant) -> f64 {
+    started.elapsed().as_secs_f64() * 1000.0
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn search_and_review_marks_benchmark() {
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let n: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let built = std::time::Instant::now();
+    let (state, _dir, _other) = bench_state(n);
+    println!("P-C06 notes={n} library_built_ms={:.0}", bench_ms(built));
+    let search = |q: &str, extra: serde_json::Value| {
+        let mut params = serde_json::json!({ "q": q, "brief": true });
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let started = std::time::Instant::now();
+        let found = rt.block_on(crate::routes::notes::search_notes(
+            State(state.clone()),
+            Query(serde_json::from_value(params).unwrap()),
+        ));
+        assert!(found.is_ok());
+        bench_ms(started)
+    };
+    let mut one: Vec<f64> = (0..5)
+        .map(|_| {
+            *state.searched.lock().unwrap() = None;
+            search("queue", serde_json::json!({}))
+        })
+        .collect();
+    one.sort_by(f64::total_cmp);
+    println!(
+        "P-C06 notes={n} search_1_word_ms={:.1} profile={profile}",
+        one[2]
+    );
+    let long = BENCH_WORDS
+        .iter()
+        .cycle()
+        .take(9500)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let long_ms = search(&long, serde_json::json!({}));
+    let find_ms = {
+        let store = state.store.lock().unwrap();
+        let started = std::time::Instant::now();
+        std::hint::black_box(store.find(&long).len());
+        let long_find = bench_ms(started);
+        let started = std::time::Instant::now();
+        std::hint::black_box(store.find("queue").len());
+        (long_find, bench_ms(started))
+    };
+    println!(
+        "P-C06 notes={n} store_find_9500_words_ms={:.1} store_find_1_word_ms={:.1} profile={profile}",
+        find_ms.0, find_ms.1
+    );
+    println!("P-C06 notes={n} search_9500_words_ms={long_ms:.1} profile={profile}");
+    *state.searched.lock().unwrap() = None;
+    let waiting = {
+        let other = state.clone();
+        let long = long.clone();
+        let searching = std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(crate::routes::notes::search_notes(
+                    State(other),
+                    Query(serde_json::from_value(serde_json::json!({ "q": long })).unwrap()),
+                ))
+                .is_ok()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut longest = 0f64;
+        while !searching.is_finished() {
+            let started = std::time::Instant::now();
+            rt.block_on(state.read_store(|s| Ok(s.notes.len())))
+                .unwrap();
+            longest = longest.max(bench_ms(started));
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(searching.join().unwrap());
+        longest
+    };
+    search("queue", serde_json::json!({ "limit": 61 }));
+    let later = search("queue", serde_json::json!({ "offset": 61, "limit": 61 }));
+    println!(
+        "P-C06 notes={n} longest_read_behind_long_search_ms={waiting:.1} second_page_ms={later:.3} profile={profile}"
+    );
+    let chat = "chat-00000001";
+    crate::chats::save(
+        &state.chats,
+        chat,
+        crate::chats::Saving {
+            title: String::new(),
+            refs: vec![],
+            messages: vec![serde_json::json!({ "role": "user", "text": "quiz me" })],
+        },
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    for k in [10_000usize, 40_000] {
+        crate::review::reset(&state.chats);
+        let keys: Vec<String> = (0..k).map(|i| format!("{chat}:{i:016x}")).collect();
+        let started = std::time::Instant::now();
+        let added = crate::review::mark_reviewed(&state.chats, &keys).unwrap();
+        println!(
+            "P-C06 mark_reviewed keys={k} added={added} ms={:.1} profile={profile}",
+            bench_ms(started)
+        );
+    }
+}

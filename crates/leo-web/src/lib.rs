@@ -194,6 +194,14 @@ struct AppState {
     activity: Arc<Activity>,
     steering: steer::Steering,
     vectors: Arc<vectors::Vectors>,
+    searched: Arc<Mutex<Option<Searched>>>,
+}
+
+#[derive(Clone)]
+struct Searched {
+    query: String,
+    stamps: (u64, u64, std::sync::Weak<graph::Cache>),
+    hits: Arc<Vec<(String, usize, Option<search::Why>)>>,
 }
 
 impl std::ops::Deref for AppState {
@@ -634,6 +642,7 @@ pub(crate) async fn start_in(
         activity: Default::default(),
         steering: Default::default(),
         vectors,
+        searched: Default::default(),
     };
 
     let expiry = tokio::spawn({

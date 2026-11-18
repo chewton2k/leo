@@ -454,7 +454,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists at
   most 1000 notes (2026-11-09).
 - Search (`search.rs`): titles and acronyms, text, graph concepts and summaries,
-  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Result cards
+  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Every word
+  counts, a repeated one looked up once; a query of more than `WORDS_UNDER_LOCK`
+  (16) different words is matched on a copy outside the notes lock. Results are
+  read a page at a time (`offset`, `limit`, `x-total`; a given `limit` is never
+  cut, none means 300); exact ties go by note id, and later pages come from the
+  ranking kept for the newest search (`AppState.searched`, dropped when the
+  store, the vectors or the graph cache change). Result cards
   mark matches with `<mark>` in ink and a pencil underline (`.card mark::after`,
   three masks by `nth-of-type`, a plain underline in forced colours); the in-note
   `::highlight(leo-search)` keeps its strong fill. Reading
@@ -557,7 +563,7 @@ the web (root CLAUDE.md).
   the answer ungraded and releases the warm session. Predictions (`predict:
   yes`) are never marked, scored or counted. `quiz_from` shuffles options and
   refuses `gives_itself_away`. Sessions stop at `MOST_SESSION_QUESTIONS`; review
-  (`review.rs`) brings misses back after 20 h. The `aside` answer line must stay
+  (`review.rs`) brings misses back after 20 h; a mark lasts as long as its chat. The `aside` answer line must stay
   one line.
 - Marked quizzes read like a teacher's marks (2026-11-15, the user's call:
   green and red kept, in muted chalk tones): `--chalk-good`/`--chalk-bad` (one
