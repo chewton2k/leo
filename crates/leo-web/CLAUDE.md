@@ -182,7 +182,7 @@ Decided: one app, window only (2026-10-31).
   `doc-empty` set by doc.js on every draw and change);
   scrollbars are thin and warm (`* { scrollbar-width:
   thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
-  page's own bar for `.page-bar`. Focus rings are unchanged.
+  page's own bar for `.page-bar`. Focus rings are unchanged. Repeated style rules are written once (2026-11-18): one comma-list rule per focus-ring offset (a second one only where a rule between its members sets an outline for the same element), one rule for the chip on-state, one for the cut-off-with-dots trio (`overflow: hidden; text-overflow: ellipsis; white-space: nowrap`) per run of rules no other rule can interrupt, and the tokens `--ring-soft`, `--t-fade` and `--r-panel`. A new rule that repeats one of these joins the shared rule; `node tests/style-merge.check.js <base ref>` (Playwright library only, no server) compares the computed style of every changed selector against a base commit in light, dark, narrow and forced colours and must report 0 differences.
 - Copying a selection that holds a picture (note reading view and Felix's answers, 2026-11-18) also puts
   `text/html` on the clipboard: `leoMarkdown.selectionCopy` draws each loaded picture to a canvas and
   `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a

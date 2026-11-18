@@ -44,10 +44,13 @@
   --t-follow: 180ms;
   --t-open: 200ms;
   --t-drawer: 240ms;
+  --t-fade: .14s;
   --t-follow-out: calc(var(--t-follow) * .8);
   --t-open-out: calc(var(--t-open) * .8);
   --shadow: 0 0 0 1px rgba(60, 50, 35, .04), 0 1px 2px rgba(60, 50, 35, .06), 0 3px 10px -3px rgba(60, 50, 35, .10);
   --radius: 14px;
+  --r-panel: 16px;
+  --ring-soft: 0 0 0 3px var(--accent-soft);
   --shadow-sm: 0 0 0 1px rgba(60, 50, 35, .04), 0 1px 2px rgba(60, 50, 35, .07);
   --shadow-pop: 0 0 3px rgba(60, 50, 35, .16), 0 2px 4px rgba(60, 50, 35, .06), 0 14px 36px -10px rgba(60, 50, 35, .24);
   --mark-ink: 50%;

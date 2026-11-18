@@ -22,6 +22,9 @@ const CAL_HOLD_MS = 300;
 const CAL_MONTH_CHIPS = 3;
 const KIND_LABEL = { assignment: 'Assignment', exam: 'Exam', meeting: 'Meeting', 'follow-up': 'Follow-up', deadline: 'Deadline', other: 'Other' };
 const KIND_ORDER = ['assignment', 'exam', 'meeting', 'follow-up', 'deadline', 'other'];
+function kindChips(id, selected) {
+  return `<div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="${id}">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${selected === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${selected === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>`;
+}
 
 function calLocale() {
   return navigator.language || 'en-US';
@@ -1048,7 +1051,7 @@ function calPeekTask(side, id, on) {
       ${leo ? `<span class="hint">to</span><input class="set-input" type="time" id="cal-peek-end" aria-label="Ends" value="${esc(calHM(slot.end) || '')}"${slot.time ? '' : ' disabled'}>` : ''}
     </span></div>
     ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
-    <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="cal-peek-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
+    ${kindChips('cal-peek-kinds', task.kind)}
     <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value" id="cal-peek-google">${esc(calPeekGoogle(task))}</span></div>
@@ -1296,7 +1299,7 @@ function newTaskSheet(day = null) {
       <div class="task-left">
         <input class="set-input task-title" id="task-title" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
         <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…"></textarea></label>
-        <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${k === 'other' ? ' on' : ''}" data-kind="${k}" aria-pressed="${k === 'other'}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
+        ${kindChips('task-kinds', 'other')}
         <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint([]))}</span></div>
       </div>
       <div class="picker-box" id="pick-box"></div>
@@ -1420,7 +1423,7 @@ function taskSheet(id, on = null) {
     <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
     <div class="set-row"><span class="set-label">${repeating ? 'Starts' : 'Date'}</span><span class="set-value">${esc(when)}<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(task.id)}">${task.date ? 'Change' : 'Set date'}</button></span></div>
     ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
-    <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
+    ${kindChips('task-kinds', task.kind)}
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value">${esc(google)}</span></div>
     ${moved ? `<p class="set-note">The Google event is on another day. <a href="${esc(S.googleDay(S.dayKey(new Date(onGoogle.start))))}" target="_blank" rel="noopener">Open that day in Google Calendar</a></p>` : ''}

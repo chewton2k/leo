@@ -31,7 +31,6 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .settings-link span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .settings-link:hover { background: var(--tint); color: var(--text); }
 .settings-link.on { background: var(--raised); color: var(--text); font-weight: 600; }
-.settings-link:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .settings-section { grid-column: 3; grid-row: 1; min-width: 0; padding: 14px 0 calc(var(--bottom) + 110px); }
 .settings-head { margin-bottom: 22px; }
 .settings-head h1 { text-wrap: balance; margin: 0; font-size: var(--fs-2xl); font-weight: 720; line-height: 1.2; letter-spacing: -.02em; }
@@ -76,8 +75,8 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .set-card .shortcut-field { background: var(--raised); }
 .shortcut-field kbd { flex: none; font-family: inherit; font-size: var(--fs-xs); font-weight: var(--fw-semibold); line-height: 1; color: var(--muted); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 3px 6px; }
 .shortcut-held { display: flex; gap: 6px; margin-left: auto; flex: none; }
-.shortcut-prompt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-md); color: var(--faint); }
-.shortcut-field.recording { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.shortcut-prompt { flex: 1; min-width: 0; font-size: var(--fs-md); color: var(--faint); }
+.shortcut-field.recording { border-color: var(--accent); box-shadow: var(--ring-soft); }
 .shortcut-field.recording kbd { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
 #dictation-shortcut-status.ok { color: var(--good); }
 #dictation-shortcut-status.bad { color: var(--danger); }
@@ -130,9 +129,9 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .select-control.has-menu > svg { display: none; }
 .select-menu-button { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; min-width: 0; min-height: 38px; padding: 0 10px 0 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--bg); color: var(--text); font-size: var(--fs-base); font-weight: 500; text-align: left; cursor: pointer; transition: border-color var(--t-press) ease, box-shadow var(--t-press) ease; }
 .select-menu-button:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
-.select-menu-button[aria-expanded="true"] { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
-.select-menu-button:focus-visible { border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); outline: none; }
-.select-menu-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-menu-button[aria-expanded="true"] { border-color: var(--accent); box-shadow: var(--ring-soft); outline: none; }
+.select-menu-button:focus-visible { border-color: var(--focus); box-shadow: var(--ring-soft); outline: none; }
+.select-menu-text { min-width: 0; }
 .select-menu-button svg { width: 15px; height: 15px; flex: none; color: var(--muted); transform: rotate(90deg); transition: transform var(--t-follow) var(--ease-arrive); }
 .select-menu-button[aria-expanded="true"] svg { transform: rotate(-90deg); }
 .select-menu, .margin-mode-menu { position: absolute; z-index: 20; right: 0; top: calc(100% + 6px); min-width: 100%; width: max-content; max-width: min(360px, calc(100vw - 32px)); max-height: 280px; overflow-y: auto; overscroll-behavior: contain; padding: 5px; border: 0; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow-pop); outline: none; }
@@ -156,7 +155,6 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .switch::before { content: ''; position: absolute; top: 2px; left: 2px; width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: var(--shadow-sm), 0 0 0 .5px rgba(0, 0, 0, .06); transition: transform var(--t-drawer) var(--ease-move); }
 .switch:checked { background: var(--accent); }
 .switch:checked::before { transform: translateX(18px); background: var(--accent-text); }
-.switch:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .switch:disabled { opacity: .5; cursor: default; }
 /* Segmented control: the pill slides under whichever option is picked. */
 .upload-where { display: grid; gap: 6px; margin: 0 8px 10px; }
@@ -171,7 +169,6 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .segment.on { color: var(--text); }
 .segment.on svg:not(.felix) { color: var(--accent); }
 .segment:hover:not(.on) { color: var(--text); }
-.segment:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 :root[data-theme="dark"] .segment-pill { background: color-mix(in srgb, var(--text) 14%, var(--surface)); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .segment-pill { background: color-mix(in srgb, var(--text) 14%, var(--surface)); } }
 @media (max-width: 520px) { .segment span { display: none; } .segment:not(:has(svg)) span { display: inline; } }
@@ -187,7 +184,24 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .choice-pick { position: relative; display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 8px 8px 11px; border-radius: var(--r-tile); background: var(--tint); cursor: pointer; }
 .choice-pick.on, .set-card .choice-pick { background: var(--raised); }
 .choice-pick > input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; appearance: none; -webkit-appearance: none; }
-.choice-pick:has(> input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.margin-toggle:focus-visible,
+.margin-chat:focus-visible,
+.margin-pin:focus-visible,
+.margin-copy:focus-visible,
+.margin-send:focus-visible,
+.margin-earlier:focus-visible,
+.margin-add:focus-visible,
+.margin-mark:focus-visible,
+.margin-revisit:focus-visible,
+.card:focus-visible,
+:is(.prose .task input, .sched-check, .cal-check):focus-visible,
+.sched-day:focus-visible .sched-n,
+.repeat-day:focus-visible,
+.tasks-window:focus-visible,
+.switch:focus-visible,
+.choice-pick:has(> input:focus-visible),
+button.choice-pick:focus-visible,
+.onboarding-model:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .choice-diagram { display: block; margin-bottom: 7px; border-radius: var(--r-xs); background: var(--page); overflow: hidden; }
 .choice-diagram > svg { display: block; width: 100%; height: auto; }
 .choice-diagram > .read-sample { display: grid; place-items: center; min-height: 52px; padding: 6px; text-align: center; line-height: 1.3; color: var(--text); overflow-wrap: anywhere; }
@@ -209,7 +223,6 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 }
 .choice-ring { position: absolute; z-index: 1; top: 0; bottom: 0; left: 0; width: calc((100% - (var(--count) - 1) * var(--gap)) / var(--count)); border-radius: var(--r-tile); box-shadow: 0 0 0 1.5px var(--text); pointer-events: none; transform: translateX(calc((100% + var(--gap)) * var(--at))); transition: transform var(--t-drawer) var(--ease-move); }
 .choice-pick:where(button) { margin: 0; border: 0; font: inherit; text-align: left; color: inherit; }
-button.choice-pick:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 button.choice-pick .felix { cursor: inherit; }
 .appearance .set-row.column { gap: 10px; }
 .appearance .set-row.column + .set-row.column { padding-top: 6px; }
@@ -218,7 +231,7 @@ button.choice-pick .felix { cursor: inherit; }
 .set-reset[data-on] { opacity: 1; visibility: visible; transform: none; transition: opacity var(--t-follow), transform var(--t-follow) var(--ease-arrive); }
 .set-reset svg { width: 13px; height: 13px; }
 .set-reset:hover { color: var(--text); background: var(--raised); }
-.set-reset:focus-visible { outline: 2px solid var(--focus); }
+.set-reset:focus-visible, .fa-lg:focus-visible { outline: 2px solid var(--focus); }
 .settings-section .panel { border: 0; box-shadow: none; background: var(--tint); }
 .settings-section .select-menu, .settings-section .picker-menu { border: 0; background: var(--raised); box-shadow: var(--shadow-pop); }
 .settings-section [data-find] { position: relative; }
@@ -274,7 +287,6 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-readout { line-height: 1.4; height: 48px; margin-top: 6px; padding-top: 6px; font-size: var(--fs-sm); color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
 @container (max-width: 519px) { .fa-readout { height: 70px; } }
 .fa-readout b { color: var(--text); font-weight: 600; }
-.fa-rh { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .fa-rm { display: flex; flex-wrap: wrap; gap: 3px 12px; max-height: calc(2.8em + 7px); overflow: hidden; }
 .fa-rm span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; min-width: 0; max-width: 100%; padding-bottom: 2px; }
 .fa-rm b { flex: none; }
@@ -297,19 +309,17 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-legend { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .fa-lg { display: grid; grid-template-columns: 9px minmax(0, 1fr) 52px 38px; align-items: center; gap: 8px; padding: 6px 8px; margin: 0 -8px; border: 0; background: none; border-radius: var(--r-tile); color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; cursor: default; }
 .fa-lg:hover, .fa-lg:focus-visible, .fa-lg.on { background: var(--raised); }
-.fa-lg:focus-visible { outline: 2px solid var(--focus); }
-.fa-lg-n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .fa-lg-v, .fa-lg-r, .fa-lg-s { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; white-space: nowrap; }
 .fa-lg-s { color: var(--text); }
 .fa-lg-r { display: none; }
 @container dp (min-width: 420px) { .fa-lg:not(.k) { grid-template-columns: 9px minmax(0, 1fr) 52px 56px 38px; } .fa-lg:not(.k) .fa-lg-r { display: block; } }
 .fa-one { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--fs-sm); }
-.fa-one b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-one b { font-weight: 600; min-width: 0; }
 .fa-one span { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fa-kinds { display: flex; flex-direction: column; }
 .fa-kind { display: grid; grid-template-columns: 120px minmax(0, 1fr) 64px; grid-template-areas: "n bar c" ". note note"; gap: 2px 14px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: var(--fs-base); }
 .fa-kind:first-child { border-top: 0; }
-.fa-kn { grid-area: n; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-kn { grid-area: n; min-width: 0; }
 .fa-kb { grid-area: bar; display: flex; align-items: center; gap: 12px; min-width: 0; }
 .fa-kc { grid-area: c; text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .fa-kx { grid-area: note; font-size: var(--fs-sm); color: var(--muted); }
@@ -318,7 +328,7 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-track { position: relative; flex: 0 0 38%; height: 6px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--text) 8%, transparent); }
 .fa-track i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: var(--r-xs); background: var(--muted); }
 .fa-track u { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--text); border-radius: 1px; }
-.fa-kl { font-size: var(--fs-sm); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.fa-kl { font-size: var(--fs-sm); color: var(--muted); font-variant-numeric: tabular-nums; }
 @container (max-width: 520px) { .fa-kind { grid-template-columns: minmax(0, 1fr) 64px; grid-template-areas: "n c" "bar bar" "note note"; } .fa-track { flex-basis: 40%; } }
 .fa-run-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 30px; margin: -2px 0 6px; }
 .fa-run-top b { font-variant-numeric: tabular-nums; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
@@ -329,7 +339,7 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-run-row:first-child { border-top: 0; }
 .fa-run-ic { width: 18px; height: 18px; display: grid; place-items: center; color: var(--muted); }
 .fa-run-ic svg { width: 18px; height: 18px; }
-.fa-run-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fa-run-n { min-width: 0; }
 .fa-run-c { font-variant-numeric: tabular-nums; color: var(--muted); text-align: right; min-width: 22px; }
 .fa-run-bar { height: 6px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--text) 8%, transparent); overflow: hidden; }
 .fa-run-bar i { display: block; height: 100%; border-radius: var(--r-xs); }
@@ -374,12 +384,12 @@ button.choice-pick .felix { cursor: inherit; }
 .hc-tile { display: flex; flex-direction: column; min-width: 0; padding: 13px 14px 12px; border-radius: var(--r-tile); background: var(--raised); }
 .hc-tile.wide { grid-column: span 2; }
 .hc-ic { width: 18px; height: 18px; flex: none; color: var(--muted); margin-bottom: 11px; }
-.hc-tn { font-size: var(--fs-base); font-weight: 550; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hc-tn { font-size: var(--fs-base); font-weight: 550; line-height: 1.3; }
 .hc-ts { display: flex; align-items: center; gap: 5px; margin-top: 3px; min-width: 0; font-size: var(--fs-sm); line-height: 1.35; color: var(--muted); }
 .hc-ts .hc-g { width: 13px; height: 13px; }
-.hc-dt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-dt { min-width: 0; }
 .hc-mid { display: flex; min-width: 0; max-width: 100%; }
-.hc-mid .h { min-width: 1.5em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hc-mid .h { min-width: 1.5em; }
 .hc-mid .t { flex: none; white-space: nowrap; }
 @container (max-width: 619px) {
   .hc-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }

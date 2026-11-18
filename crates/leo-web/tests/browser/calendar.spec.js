@@ -291,6 +291,37 @@ test('the task sidebar shows fifty earlier tasks and reveals more a page at a ti
   });
 });
 
+test('the Type row is one markup for the peek, the add sheet and the edit sheet', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const row = (selector) => page.locator(selector).evaluate((box) => ({
+      kinds: box.className,
+      buttons: [...box.querySelectorAll('button')].map((b) => [b.type, b.className.replace(' on', ''), b.dataset.kind, b.textContent].join('|')),
+      on: [...box.querySelectorAll('button.on')].map((b) => b.getAttribute('aria-pressed')),
+      pressed: box.querySelectorAll('[aria-pressed="true"]').length,
+    }));
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    const peek = await row('#cal-peek-kinds');
+    await page.locator('.cal-name').click();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => newTaskSheet());
+    await expect(page.locator('#task-kinds')).toBeVisible();
+    const add = await row('#task-kinds');
+    await page.evaluate(() => closeSheet());
+    await page.evaluate(() => taskSheet('task-lab'));
+    await expect(page.locator('#task-kinds')).toBeVisible();
+    const edit = await row('#task-kinds');
+    for (const found of [peek, add, edit]) {
+      expect(found.buttons).toHaveLength(6);
+      expect(found.on).toEqual(['true']);
+      expect(found.pressed).toBe(1);
+    }
+    expect(add.buttons).toEqual(peek.buttons);
+    expect(edit.buttons).toEqual(peek.buttons);
+    expect(add.kinds).toBe(peek.kinds);
+    expect(edit.kinds).toBe(peek.kinds);
+  });
+});
+
 test('the task sidebar creates undated tasks from its empty state', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     await page.evaluate(async () => { window.db.tasks = []; await loadSchedule(); });
