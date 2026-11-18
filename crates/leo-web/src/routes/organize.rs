@@ -4,6 +4,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 
+use leo_core::store::Trashed;
+
 use crate::routes::notes::{save, CreateDirBody, MoveBody, MoveDirBody};
 use crate::tasks::{self, Listed};
 use crate::tools::{self, Access, Call, Done, Proposal};
@@ -378,12 +380,20 @@ fn restore_note(state: &AppState, call: &Call) -> Result<Proposal, String> {
     let wanted = call.text("note").trim().to_string();
     let trashed = store_now(state, |store| Ok(store.trashed()))
         .map_err(|_| "leo could not read the trash".to_string())?;
+    note_to_restore(&trashed, &wanted)
+}
+
+fn note_to_restore(trashed: &[Trashed], wanted: &str) -> Result<Proposal, String> {
     let lower = wanted.to_lowercase();
     let found: Vec<_> = trashed
         .iter()
         .filter(|t| t.id == wanted || t.title.to_lowercase() == lower)
         .collect();
     match found.as_slice() {
+        [one] if !one.readable => Err(format!(
+            "“{}” is in the trash, but its file cannot be read, so it cannot be brought back",
+            one.title
+        )),
         [one] => Ok(Proposal::RestoreNote {
             summary: format!("Bring “{}” back from the trash", one.title),
             note: one.id.clone(),
@@ -433,31 +443,71 @@ fn restore_folder(state: &AppState, call: &Call) -> Result<Proposal, String> {
         Ok(store.trashed())
     })
     .map_err(|_| format!("\"{path}\" is not a folder path"))?;
+    folder_to_restore(&trashed, &path)
+}
+
+fn folder_to_restore(trashed: &[Trashed], path: &str) -> Result<Proposal, String> {
     let inside = format!("{path}/");
     let mut ids = Vec::new();
-    let mut dirs = vec![path.clone()];
-    for t in &trashed {
+    let mut dirs = vec![path.to_string()];
+    let mut unreadable = 0;
+    for t in trashed {
         if t.directory == path || t.directory.starts_with(&inside) {
+            if !t.readable {
+                unreadable += 1;
+                continue;
+            }
             ids.push(t.id.clone());
             if !dirs.contains(&t.directory) {
                 dirs.push(t.directory.clone());
             }
         }
     }
+    let files = |n: usize| if n == 1 { "file" } else { "files" };
     if ids.is_empty() {
-        return Err(format!(
-            "no trashed note came from the folder \"{path}\"; use list_trash to see where trashed notes came from"
-        ));
+        return Err(if unreadable == 0 {
+            format!(
+                "no trashed note came from the folder \"{path}\"; use list_trash to see where trashed notes came from"
+            )
+        } else {
+            format!(
+                "the {unreadable} trashed {} from the folder \"{path}\" cannot be read, so none can be brought back",
+                files(unreadable)
+            )
+        });
     }
+    let left = if unreadable == 0 {
+        String::new()
+    } else {
+        format!(
+            "; {unreadable} {} in it cannot be read and stay in the trash",
+            files(unreadable)
+        )
+    };
     Ok(Proposal::RestoreFolder {
         summary: format!(
-            "Bring the folder {path} back with its {} {}",
+            "Bring the folder {path} back with its {} {}{left}",
             ids.len(),
             if ids.len() == 1 { "note" } else { "notes" }
         ),
         ids,
         dirs,
     })
+}
+
+fn trash_line(t: &Trashed) -> String {
+    let unreadable = if t.readable {
+        ""
+    } else {
+        " · the file cannot be read, so it cannot be brought back"
+    };
+    format!(
+        "- [{}] “{}” from {} · deleted {}{unreadable}",
+        t.id,
+        t.title,
+        folder_label(&t.directory),
+        t.deleted_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+    )
 }
 
 fn trash_list(state: &AppState) -> Done {
@@ -468,19 +518,7 @@ fn trash_list(state: &AppState) -> Done {
     };
     let mut trashed = trashed;
     trashed.sort_by_key(|t| std::cmp::Reverse(t.deleted_at));
-    let lines: Vec<String> = trashed
-        .iter()
-        .take(100)
-        .map(|t| {
-            format!(
-                "- [{}] “{}” from {} · deleted {}",
-                t.id,
-                t.title,
-                folder_label(&t.directory),
-                t.deleted_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
-            )
-        })
-        .collect();
+    let lines: Vec<String> = trashed.iter().take(100).map(trash_line).collect();
     Done {
         step: step.into(),
         result: if lines.is_empty() {
@@ -1868,4 +1906,57 @@ fn applied(state: &AppState, p: &Proposal) -> Result<serde_json::Value, Refused>
     shown["state"] = serde_json::json!("applied");
     shown["undo"] = serde_json::json!(undo);
     Ok(shown)
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::*;
+
+    fn row(id: &str, title: &str, directory: &str, readable: bool) -> Trashed {
+        Trashed {
+            id: id.into(),
+            title: title.into(),
+            directory: directory.into(),
+            deleted_at: Utc::now(),
+            readable,
+        }
+    }
+
+    #[test]
+    fn the_trash_list_says_a_row_whose_file_cannot_be_read() {
+        let line = trash_line(&row("t1", "Broken", "cs130", false));
+        assert!(line.contains("the file cannot be read"), "{line}");
+        let line = trash_line(&row("t2", "Fine", "cs130", true));
+        assert!(!line.contains("cannot be read"), "{line}");
+    }
+
+    #[test]
+    fn restoring_a_note_whose_file_cannot_be_read_says_so() {
+        let trashed = [row("t1", "Broken", "cs130", false)];
+        let said = note_to_restore(&trashed, "Broken").unwrap_err();
+        assert!(said.contains("file cannot be read"), "{said}");
+        let trashed = [row("t2", "Fine", "cs130", true)];
+        assert!(note_to_restore(&trashed, "Fine").is_ok());
+    }
+
+    #[test]
+    fn restoring_a_folder_says_how_many_unreadable_files_stay_behind() {
+        let trashed = [
+            row("a", "One", "cs130", true),
+            row("b", "Two", "cs130/labs", false),
+            row("c", "Three", "cs130", false),
+        ];
+        let Ok(Proposal::RestoreFolder { summary, ids, .. }) = folder_to_restore(&trashed, "cs130")
+        else {
+            panic!("expected a restore");
+        };
+        assert_eq!(ids, ["a"]);
+        assert!(
+            summary.contains("2 files in it cannot be read"),
+            "{summary}"
+        );
+        let only = [row("b", "Two", "cs130", false)];
+        let said = folder_to_restore(&only, "cs130").unwrap_err();
+        assert!(said.contains("cannot be read"), "{said}");
+    }
 }
