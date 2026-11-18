@@ -1734,7 +1734,7 @@
       let field = $('#chat-pick-search');
       let list = box.querySelector('.chat-pick-list');
       if (!list || Boolean(field) !== wantsSearch) {
-        box.innerHTML = `${wantsSearch ? `<input class="chat-pick-search" id="chat-pick-search" placeholder="Find a note…" autocomplete="off" value="${escape(p.query)}">` : ''}<div class="chat-pick-list" role="listbox" aria-label="Notes"></div>`;
+        box.innerHTML = `${wantsSearch ? `<input class="chat-pick-search" id="chat-pick-search" placeholder="Find a note…" aria-label="Find a note" autocomplete="off" value="${escape(p.query)}">` : ''}<div class="chat-pick-list" role="listbox" aria-label="Notes"></div>`;
         field = $('#chat-pick-search');
         list = box.querySelector('.chat-pick-list');
         list.addEventListener('wheel', (event) => {
@@ -2155,9 +2155,9 @@
           return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span>${mark ? quizMark(q, mark === ' right' ? (o === q.given ? 'Your answer, right' : 'The right answer') : 'Your answer, not right') : ''}</button>`;
         }).join('')}</div>`;
       } else if (q.kind === 'fill_blank') {
-        answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
+        answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" aria-label="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       } else {
-        answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
+        answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words" aria-label="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       }
       const result = checking.has(q) ? `<div class="quiz-result">${BLOT}Checking your answer…</div>` : marking && !(reply && reply.text) ? `<div class="quiz-result">${BLOT}Felix is reading your answer…</div>` : '';
       const open = !done && !q.predict;

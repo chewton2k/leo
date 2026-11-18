@@ -1307,3 +1307,24 @@ test('an edit card shows proof marks, falls back to both texts when marks would 
   const same = { kind: 'edit', title: 'Heaps', find: 'a b', replace: 'a c', state: 'new' };
   assert.equal(context.card(same, 0, 0), context.card(same, 0, 0), 'a redraw reuses the marks');
 });
+
+test('quiz answer fields and the note picker have accessible names', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8');
+  assert.match(source, /id="chat-pick-search" placeholder="Find a note…" aria-label="Find a note"/);
+  const code = source.slice(source.indexOf('    function quizCard('), source.indexOf('    const checking = new WeakSet()'));
+  const context = { ...C, escape: esc, state: { drafts: {} }, checking: new WeakSet(), thinkingOpen: new WeakSet(), markedAt: new WeakMap(), inline: (t) => esc(t), render: (t) => esc(t), cite: (t) => t, hintsOf: () => [] };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  for (let tries = 0; tries < 40; tries++) {
+    try { vm.runInContext(`${code}\n;globalThis.__card = quizCard;`, context); break; }
+    catch (e) { if (!(e instanceof ReferenceError)) throw e; context[e.message.split(' ')[0]] = () => ''; }
+  }
+  for (const [kind, name] of [['fill_blank', 'The missing words'], ['free_response', 'Your answer, in your own words']]) {
+    let html;
+    for (let tries = 0; tries < 40 && html === undefined; tries++) {
+      try { html = context.__card({ kind, question: 'Why?', answer: 'x' }, 0, 0, false, []); }
+      catch (e) { if (e.name !== 'ReferenceError') throw e; context[e.message.split(' ')[0]] = ''; }
+    }
+    assert.match(html, new RegExp(`<(input|textarea) class="quiz-input"[^>]* aria-label="${name}"`));
+  }
+});
