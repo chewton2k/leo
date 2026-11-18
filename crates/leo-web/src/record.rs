@@ -23,6 +23,7 @@ const WAIT_FOR_WRITES: Duration = Duration::from_secs(5);
 const MOST_WARNINGS: usize = 40;
 const WARNING_CHARS: usize = 2_000;
 const SLIDE_TEXT_CHARS: usize = 6500;
+const NOTE_GONE: &str = "The note this recording belongs to is not in your notes; restore it from the trash, then recover again.";
 pub const RECORD_PAGE: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -176,6 +177,7 @@ pub struct Recorded {
     pub source: Option<leo_core::recording::Archive>,
     pub commit: Option<Commit>,
     pub writer_failed: bool,
+    pub into: Option<String>,
 }
 
 pub type Listener = Arc<dyn Fn(Listening, &mut dyn FnMut(Heard)) -> Result<Recorded> + Send + Sync>;
@@ -618,16 +620,34 @@ fn run(
     });
     let title = title.unwrap_or(recorded.title);
     let body = recorded.body;
-    let writer_failed = recorded.writer_failed;
+    let into = recorded.into;
+    let writer_failed = recorded.writer_failed && into.is_none();
     let source = recorded.source;
     let commit = recorded.commit;
+    let gone = || {
+        change(&recordings, &id, |job| {
+            job.view.state = "failed";
+            job.view.error = Some(NOTE_GONE.into());
+        })
+    };
+    if let Some(into) = into.clone() {
+        if !store_now(&state, move |store| Ok(store.find_note(&into).is_some())).unwrap_or(false) {
+            return gone();
+        }
+    }
     if let Some(source) = &source {
         let save = if recovering {
             leo_core::recording::save_merged
         } else {
             leo_core::recording::save
         };
-        if save(&state.notes_dir, &source.id, source).is_err() {
+        if save(
+            &state.notes_dir,
+            into.as_deref().unwrap_or(&source.id),
+            source,
+        )
+        .is_err()
+        {
             change(&recordings, &id, |job| {
                 job.view.state = "failed";
                 job.view.error = Some("The recording sources could not be saved. Check free disk space and recover this recording.".into());
@@ -635,7 +655,14 @@ fn run(
             return;
         }
     }
+    let joined = into.clone();
     let made = store_now(&state, move |store| {
+        if let Some(into) = joined {
+            return match store.find_note(&into) {
+                Some(_) => Ok((into, store.notes_dir.clone())),
+                None => Err(StatusCode::NOT_FOUND),
+            };
+        }
         if !directory.is_empty() && !store.dir_exists(&directory) {
             store.create_dir(&directory);
         }
@@ -680,6 +707,10 @@ fn run(
             job.view.state = "done";
             job.view.note = Some(note);
             job.view.writer_failed = writer_failed;
+        }
+        Err(StatusCode::NOT_FOUND) if into.is_some() => {
+            job.view.state = "failed";
+            job.view.error = Some(NOTE_GONE.into());
         }
         Err(_) => {
             job.view.state = "failed";

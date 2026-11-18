@@ -314,6 +314,7 @@ fn source_commit_runs_after_the_note_is_visible_on_disk_and_recovery_uses_the_sa
                 seen.store(true, Ordering::Relaxed);
                 Ok(())
             })),
+            into: None,
             writer_failed: false,
         })
     }));
@@ -556,6 +557,141 @@ fn native_recordings_can_be_recovered_without_reopening_capture() {
     let view = recording_until(&state, |s| s == "done" || s == "failed");
     assert_eq!(view.state, "done");
     assert_eq!(state.fresh().notes[0].body, "Saved speech");
+}
+
+const KEPT_SAVED: &str = "kept-saved-01";
+
+fn recover_saved_into(
+    state: &mut AppState,
+    into: &str,
+) -> (record::RecordView, Arc<Mutex<Vec<String>>>) {
+    struct Kept;
+    impl crate::record::Housekeeper for Kept {
+        fn pending_recordings(&self) -> anyhow::Result<Vec<record::Pending>> {
+            Ok(vec![record::Pending {
+                id: KEPT_SAVED.into(),
+                title: None,
+                directory: String::new(),
+                source: record::Source::Microphone,
+                profile: Default::default(),
+                started: None,
+            }])
+        }
+    }
+    let committed = Arc::new(Mutex::new(Vec::new()));
+    let seen = committed.clone();
+    let into = into.to_owned();
+    state.housekeeper = Some(Arc::new(Kept));
+    state.listener = Some(Arc::new(move |_, _| {
+        let seen = seen.clone();
+        Ok(record::Recorded {
+            title: "Recovered".into(),
+            body: "Words that must not replace the note".into(),
+            source: Some(leo_core::recording::Archive {
+                id: KEPT_SAVED.into(),
+                started: chrono::Utc::now(),
+                passages: vec![leo_core::recording::Passage {
+                    start_secs: 300,
+                    end_secs: 600,
+                    text: "the part that failed before".into(),
+                    speaker: String::new(),
+                }],
+                points: vec![],
+                context: String::new(),
+                wants: String::new(),
+                warnings: vec![],
+                trace: vec![],
+                from: String::new(),
+            }),
+            into: Some(into.clone()),
+            commit: Some(Arc::new(move |_, note| {
+                seen.lock().unwrap().push(note.to_owned());
+                Ok(())
+            })),
+            writer_failed: false,
+        })
+    }));
+    let recovered = run(record::recover(
+        State(state.clone()),
+        Path(KEPT_SAVED.into()),
+    ));
+    assert_eq!(recovered.status(), StatusCode::ACCEPTED);
+    (
+        recording_until(state, |s| s == "done" || s == "failed"),
+        committed,
+    )
+}
+
+fn joined_the_note(
+    state: &AppState,
+    view: &record::RecordView,
+    committed: &Mutex<Vec<String>>,
+    into: &str,
+    count: usize,
+) {
+    assert_eq!(view.state, "done", "{:?}", view.error);
+    assert_eq!(view.note.as_deref(), Some(into));
+    let store = state.fresh();
+    assert_eq!(store.notes.len(), count);
+    assert_eq!(store.find_note(into).unwrap().body, "");
+    assert!(store.find_note(KEPT_SAVED).is_none());
+    drop(store);
+    let sources = leo_core::recording::load(&state.notes_dir, into).unwrap();
+    assert_eq!(sources.len(), 1);
+    assert_eq!(sources[0].id, KEPT_SAVED);
+    assert_eq!(sources[0].passages[0].text, "the part that failed before");
+    assert_eq!(*committed.lock().unwrap(), [into]);
+}
+
+fn trash(state: &AppState, id: &str, for_good: bool) {
+    let mut store = leo_core::store::Store::load_from(&state.notes_dir).unwrap();
+    assert_eq!(store.delete_notes(&[id.to_owned()]), 1);
+    store.save().unwrap();
+    if for_good {
+        store.delete_from_trash(&[id.to_owned()]);
+    }
+}
+
+#[test]
+fn a_recovered_failed_part_joins_its_notes_transcript() {
+    let (mut state, _dir, ids) = state_with(&[("Lecture", "")]);
+    let (view, committed) = recover_saved_into(&mut state, &ids[0]);
+    joined_the_note(&state, &view, &committed, &ids[0], 1);
+}
+
+#[test]
+fn recovery_after_combine_adds_to_the_remaining_note() {
+    let (mut state, _dir, ids) = state_with(&[("Absorbed", ""), ("Remaining", "")]);
+    trash(&state, &ids[0], false);
+    let (view, committed) = recover_saved_into(&mut state, &ids[1]);
+    joined_the_note(&state, &view, &committed, &ids[1], 1);
+    assert!(state.fresh().find_note(&ids[0]).is_none());
+}
+
+#[test]
+fn recovery_after_the_absorbed_note_is_deleted_still_reaches_the_remaining_note() {
+    let (mut state, _dir, ids) = state_with(&[("Absorbed", ""), ("Remaining", "")]);
+    trash(&state, &ids[0], true);
+    let (view, committed) = recover_saved_into(&mut state, &ids[1]);
+    joined_the_note(&state, &view, &committed, &ids[1], 1);
+    assert!(state.fresh().find_note(&ids[0]).is_none());
+}
+
+#[test]
+fn recovery_into_a_note_that_is_gone_keeps_the_audio() {
+    let (mut state, _dir, ids) = state_with(&[("Kept", "")]);
+    trash(&state, &ids[0], false);
+    let (view, committed) = recover_saved_into(&mut state, &ids[0]);
+    assert_eq!(view.state, "failed");
+    assert_eq!(
+        view.error.as_deref(),
+        Some("The note this recording belongs to is not in your notes; restore it from the trash, then recover again.")
+    );
+    assert!(committed.lock().unwrap().is_empty());
+    assert!(state.fresh().notes.is_empty());
+    assert!(leo_core::recording::load(&state.notes_dir, &ids[0])
+        .unwrap()
+        .is_empty());
 }
 
 #[test]
