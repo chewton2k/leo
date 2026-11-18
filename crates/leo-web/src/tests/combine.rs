@@ -190,6 +190,47 @@ fn a_note_changed_while_combining_is_not_overwritten() {
 }
 
 #[test]
+fn a_note_changed_during_the_copy_is_not_combined() {
+    let (mut state, _d, ids) = state_with(&[("Graphs", ""), ("BFS", "")]);
+    bodies(&state, &ids, ["edges", "queue"]);
+    let notes = state.fresh().notes_dir.clone();
+    leo_core::recording::save(&notes, &ids[1], &transcript("session-bfs01")).unwrap();
+    with_writer(&mut state, "edges and queue");
+    let job = json_of(started(&state, &ids[0], &ids[1]));
+    let done = finished(&state, job["id"].as_str().unwrap());
+    let page = done["result"].clone();
+    let meanwhile = state.clone();
+    let wanted = ids.clone();
+    combine::AFTER_COPY.lock().unwrap().push((
+        ids[0].clone(),
+        Box::new(move || bodies(&meanwhile, &wanted, ["edges, edited meanwhile", "queue"])),
+    ));
+    let refused = keep(
+        &state,
+        &ids[0],
+        serde_json::json!({ "with": ids[1], "body": page["body"], "base": page["base"], "with_base": page["with_base"] }),
+    );
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    assert!(
+        leo_core::recording::load(&notes, &ids[0])
+            .unwrap_or_default()
+            .is_empty(),
+        "the copies are removed"
+    );
+    assert_eq!(
+        leo_core::recording::load(&notes, &ids[1]).unwrap().len(),
+        1,
+        "the other note keeps its own"
+    );
+    let store = state.fresh();
+    assert_eq!(
+        store.find_note(&ids[0]).unwrap().body,
+        "edges, edited meanwhile"
+    );
+    assert!(store.find_note(&ids[1]).is_some());
+}
+
+#[test]
 fn combining_needs_an_ai_and_two_different_notes_and_a_failed_ai_changes_nothing() {
     let (mut state, _d, ids) = state_with(&[("Graphs", ""), ("BFS", "")]);
     assert_eq!(

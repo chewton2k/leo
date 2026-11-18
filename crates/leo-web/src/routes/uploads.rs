@@ -6,7 +6,7 @@ use leo_core::attachments;
 use serde::Deserialize;
 
 use crate::routes::notes::{directory, save};
-use crate::{store_now, AppState, Figure, Importer, Made, UploadFile};
+use crate::{read_now, store_now, AppState, Figure, Importer, Made, UploadFile};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ImportJob {
@@ -507,24 +507,25 @@ fn write_upload(
         .first()
         .and_then(|n| n.rsplit_once('.').map(|(s, _)| s.to_string()))
         .unwrap_or_else(|| "upload".into());
+    let pictures_dir = read_now(state, |store| Ok(store.notes_dir.clone()))
+        .map_err(|_| missed(None, "The note could not be saved."))?;
+    let body = settle_figures(&body, &figures, &mut |figure| {
+        let kind = attachments::kind_of(&figure.bytes)?;
+        let name = if figure.photo {
+            let named = figure
+                .place
+                .rsplit_once('.')
+                .map_or(figure.place.as_str(), |(s, _)| s);
+            format!("{named}.{kind}")
+        } else {
+            format!("{stem} {}.{kind}", figure.place)
+        };
+        attachments::save(&pictures_dir, &name, &figure.bytes).ok()
+    });
     let made = store_now(state, |store| {
         if into.is_none() && !store.dir_exists(dir) {
             store.create_dir(dir);
         }
-        let notes_dir = store.notes_dir.clone();
-        let body = settle_figures(&body, &figures, &mut |figure| {
-            let kind = attachments::kind_of(&figure.bytes)?;
-            let name = if figure.photo {
-                let named = figure
-                    .place
-                    .rsplit_once('.')
-                    .map_or(figure.place.as_str(), |(s, _)| s);
-                format!("{named}.{kind}")
-            } else {
-                format!("{stem} {}.{kind}", figure.place)
-            };
-            attachments::save(&notes_dir, &name, &figure.bytes).ok()
-        });
         let written = format!("{}{footer}", body.trim());
         let wrote = match into {
             // Added to an open note: the page puts the section in through the

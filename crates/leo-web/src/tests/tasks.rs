@@ -538,6 +538,60 @@ fn finding_one_task_copies_one_task_and_not_the_list() {
         .is_none());
 }
 
+#[test]
+fn editing_a_note_task_reads_only_its_note() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    let lines: String = (0..600)
+        .map(|i| format!("- [ ] Task number {i}\n"))
+        .collect();
+    with_action_items(&state, &ids[0], &format!("## Action items\n{lines}"));
+    let first = listed(&state);
+    assert_eq!(state.listed.builds(), 1);
+    let (id, cloned) = (
+        first[250]["id"].as_str().unwrap().to_string(),
+        state.listed.cloned(),
+    );
+    let ticked = change(&state, &id, serde_json::json!({"done": true}));
+    assert_eq!(ticked.status(), StatusCode::OK);
+    assert_eq!(json_of(ticked)["done"], true);
+    assert_eq!(state.listed.builds(), 1);
+    assert_eq!(state.listed.cloned(), cloned + 1);
+    assert_eq!(
+        body_of(&state, &ids[0])
+            .lines()
+            .filter(|l| l.starts_with("- [x]"))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_task_past_two_thousand_can_be_edited() {
+    let (state, _d, _ids) = state_with(&[]);
+    let folder = state.notes_dir.join("bio");
+    std::fs::create_dir_all(&folder).unwrap();
+    for i in 0..2_100 {
+        std::fs::write(
+            folder.join(format!("Note {i}.md")),
+            "## Action items\n- [ ] Hand it in\n",
+        )
+        .unwrap();
+    }
+    state
+        .refresh_requested
+        .store(true, std::sync::atomic::Ordering::Release);
+    let last = {
+        let store = state.fresh();
+        assert_eq!(store.notes.len(), 2_100);
+        store.notes[2_050].id.clone()
+    };
+    let task = crate::tasks::note_task_id(&last, "Hand it in");
+    let ticked = change(&state, &task, serde_json::json!({"done": true}));
+    assert_eq!(ticked.status(), StatusCode::OK);
+    assert_eq!(json_of(ticked)["done"], true);
+    assert!(body_of(&state, &last).contains("- [x] Hand it in"));
+}
+
 fn rev_of(state: &AppState, query: serde_json::Value) -> String {
     let reply = run(crate::routes::notes::get_rev(
         State(state.clone()),
@@ -733,7 +787,9 @@ fn audit_bench_all_listed() {
                     .iter()
                     .map(|t| crate::tasks::standalone(t, Some(&store))),
             );
-            crate::tasks::sorted(all).len()
+            crate::tasks::in_order(&mut all);
+            all.truncate(crate::tasks::MOST_LISTED);
+            all.len()
         };
         let first = median_ms(1, || {
             rt.block_on(crate::routes::tasks::all_listed(&state))
@@ -781,6 +837,133 @@ fn audit_bench_all_listed() {
             "notes {n}: first {first:.2} ms, repeat (median of 11) {repeat:.2} ms, warm find {found:.4} ms"
         );
     }
+}
+
+#[test]
+#[ignore]
+fn audit_bench_p11_lock_work() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .map(|v| v.split(',').filter_map(|s| s.parse().ok()).collect())
+        .unwrap_or_else(|| vec![5_000, 50_000]);
+    for n in sizes {
+        let (state, _dir, _other) = bench_state(n);
+        let metas = crate::tasks::metas(&state.chats);
+        let stored = crate::tasks::load_all(&state.chats);
+        let store = crate::lock_storage(&state.store);
+        let id = {
+            let all = crate::tasks::note_tasks(&store, &metas);
+            all[all.len() / 2].id.clone()
+        };
+        let (listed, generation) = (state.listed.clone(), state.generation.clone());
+        let warm = |store: &Store| {
+            crate::tasks::find_listed(&listed, &generation, store, &metas, &stored, &id).unwrap();
+        };
+        warm(&store);
+        let mut paired = [Vec::new(), Vec::new(), Vec::new()];
+        for _ in 0..9 {
+            paired[0].push(median_ms(1, || {
+                crate::tasks::note_tasks(&store, &metas)
+                    .into_iter()
+                    .find(|t| t.id == id)
+                    .unwrap();
+            }));
+            paired[1].push(median_ms(1, || warm(&store)));
+            generation.fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+            paired[2].push(median_ms(1, || warm(&store)));
+        }
+        paired.iter_mut().for_each(|v| v.sort_by(f64::total_cmp));
+        println!(
+            "notes {n}: old scan {:.3} ms, find_listed warm {:.4} ms, find_listed after a change {:.3} ms (median of 9, alternating)",
+            paired[0][4], paired[1][4], paired[2][4]
+        );
+    }
+}
+
+#[test]
+#[ignore]
+fn audit_bench_p11_combine_lock() {
+    use crate::routes::notes::version_of;
+    let megabytes: usize = std::env::var("LEO_BENCH_MB")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(20);
+    let (state, _d, ids) = state_with(&[("Graphs", ""), ("BFS", "")]);
+    let notes = state.fresh().notes_dir.clone();
+    let big = leo_core::recording::Archive {
+        id: "session-bfs01".into(),
+        started: chrono::Utc::now(),
+        passages: vec![leo_core::recording::Passage {
+            start_secs: 0,
+            end_secs: 5,
+            text: "word ".repeat(megabytes * 1024 * 1024 / 5),
+            speaker: String::new(),
+        }],
+        points: vec![],
+        context: String::new(),
+        wants: String::new(),
+        warnings: vec![],
+        trace: vec![],
+        from: String::new(),
+    };
+    let held = |state: &AppState, work: &mut dyn FnMut()| {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let longest = Arc::new(Mutex::new(0f64));
+        let probe = {
+            let (state, stop, longest) = (state.clone(), stop.clone(), longest.clone());
+            std::thread::spawn(move || {
+                let mut since: Option<std::time::Instant> = None;
+                while !stop.load(std::sync::atomic::Ordering::Acquire) {
+                    let free = state.store.try_lock().is_ok();
+                    match (free, since) {
+                        (false, None) => since = Some(std::time::Instant::now()),
+                        (true, Some(at)) => {
+                            let mut longest = longest.lock().unwrap();
+                            *longest = longest.max(at.elapsed().as_secs_f64() * 1000.0);
+                            since = None;
+                        }
+                        _ => {}
+                    }
+                    std::thread::sleep(std::time::Duration::from_micros(100));
+                }
+            })
+        };
+        work();
+        stop.store(true, std::sync::atomic::Ordering::Release);
+        probe.join().unwrap();
+        let held = *longest.lock().unwrap();
+        held
+    };
+    leo_core::recording::save(&notes, &ids[1], &big).unwrap();
+    let (from, target) = (ids[1].clone(), ids[0].clone());
+    let old = held(&state, &mut || {
+        let (notes, from, target) = (notes.clone(), from.clone(), target.clone());
+        run(state.with_store(move |_| {
+            let copied = leo_core::recording::copy_to(&notes, &from, &target, "BFS").unwrap();
+            leo_core::recording::remove(&notes, &target, &copied).unwrap();
+            Ok(())
+        }))
+        .unwrap();
+    });
+    let (with_base, base) = {
+        let store = state.fresh();
+        (
+            version_of(store.find_note(&ids[1]).unwrap()),
+            version_of(store.find_note(&ids[0]).unwrap()),
+        )
+    };
+    let new = held(&state, &mut || {
+        let body = serde_json::json!({ "with": ids[1], "body": "combined", "base": base, "with_base": with_base });
+        let saved = crate::routes::combine::keep(
+            State(state.clone()),
+            Path(ids[0].clone()),
+            Json(serde_json::from_value(body).unwrap()),
+        );
+        assert!(run(saved).status().is_success());
+    });
+    println!(
+        "{megabytes} MB transcript: lock held {old:.2} ms with the copy inside (old way), {new:.2} ms by keep (new way)"
+    );
 }
 
 #[test]

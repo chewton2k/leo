@@ -308,6 +308,16 @@ pub(crate) async fn change_task(
         Ok(Err(change)) => *change,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
+    let stored = {
+        let chats = chats.clone();
+        tokio::task::spawn_blocking(move || tasks::load_all(&chats))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    };
+    let Ok(stored) = stored else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let (listed, generation) = (state.listed.clone(), state.generation.clone());
     let found = state
         .with_store(move |store| {
             if change.occurrence.is_some() {
@@ -317,8 +327,8 @@ pub(crate) async fn change_task(
                 ));
             }
             let metas = tasks::metas(&chats);
-            let listed = tasks::note_tasks(store, &metas);
-            let Some(task) = listed.into_iter().find(|t| t.id == id) else {
+            let Some(task) = tasks::find_listed(&listed, &generation, store, &metas, &stored, &id)
+            else {
                 return Err(StatusCode::NOT_FOUND);
             };
             let note_id = task.note.as_ref().map(|n| n.id.clone()).unwrap_or_default();
@@ -390,15 +400,10 @@ pub(crate) async fn change_task(
                 tasks::put_meta(&chats, &meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
             let metas = tasks::metas(&chats);
-            Ok(
-                match tasks::note_tasks(store, &metas)
-                    .into_iter()
-                    .find(|t| t.id == id)
-                {
-                    Some(task) => Json(serde_json::json!(task)).into_response(),
-                    None => StatusCode::NO_CONTENT.into_response(),
-                },
-            )
+            Ok(match tasks::note_task(store, &metas, &note_id, &id) {
+                Some(task) => Json(serde_json::json!(task)).into_response(),
+                None => StatusCode::NO_CONTENT.into_response(),
+            })
         })
         .await;
     match found {
@@ -481,9 +486,7 @@ pub(crate) async fn promote_task(
             };
             tasks::put_meta(&chats, &meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let metas = tasks::metas(&chats);
-            tasks::note_tasks(store, &metas)
-                .into_iter()
-                .find(|t| t.id == meta.id)
+            tasks::note_task(store, &metas, &meta.note, &meta.id)
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
         })
         .await;

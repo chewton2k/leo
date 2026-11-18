@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use leo_core::notes::checkbox_line;
+use leo_core::notes::{checkbox_line, Note};
 use leo_core::store::Store;
 use leo_core::tasks::{self as core, Located};
 use serde::{Deserialize, Serialize};
@@ -231,83 +231,105 @@ pub struct NoteRef {
     pub folder: String,
 }
 
+pub fn tasks_in(note: &Note, metas: &[&Meta]) -> Vec<Listed> {
+    let mut out: Vec<Listed> = Vec::new();
+    let lines: Vec<&str> = note.body.lines().collect();
+    let note_ref = NoteRef {
+        id: note.id.clone(),
+        title: note.title.clone(),
+        folder: note.directory.clone(),
+    };
+    let mut claimed: HashSet<usize> = HashSet::new();
+    for meta in metas {
+        let at = match core::locate(&note.body, &meta.text, &meta.before, &meta.after) {
+            Located::At(n) => Some(n),
+            _ => None,
+        };
+        if let Some(n) = at {
+            claimed.insert(n);
+        }
+        let text = at
+            .and_then(|n| checkbox_line(lines[n]).map(|c| c.text.to_string()))
+            .unwrap_or_else(|| meta.text.clone());
+        let done = at
+            .and_then(|n| checkbox_line(lines[n]))
+            .is_some_and(|c| c.ticked);
+        let mut task = listed(
+            &meta.id,
+            &text,
+            done,
+            meta.kind.clone(),
+            &note_ref,
+            at,
+            at.is_some(),
+            meta.promoted,
+            meta.sent_at,
+        );
+        task.description = meta.description.clone();
+        out.push(task);
+    }
+    for n in core::action_items(&note.body) {
+        if claimed.contains(&n) {
+            continue;
+        }
+        let Some(found) = checkbox_line(lines[n]) else {
+            continue;
+        };
+        if found.text.trim().is_empty() {
+            continue;
+        }
+        let id = note_task_id(&note.id, found.text);
+        if out.iter().any(|t| t.id == id) {
+            continue;
+        }
+        out.push(listed(
+            &id,
+            found.text,
+            found.ticked,
+            None,
+            &note_ref,
+            Some(n),
+            true,
+            false,
+            None,
+        ));
+    }
+    out
+}
+
 pub fn note_tasks(store: &Store, metas: &[Meta]) -> Vec<Listed> {
-    let mut out = Vec::new();
     let mut by_note: BTreeMap<&str, Vec<&Meta>> = BTreeMap::new();
     for meta in metas {
         by_note.entry(meta.note.as_str()).or_default().push(meta);
     }
-    for note in &store.notes {
-        let lines: Vec<&str> = note.body.lines().collect();
-        let note_ref = NoteRef {
-            id: note.id.clone(),
-            title: note.title.clone(),
-            folder: note.directory.clone(),
-        };
-        let mut claimed: HashSet<usize> = HashSet::new();
-        for meta in by_note
-            .get(note.id.as_str())
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
-        {
-            let at = match core::locate(&note.body, &meta.text, &meta.before, &meta.after) {
-                Located::At(n) => Some(n),
-                _ => None,
-            };
-            if let Some(n) = at {
-                claimed.insert(n);
-            }
-            let text = at
-                .and_then(|n| checkbox_line(lines[n]).map(|c| c.text.to_string()))
-                .unwrap_or_else(|| meta.text.clone());
-            let done = at
-                .and_then(|n| checkbox_line(lines[n]))
-                .is_some_and(|c| c.ticked);
-            let mut task = listed(
-                &meta.id,
-                &text,
-                done,
-                meta.kind.clone(),
-                &note_ref,
-                at,
-                at.is_some(),
-                meta.promoted,
-                meta.sent_at,
-            );
-            task.description = meta.description.clone();
-            out.push(task);
-        }
-        for n in core::action_items(&note.body) {
-            if claimed.contains(&n) {
-                continue;
-            }
-            let Some(found) = checkbox_line(lines[n]) else {
-                continue;
-            };
-            if found.text.trim().is_empty() {
-                continue;
-            }
-            let id = note_task_id(&note.id, found.text);
-            if out.iter().any(|t: &Listed| t.id == id) {
-                continue;
-            }
-            out.push(listed(
-                &id,
-                found.text,
-                found.ticked,
-                None,
-                &note_ref,
-                Some(n),
-                true,
-                false,
-                None,
-            ));
-        }
-        if out.len() > MOST_LISTED * 4 {
-            break;
-        }
-    }
-    out
+    store
+        .notes
+        .iter()
+        .flat_map(|note| {
+            let own = by_note.get(note.id.as_str()).map_or(&[][..], Vec::as_slice);
+            tasks_in(note, own)
+        })
+        .collect()
+}
+
+pub fn note_task(store: &Store, metas: &[Meta], note: &str, id: &str) -> Option<Listed> {
+    let note = store.notes.iter().find(|n| n.id == note)?;
+    let own: Vec<&Meta> = metas.iter().filter(|m| m.note == note.id).collect();
+    tasks_in(note, &own).into_iter().find(|t| t.id == id)
+}
+
+pub fn find_listed(
+    listed: &ListedCache,
+    generation: &AtomicU64,
+    store: &Store,
+    metas: &[Meta],
+    stored: &[Task],
+    id: &str,
+) -> Option<Listed> {
+    let kept = listed
+        .find(generation, store, metas, stored, id)
+        .filter(|t| t.source == "note")?;
+    note_task(store, metas, &kept.note.as_ref()?.id, id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -375,7 +397,7 @@ pub fn standalone(task: &Task, store: Option<&Store>) -> Listed {
     }
 }
 
-fn in_order(all: &mut [Listed]) {
+pub(crate) fn in_order(all: &mut [Listed]) {
     all.sort_by(|a, b| {
         a.done
             .cmp(&b.done)
@@ -385,12 +407,6 @@ fn in_order(all: &mut [Listed]) {
             .then(a.time.cmp(&b.time))
             .then(a.title.cmp(&b.title))
     });
-}
-
-pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
-    in_order(&mut all);
-    all.truncate(MOST_LISTED);
-    all
 }
 
 pub struct ListedIndex {
@@ -405,6 +421,8 @@ pub struct ListedCache {
     kept: Mutex<Option<Kept>>,
     #[cfg(test)]
     builds: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    cloned: std::sync::atomic::AtomicUsize,
 }
 
 impl ListedCache {
@@ -448,10 +466,12 @@ impl ListedCache {
         stored: &[Task],
     ) -> Vec<Listed> {
         let index = self.index(generation, store, metas, stored);
+        #[cfg(test)]
+        self.cloned
+            .fetch_add(index.all.len().min(MOST_LISTED), Ordering::Relaxed);
         index.all.iter().take(MOST_LISTED).cloned().collect()
     }
 
-    #[allow(dead_code)]
     pub fn find(
         &self,
         generation: &AtomicU64,
@@ -461,12 +481,20 @@ impl ListedCache {
         id: &str,
     ) -> Option<Listed> {
         let index = self.index(generation, store, metas, stored);
-        index.by_id.get(id).map(|&at| index.all[at].clone())
+        let at = *index.by_id.get(id)?;
+        #[cfg(test)]
+        self.cloned.fetch_add(1, Ordering::Relaxed);
+        Some(index.all[at].clone())
     }
 
     #[cfg(test)]
     pub fn builds(&self) -> usize {
         self.builds.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub fn cloned(&self) -> usize {
+        self.cloned.load(Ordering::Relaxed)
     }
 }
 
@@ -773,12 +801,13 @@ mod tests {
                 None,
             )
         };
-        let all = sorted(vec![
+        let mut all = vec![
             task("undated", false, None),
             task("done", true, NaiveDate::from_ymd_opt(2026, 1, 1)),
             task("later", false, NaiveDate::from_ymd_opt(2026, 12, 1)),
             task("sooner", false, NaiveDate::from_ymd_opt(2026, 11, 1)),
-        ]);
+        ];
+        in_order(&mut all);
         let order: Vec<&str> = all.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(order, ["sooner", "later", "undated", "done"]);
         let ics = ics_of(&all[0], now);

@@ -287,39 +287,107 @@ pub(crate) async fn keep(
             "The combined note is empty or too long.",
         );
     }
-    let done = state
-        .with_store(move |store| {
-            let from = store.find_note(&body.with).ok_or(StatusCode::NOT_FOUND)?;
-            if version_of(from) != body.with_base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let (from, from_title) = (from.id.clone(), from.title.clone());
-            let note = store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
-            if note.id == from {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            if version_of(note) != body.base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let target = note.id.clone();
-            let notes_dir = store.notes_dir.clone();
+    let (from, from_title, target, notes_dir) = {
+        let (with, base, with_base, into) = (
+            body.with.clone(),
+            body.base.clone(),
+            body.with_base.clone(),
+            into.clone(),
+        );
+        let seen = state
+            .read_store(move |store| {
+                let (from, from_title) = {
+                    let from = store.find_note(&with).ok_or(StatusCode::NOT_FOUND)?;
+                    if version_of(from) != with_base {
+                        return Err(StatusCode::CONFLICT);
+                    }
+                    (from.id.clone(), from.title.clone())
+                };
+                let note = store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
+                if note.id == from {
+                    return Err(StatusCode::BAD_REQUEST);
+                }
+                if version_of(note) != base {
+                    return Err(StatusCode::CONFLICT);
+                }
+                Ok((from, from_title, note.id.clone(), store.notes_dir.clone()))
+            })
+            .await;
+        match seen {
+            Ok(seen) => seen,
+            Err(StatusCode::CONFLICT) => return changed_while_combining(),
+            Err(code) => return error(code, "The combined note could not be saved."),
+        }
+    };
+    let copying = {
+        let (notes_dir, from, target, from_title) = (
+            notes_dir.clone(),
+            from.clone(),
+            target.clone(),
+            from_title.clone(),
+        );
+        tokio::task::spawn_blocking(move || {
             let copied = leo_core::recording::copy_to(&notes_dir, &from, &target, &from_title)
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let originals = match share_originals(&notes_dir, &from, &target) {
-                Ok(names) => names,
+            match share_originals(&notes_dir, &from, &target) {
+                Ok(originals) => Ok((copied, originals)),
                 Err(_) => {
                     let _ = leo_core::recording::remove(&notes_dir, &target, &copied);
-                    return Err(StatusCode::INTERNAL_SERVER_ERROR);
+                    Err(StatusCode::INTERNAL_SERVER_ERROR)
                 }
+            }
+        })
+        .await
+    };
+    let (copied, originals) = match copying {
+        Ok(Ok(copies)) => copies,
+        Ok(Err(code)) => return error(code, "The combined note could not be saved."),
+        Err(_) => {
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "The combined note could not be saved.",
+            )
+        }
+    };
+    #[cfg(test)]
+    {
+        let hook = {
+            let mut hooks = AFTER_COPY.lock().unwrap_or_else(|e| e.into_inner());
+            hooks
+                .iter()
+                .position(|(id, _)| *id == target)
+                .map(|at| hooks.remove(at).1)
+        };
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+    let done = state
+        .with_store(move |store| {
+            let undo = |store: &leo_core::store::Store| {
+                let _ = leo_core::recording::remove(&store.notes_dir, &target, &copied);
+                let _ = remove_originals(&store.notes_dir, &target, &originals);
             };
-            let note = store.find_note_mut(&target).ok_or(StatusCode::NOT_FOUND)?;
+            let still = store
+                .find_note(&from)
+                .is_some_and(|n| version_of(n) == body.with_base)
+                && store
+                    .find_note(&target)
+                    .is_some_and(|n| version_of(n) == body.base);
+            if !still {
+                undo(store);
+                return Err(StatusCode::CONFLICT);
+            }
+            let Some(note) = store.find_note_mut(&target) else {
+                undo(store);
+                return Err(StatusCode::NOT_FOUND);
+            };
             let before = std::mem::replace(&mut note.body, body.body);
             note.updated_at = chrono::Utc::now();
             let response = NoteResponse::from_note(note);
             store.delete_notes(std::slice::from_ref(&from));
             if let Err(code) = save(store) {
-                let _ = leo_core::recording::remove(&notes_dir, &target, &copied);
-                let _ = remove_originals(&notes_dir, &target, &originals);
+                undo(store);
                 return Err(code);
             }
             let record = Combined {
@@ -341,13 +409,24 @@ pub(crate) async fn keep(
                 tokio::task::spawn_blocking(move || set_combined(&chats, &target, &record)).await;
             Json(value).into_response()
         }
-        Err(StatusCode::CONFLICT) => error(
-            StatusCode::CONFLICT,
-            "One of the notes changed while they were being combined. Combine them again.",
-        ),
+        Err(StatusCode::CONFLICT) => changed_while_combining(),
         Err(code) => error(code, "The combined note could not be saved."),
     }
 }
+
+fn changed_while_combining() -> Response {
+    error(
+        StatusCode::CONFLICT,
+        "One of the notes changed while they were being combined. Combine them again.",
+    )
+}
+
+#[cfg(test)]
+pub(crate) type AfterCopy = Box<dyn FnOnce() + Send>;
+
+#[cfg(test)]
+pub(crate) static AFTER_COPY: std::sync::Mutex<Vec<(String, AfterCopy)>> =
+    std::sync::Mutex::new(Vec::new());
 
 #[derive(Deserialize)]
 pub(crate) struct Uncombine {

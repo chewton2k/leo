@@ -9,7 +9,7 @@ use leo_core::store::Trashed;
 use crate::routes::notes::{save, CreateDirBody, MoveBody, MoveDirBody};
 use crate::tasks::{self, Listed};
 use crate::tools::{self, Access, Call, Done, Proposal};
-use crate::{store_now, AppState};
+use crate::{read_now, store_now, AppState};
 
 const MOST_DAYS: i64 = 42;
 const MOST_LINES: usize = 300;
@@ -96,10 +96,8 @@ fn kind_of(text: &str) -> Result<Option<String>, String> {
 pub(crate) fn listed_now(state: &AppState) -> Result<Vec<Listed>, String> {
     let metas = tasks::metas(&state.chats);
     let stored = tasks::load_all(&state.chats);
-    store_now(state, |store| {
-        let mut all = tasks::note_tasks(store, &metas);
-        all.extend(stored.iter().map(|t| tasks::standalone(t, Some(store))));
-        Ok(tasks::sorted(all))
+    read_now(state, |store| {
+        Ok(state.listed.all(&state.generation, store, &metas, &stored))
     })
     .map_err(|_| "leo could not read the tasks".to_string())
 }
