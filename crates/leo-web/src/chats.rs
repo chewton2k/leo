@@ -4,7 +4,7 @@ use anyhow::Result;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-pub const MOST_MESSAGES: usize = 400;
+const LONG_CHAT: usize = 400;
 pub const MOST_TITLE: usize = 80;
 pub const MOST_ABOUT: usize = 110;
 const SHORT_QUESTION_WORDS: usize = 6;
@@ -747,12 +747,9 @@ pub fn save_from(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Re
                 }
                 engaged = old.as_ref().is_none_or(|old| {
                     sent.len() > held
-                        || (sent.len() >= MOST_MESSAGES && sent.last() != old.last.as_ref())
+                        || (sent.len() >= LONG_CHAT && sent.last() != old.last.as_ref())
                 });
-                let mut list = sent;
-                if list.len() > MOST_MESSAGES {
-                    list.drain(..list.len() - MOST_MESSAGES);
-                }
+                let list = sent;
                 let start = match &old {
                     Some(old) if old.rows => first_change(&tx, id, &list)?,
                     _ => 0,
@@ -1336,7 +1333,7 @@ mod tests {
     }
 
     #[test]
-    fn ids_cannot_reach_outside_the_folder_and_long_chats_keep_their_end() {
+    fn ids_cannot_reach_outside_the_folder_and_long_chats_keep_every_message() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("chats");
         for bad in [
@@ -1363,7 +1360,7 @@ mod tests {
             assert!(load(&dir, bad).is_none());
             assert!(!remove(&dir, bad));
         }
-        let messages: Vec<_> = (0..MOST_MESSAGES + 10)
+        let messages: Vec<_> = (0..LONG_CHAT + 10)
             .map(|i| said("user", &format!("m{i}")))
             .collect();
         let long = "word ".repeat(100);
@@ -1380,8 +1377,8 @@ mod tests {
             at(0),
         )
         .unwrap();
-        assert_eq!(chat.messages.len(), MOST_MESSAGES);
-        assert_eq!(chat.messages[0]["text"], "m10");
+        assert_eq!(chat.messages.len(), LONG_CHAT + 10);
+        assert_eq!(chat.messages[0]["text"], "m0");
         assert_eq!(chat.title.chars().count(), MOST_TITLE + 1);
         assert!(chat.title.ends_with('…'));
         assert!(save(&dir, "../outside", saving(vec![]), at(0)).is_err());
@@ -1651,12 +1648,13 @@ mod tests {
     }
 
     #[test]
-    fn a_whole_save_is_still_cut_at_four_hundred_and_a_partial_one_is_not() {
+    fn a_chat_longer_than_four_hundred_messages_keeps_them_all() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("chats");
         let whole = save(&dir, "chat-rows-0007", saving(talk(410)), at(0)).unwrap();
-        assert_eq!(whole.messages.len(), MOST_MESSAGES);
-        assert_eq!(stored(&dir, "chat-rows-0007").len(), MOST_MESSAGES);
+        assert_eq!(whole.messages.len(), 410);
+        assert_eq!(stored(&dir, "chat-rows-0007").len(), 410);
+        assert_eq!(load(&dir, "chat-rows-0007").unwrap().messages, talk(410));
         save(&dir, "chat-rows-0008", saving(talk(1)), at(0)).unwrap();
         let more = save_from(&dir, "chat-rows-0008", partial(1, talk(409)), at(1)).unwrap();
         assert_eq!(more.count, 410);

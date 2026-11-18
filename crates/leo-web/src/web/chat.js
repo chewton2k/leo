@@ -9,7 +9,6 @@
   }
   const MOST_KEPT = 40;
   const MOST_REFS = 8;
-  const MOST_SAVED = 400;
   const COMPACT_IDLE_MS = 10 * 60 * 1000;
   const COMPACT_LEAST_TURNS = 8;
   const ACCESS = [
@@ -778,19 +777,43 @@
     const fresh = { id: null, messages: [], refs: [] };
     try {
       const saved = JSON.parse(storage.getItem(KEY) || 'null');
-      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [], ...(saved.synced === true ? { synced: true } : {}) };
+      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [], ...(saved.synced === true ? { synced: true } : {}), ...(Number.isInteger(saved.first) && Number.isInteger(saved.saved) ? { first: saved.first, saved: saved.saved } : {}) };
     } catch (e) {
       return fresh;
     }
     return fresh;
   }
 
-  function save(storage, messages, refs = [], id = null, synced = false) {
+  function save(storage, messages, refs = [], id = null, synced = false, mark = null) {
     try {
-      storage.setItem(KEY, JSON.stringify({ id, messages: messages.slice(-MOST_KEPT), refs, ...(synced ? { synced: true } : {}) }));
+      const kept = messages.slice(-MOST_KEPT);
+      const at = mark ? { first: mark.first + messages.length - kept.length, saved: mark.saved } : {};
+      storage.setItem(KEY, JSON.stringify({ id, messages: kept, refs, ...(synced ? { synced: true } : {}), ...at }));
     } catch (e) {
       return;
     }
+  }
+
+  function markOf(page) {
+    const messages = Array.isArray(page.messages) ? page.messages : [];
+    const first = Number.isInteger(page.from) ? page.from : 0;
+    return { first, saved: Number.isInteger(page.count) ? page.count : first + messages.length, held: messages.map((m) => JSON.stringify(m)) };
+  }
+
+  function toSave(mark, messages) {
+    const sure = Math.max(0, Math.min(messages.length, mark.saved - mark.first));
+    let from = mark.first + sure;
+    for (let i = 0; i < sure; i++) {
+      if (mark.held[i] !== JSON.stringify(messages[i])) {
+        from = mark.first + i;
+        break;
+      }
+    }
+    return { from, messages: messages.slice(from - mark.first) };
+  }
+
+  function savedAs(mark, messages, count) {
+    return { first: mark.first, saved: count, held: messages.map((m) => JSON.stringify(m)) };
   }
 
   function groups(list, now = new Date()) {
@@ -904,8 +927,11 @@
     const saved = load(storage);
     const known = new Set(saved.synced && saved.id ? [saved.id] : []);
     const gone = new Set();
+    const marks = new Map();
     const stepChevron = (icons.chevron || '').replace('<svg ', '<svg class="msg-step-chevron" ');
     const state = { open: false, id: saved.id || newId(), messages: saved.messages, refs: saved.refs, context: null, dropped: null, fresh: false, busy: null, streak: 0, pick: null, chats: null, sidebar: null, doomed: null, asking: null, files: [], sent: [], filesFor: null, review: [], drafts: {}, found: null, selection: null };
+    if (Number.isInteger(saved.first)) marks.set(state.id, { first: saved.first, saved: saved.saved, held: [] });
+    else if (!known.has(state.id)) marks.set(state.id, { first: 0, saved: 0, held: [] });
     const panel = document.createElement('aside');
     panel.className = 'chat';
     panel.id = 'chat';
@@ -1300,7 +1326,7 @@
     }
 
     function persist() {
-      save(storage, stored(), state.refs, state.id, known.has(state.id));
+      save(storage, stored(), state.refs, state.id, known.has(state.id), marks.get(state.id));
     }
 
     // Idle compaction: after warm.rs IDLE the warm session and the provider's
@@ -1335,16 +1361,22 @@
       const messages = chat.messages.filter((m) => !m.pending);
       if (!messages.length) return upload;
       const id = chat.id;
-      const sending = { refs: chat.refs, messages: messages.slice(-MOST_SAVED).map(({ pending, ...m }) => m) };
+      const local = messages.map(({ pending, ...m }) => m);
       upload = upload.then(async () => {
         if (gone.has(id)) return;
         const existed = known.has(id);
+        const mark = marks.get(id);
+        const sending = { refs: chat.refs, ...(mark ? toSave(mark, local) : { messages: local }) };
         try {
           const response = await request(`/api/chats/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ...sending, existed }),
           }).catch(() => null);
+          if (response && response.status === 409) {
+            await reconcile(id, chat.refs, local, mark);
+            return;
+          }
           if (!response || !response.ok) {
             if (response && response.status === 410) {
               known.delete(id);
@@ -1364,6 +1396,7 @@
             if (id === state.id) persist();
           }
           const summary = await response.json();
+          marks.set(id, savedAs(mark || { first: 0 }, local, summary.count));
           if (state.chats) {
             state.chats = [summary, ...state.chats.filter((c) => c.id !== summary.id)].sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
             drawChats();
@@ -1374,6 +1407,72 @@
           }
         } catch (e) {
           return;
+        }
+      });
+      return upload;
+    }
+
+    async function reconcile(id, refs, local, mark) {
+      let page;
+      try {
+        const response = await request(`/api/chats/${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error();
+        page = await response.json();
+      } catch (e) {
+        notify('Felix could not save this chat, so it may be missing from your history.');
+        return;
+      }
+      const theirs = Array.isArray(page.messages) ? page.messages : [];
+      const seen = theirs.map((m) => JSON.stringify(m));
+      const last = local.findLastIndex((m) => seen.includes(JSON.stringify(m)));
+      const unsent = mark ? local.slice(Math.max(0, mark.saved - mark.first)) : local.slice(last + 1);
+      const earlier = Boolean(mark) && toSave(mark, local).from < mark.saved;
+      const fresh = markOf(page);
+      marks.set(id, fresh);
+      if (id === state.id) {
+        state.messages = [...theirs, ...unsent];
+        persist();
+        draw(false);
+      }
+      if (earlier) notify('This chat changed in another window, so your change to an earlier message was not kept.');
+      if (!unsent.length) return;
+      const response = await request(`/api/chats/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refs, from: fresh.saved, messages: unsent, existed: true }),
+      }).catch(() => null);
+      if (!response || !response.ok) {
+        notify('Felix could not save this chat, so it may be missing from your history.');
+        return;
+      }
+      const summary = await response.json();
+      marks.set(id, savedAs(fresh, [...theirs, ...unsent], summary.count));
+    }
+
+    let loadingEarlier = false;
+    function earlier() {
+      const id = state.id;
+      if (loadingEarlier || state.busy || state.preparingSend || !(marks.get(id)?.first > 0)) return upload;
+      loadingEarlier = true;
+      upload = upload.then(async () => {
+        try {
+          const mark = marks.get(id);
+          if (!mark || mark.first <= 0 || state.id !== id) return;
+          const response = await request(`/api/chats/${encodeURIComponent(id)}?before=${mark.first}`);
+          if (!response.ok) return;
+          const page = await response.json();
+          const older = Array.isArray(page.messages) ? page.messages : [];
+          if (state.id !== id || marks.get(id) !== mark || !older.length || page.from + older.length !== mark.first) return;
+          const height = body.scrollHeight;
+          const top = body.scrollTop;
+          state.messages = [...older, ...state.messages];
+          marks.set(id, { first: page.from, saved: mark.saved, held: [...older.map((m) => JSON.stringify(m)), ...mark.held] });
+          draw(false);
+          body.scrollTop = top + body.scrollHeight - height;
+        } catch (e) {
+          return;
+        } finally {
+          loadingEarlier = false;
         }
       });
       return upload;
@@ -1466,6 +1565,7 @@
       state.fresh = true;
       stopCompacting();
       state.messages = [];
+      marks.set(id, { first: 0, saved: 0, held: [] });
       state.refs = [];
       state.files = [];
       state.sent = [];
@@ -1520,6 +1620,7 @@
       state.fresh = false;
       compactLater();
       state.messages = Array.isArray(chat.messages) ? chat.messages : [];
+      marks.set(chat.id, markOf(chat));
       state.refs = Array.isArray(chat.refs) ? chat.refs.slice(0, MOST_REFS) : [];
       state.files = [];
       state.sent = [];
@@ -2525,6 +2626,7 @@
       state.pickWait = setTimeout(placeAddFloat, 120);
     });
     body.addEventListener('scroll', () => hideAddFloat(), { passive: true });
+    body.addEventListener('scroll', () => { if (body.scrollTop < 80) earlier(); }, { passive: true });
     body.addEventListener('click', (e) => {
       const trace = e.target.closest?.('.msg-trace > summary')?.parentElement;
       const m = trace && state.messages[Number(trace.dataset.i)];
@@ -2601,7 +2703,7 @@
       state.preparingSend = true;
       try {
         await upload;
-        const response = await request(`/api/chats/${encodeURIComponent(id)}/drop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2, total: stored().length }) });
+        const response = await request(`/api/chats/${encodeURIComponent(id)}/drop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2, total: (marks.get(id)?.first || 0) + stored().length }) });
         if (!response.ok) throw new Error();
       } catch (e) {
         notify('leo could not take back that reply. Try again.');
@@ -2611,6 +2713,8 @@
       }
       if (state.id !== id) return null;
       state.messages.splice(at, 2);
+      const mark = marks.get(id);
+      if (mark) marks.set(id, savedAs(mark, stored(), mark.first + stored().length));
       persist();
       draw(false);
       return asked;
@@ -3461,5 +3565,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
 })(typeof window !== 'undefined' ? window : globalThis);

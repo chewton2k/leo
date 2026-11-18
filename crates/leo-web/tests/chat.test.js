@@ -1026,7 +1026,7 @@ function answers(messages, { busy = null, send = () => {}, clipboard = null, fet
   const calls = [];
   const input = { value: '', focus() { calls.push('focus'); } };
   const context = {
-    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
+    ...C, marks: new Map(), state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
     root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), timed: new Set(), tick() {}, workingFor: () => '', tookFor: () => '', writer: () => '', writerOf: () => '',
     stepChevron: '', MOST_REPLY_STEPS: 64, clipped: (t) => t, stored: () => messages.filter((m) => !m.pending), fit() {}, persist() {}, draw() {}, send,
     notify: (text) => calls.push(`notify:${text}`), setTimeout: () => 0,
@@ -1081,7 +1081,7 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   const told = [];
   const messages = Array.from({ length: 450 }, (_, i) => ({ role: 'user', text: `m${i}` }));
   const context = {
-    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
     NAME_CHECKS: [], notify: (t) => told.push(t),
     request: async (url, init) => { sent.push(JSON.parse(init.body)); return { ok: false }; },
   };
@@ -1090,8 +1090,8 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   await context.__remember();
   await context.__remember();
   assert.equal(sent.length, 2);
-  assert.equal(sent[0].messages.length, 400);
-  assert.equal(sent[0].messages[0].text, 'm50');
+  assert.equal(sent[0].messages.length, 450);
+  assert.equal(sent[0].messages[0].text, 'm0');
   assert.equal(told.length, 1);
 });
 
@@ -1106,7 +1106,7 @@ test('a history save that cannot reach leo warns once', async () => {
   let reachable = false;
   const messages = [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }];
   const context = {
-    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
     NAME_CHECKS: [], notify: (t) => told.push(t),
     request: async () => {
       if (!reachable) throw new TypeError('Failed to fetch');
@@ -1358,7 +1358,7 @@ function goneFixture({ id = 'chat-1', synced = true, reply = async () => ({ ok: 
   const state = { id, refs: [], messages: messages.slice(), chats: null, busy: null, preparingSend: false };
   const input = { value: typed };
   const context = vm.createContext({
-    state, input, MOST_SAVED: 400, NAME_CHECKS: [], setTimeout: () => 0,
+    state, input, marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, NAME_CHECKS: [], setTimeout: () => 0,
     known: new Set(synced ? [id] : []), gone: new Set(),
     stored: () => state.messages, persist() {}, drawChats() {}, loadChats() {}, fit() {},
     notify: (t) => told.push(t),
@@ -1506,4 +1506,147 @@ test('elapsed time is worded 42 s below a minute and 1:05 from a minute up', () 
   for (const name of ['app/events.js', 'app/uploads.js']) {
     assert.ok(!fs.readFileSync(path.join(__dirname, '../src/web', name), 'utf8').includes("padStart(2, '0')"), `${name} words elapsed time itself`);
   }
+});
+
+function fakeChat(count) {
+  let rows = Array.from({ length: count }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: `m${i}` }));
+  const puts = [];
+  return {
+    puts,
+    rows: () => rows,
+    set: (next) => { rows = next; },
+    put(body) {
+      puts.push(body);
+      if (body.from === undefined) {
+        if (body.messages.length < rows.length) return { status: 409, count: rows.length };
+        rows = body.messages.slice();
+      } else {
+        if (body.from > rows.length) return { status: 409, count: rows.length };
+        rows = [...rows.slice(0, body.from), ...body.messages];
+      }
+      return { status: 200, count: rows.length };
+    },
+    page(before) {
+      const to = Math.min(before ?? rows.length, rows.length);
+      const from = Math.max(0, to - 200);
+      return JSON.parse(JSON.stringify({ messages: rows.slice(from, to), from, count: rows.length }));
+    },
+  };
+}
+
+test('a save sends only the messages added since the last save', () => {
+  const first = [{ role: 'user', text: 'q1' }, { role: 'assistant', text: 'a1' }];
+  const mark = C.savedAs({ first: 0 }, first, 2);
+  assert.deepEqual(C.toSave(mark, [...first, { role: 'user', text: 'q2' }]), { from: 2, messages: [{ role: 'user', text: 'q2' }] });
+  assert.deepEqual(C.toSave({ first: 0, saved: 0, held: [] }, first), { from: 0, messages: first });
+});
+
+test('a long chat opened at its newest page keeps a new message', () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const mark = C.markOf(page);
+  assert.deepEqual([mark.first, mark.saved], [800, 1000]);
+  const plan = C.toSave(mark, [...page.messages, { role: 'user', text: 'one more' }]);
+  assert.equal(plan.from, 1000);
+  assert.equal(plan.messages.length, 1);
+  assert.equal(server.put(plan).status, 200);
+  const back = server.rows();
+  assert.equal(back.length, 1001);
+  assert.equal(back[1000].text, 'one more');
+  assert.deepEqual(back.slice(0, 1000).map((m) => m.text), Array.from({ length: 1000 }, (_, i) => `m${i}`));
+});
+
+test('a message appended after loading an earlier page is saved at the right index', () => {
+  const server = fakeChat(1000);
+  const newest = server.page();
+  let mark = C.markOf(newest);
+  const older = server.page(mark.first);
+  mark = { first: older.from, saved: mark.saved, held: [...older.messages.map((m) => JSON.stringify(m)), ...mark.held] };
+  const local = [...older.messages, ...newest.messages, { role: 'user', text: 'after scrolling up' }];
+  const plan = C.toSave(mark, local);
+  assert.equal(plan.from, 1000);
+  assert.deepEqual(plan.messages, [{ role: 'user', text: 'after scrolling up' }]);
+  server.put(plan);
+  assert.equal(server.rows()[1000].text, 'after scrolling up');
+  assert.equal(server.rows().length, 1001);
+});
+
+test('an earlier message changed with the count and the last message unchanged is saved', () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const mark = C.markOf(page);
+  const local = JSON.parse(JSON.stringify(page.messages));
+  local[150].quiz = { given: 'a stack', correct: false };
+  const plan = C.toSave(mark, local);
+  assert.equal(plan.from, 950);
+  assert.equal(plan.messages.length, 50);
+  server.put(plan);
+  assert.equal(server.rows().length, 1000);
+  assert.equal(server.rows()[950].quiz.given, 'a stack');
+  assert.equal(server.rows()[999].text, 'm999');
+});
+
+function savingSlice(server, state, noted) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('    let upload = Promise.resolve();');
+  const code = source.slice(start, source.indexOf('\n    function freshIfGone() {', start));
+  const body = { scrollTop: 0, scrollHeight: 0 };
+  const request = async (url, init = {}) => {
+    const before = /before=(\d+)/.exec(url);
+    if (init.method === 'PUT') {
+      const answer = server.put(JSON.parse(init.body));
+      return { ok: answer.status === 200, status: answer.status, json: async () => ({ id: state.id, named: true, count: answer.count, updated_at: '2026-11-18T00:00:00Z' }) };
+    }
+    return { ok: true, status: 200, json: async () => server.page(before ? Number(before[1]) : undefined) };
+  };
+  const context = vm.createContext({
+    state, body, request, encodeURIComponent, JSON, Number, Math, Array, Boolean, Promise, setTimeout,
+    marks: new Map(), known: new Set([state.id]), gone: new Set(), unsaved: new Set(), naming: new Set(), NAME_CHECKS: [],
+    markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs,
+    stored: () => state.messages.filter((m) => !m.pending), persist() {}, drawChats() {}, loadChats() {}, freshIfGone() {}, notify: (m) => noted.push(m),
+    draw() { body.scrollHeight = state.messages.length * 10; },
+  });
+  vm.runInContext(`${code}\nthis.remember = remember; this.earlier = earlier; this.marks = marks; this.upload = () => upload;`, context);
+  return { context, body };
+}
+
+test('a refused save reloads and resends only the unsent messages, never a whole list', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const state = { id: 'chat-long-0001', messages: page.messages, refs: [], busy: null };
+  const noted = [];
+  const { context } = savingSlice(server, state, noted);
+  context.marks.set(state.id, C.markOf(page));
+  server.set(server.rows().slice(0, 998));
+  state.messages = [...state.messages, { role: 'user', text: 'mine' }];
+  await context.remember();
+  assert.ok(server.puts.every((p) => Number.isInteger(p.from)), 'no whole list is ever sent');
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1], [998, 1]]);
+  assert.equal(server.rows().length, 999);
+  assert.equal(server.rows()[998].text, 'mine');
+  assert.equal(state.messages.at(-1).text, 'mine');
+  assert.equal(state.messages.length, 201);
+  assert.deepEqual([context.marks.get(state.id).first, context.marks.get(state.id).saved], [798, 999]);
+  assert.deepEqual(noted, []);
+});
+
+test('scrolling to the top loads the page before', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const state = { id: 'chat-long-0002', messages: page.messages, refs: [], busy: null };
+  const { context, body } = savingSlice(server, state, []);
+  context.marks.set(state.id, C.markOf(page));
+  body.scrollHeight = 2000;
+  body.scrollTop = 30;
+  await context.earlier();
+  assert.equal(state.messages.length, 400);
+  assert.equal(state.messages[0].text, 'm600');
+  assert.equal(state.messages[399].text, 'm999');
+  assert.equal(context.marks.get(state.id).first, 600);
+  assert.equal(body.scrollTop, 30 + 2000, 'what was on screen stays put');
+  state.messages.push({ role: 'user', text: 'new' });
+  await context.remember();
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1]]);
 });

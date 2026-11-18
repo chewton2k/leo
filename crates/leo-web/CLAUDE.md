@@ -32,7 +32,11 @@ This file holds the rules. How each screen behaves, area by area, is in
   and `theme.js` are separate scripts too.
 - Everything leo-web computes or keeps besides notes and uploads lives in one
   SQLite file, `<data>/leo.db` (`db.rs`; rusqlite bundled, WAL, 0600, never
-  synced): chats (+ FTS5), chat documents, review progress, picture captions,
+  synced): chats (+ FTS5; chat messages are rows, `chat_messages` with
+  `chat_words` for search, db `VERSION` 7: a save adds only new rows, a chat
+  keeps every message and is read 200 at a time, a chat saved before is moved to
+  rows on its next save; 2026-11-17, the owner's principle 1: the 400-message cut
+  and its page slice are gone), chat documents, review progress, picture captions,
   meaning vectors, note connections, calendar feeds, note-task metadata,
   reading positions, margin threads, dictations, usage days, recordings whose
   notes are not written yet. Old caption, graph and meaning JSON files are
@@ -680,7 +684,7 @@ Felix (2026-10-19).
   stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
-  (guarded `ALTER`, db `VERSION` 6 (5 added `reworded`, 6 `closed_by`), a revert keeps 6; a revert never lowers `VERSION`, in `margin.json`), PATCH
+  (guarded `ALTER`, db `VERSION` 7 (5 added `reworded`, 6 `closed_by`, 7 chat message rows), a revert keeps 7; a revert never lowers `VERSION`, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
   unpinning folds it unless it is the one open) and a newest read-along note
