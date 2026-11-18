@@ -147,9 +147,22 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         "serve-token",
         "update-check.json",
         "recent.json",
+        ".manual-installed",
         ".env",
+        "keep.json",
+        "ui-prefs.json",
+        "calendars.json",
+        "usage.json",
     ] {
         std::fs::write(home.join(made), "x").unwrap();
+    }
+    let belongs = [
+        "attachments/note-k0001/source.pdf",
+        "recording-sources/note-k0001/source.json",
+    ];
+    for kept in belongs {
+        std::fs::create_dir_all(home.join(kept).parent().unwrap()).unwrap();
+        std::fs::write(home.join(kept), "kept").unwrap();
     }
     std::fs::create_dir_all(home.join(".leo/models")).unwrap();
     std::fs::write(home.join(".leo/models/ggml-base.en.bin"), "model").unwrap();
@@ -170,8 +183,15 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         ".leo",
         "models",
         ".manual-installed",
+        "keep.json",
+        "ui-prefs.json",
+        "calendars.json",
+        "usage.json",
     ] {
         assert!(!home.join(made).exists(), "{made} is still there");
+    }
+    for kept in belongs {
+        assert!(home.join(kept).is_file(), "{kept} went too");
     }
     assert!(
         home.join("my-own-file.txt").exists(),
@@ -182,6 +202,41 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         "notes went too"
     );
     assert!(home.join("notes").is_dir());
+}
+
+#[test]
+fn a_kept_notes_failed_recording_reopens_after_uninstall() {
+    use leo_services::session::{Manifest, Session};
+    let leo = Leo::new();
+    leo.note("Kept", "---\nid: note-k0001\ntitle: Kept\n---\nKept\n");
+    let root = leo.home.path().join("recordings");
+    let recording = |saved: bool, note: Option<&str>| {
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.saved = saved;
+        manifest.note = note.map(String::from);
+        let dir = Session::create(&root, manifest).unwrap().dir;
+        std::fs::write(dir.join("seg-00001.wav"), "audio").unwrap();
+        dir
+    };
+    let owned = recording(true, Some("note-k0001"));
+    let combined = recording(true, Some("note-k0001"));
+    let unfinished = recording(false, None);
+    let exe = leo.installed();
+
+    let out = leo.cmd_at(&exe, &["uninstall", "--yes"]).output_retrying();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", describe(&out));
+    assert!(
+        said.contains("Kept 2 recordings that belong to your notes, and 1 unfinished recording not yet saved as notes, in ~/recordings."),
+        "{said}"
+    );
+    for dir in [owned, combined, unfinished] {
+        assert!(Session::open(&dir).is_ok(), "{dir:?} went");
+        assert!(
+            dir.join("seg-00001.wav").is_file(),
+            "{dir:?} lost its audio"
+        );
+    }
 }
 
 #[test]

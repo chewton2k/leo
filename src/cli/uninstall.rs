@@ -3,102 +3,161 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+use std::collections::HashSet;
+
+use leo_core::paths::own;
 use leo_core::store::Store;
 use leo_services::config::Config;
+use leo_services::session::{self, Session};
 
 const MARKER: &str = "# Added by the leo installer";
 
-const KNOWN: &[&str] = &[
-    "config.toml",
-    "config.toml.new",
-    "credentials.json",
-    "serve-token",
-    "serve-sessions.json",
-    "app-sessions.json",
-    "app-port",
-    "update-foreground",
-    "app-launched",
-    "app-cli-dir",
-    "app-settings.json",
-    "dictation.json",
-    "speech-model.json",
-    ".speech.lock",
-    ".dictation.lock",
-    "update-check.json",
-    "recent.json",
-    ".env",
-    ".manual-installed",
-    ".tour-completed",
-    "notes.json",
-    "notes.json.bak",
-    "recordings",
-    "models",
-    "leo.db",
-    "leo.db-wal",
-    "leo.db-shm",
-];
+fn leftovers(dir: &Path, kept: &[PathBuf]) -> Vec<PathBuf> {
+    gather(dir, kept, dir.file_name().is_some_and(|n| n == "leo"))
+}
 
-const TEMP_PREFIXES: &[&str] = &["leo-recording", "leo-live-", "leo-mic-probe-"];
-
-fn leftovers(dir: &Path, notes: &Path) -> Vec<PathBuf> {
+fn gather(dir: &Path, kept: &[PathBuf], all: bool) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
-    let owned = dir.file_name().is_some_and(|n| n == "leo");
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path == notes {
+        if kept.contains(&path) {
             continue;
         }
-        if notes.starts_with(&path) {
-            if owned {
-                out.extend(leftovers(&path, notes));
+        let mine = all || own::listed(&entry.file_name().to_string_lossy());
+        if kept.iter().any(|k| k.starts_with(&path)) {
+            if mine {
+                out.extend(gather(&path, kept, true));
             }
             continue;
         }
-        let name = entry.file_name();
-        if owned || KNOWN.iter().any(|k| name == *k) {
+        if mine {
             out.push(path);
         }
     }
     out
 }
 
-fn plan(notes: &Path, home: &Path) -> Vec<PathBuf> {
-    let mut dirs: Vec<PathBuf> = [leo_core::paths::config_dir(), leo_core::paths::data_dir()]
+#[derive(Debug, Default, PartialEq)]
+struct Recordings {
+    kept: Vec<PathBuf>,
+    owned: usize,
+    unfinished: usize,
+}
+
+fn recordings(root: &Path, notes: &Path) -> Recordings {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Recordings::default();
+    };
+    let trashed = leo_core::store::trashed_ids(notes);
+    let listed = session::kept_owned(root);
+    let live: Option<HashSet<String>> = listed
+        .iter()
+        .any(|(_, note)| !trashed.contains(note))
+        .then(|| {
+            notes
+                .is_dir()
+                .then(|| Store::load_from(notes).ok())
+                .flatten()
+                .filter(|store| store.unreadable.is_empty())
+                .map(|store| store.notes.into_iter().map(|note| note.id).collect())
+        })
+        .flatten();
+    let unfinished: HashSet<PathBuf> = Session::unfinished_page(root, None, usize::MAX)
+        .0
         .into_iter()
-        .flatten()
+        .map(|session| session.dir)
         .collect();
+    let mut owned = HashSet::new();
+    let mut gone = HashSet::new();
+    for (dir, note) in listed {
+        let belongs =
+            live.as_ref().is_none_or(|live| live.contains(&note)) || trashed.contains(&note);
+        if belongs {
+            owned.insert(dir);
+        } else if !unfinished.contains(&dir) && !session::locked(&dir) {
+            gone.insert(dir);
+        }
+    }
+    let mut kept: Vec<PathBuf> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| !gone.contains(path))
+        .collect();
+    kept.sort();
+    Recordings {
+        kept,
+        owned: owned.len(),
+        unfinished: unfinished.difference(&owned).count(),
+    }
+}
+
+struct Plan {
+    doomed: Vec<PathBuf>,
+    recordings: Recordings,
+}
+
+fn plan(dirs: &[PathBuf], notes: &Path, home: &Path, root: &Path, temp: Option<&Path>) -> Plan {
+    let mut dirs = dirs.to_vec();
     dirs.dedup();
+    let recordings = recordings(root, notes);
+    let mut kept = own::kept_with(notes);
+    kept.extend(recordings.kept.iter().cloned());
+    let holds_kept = |dir: &Path| kept.iter().any(|k| k.starts_with(dir));
     let mut out = Vec::new();
     for dir in dirs {
         let owned = dir.file_name().is_some_and(|n| n == "leo");
-        if owned && !notes.starts_with(&dir) && dir.exists() {
+        if owned && !holds_kept(&dir) && dir.exists() {
             out.push(dir);
         } else {
-            out.extend(leftovers(&dir, notes));
+            out.extend(leftovers(&dir, &kept));
         }
     }
     let models = home.join(".leo");
-    if !home.as_os_str().is_empty() && models.is_dir() && !notes.starts_with(&models) {
+    if !home.as_os_str().is_empty() && models.is_dir() && !holds_kept(&models) {
         out.push(models);
     }
-    let temp = std::env::var_os("LEO_HOME")
-        .is_none()
-        .then(std::env::temp_dir)
-        .and_then(|t| std::fs::read_dir(t).ok());
-    if let Some(entries) = temp {
+    if let Some(entries) = temp.and_then(|t| std::fs::read_dir(t).ok()) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if TEMP_PREFIXES.iter().any(|p| name.starts_with(p)) && name.ends_with(".wav") {
+            if own::LEGACY_TEMP.iter().any(|p| name.starts_with(p)) && name.ends_with(".wav") {
                 out.push(entry.path());
             }
         }
     }
     out.sort();
     out.dedup();
-    out
+    Plan {
+        doomed: out,
+        recordings,
+    }
+}
+
+fn kept_recordings(recordings: &Recordings, root: &Path, home: &Path) -> Option<String> {
+    let count =
+        |n: usize, kind: &str| format!("{n} {kind}recording{}", if n == 1 { "" } else { "s" });
+    (recordings.owned + recordings.unfinished > 0).then(|| {
+        format!(
+            "  Kept {} that belong to your notes, and {} not yet saved as notes, in {}. Open leo again to save the unfinished ones.",
+            count(recordings.owned, ""),
+            count(recordings.unfinished, "unfinished "),
+            pretty(root, home)
+        )
+    })
+}
+
+fn described(path: &Path, home: &Path) -> String {
+    let name = path.file_name().unwrap_or_default().to_string_lossy();
+    if name.starts_with("leo.db.damaged-") && own::listed(&name) {
+        format!(
+            "{}: an old copy of leo's database (chats and margin notes from before it was set aside)",
+            pretty(path, home)
+        )
+    } else {
+        pretty(path, home)
+    }
 }
 
 fn remove(path: &Path) -> std::io::Result<()> {
@@ -142,24 +201,36 @@ pub fn run(yes: bool) -> Result<()> {
         anyhow::ensure!(!notes.starts_with(bundle), "Your notes are inside the app folder. Move them in Settings before uninstalling; nothing was removed.");
         super::installation::verify_installed_bundle(bundle)?;
     }
-    let doomed = plan(&notes, &home);
+    let root = session::root()?;
+    let data: Vec<PathBuf> = [leo_core::paths::config_dir()?, leo_core::paths::data_dir()?].into();
+    let temp = std::env::var_os("LEO_HOME")
+        .is_none()
+        .then(std::env::temp_dir);
+    let Plan { doomed, recordings } = plan(&data, &notes, &home, &root, temp.as_deref());
+    let kept = kept_recordings(&recordings, &root, &home);
 
     if !yes {
         if !std::io::stdin().is_terminal() {
             anyhow::bail!("nothing removed; run `leo uninstall --yes` to confirm");
         }
         println!();
-        println!("  This removes leo and everything it made, except your notes:");
+        println!("  This removes leo and everything it made, except your notes and what belongs to them:");
         println!("    {}", pretty(&exe, &home));
         for path in &doomed {
-            println!("    {}", pretty(path, &home));
+            println!("    {}", described(path, &home));
         }
         if let Some(bundle) = &bundle {
             println!("    {} and its login item", pretty(bundle, &home));
         }
         println!("    the PATH line the installer added, and any API keys leo stored");
         println!();
-        println!("  Your notes stay in {}.", pretty(&notes, &home));
+        println!(
+            "  Your notes stay in {}, with their original files and recording transcripts.",
+            pretty(&notes, &home)
+        );
+        if let Some(kept) = &kept {
+            println!("{kept}");
+        }
         let answer = super::prompt::ask("  Remove leo? [y/N] ")?;
         if !answer.eq_ignore_ascii_case("y") && !answer.eq_ignore_ascii_case("yes") {
             println!("  Nothing removed.");
@@ -243,7 +314,13 @@ pub fn run(yes: bool) -> Result<()> {
     }
 
     println!();
-    println!("  Your notes are still in {}.", pretty(&notes, &home));
+    println!(
+        "  Your notes are still in {}, with their original files and recording transcripts.",
+        pretty(&notes, &home)
+    );
+    if let Some(kept) = &kept {
+        println!("{kept}");
+    }
     println!("  Tools installed separately (cloudflared, Ollama) stay;");
     println!("  remove them with your package manager if you no longer want them.");
     println!("  Thank you for using leo!");
@@ -403,7 +480,7 @@ mod tests {
     }
 
     #[test]
-    fn in_a_leo_folder_everything_but_the_notes_goes() {
+    fn in_a_leo_folder_everything_but_the_notes_and_what_belongs_to_them_goes() {
         let tmp = tempfile::tempdir().unwrap();
         let leo = tmp.path().join("leo");
         let notes = leo.join("notes");
@@ -411,7 +488,9 @@ mod tests {
         touch(&leo.join("config.toml"));
         touch(&leo.join("something-new.json"));
         touch(&leo.join("cache/x"));
-        let mut found = leftovers(&leo, &notes);
+        touch(&leo.join("attachments/note-a0001/source.pdf"));
+        touch(&leo.join("recording-sources/note-a0001/source.json"));
+        let mut found = leftovers(&leo, &own::kept_with(&notes));
         found.sort();
         assert_eq!(
             found,
@@ -429,15 +508,35 @@ mod tests {
         let home = tmp.path().join("me");
         let notes = home.join("notes");
         touch(&notes.join("a.md"));
-        touch(&home.join("config.toml"));
-        touch(&home.join("serve-token"));
-        touch(&home.join("taxes.pdf"));
-        touch(&home.join("Documents/x"));
-        let mut found = leftovers(&home, &notes);
+        for name in [
+            "config.toml",
+            "serve-token",
+            "keep.json",
+            "ui-prefs.json",
+            "leo.db-wal",
+            "graph.json.before-database",
+            "recent.json",
+            "taxes.pdf",
+            "Documents/x",
+            "attachments/x",
+            "recording-sources/x",
+        ] {
+            touch(&home.join(name));
+        }
+        let mut found = leftovers(&home, &own::kept_with(&notes));
         found.sort();
         assert_eq!(
             found,
-            vec![home.join("config.toml"), home.join("serve-token")]
+            [
+                "config.toml",
+                "graph.json.before-database",
+                "keep.json",
+                "leo.db-wal",
+                "recent.json",
+                "serve-token",
+                "ui-prefs.json",
+            ]
+            .map(|name| home.join(name))
         );
     }
 
@@ -448,8 +547,100 @@ mod tests {
         let notes = leo.join("data/notes");
         touch(&notes.join("a.md"));
         touch(&leo.join("data/recent.json"));
-        let found = leftovers(&leo, &notes);
+        let found = leftovers(&leo, &own::kept_with(&notes));
         assert_eq!(found, vec![leo.join("data/recent.json")]);
+    }
+
+    fn note(path: &Path, id: &str) {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("---\nid: {id}\ntitle: {id}\n---\nbody\n")).unwrap();
+    }
+
+    fn recording(root: &Path, saved: bool, note: Option<&str>, failed: bool) -> PathBuf {
+        let mut manifest = session::Manifest::new(None, None, "", false);
+        manifest.saved = saved;
+        manifest.note = note.map(String::from);
+        let session = Session::create(root, manifest).unwrap();
+        if failed {
+            std::fs::write(session.dir.join("seg-00001.wav"), "audio").unwrap();
+        }
+        session.dir
+    }
+
+    #[test]
+    fn recordings_of_kept_notes_and_unfinished_ones_stay() {
+        let tmp = tempfile::tempdir().unwrap();
+        for (data, notes_beside) in [
+            (tmp.path().join("leo"), true),
+            (tmp.path().join("mine"), true),
+            (tmp.path().join("leo-outside"), false),
+        ] {
+            let data = if notes_beside { data } else { data.join("leo") };
+            let notes = if notes_beside {
+                data.join("notes")
+            } else {
+                data.parent().unwrap().join("notes")
+            };
+            note(&notes.join("One.md"), "note-n0001");
+            note(&notes.join(".trash/Two.md"), "note-n0002");
+            let root = data.join("recordings");
+            let a = recording(&root, true, Some("note-n0001"), true);
+            let b = recording(&root, true, None, false);
+            Session::open(&b)
+                .unwrap()
+                .trace("saved", "Note note-n0002 saved");
+            let c = recording(&root, true, Some("note-n0003"), false);
+            let d = recording(&root, false, None, false);
+            let e = recording(&root, true, Some("note-n0004"), false);
+            std::fs::write(e.join("lock"), std::process::id().to_string()).unwrap();
+            touch(&data.join("config.toml"));
+
+            let planned = plan(
+                std::slice::from_ref(&data),
+                &notes,
+                Path::new(""),
+                &root,
+                None,
+            );
+            assert_eq!(planned.recordings.kept, {
+                let mut kept = vec![a.clone(), b.clone(), d.clone(), e.clone()];
+                kept.sort();
+                kept
+            });
+            assert_eq!(
+                (planned.recordings.owned, planned.recordings.unfinished),
+                (2, 1)
+            );
+            assert!(
+                planned.doomed.contains(&c),
+                "{data:?}: {:?}",
+                planned.doomed
+            );
+            assert!(planned.doomed.contains(&data.join("config.toml")));
+            for path in [&a, &b, &d, &e, &notes, &data, &root] {
+                assert!(
+                    !planned.doomed.iter().any(|p| path.starts_with(p)),
+                    "{path:?} would go: {:?}",
+                    planned.doomed
+                );
+            }
+
+            std::fs::write(notes.join("Broken.md"), "---\nid: [\n---\n").unwrap();
+            let planned = plan(
+                std::slice::from_ref(&data),
+                &notes,
+                Path::new(""),
+                &root,
+                None,
+            );
+            let mut all = vec![a, b, c, d, e];
+            all.sort();
+            assert_eq!(planned.recordings.kept, all, "{data:?}");
+            assert!(!planned
+                .doomed
+                .iter()
+                .any(|p| root.starts_with(p) || p.starts_with(&root)));
+        }
     }
 
     #[test]

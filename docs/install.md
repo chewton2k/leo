@@ -61,7 +61,7 @@ Settings → Updates & about checks for updates, shows what changed, and install
 when you quit by default. Updates wait for recording and dictation to finish.
 
 `leo uninstall` removes the app, its login item and its local settings and
-models, and keeps your notes.
+models, and keeps your notes, with their original files and recording transcripts.
 
 Settings → Health lists setup problems and how to fix each one.
 

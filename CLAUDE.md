@@ -10,7 +10,7 @@ the compiler enforces it — do not add an upward dependency:
 
 | Crate | Holds | Depends on |
 |-------|-------|------------|
-| `crates/leo-core` | `notes`, `store`, `filename`, `open` (opens a link with the system), `children` (stops a process tree, runs a bounded helper, lists the processes leo owns for Felix activity's Running now; `quiet_command` starts every helper program without a console window on Windows), `diag`, `keep` (retention choices), `paths`, `recording`, `activity` | — |
+| `crates/leo-core` | `notes`, `store`, `filename`, `open` (opens a link with the system), `children` (stops a process tree, runs a bounded helper, lists the processes leo owns for Felix activity's Running now; `quiet_command` starts every helper program without a console window on Windows), `diag`, `keep` (retention choices), `paths` (and `own`, the names of every file leo writes in its folders), `recording`, `activity` | — |
 | `crates/leo-services` | `ai/` (chains, prompts, live transcription), `config/` (providers, credentials), `health`, `providers`, `speech`, `dictation`, `session`, `update`, `usage`, `import` | core |
 | `crates/leo-web` | leo's engine and pages: `lib.rs` (`start` → `Running`, router), `routes/` (handlers by area), `token.rs`, and the page in `src/web/` (`page-head.html` + `styles/*.css` + `page-tail.html` joined at compile time, `app/*.js` served as `/app.js`, `markdown.js`, …) | core |
 | `crates/leo-host` | `powers()` (the AI, speech, settings, recording housekeeping and import powers handed to the engine) and `leo-test-server` (Playwright's engine) | core, services, web |
@@ -276,8 +276,15 @@ models: first-launch setup owns that choice.
 
 The CLI is bundled with the app; macOS links to it, Windows uses a UTF-8 cmd shim
 that preserves its caller's code page. Uninstall validates bundle identity, refuses
-active apps, removes owned login entries and links, keeps notes and unrelated
-files, and defers locked Windows removal. Shell-profile edits are atomic and
+active apps, removes owned login entries and links, keeps notes, their original
+files and recording transcripts, and unrelated files; in a folder not named `leo`
+it removes only the names in `leo_core::paths::own`: what today's code writes,
+plus a legacy list of what earlier versions wrote, which only ever shrinks
+(2026-11-17: what a kept note depends on is kept, and a service removes exactly
+what leo manages, including what it managed before; `tests/owned_files.rs` fails
+when code writes a bare name not listed there). Recordings that belong to kept or
+trashed notes, and unfinished ones, stay in `recordings/`. It defers locked
+Windows removal. Shell-profile edits are atomic and
 retain permissions. Tests use scratch bundles and ad-hoc signatures, never the
 real signing keychain. Four persistent signing secrets gate release before bump;
 private values are generated outside the repository and added by the user.
