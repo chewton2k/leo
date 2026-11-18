@@ -692,6 +692,7 @@ impl ClaudeSession {
         self.native
     }
 
+    #[cfg(test)]
     pub fn say(&mut self, text: &str, sink: Sink<'_>) -> ProviderResult<(String, Spent)> {
         self.say_with(
             text,
@@ -701,6 +702,7 @@ impl ClaudeSession {
         )
     }
 
+    #[cfg(test)]
     pub fn say_with(
         &mut self,
         text: &str,

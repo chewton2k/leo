@@ -22,13 +22,6 @@ impl Task {
             Task::Transcribe => "transcribe",
         }
     }
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Task::Chat => "chat",
-            Task::Transcribe => "transcribe",
-        }
-    }
 }
 
 /// Read the chain as it appears in the file.

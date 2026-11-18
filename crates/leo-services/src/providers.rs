@@ -106,14 +106,6 @@ pub fn model_state(path: &std::path::Path, sha256: &str) -> ModelState {
     }
 }
 
-pub fn files_state(dir: &std::path::Path, manifest: &[(String, String)]) -> ModelState {
-    worst_state(
-        manifest
-            .iter()
-            .map(|(name, sha)| model_state(&dir.join(name), sha)),
-    )
-}
-
 pub fn worst_state(states: impl IntoIterator<Item = ModelState>) -> ModelState {
     let states: Vec<ModelState> = states.into_iter().collect();
     if states.contains(&ModelState::Damaged) {
@@ -331,24 +323,6 @@ mod tests {
         assert_eq!(model_state(&path, &good.to_uppercase()), ModelState::Ready);
         std::fs::write(&path, b"whole mo").unwrap();
         assert_eq!(model_state(&path, &good), ModelState::Damaged);
-    }
-
-    #[test]
-    fn a_model_of_several_files_is_ready_only_when_every_one_is() {
-        let dir = tempfile::tempdir().unwrap();
-        let a = dir.path().join("a.onnx");
-        let b = dir.path().join("b.txt");
-        std::fs::write(&a, b"aaa").unwrap();
-        std::fs::write(&b, b"bbb").unwrap();
-        let manifest = vec![
-            ("a.onnx".to_string(), sha256_of(&a).unwrap()),
-            ("b.txt".to_string(), sha256_of(&b).unwrap()),
-        ];
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Ready);
-        std::fs::remove_file(&b).unwrap();
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Missing);
-        std::fs::write(&a, b"aa").unwrap();
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Damaged);
     }
 
     #[cfg(unix)]
