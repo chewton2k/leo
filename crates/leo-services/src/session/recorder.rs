@@ -1439,7 +1439,11 @@ mod tests {
             events.last()
         );
         assert!(dir.join(wav::done_name(0)).exists());
-        assert_eq!(Session::unfinished(root.path()), [dir]);
+        let found: Vec<PathBuf> = Session::unfinished(root.path())
+            .into_iter()
+            .map(|s| s.dir)
+            .collect();
+        assert_eq!(found, [dir]);
     }
 
     #[test]
