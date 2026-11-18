@@ -156,7 +156,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     const saving = {open(note) {return {note, edit: {...note, tags: []}}}};
     const chrome = () => {}, arriveOnPage = () => {}, drawOriginals = () => {}, hideAskFloat = () => {}, restoreReading = () => {}, drawRelated = () => {}, placeAskFloat = () => {};
     const swap = (_key, draw) => draw(), scrollToTop = () => window.scrollTo(0, 0);
-    const marginLoadPrefs = async () => {}, marginMount = async () => {}, marginEdited = () => {}, fail = error => { throw error; };
+    const marginLoadPrefs = async () => {}, marginMount = async () => {}, marginEdited = () => {}, marginIdle = fn => setTimeout(fn, 0), fail = error => { throw error; };
     const cleanTitle = text => text.trim(), folderLabel = () => 'Top level', rel = () => 'now';
     function changed(s) {saved = s.doc.source();}
     ${icons}
