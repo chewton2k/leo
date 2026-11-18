@@ -284,3 +284,54 @@ fn audit_bench_c1_autosave() {
         );
     }
 }
+
+#[test]
+#[ignore]
+fn audit_bench_save_parts() {
+    let n: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000);
+    let big = std::env::var("LEO_BENCH_BIG").is_ok_and(|v| v == "1");
+    let start = Instant::now();
+    let (_dir, mut store) = library(n, big);
+    let built = start.elapsed();
+    let id = store
+        .notes
+        .iter()
+        .filter(|note| note.title != "Big")
+        .nth(n / 2)
+        .unwrap()
+        .id
+        .clone();
+    let base = body_for(n / 2);
+    let (mut folders, mut paths, mut ids, mut hashes) =
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    let (mut save_edit, mut save_none) = (Vec::new(), Vec::new());
+    for round in 0..7 {
+        let note = store.find_note_mut(&id).unwrap();
+        note.body = format!("{base} parts {round}");
+        note.updated_at = chrono::Utc::now();
+        let [a, b, c, d] = store.time_save_parts();
+        folders.push(a);
+        paths.push(b);
+        ids.push(c);
+        hashes.push(d);
+        let start = Instant::now();
+        store.save().unwrap();
+        save_edit.push(start.elapsed());
+        let start = Instant::now();
+        store.save().unwrap();
+        save_none.push(start.elapsed());
+    }
+    println!(
+        "save parts notes={n} big={big} fixture_s={:.1} folders_ms={:.3} assign_paths_ms={:.3} live_ids_ms={:.3} hash_ms={:.3} save_with_edit_ms={:.2} save_nothing_changed_ms={:.2}",
+        built.as_secs_f64(),
+        median(folders),
+        median(paths),
+        median(ids),
+        median(hashes),
+        median(save_edit),
+        median(save_none)
+    );
+}
