@@ -41,6 +41,7 @@ tokenizers.workspace = true
 libc.workspace = true
 zeroize.workspace = true
 fs2 = "0.4"
+quick-xml = "0.42.0"
 log = "0.4"
 regex = "1"
 strsim = "0.11"

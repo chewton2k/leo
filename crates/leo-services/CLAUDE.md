@@ -274,7 +274,11 @@ row shows `label` (age past `STALE_AFTER`; a window past its reset reads 0%).
 
 Native Markdown extraction precedes AI writing. Office XML is parsed with
 roxmltree (`nodes_limit`, DTDs refused by default) plus a post-parse depth check
-(`MOST_DEPTH`); parts, decompressed bytes and output are bounded; relationships
+(`MOST_DEPTH`). Word is read one top-level paragraph or table row at a time and
+PowerPoint one slide at a time, into the import's text spill (2026-11-17,
+principle 1: no part, total, table or output limit); each piece keeps the
+`nodes_limit` and depth bounds; a part over 4 GiB uncompressed is refused and
+reading stops before the disk's free space falls under 1 GB; relationships
 stay inside the ZIP and external links are never fetched. PDF text uses
 `lopdf::extract_text_with_limit` per page; a page number must not hide a scan and
 text on another page must not suppress one; an unreadable scan fails with its

@@ -3397,6 +3397,7 @@ dependencies = [
  "lopdf",
  "objc2",
  "objc2-foundation",
+ "quick-xml 0.42.0",
  "regex",
  "reqwest 0.12.28",
  "roxmltree",

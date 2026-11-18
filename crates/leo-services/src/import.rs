@@ -22,6 +22,8 @@ const MOST_PDF_DEPTH: usize = 128;
 const SCAN_TEXT_LETTERS: usize = 40;
 const SCAN_PAGE_SHARE: f32 = 0.65;
 const SPILL_AT: usize = 8 * 1024 * 1024;
+const FREE_DISK_FLOOR: u64 = 1024 * 1024 * 1024;
+const DISK_CHECK_EVERY: u64 = 64 * 1024 * 1024;
 const LABEL_LOOK: usize = 2_000;
 
 #[derive(Debug, Clone)]
@@ -99,6 +101,8 @@ pub struct Spill {
     file: Option<(PathBuf, std::fs::File)>,
     length: u64,
     content: bool,
+    #[cfg(test)]
+    free: Option<u64>,
 }
 
 impl Spill {
@@ -113,10 +117,14 @@ impl Spill {
             return Ok(());
         }
         self.content |= !text.trim().is_empty();
+        let before = self.length;
         self.length += text.len() as u64;
         if self.file.is_none() && self.buffer.len() + text.len() <= SPILL_AT {
             self.buffer.push_str(text);
             return Ok(());
+        }
+        if self.file.is_none() || before / DISK_CHECK_EVERY != self.length / DISK_CHECK_EVERY {
+            self.room()?;
         }
         let buffered = std::mem::take(&mut self.buffer);
         let file = self.open()?;
@@ -141,6 +149,22 @@ impl Spill {
         }
     }
 
+    fn room(&mut self) -> Result<()> {
+        let path = match &self.file {
+            Some((path, _)) => path.clone(),
+            None => self.scratch.path("text", "md")?,
+        };
+        let folder = path.parent().unwrap_or(&path);
+        #[cfg(test)]
+        let free = self.free.or_else(|| fs2::available_space(folder).ok());
+        #[cfg(not(test))]
+        let free = fs2::available_space(folder).ok();
+        if free.is_some_and(|free| free < FREE_DISK_FLOOR + DISK_CHECK_EVERY) {
+            bail!("There is not enough free disk space to read this file.");
+        }
+        Ok(())
+    }
+
     fn append(&mut self, other: &Spill) -> Result<()> {
         self.content |= other.content;
         self.length += other.length;
@@ -153,6 +177,7 @@ impl Spill {
             self.buffer.push_str(&other.buffer);
             return Ok(());
         }
+        self.room()?;
         let file = self.open()?;
         file.write_all(buffered.as_bytes())?;
         match &other.file {
@@ -192,6 +217,15 @@ impl Spill {
         file.take(range.end.saturating_sub(range.start))
             .read_to_end(&mut out)?;
         Ok(out)
+    }
+
+    fn reader(&self) -> Result<Box<dyn std::io::BufRead + '_>> {
+        Ok(match &self.file {
+            Some((path, _)) => Box::new(std::io::BufReader::new(
+                std::fs::File::open(path).context("leo could not read back its text")?,
+            )),
+            None => Box::new(self.buffer.as_bytes()),
+        })
     }
 
     pub fn read(&self, range: Range<u64>) -> Result<String> {
@@ -503,14 +537,18 @@ fn extract_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
     }
     match ext.as_str() {
         "pdf" => pdf(&upload.bytes, scratch),
-        "docx" => Ok(Material {
-            figures: figures::from_docx(&upload.bytes),
-            ..text(&office::docx(&upload.bytes)?)?
-        }),
-        "pptx" => Ok(Material {
-            figures: figures::from_pptx(&upload.bytes),
-            ..text(&office::pptx(&upload.bytes)?)?
-        }),
+        "docx" => {
+            let mut material = Material::new(scratch);
+            office::docx(&upload.bytes, &mut material.text)?;
+            material.figures = figures::from_docx(&upload.bytes);
+            Ok(material)
+        }
+        "pptx" => {
+            let mut material = Material::new(scratch);
+            office::pptx(&upload.bytes, &mut material.text)?;
+            material.figures = figures::from_pptx(&upload.bytes);
+            Ok(material)
+        }
         "txt" | "md" | "markdown" | "text" => text(&String::from_utf8_lossy(&upload.bytes)),
         "jpg" | "jpeg" | "png" | "webp" | "gif" => photo(format!(
             "image/{}",
@@ -2189,7 +2227,7 @@ mod tests {
         pdf_with_pages(&parts)
     }
 
-    fn measured_read(file: &str) {
+    pub(super) fn measured_read(file: &str, name: &str) {
         let bytes = std::fs::read(file).unwrap();
         let baseline = resident_kb();
         let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(baseline));
@@ -2206,8 +2244,8 @@ mod tests {
         let started = std::time::Instant::now();
         let outcome = (|| -> Result<(usize, usize, usize)> {
             let material = extract(&Upload {
-                name: "long.pdf".into(),
-                mime: "application/pdf".into(),
+                name: name.into(),
+                mime: String::new(),
                 bytes,
             })?;
             let parts = std::sync::atomic::AtomicUsize::new(0);
@@ -2222,7 +2260,7 @@ mod tests {
             };
             write_note(
                 &material,
-                "long.pdf",
+                name,
                 None,
                 "",
                 &write,
@@ -2255,7 +2293,7 @@ mod tests {
     #[ignore]
     fn benchmark_long_pdf() {
         if let Ok(file) = std::env::var("LEO_BENCH_PDF_FILE") {
-            measured_read(&file);
+            measured_read(&file, "long.pdf");
             return;
         }
         let cases = std::env::var("LEO_BENCH_CASES")
