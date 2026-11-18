@@ -889,6 +889,15 @@ impl Feed {
 pub const MOST_FOLDER_NAME_CHARS: usize = 120;
 pub const MOST_FOLDER_NAME_BYTES: usize = 240;
 
+/// What Health reports about the loaded notes.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Facts {
+    pub notes: usize,
+    pub directories: usize,
+    pub unreadable: Vec<(PathBuf, String)>,
+    pub conflict_copies: Vec<String>,
+}
+
 /// Persistent store backed by per-note .md files in a directory.
 pub struct Store {
     pub notes: Vec<Note>,
@@ -1007,6 +1016,20 @@ impl Store {
             directories,
             notes_dir: notes_dir.to_path_buf(),
         })
+    }
+
+    pub fn facts(&self) -> Facts {
+        Facts {
+            notes: self.notes.len(),
+            directories: self.directories.len(),
+            unreadable: self.unreadable.clone(),
+            conflict_copies: self
+                .notes
+                .iter()
+                .filter(|n| n.title.ends_with(CONFLICT_SUFFIX))
+                .map(|n| n.title.clone())
+                .collect(),
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -2647,6 +2670,30 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::load_from(&dir.path().join("notes")).unwrap();
         (store, dir)
+    }
+
+    #[test]
+    fn a_stores_facts_name_unreadable_files_and_conflict_copies() {
+        let (mut store, _d) = temp_store();
+        store.create_note("A", "a", vec![], "").unwrap();
+        store
+            .create_note(format!("B{CONFLICT_SUFFIX}"), "b", vec![], "cs130")
+            .unwrap();
+        store.create_dir("cs130");
+        store.save().unwrap();
+        fs::write(
+            store.notes_dir.join("broken.md"),
+            "---\ntitle: [unclosed\n---\nx",
+        )
+        .unwrap();
+        let store = Store::load_from(&store.notes_dir).unwrap();
+        let facts = store.facts();
+        assert_eq!(facts.notes, 2);
+        assert_eq!(facts.directories, store.directories.len());
+        assert!(facts.directories >= 1);
+        assert_eq!(facts.unreadable.len(), 1);
+        assert!(facts.unreadable[0].0.ends_with("broken.md"));
+        assert_eq!(facts.conflict_copies, vec![format!("B{CONFLICT_SUFFIX}")]);
     }
 
     // ── find ────────────────────────────────────────────────────────────────
