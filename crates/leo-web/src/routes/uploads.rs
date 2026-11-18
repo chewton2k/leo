@@ -293,9 +293,12 @@ pub(crate) fn remove_originals(
             .ok_or_else(|| {
                 std::io::Error::other("Original files must stay inside the attachments folder")
             })
-            .and_then(|path| match std::fs::remove_file(path) {
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                done => done,
+            .and_then(|path| {
+                crate::originals::forget_copy(&path);
+                match std::fs::remove_file(path) {
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                    done => done,
+                }
             });
         if let Err(error) = removed {
             failed.get_or_insert(error);

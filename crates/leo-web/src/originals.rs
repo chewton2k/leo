@@ -186,6 +186,12 @@ fn copy_of(original: &Path) -> Option<PathBuf> {
     Some(original.parent()?.join(COPIES).join(name))
 }
 
+pub(crate) fn forget_copy(original: &Path) {
+    if let Some(copy) = copy_of(original) {
+        drop_copy(&copy);
+    }
+}
+
 fn copies_folder_is_ours(copy: &Path) -> bool {
     copy.parent()
         .and_then(|folder| std::fs::symlink_metadata(folder).ok())
@@ -1028,5 +1034,18 @@ mod tests {
                 part.len()
             );
         }
+    }
+
+    #[test]
+    fn removing_an_original_takes_its_read_copy_and_nothing_else() {
+        let dir = tempfile::tempdir().unwrap();
+        let copies = dir.path().join(COPIES);
+        std::fs::create_dir(&copies).unwrap();
+        for name in ["gone.pdf.txt", "kept.pdf.txt"] {
+            std::fs::write(copies.join(name), "text").unwrap();
+        }
+        forget_copy(&dir.path().join("gone.pdf"));
+        assert!(!copies.join("gone.pdf.txt").exists());
+        assert!(copies.join("kept.pdf.txt").is_file());
     }
 }
