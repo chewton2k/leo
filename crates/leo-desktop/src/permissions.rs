@@ -425,16 +425,13 @@ pub fn shortcut_clash(shortcut: &str) -> bool {
     let value = shortcut.to_ascii_lowercase();
     #[cfg(target_os = "macos")]
     {
-        use std::ffi::OsStr;
         if !["option+space", "alt+space", "opt+space"].contains(&value.as_str()) {
             return false;
         }
-        crate::helpers::capture(
-            "pgrep",
-            &[OsStr::new("-f"), OsStr::new("/Alfred[^/]*\\.app/")],
-            std::time::Duration::from_secs(1),
-        )
-        .is_ok_and(|output| output.status.success())
+        let mut command = leo_core::children::quiet_command("pgrep");
+        command.args(["-f", "/Alfred[^/]*\\.app/"]);
+        leo_core::children::run_bounded(command, std::time::Duration::from_secs(1), 4096)
+            .is_ok_and(|out| !out.timed_out && out.status.success())
     }
     #[cfg(windows)]
     unsafe {

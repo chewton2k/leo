@@ -2,8 +2,6 @@ mod app_settings;
 mod audio_feedback;
 mod clipboard;
 mod dictation;
-#[cfg(target_os = "macos")]
-mod helpers;
 mod input;
 mod links;
 mod notify;

@@ -236,7 +236,7 @@ Permission status checks never open the microphone; requests are explicit.
 A microphone request after a macOS denial opens the Microphone privacy pane,
 since the system shows its dialog only once.
 Health combines host doctor checks with native permission, model and shortcut
-checks. macOS helper output is bounded, nonblocking and timed out by process group.
+checks. The one `leo_core::children::run_bounded` runner bounds and times out helper output, killing the process tree.
 
 `updates.rs` owns updater checks, verified downloads and installation on one actor.
 Automatic checks and install-on-quit default on; debug startup checks stay off.
