@@ -13,6 +13,12 @@ fn no_settings() -> Response {
         .into_response()
 }
 
+fn with_usage(mut page: serde_json::Value, usage: &crate::usage::Usage) -> serde_json::Value {
+    page["felix_days"] = serde_json::json!(usage.days());
+    page["felix_recent"] = serde_json::json!(usage.recent());
+    page
+}
+
 pub(crate) async fn get_settings(State(state): State<AppState>) -> Response {
     settings_page(state, None).await
 }
@@ -23,12 +29,8 @@ async fn settings_page(state: AppState, note: Option<String>) -> Response {
     };
     let notes_dir = state.notes_dir.clone();
     let usage = std::sync::Arc::clone(&state.usage);
-    let described = tokio::task::spawn_blocking(move || {
-        let mut page = settings.describe(&notes_dir);
-        page["felix_days"] = serde_json::json!(usage.days());
-        page["felix_recent"] = serde_json::json!(usage.recent());
-        page
-    });
+    let described =
+        tokio::task::spawn_blocking(move || with_usage(settings.describe(&notes_dir), &usage));
     match described.await {
         Ok(mut page) => {
             if let Some(note) = note {
@@ -94,10 +96,7 @@ pub(crate) async fn change_setting(
     let done = tokio::task::spawn_blocking(move || {
         settings.apply(&change).map(|message| {
             warm.clear();
-            let mut page = settings.describe(&notes_dir);
-            page["felix_days"] = serde_json::json!(usage.days());
-            page["felix_recent"] = serde_json::json!(usage.recent());
-            (message, page)
+            (message, with_usage(settings.describe(&notes_dir), &usage))
         })
     })
     .await;

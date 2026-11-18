@@ -133,30 +133,7 @@ pub(crate) fn run(state: &AppState, desk: &mut tools::Desk, access: Access, call
         "list_boards" | "open_board" => return crate::board_tools::read(&state.chats, call),
         _ => {}
     }
-    let step = match call.name.as_str() {
-        "add_task" => "Tried to add a task",
-        "update_task" => "Tried to change a task",
-        "delete_task" => "Tried to delete a task",
-        "move_note" => "Tried to move a note",
-        "make_folder" => "Tried to make a folder",
-        "move_folder" => "Tried to move a folder",
-        "rename_note" => "Tried to rename a note",
-        "rename_folder" => "Tried to rename a folder",
-        "pin_note" => "Tried to pin a note",
-        "add_margin_note" => "Tried to add a margin note",
-        "restore_note" => "Tried to bring a note back",
-        "delete_folder" => "Tried to delete a folder",
-        "restore_folder" => "Tried to bring a folder back",
-        "add_card" => "Tried to add a card",
-        "update_card" => "Tried to change a card",
-        "move_card" => "Tried to move a card",
-        "delete_card" => "Tried to delete a card",
-        "add_board" => "Tried to make a board",
-        "change_board" => "Tried to change a board",
-        "delete_board" => "Tried to delete a board",
-        "delete_note" => "Tried to delete a note",
-        _ => "Tried to change something",
-    };
+    let step = tools::step_of(&call.name);
     if !access.changes() {
         return fail(
             step,

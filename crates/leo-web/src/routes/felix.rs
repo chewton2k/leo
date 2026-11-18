@@ -861,11 +861,7 @@ pub(crate) fn execute_tool(
             proposal: None,
             found: Vec::new(),
         }
-    } else if matches!(
-        call.name.as_str(),
-        "list_schedule" | "list_trash" | "search_chats" | "list_boards" | "open_board"
-    ) || tools::organizes(&call.name)
-    {
+    } else if tools::answered_by_organize(&call.name) {
         crate::routes::organize::run(state, desk, access, call)
     } else if call.name == "study_rules" {
         let heard = std::mem::replace(&mut desk.reads.study_rules, true);

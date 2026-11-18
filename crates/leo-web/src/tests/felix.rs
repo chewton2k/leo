@@ -4448,3 +4448,27 @@ fn benchmark_a_chats_documents_are_listed_and_added() {
         );
     }
 }
+
+#[test]
+fn every_tool_that_organizes_or_lists_is_carried_out_by_the_engine() {
+    let (state, _dir, _) = state_with(&[]);
+    let specs = tools::SPECS.iter().chain(crate::board_tools::SPECS.iter());
+    for spec in specs.filter(|s| tools::answered_by_organize(s.name)) {
+        let mut desk = tools::Desk::new(vec![], 8000);
+        let done = crate::routes::organize::run(
+            &state,
+            &mut desk,
+            tools::Access::Ask,
+            &tools::Call {
+                name: spec.name.into(),
+                args: serde_json::json!({}),
+            },
+        );
+        assert!(
+            !done.result.contains("there is no tool called"),
+            "{}: {}",
+            spec.name,
+            done.result
+        );
+    }
+}

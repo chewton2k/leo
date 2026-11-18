@@ -3,7 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::boards::{self, Board, Card};
-use crate::tools::{Call, Done, Param, Proposal, Spec};
+use crate::tools::{Call, Done, Kind, Param, Proposal, Spec};
 
 const MOST_SHOWN: usize = 12_000;
 const DESCRIPTION_SHOWN: usize = 300;
@@ -29,6 +29,8 @@ const PRIORITY: Param = Param {
 pub const SPECS: [Spec; 9] = [
     Spec {
         name: "list_boards",
+        kind: Kind::ReadsLists,
+        step: "",
         purpose: "List Kanban boards (not calendar tasks).",
         params: &[],
         returns: "Board ids, names, columns and card counts.",
@@ -36,6 +38,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "open_board",
+        kind: Kind::ReadsLists,
+        step: "",
         purpose: "Read a board's cards by column, or one card in full.",
         params: &[
             BOARD,
@@ -50,6 +54,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "add_card",
+        kind: Kind::Organizes,
+        step: "Tried to add a card",
         purpose: "Add a requested card.",
         params: &[
             Param {
@@ -85,6 +91,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "update_card",
+        kind: Kind::Organizes,
+        step: "Tried to change a card",
         purpose: "Change card fields; omitted stay, empty clears.",
         params: &[
             CARD,
@@ -111,6 +119,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "move_card",
+        kind: Kind::Organizes,
+        step: "Tried to move a card",
         purpose: "Move a card to a column (status) or board, or reorder it.",
         params: &[
             CARD,
@@ -135,6 +145,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "delete_card",
+        kind: Kind::Organizes,
+        step: "Tried to delete a card",
         purpose: "Delete a requested card.",
         params: &[CARD, BOARD],
         returns: "Suggested, or done with Undo in Auto.",
@@ -142,6 +154,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "add_board",
+        kind: Kind::Organizes,
+        step: "Tried to make a board",
         purpose: "Make a requested board.",
         params: &[
             Param {
@@ -160,6 +174,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "change_board",
+        kind: Kind::Organizes,
+        step: "Tried to change a board",
         purpose: "Rename a board or set its columns; same-named columns keep their cards.",
         params: &[
             BOARD,
@@ -184,6 +200,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "delete_board",
+        kind: Kind::Organizes,
+        step: "Tried to delete a board",
         purpose: "Delete only the requested board and its cards. Always asks the user.",
         params: &[BOARD],
         returns: "Suggested; the user decides.",
@@ -192,16 +210,9 @@ pub const SPECS: [Spec; 9] = [
 ];
 
 pub fn changes(name: &str) -> bool {
-    matches!(
-        name,
-        "add_card"
-            | "update_card"
-            | "move_card"
-            | "delete_card"
-            | "add_board"
-            | "change_board"
-            | "delete_board"
-    )
+    SPECS
+        .iter()
+        .any(|spec| spec.name == name && spec.kind == Kind::Organizes)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
