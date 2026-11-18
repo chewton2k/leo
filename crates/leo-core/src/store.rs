@@ -1010,10 +1010,6 @@ impl Store {
     }
 
     pub fn save(&self) -> Result<()> {
-        self.save_files()
-    }
-
-    pub fn save_files(&self) -> Result<()> {
         check_notes_root(&self.notes_dir)?;
         fs::create_dir_all(&self.notes_dir)?;
         let stamp = self.tidied.get();
@@ -1806,18 +1802,6 @@ impl Store {
         Some(&mut self.notes[at])
     }
 
-    /// IDs that more than one note has.
-    pub fn duplicate_ids(&self) -> Vec<String> {
-        let mut seen = HashSet::new();
-        let mut dupes: Vec<String> = Vec::new();
-        for note in &self.notes {
-            if !seen.insert(note.id.as_str()) && !dupes.contains(&note.id) {
-                dupes.push(note.id.clone());
-            }
-        }
-        dupes
-    }
-
     /// Delete every note whose full ID is in `ids`.
     /// Returns how many were deleted.
     pub fn delete_notes(&mut self, ids: &[String]) -> usize {
@@ -1874,11 +1858,6 @@ impl Store {
         }
         ranked.sort_by(|(ga, a), (gb, b)| ga.cmp(gb).then(b.updated_at.cmp(&a.updated_at)));
         ranked.into_iter().map(|(_, n)| n).collect()
-    }
-
-    /// Toggle the Nth checkbox in a note. Returns whether it is now ticked.
-    pub fn toggle_checkbox(&mut self, id_prefix: &str, n: usize) -> Option<bool> {
-        self.find_note_mut(id_prefix)?.toggle_checkbox(n)
     }
 
     // ── Directory operations ───────────────────────────────────────────────
@@ -1949,31 +1928,6 @@ impl Store {
         dirs.sort();
         dirs.dedup();
         dirs
-    }
-
-    /// What a recursive delete of `path` would remove: notes and directories,
-    /// counting everything nested inside it.
-    ///
-    /// Exists so the confirmation prompt can state the blast radius before the
-    /// user commits to it, rather than after.
-    pub fn dir_contents(&self, path: &str) -> (usize, usize) {
-        let path = path.trim_matches('/');
-        if path.is_empty() {
-            return (0, 0);
-        }
-        let prefix = format!("{path}/");
-        let notes = self
-            .notes
-            .iter()
-            .filter(|n| n.directory == path || n.directory.starts_with(&prefix))
-            .count();
-        // The directory itself plus anything below it.
-        let dirs = self
-            .directories
-            .iter()
-            .filter(|d| *d == path || d.starts_with(&prefix))
-            .count();
-        (notes, dirs)
     }
 
     /// Delete a directory and everything in it. Returns the counts removed.
@@ -2275,38 +2229,6 @@ mod tests {
         assert_eq!(store.move_dir("nope", "cs162"), None);
         assert_eq!(store.move_dir("cs162", "nope"), None);
         assert!(store.dir_exists("cs130/lec"));
-        assert_eq!(store.dir_contents("cs130"), (3, 2));
-    }
-
-    #[test]
-    fn dir_contents_counts_everything_nested() {
-        let (store, _d) = store_with_tree();
-        // cs130 itself, cs130/lec, and the three notes between them.
-        assert_eq!(store.dir_contents("cs130"), (3, 2));
-        assert_eq!(store.dir_contents("cs130/lec"), (2, 1));
-        assert_eq!(store.dir_contents("cs162"), (1, 1));
-        // An unknown directory has nothing in it.
-        assert_eq!(store.dir_contents("nope"), (0, 0));
-        // The root is never reported as deletable.
-        assert_eq!(store.dir_contents(""), (0, 0));
-    }
-
-    /// A sibling directory whose name merely starts with the same letters must
-    /// not be swept up: "cs13" is not a parent of "cs130".
-    #[test]
-    fn dir_contents_matches_path_segments_not_string_prefixes() {
-        let dir = tempfile::tempdir().unwrap();
-        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        store.create_dir("cs13");
-        store.create_dir("cs130");
-        store.create_note("In cs130", "b", vec![], "cs130").unwrap();
-
-        assert_eq!(
-            store.dir_contents("cs13"),
-            (0, 1),
-            "cs130 is not inside cs13"
-        );
-        assert_eq!(store.dir_contents("cs130"), (1, 1));
     }
 
     #[test]
@@ -2546,7 +2468,12 @@ mod tests {
         type Step = fn(&mut Store, &[String; 3]);
         let steps: [Step; 11] = [
             |s, ids| s.find_note_mut(&ids[0]).unwrap().body = "- [ ] edited".into(),
-            |s, ids| assert_eq!(s.toggle_checkbox(&ids[0], 1), Some(true)),
+            |s, ids| {
+                assert_eq!(
+                    s.find_note_mut(&ids[0]).unwrap().toggle_checkbox(1),
+                    Some(true)
+                )
+            },
             |s, ids| assert!(s.move_note(&ids[1], "h").is_some()),
             |s, _| assert!(s.rename_dir("f", "renamed").is_some()),
             |s, _| assert!(s.move_dir("renamed", "h").is_some()),
@@ -2711,7 +2638,7 @@ mod tests {
         assert!(Store::load_from(&linked).is_err());
         let mut store = Store::load_from(&dir.path().join("real")).unwrap();
         store.notes_dir = linked.clone();
-        assert!(store.save_files().is_err());
+        assert!(store.save().is_err());
         assert_eq!(fs::read_dir(outside).unwrap().count(), 0);
     }
 
@@ -2944,18 +2871,6 @@ mod tests {
             .find_note(&id)
             .is_none());
         assert_eq!(store.trashed().len(), 1);
-    }
-
-    /// Two note files with the same ID confuse every lookup by ID.
-    #[test]
-    fn duplicate_ids_are_found() {
-        let (mut store, _d) = temp_store();
-        store.create_note("A", "", vec![], "").unwrap();
-        store.create_note("B", "", vec![], "").unwrap();
-        assert!(store.duplicate_ids().is_empty());
-        let id = store.notes[0].id.clone();
-        store.notes[1].id = id.clone();
-        assert_eq!(store.duplicate_ids(), vec![id]);
     }
 
     /// A note's directory is shown even if the directory list on disk never
@@ -4923,7 +4838,6 @@ mod tests {
         assert_eq!(store.notes.len(), 2);
         let ids: HashSet<&str> = store.notes.iter().map(|n| n.id.as_str()).collect();
         assert_eq!(ids.len(), 2, "two notes share one id");
-        assert!(store.duplicate_ids().is_empty());
 
         store.find_note_mut(&id).unwrap().body = "the original, edited in leo".to_string();
         store.save().unwrap();
@@ -5171,7 +5085,7 @@ mod tests {
         let mut store = Store::load_from(&temp.path().join("notes")).unwrap();
         store.create_note("Escape", "body", vec![], "").unwrap();
         store.notes[0].directory = "../outside".to_string();
-        assert!(store.save_files().is_err());
+        assert!(store.save().is_err());
         assert!(!temp.path().join("outside").exists());
     }
 
@@ -5202,10 +5116,10 @@ mod tests {
     fn a_new_empty_folder_on_disk_changes_the_store_fingerprint() {
         let temp = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&temp.path().join("notes")).unwrap();
-        store.save_files().unwrap();
+        store.save().unwrap();
         let mut other = Store::load_from(&store.notes_dir).unwrap();
         other.create_dir("empty");
-        other.save_files().unwrap();
+        other.save().unwrap();
         assert!(store.changed_on_disk());
         store.refresh().unwrap();
         assert!(store.dir_exists("empty"));
