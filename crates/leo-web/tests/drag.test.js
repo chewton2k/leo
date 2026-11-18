@@ -179,3 +179,23 @@ test('a refused start shows the engine\u2019s sentence in the sheet and starts n
   assert.match(run.open.innerHTML, /Two combines are already running/);
   assert.equal(run.toasts.length, 0);
 });
+
+test('opening a combine that is still working shows its part and offers Stop', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8');
+  const start = source.indexOf('const combinePart');
+  const review = source.indexOf('async function reviewCombine');
+  const code = `${source.slice(start, source.indexOf('const combinesWatched'))}\n${source.slice(review, source.indexOf("if (job.state !== 'ready')", review))}}`;
+  const sheets = [];
+  const context = {
+    esc: (text) => text, enc: String, fail(e) { throw e; }, checkActivity() {}, closeSheet() {}, toast() {},
+    sheetButtons: (primary, { cancel } = {}) => `[${cancel}|${primary[0]}]`,
+    sheet: (html) => { sheets.push(html); return {}; },
+    $: () => ({ addEventListener() {} }),
+    api: async () => ({ id: 'j9', state: 'working', parts: 7, done: 2 }),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.reviewCombine = reviewCombine;`, context);
+  await context.reviewCombine('j9');
+  assert.match(sheets.at(-1), /Part 3 of 7/);
+  assert.match(sheets.at(-1), /\[Keep going\|Stop combining\]/);
+});

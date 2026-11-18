@@ -277,7 +277,7 @@ async function forgetCombine(id) {
 
 async function reviewCombine(id) {
   const job = await api(`/api/combines/${enc(id)}`);
-  if (job.state === 'working') { toast('Still combining. Its progress is in the Background panel.'); return; }
+  if (job.state === 'working') { longCombine(job); return; }
   if (job.state !== 'ready') {
     await forgetCombine(id);
     toast(job.error || 'The notes could not be combined.', { bad: true });

@@ -135,7 +135,13 @@ pub(crate) fn combine_tasks(
             kind: "combine",
             label: format!("Combining “{}” into “{}”", j.with_title, j.into_title),
             step: match j.state {
-                "working" => "Felix is writing one note".into(),
+                "working" => match (j.run.as_ref(), j.parts) {
+                    (Some(run), parts) if parts > 1 => format!(
+                        "Felix is writing one note · part {} of {parts}",
+                        (run.done.load(std::sync::atomic::Ordering::SeqCst) + 1).min(parts)
+                    ),
+                    _ => "Felix is writing one note".into(),
+                },
                 "ready" => "Ready to review".into(),
                 _ => format!("Not combined: {}", j.error),
             },
