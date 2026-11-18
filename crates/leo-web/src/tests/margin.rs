@@ -1987,7 +1987,8 @@ async fn bad_thread_ids_are_refused_before_anything_runs() {
     engine.stop().await;
 }
 
-struct Healthy;
+#[derive(Default)]
+struct Healthy(std::sync::Mutex<Vec<bool>>);
 
 impl crate::app_settings::AppApi for Healthy {
     fn view(&self) -> anyhow::Result<serde_json::Value> {
@@ -1996,9 +1997,24 @@ impl crate::app_settings::AppApi for Healthy {
     fn change(&self, _: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
-    fn health(&self, _: &std::path::Path) -> anyhow::Result<serde_json::Value> {
+    fn health(&self, _: &std::path::Path, fresh: bool) -> anyhow::Result<serde_json::Value> {
+        self.0.lock().unwrap().push(fresh);
         Ok(serde_json::json!({ "sections": [] }))
     }
+}
+
+#[tokio::test]
+async fn check_again_passes_fresh_to_the_app() {
+    let healthy = Arc::new(Healthy::default());
+    let engine = Engine::with(Powers {
+        app_settings: Some(healthy.clone()),
+        ..Default::default()
+    })
+    .await;
+    assert_eq!(engine.get("/api/health?fresh=true").await.0, 200);
+    assert_eq!(engine.get("/api/health").await.0, 200);
+    assert_eq!(*healthy.0.lock().unwrap(), vec![true, false]);
+    engine.stop().await;
 }
 
 #[tokio::test]
@@ -2006,7 +2022,7 @@ async fn health_shows_a_failed_read_through_its_route() {
     let writer: Writer = Arc::new(|_, _, _| anyhow::bail!("down"));
     let engine = Engine::with(Powers {
         toolless: Some(writer),
-        app_settings: Some(Arc::new(Healthy)),
+        app_settings: Some(Arc::new(Healthy::default())),
         ..Default::default()
     })
     .await;

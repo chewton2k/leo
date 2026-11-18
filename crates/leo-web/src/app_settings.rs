@@ -2,7 +2,7 @@ use crate::reply::error;
 use crate::AppState;
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -21,13 +21,13 @@ pub struct EventStarting {
 pub trait AppApi: Send + Sync {
     fn view(&self) -> Result<Value>;
     fn change(&self, value: Value) -> Result<Value>;
-    fn health(&self, notes: &Path) -> Result<Value>;
+    fn health(&self, notes: &Path, fresh: bool) -> Result<Value>;
     fn event_starting(&self, _event: EventStarting) {}
 }
 async fn call(
     api: Option<Arc<dyn AppApi>>,
     change: Option<Value>,
-    notes: Option<PathBuf>,
+    notes: Option<(PathBuf, bool)>,
     margin: Option<String>,
 ) -> Response {
     let Some(api) = api else {
@@ -46,8 +46,8 @@ async fn call(
         );
     }
     match tokio::task::spawn_blocking(move || {
-        if let Some(notes) = notes {
-            let mut view = api.health(&notes)?;
+        if let Some((notes, fresh)) = notes {
+            let mut view = api.health(&notes, fresh)?;
             if let (Some(line), Some(sections)) = (margin, view["sections"].as_array_mut()) {
                 sections.push(json!({
                     "title": "Felix",
@@ -87,12 +87,20 @@ pub(crate) async fn change(
     };
     call(state.app_settings.clone(), Some(value), None, None).await
 }
-pub(crate) async fn health(State(state): State<AppState>) -> Response {
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct HealthQuery {
+    #[serde(default)]
+    fresh: bool,
+}
+pub(crate) async fn health(
+    State(state): State<AppState>,
+    Query(query): Query<HealthQuery>,
+) -> Response {
     let notes = state.notes_dir.clone();
     call(
         state.app_settings.clone(),
         None,
-        Some(notes),
+        Some((notes, query.fresh)),
         state.margin.problem(),
     )
     .await
@@ -119,7 +127,11 @@ mod tests {
             self.0.lock().unwrap().push(value);
             self.view()
         }
-        fn health(&self, _notes: &std::path::Path) -> anyhow::Result<serde_json::Value> {
+        fn health(
+            &self,
+            _notes: &std::path::Path,
+            _fresh: bool,
+        ) -> anyhow::Result<serde_json::Value> {
             Ok(serde_json::json!({"sections":[]}))
         }
     }
@@ -129,7 +141,7 @@ mod tests {
         let response = call(
             api,
             None,
-            Some(PathBuf::from("unused")),
+            Some((PathBuf::from("unused"), false)),
             Some("Felix could not read.".into()),
         )
         .await;
@@ -174,9 +186,14 @@ mod tests {
             axum::http::StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            call(api, None, Some(std::path::PathBuf::from("unused")), None)
-                .await
-                .status(),
+            call(
+                api,
+                None,
+                Some((std::path::PathBuf::from("unused"), false)),
+                None
+            )
+            .await
+            .status(),
             axum::http::StatusCode::OK
         );
     }
