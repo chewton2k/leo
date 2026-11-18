@@ -1134,15 +1134,10 @@ fn read_original(
         });
     }
     let wanted = tools::part_of(call, usize::MAX).unwrap_or(1);
-    let lines = match read.iter() {
-        Ok(lines) => lines,
+    let (total, text) = match read.part(size, wanted) {
+        Ok(part) => part,
         Err(e) => return Ok(unreadable(step, e)),
     };
-    let (total, text) = crate::originals::pack_part(
-        lines.enumerate().map(|(i, l)| format!("{}| {l}", i + 1)),
-        size,
-        wanted,
-    );
     let Ok(part) = tools::part_of(call, total) else {
         return Ok(fail(
             step,

@@ -29,6 +29,7 @@ const ELSEWHERE: &[(&str, &str)] = &[
     ("leo-quit", "label"),
     ("leo-file:", "label"),
     (".read", "attachments"),
+    (".parts", "attachments"),
     ("main", "window"),
     ("medium", "effort"),
     ("transcribe_worker", "log"),

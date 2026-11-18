@@ -1,5 +1,7 @@
 use std::collections::VecDeque;
-use std::io::{BufRead, Cursor, Write};
+use std::fs::{File, Metadata};
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::io::{self, BufRead, BufReader, BufWriter, Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -12,6 +14,9 @@ pub const SPILL_BYTES: usize = 1_000_000;
 const PIECE: usize = 64 * 1024;
 const LARGE_BYTES: u64 = 16_000_000;
 const COPIES: &str = ".read";
+const PART_INDEX: &str = ".parts";
+const STAMP_LIMIT: u64 = 128;
+const RECORD_BYTES: u64 = 24;
 
 type Key = (PathBuf, u64, Option<SystemTime>);
 
@@ -32,6 +37,28 @@ impl AsRef<[u8]> for Bytes {
 struct Split<R: BufRead> {
     from: R,
     carry: Vec<u8>,
+    read: u64,
+}
+
+impl<R: BufRead> Split<R> {
+    fn new(from: R, read: u64) -> Self {
+        Self {
+            from,
+            carry: Vec::new(),
+            read,
+        }
+    }
+
+    fn offset(&self) -> u64 {
+        self.read - self.carry.len() as u64
+    }
+
+    fn positioned(&mut self) -> impl Iterator<Item = (u64, String)> + '_ {
+        std::iter::from_fn(|| {
+            let offset = self.offset();
+            self.next().map(|line| (offset, line))
+        })
+    }
 }
 
 impl<R: BufRead> Iterator for Split<R> {
@@ -54,6 +81,7 @@ impl<R: BufRead> Iterator for Split<R> {
                 Some(at) => {
                     line.extend_from_slice(&window[..at]);
                     self.from.consume(at + 1);
+                    self.read += (at + 1) as u64;
                     ended = true;
                     break;
                 }
@@ -61,6 +89,7 @@ impl<R: BufRead> Iterator for Split<R> {
                     line.extend_from_slice(window);
                     let taken = window.len();
                     self.from.consume(taken);
+                    self.read += taken as u64;
                 }
             }
         }
@@ -104,60 +133,214 @@ fn cut_of(line: &[u8]) -> usize {
 impl Lines {
     pub fn iter(&self) -> Result<Box<dyn Iterator<Item = String>>> {
         Ok(match self {
-            Lines::Held(text) => Box::new(Split {
-                from: Cursor::new(Bytes(Arc::clone(text))),
-                carry: Vec::new(),
-            }),
+            Lines::Held(text) => Box::new(Split::new(Cursor::new(Bytes(Arc::clone(text))), 0)),
             Lines::Spilled(path) => {
-                let file = leo_core::paths::open_regular(path)
-                    .context("leo could not read back what it kept")?;
-                let mut from = std::io::BufReader::new(file);
-                from.read_until(b'\n', &mut Vec::new())?;
-                Box::new(Split {
-                    from,
-                    carry: Vec::new(),
-                })
+                let (from, offset) = open_spill(path)?;
+                Box::new(Split::new(from, offset))
             }
         })
     }
+
+    pub(crate) fn part(&self, size: usize, wanted: usize) -> Result<(usize, String)> {
+        let Lines::Spilled(copy) = self else {
+            return Ok(pack_part(
+                self.iter()?.map(|line| (0, line)),
+                size,
+                wanted,
+                0,
+                |_, _, _| {},
+            ));
+        };
+        let (mut from, body) = open_spill(copy)?;
+        let stamp = from
+            .get_ref()
+            .metadata()
+            .ok()
+            .and_then(|m| part_stamp(m, size));
+        let index = index_of(copy);
+        if let Some(stamp) = &stamp {
+            if let Some(part) = indexed_part(&index, &mut from, stamp, body, wanted) {
+                return Ok(part);
+            }
+        }
+        from.seek(SeekFrom::Start(body))?;
+        let mut out = stamp
+            .as_ref()
+            .and_then(|stamp| start_index(copy, stamp, body));
+        let mut split = Split::new(from, body);
+        let mut lines = 0;
+        let (total, text) = pack_part(
+            split.positioned().inspect(|_| lines += 1),
+            size,
+            wanted,
+            0,
+            |part, offset, number| {
+                if let (Some(out_file), Some(stamp)) = (&mut out, &stamp) {
+                    if write_record(out_file, stamp, (part - 1) as u64, [offset, number as u64])
+                        .is_err()
+                    {
+                        out = None;
+                    }
+                }
+            },
+        );
+        if let (Some(out), Some(stamp)) = (out, &stamp) {
+            if split.offset() == stamp.0 {
+                let _ = finish_index(copy, &index, out, stamp, total as u64, lines);
+            }
+        }
+        Ok((total, text))
+    }
 }
 
-pub fn pack_part(
-    lines: impl Iterator<Item = String>,
+fn open_spill(copy: &Path) -> Result<(BufReader<File>, u64)> {
+    let file = open_copy_file(copy).context("leo could not read back what it kept")?;
+    let mut from = BufReader::new(file);
+    let body = from.skip_until(b'\n')?;
+    Ok((from, body as u64))
+}
+
+fn pack_part(
+    lines: impl Iterator<Item = (u64, String)>,
     size: usize,
     wanted: usize,
+    first: usize,
+    mut start: impl FnMut(usize, u64, usize),
 ) -> (usize, String) {
-    let (mut total, mut kept) = (1, String::new());
-    let (mut last, mut chars) = (String::new(), 0usize);
-    for line in lines {
+    let (mut total, mut kept, mut chars) = (1, String::new(), 0usize);
+    for (i, (offset, line)) in lines.enumerate() {
+        let number = first + i;
+        let line = format!("{}| {line}", number + 1);
         if chars > 0 && chars + line.chars().count() > size {
-            if total == wanted {
-                kept = std::mem::take(&mut last);
-            }
-            last.clear();
             chars = 0;
             total += 1;
+            start(total, offset, number);
         }
         if chars > 0 {
             chars += 1;
             if total == wanted {
-                last.push('\n');
+                kept.push('\n');
             }
         }
         let clipped = crate::chat::clip(&line, size);
         chars += clipped.chars().count();
         if total == wanted {
-            last.push_str(&clipped);
+            kept.push_str(&clipped);
         }
-    }
-    if total == wanted {
-        kept = last;
     }
     (total, kept)
 }
 
+type PartStamp = (u64, SystemTime, usize);
+
+fn part_stamp(meta: Metadata, size: usize) -> Option<PartStamp> {
+    meta.is_file()
+        .then_some((meta.len(), meta.modified().ok()?, size))
+}
+
+fn record_hash(stamp: &PartStamp, at: u64, data: [u64; 2]) -> u64 {
+    let mut hash = DefaultHasher::new();
+    (stamp, at, data).hash(&mut hash);
+    hash.finish()
+}
+
+fn write_record(
+    out: &mut impl Write,
+    stamp: &PartStamp,
+    at: u64,
+    data: [u64; 2],
+) -> io::Result<()> {
+    for word in [data[0], data[1], record_hash(stamp, at, data)] {
+        out.write_all(&word.to_le_bytes())?;
+    }
+    Ok(())
+}
+
+fn read_record(from: &mut impl Read, stamp: &PartStamp, at: u64) -> Option<[u64; 2]> {
+    let mut word = || {
+        let mut bytes = [0; 8];
+        from.read_exact(&mut bytes).ok()?;
+        Some(u64::from_le_bytes(bytes))
+    };
+    let data = [word()?, word()?];
+    (word()? == record_hash(stamp, at, data)).then_some(data)
+}
+
+fn indexed_part(
+    index: &Path,
+    from: &mut BufReader<File>,
+    stamp: &PartStamp,
+    body: u64,
+    wanted: usize,
+) -> Option<(usize, String)> {
+    let mut index = BufReader::new(open_copy_file(index).ok()?);
+    let end = index.seek(SeekFrom::End(-(RECORD_BYTES as i64))).ok()?;
+    let total = end / RECORD_BYTES;
+    if total == 0 || end % RECORD_BYTES != 0 || read_record(&mut index, stamp, total)?[0] != stamp.0
+    {
+        return None;
+    }
+    let total = usize::try_from(total).ok()?;
+    if wanted == 0 || wanted > total {
+        return Some((total, String::new()));
+    }
+    let at = (wanted - 1) as u64;
+    index.seek(SeekFrom::Start(at * RECORD_BYTES)).ok()?;
+    let [offset, first] = read_record(&mut index, stamp, at)?;
+    let [end, next] = read_record(&mut index, stamp, at + 1)?;
+    let count = usize::try_from(next.checked_sub(first)?).ok()?;
+    let first = usize::try_from(first).ok()?;
+    first.checked_add(count)?;
+    let size = stamp.2;
+    if offset < body || end < offset || end > stamp.0 || count > size.saturating_add(1) {
+        return None;
+    }
+    from.seek(SeekFrom::Start(offset)).ok()?;
+    let mut split = Split::new(from, offset);
+    let (parts, text) = pack_part(split.positioned().take(count), size, 1, first, |_, _, _| {});
+    (parts == 1 && split.offset() == end).then_some((total, text))
+}
+
+fn start_index(
+    copy: &Path,
+    stamp: &PartStamp,
+    body: u64,
+) -> Option<BufWriter<tempfile::NamedTempFile>> {
+    if !copies_folder_is_ours(copy) {
+        return None;
+    }
+    let mut out = BufWriter::new(tempfile::NamedTempFile::new_in(copy.parent()?).ok()?);
+    write_record(&mut out, stamp, 0, [body, 0]).ok()?;
+    Some(out)
+}
+
+fn finish_index(
+    copy: &Path,
+    index: &Path,
+    mut out: BufWriter<tempfile::NamedTempFile>,
+    stamp: &PartStamp,
+    total: u64,
+    lines: u64,
+) -> io::Result<()> {
+    write_record(&mut out, stamp, total, [stamp.0, lines])?;
+    let temp = out.into_inner().map_err(|error| error.into_error())?;
+    if copies_folder_is_ours(copy)
+        && std::fs::symlink_metadata(copy)
+            .ok()
+            .and_then(|m| part_stamp(m, stamp.2))
+            == Some(*stamp)
+    {
+        temp.persist(index).map_err(|error| error.error)?;
+        if copies_folder_is_ours(copy)
+            && !std::fs::symlink_metadata(copy).is_ok_and(|m| m.is_file())
+        {
+            let _ = std::fs::remove_file(index);
+        }
+    }
+    Ok(())
+}
+
 pub fn through(reader: crate::Reader) -> crate::ReaderTo {
-    use std::io::Read;
     Arc::new(
         move |path: &Path,
               name: &str,
@@ -186,6 +369,12 @@ fn copy_of(original: &Path) -> Option<PathBuf> {
     Some(original.parent()?.join(COPIES).join(name))
 }
 
+fn index_of(copy: &Path) -> PathBuf {
+    let mut path = copy.as_os_str().to_os_string();
+    path.push(PART_INDEX);
+    PathBuf::from(path)
+}
+
 pub(crate) fn forget_copy(original: &Path) {
     if let Some(copy) = copy_of(original) {
         drop_copy(&copy);
@@ -198,11 +387,20 @@ fn copies_folder_is_ours(copy: &Path) -> bool {
         .is_some_and(|m| m.file_type().is_dir())
 }
 
+fn open_copy_file(path: &Path) -> io::Result<File> {
+    if !copies_folder_is_ours(path) || !std::fs::symlink_metadata(path)?.is_file() {
+        return Err(io::Error::other("the saved read is not a regular file"));
+    }
+    leo_core::paths::open_regular(path)
+}
+
 pub fn drop_copy(copy: &Path) {
-    if copies_folder_is_ours(copy)
-        && std::fs::symlink_metadata(copy).is_ok_and(|m| m.file_type().is_file())
-    {
-        let _ = std::fs::remove_file(copy);
+    if copies_folder_is_ours(copy) {
+        for path in [copy, &index_of(copy)] {
+            if std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
     }
 }
 
@@ -221,15 +419,11 @@ fn stamp_of(key: &Key) -> String {
 }
 
 fn copy_matches(copy: &Path, stamp: &str) -> bool {
-    use std::io::Read;
-    if !copies_folder_is_ours(copy) {
-        return false;
-    }
-    let Ok(file) = leo_core::paths::open_regular(copy) else {
+    let Ok(file) = open_copy_file(copy) else {
         return false;
     };
     let mut first = String::new();
-    std::io::BufReader::new(file.take(128))
+    BufReader::new(file.take(STAMP_LIMIT))
         .read_line(&mut first)
         .is_ok()
         && first == stamp
@@ -361,33 +555,38 @@ fn mime_of(name: &str) -> &'static str {
 
 impl Originals {
     pub fn forget_missing(&self) {
-        self.read
+        let mut missing: Vec<_> = self
+            .read
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain(|((path, _, _), lines)| {
-                let there = std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file());
-                if !there {
-                    if let Lines::Spilled(copy) = lines {
-                        drop_copy(copy);
-                    }
-                }
-                there
-            });
+            .iter()
+            .map(|(key, _)| key.clone())
+            .collect();
+        missing.retain(|(path, _, _)| !std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file()));
+        if !missing.is_empty() {
+            self.forget(|key| missing.contains(key));
+        }
     }
 
     pub fn forget_note(&self, folder: &Path) {
+        self.forget(|(path, _, _)| path.starts_with(folder));
+    }
+
+    fn forget(&self, remove: impl Fn(&Key) -> bool) {
+        let mut dropped = Vec::new();
         self.read
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain(|((path, _, _), lines)| {
-                let inside = path.starts_with(folder);
-                if inside {
-                    if let Lines::Spilled(copy) = lines {
-                        drop_copy(copy);
-                    }
+            .retain(|(key, lines)| {
+                let gone = remove(key);
+                if let (true, Lines::Spilled(copy)) = (gone, lines) {
+                    dropped.push(copy.clone());
                 }
-                !inside
+                !gone
             });
+        for copy in dropped {
+            drop_copy(&copy);
+        }
     }
 
     fn cached(&self, key: &Key) -> Option<Lines> {
@@ -462,6 +661,9 @@ impl Originals {
 }
 
 fn forget_orphans(folder: &Path, made: &Path) {
+    if !copies_folder_is_ours(made) {
+        return;
+    }
     let Some(copies) = made.parent() else {
         return;
     };
@@ -469,9 +671,16 @@ fn forget_orphans(folder: &Path, made: &Path) {
         return;
     };
     for entry in entries.flatten() {
-        let copy = entry.path();
-        let name = entry.file_name().to_string_lossy().to_string();
-        let Some(original) = name.strip_suffix(".txt").filter(|o| !o.is_empty()) else {
+        let mut copy = entry.path();
+        if copy.extension().and_then(|ext| ext.to_str()) == PART_INDEX.strip_prefix('.') {
+            copy.set_extension("");
+        }
+        let Some(original) = copy
+            .file_name()
+            .and_then(|name| name.to_str())
+            .and_then(|name| name.strip_suffix(".txt"))
+            .filter(|o| !o.is_empty())
+        else {
             continue;
         };
         if copy != made
@@ -843,14 +1052,80 @@ mod tests {
             .chain(std::iter::once("x".repeat(500)))
             .chain(std::iter::once(String::new()))
             .collect();
+        let read = Lines::Held(Arc::new(format!("{}\n", lines.join("\n"))));
         for size in [60, 200, 1_000] {
-            let parts = crate::tools::packed(lines.clone(), size);
+            let numbered = lines
+                .iter()
+                .enumerate()
+                .map(|(i, line)| format!("{}| {line}", i + 1));
+            let parts = crate::tools::packed(numbered, size);
             for want in [1, 2, parts.len(), parts.len() + 1] {
-                let (total, text) = pack_part(lines.clone().into_iter(), size, want);
+                let (total, text) = read.part(size, want).unwrap();
                 assert_eq!(total, parts.len());
                 assert_eq!(text, parts.get(want - 1).cloned().unwrap_or_default());
             }
         }
+    }
+
+    #[test]
+    fn spilled_parts_match_packing_after_reuse_and_index_damage() {
+        let dir = tempfile::tempdir().unwrap();
+        let copies = dir.path().join(COPIES);
+        std::fs::create_dir(&copies).unwrap();
+        let copy = copies.join("notes.txt.txt");
+        let index = copies.join("notes.txt.txt.parts");
+        let mut text: String = (0..80)
+            .map(|n| format!("{n} é 漢字 {}\r\n", "w".repeat(n % 37)))
+            .collect();
+        text.push_str(&format!("a {}漢字\n\nlast é", "é".repeat(PIECE)));
+        std::fs::write(&copy, format!("leo-read 1 1\n{text}")).unwrap();
+        let read = Lines::Spilled(copy.clone());
+        let numbered = || {
+            read.iter()
+                .unwrap()
+                .enumerate()
+                .map(|(i, line)| format!("{}| {line}", i + 1))
+        };
+        let pick = |size, wanted| read.part(size, wanted).unwrap();
+        let marker = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
+        for size in [60, 200, 1_000] {
+            let parts = crate::tools::packed(numbered(), size);
+            assert_eq!(pick(size, 1), (parts.len(), parts[0].clone()));
+            let file = std::fs::File::options().write(true).open(&index).unwrap();
+            file.set_modified(marker).unwrap();
+            for (i, part) in parts.iter().enumerate() {
+                assert_eq!(pick(size, i + 1), (parts.len(), part.clone()));
+            }
+            assert_eq!(pick(size, parts.len() + 1), (parts.len(), String::new()));
+            assert_eq!(
+                std::fs::metadata(&index).unwrap().modified().unwrap(),
+                marker
+            );
+            let intact = std::fs::read(&index).unwrap();
+            let mut damaged = intact.clone();
+            damaged[RECORD_BYTES as usize] ^= 1;
+            std::fs::write(&index, damaged).unwrap();
+            assert_eq!(pick(size, 2), (parts.len(), parts[1].clone()));
+            assert_eq!(std::fs::read(&index).unwrap(), intact);
+        }
+        let intact = std::fs::read(&index).unwrap();
+        std::fs::write(&index, &intact[..intact.len() - 1]).unwrap();
+        let parts = crate::tools::packed(numbered(), 1_000);
+        assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
+        assert_eq!(std::fs::read(&index).unwrap(), intact);
+
+        let before = std::fs::metadata(&copy).unwrap();
+        std::fs::write(&copy, format!("leo-read 1 1\n{}", text.replace('w', "z"))).unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&copy)
+            .unwrap()
+            .set_modified(marker)
+            .unwrap();
+        assert_eq!(std::fs::metadata(&copy).unwrap().len(), before.len());
+        let parts = crate::tools::packed(numbered(), 1_000);
+        assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
+        assert_ne!(std::fs::read(&index).unwrap(), intact);
     }
 
     #[test]
@@ -862,18 +1137,22 @@ mod tests {
         let reads = Arc::new(AtomicUsize::new(0));
         let originals = Originals::default();
         for (path, name) in [(&one, "one.txt"), (&two, "two.txt")] {
-            originals.lines(&copying(&reads), path, name).unwrap();
+            let lines = originals.lines(&copying(&reads), path, name).unwrap();
+            lines.part(6_000, 2).unwrap();
         }
         let (copy_one, copy_two) = (
             dir.path().join(".read/one.txt.txt"),
             dir.path().join(".read/two.txt.txt"),
         );
+        let (index_one, index_two) = (index_of(&copy_one), index_of(&copy_two));
         assert!(copy_one.is_file() && copy_two.is_file());
+        assert!(index_one.is_file() && index_two.is_file());
         std::fs::remove_file(&one).unwrap();
         originals.forget_missing();
         assert!(!copy_one.exists() && copy_two.is_file());
+        assert!(!index_one.exists() && index_two.is_file());
         originals.forget_note(dir.path());
-        assert!(!copy_two.exists());
+        assert!(!copy_two.exists() && !index_two.exists());
     }
 
     #[test]
@@ -952,12 +1231,32 @@ mod tests {
         assert!(Originals::default()
             .lines(&copying(&reads), &path, "big.txt")
             .is_err());
+        assert!(Lines::Spilled(copy_of(&path).unwrap()).part(60, 1).is_err());
         drop_copy_of(&path);
         assert_eq!(
             std::fs::read_to_string(outside.path().join("big.txt.txt")).unwrap(),
             "the person's file"
         );
         assert_eq!(std::fs::read_dir(outside.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_index_symlink_is_rebuilt_without_touching_its_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let copy = copy_of(&dir.path().join("original.txt")).unwrap();
+        std::fs::create_dir(copy.parent().unwrap()).unwrap();
+        std::fs::write(&copy, "leo-read 1 1\none é\ntwo 漢字\n").unwrap();
+        let index = index_of(&copy);
+        let outside = dir.path().join("outside");
+        let read = Lines::Spilled(copy);
+        let expected = read.part(8, 2).unwrap();
+        let intact = std::fs::read(&index).unwrap();
+        std::fs::rename(&index, &outside).unwrap();
+        std::os::unix::fs::symlink(&outside, &index).unwrap();
+        assert_eq!(read.part(8, 2).unwrap(), expected);
+        assert!(std::fs::symlink_metadata(&index).unwrap().is_file());
+        assert_eq!(std::fs::read(&outside).unwrap(), intact);
     }
 
     #[test]
@@ -1020,17 +1319,14 @@ mod tests {
             }
             let walked = started.elapsed();
             let started = std::time::Instant::now();
-            let (total, part) = pack_part(
-                read.iter()
-                    .unwrap()
-                    .enumerate()
-                    .map(|(i, l)| format!("{}| {l}", i + 1)),
-                6_000,
-                2,
-            );
+            let first = read.part(6_000, 2).unwrap();
             let packed = started.elapsed();
+            let started = std::time::Instant::now();
+            let (total, part) = read.part(6_000, 2).unwrap();
+            let indexed = started.elapsed();
+            assert_eq!(first, (total, part.clone()));
             println!(
-                "{megabytes} MB one_line={one_line}: read {made:?}, walk {walked:?} ({count} lines, longest {most}), part 2 of {total} ({} chars) {packed:?}, held at most {SPILL_BYTES} bytes",
+                "{megabytes} MB one_line={one_line}: read {made:?}, walk {walked:?} ({count} lines, longest {most}), part 2 of {total} ({} bytes), first {packed:?}, indexed {indexed:?}",
                 part.len()
             );
         }
@@ -1041,11 +1337,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let copies = dir.path().join(COPIES);
         std::fs::create_dir(&copies).unwrap();
-        for name in ["gone.pdf.txt", "kept.pdf.txt"] {
+        for name in [
+            "gone.pdf.txt",
+            "gone.pdf.txt.parts",
+            "kept.pdf.txt",
+            "kept.pdf.txt.parts",
+        ] {
             std::fs::write(copies.join(name), "text").unwrap();
         }
         forget_copy(&dir.path().join("gone.pdf"));
         assert!(!copies.join("gone.pdf.txt").exists());
+        assert!(!copies.join("gone.pdf.txt.parts").exists());
         assert!(copies.join("kept.pdf.txt").is_file());
+        assert!(copies.join("kept.pdf.txt.parts").is_file());
     }
 }
