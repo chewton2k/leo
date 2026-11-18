@@ -212,11 +212,23 @@ pub(crate) async fn edit_sources(
 }
 
 fn source_version(source: &recording::Archive) -> String {
-    let text = serde_json::to_vec(source).unwrap_or_default();
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for b in text {
-        hash ^= u64::from(b);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
+    format!(
+        "{:016x}",
+        crate::vectors::fnv64(serde_json::to_vec(source).unwrap_or_default())
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stored_hashes_do_not_change() {
+        let source: leo_core::recording::Archive = serde_json::from_value(serde_json::json!({
+            "id": "rec-00000001",
+            "started": "2026-01-02T03:04:05Z",
+            "passages": [{"start_secs": 0, "end_secs": 4, "text": "Héllo there.", "speaker": "A"}],
+            "points": [{"at_secs": 2, "text": "greeting"}],
+        }))
+        .unwrap();
+        assert_eq!(super::source_version(&source), "fb4c169d4e0b529d");
     }
-    format!("{hash:016x}")
 }

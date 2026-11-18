@@ -95,13 +95,14 @@ fn decode(text: &str) -> Option<Vec<f32>> {
     )
 }
 
+pub(crate) fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
+    bytes.into_iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 fn fnv(bytes: impl Iterator<Item = u8>) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    format!("{:016x}", fnv64(bytes))
 }
 
 pub fn hash_of(note: &Note) -> String {
@@ -578,6 +579,41 @@ mod tests {
         let mut store =
             Store::load_from(&tempfile::tempdir().unwrap().keep().join("notes")).unwrap();
         store.create_note(title, body, vec![], "").unwrap().clone()
+    }
+
+    #[test]
+    fn stored_hashes_do_not_change() {
+        let mut tagged = Note::new("Héaps", "sift down\nand up", vec![], "cs");
+        tagged.tags = vec!["exam".into(), "week 3".into()];
+        let turns = [
+            crate::chat::Turn {
+                role: "user".into(),
+                text: "Why a heap?".into(),
+            },
+            crate::chat::Turn {
+                role: "assistant".into(),
+                text: "Order in O(log n).".into(),
+            },
+        ];
+        let got = [
+            hash_of(&tagged),
+            mark_of("sift down"),
+            crate::review::key_of("chat-1", "A reply."),
+            crate::tasks::note_task_id("note-1", " Read chapter 3 "),
+            crate::chat::hash_of(&turns),
+            crate::routes::notes::version_of(&tagged),
+        ];
+        assert_eq!(
+            got,
+            [
+                "e46db3786d46da0b",
+                "90353766bf8d4059",
+                "chat-1:e1477ec64d3700ca",
+                "n0ddeeeee2af88de5",
+                "c5d3e84b0dec08b3",
+                "f406bea19db6735a",
+            ]
+        );
     }
 
     #[test]
