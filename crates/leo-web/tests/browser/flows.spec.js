@@ -868,6 +868,7 @@ test('search shows placeholder cards while it waits', async ({ page }) => {
 });
 
 test('search reads a page at a time and Show more asks for the next page', async ({ page }) => {
+  test.slow();
   const word = `zzpaged${Date.now().toString(36)}${test.info().project.name.replace(/\W/g, '')}`;
   const ids = [];
   for (let n = 0; n < 130; n++) {

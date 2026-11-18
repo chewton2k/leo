@@ -3068,7 +3068,7 @@
       }
       const el = e.target.closest('[data-chat]');
       if (!el) return;
-      e.preventDefault();
+      if (el.dataset.chat !== 'quiz-think') e.preventDefault();
       const what = el.dataset.chat;
       if (what === 'close') toggle(false);
       else if (what === 'new') {

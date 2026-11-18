@@ -247,6 +247,7 @@ test('the thinking box opens with the height reveal and the shared switch is not
   const chat = fs.readFileSync(path.resolve(__dirname, '../src/web/chat.js'), 'utf8');
   const toggle = chat.slice(chat.indexOf("} else if (what === 'quiz-think') {"), chat.indexOf("} else if (what === 'quiz-hint') {"));
   assert.match(chat, /class="switch" role="switch" data-chat="quiz-think"/);
+  assert.match(chat, /if \(el\.dataset\.chat !== 'quiz-think'\) e\.preventDefault\(\);/);
   assert.match(toggle, /insertAdjacentHTML/);
   assert.match(toggle, /root\.leoMotion\?\.slide/);
   assert.doesNotMatch(toggle, /thinkingOpen\.(add|delete)\(q\);\s*draw\(/);
