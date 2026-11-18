@@ -35,7 +35,8 @@ fn tidy_rooms_in(dir: &std::path::Path) {
         };
         let room = (name.starts_with("leo-writing-")
             || name.starts_with("leo-usage-")
-            || name.starts_with("leo-import-"))
+            || name.starts_with("leo-import-")
+            || name.starts_with("leo-dictation-"))
             && kind.is_dir();
         let helper =
             name.starts_with("leo-sign-in-") && name.ends_with(".command") && kind.is_file();
@@ -471,7 +472,11 @@ mod tests {
             }
             path
         };
-        let stale = [aged("leo-writing-old", true), aged("leo-usage-old", true)];
+        let stale = [
+            aged("leo-writing-old", true),
+            aged("leo-usage-old", true),
+            aged("leo-dictation-old", true),
+        ];
         let kept = [aged("leo-writing-new", false), aged("someone-else", true)];
         super::tidy_rooms_in(temp.path());
         assert!(stale.iter().all(|path| !path.exists()));

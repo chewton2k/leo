@@ -1008,7 +1008,7 @@ a modal.
 - Settings go through `SettingsApi` (`leo_host::WebSettings`); `Powers.speech`
   (`SpeechApi`, `/api/speech`), `Powers.ollama` (`OllamaApi`,
   `/api/writing/ollama`), `Powers.dictation` (`DictationApi`, `/api/dictation`,
-  200 KB input) and `Powers.app_settings` (`AppApi`, `/api/app`, `/api/health`)
+  64 MiB input) and `Powers.app_settings` (`AppApi`, `/api/app`, `/api/health`)
   are session-gated with bounded JSON; work runs off async tasks and outside
   store locks; every success is JSON, errors actionable. Progress and polling
   update only their own card: fields, drafts, focus and caret survive

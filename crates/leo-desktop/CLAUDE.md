@@ -51,8 +51,8 @@ a test, or leave it unset to see the user's own data.
 - Menu bar icon (`tray.rs`, 2026-11-02, the user's request): Open Leo, Record a
   lecture / Record a call (shows the window and calls the page's
   `window.leoFromApp('record', kind)`, which presses Start for that kind; a
-  running recording is just shown), Copy last dictation (newest row of
-  `leo_web::dictation::recent`, native clipboard), status rows (speech model
+  running recording is just shown), Copy last dictation (`leo_web::dictation::newest`,
+  whole, native clipboard), status rows (speech model
   `Library::selected_name`, writing AI and model plus 5h/7d plan use from
   `web_settings::writing_status`, AI use since launch `Running::usage_line`),
   Settings…, Check for updates… (queues a check, opens Updates & about), the
