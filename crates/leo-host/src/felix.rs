@@ -175,12 +175,25 @@ pub fn converser() -> leo_web::Converser {
     )
 }
 
+fn check_and_fetch(
+    wanted: impl FnOnce() -> bool + Send + 'static,
+    fetch: impl FnOnce() -> anyhow::Result<()> + Send + 'static,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        if wanted() {
+            if let Err(error) = fetch() {
+                leo_core::diag::warn(format!(
+                    "The model that finds notes by meaning could not be downloaded: {error:#}. leo will try again when it opens."
+                ));
+            }
+        }
+    })
+}
+
 pub fn meaning() -> leo_web::Meaning {
-    if leo_services::meaning::wanted() {
-        std::thread::spawn(|| {
-            let _ = leo_services::meaning::fetch();
-        });
-    }
+    check_and_fetch(leo_services::meaning::wanted, || {
+        leo_services::meaning::fetch().map(drop)
+    });
     std::sync::Arc::new(|texts: &[String], query: bool| leo_services::meaning::embed(texts, query))
 }
 
@@ -204,5 +217,44 @@ mod route_tests {
         let line = logged(&body);
         assert_eq!(line.chars().count(), 200);
         assert!(!line.contains("prompt text"));
+    }
+
+    #[test]
+    fn the_model_check_does_not_run_on_the_caller() {
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (asked, checked) = std::sync::mpsc::channel::<()>();
+        let fetched = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let seen = Arc::clone(&fetched);
+        let thread = check_and_fetch(
+            move || {
+                asked.send(()).unwrap();
+                held.recv().unwrap();
+                true
+            },
+            move || {
+                seen.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            },
+        );
+        checked
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap();
+        assert!(!thread.is_finished());
+        assert!(!fetched.load(std::sync::atomic::Ordering::SeqCst));
+        release.send(()).unwrap();
+        thread.join().unwrap();
+        assert!(fetched.load(std::sync::atomic::Ordering::SeqCst));
+    }
+
+    #[test]
+    fn a_failed_fetch_does_not_panic_the_thread() {
+        let thread = check_and_fetch(|| true, || Err(anyhow::anyhow!("offline")));
+        thread.join().unwrap();
+    }
+
+    #[test]
+    fn a_model_that_is_there_is_not_fetched() {
+        let thread = check_and_fetch(|| false, || panic!("fetched a model that is there"));
+        thread.join().unwrap();
     }
 }
