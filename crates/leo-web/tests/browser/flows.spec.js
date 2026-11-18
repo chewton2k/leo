@@ -3785,6 +3785,40 @@ test('dropping one note on another combines them in the background with progress
   expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toBe('A graph has nodes and edges.');
 });
 
+test('Combine into… reaches the 51st of many same-titled notes in different folders through Show more', async ({ page }) => {
+  test.skip(test.info().project.name === 'phone', 'the explorer is beside the page on wider screens');
+  const tag = Date.now().toString(36);
+  const title = `Twin ${tag}`;
+  const folders = Array.from({ length: 120 }, (_, i) => `twin-${tag}-${i}`);
+  for (let i = 0; i < folders.length; i += 20) {
+    await Promise.all(folders.slice(i, i + 20).map(async (folder) => {
+      await page.request.post('/api/dirs', { data: { path: folder } });
+      await page.request.post('/api/notes', { data: { title, body: 'x', directory: folder } });
+    }));
+  }
+  const mine = await (await page.request.post('/api/notes', { data: { title: `Mine ${tag}`, body: 'x' } })).json();
+  await page.goto(`/#/n/${mine.id}`);
+  const row = page.locator(`#side .side-note[data-id="${mine.id}"]`);
+  await expect(row).toBeVisible();
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Combine into…' }).click();
+  const picker = page.getByRole('menu', { name: `Combine “${mine.title}” into` });
+  await picker.locator('input').fill(title);
+  const twins = picker.getByRole('menuitem', { name: new RegExp(`^${title} · twin-${tag}-`) });
+  await expect(twins).toHaveCount(50);
+  const more = picker.getByRole('menuitem', { name: 'Show more' });
+  while (await more.count()) {
+    const before = await twins.count();
+    await more.click();
+    await expect(twins).not.toHaveCount(before);
+  }
+  await expect(twins).toHaveCount(120);
+  await picker.getByRole('menuitem', { name: `${title} · twin-${tag}-119`, exact: true }).click();
+  const sheet = page.locator('.scrim:not(.scrim-gone) .sheet');
+  await expect(sheet.locator('h3')).toHaveText('Combine these notes?');
+  await sheet.locator('[data-action="close"]').click();
+});
+
 test('Combine into… in the explorer menu and a “merge” line in Quick Leo pick the other note from a list', async ({ page }) => {
   test.skip(test.info().project.name === 'phone', 'the explorer is beside the page on wider screens');
   const tag = Date.now().toString(36);
@@ -3801,7 +3835,7 @@ test('Combine into… in the explorer menu and a “merge” line in Quick Leo p
   const picker = page.getByRole('menu', { name: `Combine “${a.title}” into` });
   await expect(picker.locator('input')).toBeFocused();
   await picker.locator('input').fill(b.title);
-  await expect(picker.getByRole('menuitem')).toHaveCount(1);
+  await expect(picker.getByRole('menuitem', { name: b.title })).toBeVisible();
   await picker.getByRole('menuitem', { name: b.title }).click();
   const sheet = page.locator('.scrim:not(.scrim-gone) .sheet');
   await expect(sheet.locator('h3')).toHaveText('Combine these notes?');

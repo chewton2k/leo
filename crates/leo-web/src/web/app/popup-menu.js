@@ -21,7 +21,7 @@ function popupRow(row, index) {
   return `<button type="button" ${radio} data-row="${index}"${action}${row.danger ? ' class="danger"' : ''}${row.off ? ' disabled' : ''}>${row.icon || ''}<span class="grow">${esc(row.text)}</span>${row.after || (row.checked ? ICON.check : '')}</button>`;
 }
 
-function popupMenu(owner, { label, rows, point = null, find = '' }) {
+function popupMenu(owner, { label, rows, point = null, find = '', page = null, more = false, loaded = 0 }) {
   const again = !point && popup && !popup.point && popup.owner === owner && popup.label === label;
   closePopup(again);
   if (again) return;
@@ -33,10 +33,19 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
   const input = box.querySelector('input');
   const list = box.querySelector('.popup-rows');
   document.body.appendChild(box);
-  let shown = rows;
-  const draw = (items) => {
-    shown = items;
-    list.innerHTML = items.map(popupRow).join('');
+  let shown = rows, ask = 0, at = loaded, waiting = false, timer = 0;
+  const draw = (items, tail = false) => {
+    shown = tail ? [...items, { text: 'Show more', more: true }] : items;
+    list.innerHTML = shown.map(popupRow).join('');
+  };
+  const answer = (reply) => {
+    at = reply.loaded;
+    draw(reply.rows.length ? reply.rows : [{ note: 'Nothing matches' }], reply.more);
+    place();
+  };
+  const fetch = async (query, offset, mine) => {
+    const reply = await page(query, offset);
+    if (mine === ask) answer(reply);
   };
   const place = () => {
     const bounds = owner.getBoundingClientRect();
@@ -46,12 +55,21 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
   const first = () => (input || list.querySelector('button:not(:disabled)'))?.focus();
   const marked = owner.hasAttribute('aria-haspopup') || owner.matches('button:not([aria-expanded])');
   if (marked) owner.setAttribute('aria-expanded', 'true');
-  draw(rows);
+  draw(rows, more);
   place();
   popup = { box, owner, point, label, marked };
   unfold(box, point || owner);
   first();
   input?.addEventListener('input', () => {
+    if (page) {
+      clearTimeout(timer);
+      const mine = ++ask;
+      const query = input.value.trim();
+      waiting = !!query;
+      if (!query) { at = loaded; draw(rows, more); place(); return; }
+      timer = setTimeout(() => fetch(query, 0, mine).then(() => { if (mine === ask) waiting = false; }, (e) => { if (mine === ask) waiting = false; fail(e); }), 160);
+      return;
+    }
     const wanted = input.value.trim().toLowerCase();
     const found = rows.filter((row) => row.text.toLowerCase().includes(wanted));
     draw(found.length ? found : [{ note: 'Nothing matches' }]);
@@ -60,6 +78,11 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
     const button = e.target.closest('[data-row]');
     if (!button || button.disabled) return;
     const row = shown[button.dataset.row];
+    if (row.more) {
+      const mine = ++ask, query = input?.value.trim() || '', index = Number(button.dataset.row);
+      fetch(query, at, mine).then(() => list.querySelectorAll('button')[index]?.focus(), fail);
+      return;
+    }
     if (row.next) { draw(row.next); place(); first(); return; }
     closePopup();
     if (row.run) Promise.resolve().then(row.run).catch(fail);
@@ -70,7 +93,7 @@ function popupMenu(owner, { label, rows, point = null, find = '' }) {
     const at = stops.indexOf(document.activeElement);
     const typing = e.target === input;
     let next;
-    if (e.key === 'Enter' && typing && !e.isComposing) { e.preventDefault(); buttons[0]?.click(); return; }
+    if (e.key === 'Enter' && typing && !e.isComposing) { e.preventDefault(); if (!waiting) buttons[0]?.click(); return; }
     if (e.key === 'ArrowDown') next = (at + 1) % stops.length;
     else if (e.key === 'ArrowUp') next = (at + stops.length - 1) % stops.length;
     else if (e.key === 'Home' && !typing) next = 0;

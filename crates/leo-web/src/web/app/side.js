@@ -780,23 +780,32 @@ async function explorerMoveMenu(target, note, owner) {
   });
 }
 
+const COMBINE_PAGE = 50;
+
 async function explorerCombineMenu(note, owner) {
   const mine = seq;
-  const notes = await api(`/api/notes?${new URLSearchParams({ limit: '1000', brief: 'true', sort: 'title' })}`);
-  if (mine !== seq) return;
-  const others = notes.filter((n) => n.id !== note.id);
-  if (!others.length) return toast('There is no other note to combine it with.');
-  const titles = others.map((n) => n.title);
-  const twice = new Set(titles.filter((title, i) => titles.indexOf(title) !== i));
-  popupMenu(owner, {
-    label: `Combine “${note.title || 'Untitled'}” into`,
-    find: 'Find a note',
-    rows: others.map((n) => ({
-      text: `${n.title || 'Untitled'}${twice.has(n.title) ? ` · ${n.directory || 'Top level'}` : ''}`,
+  const seen = new Map();
+  const rowsOf = (loaded) => {
+    const titles = new Map();
+    for (const n of loaded) titles.set(n.title, (titles.get(n.title) || 0) + 1);
+    return loaded.filter((n) => n.id !== note.id).map((n) => ({
+      text: `${n.title || 'Untitled'}${titles.get(n.title) > 1 ? ` · ${n.directory || 'Top level'}` : ''}`,
       icon: ICON.note,
       run: () => combineSheet({ id: note.id, title: note.title || 'Untitled' }, { id: n.id, title: n.title || 'Untitled' }),
-    })),
-  });
+    }));
+  };
+  const page = async (query, offset) => {
+    const got = await api(query
+      ? `/api/search?q=${enc(query)}&brief=true&limit=${COMBINE_PAGE + 1}&offset=${offset}`
+      : `/api/notes?${new URLSearchParams({ limit: String(COMBINE_PAGE + 1), offset: String(offset), brief: 'true', sort: 'title' })}`);
+    const loaded = [...(offset ? seen.get(query) : []), ...got.slice(0, COMBINE_PAGE)];
+    seen.set(query, loaded);
+    return { rows: rowsOf(loaded), more: got.length > COMBINE_PAGE, loaded: loaded.length };
+  };
+  const first = await page('', 0);
+  if (mine !== seq) return;
+  if (!first.rows.length) return toast('There is no other note to combine it with.');
+  popupMenu(owner, { label: `Combine “${note.title || 'Untitled'}” into`, find: 'Find a note', rows: first.rows, more: first.more, loaded: first.loaded, page });
 }
 
 async function afterExplorerNote(id) {

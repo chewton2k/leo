@@ -451,8 +451,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   and gives it the other note's original files (`share_originals`).
   In the explorer a note dropped on a note moves it unless held on that row for
   `SPRING_MS` (arms Combine: `.combine-wait`, then `.combine-armed`; the folder
-  is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists at
-  most 1000 notes (2026-11-09).
+  is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists the
+  first 50 notes by title and finds any note by typing, through the page's search, with
+  Show more for further pages (2026-11-17, the user's call: no fixed limit on data;
+  overturns 2026-11-09).
 - Search (`search.rs`): titles and acronyms, text, graph concepts and summaries,
   then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Every word
   counts, a repeated one looked up once; a query of more than `WORDS_UNDER_LOCK`

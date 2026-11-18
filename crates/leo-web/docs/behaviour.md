@@ -432,7 +432,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   simulation) a note held on another note's row for `SPRING_MS` arms it (the folder spring's timer slot, keyed
   `{key, kind}`; `.combine-wait` "Hold to combine" with a line growing over the hold, then `.combine-armed` "Combine";
   the parent folder is not lit) and a drop opens the sheet; a quicker drop still moves. The note menu has
-  Combine into… (`explorerCombineMenu`: up to 1000 notes from the brief notes list, " · folder" only on a title clash),
+  Combine into… (`explorerCombineMenu`: the first 50 notes by title, Show more for the next 50, and the find box asks the page's search (`/api/search`) after a 160 ms pause, so any note is reachable; " · folder" only where two loaded titles are equal),
   and a Quick Leo query that is just "merge" or "combine" (optionally followed by this, note, it, into or with) offers Combine “<open note>” into… above the ranked rows
   (a hint row when no note is open). The sheet says which note is merged into which and warns the result may not be fully accurate; the ready toast says "ready to review". It runs in the background
   (2026-10-14, the user's call): POST `combine` starts a job on a thread
