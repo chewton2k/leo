@@ -273,6 +273,18 @@ pub fn resolved_on(chats: &Path, note: &str) -> Vec<Passage> {
         .unwrap_or_default()
 }
 
+pub fn dismissed_on(chats: &Path, note: &str) -> Vec<String> {
+    db_of(chats)
+        .with(|c| {
+            let mut query = c.prepare_cached(
+                "SELECT quote FROM margin_threads WHERE note = ?1 AND status = 'dismissed'",
+            )?;
+            let rows = query.query_map([note], |row| row.get(0))?;
+            rows.collect()
+        })
+        .unwrap_or_default()
+}
+
 pub fn one(chats: &Path, note: &str, id: &str) -> Option<Thread> {
     db_of(chats)
         .with(|c| {

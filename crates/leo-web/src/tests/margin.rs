@@ -3177,3 +3177,67 @@ fn a_changed_wording_is_placed_between_its_own_note_s_context() {
         body.find("salt")
     );
 }
+
+async fn closed_then_read(
+    status: &str,
+    said: &'static str,
+    edited: &str,
+) -> (u16, serde_json::Value, usize) {
+    let (engine, calls) = reading(said).await;
+    let (id, _) = engine.note("Closed", NOW).await;
+    let old = old_note(&engine, &id, NOW, REWORDED, "read", untouched());
+    if status != "open" {
+        let (code, _) = engine
+            .post(
+                &format!("/api/notes/{id}/margin/threads/{old}"),
+                serde_json::json!({ "status": status }),
+            )
+            .await;
+        assert_eq!(code, 200);
+    }
+    let version = engine.edit(&id, edited).await;
+    let (code, reply) = engine.read(&id, &version, &[edited]).await;
+    let calls = calls.load(Ordering::SeqCst);
+    engine.stop().await;
+    (code, reply, calls)
+}
+
+const ONE_DAY: &str =
+    "Passwords use bcrypt. then login just checks if it matches. Sessions last one day.";
+
+#[tokio::test]
+async fn a_read_along_stays_off_a_sentence_whose_note_is_still_open() {
+    let (code, reply, calls) = closed_then_read("open", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls), (200, 1));
+    assert!(reply["note"].is_null(), "{reply}");
+}
+
+#[tokio::test]
+async fn a_read_along_stays_off_a_sentence_whose_note_was_dismissed() {
+    let (code, reply, calls) = closed_then_read("dismissed", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls), (200, 1));
+    assert!(
+        reply["note"].is_null(),
+        "a new note was saved on the dismissed sentence: {reply}"
+    );
+}
+
+#[tokio::test]
+async fn a_read_along_may_return_to_a_sentence_whose_note_was_resolved() {
+    let (code, reply, calls) = closed_then_read("resolved", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls), (200, 1));
+    assert!(reply["note"].is_object(), "{reply}");
+}
+
+#[tokio::test]
+async fn a_dismissed_sentence_that_is_reworded_can_get_a_note() {
+    const COMPARES: &str = r#"{"quote":"just compares the stored hash","text":"Which hash?"}"#;
+    let (code, reply, calls) = closed_then_read(
+        "dismissed",
+        COMPARES,
+        "Passwords use bcrypt. then login just compares the stored hash. Sessions last a day.",
+    )
+    .await;
+    assert_eq!((code, calls), (200, 1));
+    assert!(reply["note"].is_object(), "{reply}");
+}

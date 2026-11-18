@@ -727,7 +727,8 @@ Felix (2026-10-19).
 - A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent. Read through sends none.
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
-  then `margin::crowded` allows one open note per sentence. A reworded passage still counts
+  then `margin::crowded` allows one open note per sentence; for read-along a dismissed note keeps its
+  sentence too while its words are in the note (`margin::dismissed_on`), never in Read through. A reworded passage still counts
   (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
   open thread the page places only by context, as `{id, text}` of its current wording, at most
   2 × `MOST_OPEN`). The server places each text itself between that thread's stored context
