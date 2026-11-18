@@ -4,9 +4,11 @@
   const PREFIX = 'leo-draft-v1:';
   const copy = (value) => JSON.parse(JSON.stringify(value));
   const copyEdit = (e) => ({ title: e.title, body: e.body });
+  const DRAFT_EVERY = 250;
+  const SETTLE_WITHIN = 5000;
   const draftId = () => Array.from(root.crypto.getRandomValues(new Uint32Array(4)), (n) => n.toString(16).padStart(8, '0')).join('');
 
-  function create({ api, storage, mark = () => {}, recovered = () => {}, conflict = () => {}, created = () => {}, storageError = () => {}, retryable = () => false, schedule = setTimeout, cancel = clearTimeout }) {
+  function create({ api, storage, mark = () => {}, recovered = () => {}, conflict = () => {}, created = () => {}, storageError = () => {}, retryable = () => false, schedule = setTimeout, cancel = clearTimeout, now = Date.now }) {
     const pending = new Map();
     let warned = false;
 
@@ -41,9 +43,12 @@
 
     function persist(s) {
       pending.set(s.key, s);
+      s.persistDue = false;
+      s.persistedAt = now();
       try {
-        storage.setItem(s.key, JSON.stringify({ note: s.note, edit: s.edit }));
+        storage.setItem(s.key, JSON.stringify({ note: { ...s.note, body: '' }, edit: copyEdit(s.edit) }));
         s.persisted = true;
+        s.durableRevision = s.revision;
       } catch (error) {
         s.persisted = false;
         if (!warned) { warned = true; storageError(error); }
@@ -59,7 +64,9 @@
       s.edit = copyEdit(edit);
       s.revision++;
       s.dirty = true;
-      persist(s);
+      pending.set(s.key, s);
+      if (now() - (s.persistedAt || 0) >= DRAFT_EVERY) persist(s);
+      else s.persistDue = true;
       mark(s, 'Editing…');
       cancel(s.timer);
       s.timer = schedule(() => flush(s).catch(() => {}), 700);
@@ -91,6 +98,7 @@
 
     function flush(s) {
       if (!s) return Promise.resolve();
+      if (s.persistDue) persist(s);
       cancel(s.timer);
       if (s.saving) return s.saving;
       if (!s.dirty) return Promise.resolve();
@@ -130,6 +138,18 @@
       return s.saving;
     }
 
+    const durable = (s) => !pending.has(s.key) || s.durableRevision === s.revision;
+
+    async function settle(within = SETTLE_WITHIN) {
+      const work = Promise.all([...pending.values()].map(async (s) => {
+        if (!durable(s)) persist(s);
+        if (!durable(s)) await flush(s).catch(() => {});
+      })).then(() => [...pending.values()].every(durable));
+      let timer;
+      const late = new Promise((resolve) => { timer = schedule(() => resolve(false), within); });
+      try { return await Promise.race([work, late]); } finally { cancel(timer); }
+    }
+
     const drafts = stored();
     for (const draft of drafts) session(draft.note, draft);
     if (drafts.length) recovered(drafts.length);
@@ -141,7 +161,7 @@
       },
       get: (key) => pending.get(key),
       drafts: () => [...pending.values()].map((s) => ({ key: s.key, note: copy(s.note), edit: copyEdit(s.edit) })),
-      changed, flush,
+      changed, flush, settle,
       unsaved: () => pending.size > 0,
       discardAll: () => {
         const all = [...pending.values()];

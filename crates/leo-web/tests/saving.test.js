@@ -106,11 +106,13 @@ test('a draft saved with tags by an older page still loads and saves', async () 
 test('storage failure is visible and the draft stays in memory until saved', async () => {
   let warning = 0;
   const local = storage();
-  local.setItem = () => { throw new Error('quota'); };
-  const m = manager(async (_, { body }) => ({ ...note(), ...body }), local, { storageError: () => warning++ });
+  let tries = 0;
+  local.setItem = () => { tries++; throw new Error('quota'); };
+  const m = manager(async (_, { body }) => ({ ...note(), ...body }), local, { storageError: () => warning++, now: () => 1000 });
   const s = m.open(note());
   m.changed(s, edit('First'));
   m.changed(s, edit('Latest'));
+  assert.equal(tries, 1, 'the second edit inside 250 ms does not write');
   assert.equal(warning, 1);
   assert.equal(s.persisted, false);
   assert.equal(m.unsaved(), true);
@@ -233,4 +235,56 @@ test('clearing drafts forgets every unsaved edit in this browser and nothing els
   assert.equal(local.length, 1);
   assert.equal(local.getItem('other-app'), 'keep');
   assert.equal(manager(async () => note(), local).drafts().length, 0, 'nothing comes back after a reload');
+});
+
+test('typing writes the draft at most four times a second and once more when a save starts', async () => {
+  const local = storage();
+  let writes = 0;
+  const setItem = local.setItem;
+  local.setItem = (k, v) => { writes++; setItem(k, v); };
+  let clock = 1000;
+  const m = manager(async (_, { body }) => ({ ...note(), ...body, version: 'v2' }), local, { now: () => clock });
+  const s = m.open(note());
+  for (let i = 0; i < 20; i++) { clock += 50; m.changed(s, edit(`typed ${i}`)); }
+  assert.equal(writes, 4, 'one write every 250 ms over a second of typing');
+  assert.equal(JSON.parse(local.getItem(s.key)).edit.body, 'typed 15');
+  assert.equal(s.persistDue, true);
+  let sent = null;
+  const saved = m.flush(s);
+  sent = JSON.parse(local.getItem(s.key)).edit.body;
+  assert.equal(writes, 5);
+  assert.equal(sent, 'typed 19', 'the waiting draft is written before the save starts');
+  await saved;
+  assert.equal(local.length, 0);
+});
+
+test('the stored draft carries the edit once', () => {
+  const local = storage();
+  const m = manager(async () => note(), local);
+  const s = m.open({ ...note(), body: 'The whole long body' });
+  m.changed(s, edit('The whole long body, edited'));
+  const stored = JSON.parse(local.getItem(s.key));
+  assert.equal(stored.note.body, '');
+  assert.equal(stored.edit.body, 'The whole long body, edited');
+  assert.equal(stored.note.version, 'v1');
+  const again = manager(async () => note(), local).open(note());
+  assert.equal(again.edit.body, 'The whole long body, edited');
+});
+
+test('persistDue writes a draft that was waiting', async () => {
+  const local = storage();
+  let clock = 1000;
+  const m = manager(async () => { throw Object.assign(new Error('offline'), { status: 500 }); }, local, { now: () => clock });
+  const s = m.open(note());
+  m.changed(s, edit('first'));
+  clock += 10;
+  m.changed(s, edit('second'));
+  assert.equal(s.persistDue, true);
+  assert.equal(JSON.parse(local.getItem(s.key)).edit.body, 'first');
+  assert.equal(await m.settle(), true, "stored in this browser counts as kept");
+  assert.equal(s.persistDue, false);
+  assert.equal(JSON.parse(local.getItem(s.key)).edit.body, 'second');
+  assert.equal(s.durableRevision, s.revision);
+  const again = manager(async () => note(), local).open(note());
+  assert.equal(again.edit.body, 'second');
 });

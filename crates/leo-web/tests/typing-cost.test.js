@@ -212,4 +212,6 @@ test('a keystroke joins the note once and copies it without turning it into text
   const { counts } = keystroke(20000);
   assert.equal(counts.joins, 1);
   assert.equal(counts.parse, 0);
+  assert.equal(counts.stringify, 0);
+  assert.equal(counts.writes, 0);
 });

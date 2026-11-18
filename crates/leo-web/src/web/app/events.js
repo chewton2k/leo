@@ -173,6 +173,9 @@ const tellVisible = () => {
   } catch (e) {}
 };
 document.addEventListener('visibilitychange', tellVisible);
+window.addEventListener('leo-visibility', () => {
+  if (window.__LEO_VISIBLE__ === false) saveWebsiteWork();
+});
 setTimeout(tellVisible, 0);
 
 async function route(arrived = false) {
