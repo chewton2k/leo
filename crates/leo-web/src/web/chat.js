@@ -774,16 +774,16 @@
     const fresh = { id: null, messages: [], refs: [] };
     try {
       const saved = JSON.parse(storage.getItem(KEY) || 'null');
-      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [] };
+      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [], ...(saved.synced === true ? { synced: true } : {}) };
     } catch (e) {
       return fresh;
     }
     return fresh;
   }
 
-  function save(storage, messages, refs = [], id = null) {
+  function save(storage, messages, refs = [], id = null, synced = false) {
     try {
-      storage.setItem(KEY, JSON.stringify({ id, messages: messages.slice(-MOST_KEPT), refs }));
+      storage.setItem(KEY, JSON.stringify({ id, messages: messages.slice(-MOST_KEPT), refs, ...(synced ? { synced: true } : {}) }));
     } catch (e) {
       return;
     }
@@ -899,6 +899,8 @@
     };
     const sentenceOf = async (response) => { try { return (await response.json()).error || ''; } catch (e) { return ''; } };
     const saved = load(storage);
+    const known = new Set(saved.synced && saved.id ? [saved.id] : []);
+    const gone = new Set();
     const stepChevron = (icons.chevron || '').replace('<svg ', '<svg class="msg-step-chevron" ');
     const state = { open: false, id: saved.id || newId(), messages: saved.messages, refs: saved.refs, context: null, dropped: null, fresh: false, busy: null, streak: 0, pick: null, chats: null, sidebar: null, doomed: null, asking: null, files: [], sent: [], filesFor: null, review: [], drafts: {}, found: null, selection: null };
     const panel = document.createElement('aside');
@@ -1299,7 +1301,7 @@
     }
 
     function persist() {
-      save(storage, stored(), state.refs, state.id);
+      save(storage, stored(), state.refs, state.id, known.has(state.id));
     }
 
     // Idle compaction: after warm.rs IDLE the warm session and the provider's
@@ -1336,13 +1338,21 @@
       const id = chat.id;
       const sending = { refs: chat.refs, messages: messages.slice(-MOST_SAVED).map(({ pending, ...m }) => m) };
       upload = upload.then(async () => {
+        if (gone.has(id)) return;
+        const existed = known.has(id);
         try {
           const response = await request(`/api/chats/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sending),
+            body: JSON.stringify({ ...sending, existed }),
           }).catch(() => null);
           if (!response || !response.ok) {
+            if (response && response.status === 410) {
+              known.delete(id);
+              gone.add(id);
+              freshIfGone();
+              return;
+            }
             if (!unsaved.has(id)) {
               unsaved.add(id);
               notify('Felix could not save this chat, so it may be missing from your history.');
@@ -1350,6 +1360,10 @@
             return;
           }
           unsaved.delete(id);
+          if (!known.has(id)) {
+            known.add(id);
+            if (id === state.id) persist();
+          }
           const summary = await response.json();
           if (state.chats) {
             state.chats = [summary, ...state.chats.filter((c) => c.id !== summary.id)].sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
@@ -1364,6 +1378,17 @@
         }
       });
       return upload;
+    }
+
+    function freshIfGone() {
+      if (!gone.has(state.id) || state.busy || state.preparingSend) return;
+      const last = state.messages.filter((m) => m.role === 'user' && !m.next).at(-1);
+      begin();
+      if (last && !input.value.trim()) {
+        input.value = last.text;
+        fit();
+      }
+      notify('This chat was removed, so Felix started a new one. Your last message is in the box.');
     }
 
     const naming = new Set();
@@ -1457,6 +1482,18 @@
       mood('wave', 1500);
     }
 
+    async function checkStored() {
+      if (!known.has(state.id) || !state.messages.length) return;
+      const id = state.id, count = state.messages.length;
+      try {
+        const response = await request(`/api/chats/${encodeURIComponent(id)}`);
+        if (response.status !== 404 || state.id !== id || state.busy || state.messages.length !== count) return;
+        known.delete(id);
+        gone.add(id);
+        begin();
+      } catch (e) {}
+    }
+
     async function resume(id) {
       if (id === state.id) {
         if (!wide() || sourceNarrow()) leaveOverlay();
@@ -1489,6 +1526,7 @@
       state.sent = [];
       state.streak = 0;
       closePick();
+      known.add(chat.id);
       persist();
       await loadFiles();
       if (mine !== resumeSeq || state.id !== id) return null;
@@ -1536,6 +1574,7 @@
         }
       }
       state.doomed = null;
+      known.delete(id);
       state.chats = (state.chats || []).filter((c) => c.id !== id);
       if (id === state.id) begin();
       else drawChats();
@@ -2927,6 +2966,7 @@
         delete m.late;
       }
       state.busy = null;
+      freshIfGone();
       thinking(false);
       if (stopped && left.length && thread.id === state.id) {
         input.value = [input.value, ...left.map((m) => m.text)].filter((t) => t.trim()).join('\n\n');
@@ -3323,6 +3363,7 @@
       else toggle(false);
     });
 
+    checkStored();
     return {
       toggle,
       attachSelection(selection) {

@@ -551,7 +551,7 @@ function chatSendFixture(id = 'practice', access = 'ask', before = async () => t
     state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), timed: new Set(), MOST_REFS: C.MOST_REFS,
     historyText: C.historyText, modelHistory: C.modelHistory, historyRequest: C.historyRequest, threadRefs: C.threadRefs, recentNotes: C.recentNotes, sessionBody: C.sessionBody, splitLines: C.splitLines, grade: C.grade, scoreSession: C.scoreSession,
     cardOf: doc => doc, currentSession: () => stream.session || null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
-    pose: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
+    pose: noop, freshIfGone: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
     $: () => contextBox, escape: esc,
     onBeforeSend: async args => { prepared.push(args); return before(args); }, notify: message => notices.push(message),
     request: async (_url, options) => {
@@ -1081,7 +1081,7 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   const told = [];
   const messages = Array.from({ length: 450 }, (_, i) => ({ role: 'user', text: `m${i}` }));
   const context = {
-    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
     NAME_CHECKS: [], notify: (t) => told.push(t),
     request: async (url, init) => { sent.push(JSON.parse(init.body)); return { ok: false }; },
   };
@@ -1106,7 +1106,7 @@ test('a history save that cannot reach leo warns once', async () => {
   let reachable = false;
   const messages = [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }];
   const context = {
-    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
     NAME_CHECKS: [], notify: (t) => told.push(t),
     request: async () => {
       if (!reachable) throw new TypeError('Failed to fetch');
@@ -1344,4 +1344,124 @@ test("a refused reply's sentence is read one way at the three sites", async () =
   assert.equal(await context.sentenceOf({ json: async () => ({}) }), '');
   assert.equal(source.includes('said = (await'), false);
   assert.equal((source.match(/const said = await sentenceOf\(/g) || []).length, 3);
+});
+
+function goneFixture({ id = 'chat-1', synced = true, reply = async () => ({ ok: true, status: 200 }), messages = [{ role: 'user', text: 'Explain heaps' }, { role: 'assistant', text: 'A heap is a tree.' }], typed = '' } = {}) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const from = source.indexOf('    let upload = Promise.resolve();');
+  const saving = source.slice(from, source.indexOf('    async function loadChats()', from));
+  const at = source.indexOf('    async function checkStored() {');
+  const checking = source.slice(at, source.indexOf('    async function resume(', at));
+  const calls = [], told = [], begun = [];
+  const state = { id, refs: [], messages: messages.slice(), chats: null, busy: null, preparingSend: false };
+  const input = { value: typed };
+  const context = vm.createContext({
+    state, input, MOST_SAVED: 400, NAME_CHECKS: [], setTimeout: () => 0,
+    known: new Set(synced ? [id] : []), gone: new Set(),
+    stored: () => state.messages, persist() {}, drawChats() {}, loadChats() {}, fit() {},
+    notify: (t) => told.push(t),
+    begin: () => { begun.push(state.id); state.id = `fresh-${begun.length}`; state.messages = []; },
+    request: async (url, init = {}) => { calls.push([init.method || 'GET', url, init.body ? JSON.parse(init.body) : null]); return reply(url, init, calls.length); },
+  });
+  vm.runInContext(`${saving}\n${checking}\nthis.remember = remember; this.checkStored = checkStored; this.freshIfGone = freshIfGone;`, context);
+  return { context, state, input, calls, told, begun, known: context.known, gone: context.gone };
+}
+
+test('a stored chat leo no longer has starts a new chat', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 404 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, ['chat-1']);
+  assert.equal(f.known.has('chat-1'), false);
+  assert.equal(f.gone.has('chat-1'), true);
+  assert.deepEqual(f.calls.map((c) => c.slice(0, 2)), [['GET', '/api/chats/chat-1']]);
+});
+
+test('a stored chat leo still has is kept', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: true, status: 200 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  assert.equal(f.state.id, 'chat-1');
+});
+
+test('an unreachable leo, a 401 and a 500 keep the stored chat', async () => {
+  for (const reply of [async () => { throw new TypeError('Failed to fetch'); }, async () => ({ ok: false, status: 401 }), async () => ({ ok: false, status: 500 })]) {
+    const f = goneFixture({ reply });
+    await f.context.checkStored();
+    assert.deepEqual(f.begun, []);
+    assert.equal(f.state.messages.length, 2);
+  }
+});
+
+test('a stored chat that never reached leo is kept without asking', async () => {
+  const f = goneFixture({ synced: false, reply: async () => ({ ok: false, status: 404 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  assert.equal(f.calls.length, 0);
+});
+
+test('a chat that changed while the check ran is kept', async () => {
+  let f;
+  f = goneFixture({ reply: async () => { f.state.messages.push({ role: 'user', text: 'and again' }); return { ok: false, status: 404 }; } });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  f = goneFixture({ reply: async () => { f.state.busy = {}; return { ok: false, status: 404 }; } });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+});
+
+test('a save answered gone starts a new chat and puts the last message back in the box', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  await f.context.remember();
+  assert.equal(f.calls[0][2].existed, true);
+  assert.deepEqual(f.begun, ['chat-1']);
+  assert.equal(f.input.value, 'Explain heaps');
+  assert.equal(f.told.length, 1);
+  assert.match(f.told[0], /Your last message is in the box/);
+  assert.equal(f.known.has('chat-1'), false);
+});
+
+test('a save queued before a gone answer is not sent after it', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  f.state.busy = {};
+  const first = f.context.remember();
+  const second = f.context.remember();
+  await first;
+  await second;
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.begun, []);
+});
+
+test('a chat found gone while a reply runs starts fresh when the reply ends and the final save of the old id is not sent', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  f.state.busy = {};
+  const old = { id: 'chat-1', refs: [], messages: f.state.messages.slice() };
+  await f.context.remember(old);
+  assert.deepEqual(f.begun, []);
+  f.state.busy = null;
+  f.context.freshIfGone();
+  assert.deepEqual(f.begun, ['chat-1']);
+  await f.context.remember({ ...old, messages: [...old.messages, { role: 'assistant', text: 'more' }] });
+  assert.equal(f.calls.length, 1);
+  assert.notEqual(f.state.id, 'chat-1');
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  assert.match(source, /state\.busy = null;\n\s+freshIfGone\(\);/);
+});
+
+test('a first save says leo did not have the chat, and a later one says it did', async () => {
+  const f = goneFixture({ synced: false, reply: async () => ({ ok: true, status: 200, json: async () => ({ id: 'chat-1', named: true, count: 2 }) }) });
+  await f.context.remember();
+  await f.context.remember();
+  assert.deepEqual(f.calls.map((c) => c[2].existed), [false, true]);
+});
+
+test('the saved flag round-trips', () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  C.save(storage, [{ role: 'user', text: 'hi' }], [], 'id', true);
+  assert.equal(C.load(storage).synced, true);
+  C.save(storage, [{ role: 'user', text: 'hi' }], [], 'id');
+  assert.equal('synced' in C.load(storage), false);
+  assert.equal(JSON.parse(store.get([...store.keys()][0])).synced, undefined);
 });

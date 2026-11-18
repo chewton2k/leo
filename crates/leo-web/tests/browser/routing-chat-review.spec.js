@@ -290,3 +290,64 @@ test('pressing Enter on a quiz answer keeps the chat where it was while the answ
   await expect(page.locator('#chat .quiz-verdict')).toHaveText('Right');
   expect(await scrolled()).toBeGreaterThan(before - 40);
 });
+test("a chat that leo no longer has is not brought back from the browser's copy", async ({ page }) => {
+  const asked = [];
+  page.on('request', (request) => { if (request.url().includes('/api/chats/gone-chat')) asked.push(request.method()); });
+  await page.addInitScript(() => {
+    if (sessionStorage.getItem('seeded-gone-chat')) return;
+    sessionStorage.setItem('seeded-gone-chat', '1');
+    localStorage.setItem('leo-chat-v1', JSON.stringify({ id: 'gone-chat', messages: [{ role: 'user', text: 'What is a heap?' }, { role: 'assistant', text: 'A tree kept in order.' }], refs: [], synced: true }));
+  });
+  await page.goto('/');
+  await page.locator('#chat-toggle').click();
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('leo-chat-v1') || '{}').id)).not.toBe('gone-chat');
+  await expect(page.locator('#chat')).not.toContainText('A tree kept in order.');
+  expect(asked).toContain('GET');
+  expect(asked).not.toContain('PUT');
+});
+test('a chat removed while a reply is running is not re-created', async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const id = `removed-${tag}`;
+  await note(page, `Removed chat note one ${tag}`);
+  await note(page, `Removed chat note two ${tag}`);
+  const earlier = [{ role: 'user', text: 'Earlier question' }, { role: 'assistant', text: 'Earlier answer' }];
+  await page.request.put(`/api/chats/${id}`, { data: { title: 'Removed', messages: earlier } });
+  await page.addInitScript(([chat, messages]) => {
+    if (sessionStorage.getItem('seeded-' + chat)) return;
+    sessionStorage.setItem('seeded-' + chat, '1');
+    localStorage.setItem('leo-chat-v1', JSON.stringify({ id: chat, messages, refs: [], synced: true }));
+  }, [id, earlier]);
+  let puts = 0;
+  await page.route(`**/api/chats/${id}`, (route) => {
+    if (route.request().method() !== 'PUT') return route.continue();
+    puts += 1;
+    return route.fulfill({ status: 410, body: '' });
+  });
+  let release;
+  const waiting = new Promise((done) => { release = done; });
+  await page.route('**/api/chat', async (route) => {
+    await waiting;
+    await route.fulfill({ status: 200, contentType: 'application/x-ndjson', body: '{"t":"An answer for the removed chat."}\n{"done":true}\n' });
+  });
+  try {
+    await page.goto('/');
+    await page.locator('#chat-toggle').click();
+    const chat = page.locator('#chat');
+    await expect(chat).toContainText('Earlier answer');
+    await chat.locator('#chat-input').fill('Hold this reply');
+    await chat.locator('#chat-input').press('Enter');
+    await expect(page.locator('#chat-send')).toHaveAttribute('aria-label', 'Stop');
+    for (const which of ['one', 'two']) {
+      await chat.locator('[data-chat="attach"]').click();
+      await chat.locator('[data-chat="attach-note"]').click();
+      await chat.locator('#chat-pick-search').fill(`Removed chat note ${which} ${tag}`);
+      await chat.locator('.chat-pick-row', { hasText: `Removed chat note ${which} ${tag}` }).click();
+      await expect.poll(() => puts).toBe(1);
+    }
+  } finally { release(); }
+  await expect(page.locator('#chat-send')).toHaveAttribute('aria-label', 'Send');
+  await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('leo-chat-v1') || '{}').id)).not.toBe(id);
+  await expect(page.locator('#chat-input')).toHaveValue('Hold this reply');
+  await page.waitForTimeout(300);
+  expect(puts).toBe(1);
+});

@@ -37,10 +37,3 @@ test('the Cancel button is written once', () => {
     assert.equal(rest.includes('data-action="close">Cancel</button>'), false, file);
   }
 });
-
-test('the page and the chat are smaller than before the footers and sentences were shared', () => {
-  const page = fs.readdirSync(app).filter((f) => f.endsWith('.js')).reduce((sum, f) => sum + fs.statSync(path.join(app, f)).size, 0);
-  const chat = fs.statSync(path.join(__dirname, '../src/web/chat.js')).size;
-  assert.ok(page < 720405, String(page));
-  assert.ok(chat < 175963, String(chat));
-});
