@@ -95,7 +95,7 @@ fn kind_of(text: &str) -> Result<Option<String>, String> {
 
 pub(crate) fn listed_now(state: &AppState) -> Result<std::sync::Arc<tasks::ListedIndex>, String> {
     let metas = tasks::metas(&state.chats);
-    let stored = tasks::load_all(&state.chats);
+    let stored = tasks::snapshot(&state.chats);
     read_now(state, |store| {
         Ok(state
             .listed

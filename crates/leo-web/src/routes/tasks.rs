@@ -92,7 +92,7 @@ pub(crate) async fn list_tasks(
 pub(crate) async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, StatusCode> {
     let chats = state.chats.clone();
     let (metas, stored) =
-        tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::load_all(&chats)))
+        tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::snapshot(&chats)))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     let generation = state.generation.clone();
@@ -158,12 +158,6 @@ pub(crate) async fn create_task(
         }
         if let Some(existing) = tasks::load(&chats, &id) {
             return Json(serde_json::json!(tasks::standalone(&existing, None))).into_response();
-        }
-        if tasks::count(&chats) >= tasks::MOST_TASKS {
-            return error(
-                StatusCode::CONFLICT,
-                "leo keeps up to 10,000 tasks. Delete finished ones first.",
-            );
         }
         let now = Utc::now();
         let repeat = tasks::clean_repeat(&body.repeat);
@@ -347,7 +341,7 @@ pub(crate) async fn change_task(
     };
     let stored = {
         let chats = chats.clone();
-        tokio::task::spawn_blocking(move || tasks::load_all(&chats))
+        tokio::task::spawn_blocking(move || tasks::snapshot(&chats))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
     };
@@ -577,48 +571,60 @@ pub(crate) struct Import {
     tasks: Vec<Task>,
 }
 
+const RESTORE_PIECE: usize = 500;
+
 pub(crate) async fn import_tasks(
     State(state): State<AppState>,
     Json(body): Json<Import>,
 ) -> Response {
-    let chats = state.chats.clone();
-    writing(move || {
-        let mut added = 0;
-        let mut kept = 0;
-        let mut count = tasks::count(&chats);
-        for mut task in body.tasks.into_iter().take(tasks::MOST_TASKS) {
-            if !tasks::valid_id(&task.id)
-                || task.id.starts_with('n')
-                || task.title.trim().is_empty()
-            {
-                continue;
-            }
-            let Ok(description) = tasks::description_of(&task.description) else {
-                continue;
-            };
-            task.description = description;
-            task.title = task.title.trim().chars().take(tasks::MOST_TITLE).collect();
-            task.kind = tasks::clean_kind(&task.kind);
-            task.repeat = tasks::clean_repeat(&task.repeat);
-            task.done_on.sort_unstable();
-            task.done_on.dedup();
-            let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
-            task.done_on.drain(..extra);
-            task.deleted = false;
-            match tasks::load(&chats, &task.id) {
-                Some(mine) if mine.updated_at >= task.updated_at => kept += 1,
-                mine => {
-                    if count >= tasks::MOST_TASKS {
-                        break;
-                    }
-                    if tasks::put(&chats, &task).is_ok() {
-                        added += 1;
-                        count += usize::from(mine.is_none());
-                    }
+    let (mut added, mut kept) = (0, 0);
+    let mut tasks = body.tasks.into_iter();
+    loop {
+        let piece: Vec<Task> = tasks.by_ref().take(RESTORE_PIECE).collect();
+        if piece.is_empty() {
+            break;
+        }
+        let chats = state.chats.clone();
+        let Ok((new, old)) = super::off(move || {
+            let _writing = tasks::writing();
+            restore_piece(&chats, piece)
+        })
+        .await
+        else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
+        added += new;
+        kept += old;
+    }
+    Json(serde_json::json!({ "added": added, "kept": kept })).into_response()
+}
+
+fn restore_piece(chats: &std::path::Path, piece: Vec<Task>) -> (usize, usize) {
+    let (mut added, mut kept) = (0, 0);
+    for mut task in piece {
+        if !tasks::valid_id(&task.id) || task.id.starts_with('n') || task.title.trim().is_empty() {
+            continue;
+        }
+        let Ok(description) = tasks::description_of(&task.description) else {
+            continue;
+        };
+        task.description = description;
+        task.title = task.title.trim().chars().take(tasks::MOST_TITLE).collect();
+        task.kind = tasks::clean_kind(&task.kind);
+        task.repeat = tasks::clean_repeat(&task.repeat);
+        task.done_on.sort_unstable();
+        task.done_on.dedup();
+        let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
+        task.done_on.drain(..extra);
+        task.deleted = false;
+        match tasks::load(chats, &task.id) {
+            Some(mine) if mine.updated_at >= task.updated_at => kept += 1,
+            _ => {
+                if tasks::put(chats, &task).is_ok() {
+                    added += 1;
                 }
             }
         }
-        Json(serde_json::json!({ "added": added, "kept": kept })).into_response()
-    })
-    .await
+    }
+    (added, kept)
 }

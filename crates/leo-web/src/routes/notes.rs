@@ -739,7 +739,7 @@ pub(crate) async fn get_rev(
             crate::boards::look_again(&chats);
         }
         [
-            crate::jsonline::stamp_of(&chats, "tasks"),
+            crate::tasks::generation(&chats),
             crate::boards::generation(&chats),
         ]
     })

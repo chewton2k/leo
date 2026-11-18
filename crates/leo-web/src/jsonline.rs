@@ -39,30 +39,6 @@ pub(crate) fn checked_dir(chats: &Path, kind: &str) -> anyhow::Result<PathBuf> {
     leo_core::paths::contained_path(root(chats), &Path::new("notes/.leo").join(kind))
 }
 
-pub(crate) fn stamp_of(chats: &Path, kind: &str) -> u64 {
-    let Ok(entries) = checked_dir(chats, kind).and_then(|dir| Ok(std::fs::read_dir(dir)?)) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .filter_map(|entry| {
-            let meta = entry.metadata().ok().filter(|meta| meta.is_file())?;
-            let changed = meta
-                .modified()
-                .ok()
-                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-                .map_or(0, |since| since.as_nanos());
-            let name = entry.file_name();
-            Some(crate::vectors::fnv64(
-                name.to_string_lossy()
-                    .bytes()
-                    .chain(meta.len().to_le_bytes())
-                    .chain(changed.to_le_bytes()),
-            ))
-        })
-        .fold(0, u64::wrapping_add)
-}
-
 pub(crate) type Stamp = (u64, u128, i64);
 
 fn stamp_meta(meta: &std::fs::Metadata) -> Stamp {

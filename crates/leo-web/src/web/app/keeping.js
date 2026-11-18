@@ -131,10 +131,11 @@ function drawKeeping() {
   $('#export-link').href = exportHref();
 }
 
+const TASKS_RESTORE_PIECE = 500;
+
 async function tasksRestoreAsk(file) {
   let tasks;
   try {
-    if (file.size > 1_500_000) throw new Error('too big');
     const data = JSON.parse(await file.text());
     tasks = Array.isArray(data) ? data : data && data.tasks;
     if (!Array.isArray(tasks) || tasks.some((task) => !task || typeof task.id !== 'string' || typeof task.title !== 'string')) throw new Error('no tasks');
@@ -152,7 +153,18 @@ async function tasksRestoreGo() {
   closeSheet();
   state.tasksRestore = null;
   if (!tasks) return;
-  const done = await api('/api/tasks/import', { method: 'POST', body: { tasks } });
+  const done = { added: 0, kept: 0 };
+  for (let at = 0; at < tasks.length; at += TASKS_RESTORE_PIECE) {
+    try {
+      const piece = await api('/api/tasks/import', { method: 'POST', body: { tasks: tasks.slice(at, at + TASKS_RESTORE_PIECE) } });
+      done.added += piece.added;
+      done.kept += piece.kept;
+    } catch (e) {
+      toast(`Restored ${plural(done.added, 'task')} before it stopped: ${e.message || 'leo could not reach the notes folder'}`, { bad: true });
+      loadTasksWindow().catch(() => {});
+      return;
+    }
+  }
   toast(done.added ? `Restored ${plural(done.added, 'task')}${done.kept ? ` · ${done.kept} already here` : ''}` : 'Every task in that file is already here');
   pulse($('.toast'));
   loadTasksWindow().catch(() => {});

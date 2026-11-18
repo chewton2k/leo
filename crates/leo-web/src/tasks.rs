@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use leo_core::notes::{checkbox_line, Note};
@@ -11,7 +11,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::jsonline;
 
-pub const MOST_TASKS: usize = 10_000;
 pub const MOST_TITLE: usize = 300;
 pub const MOST_DESCRIPTION: usize = 4_000;
 
@@ -323,7 +322,7 @@ pub fn find_listed(
     generation: &AtomicU64,
     store: &Store,
     metas: &[Meta],
-    stored: &[Task],
+    stored: &Arc<Vec<Task>>,
     id: &str,
 ) -> Option<Listed> {
     let kept = listed
@@ -422,7 +421,7 @@ impl std::ops::Deref for ListedIndex {
     }
 }
 
-type Kept = (u64, Vec<Meta>, Vec<Task>, Arc<ListedIndex>);
+type Kept = (u64, Vec<Meta>, Arc<Vec<Task>>, Arc<ListedIndex>);
 
 #[derive(Default)]
 pub struct ListedCache {
@@ -439,13 +438,13 @@ impl ListedCache {
         generation: &AtomicU64,
         store: &Store,
         metas: &[Meta],
-        stored: &[Task],
+        stored: &Arc<Vec<Task>>,
     ) -> Arc<ListedIndex> {
         let at = generation.load(Ordering::Acquire);
         if let Some((kept_at, kept_metas, kept_stored, index)) =
             self.kept.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
         {
-            if *kept_at == at && kept_metas == metas && kept_stored == stored {
+            if *kept_at == at && kept_metas == metas && Arc::ptr_eq(kept_stored, stored) {
                 return Arc::clone(index);
             }
         }
@@ -462,7 +461,7 @@ impl ListedCache {
             .collect();
         let index = Arc::new(ListedIndex { all, by_id });
         *self.kept.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some((at, metas.to_vec(), stored.to_vec(), Arc::clone(&index)));
+            Some((at, metas.to_vec(), Arc::clone(stored), Arc::clone(&index)));
         index
     }
 
@@ -471,7 +470,7 @@ impl ListedCache {
         generation: &AtomicU64,
         store: &Store,
         metas: &[Meta],
-        stored: &[Task],
+        stored: &Arc<Vec<Task>>,
         id: &str,
     ) -> Option<Listed> {
         let index = self.index(generation, store, metas, stored);
@@ -616,18 +615,54 @@ impl jsonline::Line for Task {
     }
 }
 
-fn read_all(chats: &Path) -> Vec<Task> {
-    let mut out: Vec<Task> = jsonline::read_all(chats, None);
-    out.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
-    out
+#[derive(Default)]
+struct Table {
+    index: jsonline::Index<Task>,
+    live: Mutex<Option<(u64, Arc<Vec<Task>>)>>,
+}
+
+fn table(chats: &Path) -> Arc<Table> {
+    static TABLES: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<Table>>>> = OnceLock::new();
+    let key = chats.parent().unwrap_or(chats).to_path_buf();
+    let mut all = TABLES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(all.entry(key).or_default())
+}
+
+pub fn generation(chats: &Path) -> u64 {
+    table(chats).index.generation(chats)
+}
+
+pub fn snapshot(chats: &Path) -> Arc<Vec<Task>> {
+    let held = table(chats);
+    let at = held.index.generation(chats);
+    let mut live = held.live.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((kept_at, tasks)) = live.as_ref() {
+        if *kept_at == at {
+            return Arc::clone(tasks);
+        }
+    }
+    let mut tasks: Vec<Task> = held.index.view(chats, |items| {
+        items
+            .values()
+            .filter(|(_, task)| !task.deleted)
+            .map(|(_, task)| task.clone())
+            .collect()
+    });
+    tasks.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let tasks = Arc::new(tasks);
+    *live = Some((at, Arc::clone(&tasks)));
+    tasks
 }
 
 pub fn load_all(chats: &Path) -> Vec<Task> {
-    read_all(chats)
-        .into_iter()
-        .filter(|t| !t.deleted)
-        .take(MOST_TASKS)
-        .collect()
+    snapshot(chats).to_vec()
 }
 
 pub fn load(chats: &Path, id: &str) -> Option<Task> {
@@ -637,8 +672,11 @@ pub fn load(chats: &Path, id: &str) -> Option<Task> {
     jsonline::load::<Task>(chats, id).filter(|t| !t.deleted)
 }
 
+#[cfg(test)]
 pub fn count(chats: &Path) -> usize {
-    load_all(chats).len()
+    table(chats).index.view(chats, |items| {
+        items.values().filter(|(_, t)| !t.deleted).count()
+    })
 }
 
 pub fn put(chats: &Path, task: &Task) -> anyhow::Result<()> {
@@ -664,8 +702,8 @@ pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
 pub fn metas(chats: &Path) -> Vec<Meta> {
     db_of(chats)
         .and_then(|db| db.with(|c| {
-            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks ORDER BY rowid DESC LIMIT ?1")?;
-            let rows = statement.query_map([MOST_TASKS as i64], |r| {
+            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks ORDER BY rowid DESC")?;
+            let rows = statement.query_map([], |r| {
                 Ok(Meta {
                     id: r.get(0)?,
                     note: r.get(1)?,
@@ -840,7 +878,7 @@ mod tests {
         let now = Utc::now();
         let folder = dir.path().join("notes/.leo/tasks");
         std::fs::create_dir_all(&folder).unwrap();
-        for n in 0..MOST_TASKS * 3 {
+        for n in 0..30_000 {
             let id = format!("gone-{n:06}");
             let mut gone = plain(&id, "Gone", now);
             gone.deleted = true;

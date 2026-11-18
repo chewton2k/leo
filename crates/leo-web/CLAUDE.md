@@ -981,6 +981,12 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   table are not read. Descriptions are optional plain text ≤4,000 characters.
   One mutex (`tasks::writing`) serialises task writes; task and board file work
   runs on blocking workers and never holds the notes store lock.
+- No fixed number of tasks (2026-11-18, the owner's principle 1): tasks are kept in memory like boards and
+  cards (`tasks::table`, a `jsonline::Index<Task>` per data folder with the same watcher rule as Boards "Tables").
+  Every task is held whole, tombstones included. `tasks::snapshot` is the live tasks newest first, an `Arc`
+  rebuilt only when the table's `generation` moves; `tasks::load` still reads the one file. A restore
+  (`POST /api/tasks/import`) takes its tasks 500 at a time, each piece under one hold of `tasks::writing`, and
+  Keeping sends the file 500 at a time, stopping at a failed piece and saying how many came back.
 - The task list has no fixed length (2026-11-17, the owner's principle 1): `GET /api/tasks` takes
   `offset`, `limit` (500 by default), `q` (a word of the title) and `note` (a note id), and answers
   `{tasks, total}`; the Tasks card ends with Show more while it holds fewer than `total`, and a poll
@@ -1208,9 +1214,8 @@ AI uses a pen icon, never a sparkle.
   due or there is no watcher, and always on Windows (2026-11-17, the owner's
   call on ENG-D6: the most efficient and scalable method).
 - GET `/api/rev[?foreground=1]` answers `{rev}`, 16 hex digits over the store's fingerprint and a
-  stamp of `.leo/tasks` (each regular file's name, length and modified time, so a file rewritten in
-  place moves it) and the board and card tables' generation numbers (moved whenever an entry is added,
-  replaced or dropped). `foreground=1` forces a disk check first.
+  the task, board and card tables' generation numbers (moved whenever an entry is added, replaced or
+  dropped; a file rewritten in place moves its table's number once the watcher or the minute's listing sees it). `foreground=1` forces a disk check first.
   It is signed in like every API route and, as a GET, does not count as use.
 - The watcher's `.leo` signal is separate from the notes' one: a change under `.leo` never marks the
   notes as changed (`leo_core::watch::Watch::leo`, taken by `jsonline::Hub` for the board and card tables).
@@ -1225,9 +1230,9 @@ AI uses a pen icon, never a sparkle.
 - The task list is rebuilt only after a change: `AppState.generation` moves after every
   store refresh and every `with_store`/`store_now` call, and `tasks::ListedCache` keeps the
   last list (note tasks and standalone tasks, sorted once, with an id index for `find`) until
-  the generation, the note-task records or the standalone task files differ; the generation is
-  read inside the store closure, after any refresh. The standalone task files are still read
-  on every request.
+  the generation, the note-task records or the standalone tasks' snapshot (`tasks::snapshot`, compared
+  by identity) differ; the generation is read inside the store closure, after any refresh. No task file
+  is read for a repeat list.
 
 ## Retired interview practice
 

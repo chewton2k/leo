@@ -523,21 +523,22 @@ fn finding_one_task_copies_one_task_and_not_the_list() {
     with_action_items(&state, &ids[0], &format!("## Action items\n{lines}"));
     let metas = crate::tasks::metas(&state.chats);
     let store = state.fresh();
-    let index = state.listed.index(&state.generation, &store, &metas, &[]);
+    let none = Arc::new(Vec::new());
+    let index = state.listed.index(&state.generation, &store, &metas, &none);
     let id = index.all[300].id.clone();
     let (at, held) = (Arc::as_ptr(&index), Arc::strong_count(&index));
     let found = state
         .listed
-        .find(&state.generation, &store, &metas, &[], &id)
+        .find(&state.generation, &store, &metas, &none, &id)
         .unwrap();
     assert_eq!(found.id, id);
     assert_eq!(Arc::strong_count(&index), held);
-    let again = state.listed.index(&state.generation, &store, &metas, &[]);
+    let again = state.listed.index(&state.generation, &store, &metas, &none);
     assert_eq!(Arc::as_ptr(&again), at);
     assert_eq!(state.listed.builds(), 1);
     assert!(state
         .listed
-        .find(&state.generation, &store, &metas, &[], "nothing")
+        .find(&state.generation, &store, &metas, &none, "nothing")
         .is_none());
 }
 
@@ -889,7 +890,7 @@ fn audit_bench_all_listed() {
             paired[0][3], paired[1][3]
         );
         let metas = crate::tasks::metas(&state.chats);
-        let stored = crate::tasks::load_all(&state.chats);
+        let stored = crate::tasks::snapshot(&state.chats);
         let (all, generation) = (state.listed.clone(), state.generation.clone());
         let found = {
             let store = crate::lock_storage(&state.store);
@@ -923,7 +924,7 @@ fn audit_bench_p11_lock_work() {
     for n in sizes {
         let (state, _dir, _other) = bench_state(n);
         let metas = crate::tasks::metas(&state.chats);
-        let stored = crate::tasks::load_all(&state.chats);
+        let stored = crate::tasks::snapshot(&state.chats);
         let store = crate::lock_storage(&state.store);
         let id = {
             let all = crate::tasks::note_tasks(&store, &metas);
@@ -1069,12 +1070,157 @@ fn audit_bench_rev_probe() {
                 ))
                 .unwrap();
         });
-        let stamp = median_ms(11, || {
-            crate::jsonline::stamp_of(&state.chats, "cards");
+        println!("notes {notes}, card files {written}: probe {probe:.3} ms");
+    }
+}
+
+fn stored_task(n: usize) -> crate::tasks::Task {
+    crate::tasks::Task {
+        id: format!("taudit{n:08}"),
+        title: format!("Standalone {n}"),
+        description: String::new(),
+        kind: "other".into(),
+        done: false,
+        date: None,
+        time: None,
+        end: None,
+        note: None,
+        sent_at: None,
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+        repeat: Vec::new(),
+        done_on: Vec::new(),
+        moved: Default::default(),
+        deleted: false,
+    }
+}
+
+fn write_task_files(dir: &std::path::Path, from: usize, to: usize) {
+    let folder = dir.join("notes/.leo/tasks");
+    std::fs::create_dir_all(&folder).unwrap();
+    for n in from..to {
+        let task = stored_task(n);
+        std::fs::write(
+            folder.join(format!("{}.json", task.id)),
+            serde_json::to_string(&task).unwrap() + "\n",
+        )
+        .unwrap();
+    }
+}
+
+#[test]
+fn tasks_past_ten_thousand_are_made_listed_and_counted() {
+    let (state, dir, _) = state_with(&[]);
+    write_task_files(dir.path(), 0, 10_050);
+    let created = run(create_task(
+        State(state.clone()),
+        Json(serde_json::from_value(serde_json::json!({"title": "One more"})).unwrap()),
+    ));
+    assert_eq!(created.status(), 201);
+    assert_eq!(crate::tasks::count(&state.chats), 10_051);
+    let page = page_of(&state, serde_json::json!({"offset": 10_000, "limit": 100}));
+    assert_eq!(page["total"], 10_051);
+    assert_eq!(page["tasks"].as_array().unwrap().len(), 51);
+}
+
+#[test]
+fn a_restore_of_more_than_one_piece_keeps_them_all() {
+    let (state, _dir, _) = state_with(&[]);
+    let tasks: Vec<_> = (0..1_200).map(stored_task).collect();
+    let answer = json_of(run(import_tasks(
+        State(state.clone()),
+        Json(serde_json::from_value(serde_json::json!({ "tasks": tasks })).unwrap()),
+    )));
+    assert_eq!(answer["added"], 1_200);
+    assert_eq!(crate::tasks::count(&state.chats), 1_200);
+}
+
+#[test]
+fn an_unchanged_task_file_is_not_read_again() {
+    let (state, dir, _) = state_with(&[]);
+    write_task_files(dir.path(), 0, 50);
+    let reads = || crate::jsonline::READS.with(|reads| reads.get());
+    let first = crate::tasks::load_all(&state.chats);
+    assert_eq!(first.len(), 50);
+    let after_first = reads();
+    assert_eq!(crate::tasks::load_all(&state.chats).len(), 50);
+    assert_eq!(reads(), after_first, "an unchanged folder reads no file");
+    let mut changed = stored_task(7);
+    changed.title = "Renamed".into();
+    changed.updated_at += chrono::Duration::seconds(5);
+    crate::tasks::put(&state.chats, &changed).unwrap();
+    let again = crate::tasks::load_all(&state.chats);
+    assert_eq!(reads(), after_first + 1, "one written file is read once");
+    assert!(again.iter().any(|t| t.title == "Renamed"));
+}
+
+#[test]
+fn a_task_file_edited_outside_leo_is_seen() {
+    let (state, dir, _) = state_with(&[]);
+    write_task_files(dir.path(), 0, 3);
+    assert_eq!(crate::tasks::load_all(&state.chats).len(), 3);
+    let mut edited = stored_task(1);
+    edited.title = "Edited by hand, longer".into();
+    edited.updated_at += chrono::Duration::seconds(5);
+    std::fs::write(
+        dir.path().join("notes/.leo/tasks/taudit00000001.json"),
+        serde_json::to_string(&edited).unwrap() + "\n",
+    )
+    .unwrap();
+    std::fs::remove_file(dir.path().join("notes/.leo/tasks/taudit00000002.json")).unwrap();
+    let seen = crate::tasks::load_all(&state.chats);
+    assert_eq!(seen.len(), 2);
+    assert!(seen.iter().any(|t| t.title == "Edited by hand, longer"));
+}
+
+#[test]
+#[ignore]
+fn audit_bench_task_files() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_TASKS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|s| s.parse().ok()).collect())
+        .unwrap_or_else(|| vec![5_000, 20_000]);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (state, dir, _other) = state_with(&[]);
+    crate::lock_storage(&state.store).changes = Some(store_refresh::Changes::new(&state.notes_dir));
+    let task_dir = dir.path().join("notes/.leo/tasks");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let mut written = 0;
+    for target in sizes {
+        while written < target {
+            let task = stored_task(written);
+            std::fs::write(
+                task_dir.join(format!("{}.json", task.id)),
+                serde_json::to_string(&task).unwrap() + "\n",
+            )
+            .unwrap();
+            written += 1;
+        }
+        let first = median_ms(1, || {
+            rt.block_on(crate::routes::tasks::all_listed(&state))
+                .unwrap();
         });
-        let tasks = median_ms(11, || {
-            crate::jsonline::stamp_of(&state.chats, "tasks");
+        let create = median_ms(5, || {
+            let response = rt.block_on(create_task(
+                State(state.clone()),
+                Json(serde_json::from_value(serde_json::json!({"title": "Read"})).unwrap()),
+            ));
+            assert_eq!(response.status(), 201);
         });
-        println!("notes {notes}, card files {written}: probe {probe:.3} ms, card folder stamp {stamp:.3} ms, 1,000 task files stamp {tasks:.3} ms");
+        let repeat = median_ms(11, || {
+            rt.block_on(crate::routes::tasks::all_listed(&state))
+                .unwrap();
+        });
+        let probe = median_ms(11, || {
+            let _ = rt
+                .block_on(crate::routes::notes::get_rev(
+                    State(state.clone()),
+                    Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+                ))
+                .unwrap();
+        });
+        println!(
+            "task files {written}: first list {first:.2} ms, new task {create:.2} ms, repeat list {repeat:.3} ms, rev probe {probe:.3} ms"
+        );
     }
 }
