@@ -108,6 +108,25 @@ pub trait Housekeeper: Send + Sync {
     fn expire_kept_audio(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
         0
     }
+    fn discard_kept_for_notes(&self, _notes: &[String]) -> anyhow::Result<Vec<String>> {
+        Ok(Vec::new())
+    }
+    fn kept_for_notes(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn retarget_kept(&self, _from: &str, _target: &str) -> anyhow::Result<Vec<Moved>> {
+        Ok(Vec::new())
+    }
+    fn restore_kept(&self, _moved: &[Moved]) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Moved {
+    pub session: String,
+    pub previous: Option<String>,
+    pub target: String,
 }
 
 pub struct Listening {
