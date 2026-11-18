@@ -397,6 +397,10 @@ fn read_seen(dir: &Path) -> Seen {
     }
 }
 
+pub fn malformed(dir: &Path) -> bool {
+    matches!(read_seen(dir), Seen::Malformed)
+}
+
 fn seen(dir: &Path) -> Seen {
     let stamp = match std::fs::symlink_metadata(dir.join("session.json")) {
         Ok(meta) => stamp_of(&meta),
