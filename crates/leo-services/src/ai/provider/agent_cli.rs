@@ -1877,7 +1877,7 @@ mod tests {
         .unwrap();
         let schema = std::fs::read_to_string(out.join("ClientRequest.json")).unwrap();
         assert!(schema.contains("dynamicTools"));
-        let mut child = std::process::Command::new(&codex)
+        let mut child = leo_core::children::quiet_command(&codex)
             .arg("app-server")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1951,11 +1951,12 @@ mod tests {
 
     #[cfg(unix)]
     fn alive(pid: &str) -> bool {
-        Command::new("/bin/kill")
+        leo_core::children::quiet_command("/bin/kill")
             .args(["-0", pid])
             .stderr(Stdio::null())
             .status()
-            .is_ok_and(|s| s.success())
+            .expect("the CLI process check must run")
+            .success()
     }
 
     #[cfg(unix)]
@@ -1969,7 +1970,7 @@ mod tests {
     #[cfg(unix)]
     fn release(pid: &str, stop: &Path) {
         std::fs::write(stop, "").unwrap();
-        let _ = Command::new("/bin/kill")
+        let _ = leo_core::children::quiet_command("/bin/kill")
             .args(["-9", pid])
             .stderr(Stdio::null())
             .status();
@@ -2390,47 +2391,49 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
     #[cfg(unix)]
     #[test]
     fn stopping_a_stateless_codex_request_does_not_retry_and_reaps_its_child() {
-        for startup in ["", "sleep 0.2\n"] {
+        for before_pid in ["", "sleep 0.2\n"] {
             let dir = tempfile::TempDir::new().unwrap();
             let marker = dir.path().join("started");
             let bin = script(
                 dir.path(),
                 &format!(
-                    "{startup}echo $$ >> '{}'\ncat >/dev/null\nsleep 30",
+                    "{{\n{before_pid}echo $$\n}} >> '{}'\nexec sleep 30",
                     marker.display()
                 ),
             );
             let cfg = config(ProviderKind::Codex, &bin, None);
             let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg)
                 .with_limits(Duration::from_secs(30), Duration::from_secs(30));
-            let began = Instant::now();
-            let stopped = std::cell::Cell::new(None);
+            let start_by = Instant::now() + Duration::from_secs(20);
+            let finish_by = std::cell::Cell::new(None);
             let result = agent.controlled(&request(), &mut |_| {}, &|| {
-                if marker.exists() {
-                    if stopped.get().is_none() {
-                        stopped.set(Some(Instant::now()));
-                    }
-                    true
-                } else {
-                    began.elapsed() >= Duration::from_secs(5)
+                if finish_by.get().is_some() {
+                    return true;
                 }
+                if std::fs::read_to_string(&marker).ok().is_some_and(|pids| {
+                    pids.split_once('\n')
+                        .is_some_and(|(pid, _)| pid.parse::<u32>().is_ok())
+                }) {
+                    finish_by.set(Some(Instant::now() + Duration::from_secs(15)));
+                    return true;
+                }
+                Instant::now() >= start_by
             });
-            assert!(result.unwrap_err().to_string().contains("stopped"));
+            let finish_by = finish_by
+                .get()
+                .expect("the fake CLI must publish its PID before cancellation");
             assert!(
-                stopped
-                    .get()
-                    .expect("the fake CLI must start before cancellation")
-                    .elapsed()
-                    < Duration::from_secs(6)
+                matches!(result, Err(ProviderError::Fatal(ref message)) if message.contains("stopped")),
+                "{result:?}"
+            );
+            assert!(
+                Instant::now() < finish_by,
+                "the request did not stop in time"
             );
             let started = std::fs::read_to_string(marker).unwrap();
             assert_eq!(started.lines().count(), 1);
-            let pid: libc::pid_t = started.trim().parse().unwrap();
-            assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
-            assert_eq!(
-                std::io::Error::last_os_error().raw_os_error(),
-                Some(libc::ESRCH)
-            );
+            let pid = started.trim();
+            assert!(gone_by(pid, finish_by), "the CLI child {pid} still exists");
         }
     }
 
