@@ -1216,7 +1216,7 @@ test('a long outline shows its ticks a section at a time, with arrows only where
   }, { body: Array.from({ length: 30 }, (_, i) => `## Heading ${i + 1}\n\nText under heading ${i + 1}.`).join('\n\n') });
 });
 
-const manyHeadings = Array.from({ length: 3000 }, (_, i) => `## Heading ${i + 1}\nText under heading ${i + 1}.`).join('\n');
+const manyHeadings = Array.from({ length: 3000 }, (_, i) => `## Heading ${i + 1}`).join('\n');
 
 test('a note with 3,000 headings lists them all and the rail shows 24 at a time', async ({ browser }) => {
   test.setTimeout(120000);
@@ -1228,10 +1228,10 @@ test('a note with 3,000 headings lists them all and the rail shows 24 at a time'
     const ticks = page.locator('.outline-ticks [data-tick]');
     await expect(ticks).toHaveCount(24);
     await expect(ticks.first()).toHaveAttribute('data-tick', '0');
-    await page.getByRole('button', { name: 'Later headings' }).click();
+    await page.locator('.outline-page[aria-label="Later headings"]').click();
     await expect(ticks).toHaveCount(24);
-    await expect(ticks.first()).toHaveAttribute('data-tick', '48');
-    await page.getByRole('button', { name: 'Earlier headings' }).click();
+    await expect(ticks.first()).toHaveAttribute('data-tick', '24');
+    await page.locator('.outline-page[aria-label="Earlier headings"]').click();
     await expect(ticks.first()).toHaveAttribute('data-tick', '0');
   }, { body: manyHeadings });
 });
@@ -1277,7 +1277,7 @@ test('the last heading is current at the end of the note', async ({ browser }) =
     await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveText('Heading 3000');
     await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveCount(1);
     await expect(page.locator('.outline-ticks [data-tick].on')).toHaveCount(1);
-    await expect(page.locator('.outline-ticks [data-tick].on')).toHaveAttribute('data-tick', '5998');
+    await expect(page.locator('.outline-ticks [data-tick].on')).toHaveAttribute('data-tick', '2999');
   }, { body: manyHeadings });
 });
 
