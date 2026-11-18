@@ -1,13 +1,14 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
 use leo_core::notes::Note;
 
-pub const MOST_CHARS: usize = 480_000;
 const PART_CHARS: usize = 20_000;
 const LEAST_REQUEST_CHARS: usize = 8_000;
 const MOST_REPLY_CHARS: usize = 80_000;
-const MOST_PARTS: usize = 128;
 const MOST_SECONDS: u64 = 15 * 60;
 pub const KEPT_ENOUGH: f32 = 0.9;
 const LEAST_TOKENS: u32 = 4_000;
@@ -25,42 +26,127 @@ Rules:
 - Copy Markdown, LaTeX math, Mermaid blocks, callouts, [[links]], web links and picture links exactly as they are written.
 - Reply with the body of the combined note only: no title line, no preamble, no remarks after it, and do not wrap it in a code block.";
 
+#[derive(Clone)]
+pub struct Run {
+    pub now: Arc<dyn Fn() -> Duration + Send + Sync>,
+    pub stopped: Arc<AtomicBool>,
+    pub done: Arc<AtomicUsize>,
+}
+
+impl std::fmt::Debug for Run {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Run")
+    }
+}
+
+impl Run {
+    pub fn new() -> Self {
+        let began = std::time::Instant::now();
+        Run {
+            now: Arc::new(move || began.elapsed()),
+            stopped: Arc::default(),
+            done: Arc::default(),
+        }
+    }
+}
+
+const STOPPED: &str = "Combining was stopped. Nothing was changed.";
+const TOO_LONG: &str = "Combining took too long. Nothing was changed; try again.";
+
+fn part_chars(request_chars: usize) -> usize {
+    request_chars.clamp(LEAST_REQUEST_CHARS, PART_CHARS * 2) / 2
+}
+
+fn halves<'a>(
+    into: &'a Note,
+    from: &'a Note,
+    request_chars: usize,
+) -> (
+    Box<dyn Iterator<Item = String> + 'a>,
+    Box<dyn Iterator<Item = String> + 'a>,
+) {
+    let limit = part_chars(request_chars);
+    if into.body.chars().count() + from.body.chars().count() <= limit * 2 {
+        (
+            Box::new(std::iter::once(into.body.clone())),
+            Box::new(std::iter::once(from.body.clone())),
+        )
+    } else {
+        (
+            Box::new(parts(&into.body, limit)),
+            Box::new(parts(&from.body, limit)),
+        )
+    }
+}
+
+pub fn parts_needed(into: &Note, from: &Note, request_chars: usize) -> usize {
+    let (a, b) = halves(into, from, request_chars);
+    a.count().max(b.count())
+}
+
+fn asked(
+    writer: &crate::graph::Writer,
+    run: &Run,
+    system: &'static str,
+    user: String,
+    most: u32,
+) -> Result<String, &'static str> {
+    let (send, receive) = std::sync::mpsc::channel();
+    let writer = Arc::clone(writer);
+    std::thread::Builder::new()
+        .name("leo-combine-part".into())
+        .spawn(move || {
+            let _ = send.send(writer(system, &user, most));
+        })
+        .map_err(|_| "The notes could not be combined.")?;
+    let waited = std::time::Instant::now();
+    loop {
+        match receive.recv_timeout(Duration::from_millis(200)) {
+            Ok(reply) => {
+                return reply.map_err(|_| {
+                    "The AI could not finish combining these notes. Nothing was changed; try again."
+                })
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                if run.stopped.load(Ordering::SeqCst) {
+                    return Err(STOPPED);
+                }
+                if waited.elapsed().as_secs() >= MOST_SECONDS {
+                    return Err(TOO_LONG);
+                }
+            }
+            Err(_) => return Err("The notes could not be combined."),
+        }
+    }
+}
+
 pub fn write(
     writer: &crate::graph::Writer,
     notes_dir: &Path,
     into: &Note,
     from: &Note,
     request_chars: usize,
+    run: &Run,
 ) -> Result<Combined, &'static str> {
-    let size = into.body.chars().count() + from.body.chars().count();
-    if size > MOST_CHARS {
-        return Err("These notes exceed the combine limit. Combine fewer sections at a time.");
-    }
-    let part_chars = request_chars.clamp(LEAST_REQUEST_CHARS, PART_CHARS * 2) / 2;
-    let (a, b) = if size <= part_chars * 2 {
-        (vec![into.body.clone()], vec![from.body.clone()])
-    } else {
-        (parts(&into.body, part_chars), parts(&from.body, part_chars))
-    };
-    if a.len().max(b.len()) > MOST_PARTS {
-        return Err("These notes have too many sections. Combine fewer sections at a time.");
-    }
-    let started = std::time::Instant::now();
-    let mut bodies = Vec::new();
+    let limit = part_chars(request_chars);
+    let (mut a, mut b) = halves(into, from, request_chars);
+    let mut body = String::new();
     let mut added = Vec::new();
-    let mut length = 0;
     let mut left = into.clone();
     let mut right = from.clone();
-    for i in 0..a.len().max(b.len()) {
-        if started.elapsed().as_secs() >= MOST_SECONDS {
-            return Err(
-                "Combining took too long. Nothing was changed; try fewer sections at a time.",
-            );
+    let mut done = 0;
+    loop {
+        let (x, y) = (a.next(), b.next());
+        if x.is_none() && y.is_none() {
+            break;
         }
-        left.body = a.get(i).cloned().unwrap_or_default();
-        right.body = b.get(i).cloned().unwrap_or_default();
+        if run.stopped.load(Ordering::SeqCst) {
+            return Err(STOPPED);
+        }
+        left.body = x.unwrap_or_default();
+        right.body = y.unwrap_or_default();
         let chars = left.body.chars().count() + right.body.chars().count();
-        let made = if chars > part_chars * 2 {
+        let made = if chars > limit * 2 {
             Combined {
                 body: moved_pictures(
                     notes_dir,
@@ -72,58 +158,124 @@ pub fn write(
                 kept: 1.0,
             }
         } else {
-            let reply = writer(SYSTEM, &prompt(&left, &right), reply_tokens(&left, &right))
-                .map_err(|_| {
-                    "The AI could not finish combining these notes. Nothing was changed; try again."
-                })?;
+            let asked_at = (run.now)();
+            let reply = asked(
+                writer,
+                run,
+                SYSTEM,
+                prompt(&left, &right),
+                reply_tokens(&left, &right),
+            )?;
+            if (run.now)().saturating_sub(asked_at).as_secs() >= MOST_SECONDS {
+                return Err(TOO_LONG);
+            }
             if reply.trim().is_empty() || reply.chars().count() > MOST_REPLY_CHARS {
                 return Err("The AI returned an empty or oversized section. Nothing was changed; try again.");
             }
             settle(notes_dir, &left, &right, &reply)
         };
-        length += made.body.chars().count() + 2;
-        if length > MOST_CHARS * 2 {
-            return Err("The combined note grew too large. Nothing was changed; combine fewer sections at a time.");
+        if done > 0 {
+            body.push_str("\n\n");
         }
-        bodies.push(made.body);
+        body.push_str(&made.body);
         added.extend(made.added);
+        done += 1;
+        run.done.store(done, Ordering::SeqCst);
     }
-    let body = bodies.join("\n\n");
     let kept = kept_words(&[&into.body, &from.body], &body);
     Ok(Combined { body, added, kept })
 }
 
-fn parts(body: &str, limit: usize) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut current = String::new();
-    let mut size = 0;
-    let mut protected = String::new();
-    let mut fence: Option<(char, usize)> = None;
-    let mut math: Option<String> = None;
-    for line in body.split_inclusive('\n') {
-        let trimmed = line.trim();
-        if let Some((mark, count)) = fence {
-            protected.push_str(line);
-            if closes_fence(trimmed, mark, count) {
-                fence = None;
-                push_part(limit, &mut out, &mut current, &mut size, &protected, true);
-                protected.clear();
+fn parts(body: &str, limit: usize) -> Parts<'_> {
+    Parts {
+        lines: body.split_inclusive('\n'),
+        limit,
+        ready: VecDeque::new(),
+        current: String::new(),
+        size: 0,
+        protected: String::new(),
+        fence: None,
+        math: None,
+        finished: false,
+    }
+}
+
+struct Parts<'a> {
+    lines: std::str::SplitInclusive<'a, char>,
+    limit: usize,
+    ready: VecDeque<String>,
+    current: String,
+    size: usize,
+    protected: String,
+    fence: Option<(char, usize)>,
+    math: Option<String>,
+    finished: bool,
+}
+
+impl Iterator for Parts<'_> {
+    type Item = String;
+
+    fn next(&mut self) -> Option<String> {
+        loop {
+            if let Some(part) = self.ready.pop_front() {
+                return Some(part);
             }
-            continue;
+            if self.finished {
+                return None;
+            }
+            match self.lines.next() {
+                Some(line) => self.take(line),
+                None => {
+                    if !self.protected.is_empty() {
+                        let held = std::mem::take(&mut self.protected);
+                        self.push(&held, true);
+                    }
+                    if !self.current.is_empty() {
+                        self.ready.push_back(std::mem::take(&mut self.current));
+                    }
+                    self.finished = true;
+                }
+            }
         }
-        if let Some(end) = &math {
-            protected.push_str(line);
-            if trimmed.contains(end.as_str()) {
-                math = None;
-                push_part(limit, &mut out, &mut current, &mut size, &protected, true);
-                protected.clear();
+    }
+}
+
+impl Parts<'_> {
+    fn push(&mut self, text: &str, atomic: bool) {
+        push_part(
+            self.limit,
+            &mut self.ready,
+            &mut self.current,
+            &mut self.size,
+            text,
+            atomic,
+        );
+    }
+
+    fn take(&mut self, line: &str) {
+        let trimmed = line.trim();
+        if let Some((mark, count)) = self.fence {
+            self.protected.push_str(line);
+            if closes_fence(trimmed, mark, count) {
+                self.fence = None;
+                let held = std::mem::take(&mut self.protected);
+                self.push(&held, true);
             }
-            continue;
+            return;
+        }
+        if let Some(end) = &self.math {
+            self.protected.push_str(line);
+            if trimmed.contains(end.as_str()) {
+                self.math = None;
+                let held = std::mem::take(&mut self.protected);
+                self.push(&held, true);
+            }
+            return;
         }
         if let Some(open) = opens_fence(trimmed) {
-            fence = Some(open);
-            protected.push_str(line);
-            continue;
+            self.fence = Some(open);
+            self.protected.push_str(line);
+            return;
         }
         let end = if trimmed.starts_with("$$") && !(trimmed.len() > 4 && trimmed.ends_with("$$")) {
             Some("$$".to_string())
@@ -140,14 +292,10 @@ fn parts(body: &str, limit: usize) -> Vec<String> {
                 .map(|(name, _)| format!("\\end{{{name}}}"))
         };
         if let Some(end) = end.filter(|end| trimmed.starts_with("$$") || !trimmed.contains(end)) {
-            math = Some(end);
-            protected.push_str(line);
+            self.math = Some(end);
+            self.protected.push_str(line);
         } else {
-            push_part(
-                limit,
-                &mut out,
-                &mut current,
-                &mut size,
+            self.push(
                 line,
                 trimmed.starts_with("$$")
                     || trimmed.starts_with("\\[")
@@ -155,18 +303,11 @@ fn parts(body: &str, limit: usize) -> Vec<String> {
             );
         }
     }
-    if !protected.is_empty() {
-        push_part(limit, &mut out, &mut current, &mut size, &protected, true);
-    }
-    if !current.is_empty() {
-        out.push(current);
-    }
-    out
 }
 
 fn push_part(
     limit: usize,
-    out: &mut Vec<String>,
+    out: &mut VecDeque<String>,
     current: &mut String,
     size: &mut usize,
     text: &str,
@@ -176,7 +317,7 @@ fn push_part(
     while !rest.is_empty() {
         let count = rest.chars().count();
         if *size > 0 && *size + count > limit {
-            out.push(std::mem::take(current));
+            out.push_back(std::mem::take(current));
             *size = 0;
         }
         let end = if atomic {
@@ -426,7 +567,7 @@ mod tests {
                 format!("{mark}md\nalpha\n{shorter}\nbeta\n{mark} not a closer\n{mark} {mark}\ngamma\n{mark}");
             let body = format!("{block}\nordinary prose");
             assert_eq!(pieces(&body), vec![block.clone()]);
-            assert!(parts(&body, 8).iter().any(|part| part.contains(&block)));
+            assert!(parts(&body, 8).any(|part| part.contains(&block)));
             let missing = settle(
                 Path::new("/nowhere"),
                 &note("A", "", &body),
@@ -454,9 +595,8 @@ mod tests {
             ),
             format!("~~~md\n{}", "# not a heading\n".repeat(4_000)),
         ] {
-            let chunks = parts(&text, PART_CHARS);
+            let chunks: Vec<String> = parts(&text, PART_CHARS).collect();
             assert_eq!(chunks.concat(), text);
-            assert!(chunks.len() <= MOST_PARTS);
             for piece in pieces(&text) {
                 assert!(
                     chunks.iter().any(|part| part.contains(&piece)),
@@ -464,9 +604,9 @@ mod tests {
                 );
             }
         }
-        assert!(parts(&"x".repeat(PART_CHARS * 3), PART_CHARS)
-            .iter()
-            .all(|p| p.chars().count() <= PART_CHARS));
+        assert!(
+            parts(&"x".repeat(PART_CHARS * 3), PART_CHARS).all(|p| p.chars().count() <= PART_CHARS)
+        );
     }
 
     #[test]
@@ -476,7 +616,15 @@ mod tests {
         let b = note("More", "", "extra context");
         let writer: crate::graph::Writer =
             std::sync::Arc::new(|_, _, _| panic!("oversized code must stay intact"));
-        let made = write(&writer, Path::new("/nowhere"), &a, &b, PART_CHARS * 2).unwrap();
+        let made = write(
+            &writer,
+            Path::new("/nowhere"),
+            &a,
+            &b,
+            PART_CHARS * 2,
+            &Run::new(),
+        )
+        .unwrap();
         assert!(made.body.contains(&code));
         assert!(made.body.contains("extra context"));
     }

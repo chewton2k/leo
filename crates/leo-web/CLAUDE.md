@@ -471,10 +471,11 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   saves through version-checked POST `combined` or DELETE `/api/combines/{job}`;
   Undo is POST `uncombine`. The AI writes one note, leo puts back anything it
   dropped. Source parts are sized by the provider's graph budget (≤20,000
-  characters per source, 40,000 per request, ≤480,000 input, 128 requests);
+  characters per source, 40,000 per request; no total: 2026-11-17, the owner's principle 1; the parts are
+  read one at a time, the start answer carries `parts`, the job view `done`, and DELETE on a working job stops it);
   fenced code and display maths stay whole; a closing fence needs the opener's
   character and at least its length with no trailing text. Two combines at once,
-  15-minute between-request deadline; any failed part leaves both notes
+  15-minute limit on each answer (the clock restarts after every answer, and a wait on the writer is cut off at it); any failed part leaves both notes
   unchanged. Saving copies the other note's transcripts (`recording::copy_to`)
   and gives it the other note's original files (`share_originals`) before the
   notes lock is taken; both versions are checked again after the copy, and a

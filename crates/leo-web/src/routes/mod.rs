@@ -96,9 +96,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/notes/{id}/combine", post(combine::start))
         .route(
             "/api/notes/{id}/combined",
-            post(combine::keep).layer(axum::extract::DefaultBodyLimit::max(
-                crate::combine::MOST_CHARS * 8 + 65_536,
-            )),
+            post(combine::keep).layer(text_limit()),
         )
         .route("/api/notes/{id}/uncombine", post(combine::uncombine))
         .route(

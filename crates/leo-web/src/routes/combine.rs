@@ -30,8 +30,11 @@ pub(crate) struct CombineJob {
     pub(crate) result: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub(crate) error: String,
+    pub(crate) parts: usize,
     #[serde(skip)]
     pub(crate) started: Option<Instant>,
+    #[serde(skip)]
+    pub(crate) run: Option<combine::Run>,
 }
 
 #[derive(Deserialize)]
@@ -63,12 +66,6 @@ async fn notes_for(
         }
         Err(code) => return Err((code, "One of those notes is gone. Refresh and try again.")),
     };
-    if into.body.chars().count() + from.body.chars().count() > combine::MOST_CHARS {
-        return Err((
-            StatusCode::PAYLOAD_TOO_LARGE,
-            "These notes exceed the combine limit. Combine fewer sections at a time.",
-        ));
-    }
     Ok((into, from, notes_dir))
 }
 
@@ -78,8 +75,9 @@ fn combined(
     from: &Note,
     notes_dir: &std::path::Path,
     request_chars: usize,
+    run: &combine::Run,
 ) -> Result<serde_json::Value, &'static str> {
-    let made = combine::write(writer, notes_dir, into, from, request_chars)?;
+    let made = combine::write(writer, notes_dir, into, from, request_chars, run)?;
     Ok(serde_json::json!({
         "title": into.title,
         "with_title": from.title,
@@ -104,7 +102,26 @@ pub(crate) async fn start(
         Ok(found) => found,
         Err((code, why)) => return error(code, why),
     };
+    let request_chars = state.graphs.scale().batch_chars;
+    let (into, from, parts) = {
+        let (a, b) = (into, from);
+        match tokio::task::spawn_blocking(move || {
+            let parts = combine::parts_needed(&a, &b, request_chars);
+            (a, b, parts)
+        })
+        .await
+        {
+            Ok(found) => found,
+            Err(_) => {
+                return error(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "The notes could not be combined.",
+                )
+            }
+        }
+    };
     let id = uuid::Uuid::new_v4().to_string();
+    let run = run_for(&into.id);
     let job = CombineJob {
         id: id.clone(),
         into: into.id.clone(),
@@ -114,7 +131,9 @@ pub(crate) async fn start(
         state: "working",
         result: None,
         error: String::new(),
+        parts,
         started: Some(Instant::now()),
+        run: Some(run.clone()),
     };
     {
         let mut jobs = state.combines.lock().unwrap_or_else(|e| e.into_inner());
@@ -152,6 +171,7 @@ pub(crate) async fn start(
         (Some(t), Some(stream)) => {
             let meter = std::sync::Arc::clone(&t.meter);
             let usage = std::sync::Arc::clone(&state.usage);
+            let stop = std::sync::Arc::clone(&run.stopped);
             std::sync::Arc::new(move |system: &str, user: &str, most: u32| {
                 let started = Instant::now();
                 let reply = stream(
@@ -160,7 +180,7 @@ pub(crate) async fn start(
                     most,
                     &mut |piece| meter.add(piece),
                     &mut || meter.restart(),
-                    &|| false,
+                    &|| stop.load(std::sync::atomic::Ordering::SeqCst),
                 );
                 usage.record(
                     crate::usage::Purpose::OtherWriting,
@@ -174,7 +194,6 @@ pub(crate) async fn start(
         (Some(t), None) => progress::metered(writer, std::sync::Arc::clone(&t.meter)),
         (None, _) => writer,
     };
-    let request_chars = state.graphs.scale().batch_chars;
     let jobs = std::sync::Arc::clone(&state.combines);
     let spawned = std::thread::Builder::new()
         .name("leo-combine".into())
@@ -206,8 +225,11 @@ pub(crate) async fn start(
                 id: id.clone(),
                 done: false,
             };
-            let done = combined(&writer, &into, &from, &notes_dir, request_chars);
-            if let Some(job) = jobs.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&id) {
+            let done = combined(&writer, &into, &from, &notes_dir, request_chars, &run);
+            let mut jobs = jobs.lock().unwrap_or_else(|e| e.into_inner());
+            if run.stopped.load(std::sync::atomic::Ordering::SeqCst) {
+                jobs.remove(&id);
+            } else if let Some(job) = jobs.get_mut(&id) {
                 match done {
                     Ok(view) => {
                         job.state = "ready";
@@ -219,6 +241,7 @@ pub(crate) async fn start(
                     }
                 }
             }
+            drop(jobs);
             guard.done = true;
         });
     if spawned.is_err() {
@@ -250,6 +273,11 @@ pub(crate) async fn job(State(state): State<AppState>, Path(job): Path<String>) 
                     .progress
                     .view(&format!("combine:{job}"))
                     .unwrap_or(serde_json::Value::Null);
+                view["done"] = found
+                    .run
+                    .as_ref()
+                    .map_or(0, |r| r.done.load(std::sync::atomic::Ordering::SeqCst))
+                    .into();
             }
             Json(view).into_response()
         }
@@ -262,8 +290,16 @@ pub(crate) async fn job(State(state): State<AppState>, Path(job): Path<String>) 
 
 pub(crate) async fn forget(State(state): State<AppState>, Path(job): Path<String>) -> Response {
     let mut jobs = state.combines.lock().unwrap_or_else(|e| e.into_inner());
-    if jobs.get(&job).is_some_and(|j| j.state != "working") {
-        jobs.remove(&job);
+    match jobs.get(&job) {
+        Some(found) if found.state == "working" => {
+            if let Some(run) = &found.run {
+                run.stopped.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+        Some(_) => {
+            jobs.remove(&job);
+        }
+        None => {}
     }
     StatusCode::NO_CONTENT.into_response()
 }
@@ -281,11 +317,8 @@ pub(crate) async fn keep(
     Path(into): Path<String>,
     Json(body): Json<Keep>,
 ) -> Response {
-    if body.body.trim().is_empty() || body.body.chars().count() > combine::MOST_CHARS * 2 {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "The combined note is empty or too long.",
-        );
+    if body.body.trim().is_empty() {
+        return error(StatusCode::BAD_REQUEST, "The combined note is empty.");
     }
     let (from, from_title, target, notes_dir) = {
         let (with, base, with_base, into) = (
@@ -426,6 +459,28 @@ pub(crate) type AfterCopy = Box<dyn FnOnce() + Send>;
 
 #[cfg(test)]
 pub(crate) static AFTER_COPY: std::sync::Mutex<Vec<(String, AfterCopy)>> =
+    std::sync::Mutex::new(Vec::new());
+
+#[cfg(not(test))]
+fn run_for(_: &str) -> combine::Run {
+    combine::Run::new()
+}
+
+#[cfg(test)]
+fn run_for(into: &str) -> combine::Run {
+    let mut run = combine::Run::new();
+    let mut clocks = CLOCKS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(at) = clocks.iter().position(|(note, _)| note == into) {
+        run.now = clocks.remove(at).1;
+    }
+    run
+}
+
+#[cfg(test)]
+pub(crate) type Clock = std::sync::Arc<dyn Fn() -> Duration + Send + Sync>;
+
+#[cfg(test)]
+pub(crate) static CLOCKS: std::sync::Mutex<Vec<(String, Clock)>> =
     std::sync::Mutex::new(Vec::new());
 
 #[derive(Deserialize)]
