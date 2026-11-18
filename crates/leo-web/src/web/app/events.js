@@ -403,7 +403,15 @@ async function warnUnsaved() {
     if (n && !/^#\/record/.test(location.hash)) toast(window.leoRecording.unsavedLine(n, ov.more), { action: 'Open Record', run: () => go('#/record') });
   } catch (e) {}
 }
+const QUIT_SETTLE_MS = 2800;
 window.leoFromApp = async (what, which) => {
+  if (what === 'quit' && which === 'now') {
+    saveWebsiteWork();
+    try {
+      await Promise.race([saving.settle(QUIT_SETTLE_MS), new Promise((r) => setTimeout(r, QUIT_SETTLE_MS))]);
+    } catch (e) {}
+    return api('/api/app', { method: 'POST', body: { action: 'settled' } }).catch(() => {});
+  }
   if (what === 'quit') {
     saveWebsiteWork();
     return toast(await quitText());
