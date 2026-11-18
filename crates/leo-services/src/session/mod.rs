@@ -61,6 +61,8 @@ pub struct Manifest {
     pub saved: bool,
     #[serde(default)]
     pub turns: bool,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl Manifest {
@@ -84,6 +86,7 @@ impl Manifest {
             stopped: false,
             saved: false,
             turns: false,
+            note: None,
         }
     }
 
@@ -282,6 +285,14 @@ pub struct Brief {
     pub id: String,
     pub saved: bool,
     pub started: DateTime<Utc>,
+    pub note: Option<String>,
+    pub traced: Option<String>,
+}
+
+impl Brief {
+    pub fn owner(&self) -> Option<&str> {
+        self.note.as_deref().or(self.traced.as_deref())
+    }
 }
 
 #[derive(Clone)]
@@ -358,6 +369,48 @@ fn order_key(name: &str) -> (String, u32) {
     }
 }
 
+pub fn folder_name(name: &str) -> bool {
+    started_of(name).is_some()
+        && name.get(15..).is_some_and(|rest| {
+            rest.is_empty()
+                || rest
+                    .strip_prefix('-')
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+        })
+}
+
+fn traced_note(dir: &Path) -> Option<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    std::fs::File::open(dir.join("trace.jsonl"))
+        .ok()?
+        .take(MOST_SESSION_BYTES)
+        .read_to_string(&mut text)
+        .ok()?;
+    text.lines()
+        .rev()
+        .filter_map(|l| serde_json::from_str::<leo_core::recording::Trace>(l).ok())
+        .filter(|t| t.stage == "saved")
+        .find_map(|t| {
+            let note = t.detail.strip_prefix("Note ")?.strip_suffix(" saved")?;
+            leo_core::recording::valid_id(note).then(|| note.to_owned())
+        })
+}
+
+pub fn kept_owned(root: &Path) -> Vec<(PathBuf, String)> {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| Session::open(&e.path()).ok())
+        .filter(|s| s.manifest.saved)
+        .filter_map(|s| Some((s.owner()?, s.dir)))
+        .map(|(note, dir)| (dir, note))
+        .collect()
+}
+
 fn started_of(name: &str) -> Option<DateTime<Utc>> {
     chrono::NaiveDateTime::parse_from_str(name.get(..15)?, "%Y%m%d-%H%M%S")
         .ok()
@@ -387,6 +440,10 @@ fn read_seen(dir: &Path) -> Seen {
                 id: manifest.id,
                 saved: manifest.saved,
                 started: manifest.started,
+                traced: (manifest.saved && manifest.note.is_none())
+                    .then(|| traced_note(dir))
+                    .flatten(),
+                note: manifest.note,
             }),
             Err(_) => Seen::Malformed,
         },
@@ -777,7 +834,7 @@ impl Session {
         Ok(())
     }
 
-    pub fn finish(mut self) -> Result<()> {
+    pub fn finish(mut self, note: &str) -> Result<()> {
         let assembled = self.assemble();
         let keep_audio = !assembled.failed.is_empty() || assembled.pending > 0;
         if keep_audio {
@@ -785,6 +842,7 @@ impl Session {
                 let _ = std::fs::remove_file(self.dir.join(wav::done_name(part.index)));
             }
             self.manifest.saved = true;
+            self.manifest.note = Some(note.to_owned());
             self.save()
         } else {
             std::fs::remove_dir_all(&self.dir)
@@ -915,7 +973,14 @@ impl Session {
     pub fn commit(self, notes: &Path, note: &str) -> Result<()> {
         self.trace("saved", &format!("Note {note} saved"));
         leo_core::recording::save(notes, note, &self.archive())?;
-        self.finish()
+        self.finish(note)
+    }
+
+    pub fn owner(&self) -> Option<String> {
+        self.manifest
+            .note
+            .clone()
+            .or_else(|| traced_note(&self.dir))
     }
 }
 
@@ -990,7 +1055,7 @@ mod tests {
         wav::write(&dir.join(wav::done_name(0)), &[1, 2, 3]).unwrap();
         std::fs::write(dir.join("seg-00001.err"), "failed").unwrap();
         wav::write(&dir.join(wav::done_name(1)), &[1, 2, 3]).unwrap();
-        s.finish().unwrap();
+        s.finish("n1").unwrap();
         assert!(!dir.join(wav::done_name(0)).exists());
         assert!(dir.join(wav::done_name(1)).exists());
     }
@@ -1447,16 +1512,70 @@ mod tests {
         let (s, t) = session();
         std::fs::write(s.dir.join("seg-00000.txt"), "ok").unwrap();
         let dir = s.dir.clone();
-        s.finish().unwrap();
+        s.finish("n1").unwrap();
         assert!(!dir.exists());
 
         let s2 = Session::create(t.path(), Manifest::new(None, None, "", false)).unwrap();
         std::fs::write(s2.dir.join("seg-00000.err"), "no").unwrap();
         std::fs::write(s2.dir.join("seg-00000.wav"), "x").unwrap();
         let dir2 = s2.dir.clone();
-        s2.finish().unwrap();
+        s2.finish("n1").unwrap();
         assert!(dir2.exists());
-        assert!(Session::open(&dir2).unwrap().manifest.saved);
+        let kept = Session::open(&dir2).unwrap().manifest;
+        assert!(kept.saved);
+        assert_eq!(kept.note.as_deref(), Some("n1"));
+    }
+
+    #[test]
+    fn a_kept_recording_names_its_note() {
+        let (s, _t) = session();
+        let notes = tempfile::tempdir().unwrap();
+        let dir = s.dir.clone();
+        std::fs::write(dir.join("seg-00000.txt"), "the first part").unwrap();
+        std::fs::write(dir.join("seg-00001.err"), "failed").unwrap();
+        wav::write(&dir.join(wav::done_name(1)), &[1, 2, 3]).unwrap();
+        s.commit(notes.path(), "note-n01").unwrap();
+        let kept = Session::open(&dir).unwrap();
+        assert!(kept.manifest.saved);
+        assert_eq!(kept.manifest.note.as_deref(), Some("note-n01"));
+        assert_eq!(kept.owner().as_deref(), Some("note-n01"));
+        assert!(dir.join(wav::done_name(1)).exists());
+    }
+
+    #[test]
+    fn kept_owned_lists_folders_with_their_note() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = chrono::Utc::now() - chrono::Duration::days(3);
+        let folder = |n: i64, saved: bool, note: Option<&str>| {
+            let mut manifest = Manifest::new(None, None, "", false);
+            manifest.id = format!("kept-{n}");
+            manifest.started = base + chrono::Duration::minutes(n);
+            manifest.saved = saved;
+            manifest.note = note.map(String::from);
+            settled_folder(tmp.path(), &manifest)
+        };
+        let named = folder(0, true, Some("note-a01"));
+        let old = folder(1, true, None);
+        Session::open(&old)
+            .unwrap()
+            .trace("saved", "Note note-b01 saved");
+        let moved = folder(2, true, Some("note-c01"));
+        Session::open(&moved)
+            .unwrap()
+            .trace("saved", "Note note-a01 saved");
+        let ownerless = folder(3, true, None);
+        let unfinished = folder(4, false, Some("note-d01"));
+        let mut owned = kept_owned(tmp.path());
+        owned.sort();
+        assert_eq!(
+            owned,
+            [
+                (named, "note-a01".to_string()),
+                (old, "note-b01".to_string()),
+                (moved, "note-c01".to_string())
+            ]
+        );
+        assert!(ownerless.exists() && unfinished.exists());
     }
 
     fn call_track(parts: &[&str]) -> (Session, tempfile::TempDir) {
