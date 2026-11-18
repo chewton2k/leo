@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 
 use std::io::{Read, Seek, SeekFrom, Write as _};
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -75,6 +75,18 @@ impl Scratch {
             scratch: self.clone(),
         })
     }
+
+    pub(crate) fn keep_figure(&self, kind: &str, bytes: &[u8]) -> Result<PathBuf> {
+        let path = self.path("figures", kind)?;
+        let folder = path.parent().unwrap_or(&path);
+        if fs2::available_space(folder)
+            .is_ok_and(|free| free < FREE_DISK_FLOOR.saturating_add(bytes.len() as u64))
+        {
+            bail!("There is not enough free disk space to read this file.");
+        }
+        std::fs::write(&path, bytes).context("leo could not keep a figure it is reading")?;
+        Ok(path)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -85,6 +97,10 @@ pub struct ImageFile {
 }
 
 impl ImageFile {
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+
     pub fn load(&self) -> Result<Image> {
         let _held = &self.scratch;
         Ok(Image {
@@ -354,12 +370,14 @@ pub struct Material {
     pub text: Spill,
     pub images: Vec<ImageFile>,
     pub figures: Vec<Figure>,
+    pub scratch: Scratch,
 }
 
 impl Material {
     fn new(scratch: &Scratch) -> Material {
         Material {
             text: Spill::new(scratch),
+            scratch: scratch.clone(),
             ..Material::default()
         }
     }
@@ -371,11 +389,12 @@ impl Material {
     }
 }
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default)]
 pub struct Imported {
     pub title: String,
     pub body: String,
     pub figures: Vec<Figure>,
+    pub scratch: Scratch,
 }
 
 fn extension(name: &str) -> String {
@@ -454,6 +473,7 @@ fn pdf(bytes: &[u8], scratch: &Scratch) -> Result<Material> {
         bail!("this PDF has no pages");
     }
     let mut material = Material::new(scratch);
+    let mut prepared = std::collections::HashMap::new();
     for (&number, &page) in &pages {
         let extracted = match doc.extract_text_with_limit(&[number], MOST_PDF_CONTENT_BYTES) {
             Err(lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded {
@@ -493,13 +513,15 @@ fn pdf(bytes: &[u8], scratch: &Scratch) -> Result<Material> {
             let mime = leo_core::attachments::kind_of(&bytes)
                 .and_then(leo_core::attachments::mime_of)
                 .unwrap_or("image/png");
-            material.images.push(scratch.keep_image(mime, &bytes)?);
+            let file = scratch.keep_image(mime, &bytes)?;
+            prepared.insert(image.id, file.clone());
+            material.images.push(file);
         }
     }
     if material.images.is_empty() && material.text.is_blank() {
         bail!("this PDF looks scanned, but leo cannot read its pages; take photos of them, or export them as images, and upload those");
     }
-    material.figures = figures::from_pdf_prepared(&doc, &mut std::collections::HashMap::new());
+    material.figures = figures::from_pdf_prepared(&doc, &prepared, scratch)?;
     Ok(material)
 }
 
@@ -518,14 +540,15 @@ fn extract_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
     let mime = upload.mime.to_lowercase();
     let text = |t: &str| Material::with_text(scratch, t);
     let photo = |mime: String| -> Result<Material> {
+        let image = scratch.keep_image(&mime, &upload.bytes)?;
         Ok(Material {
-            images: vec![scratch.keep_image(&mime, &upload.bytes)?],
             figures: vec![Figure {
                 mime,
-                bytes: upload.bytes.clone(),
+                path: image.path().to_path_buf(),
                 place: upload.name.clone(),
                 photo: true,
             }],
+            images: vec![image],
             ..Material::new(scratch)
         })
     };
@@ -540,13 +563,13 @@ fn extract_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
         "docx" => {
             let mut material = Material::new(scratch);
             office::docx(&upload.bytes, &mut material.text)?;
-            material.figures = figures::from_docx(&upload.bytes);
+            material.figures = figures::from_docx(&upload.bytes, scratch)?;
             Ok(material)
         }
         "pptx" => {
             let mut material = Material::new(scratch);
             office::pptx(&upload.bytes, &mut material.text)?;
-            material.figures = figures::from_pptx(&upload.bytes);
+            material.figures = figures::from_pptx(&upload.bytes, scratch)?;
             Ok(material)
         }
         "txt" | "md" | "markdown" | "text" => text(&String::from_utf8_lossy(&upload.bytes)),
@@ -581,11 +604,6 @@ pub fn gather(uploads: &[Upload]) -> Result<Material> {
             f
         }));
     }
-    let mut documents = 0;
-    all.figures.retain(|f| {
-        documents += usize::from(!f.photo);
-        f.photo || documents <= figures::MOST_FIGURES
-    });
     if all.text.is_blank() && all.images.is_empty() {
         bail!("there is no text in that file for leo to read");
     }
@@ -661,11 +679,37 @@ fn text_parts(text: &str, most: usize) -> Vec<String> {
     parts
 }
 
-pub fn offered(figures: &[Figure]) -> String {
-    figures
+fn marker(place: &str) -> Option<String> {
+    let (kind, rest) = place.split_once(' ')?;
+    let number: u64 = rest.split(' ').next()?.parse().ok()?;
+    match kind {
+        "page" => Some(format!("[page {number}]")),
+        "slide" => Some(format!("## Slide {number}\n")),
+        _ => None,
+    }
+}
+
+pub fn offered(figures: &[Figure], text: &str, part: usize, parts: usize) -> String {
+    let listed: Vec<(usize, &Figure)> = figures
         .iter()
         .enumerate()
         .filter(|(_, f)| !f.photo)
+        .collect();
+    let by_position = listed
+        .iter()
+        .filter(|(_, f)| marker(&f.place).is_none())
+        .count();
+    let mut seen = 0;
+    listed
+        .into_iter()
+        .filter(|(_, f)| match marker(&f.place) {
+            _ if parts <= 1 => true,
+            Some(marker) => text.contains(&marker),
+            None => {
+                seen += 1;
+                (seen - 1) * parts / by_position == part
+            }
+        })
         .map(|(i, f)| format!("figure:{} is from {}", i + 1, f.place))
         .collect::<Vec<_>>()
         .join("\n")
@@ -805,7 +849,6 @@ pub fn write_note(
             .map(ImageFile::load)
             .collect::<Result<Vec<_>>>()
     };
-    let figures = offered(&material.figures);
     let jobs = texts.len() + looks.len();
     if jobs == 0 {
         bail!("there is nothing in that file for leo to read");
@@ -814,6 +857,7 @@ pub fn write_note(
         progress("Writing the note", 0, 1);
         let reply = if let Some(range) = texts.first() {
             let text = material.text.read(range.clone())?;
+            let figures = offered(&material.figures, &text, 0, 1);
             write(
                 named(text_prompt(&text, name, None, &figures, wants), label),
                 NOTE_TOKENS,
@@ -835,6 +879,7 @@ pub fn write_note(
     let run = |i: usize| -> Result<String> {
         let reply = if let Some(range) = texts.get(i) {
             let text = material.text.read(range.clone())?;
+            let figures = offered(&material.figures, &text, i, texts.len());
             write(
                 text_prompt(&text, name, Some((i + 1, jobs)), &figures, wants),
                 NOTE_TOKENS,
@@ -963,6 +1008,7 @@ pub fn import(
         title,
         body,
         figures: material.figures,
+        scratch: material.scratch,
     })
 }
 
@@ -1092,13 +1138,14 @@ mod tests {
             gathered.figures[0].clone(),
             Figure {
                 mime: "image/png".into(),
-                bytes: vec![],
+                path: PathBuf::new(),
                 place: "slide 3".into(),
                 photo: false,
             },
         ];
-        assert_eq!(offered(&figures), "figure:2 is from slide 3");
-        let with = text_prompt("x", "deck.pptx", None, &offered(&figures), "");
+        let listed = offered(&figures, "## Slide 3\ntext", 0, 1);
+        assert_eq!(listed, "figure:2 is from slide 3");
+        let with = text_prompt("x", "deck.pptx", None, &listed, "");
         assert!(with
             .system
             .contains("![what it shows, in a few words](figure:N)"));
@@ -1673,7 +1720,7 @@ mod tests {
             assert!(material
                 .figures
                 .iter()
-                .all(|figure| figure.bytes == pixels(&material.images[0])));
+                .all(|figure| figure.path == material.images[0].path()));
             let file = upload("large-scan.pdf", "application/pdf", original);
             let read = read_for_chat(
                 &file,
@@ -1899,6 +1946,34 @@ mod tests {
         doc.save_to(&mut out).unwrap();
         let got = extract(&upload("drawing.pdf", "", out)).unwrap();
         assert!(text_of(&got).contains("Fig 1"));
+    }
+
+    #[test]
+    fn each_part_is_offered_its_own_figures() {
+        let figure = |place: &str| Figure {
+            mime: "image/png".into(),
+            path: PathBuf::new(),
+            place: place.into(),
+            photo: false,
+        };
+        let figures = vec![
+            figure("page 1"),
+            figure("page 900"),
+            figure("the document"),
+            figure("the document"),
+        ];
+        let first = offered(&figures, "[page 1]\nHeaps", 0, 2);
+        let second = offered(&figures, "[page 900]\nTries", 1, 2);
+        assert_eq!(
+            first,
+            "figure:1 is from page 1\nfigure:3 is from the document"
+        );
+        assert_eq!(
+            second,
+            "figure:2 is from page 900\nfigure:4 is from the document"
+        );
+        assert_eq!(offered(&figures, "no markers", 0, 1).lines().count(), 4);
+        assert_eq!(offered(&[figure("slide 1")], "## Slide 10\ntext", 0, 2), "");
     }
 
     #[test]
