@@ -434,6 +434,13 @@ pub(crate) async fn uncombine(
     let done = state
         .with_store(move |store| {
             store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
+            if let Some(from) = &body.from {
+                let kept = store.find_note(from).is_some()
+                    || leo_core::store::trashed_ids(&store.notes_dir).contains(from);
+                if !kept {
+                    return Err(StatusCode::CONFLICT);
+                }
+            }
             leo_core::recording::remove(&store.notes_dir, &into, &body.sources)
                 .map_err(|_| StatusCode::BAD_REQUEST)?;
             let Some(from) = body.from else {
@@ -450,6 +457,10 @@ pub(crate) async fn uncombine(
         .await;
     match done {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(StatusCode::CONFLICT) => error(
+            StatusCode::CONFLICT,
+            "The note that was combined is gone, so this cannot be undone.",
+        ),
         Err(code) => error(
             code,
             "The recordings and original files could not be moved back.",

@@ -180,3 +180,28 @@ fn keeping_drops_a_combine_record_older_than_a_day() {
         "an expired record undoes nothing"
     );
 }
+
+#[test]
+fn undo_is_refused_once_the_absorbed_note_is_deleted_for_good() {
+    let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
+    original(&state, &ids[1], "slides.pdf", "%PDF slides");
+    assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
+    let gone = run(crate::routes::trash::delete_from_trash(
+        State(state.clone()),
+        Json(TrashChoice {
+            ids: vec![ids[1].clone()],
+            all: false,
+            dirs: vec![],
+        }),
+    ));
+    assert!(gone.is_ok());
+    assert_eq!(
+        undo(&state, &ids[0], &ids[1]).status(),
+        StatusCode::CONFLICT
+    );
+    assert_eq!(names(&state, &ids[0]), ["slides.pdf"]);
+    let kept = originals_dir(&state.notes_dir, &ids[0])
+        .unwrap()
+        .join("slides.pdf");
+    assert_eq!(std::fs::read_to_string(kept).unwrap(), "%PDF slides");
+}
