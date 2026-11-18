@@ -212,13 +212,13 @@ fn a_note_changed_during_the_copy_is_not_combined() {
     );
     assert_eq!(refused.status(), StatusCode::CONFLICT);
     assert!(
-        leo_core::recording::load(&notes, &ids[0])
+        leo_core::recording::list(&notes, &ids[0])
             .unwrap_or_default()
             .is_empty(),
         "the copies are removed"
     );
     assert_eq!(
-        leo_core::recording::load(&notes, &ids[1]).unwrap().len(),
+        leo_core::recording::list(&notes, &ids[1]).unwrap().len(),
         1,
         "the other note keeps its own"
     );
