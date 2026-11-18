@@ -381,6 +381,13 @@ fn fingerprint_from(notes_dir: &Path, files: &[(PathBuf, fs::Metadata)]) -> u64 
     })
 }
 
+fn path_key(path: &Path) -> String {
+    path.components()
+        .map(|part| part.as_os_str().to_string_lossy().to_lowercase())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
 fn same_file(a: &Path, b: &Path) -> bool {
     match (fs::canonicalize(a), fs::canonicalize(b)) {
         (Ok(x), Ok(y)) => x == y,
@@ -1735,15 +1742,12 @@ impl Store {
                 self.notes_dir.join(&note.directory)
             };
             let base = filename::file_name(&note.title);
-            let own = seen.get(&note.id).map(|s| {
-                self.notes_dir
-                    .join(&s.path)
-                    .to_string_lossy()
-                    .to_lowercase()
-            });
+            let own = seen
+                .get(&note.id)
+                .map(|s| path_key(&self.notes_dir.join(&s.path)));
             for n in 1.. {
                 let candidate = dir.join(format!("{}.md", filename::numbered(&base, n)));
-                let key = candidate.to_string_lossy().to_lowercase();
+                let key = path_key(&candidate);
                 if taken.contains(&key) {
                     continue;
                 }
@@ -5496,6 +5500,22 @@ mod tests {
         for path in &old {
             assert!(path.exists(), "{} was removed", path.display());
         }
+    }
+
+    #[test]
+    fn a_note_keeps_its_file_when_its_path_is_spelled_another_way() {
+        let (mut store, _d) = temp_store();
+        let id = store
+            .create_note("Kept", "a", vec![], "m/deep")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.seen.borrow_mut().get_mut(&id).unwrap().path =
+            Path::new("m").join(".").join("deep").join("Kept.md");
+        store.touch_all();
+        store.save().unwrap();
+        assert_eq!(note_files(&store), ["m/deep/Kept.md"]);
     }
 
     #[test]
