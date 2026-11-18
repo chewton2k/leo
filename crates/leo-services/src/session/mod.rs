@@ -249,6 +249,19 @@ pub fn locked(dir: &Path) -> bool {
     }
 }
 
+pub fn sweep_temps(root: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.path())
+        .filter(|dir| !locked(dir))
+        .map(|dir| leo_core::paths::sweep_stale_temps(&dir, 0))
+        .sum()
+}
+
 fn settle_new(dir: PathBuf, manifest: Manifest) -> Result<Session> {
     let settled = (|| -> Result<Session> {
         #[cfg(unix)]
@@ -1379,6 +1392,35 @@ mod tests {
         s.recover_parts().unwrap();
         let states: Vec<SegmentState> = s.segments().into_iter().map(|s| s.state).collect();
         assert_eq!(states, vec![SegmentState::Waiting, SegmentState::Waiting]);
+    }
+
+    fn leave_old_temp(dir: &Path) -> PathBuf {
+        let path = dir.join(".tmpAbC123");
+        std::fs::write(&path, "half a segment").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(SystemTime::now() - std::time::Duration::from_secs(7200))
+            .unwrap();
+        path
+    }
+
+    #[test]
+    fn a_locked_session_keeps_its_temp_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        let held = Session::create(tmp.path(), Manifest::new(None, None, "", false)).unwrap();
+        let free = Session::create(tmp.path(), Manifest::new(None, None, "", false)).unwrap();
+        std::fs::write(held.dir.join("lock"), std::process::id().to_string()).unwrap();
+        let kept = leave_old_temp(&held.dir);
+        let gone = leave_old_temp(&free.dir);
+        let segment = free.dir.join("seg-00000.wav");
+        std::fs::write(&segment, "sealed").unwrap();
+        assert_eq!(sweep_temps(tmp.path()), 1);
+        assert!(kept.exists());
+        assert!(!gone.exists());
+        assert!(segment.exists());
+        assert_eq!(sweep_temps(&tmp.path().join("missing")), 0);
     }
 
     #[test]
