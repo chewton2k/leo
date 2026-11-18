@@ -1133,7 +1133,7 @@ target. Check the page sequence after loading preferences.
   3 or over `MOST_ASKED` (1,000) characters, it goes to the chat as before (2026-11-08; read-along and `add_margin_note` quotes stay at `MOST_QUOTE`, 600). The server anchors on
   prefix + quote + suffix exactly and never falls back to another occurrence. Replies
   POST `.../threads/{id}/reply`, bounded (`MOST_REPLY`, `MOST_MESSAGES`, the last 8
-  messages sent), and never run twice at once for a thread (409 `busy`; the page keeps the text and says "Felix is still answering this."). The page sends `request` (one id per typed message, kept on retry); `insert::remembered` is checked before that guard, so a resent reply gets the first answer and adds one message.
+  messages sent), and never run twice at once for a thread (409 `busy`; the page keeps the text and says "Felix is still answering this."). The page sends `request` (one id per typed message, kept on retry); `insert::remembered` is checked before that guard, so a resent reply gets the first answer and adds one message. An ask (POST `.../threads`) takes `request` the same way (one id per question text, kept on retry, a changed question gets a new one): a resent ask answers the first thread, with one AI call.
 - Word arrival runs over rendered prose too (`inkNodes` walks text nodes, skipping code, maths,
   diagrams and links); an open thread's replies scroll inside a capped area so the reply box and
   buttons stay on screen (2026-11-06). `UNSPOKEN` asks for a direct answer in three sentences and no

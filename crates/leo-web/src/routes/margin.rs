@@ -61,6 +61,8 @@ pub(crate) struct AskBody {
     question: String,
     #[serde(default)]
     gone: Vec<String>,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -943,6 +945,10 @@ pub(crate) async fn ask(
             "Select a few more words, then ask.",
         );
     }
+    let request = insert::requested(body.request.clone());
+    if let Some(found) = request.as_deref().and_then(|r| insert::remembered(&id, r)) {
+        return Json(found).into_response();
+    }
     let note = match open_note(&state, &id).await {
         Ok(note) => note,
         Err(refused) => return *refused,
@@ -989,7 +995,12 @@ pub(crate) async fn ask(
     let chats = state.chats.clone();
     let saved = thread.clone();
     match blocking(move || margin::put(&chats, &saved, limit)).await {
-        Ok(true) => Json(thread).into_response(),
+        Ok(true) => {
+            if let Some(request) = request.as_deref() {
+                insert::remember(&id, request, &serde_json::json!(thread));
+            }
+            Json(thread).into_response()
+        }
         Ok(false) => said(
             StatusCode::CONFLICT,
             "full",

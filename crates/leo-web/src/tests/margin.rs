@@ -3507,3 +3507,29 @@ fn the_chat_tool_still_places_on_a_repeated_quote() {
     let place = margin::placed("a b c here. x. a b c here.", "a b c", &[]).unwrap();
     assert_eq!(place.prefix, "");
 }
+
+#[tokio::test]
+async fn an_ask_sent_twice_answers_once() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let engine = Engine::with(Powers {
+        toolless_chat: Some(talking("Because it is.", Arc::clone(&prompts))),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("Ask twice", PASSAGE).await;
+    margin::set_mode(&engine.chats(), &id, "ask");
+    let path = format!("/api/notes/{id}/margin/threads");
+    let ask = serde_json::json!({ "version": version, "quote": "just checks if it matches", "prefix": "then login ", "question": "Why?", "request": "press-one" });
+    let (first_status, first) = engine.post(&path, ask.clone()).await;
+    let (second_status, second) = engine.post(&path, ask).await;
+    let threads = margin::open_on(&engine.chats(), &id).len();
+    let calls = prompts.lock().unwrap().len();
+    assert_eq!((first_status, second_status), (200, 200));
+    assert_eq!(
+        (threads, calls),
+        (1, 1),
+        "a resent ask made a second thread and call"
+    );
+    assert_eq!(first, second);
+    engine.stop().await;
+}

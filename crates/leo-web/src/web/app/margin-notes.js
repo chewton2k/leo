@@ -1379,10 +1379,11 @@ async function marginAskOn(s, t, question) {
   marginSaying(marginPage.els.get('draft'), '');
   marginPage.thinking.set('draft', { text: question });
   marginDraw();
+  if (t.ask?.question !== question) t.ask = { question, request: requestId() };
   let done;
   try {
     await flush(s);
-    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone } });
+    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone, request: t.ask.request } });
   } catch (error) {
     if (marginPage.s !== s) return;
     marginPage.thinking.delete('draft');

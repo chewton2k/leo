@@ -617,9 +617,10 @@ Felix (2026-10-19).
   `margin_instructions` in leo.db, never note files or git. At most `MOST_OPEN`
   (24) open threads per note (held inside the INSERT and on reopening; a read-along saves up to 48) and
   `MOST_CLOSED` (48). Replies only while open, never two at once for a thread
-  (`MOST_REPLY` 4,000, `MOST_MESSAGES`, the last 8 sent). `/reply` takes `request` (a uuid per
-  typed message, kept on retry) and checks `insert::remembered` before the replying guard,
-  so a resent reply gets the first answer; a resend while it runs is 409 `busy`.
+  (`MOST_REPLY` 4,000, `MOST_MESSAGES`, the last 8 sent). `/reply` and asks (POST
+  `.../threads`) take `request` (a uuid per typed message or question, kept on retry) and check
+  `insert::remembered` first (a reply before the replying guard), so a resent reply or ask gets
+  the first answer and one AI call; a reply resent while it runs is 409 `busy`.
 - A thread whose passage is gone is not shown (2026-11-09; there is no lost-place
   box).
 - A passage found only by its context (`marginKit.find` answers `how: 'context'`), or on

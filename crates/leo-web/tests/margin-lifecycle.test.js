@@ -431,6 +431,23 @@ test('a failed reply puts the text back, shows the error and keeps Send enabled,
   assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
 });
 
+test('a retried ask keeps its request id and a changed question gets a new one', async () => {
+  const h = harness();
+  const box = { textContent: '', hidden: true };
+  let count = 0;
+  const toasts = [];
+  Object.assign(h.context, { $: (sel) => (sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}`, toast: (text) => toasts.push(text) });
+  const bodies = [];
+  h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
+  const t = { id: 'draft', quote: 'just checks if it matches', prefix: 'then login ', suffix: '', messages: [] };
+  h.state.draft = null;
+  await h.context.marginAskOn(h.state.s, t, 'Why?');
+  await h.context.marginAskOn(h.state.s, t, 'Why?');
+  await h.context.marginAskOn(h.state.s, t, 'Why not?');
+  assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
+  assert.deepEqual(toasts, ['Felix could not answer.', 'Felix could not answer.', 'Felix could not answer.']);
+});
+
 test('a reply refused as busy keeps the text and says Felix is still answering', async () => {
   const { h, box, area, submit } = replyHarness();
   h.context.api = async () => { throw Object.assign(new Error('Felix is already answering this.'), { status: 409, data: { why: 'busy' } }); };
