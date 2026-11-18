@@ -7,7 +7,7 @@ use rusqlite::{Connection, ErrorCode};
 
 pub const FILE: &str = "leo.db";
 pub const BEFORE: &str = ".before-database";
-const VERSION: i64 = 5;
+const VERSION: i64 = 6;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS dictations (
@@ -136,7 +136,8 @@ CREATE TABLE IF NOT EXISTS margin_threads (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     pinned INTEGER NOT NULL DEFAULT 0,
-    reworded INTEGER NOT NULL DEFAULT 0
+    reworded INTEGER NOT NULL DEFAULT 0,
+    closed_by TEXT NOT NULL DEFAULT 'felix'
 );
 CREATE INDEX IF NOT EXISTS margin_threads_by_note ON margin_threads(note, status, created_at);
 CREATE TABLE IF NOT EXISTS margin_modes (
@@ -351,6 +352,12 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
         "margin_threads",
         "reworded",
         "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    add_column(
+        &tx,
+        "margin_threads",
+        "closed_by",
+        "TEXT NOT NULL DEFAULT 'felix'",
     )?;
     tx.pragma_update(None, "user_version", VERSION.max(stored))?;
     tx.commit()
@@ -902,7 +909,39 @@ mod task_descriptions {
                 )?;
                 assert_eq!(row, ("a quote".into(), true, false));
                 let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-                assert_eq!(version, 5);
+                assert_eq!(version, VERSION);
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_database_at_version_5_gains_closed_by_with_felix_in_old_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE margin_threads (id TEXT PRIMARY KEY, note TEXT NOT NULL, quote TEXT NOT NULL, prefix TEXT NOT NULL, suffix TEXT NOT NULL, status TEXT NOT NULL, source TEXT NOT NULL, messages TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, reworded INTEGER NOT NULL DEFAULT 0);
+             INSERT INTO margin_threads VALUES ('t1', 'n1', 'a quote', 'p', 's', 'resolved', 'read', '[]', '2026-11-01T00:00:00Z', '2026-11-01T00:00:00Z', 0, 1);",
+        )
+        .unwrap();
+        old.pragma_update(None, "user_version", 5).unwrap();
+        drop(old);
+        for _ in 0..2 {
+            let db = Db::open(&path).unwrap();
+            db.with(|c| {
+                let row: (String, String, bool, String) = c.query_row(
+                    "SELECT quote, status, reworded, closed_by FROM margin_threads WHERE id = 't1'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )?;
+                assert_eq!(
+                    row,
+                    ("a quote".into(), "resolved".into(), true, "felix".into())
+                );
+                let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+                assert_eq!(version, 6);
                 Ok(())
             })
             .unwrap();

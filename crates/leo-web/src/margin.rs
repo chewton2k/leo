@@ -277,11 +277,11 @@ pub fn resolved_on(chats: &Path, note: &str) -> Vec<Passage> {
         .unwrap_or_default()
 }
 
-pub fn dismissed_on(chats: &Path, note: &str) -> Vec<String> {
+pub fn declined_on(chats: &Path, note: &str) -> Vec<String> {
     db_of(chats)
         .with(|c| {
             let mut query = c.prepare_cached(
-                "SELECT quote FROM margin_threads WHERE note = ?1 AND status = 'dismissed'",
+                "SELECT quote FROM margin_threads WHERE note = ?1 AND (status = 'dismissed' OR (status = 'resolved' AND closed_by = 'you'))",
             )?;
             let rows = query.query_map([note], |row| row.get(0))?;
             rows.collect()
@@ -447,7 +447,7 @@ fn resolve_in(
         return Ok(Some(false));
     }
     c.execute(
-        "UPDATE margin_threads SET status = 'resolved', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+        "UPDATE margin_threads SET status = 'resolved', closed_by = 'felix', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
         params![Utc::now().to_rfc3339(), thread.id],
     )?;
     Ok(Some(true))
@@ -607,7 +607,7 @@ pub fn set_status(chats: &Path, note: &str, id: &str, status: &str, limit: usize
             return Ok(Status::Full);
         }
         tx.execute(
-            "UPDATE margin_threads SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE margin_threads SET status = ?1, closed_by = 'you', updated_at = ?2 WHERE id = ?3",
             params![status, Utc::now().to_rfc3339(), id],
         )?;
         prune_closed(&tx, note)?;

@@ -3325,23 +3325,70 @@ async fn closed_then_read(
     said: &'static str,
     edited: &str,
 ) -> (u16, serde_json::Value, usize) {
+    let (code, reply, calls, _) = closed_by_then_read(status, said, edited).await;
+    (code, reply, calls)
+}
+
+async fn closed_by_then_read(
+    status: &str,
+    said: &'static str,
+    edited: &str,
+) -> (u16, serde_json::Value, usize, String) {
     let (engine, calls) = reading(said).await;
     let (id, _) = engine.note("Closed", NOW).await;
     let old = old_note(&engine, &id, NOW, REWORDED, "read", untouched());
-    if status != "open" {
-        let (code, _) = engine
-            .post(
-                &format!("/api/notes/{id}/margin/threads/{old}"),
-                serde_json::json!({ "status": status }),
-            )
-            .await;
-        assert_eq!(code, 200);
+    let by_you = |status: &'static str| {
+        let path = format!("/api/notes/{id}/margin/threads/{old}");
+        let engine = &engine;
+        async move {
+            let (code, _) = engine
+                .post(&path, serde_json::json!({ "status": status }))
+                .await;
+            assert_eq!(code, 200);
+        }
+    };
+    match status {
+        "open" => {}
+        "dismissed" => by_you("dismissed").await,
+        "resolved" => by_you("resolved").await,
+        "tidied" | "reopened then tidied" => {
+            if status != "tidied" {
+                by_you("resolved").await;
+                by_you("open").await;
+            }
+            for n in 0..margin::TIDY_TO {
+                let filler = margin::new_thread(
+                    &id,
+                    "read",
+                    margin::Place {
+                        prefix: String::new(),
+                        suffix: String::new(),
+                    },
+                    &format!("filler quote {n}"),
+                    untouched(),
+                );
+                assert!(margin::put(&engine.chats(), &filler, margin::MOST_OPEN));
+            }
+            let reads = Arc::new(margin::Reads::default());
+            let tidied = margin::resolve_untouched(&engine.chats(), &reads, &id, &[], "");
+            assert_eq!(tidied, vec![old.clone()]);
+        }
+        other => panic!("{other}"),
     }
+    let closed_by: String = crate::db::for_chats(&engine.chats())
+        .with(|c| {
+            c.query_row(
+                "SELECT closed_by FROM margin_threads WHERE id = ?1",
+                [&old],
+                |r| r.get(0),
+            )
+        })
+        .unwrap();
     let version = engine.edit(&id, edited).await;
     let (code, reply) = engine.read(&id, &version, &[edited]).await;
     let calls = calls.load(Ordering::SeqCst);
     engine.stop().await;
-    (code, reply, calls)
+    (code, reply, calls, closed_by)
 }
 
 const ONE_DAY: &str =
@@ -3365,9 +3412,27 @@ async fn a_read_along_stays_off_a_sentence_whose_note_was_dismissed() {
 }
 
 #[tokio::test]
-async fn a_read_along_may_return_to_a_sentence_whose_note_was_resolved() {
-    let (code, reply, calls) = closed_then_read("resolved", SAYS, ONE_DAY).await;
-    assert_eq!((code, calls), (200, 1));
+async fn a_read_along_stays_off_a_sentence_whose_note_was_resolved() {
+    let (code, reply, calls, closed_by) = closed_by_then_read("resolved", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls, closed_by.as_str()), (200, 1, "you"));
+    assert!(
+        reply["note"].is_null(),
+        "a new note was saved on the resolved sentence: {reply}"
+    );
+}
+
+#[tokio::test]
+async fn a_sentence_felix_tidied_can_be_read_again() {
+    let (code, reply, calls, closed_by) = closed_by_then_read("tidied", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls, closed_by.as_str()), (200, 1, "felix"));
+    assert!(reply["note"].is_object(), "{reply}");
+}
+
+#[tokio::test]
+async fn a_note_you_reopened_and_felix_then_tidied_reads_as_felix() {
+    let (code, reply, calls, closed_by) =
+        closed_by_then_read("reopened then tidied", SAYS, ONE_DAY).await;
+    assert_eq!((code, calls, closed_by.as_str()), (200, 1, "felix"));
     assert!(reply["note"].is_object(), "{reply}");
 }
 

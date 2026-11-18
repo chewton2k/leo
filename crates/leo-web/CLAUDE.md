@@ -649,7 +649,7 @@ Felix (2026-10-19).
   stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
-  (guarded `ALTER`, db `VERSION` 5, a revert keeps 5; a revert never lowers `VERSION`, in `margin.json`), PATCH
+  (guarded `ALTER`, db `VERSION` 6 (5 added `reworded`, 6 `closed_by`), a revert keeps 6; a revert never lowers `VERSION`, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
   unpinning folds it unless it is the one open) and a newest read-along note
@@ -734,7 +734,7 @@ Felix (2026-10-19).
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
   then `margin::crowded` allows one open note per sentence; for read-along a dismissed note keeps its
-  sentence too while its words are in the note (`margin::dismissed_on`), never in Read through. A reworded passage still counts
+  sentence too while its words are in the note, and one you resolved yourself (`margin_threads.closed_by`), not one Felix tidied away (`margin::declined_on`), never in Read through. A reworded passage still counts
   (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
   open thread the page places only by context, as `{id, text}` of its current wording, at most
   2 × `MOST_OPEN`). The server places each text itself between that thread's stored context

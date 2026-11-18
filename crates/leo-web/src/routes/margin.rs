@@ -124,7 +124,7 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
-    dismissed: Vec<String>,
+    declined: Vec<String>,
     open: Vec<Thread>,
     limit: usize,
     free: bool,
@@ -483,7 +483,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                 cap: prefs.cap,
                 gap: prefs.gap,
                 quotes: open.iter().map(|thread| thread.quote.clone()).collect(),
-                dismissed: margin::dismissed_on(&held, &id),
+                declined: margin::declined_on(&held, &id),
                 open,
             }
         })
@@ -692,7 +692,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         }
         let quote = margin::whole_sentences(&now.body, &found.quote, &blocks);
         if margin::crowded(&now.body, &quote, &blocks, &quotes)
-            || !through && margin::crowded(&now.body, &quote, &blocks, &facts.dismissed)
+            || !through && margin::crowded(&now.body, &quote, &blocks, &facts.declined)
         {
             continue;
         }
