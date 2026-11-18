@@ -1039,7 +1039,7 @@ every note after "start over"); whether a build is due is asked every time.
   description ≤8,000, priority `""|low|medium|high`), read and written through
   `jsonline.rs` like tasks: one JSON line per save, atomic, nofollow reads,
   newest `updated_at` wins, tombstone deletes; a file counts only when its name
-  is its id. Limits: 100 boards, 5,000 cards. Not calendar tasks.
+  is its id. No fixed count of boards or cards (2026-11-17, the owner's principle 1). Not calendar tasks.
 - Tables (P-C52): boards and the faces of cards (`boards::Placed`: place, title, subheading,
   priority, the first 240 characters of the description and `description_more`) are kept in memory
   (`jsonline::Index`, one per kind per data folder, found by `boards::tables`). A file is trusted without

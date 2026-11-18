@@ -380,8 +380,7 @@ pub(crate) fn write_gone<T: Line + Clone>(
 /// name is its id, so a copied or renamed file cannot pose as another item.
 /// Boards pass no cap on the scan: deletes leave a tombstone behind (so a backup
 /// merge cannot bring the item back), and a cap counted before tombstones are
-/// dropped could silently hide live items. Each file read is size-bounded, and
-/// the live limits (`MOST_BOARDS`, `MOST_CARDS`) apply after tombstones go.
+/// dropped could silently hide live items. Each file read is size-bounded.
 pub(crate) fn read_all<T: Line>(chats: &Path, most: Option<usize>) -> Vec<T> {
     let Ok(dir) = checked_dir(chats, T::DIR) else {
         return Vec::new();

@@ -15,9 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::jsonline::{load, read_all, write_file, Index, Line};
 
-pub const MOST_BOARDS: usize = 100;
 pub const MOST_COLUMNS: usize = 12;
-pub const MOST_CARDS: usize = 5_000;
 pub const MOST_NAME: usize = 80;
 pub const MOST_TITLE: usize = 300;
 pub const MOST_SUBHEADING: usize = 200;
@@ -328,7 +326,6 @@ pub fn boards(chats: &Path) -> Vec<Board> {
             .collect()
     });
     all.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.id.cmp(&b.id)));
-    all.truncate(MOST_BOARDS);
     all
 }
 
@@ -892,7 +889,7 @@ mod tests {
         let chats = dir.path().join("chats");
         let now = Utc::now();
         // More deleted boards than an earlier scan cap allowed files to be read.
-        for _ in 0..MOST_BOARDS * 2 + 10 {
+        for _ in 0..210 {
             let mut gone = new_board("Gone", now);
             gone.deleted = true;
             put_board(&chats, &gone).unwrap();

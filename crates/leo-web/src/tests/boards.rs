@@ -542,6 +542,48 @@ fn a_board_deleted_and_undone_keeps_every_cards_title_and_description() {
     }
 }
 
+#[test]
+fn the_hundred_and_first_board_and_a_card_past_five_thousand_are_accepted() {
+    let (state, _d, _) = state_with(&[]);
+    let mut first = serde_json::Value::Null;
+    for number in 0..101 {
+        let made = run(create_board(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "name": format!("Board {number}") }))
+                    .unwrap(),
+            ),
+        ));
+        assert_eq!(made.status(), StatusCode::CREATED, "board {number}");
+        if number == 0 {
+            first = json_of(made);
+        }
+    }
+    assert_eq!(crate::boards::boards(&state.chats).len(), 101);
+    let board = crate::boards::board(&state.chats, first["id"].as_str().unwrap()).unwrap();
+    let folder = _d.path().join("notes/.leo/cards");
+    std::fs::create_dir_all(&folder).unwrap();
+    for number in 0..5_000 {
+        let id = format!("cmany{number:05}");
+        let line = bench_card_line(
+            &id,
+            &board.id,
+            &board.columns[0].id,
+            number as f64,
+            false,
+            10,
+        );
+        std::fs::write(folder.join(format!("{id}.json")), line).unwrap();
+    }
+    let last = add(
+        &state,
+        &board.id,
+        serde_json::json!({ "title": "Number 5001" }),
+    );
+    assert_eq!(last.status(), StatusCode::CREATED);
+    assert_eq!(crate::boards::live_counts(&state.chats)[&board.id], 5_001);
+}
+
 fn bench_card_line(
     id: &str,
     board: &str,

@@ -696,13 +696,6 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             if name.is_empty() {
                 return Err("give the board a name".into());
             }
-            let all = boards::boards(chats);
-            if all.len() >= boards::MOST_BOARDS {
-                return Err(format!(
-                    "leo keeps up to {} boards; one must be deleted first",
-                    boards::MOST_BOARDS
-                ));
-            }
             let columns = match call.text("columns").trim() {
                 "" => Vec::new(),
                 text => column_names(text)?,

@@ -79,12 +79,6 @@ pub(crate) async fn create_board(
         {
             return Json(first).into_response();
         }
-        if boards::boards(chats).len() >= boards::MOST_BOARDS {
-            return error(
-                StatusCode::CONFLICT,
-                "Leo keeps up to 100 boards. Delete one you no longer use first.",
-            );
-        }
         let board = boards::new_board(
             if name.is_empty() {
                 "New board"
@@ -244,13 +238,6 @@ pub(crate) async fn undelete_board(
 ) -> Response {
     blocking(&state, move |chats| {
         let _writing = boards::writing();
-        if boards::board(chats, &id).is_none() && boards::boards(chats).len() >= boards::MOST_BOARDS
-        {
-            return error(
-                StatusCode::CONFLICT,
-                "Leo keeps up to 100 boards. Delete one you no longer use first.",
-            );
-        }
         match boards::undelete(chats, &id, Utc::now()) {
             Ok(Some(board)) => Json(json!({ "board": board })).into_response(),
             Ok(None) => error(
@@ -294,7 +281,7 @@ pub(crate) async fn restore_board(
     Json(body): Json<Restore>,
 ) -> Response {
     let Restore { board, cards } = body;
-    if !boards::valid_id(&board.id) || cards.len() > boards::MOST_CARDS {
+    if !boards::valid_id(&board.id) {
         return error(StatusCode::BAD_REQUEST, "That board cannot be restored.");
     }
     let columns = match boards::clean_columns(
@@ -312,14 +299,6 @@ pub(crate) async fn restore_board(
     };
     blocking(&state, move |chats| {
         let _writing = boards::writing();
-        if boards::board(chats, &board.id).is_none()
-            && boards::boards(chats).len() >= boards::MOST_BOARDS
-        {
-            return error(
-                StatusCode::CONFLICT,
-                "Leo keeps up to 100 boards. Delete one you no longer use first.",
-            );
-        }
         let now = Utc::now();
         let name = boards::clean_line(&board.name, boards::MOST_NAME);
         let restored = Board {
@@ -443,12 +422,6 @@ pub(crate) async fn create_card(
                 None => return error(StatusCode::BAD_REQUEST, "That board has no columns."),
             },
         };
-        if boards::live_counts(chats).values().sum::<usize>() >= boards::MOST_CARDS {
-            return error(
-                StatusCode::CONFLICT,
-                "Leo keeps up to 5,000 cards. Delete finished ones first.",
-            );
-        }
         let now = Utc::now();
         let card = Card {
             id,

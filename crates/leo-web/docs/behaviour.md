@@ -1482,7 +1482,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   title, subheading, description ≤8,000, priority `""|low|medium|high`). One JSON
   line per save, atomic, nofollow reads, newest `updated_at` wins, deletes are
   tombstones; a file counts only when its name is its id. Each card has its own
-  file. Limits: 100 boards, 5,000 cards.
+  file. No fixed count of boards or cards.
 
 - Order is `rank` (f64). A move writes only the moved card (midpoint of its new
   neighbours, `boards::between`) unless the gap is gone, then `settle` renumbers that
