@@ -910,8 +910,7 @@ async fn answered(
         margin::REPLY_TOKENS,
     )
     .await?;
-    let text: String = text.trim().chars().take(margin::MOST_REPLY).collect();
-    let text = margin::without_open_fence(&text);
+    let text = margin::without_open_fence(text.trim());
     if text.is_empty() {
         return Err(Box::new(said(
             StatusCode::BAD_GATEWAY,
@@ -931,9 +930,7 @@ pub(crate) async fn ask(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let question = body.question.trim().to_string();
-    if question.chars().count() > margin::MOST_ASK
-        || body.quote.chars().count() > margin::MOST_ASKED
-        || body.prefix.chars().count() > margin::MOST_QUOTE
+    if body.prefix.chars().count() > margin::MOST_QUOTE
         || body.suffix.chars().count() > margin::MOST_QUOTE
     {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
@@ -1019,9 +1016,6 @@ pub(crate) async fn reply(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let text = body.text.trim().to_string();
-    if text.chars().count() > margin::MOST_ASK {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-    }
     if text.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -1217,8 +1211,7 @@ pub(crate) async fn change_thread(
     let Some(quote) = body.quote else {
         return StatusCode::BAD_REQUEST.into_response();
     };
-    if quote.chars().count() > margin::MOST_ASKED
-        || body.prefix.chars().count() > margin::MOST_QUOTE
+    if body.prefix.chars().count() > margin::MOST_QUOTE
         || body.suffix.chars().count() > margin::MOST_QUOTE
     {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();

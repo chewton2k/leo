@@ -491,13 +491,19 @@ pub(crate) struct MarkBody {
 }
 
 const SURE: [&str; 4] = ["", "sure", "think", "guess"];
-const THINKING_CHARS: usize = 2_000;
+const THINKING_READ_CHARS: usize = 2_000;
 
 fn sealed(said: &str) -> String {
     said.trim().replace("</", "&lt;/")
 }
 
 pub(crate) fn mark_with(writer: &crate::graph::Writer, body: &MarkBody) -> Option<(bool, String)> {
+    let thinking: String = body
+        .thinking
+        .trim()
+        .chars()
+        .take(THINKING_READ_CHARS)
+        .collect();
     let user = format!(
         "<question>\n{}\n</question>\n<model_answer>\n{}\n</model_answer>\n{}<student_answer>\n{}\n</student_answer>{}{}",
         sealed(&body.question),
@@ -510,7 +516,7 @@ pub(crate) fn mark_with(writer: &crate::graph::Writer, body: &MarkBody) -> Optio
             "guess" => "\n<student_confidence>guessing</student_confidence>",
             _ => "",
         },
-        if body.thinking.trim().is_empty() { String::new() } else { format!("\n<student_thinking>\n{}\n</student_thinking>", sealed(&body.thinking)) }
+        if thinking.is_empty() { String::new() } else { format!("\n<student_thinking>\n{}\n</student_thinking>", thinking.replace("</", "&lt;/")) }
     );
     for _ in 0..2 {
         let Ok(reply) = writer(MARK, &user, MARK_TOKENS) else {
@@ -543,7 +549,6 @@ pub(crate) async fn mark_quiz(
         || !fits(&body.answer, 6_000)
         || !fits(&body.given, 6_000)
         || !fits(&body.explain, 3_000)
-        || !fits(&body.thinking, THINKING_CHARS)
         || !SURE.contains(&body.confidence.as_str())
     {
         return StatusCode::BAD_REQUEST.into_response();

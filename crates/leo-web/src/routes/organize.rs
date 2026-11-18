@@ -279,11 +279,8 @@ fn rename_folder(state: &AppState, call: &Call) -> Result<Proposal, String> {
 fn add_margin_note(state: &AppState, desk: &tools::Desk, call: &Call) -> Result<Proposal, String> {
     let quote = call.text("quote");
     let text = call.text("text").trim().to_string();
-    if text.is_empty() || text.chars().count() > crate::margin::MOST_TEXT {
-        return Err(format!(
-            "a margin note holds at most {} characters",
-            crate::margin::MOST_TEXT
-        ));
+    if text.is_empty() {
+        return Err("give the text to leave in the margin".into());
     }
     let wanted = call.text("note");
     let quoted = quote.clone();

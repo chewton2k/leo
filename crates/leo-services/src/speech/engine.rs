@@ -488,13 +488,17 @@ fn cancelled_dictation(job: &Job, dictation_cancels: &AtomicU64) -> bool {
     job.priority == Priority::Dictation && job.cancels != dictation_cancels.load(Ordering::Acquire)
 }
 
-fn run_options(selected: &Selected, words: Vec<String>, supports_vocabulary: bool) -> RunOptions {
+fn run_options(selected: &Selected, words: &[String], supports_vocabulary: bool) -> RunOptions {
     RunOptions {
         language: (selected.language != "auto").then(|| selected.language.clone()),
-        vocabulary: words
-            .into_iter()
-            .filter(|word| supports_vocabulary && !word.contains('\0'))
-            .collect(),
+        vocabulary: if supports_vocabulary {
+            crate::dictation::model_words(words)
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        } else {
+            Vec::new()
+        },
         ..RunOptions::default()
     }
 }
@@ -762,7 +766,7 @@ fn run(
                         let vocabulary = supervisor
                             .loaded()
                             .is_some_and(|info| info.supports_vocabulary);
-                        let run = run_options(&selected, words, vocabulary);
+                        let run = run_options(&selected, &words, vocabulary);
                         let echo = run.vocabulary.clone();
                         let stream =
                             supervisor.start_stream(run, Default::default(), move |progress| {
@@ -902,7 +906,7 @@ fn run(
                     let vocabulary = supervisor
                         .loaded()
                         .is_some_and(|info| info.supports_vocabulary);
-                    let run = run_options(&job.selected, job.words.clone(), vocabulary);
+                    let run = run_options(&job.selected, &job.words, vocabulary);
                     let echo = run.vocabulary.clone();
                     let heard = supervisor.transcribe_since(mark, pcm, run);
                     *lock(&serving) = false;
@@ -1383,14 +1387,28 @@ mod option_tests {
         };
         let words = vec!["Leo".to_string()];
         let damaged = vec!["Leo".to_string(), "a\0b".to_string()];
-        assert_eq!(run_options(&selected, damaged, true).vocabulary, words);
-        assert_eq!(
-            run_options(&selected, words.clone(), true).vocabulary,
-            words
-        );
-        let run = run_options(&selected, words, false);
+        assert_eq!(run_options(&selected, &damaged, true).vocabulary, words);
+        assert_eq!(run_options(&selected, &words, true).vocabulary, words);
+        let run = run_options(&selected, &words, false);
         assert!(run.vocabulary.is_empty());
         assert_eq!(run.language, None);
+    }
+
+    #[test]
+    fn custom_words_at_the_speech_boundary_use_complete_entries_within_budget() {
+        let selected = Selected {
+            id: "test".into(),
+            language: "en".into(),
+            path: "unused".into(),
+            streaming: false,
+            live: false,
+        };
+        let first = "語".repeat(3_997);
+        let words = vec![first.clone(), "a\0b".into(), "字".into(), "尾".into()];
+        assert_eq!(
+            run_options(&selected, &words, true).vocabulary,
+            vec![first, "字".into()]
+        );
     }
 
     #[test]

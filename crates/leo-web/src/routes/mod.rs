@@ -131,26 +131,16 @@ pub(crate) fn router(state: AppState) -> Router {
                 crate::margin::BODY_BYTES,
             )),
         )
-        .route(
-            "/api/notes/{id}/margin/threads",
-            post(margin::ask).layer(axum::extract::DefaultBodyLimit::max(
-                crate::margin::BODY_BYTES,
-            )),
-        )
+        .route("/api/notes/{id}/margin/threads", post(margin::ask))
         .route(
             "/api/notes/{id}/margin/threads/{thread}",
             post(margin::set_status)
                 .patch(margin::change_thread)
-                .delete(margin::forget)
-                .layer(axum::extract::DefaultBodyLimit::max(
-                    crate::margin::BODY_BYTES,
-                )),
+                .delete(margin::forget),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/reply",
-            post(margin::reply).layer(axum::extract::DefaultBodyLimit::max(
-                crate::margin::BODY_BYTES,
-            )),
+            post(margin::reply),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/weave",

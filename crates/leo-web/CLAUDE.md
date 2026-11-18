@@ -602,8 +602,10 @@ read (root CLAUDE.md, 2026-11-17).
   abandoned mark, rewrite, Settings test or document read stops its AI program
   (`stop_when_dropped`). Multiple choice (needs
   `explain`) and matching fill-ins are marked by the page; the rest POST
-  `/api/quiz/mark` (quick model, `MARK`; `confidence` validated, `thinking`
-  bounded to `MOST_THINKING`). How sure is a 0–100% bar (`q.surePct`; `sureOf`
+  `/api/quiz/mark` (quick model, `MARK`, with `confidence` validated). The card
+  keeps all thinking. To mark or continue, Felix reads its first 2,000 characters
+  (`THINKING_READ_CHARS`, `MOST_THINKING` in `aside`). The box shows the read
+  budget through `data-reads`. How sure is a 0–100% bar (`q.surePct`, `sureOf`
   maps ≥75 sure, ≥40 think, else guess for `SURE`); thinking is sent only while
   its switch is on (2026-11-09); the switch is toggled in place and its box slides open and shut with
   `leoMotion.slide` (2026-11-18). Hidden grading accepts only the exact verdict
@@ -809,9 +811,11 @@ Felix (2026-10-19).
   read-along comment whose passage was the whole note and is gone (no stored context, untouched,
   not pinned, not in `keep`); the page could only hide it. `marginRevisits` draws no reopen
   underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
-  never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
-  characters, else the chat; read-along and `add_margin_note` quotes
-  `MOST_QUOTE` (600). The selection toolbar (`passages.js`) has Felix this
+  never falls back to another occurrence. An ask or re-anchored thread keeps
+  the whole selected passage (at least 3 characters). Felix reads its first
+  1,000 characters when answering, as the toolbar and reply area indicate.
+  Read-along and `add_margin_note` still use `MOST_QUOTE` (600) for model-chosen
+  anchors. The selection toolbar (`passages.js`) has Felix this
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else under its last word.
@@ -839,9 +843,13 @@ Felix (2026-10-19).
   Plain messages use `textContent`; diagrams use the escaped renderer, strict
   Mermaid and inert SVG. Personas and note instructions go after the prompt's
   first paragraph (`margin::voiced`, `margin::instructed`), so the safety and
-  format rules come last. Personas: built-ins plus ≤`MOST_PERSONAS` (8) (name
-  ≤32, instructions ≤500, engine-made ids); never for Felix chat. Note
-  instructions ≤`MOST_INSTRUCTIONS` (500), control characters refused.
+  format rules come last. The eight custom persona slots use engine-made IDs
+  and keep full names and instructions. Per-note instructions are kept whole.
+  Persona names are UI labels. Felix reads the first 500 characters of each
+  instruction and the first 1,000 of a new margin question or reply. The boxes
+  use the shared `data-reads` hint. Threads keep full messages and tool-created
+  margin notes. Prior thread messages still contribute up to 320 characters each
+  to prompts. Ask, reply and re-anchor use Axum's 2 MiB JSON request limit.
 - Settings says text stays here only for a loopback address and a model without
   `cloud` in its name (`ai::reads_stay_here`). Failure text is the writer's own
   sentence (`leo_core::writing_said`), `no_writer()` or `margin::PROBLEM`.
@@ -971,8 +979,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   count and no count of calendars; links are refreshed one at a time (the fetch's own
   10 s limit), each no sooner than `STALE_AFTER_MINUTES`; `CALENDAR_BYTES` (1 GB) only
   stops an endless response (2026-11-17, the owner's principle 1). One line
-  of a feed is read up to 1 MiB (`MOST_LINE`); the repeat-rule guards stay. leo.db
-  `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
+  of a feed is read up to 1 MiB (`MOST_LINE`). Event titles and locations keep
+  the full parsed values. The repeat-rule guards stay. leo.db `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
   unconditional fetch); an old stored `body` is moved to a file on first read.
   GET `/api/schedule?from&to&live` (≤43 days).
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with

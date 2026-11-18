@@ -1014,7 +1014,7 @@ pub fn copy_to(notes: &Path, from: &str, into: &str, label: &str) -> Result<Vec<
         }
         let mut copy = head.clone();
         if copy.from.is_empty() {
-            copy.from = label.chars().take(200).collect();
+            copy.from = label.to_owned();
         }
         copy.copied_from = from.to_string();
         if head.revision == 0 {
@@ -1614,8 +1614,9 @@ mod tests {
             "note-from",
             &spoken("theirs-002", &[(1, "", "old one")]),
         );
+        let label = "講義".repeat(151);
         assert_eq!(
-            copy_to(&notes, "note-from", "note-into", "Other")
+            copy_to(&notes, "note-from", "note-into", &label)
                 .unwrap()
                 .len(),
             2
@@ -1624,7 +1625,10 @@ mod tests {
             .unwrap()
             .into_iter()
             .filter(|h| h.copied_from == "note-from")
-            .map(|h| h.id)
+            .map(|h| {
+                assert_eq!(h.from, label);
+                h.id
+            })
             .collect();
         assert_eq!(copies.len(), 2);
         assert_eq!(whole(&notes, "note-into").len(), 3);

@@ -16,7 +16,9 @@ const QUIET_FADE_MS = 500;
 const WIPE_MS = 500;
 const MENU_MS = MOTION_MS;
 const MENU_SLIDE = [{ clipPath: 'inset(0 0 100% 0)', opacity: 0, transform: `scale(${POP_FROM})` }, { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'none' }];
-const MOST_ASKED = 1000;
+const MARGIN_MESSAGE_READS = 1000;
+const MARGIN_PASSAGE_READS = 1000;
+const MARGIN_INSTRUCTIONS_READS = 500;
 const marginKit = window.leoMargin;
 const READ_PAUSE = marginKit.READ_PAUSE;
 const PERSONA_ICON = {
@@ -414,6 +416,7 @@ function marginInstructions(open = false) {
   }
   if (document.activeElement === input) return;
   input.value = marginPage.instructions;
+  updateReadHint(input);
   box.hidden = !open && !marginPage.instructions;
   if (open) input.focus({ preventScroll: true });
 }
@@ -435,6 +438,7 @@ async function marginSaveInstructions(s, box, input) {
   }
   if (document.activeElement === input) return;
   input.value = marginPage.instructions;
+  updateReadHint(input);
   box.hidden = !marginPage.instructions;
 }
 
@@ -577,9 +581,11 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
-    <form class="margin-reply"><textarea rows="1" maxlength="1000" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
-    <p class="margin-hint" hidden>Enter to ask · Esc to close</p>
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
+    <form class="margin-reply"><textarea rows="1" data-reads="${MARGIN_MESSAGE_READS}" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
+    <p class="margin-hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_MESSAGE_READS.toLocaleString('en')} characters of this.</p>
+    <p class="margin-hint" data-passage-hint hidden>Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.</p>
+    <p class="margin-hint" data-draft-hint hidden>Enter to ask · Esc to close</p>
     <p class="margin-problem" role="status" hidden></p>
     <div class="margin-acts"><button type="button" class="msg-act" data-margin-act="resolve">Resolve</button><button type="button" class="msg-act" data-margin-act="dismiss">Dismiss</button><button type="button" class="margin-add" data-margin-act="add">Add to note</button><button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger">${ICON.expand}</button><span class="margin-tools"><button type="button" class="margin-copy" data-margin-act="copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat">${ICON.chat}</button></span></div></div></div>`;
   marginPage.layer.appendChild(el);
@@ -674,7 +680,8 @@ function marginFill(el, t, arriving, changed) {
   el.toggleAttribute('data-newest', marginPage.newest === t.id);
   $('.margin-add', el).hidden = draft || !marginNow(t);
   $('[data-margin-act="copy"]', el).hidden = draft || !marginNow(t);
-  $('.margin-hint', el).hidden = !draft || Boolean(waiting);
+  $('[data-draft-hint]', el).hidden = !draft || Boolean(waiting);
+  $('[data-passage-hint]', el).hidden = Array.from(t.quote).length <= MARGIN_PASSAGE_READS;
   $('[data-margin-act="resolve"]', el).hidden = draft;
   const dismiss = $('[data-margin-act="dismiss"]', el);
   dismiss.textContent = draft ? 'Cancel' : 'Dismiss';
@@ -1391,6 +1398,7 @@ async function marginReply(s, el, t, text, area = null) {
 }
 
 function marginSized(area) {
+  updateReadHint(area);
   area.style.height = 'auto';
   area.style.height = `${Math.min(area.scrollHeight, MARGIN_AREA_MAX)}px`;
   const send = area.form?.querySelector('.margin-send');
@@ -1672,7 +1680,7 @@ async function marginAdd(t) {
 
 function marginBeside(s, picked) {
   const size = [...picked.text.trim()].length;
-  if (!marginPage.layer || chat.isOpen() || size < LEAST_ASKED || [...picked.text].length > MOST_ASKED) return null;
+  if (!marginPage.layer || chat.isOpen() || size < LEAST_ASKED) return null;
   return marginKit.around(s.doc.source(), picked.text, picked.from);
 }
 
@@ -1737,10 +1745,7 @@ function marginAskFirst(s, picked) {
 
 function marginAsk(s, picked, question = '') {
   const beside = marginBeside(s, picked);
-  if (!beside) {
-    if (marginPage.layer && !chat.isOpen() && [...picked.text].length > MOST_ASKED) marginSetStatus('Long selections go to the chat', true);
-    return false;
-  }
+  if (!beside) return false;
   const same = marginSame(s, picked, beside);
   if (same) {
     marginOpen(same.id, true);
@@ -2239,7 +2244,8 @@ function felixReads(view) {
 
 function felixPersonaForm(view, p) {
   const icons = (view.persona_icons || []).map((icon) => `<label class="persona-tile" title="${esc(PERSONA_ICON_NAMES[icon] || icon)}"><input type="radio" name="persona-icon" value="${esc(icon)}" aria-label="${esc(PERSONA_ICON_NAMES[icon] || icon)}"${icon === p.icon ? ' checked' : ''}><span class="persona-icon" aria-hidden="true">${PERSONA_ICON[icon] || ''}</span></label>`).join('');
-  return `<form class="persona-form" data-persona-form="${esc(p.id)}"><div class="persona-tiles" role="radiogroup" aria-label="Icon">${icons}</div><input class="set-input" name="name" maxlength="32" required placeholder="Name" aria-label="Name" value="${esc(p.name)}"><textarea class="set-input" name="says" maxlength="500" rows="3" required placeholder="What should he look for? For example: check each claim against its evidence." aria-label="What should he look for?">${esc(p.details)}</textarea><div class="persona-form-acts"><button type="submit" class="btn primary sm">Save</button><button type="button" class="btn plain sm" data-persona-act="cancel">Cancel</button>${p.id ? '<button type="button" class="btn plain sm danger-text" data-persona-act="delete">Delete</button>' : ''}</div></form>`;
+  const long = Array.from(p.details.trim()).length > MARGIN_INSTRUCTIONS_READS;
+  return `<form class="persona-form" data-read-field data-persona-form="${esc(p.id)}"><div class="persona-tiles" role="radiogroup" aria-label="Icon">${icons}</div><input class="set-input" name="name" required placeholder="Name" aria-label="Name" value="${esc(p.name)}"><textarea class="set-input" name="says" data-reads="${MARGIN_INSTRUCTIONS_READS}" rows="3" required placeholder="What should he look for? For example: check each claim against its evidence." aria-label="What should he look for?">${esc(p.details)}</textarea><p class="hint" data-read-hint role="status"${long ? '' : ' hidden'}>Felix reads the first ${MARGIN_INSTRUCTIONS_READS} characters of this.</p><div class="persona-form-acts"><button type="submit" class="btn primary sm">Save</button><button type="button" class="btn plain sm" data-persona-act="cancel">Cancel</button>${p.id ? '<button type="button" class="btn plain sm danger-text" data-persona-act="delete">Delete</button>' : ''}</div></form>`;
 }
 
 function felixPersonaCard(view) {

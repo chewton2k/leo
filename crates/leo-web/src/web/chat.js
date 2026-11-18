@@ -213,7 +213,7 @@
   function aside(quiz) {
     const felt = Number.isFinite(quiz.surePct) ? `${quiz.surePct}%` : SURE[quiz.sure] ? SURE[quiz.sure].toLowerCase() : '';
     const how = felt ? ` (how sure I felt: ${felt})` : '';
-    const why = quiz.thinking ? ` My thinking: ${clipped(quiz.thinking, MOST_THINKING)}` : '';
+    const why = quiz.thinking ? ` My thinking: ${Array.from(quiz.thinking.trim()).slice(0, MOST_THINKING).join('').replace(/\s+/g, ' ')}` : '';
     return how + why;
   }
 
@@ -2273,7 +2273,8 @@
     }
 
     function thinkingBox(where, text, off = '') {
-      return `<div class="quiz-thinking-wrap"><textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(text)}</textarea></div>`;
+      const long = Array.from(text.trim()).length > MOST_THINKING;
+      return `<div class="quiz-thinking-wrap" data-read-field><textarea class="quiz-thinking" ${where} rows="2" data-reads="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(text)}</textarea><p class="hint" data-read-hint role="status"${long ? '' : ' hidden'}>Felix reads the first ${MOST_THINKING.toLocaleString('en')} characters of this.</p></div>`;
     }
 
     function quizCard(q, i, k, pending, sources) {
@@ -2348,7 +2349,7 @@
       const q = m && m.quizzes && m.quizzes[k];
       const text = String(given || '').trim();
       if (!q || typeof q.given === 'string' || state.busy || m.pending || !text || checking.has(q)) return;
-      const thinking = thinkingOpen.has(q) ? String(state.drafts[`think:${i}:${k}`] || '').trim().slice(0, MOST_THINKING) : '';
+      const thinking = thinkingOpen.has(q) ? String(state.drafts[`think:${i}:${k}`] || '').trim() : '';
       let correct = checkQuiz(q, text);
       if (correct === null && q.kind === 'fill_blank' && accepted(q).some((a) => plainAnswer(a) === plainAnswer(text))) correct = true;
       const known = correct;

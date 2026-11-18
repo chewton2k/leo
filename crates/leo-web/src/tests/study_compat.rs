@@ -58,10 +58,28 @@ fn marking_reads_confidence_and_thinking_and_refuses_what_it_does_not_know() {
         mark(serde_json::json!({"confidence": "very"})),
         StatusCode::BAD_REQUEST
     );
-    assert_eq!(
-        mark(serde_json::json!({"thinking": "x".repeat(2_001)})),
-        StatusCode::BAD_REQUEST
-    );
+}
+
+#[test]
+fn marking_reads_only_the_start_of_long_thinking() {
+    let (mut state, _dir, _) = state_with(&[]);
+    let start = "考".repeat(2_000);
+    let thinking = format!(" {start}THINKING_TAIL ");
+    state.quick = Some(Arc::new(move |_, material, _| {
+        assert!(material.contains(&format!("<student_thinking>\n{start}\n</student_thinking>")));
+        assert!(!material.contains("THINKING_TAIL"));
+        Ok(r#"{"correct":true,"feedback":"Right."}"#.into())
+    }));
+    let response = run(crate::routes::felix::mark_quiz(
+        State(state),
+        Json(
+            serde_json::from_value(serde_json::json!({
+                "question": "Why?", "answer": "Order", "given": "Order", "thinking": thinking
+            }))
+            .unwrap(),
+        ),
+    ));
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 #[test]

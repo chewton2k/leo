@@ -433,10 +433,11 @@ or microphone.
 
 ## Dictation
 
-`dictation/settings.rs` validates bounded preferences in private atomic
-`<config>/dictation.json`; a failed live rebind restores the previous file;
-malformed settings fall back without overwriting the damaged file. `RETIRED`
-keys are stripped before parsing (the struct denies unknown fields).
+`dictation/settings.rs` saves preferences in private atomic
+`<config>/dictation.json`. Custom words keep every entry in order with a
+64 MiB limit for the whole file. A failed live rebind restores the previous
+file. Malformed settings fall back without overwriting the damaged file.
+`RETIRED` keys are stripped before parsing (the struct denies unknown fields).
 `activation.rs`: hold, tap and the 300 ms hold-or-tap decision, ignoring repeats.
 `generation.rs` gates completion after taking the state lock, so cancel wins.
 The catalog refuses language "auto" for a model without `languageDetection`,
@@ -468,8 +469,11 @@ only unwrapped (code fence, `<dictation>`), never `clean_reply`. A reply must ke
 multisets, `FILLERS` don't count and number words/digits count as one token.
 Added links, pipes, backticks, dollar signs, semicolons and stray line breaks
 are refused, as are changed digits and am/pm; a spoken "no" self-correction is
-honored. The prompt carries the custom words and spoken punctuation; the chain
-has no tools; a leading `<think>` block is stripped. Failures are logged without
+honored. The polish prompt and vocabulary-capable speech models (live and batch)
+read complete custom words from the start of the list within 4,000 characters
+including separators. Local matching still uses the full list. The polish
+prompt also handles spoken punctuation. The chain has no tools and a leading
+`<think>` block is stripped. Failures are logged without
 the provider's text. The call uses `ChatProvider::complete_until` so cancel or
 deadline stops an agent CLI; every fallback returns a reason the popup shows.
 

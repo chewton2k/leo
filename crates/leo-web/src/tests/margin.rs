@@ -1359,14 +1359,16 @@ async fn a_thread_takes_replies_within_its_limits() {
             .0,
         400
     );
-    let long = "x".repeat(margin::MOST_ASK + 1);
-    assert_eq!(
-        engine
-            .post(&path, serde_json::json!({ "text": long }))
-            .await
-            .0,
-        413
-    );
+    let start = "問".repeat(1_000);
+    let long = format!("{start}REPLY_TAIL");
+    let (status, replied) = engine
+        .post(&path, serde_json::json!({ "text": long }))
+        .await;
+    assert_eq!(status, 200);
+    assert_eq!(replied["messages"][3]["text"], long);
+    let material = prompts.lock().unwrap()[1].clone();
+    assert!(material.contains(&start));
+    assert!(!material.contains("REPLY_TAIL"));
     let elsewhere = format!("/api/notes/{id}/margin/threads/nope/reply");
     assert_eq!(
         engine
@@ -1708,10 +1710,10 @@ async fn a_kept_note_found_by_context_is_re_anchored() {
                 .await
         }
     };
-    assert_eq!(padded(margin::BODY_BYTES).await.0, 413);
+    assert_eq!(padded(2 * 1024 * 1024).await.0, 413);
     assert_eq!(padded(8).await.0, 200);
-    let long = "x".repeat(margin::MOST_ASKED + 1);
-    assert_eq!(patch(&asked.id, &version, &long).await.0, 413);
+    let long = "x".repeat(1_001);
+    assert_eq!(patch(&asked.id, &version, &long).await.0, 409);
     let neither = engine
         .send_as(&engine.cookie, "PATCH", &path(&asked.id), Some("{}".into()))
         .await;
@@ -1818,7 +1820,7 @@ async fn dismissing_and_resolving_take_a_thread_off_the_page_and_undo_brings_it_
 async fn asking_about_selected_words_needs_no_read_along_and_the_words_must_be_there() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let engine = Engine::with(Powers {
-        toolless_chat: Some(talking("Because it is.", prompts)),
+        toolless_chat: Some(talking("Because it is.", Arc::clone(&prompts))),
         ..Default::default()
     })
     .await;
@@ -1836,9 +1838,8 @@ async fn asking_about_selected_words_needs_no_read_along_and_the_words_must_be_t
     assert_eq!(engine.post(&path, ask("same words", "", "0")).await.0, 409);
     let (status, why) = engine.post(&path, ask("not there", "", &version)).await;
     assert_eq!((status, why["why"].as_str()), (409, Some("lost")));
-    let long = "x".repeat(margin::MOST_ASKED + 1);
-    assert_eq!(engine.post(&path, ask(&long, "", &version)).await.0, 413);
-    let wide = "word ".repeat(200);
+    let start = "語".repeat(1_000);
+    let wide = format!("{start}WIDE_TAIL");
     let (wide_id, wide_version) = engine.note("Wide", &wide).await;
     margin::set_mode(&engine.chats(), &wide_id, "ask");
     let (status, thread) = engine
@@ -1848,6 +1849,10 @@ async fn asking_about_selected_words_needs_no_read_along_and_the_words_must_be_t
         )
         .await;
     assert_eq!(status, 200, "{thread}");
+    assert_eq!(thread["quote"], wide);
+    let material = prompts.lock().unwrap().last().unwrap().clone();
+    assert!(material.contains(&start));
+    assert!(!material.contains("WIDE_TAIL"));
     let (status, why) = engine
         .post(&path, ask("same words", "not beside it ", &version))
         .await;
@@ -1860,6 +1865,63 @@ async fn asking_about_selected_words_needs_no_read_along_and_the_words_must_be_t
     assert_eq!(status, 200, "{silent}");
     assert_eq!(silent["messages"].as_array().unwrap().len(), 1);
     assert_eq!(silent["messages"][0]["from"], "felix");
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn long_margin_text_stays_whole_while_felix_reads_the_start() {
+    let prompts = Arc::new(Mutex::new(Vec::new()));
+    let kept = Arc::clone(&prompts);
+    let answer = format!("{}ANSWER_TAIL", "文".repeat(4_100));
+    let said = answer.clone();
+    let engine = Engine::with(Powers {
+        toolless_chat: Some(Arc::new(move |_, user, _, _, _, _| {
+            kept.lock().unwrap().push(user.to_owned());
+            Ok(crate::chat::Reply::from(said.clone()))
+        })),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("Long discussion", PASSAGE).await;
+    let path = format!("/api/notes/{id}/margin/threads");
+    let ask = |quote: &str, prefix: &str, question: &str| {
+        serde_json::json!({
+            "version": version, "quote": quote, "prefix": prefix, "question": question
+        })
+    };
+    let question_start = "問".repeat(1_000);
+    let question = format!("{question_start}QUESTION_TAIL{}", "x".repeat(41_000));
+    let (status, initial) = engine.post(&path, ask(PASSAGE, "", &question)).await;
+    assert_eq!(status, 200, "{initial}");
+    assert_eq!(initial["messages"][0]["text"], question);
+    assert_eq!(initial["messages"][1]["text"], answer);
+    let thread = initial["id"].as_str().unwrap();
+    let reply_start = "返".repeat(1_000);
+    let reply = format!("{reply_start}REPLY_TAIL{}", "x".repeat(41_000));
+    let (status, answered) = engine
+        .post(
+            &format!("{path}/{thread}/reply"),
+            serde_json::json!({ "text": reply }),
+        )
+        .await;
+    assert_eq!(status, 200, "{answered}");
+    let saved = engine.get(&format!("/api/notes/{id}/margin")).await.1;
+    let saved = saved["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == thread)
+        .unwrap();
+    assert_eq!(saved["messages"][0]["text"], question);
+    assert_eq!(saved["messages"][1]["text"], answer);
+    assert_eq!(saved["messages"][2]["text"], reply);
+    assert_eq!(saved["messages"][3]["text"], answer);
+    let prompts = prompts.lock().unwrap().clone();
+    assert!(prompts[0].contains(&question_start));
+    assert!(!prompts[0].contains("QUESTION_TAIL"));
+    assert!(prompts[1].contains(&reply_start));
+    assert!(!prompts[1].contains("REPLY_TAIL"));
+    assert!(!prompts[1].contains("ANSWER_TAIL"));
     engine.stop().await;
 }
 
@@ -2121,9 +2183,10 @@ fn the_tool_follows_each_access_mode_and_offers_undo() {
         axum::Json(serde_json::from_value(serde_json::json!({ "body": PASSAGE })).unwrap()),
     ))
     .unwrap();
-    let call = |quote: &str| tools::Call {
+    let text = "詳".repeat(601);
+    let call = move |quote: &str| tools::Call {
         name: "add_margin_note".into(),
-        args: serde_json::json!({ "note": "Passage note", "quote": quote, "text": "Hash it first." }),
+        args: serde_json::json!({ "note": "Passage note", "quote": quote, "text": text }),
     };
     assert!(tools::manual_for(Access::Ask).contains("add_margin_note"));
     assert!(tools::manual_for(Access::Auto).contains("add_margin_note"));
@@ -2162,6 +2225,7 @@ fn the_tool_follows_each_access_mode_and_offers_undo() {
             let threads = margin::open_on(&state.chats, &ids[0]);
             assert_eq!(threads.len(), 1);
             assert_eq!(threads[0].source, "chat");
+            assert_eq!(threads[0].messages[0].text, "詳".repeat(601));
             assert_eq!(shown["undo"]["kind"], "remove_margin_note");
 
             let undo: tools::Proposal = serde_json::from_value(shown["undo"].clone()).unwrap();

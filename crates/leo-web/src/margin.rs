@@ -14,9 +14,8 @@ pub const MOST_QUOTE: usize = 600;
 pub const LEAST_QUOTE: usize = 3;
 const LEAST_TAIL: usize = 6;
 pub const MOST_TEXT: usize = 500;
-pub const MOST_REPLY: usize = 4_000;
-pub const MOST_ASK: usize = 1_000;
-pub const MOST_ASKED: usize = 1_000;
+const MESSAGE_READ_CHARS: usize = 1_000;
+const PASSAGE_READ_CHARS: usize = 1_000;
 pub const MOST_MESSAGES: usize = 24;
 pub const MOST_OPEN: usize = 24;
 pub const MOST_CLOSED: usize = 48;
@@ -94,7 +93,7 @@ pub struct PersonaBody {
 }
 
 pub const MOST_PERSONAS: usize = 8;
-pub const MOST_INSTRUCTIONS: usize = 500;
+const INSTRUCTIONS_READ_CHARS: usize = 500;
 pub const PERSONA_ICONS: [&str; 12] = [
     "flask", "globe", "bulb", "cap", "leaf", "compass", "code", "heart", "star", "pen", "target",
     "thumb",
@@ -851,8 +850,7 @@ pub fn instructions_of(chats: &Path, note: &str) -> String {
 }
 
 pub fn set_instructions(chats: &Path, note: &str, text: &str) -> Option<String> {
-    let text: String = text.trim().chars().take(MOST_INSTRUCTIONS).collect();
-    let text = text.trim_end();
+    let text = text.trim();
     db_of(chats)
         .with(|c| {
             if text.is_empty() {
@@ -897,9 +895,9 @@ pub fn valid_personas(list: Vec<PersonaBody>) -> Option<Vec<Persona>> {
     for body in list {
         let name = body.name.trim().to_string();
         let says = body.says.trim().to_string();
-        if !(1..=32).contains(&name.chars().count())
+        if name.is_empty()
             || name.chars().any(char::is_control)
-            || !(1..=500).contains(&says.chars().count())
+            || says.is_empty()
             || says.chars().any(|c| c.is_control() && c != '\n')
             || !(body.icon == "book" || PERSONA_ICONS.contains(&body.icon.as_str()))
         {
@@ -927,7 +925,14 @@ pub fn valid_personas(list: Vec<PersonaBody>) -> Option<Vec<Persona>> {
     Some(made)
 }
 
+fn read_start(text: &str, most: usize) -> &str {
+    text.char_indices()
+        .nth(most)
+        .map_or(text, |(at, _)| &text[..at])
+}
+
 pub fn voiced(system: &str, voice: &str, asked: bool) -> String {
+    let voice = read_start(voice, INSTRUCTIONS_READ_CHARS);
     if voice.is_empty() {
         return system.to_string();
     }
@@ -943,6 +948,7 @@ pub fn voiced(system: &str, voice: &str, asked: bool) -> String {
 }
 
 pub fn instructed(system: &str, said: &str) -> String {
+    let said = read_start(said, INSTRUCTIONS_READ_CHARS);
     if said.is_empty() {
         return system.to_string();
     }
@@ -1064,7 +1070,7 @@ fn quotable(quote: &str, most: usize) -> bool {
 }
 
 pub fn placed_exact(body: &str, prefix: &str, quote: &str, suffix: &str) -> Option<Place> {
-    if !quotable(quote, MOST_ASKED) {
+    if quote.chars().take(LEAST_QUOTE).count() < LEAST_QUOTE || quote.trim().is_empty() {
         return None;
     }
     let at = body.find(&format!("{prefix}{quote}{suffix}"))? + prefix.len();
@@ -1434,13 +1440,16 @@ pub fn read_prompt(title: &str, blocks: &[String], tag: &str, earlier: &str) -> 
 }
 
 fn nearby(body: &str, quote: &str) -> String {
-    let start = body
-        .find(quote)
-        .and_then(|at| body.get(..at))
-        .map_or(0, |before| {
-            before.chars().count().saturating_sub(NEARBY / 2)
-        });
-    body.chars().skip(start).take(NEARBY).collect()
+    let at = body.find(quote).unwrap_or(0);
+    let before = body.get(..at).unwrap_or_default().chars().count();
+    let start = before.saturating_sub(NEARBY / 2);
+    let read = read_start(quote, PASSAGE_READ_CHARS);
+    let room = if read.len() < quote.len() {
+        before - start + PASSAGE_READ_CHARS
+    } else {
+        NEARBY
+    };
+    body.chars().skip(start).take(room).collect()
 }
 
 pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) -> String {
@@ -1454,7 +1463,11 @@ pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) ->
         &nearby(body, &thread.quote),
         &fence,
     ));
-    user.push_str(&fenced("passage", &thread.quote, &fence));
+    user.push_str(&fenced(
+        "passage",
+        read_start(&thread.quote, PASSAGE_READ_CHARS),
+        &fence,
+    ));
     let earlier: Vec<String> = thread
         .messages
         .iter()
@@ -1466,6 +1479,7 @@ pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) ->
     if !earlier.is_empty() {
         user.push_str(&fenced("thread_so_far", &earlier.join("\n"), &fence));
     }
+    let question = read_start(question, MESSAGE_READ_CHARS);
     user.push_str(&format!("User: {question}\n\nReply as Felix."));
     user
 }
@@ -1477,7 +1491,11 @@ pub fn weave_prompt(title: &str, passage: &str, thread: &Thread) -> String {
     );
     user.push_str(&fenced("note_title", &clip(title, 200), &fence));
     user.push_str(&fenced("passage", passage, &fence));
-    user.push_str(&fenced("quoted_words", &thread.quote, &fence));
+    user.push_str(&fenced(
+        "quoted_words",
+        read_start(&thread.quote, PASSAGE_READ_CHARS),
+        &fence,
+    ));
     let said: Vec<String> = thread
         .messages
         .iter()
@@ -2501,10 +2519,16 @@ mod tests {
         assert!(custom_id(&reissued[0].id));
         assert!(valid_personas((0..MOST_PERSONAS).map(|_| body("A", "b")).collect()).is_some());
         assert!(valid_personas((0..=MOST_PERSONAS).map(|_| body("A", "b")).collect()).is_none());
-        assert!(valid_personas(vec![body(&"n".repeat(33), "b")]).is_none());
-        assert!(valid_personas(vec![body(&"n".repeat(32), "b")]).is_some());
-        assert!(valid_personas(vec![body("A", &"s".repeat(501))]).is_none());
-        assert!(valid_personas(vec![body("A", &"s".repeat(500))]).is_some());
+        let name = "名".repeat(48);
+        let style = "根".repeat(500);
+        let says = format!("{style}STYLE_TAIL");
+        for (name, says) in [(&name, &"Check.".into()), (&"Chemist".into(), &says)] {
+            let saved = valid_personas(vec![body(name, says)]).expect("the persona can be saved");
+            assert_eq!((&saved[0].name, &saved[0].says), (name, says));
+        }
+        let prompt = voiced(READ_SYSTEM, &says, false);
+        assert!(prompt.contains(&style));
+        assert!(!prompt.contains("STYLE_TAIL"));
         assert!(valid_personas(vec![body("", "b")]).is_none());
         assert!(valid_personas(vec![body("A", "  ")]).is_none());
         assert!(valid_personas(vec![body("A\nB", "b")]).is_none());
@@ -2585,7 +2609,7 @@ mod tests {
     }
 
     #[test]
-    fn instructions_are_trimmed_capped_and_gone_when_empty() {
+    fn instructions_are_kept_whole_and_gone_when_empty() {
         let dir = tempfile::tempdir().unwrap();
         let chats = dir.path().join("chats");
         assert_eq!(
@@ -2593,9 +2617,13 @@ mod tests {
             Some("Check sources.")
         );
         assert_eq!(instructions_of(&chats, "n"), "Check sources.");
-        let long = "x".repeat(MOST_INSTRUCTIONS + 9);
-        let kept = set_instructions(&chats, "n", &long).unwrap();
-        assert_eq!(kept.chars().count(), MOST_INSTRUCTIONS);
+        let start = "根".repeat(500);
+        let long = format!("{start}INSTRUCTION_TAIL");
+        assert_eq!(set_instructions(&chats, "n", &long).unwrap(), long);
+        assert_eq!(instructions_of(&chats, "n"), long);
+        let prompt = instructed(READ_SYSTEM, &long);
+        assert!(prompt.contains(&start));
+        assert!(!prompt.contains("INSTRUCTION_TAIL"));
         assert_eq!(set_instructions(&chats, "n", "   ").as_deref(), Some(""));
         let rows: i64 = db_of(&chats)
             .with(|c| c.query_row("SELECT COUNT(*) FROM margin_instructions", [], |r| r.get(0)))

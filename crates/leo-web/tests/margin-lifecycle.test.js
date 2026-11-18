@@ -28,6 +28,8 @@ function harness() {
   vm.createContext(context);
   const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
   vm.runInContext(core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint')), context);
+  const uploads = fs.readFileSync(path.join(__dirname, '../src/web/app/uploads.js'), 'utf8');
+  vm.runInContext(uploads.slice(uploads.indexOf('function updateReadHint('), uploads.indexOf('function noteFields(')), context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8'), context);
   const state = vm.runInContext('marginPage', context);
   const session = () => ({ note: { id: 'a', version: 'abc' }, doc: { source: () => 'A changed paragraph long enough to read.' } });
@@ -259,15 +261,14 @@ test('Undo after Dismiss toasts the server reason when it fails', async () => {
   assert.equal(toasts[1][1].bad, true);
 });
 
-test('an ask over the length limit says it goes to the chat', () => {
+test('a long selection still qualifies for a margin ask', () => {
   const h = harness();
   h.context.chat.isOpen = () => false;
   h.state.layer = {};
-  assert.equal(h.context.marginAsk(h.state.s, { text: 'x'.repeat(1001), from: 1 }), false);
-  assert.equal(h.state.status, 'Long selections go to the chat');
-  h.state.status = '';
-  assert.equal(h.context.marginAsk(h.state.s, { text: 'x', from: 1 }), false);
-  assert.equal(h.state.status, '');
+  const text = '語'.repeat(1001);
+  h.state.s.doc.source = () => `Before ${text} after`;
+  assert.equal(h.context.marginBeside(h.state.s, { text, from: 7 })?.prefix, 'Before ');
+  assert.equal(h.context.marginBeside(h.state.s, { text: 'x', from: 1 }), null);
 });
 
 test('a stale 409 without a reason says the note changed and a retry follows the next edit', async () => {
@@ -404,7 +405,9 @@ function replyHarness() {
   const box = { textContent: '', hidden: true };
   const send = { disabled: false };
   const el = { isConnected: true, dataset: { id: 't1' } };
-  const area = { value: '', style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: () => el, focus() {} };
+  const hint = { hidden: true };
+  const field = { querySelector: (selector) => selector === '[data-read-hint]' ? hint : null };
+  const area = { value: '', dataset: { reads: '1000' }, style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: (selector) => selector === '.margin-note' ? el : selector === '[data-read-field]' ? field : null, focus() {} };
   let count = 0;
   Object.assign(h.context, { $: (sel) => (sel === 'textarea' ? area : sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}` });
   h.state.threads = [{ id: 't1', messages: [] }];
@@ -413,20 +416,22 @@ function replyHarness() {
     area.value = text;
     await h.context.marginSubmit({ preventDefault() {}, target: { closest: () => el } });
   };
-  return { h, box, send, area, submit };
+  return { h, box, send, area, hint, submit };
 }
 
 test('a failed reply puts the text back, shows the error and keeps Send enabled, and a retry keeps its request', async () => {
-  const { h, box, send, area, submit } = replyHarness();
+  const { h, box, send, area, hint, submit } = replyHarness();
   const bodies = [];
   h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
-  await submit('Why?');
-  assert.equal(area.value, 'Why?');
+  const text = '💬'.repeat(1001);
+  await submit(text);
+  assert.equal(area.value, text);
+  assert.equal(hint.hidden, false);
   assert.equal(box.textContent, 'Felix could not answer.');
   assert.equal(box.hidden, false);
   assert.equal(send.disabled, false);
   assert.equal(h.state.thinking.size, 0);
-  await submit('Why?');
+  await submit(text);
   await submit('Why not?');
   assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
 });

@@ -1311,6 +1311,38 @@ test('an edit card shows proof marks, falls back to both texts when marks would 
   assert.equal(context.card(same, 0, 0), context.card(same, 0, 0), 'a redraw reuses the marks');
 });
 
+test('a quiz keeps the full thinking draft and tells the user how much Felix reads', async () => {
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  const slice = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
+  const start = '💭'.repeat(2000);
+  const thinking = start + 'THINKING_TAIL';
+  const q = { kind: 'free_response', question: 'Why?', answer: 'Order' };
+  const sent = [];
+  const context = require('node:vm').createContext({
+    ...C, MOST_THINKING: 2000, SURE: {}, escape: esc,
+    state: { messages: [{ quizzes: [q] }], drafts: { 'think:0:0': thinking }, streak: 0 },
+    draw() {}, remember() {}, mood() {}, currentSession: () => null, scoreSession() {},
+    request: async (_, { body }) => {
+      sent.push(JSON.parse(body));
+      return { ok: true, json: async () => ({ correct: true }) };
+    },
+  });
+  require('node:vm').runInContext(
+    slice('    function thinkingBox(', '    function quizCard(') +
+    slice('    const checking = new WeakSet()', '    function continueQuiz(') +
+    '\nthis.box = thinkingBox; this.answer = answerQuiz; thinkingOpen.add(state.messages[0].quizzes[0]);',
+    context);
+  await context.answer(0, 0, 'Order');
+  assert.equal(sent[0].thinking, thinking);
+  assert.equal(q.thinking, thinking);
+  const box = context.box('data-i="0" data-k="0"', thinking);
+  assert.doesNotMatch(box, /maxlength/);
+  assert.match(box, /Felix reads the first 2,000 characters/);
+  const prompt = C.quizSay(q, q.given, true);
+  assert.ok(prompt.includes(start));
+  assert.ok(!prompt.includes('THINKING_TAIL'));
+});
+
 test('quiz answer fields and the note picker have accessible names', () => {
   const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8');
   assert.match(source, /id="chat-pick-search" placeholder="Find a note…" aria-label="Find a note"/);

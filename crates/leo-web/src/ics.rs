@@ -653,7 +653,7 @@ fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
     let title = if raw.summary.trim().is_empty() {
         "Untitled event".to_string()
     } else {
-        raw.summary.trim().chars().take(200).collect()
+        raw.summary.trim().to_owned()
     };
     let mut context = format!("Calendar event: {title}");
     if !raw.location.trim().is_empty() {
@@ -673,7 +673,7 @@ fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
         title,
         start,
         end,
-        location: raw.location.trim().chars().take(200).collect(),
+        location: raw.location.trim().to_owned(),
         context: context.chars().take(CONTEXT_CHARS).collect(),
         all_day: false,
         date: None,
@@ -782,6 +782,22 @@ END:VCALENDAR\r
             cal.events[1].end - cal.events[1].start,
             Duration::minutes(30)
         );
+    }
+
+    #[test]
+    fn event_titles_and_locations_keep_the_whole_feed_values() {
+        let title = format!("{} Title end", "題".repeat(420));
+        let location = format!("{} Place end", "所".repeat(420));
+        let feed = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:long\r\nDTSTART:20261101T150000Z\r\nSUMMARY:{title}\r\nLOCATION:{location}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let calendar = read(
+            &feed,
+            at("2026-11-01T00:00:00Z"),
+            at("2026-11-02T00:00:00Z"),
+        );
+        let event = &calendar.events[0];
+        assert_eq!((&event.title, &event.location), (&title, &location));
     }
 
     #[test]

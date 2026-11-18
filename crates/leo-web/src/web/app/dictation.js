@@ -38,7 +38,7 @@ function dictationCards(view) {
     ${row('Microphone', select('microphone', microphones), 'dictation-microphone')}
     ${toggle('sounds', 'Start and stop sounds', 'dictation-sounds', 'Play a short sound when dictation starts and stops.')}
   </section><section class="set-card"><header><h3>Text</h3></header>
-    <label class="set-row column" data-find="dictation-words"><span class="set-label">Custom words</span><textarea class="set-input" data-dictation="custom_words" rows="3" placeholder="Names and terms, one per line">${esc((s.custom_words || []).join('\n'))}</textarea><span class="hint">Names and terms leo should spell your way, up to 200. Some models also listen for them; the first ones count most.</span></label>
+    <label class="set-row column" data-find="dictation-words"><span class="set-label">Custom words</span><textarea class="set-input" data-dictation="custom_words" rows="3" placeholder="Names and terms, one per line">${esc((s.custom_words || []).join('\n'))}</textarea><span class="hint">Names and terms leo should spell your way. Speech models that support vocabulary and your optional Writing AI read complete entries from the start, up to 4,000 characters total.</span></label>
     ${toggle('fillers', 'Remove filler words', 'dictation-fillers', 'Take out words like um and uh as you speak.')}
     <div class="set-row column" data-find="dictation-ai"><label class="set-line"><span class="grow">AI writing</span>${settingsSwitch(`data-dictation="writing" data-on="${s.writing && s.writing !== 'off' ? esc(s.writing) : 'quick'}"`, s.writing && s.writing !== 'off')}</label><span class="hint">Fixes grammar, writes times like 2:30 and formats lists with your <a href="#/settings/writing">Writing AI</a>. Matches the tone of the app you dictate into (only the app’s name is used). Adds a few seconds; Escape cancels.</span>${view.writing_ready === false ? '<span class="set-note warn">No writing AI is set up yet, so dictations are pasted as spoken. <a href="#/settings/writing">Set up writing AI</a>.</span>' : ''}</div>
   </section><section class="set-card"><header><h3>Popup</h3></header>
@@ -47,7 +47,7 @@ function dictationCards(view) {
   </section><section class="set-card" data-find="dictation-recent"><header><h3>Recent dictations</h3><button class="btn plain sm" data-action="dictation-clear">Clear history</button></header><p class="hint">Last 20, on this computer only.</p><div id="dictation-recent">${dictationRecent(view.recent || [])}</div></section>`;
 }
 let dictationEdit = null;
-const dictationOffers = {}, DICTATION_MOST_WORDS = 200;
+const dictationOffers = {};
 function dictationRecent(items) {
   return items.length ? items.map((item) => {
     const id = esc(String(item.id)), full = dictationFull.get(item.id);
@@ -126,11 +126,6 @@ async function saveDictationEdit() {
 function addDictationWord(el) {
   const id = Number(el.dataset.id), word = el.dataset.word, words = dictationDraft().custom_words;
   if (!words.some((w) => w.toLowerCase() === word.toLowerCase())) {
-    if (words.length >= DICTATION_MOST_WORDS) {
-      const result = $('#dictation-result');
-      if (result) result.textContent = `Custom words is full (${DICTATION_MOST_WORDS}). Remove one to add more.`;
-      return;
-    }
     $('[data-dictation="custom_words"]').value = words.concat(word).join('\n');
   }
   dictationOffers[id] = (dictationOffers[id] || []).filter((w) => w !== word);
