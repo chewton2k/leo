@@ -148,6 +148,8 @@ settings and credentials are excluded from note exports.
 - `Store::changed_on_disk`/`refresh` (fingerprint of paths, sizes, mtimes);
   refresh re-reads only files whose size, modified or change time changed, or
   whose note differs in memory; the result equals a fresh load.
+  `Store::changes_since(seen)` hands readers the ids changed since their last
+  look, or `Everything`.
   Engine mutations reconcile before writing; hot read-only
   paths use the existing filesystem watcher with a 60 s reconciliation fallback.
   Returning to the native window forces a check before serving cached reads.

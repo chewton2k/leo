@@ -776,7 +776,10 @@ fn read_found(
     }
 }
 
-fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
+fn index_notes(
+    mut found: Vec<Found>,
+    mut feed: Option<&mut Feed>,
+) -> (Vec<Note>, HashMap<String, Seen>) {
     let mut once = HashSet::new();
     let twins: HashSet<String> = found
         .iter()
@@ -806,6 +809,9 @@ fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
             if seen.contains_key(&note.id) {
                 note.id = uuid::Uuid::new_v4().to_string();
             }
+        }
+        if let Some(feed) = feed.as_deref_mut().filter(|_| reassigned || kept.is_none()) {
+            feed.record(note.id.clone());
         }
         let (model, fields) = match &kept {
             _ if reassigned => (0, 0),
@@ -837,6 +843,49 @@ fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
 
 // ── Store ───────────────────────────────────────────────────────────────────
 
+pub const MOST_LOGGED: usize = 4096;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Changed {
+    Ids(Vec<String>),
+    Everything,
+}
+
+#[derive(Debug)]
+struct Feed {
+    generation: u64,
+    base: u64,
+    log: std::collections::VecDeque<(u64, String)>,
+}
+
+impl Default for Feed {
+    fn default() -> Self {
+        Feed {
+            generation: 1,
+            base: 1,
+            log: Default::default(),
+        }
+    }
+}
+
+impl Feed {
+    fn record(&mut self, id: String) {
+        if self.log.len() >= MOST_LOGGED {
+            if let Some((gone, _)) = self.log.pop_front() {
+                self.base = gone;
+            }
+        }
+        self.generation += 1;
+        self.log.push_back((self.generation, id));
+    }
+
+    fn everything(&mut self) {
+        self.generation += 1;
+        self.base = self.generation;
+        self.log.clear();
+    }
+}
+
 pub const MOST_FOLDER_NAME_CHARS: usize = 120;
 pub const MOST_FOLDER_NAME_BYTES: usize = 240;
 
@@ -857,6 +906,7 @@ pub struct Store {
     removed: std::cell::RefCell<HashSet<String>>,
     full: std::cell::Cell<bool>,
     placed: std::cell::Cell<bool>,
+    feed: std::cell::RefCell<Feed>,
 }
 
 impl Store {
@@ -904,9 +954,10 @@ impl Store {
         for (path, why) in &errors {
             skip(&mut unreadable, path, why);
         }
-        let mut kept = old
-            .map(|old| old.take_unchanged(&files))
-            .unwrap_or_default();
+        let (mut kept, mut feed) = match old {
+            Some(old) => (old.take_unchanged(&files), Some(old.feed.take())),
+            None => Default::default(),
+        };
         let found = files
             .into_iter()
             .filter_map(|(path, relative, meta)| match kept.remove(&relative) {
@@ -922,7 +973,7 @@ impl Store {
                 None => read_found(&path, relative, &meta, &mut unreadable),
             })
             .collect();
-        let (notes, seen) = index_notes(found);
+        let (notes, seen) = index_notes(found, feed.as_mut());
 
         // The directory list on disk only needs to remember empty directories:
         // every note's directory, and its parents, is known from where it is.
@@ -950,6 +1001,7 @@ impl Store {
             removed: Default::default(),
             full: std::cell::Cell::new(true),
             placed: Default::default(),
+            feed: std::cell::RefCell::new(feed.unwrap_or_default()),
             unreadable,
             notes,
             directories,
@@ -1084,6 +1136,7 @@ impl Store {
             let exact = back.is_some_and(|(back, _)| {
                 hash_note(&back) == fields && back.directory == note.directory
             });
+            self.feed.borrow_mut().record(note.id.clone());
             seen.insert(
                 note.id.clone(),
                 Seen {
@@ -1144,6 +1197,7 @@ impl Store {
         drop(removed);
         moved |= !gone.is_empty();
         for id in gone {
+            self.feed.borrow_mut().record(id.clone());
             let Some(entry) = seen.get(&id) else {
                 continue;
             };
@@ -1319,6 +1373,7 @@ impl Store {
 
     pub fn touch_all(&mut self) {
         self.full.set(true);
+        self.feed.get_mut().everything();
         self.dirty
             .get_mut()
             .extend(self.notes.iter().map(|n| n.id.clone()));
@@ -1362,6 +1417,26 @@ impl Store {
         self.fingerprint.get()
     }
 
+    pub fn changes_since(&self, seen: u64) -> (u64, Changed) {
+        let feed = self.feed.borrow();
+        if seen < feed.base || seen > feed.generation {
+            return (feed.generation, Changed::Everything);
+        }
+        let from = feed.log.partition_point(|(at, _)| *at <= seen);
+        let mut once = HashSet::new();
+        let ids = feed
+            .log
+            .range(from..)
+            .filter(|(_, id)| once.insert(id.as_str()))
+            .map(|(_, id)| id.clone())
+            .collect();
+        (feed.generation, Changed::Ids(ids))
+    }
+
+    pub fn forget_changes(&self) {
+        self.feed.borrow_mut().everything();
+    }
+
     pub fn refresh(&mut self) -> Result<()> {
         let notes_dir = self.notes_dir.clone();
         let tidied = self.tidied.get();
@@ -1379,6 +1454,7 @@ impl Store {
             .collect();
         let seen = self.seen.get_mut();
         let dirty = self.dirty.get_mut();
+        let feed = self.feed.get_mut();
         let unchanged: Vec<bool> = self
             .notes
             .iter()
@@ -1404,6 +1480,7 @@ impl Store {
         let mut taken = HashMap::with_capacity(self.notes.len());
         for (note, same) in std::mem::take(&mut self.notes).into_iter().zip(unchanged) {
             if !same {
+                feed.record(note.id);
                 continue;
             }
             if let Some(entry) = seen.remove(&note.id) {
@@ -1450,6 +1527,7 @@ impl Store {
         }
         let text = note_to_markdown(&copy)?;
         write_atomic(&path, &text)?;
+        self.feed.borrow_mut().record(copy.id);
         if fresh {
             crate::diag::warn(conflict_notice(&note.title));
         }
@@ -1555,6 +1633,7 @@ impl Store {
             add_with_parents(&mut self.directories, &note.directory);
             restored.titles.push(note.title.clone());
             self.dirty.get_mut().insert(note.id.clone());
+            self.feed.get_mut().record(note.id.clone());
             self.notes.push(note);
         }
         if !restored.titles.is_empty() {
@@ -1673,6 +1752,7 @@ impl Store {
         add_with_parents(&mut self.directories, directory);
         let note = Note::new(title, body, tags, directory);
         self.dirty.get_mut().insert(note.id.clone());
+        self.feed.get_mut().record(note.id.clone());
         self.notes.push(note);
         Ok(self.notes.last().unwrap())
     }
@@ -1722,6 +1802,7 @@ impl Store {
             }
         };
         self.dirty.get_mut().insert(self.notes[at].id.clone());
+        self.feed.get_mut().record(self.notes[at].id.clone());
         Some(&mut self.notes[at])
     }
 
@@ -1742,10 +1823,12 @@ impl Store {
     pub fn delete_notes(&mut self, ids: &[String]) -> usize {
         let before = self.notes.len();
         let removed = self.removed.get_mut();
+        let feed = self.feed.get_mut();
         self.notes.retain(|n| {
             let keep = !ids.contains(&n.id);
             if !keep {
                 removed.insert(n.id.clone());
+                feed.record(n.id.clone());
             }
             keep
         });
@@ -1905,10 +1988,12 @@ impl Store {
 
         let (notes, dirs) = (self.notes.len(), self.directories.len());
         let removed = self.removed.get_mut();
+        let feed = self.feed.get_mut();
         self.notes.retain(|n| {
             let keep = n.directory != path && !n.directory.starts_with(&prefix);
             if !keep {
                 removed.insert(n.id.clone());
+                feed.record(n.id.clone());
             }
             keep
         });
@@ -1985,11 +2070,13 @@ impl Store {
         };
         let now = Utc::now();
         let dirty = self.dirty.get_mut();
+        let feed = self.feed.get_mut();
         for note in &mut self.notes {
             if let Some(dir) = renamed(&note.directory) {
                 note.directory = dir;
                 note.updated_at = now;
                 dirty.insert(note.id.clone());
+                feed.record(note.id.clone());
             }
         }
         let mut directories: Vec<String> = self
@@ -2566,6 +2653,7 @@ mod tests {
             removed: Default::default(),
             full: std::cell::Cell::new(true),
             placed: Default::default(),
+            feed: Default::default(),
             notes: vec![make_note()],
             directories: vec![],
             notes_dir: notes_dir.clone(),
@@ -5423,5 +5511,372 @@ mod tests {
         store.find_note_mut(&id).unwrap().body = "only in memory".to_string();
         store.refresh().unwrap();
         assert_eq!(store.find_note(&id).unwrap().body, "on disk");
+    }
+
+    type Scanned = HashMap<String, (String, String, String, u64)>;
+
+    fn scan(store: &Store) -> Scanned {
+        store
+            .notes
+            .iter()
+            .map(|n| {
+                (
+                    n.id.clone(),
+                    (
+                        n.title.clone(),
+                        n.body.clone(),
+                        n.directory.clone(),
+                        hash_note(n),
+                    ),
+                )
+            })
+            .collect()
+    }
+
+    #[derive(Default)]
+    struct Reader {
+        seen: u64,
+        map: Scanned,
+    }
+
+    impl Reader {
+        fn catch_up(&mut self, store: &Store) -> bool {
+            let (now, changed) = store.changes_since(self.seen);
+            self.seen = now;
+            match changed {
+                Changed::Everything => {
+                    self.map = scan(store);
+                    true
+                }
+                Changed::Ids(ids) => {
+                    for id in ids {
+                        match store.notes.iter().find(|n| n.id == id) {
+                            Some(n) => {
+                                self.map.insert(
+                                    id,
+                                    (
+                                        n.title.clone(),
+                                        n.body.clone(),
+                                        n.directory.clone(),
+                                        hash_note(n),
+                                    ),
+                                );
+                            }
+                            None => {
+                                self.map.remove(&id);
+                            }
+                        }
+                    }
+                    false
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_reader_given_everything_after_the_list_overflows_sees_every_change() {
+        let (mut store, _d) = temp_store();
+        for i in 0..MOST_LOGGED + 10 {
+            store
+                .create_note(format!("Note {i}"), "first", vec![], "")
+                .unwrap();
+        }
+        let mut reader = Reader::default();
+        assert!(reader.catch_up(&store));
+        let ids: Vec<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+        for id in &ids {
+            store.find_note_mut(id).unwrap().body = "second".to_string();
+        }
+        assert_eq!(store.changes_since(reader.seen).1, Changed::Everything);
+        assert!(reader.catch_up(&store));
+        assert!(reader.map.values().all(|(_, body, _, _)| body == "second"));
+        assert_eq!(reader.map, scan(&store));
+        store.find_note_mut(&ids[0]).unwrap().body = "third".to_string();
+        assert_eq!(
+            store.changes_since(reader.seen).1,
+            Changed::Ids(vec![ids[0].clone()])
+        );
+    }
+
+    #[test]
+    fn a_reader_that_never_looked_gets_everything() {
+        let (mut store, _d) = temp_store();
+        assert_eq!(store.changes_since(0).1, Changed::Everything);
+        store.create_note("One", "a", vec![], "").unwrap();
+        assert_eq!(store.changes_since(0).1, Changed::Everything);
+    }
+
+    #[test]
+    fn a_cold_load_says_everything() {
+        let (mut store, _d) = temp_store();
+        for title in ["One", "Two", "Three"] {
+            store.create_note(title, "a", vec![], "").unwrap();
+        }
+        store.save().unwrap();
+        let (seen, changed) = store.changes_since(0);
+        assert_eq!(changed, Changed::Everything);
+        assert_eq!(store.changes_since(seen).1, Changed::Ids(vec![]));
+        let fresh = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(fresh.changes_since(seen).1, Changed::Everything);
+        assert_eq!(fresh.changes_since(0).1, Changed::Everything);
+    }
+
+    #[test]
+    fn refresh_keeps_the_feed_and_adds_what_it_read() {
+        let (mut store, _d) = temp_store();
+        for title in ["One", "Two", "Three"] {
+            store.create_note(title, "a", vec![], "").unwrap();
+        }
+        store.save().unwrap();
+        let mut reader = Reader::default();
+        reader.catch_up(&store);
+        let edited = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Two")
+            .unwrap()
+            .id
+            .clone();
+        append(&store.notes_dir.join("Two.md"), "from elsewhere");
+        fs::write(store.notes_dir.join("Four.md"), headed("Four", "new")).unwrap();
+        store.refresh().unwrap();
+        let made = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Four")
+            .unwrap()
+            .id
+            .clone();
+        let Changed::Ids(ids) = store.changes_since(reader.seen).1 else {
+            panic!("a refresh forgot the feed");
+        };
+        let ids: HashSet<String> = ids.into_iter().collect();
+        assert_eq!(ids, HashSet::from([edited, made]));
+        assert!(!reader.catch_up(&store));
+        assert_eq!(reader.map, scan(&store));
+    }
+
+    #[test]
+    #[ignore = "benchmark: run by hand with --ignored --nocapture"]
+    fn p_c79_benchmark_change_feed() {
+        use std::time::Instant;
+        let count: usize = std::env::var("LEO_BENCH_NOTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5000);
+        let big = std::env::var("LEO_BENCH_BIG").is_ok_and(|v| v == "1");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("notes");
+        fs::create_dir_all(&dir).unwrap();
+        let body = "word ".repeat(1000);
+        for i in 0..count {
+            fs::write(
+                dir.join(format!("Note {i}.md")),
+                headed(&format!("Note {i}"), &body),
+            )
+            .unwrap();
+        }
+        if big {
+            fs::write(
+                dir.join("Big.md"),
+                headed("Big", &"word ".repeat(4_000_000)),
+            )
+            .unwrap();
+        }
+        let mut store = Store::load_from(&dir).unwrap();
+        let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
+        let mut full = Vec::new();
+        for _ in 0..5 {
+            let t = Instant::now();
+            let mut sum = 0u64;
+            for note in &store.notes {
+                sum ^= hash_note(note);
+            }
+            std::hint::black_box(sum);
+            full.push(ms(t.elapsed()));
+        }
+        let target = if big { "Big" } else { "Note 0" };
+        let id = store
+            .notes
+            .iter()
+            .find(|n| n.title == target)
+            .unwrap()
+            .id
+            .clone();
+        let mut one = Vec::new();
+        for _ in 0..5 {
+            let (seen, _) = store.changes_since(0);
+            store.find_note_mut(&id).unwrap().body.push('x');
+            let t = Instant::now();
+            let (_, changed) = store.changes_since(seen);
+            one.push(ms(t.elapsed()));
+            assert_eq!(changed, Changed::Ids(vec![id.clone()]));
+        }
+        let ids: Vec<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+        let mut feed = Feed::default();
+        let rounds = MOST_LOGGED * 16;
+        let t = Instant::now();
+        for i in 0..rounds {
+            feed.record(ids[i % ids.len()].clone());
+        }
+        let record_us = t.elapsed().as_secs_f64() * 1e6 / rounds as f64;
+        let mut whole = Vec::new();
+        for _ in 0..5 {
+            let (seen, _) = store.changes_since(0);
+            for id in ids.iter().cycle().take(MOST_LOGGED) {
+                store.feed.borrow_mut().record(id.clone());
+            }
+            let t = Instant::now();
+            let (_, changed) = store.changes_since(seen);
+            whole.push(ms(t.elapsed()));
+            assert!(matches!(changed, Changed::Ids(_)));
+        }
+        let feed = store.feed.borrow();
+        let bytes = feed.log.capacity() * std::mem::size_of::<(u64, String)>()
+            + feed.log.iter().map(|(_, id)| id.capacity()).sum::<usize>();
+        println!(
+            "P-C79 notes={count} big={big} full_pass_ms={full:.2?} changes_since_one_ms={one:.4?} changes_since_full_log_ms={whole:.3?} record_us={record_us:.3} log_bytes={bytes} logged={}",
+            feed.log.len()
+        );
+    }
+
+    #[test]
+    fn the_change_feed_matches_a_full_scan() {
+        let temp = tempfile::tempdir().unwrap();
+        let dir = temp.path().join("notes");
+        let folders = ["", "a", "b"];
+        for folder in folders {
+            fs::create_dir_all(dir.join(folder)).unwrap();
+        }
+        for i in 0..200 {
+            fs::write(
+                dir.join(folders[i % 3]).join(format!("Note {i}.md")),
+                headed(&format!("Note {i}"), &format!("body {i}")),
+            )
+            .unwrap();
+        }
+        let mut store = Store::load_from(&dir).unwrap();
+        let mut reader = Reader::default();
+        reader.catch_up(&store);
+        let mut state: u64 = 0x2545_f491_4f6c_dd1d;
+        let mut next = |n: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state % n.max(1) as u64) as usize
+        };
+        let titles = ["Alpha", "Beta", "Gamma", "Delta", "Epsilon", "Zeta"];
+        for step in 0..2000 {
+            let kind = next(14);
+            let pick = next(store.notes.len());
+            let id = store.notes.get(pick).map(|n| n.id.clone());
+            let path = id
+                .as_ref()
+                .map(|id| store.notes_dir.join(&store.seen.borrow()[id].path));
+            let folder = {
+                let mut dirs = store.directories.clone();
+                dirs.push(String::new());
+                dirs[next(dirs.len())].clone()
+            };
+            match (kind, id, path) {
+                (0, Some(id), _) => {
+                    store.find_note_mut(&id).unwrap().body = format!("edit {step}");
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                (2, Some(id), _) => {
+                    store.delete_notes(&[id]);
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                (3, Some(id), _) => {
+                    store.find_note_mut(&id).unwrap().title = titles[next(titles.len())].into();
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                (4, Some(id), _) => {
+                    if next(5) == 0 {
+                        if store.dir_exists("b") {
+                            store.rename_dir("b", "c");
+                        } else if store.dir_exists("c") {
+                            store.rename_dir("c", "b");
+                        }
+                    } else {
+                        store.move_note(&id, &folder);
+                    }
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                (5, Some(id), _) => {
+                    let other = store.notes[next(store.notes.len())].id.clone();
+                    store.delete_notes(&[id, other]);
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                (6, _, _) => {
+                    let trashed = store.trashed();
+                    if let Some(entry) = trashed.get(next(trashed.len())) {
+                        store.restore_many(std::slice::from_ref(&entry.id));
+                        agrees(&mut reader, &store, step);
+                        store.save().unwrap();
+                    }
+                }
+                (7, Some(_), Some(path)) => {
+                    append(&path, &format!("outside {step}"));
+                    store.refresh().unwrap();
+                }
+                (8, _, _) => {
+                    let made = dir.join(&folder).join(format!("Outside {step}.md"));
+                    fs::create_dir_all(made.parent().unwrap()).unwrap();
+                    fs::write(&made, headed(&format!("Outside {step}"), "from elsewhere")).unwrap();
+                    store.refresh().unwrap();
+                }
+                (9, Some(_), Some(path)) => {
+                    fs::remove_file(&path).unwrap();
+                    store.refresh().unwrap();
+                }
+                (10, Some(_), Some(path)) => {
+                    fs::rename(&path, path.with_file_name(format!("Moved {step}.md"))).unwrap();
+                    store.refresh().unwrap();
+                }
+                (11, Some(id), Some(path)) => {
+                    store.find_note_mut(&id).unwrap().body = format!("mine {step}");
+                    agrees(&mut reader, &store, step);
+                    append(&path, &format!("theirs {step}"));
+                    store.save().unwrap();
+                }
+                (12, Some(id), _) => {
+                    store.find_note_mut(&id).unwrap().body = format!("lost {step}");
+                    agrees(&mut reader, &store, step);
+                    store.forget_changes();
+                    store.refresh().unwrap();
+                }
+                (13, _, _) => {
+                    let gone = format!("gone{step}");
+                    store
+                        .create_note(titles[next(titles.len())], "doomed", vec![], &gone)
+                        .unwrap();
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                    agrees(&mut reader, &store, step);
+                    store.delete_dir_recursive(&gone);
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+                _ => {
+                    store
+                        .create_note(titles[next(titles.len())], "made", vec![], &folder)
+                        .unwrap();
+                    agrees(&mut reader, &store, step);
+                    store.save().unwrap();
+                }
+            }
+            agrees(&mut reader, &store, step);
+        }
+    }
+
+    fn agrees(reader: &mut Reader, store: &Store, step: usize) {
+        reader.catch_up(store);
+        assert_eq!(reader.map, scan(store), "step {step}");
     }
 }
