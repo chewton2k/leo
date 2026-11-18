@@ -315,7 +315,7 @@ fn an_empty_folder_created_by_another_app_is_visible_without_restarting() {
     let (state, dir, _) = state_with(&[]);
     let mut other = Store::load_from(&dir.path().join("notes")).unwrap();
     other.create_dir("new-folder");
-    other.save_files().unwrap();
+    other.save().unwrap();
     let Json(dirs) = run(list_folders(State(state))).unwrap();
     assert_eq!(dirs[0].name, "new-folder");
 }
@@ -649,7 +649,14 @@ fn folder_note_counts_include_everything_below_and_ignore_lookalike_names() {
     let store = state.fresh();
     assert!(!all.is_empty());
     for dir in &all {
-        assert_eq!(dir.notes, store.dir_contents(&dir.name).0, "{}", dir.name);
+        let inside = store
+            .notes
+            .iter()
+            .filter(|n| {
+                n.directory == dir.name || n.directory.starts_with(&format!("{}/", dir.name))
+            })
+            .count();
+        assert_eq!(dir.notes, inside, "{}", dir.name);
     }
     let count = |name: &str| all.iter().find(|d| d.name == name).unwrap().notes;
     assert_eq!(
