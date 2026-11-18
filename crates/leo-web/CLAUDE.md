@@ -908,7 +908,11 @@ Embeddings, summaries, concepts and note links are shared by search, related
 notes and Felix, and refresh when idle. The graph page, canvas renderer and
 `/api/graph*` routes are removed; connection caches stay. A note the meaning model refuses waits 10 minutes, or until edited, while the rest index. Graph, vector and
 caption maintenance starts after its first interval and defers while the window
-is hidden or the capture activity gate is busy.
+is hidden or the capture activity gate is busy. The idle check compares version
+stamps first (store fingerprint, caption generation, graph generation, meaning
+version) and reads no note when nothing changed; pictures are looked for only in
+the notes the store's changed-notes feed names (`Store::changes_since`, or
+every note after "start over"); whether a build is due is asked every time.
 
 ## Calendar and tasks (`calendar.rs`, `ics.rs`, `tasks.rs`, `routes/tasks.rs`, `app/calendar.js`, `schedule.js`)
 

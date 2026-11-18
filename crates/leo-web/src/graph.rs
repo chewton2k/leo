@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -793,6 +794,7 @@ pub struct Graphs {
     held: Mutex<Option<Arc<Cache>>>,
     job: Mutex<Job>,
     auto: Mutex<Option<std::time::Instant>>,
+    generation: AtomicU64,
 }
 
 impl Graphs {
@@ -842,6 +844,7 @@ impl Graphs {
             near: Mutex::new(None),
             held: Mutex::new(None),
             auto: Mutex::new(None),
+            generation: AtomicU64::new(0),
             job: Mutex::new(Job {
                 state: "idle",
                 done: 0,
@@ -1004,6 +1007,7 @@ impl Graphs {
         });
         if written.is_ok() {
             *held = None;
+            self.generation.fetch_add(1, Ordering::AcqRel);
         }
         written
     }
@@ -1049,8 +1053,42 @@ impl Graphs {
         self.writer.is_none() || self.settled_by(&self.status(sources))
     }
 
-    fn settled_by(&self, status: &Status) -> bool {
+    pub fn settled_by(&self, status: &Status) -> bool {
         status.state != "building" && (status.built_at.is_none() || status.requests == 0)
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub fn inputs(&self) -> (u64, u64, Scale) {
+        let vectors = self.vectors.as_ref().map_or(0, |v| v.version());
+        (self.generation(), vectors, self.scale())
+    }
+
+    pub fn live(&self, plan: &Status) -> Status {
+        let job = self.job();
+        Status {
+            state: job.state,
+            done: job.done,
+            total: job.total,
+            message: job.message,
+            ..plan.clone()
+        }
+    }
+
+    pub fn due(&self, status: &Status, idle: std::time::Duration) -> bool {
+        let since = self
+            .auto
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .map(|at| at.elapsed());
+        self.writer.is_some() && should_update(status, idle, since)
+    }
+
+    pub fn begin(self: &Arc<Self>, sources: Vec<Source>) {
+        *self.auto.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
+        self.start(sources);
     }
 
     pub fn update_if_due(
@@ -1061,17 +1099,11 @@ impl Graphs {
         if self.writer.is_none() {
             return (false, true);
         }
-        let since = self
-            .auto
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .map(|at| at.elapsed());
         let status = self.status(&sources);
-        if !should_update(&status, idle, since) {
+        if !self.due(&status, idle) {
             return (false, self.settled_by(&status));
         }
-        *self.auto.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
-        self.start(sources);
+        self.begin(sources);
         (true, false)
     }
 
@@ -1426,6 +1458,57 @@ mod tests {
             graphs.load().notes.get("a").map(|r| r.summary.as_str()),
             Some("BFS")
         );
+    }
+
+    #[test]
+    fn a_due_build_starts_from_the_remembered_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = [source(
+            "a",
+            "Graph traversals",
+            "BFS uses a queue.",
+            "cs130",
+        )];
+        let writer: Writer = Arc::new(|_: &str, _: &str, _: u32| {
+            Ok(r#"{"notes": [{"id": "a", "summary": "BFS", "concepts": ["queue"]}]}"#.into())
+        });
+        let graphs = Arc::new(Graphs::new(dir.path().join("graph.json"), Some(writer)));
+        let cache = Cache {
+            built_at: Some("2026-10-09T00:00:00Z".into()),
+            ..Cache::default()
+        };
+        std::fs::write(graphs.path(), serde_json::to_string(&cache).unwrap()).unwrap();
+        let plan = graphs.status(&notes);
+        let inputs = graphs.inputs();
+        assert_eq!(graphs.live(&plan), graphs.status(&notes));
+        let almost = UPDATE_WHEN_IDLE - std::time::Duration::from_secs(1);
+        assert!(!graphs.due(&graphs.live(&plan), almost));
+        assert!(graphs.due(&graphs.live(&plan), UPDATE_WHEN_IDLE));
+        graphs.begin(notes.to_vec());
+        assert_eq!(graphs.inputs(), inputs, "starting a build moves no stamp");
+        assert!(!graphs.due(&graphs.live(&plan), UPDATE_WHEN_IDLE));
+        let waited = std::time::Instant::now();
+        while graphs.building().is_some() {
+            assert!(waited.elapsed().as_secs() < 5);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_ne!(graphs.inputs(), inputs, "a finished build moves the stamp");
+        assert!(graphs.generation() > 0);
+        let failed = Status {
+            state: "failed",
+            message: Some("no".into()),
+            ..plan.clone()
+        };
+        let retry = graphs.auto.lock().unwrap().unwrap();
+        assert!(retry.elapsed() < RETRY_AUTO_AFTER);
+        assert!(!graphs.due(&failed, UPDATE_WHEN_IDLE), "a failure waits");
+        if let Some(long_ago) = std::time::Instant::now().checked_sub(RETRY_AUTO_AFTER) {
+            *graphs.auto.lock().unwrap() = Some(long_ago);
+            assert!(
+                graphs.due(&failed, UPDATE_WHEN_IDLE),
+                "a retry that came due starts"
+            );
+        }
     }
 
     #[test]

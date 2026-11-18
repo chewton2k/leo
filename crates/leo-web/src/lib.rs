@@ -385,6 +385,10 @@ async fn keep_graph_current(state: AppState) {
     let mut graphed_at = None;
     let mut stuck = None;
     let mut swept_at = None;
+    let mut planned = None;
+    let mut captions_at = None;
+    let mut captions_seen = 0;
+    let mut more_pictures = false;
     loop {
         tick.tick().await;
         if margin::sweep_due(swept_at) {
@@ -445,36 +449,70 @@ async fn keep_graph_current(state: AppState) {
         let (mut settled, mut busy) = if state.graphs.writer().is_none() {
             (true, state.graphs.building().is_some())
         } else {
-            let Ok(sources) = state
-                .read_store(|store| Ok(graph::sources(&store.notes)))
-                .await
-            else {
-                continue;
+            let key = (seen, state.graphs.inputs());
+            let plan = match planned
+                .as_ref()
+                .filter(|(at, _): &&(_, graph::Status)| *at == key)
+            {
+                Some((_, plan)) => plan.clone(),
+                None => {
+                    let Ok(sources) = state
+                        .read_store(|store| Ok(graph::sources(&store.notes)))
+                        .await
+                    else {
+                        continue;
+                    };
+                    let graphs = Arc::clone(&state.graphs);
+                    let Ok(plan) =
+                        tokio::task::spawn_blocking(move || graphs.status(&sources)).await
+                    else {
+                        continue;
+                    };
+                    planned = Some((key, plan.clone()));
+                    plan
+                }
             };
-            let graphs = Arc::clone(&state.graphs);
-            let Ok(checked) = tokio::task::spawn_blocking(move || {
-                let (started, settled) = graphs.update_if_due(sources, idle);
-                (settled, started || graphs.building().is_some())
-            })
-            .await
-            else {
-                continue;
-            };
-            checked
+            let status = state.graphs.live(&plan);
+            if state.graphs.due(&status, idle) {
+                let Ok(sources) = state
+                    .read_store(|store| Ok(graph::sources(&store.notes)))
+                    .await
+                else {
+                    continue;
+                };
+                state.graphs.begin(sources);
+                (false, true)
+            } else {
+                (
+                    state.graphs.settled_by(&status),
+                    state.graphs.building().is_some(),
+                )
+            }
         };
         if let Some(seer) = state.seer.clone() {
             let captions = Arc::clone(&state.captions);
-            let listed = Arc::clone(&captions);
-            let Ok((paths, forget)) = state
-                .read_store(move |store| {
-                    Ok((
-                        captions::uncaptioned(store, &listed, PICTURES_PER_TICK),
-                        captions::may_forget(store),
-                    ))
-                })
-                .await
-            else {
-                continue;
+            let at = (seen, captions.generation());
+            let (paths, forget) = if captions_at != Some(at) || more_pictures {
+                let listed = Arc::clone(&captions);
+                let Ok((next, paths, forget)) = state
+                    .read_store(move |store| {
+                        let (next, changed) = store.changes_since(captions_seen);
+                        Ok((
+                            next,
+                            captions::uncaptioned(store, &listed, PICTURES_PER_TICK, &changed),
+                            captions::may_forget(store),
+                        ))
+                    })
+                    .await
+                else {
+                    continue;
+                };
+                captions_seen = next;
+                captions_at = Some(at);
+                more_pictures = !paths.is_empty();
+                (paths, forget)
+            } else {
+                (Vec::new(), false)
             };
             if forget {
                 let stale = Arc::clone(&captions);
