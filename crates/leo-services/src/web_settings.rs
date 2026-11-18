@@ -235,7 +235,7 @@ fn open(path: &Path) -> Result<DocumentMut> {
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        std::fs::write(path, Config::default_toml())?;
+        leo_core::paths::write_atomic(path, Config::default_toml())?;
     }
     let text = std::fs::read_to_string(path)
         .with_context(|| format!("could not read {}", path.display()))?;
@@ -392,6 +392,17 @@ mod tests {
             &Default::default(),
             None,
         )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_missing_config_is_created_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("leo").join("config.toml");
+        open(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "config.toml created with {mode:o}");
     }
 
     #[test]
