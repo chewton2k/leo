@@ -9,7 +9,7 @@ const DICTATION_COMMON_WORDS = new Set(
   before through under between should might must being have that its yes okay`.split(/\s+/)
 );
 let dictationShortcutNote = null, dictationCaptureArmed = false;
-const dictationOriginals = new Set();
+const dictationOriginals = new Set(), dictationFull = new Map();
 function dictationKeycaps(keys) {
   return shortcutParts(keys).map((part) => `<kbd>${esc(part)}</kbd>`).join('');
 }
@@ -50,20 +50,28 @@ let dictationEdit = null;
 const dictationOffers = {}, DICTATION_MOST_WORDS = 200;
 function dictationRecent(items) {
   return items.length ? items.map((item) => {
-    const id = esc(String(item.id));
+    const id = esc(String(item.id)), full = dictationFull.get(item.id);
+    const whole = full ? full.text : item.text, cut = item.cut && !full;
     const text = dictationEdit && dictationEdit.id === item.id
-      ? `<input class="set-input grow" data-edit-text value="${esc(dictationEdit.text)}" aria-label="Edit dictation">`
-      : `<span class="grow" role="button" tabindex="0" title="Edit" data-action="dictation-edit" data-id="${id}">${esc(item.text)}</span>`;
+      ? (item.cut ? `<textarea class="set-input grow" data-edit-text rows="8" aria-label="Edit dictation">${esc(dictationEdit.text)}</textarea>` : `<input class="set-input grow" data-edit-text value="${esc(dictationEdit.text)}" aria-label="Edit dictation">`)
+      : `<span class="grow" role="button" tabindex="0" title="Edit" data-action="dictation-edit" data-id="${id}">${esc(whole)}${cut ? '\u2026' : ''}</span>${cut ? `<button type="button" class="btn plain sm" data-action="dictation-full" data-id="${id}">Show all</button>` : ''}`;
     const offers = (dictationOffers[item.id] || []).map((word) => `<button class="chip accent" data-action="dictation-add-word" data-id="${id}" data-word="${esc(word)}">${ICON.plus}Add \u201c${esc(word)}\u201d to custom words</button>`).join('');
     const shown = item.original && dictationOriginals.has(item.id);
     const edited = item.edited ? `<span class="hint">Edited${item.original ? ` \u00b7 <button type="button" class="link-btn" data-action="dictation-original" data-id="${id}" aria-expanded="${shown ? 'true' : 'false'}">${shown ? 'Hide' : 'Show'} original</button>` : ''}</span>` : '';
-    return `<div class="set-row" data-refresh-key="${id}">${text}${edited}<button class="btn plain sm" data-action="dictation-copy" data-id="${id}">Copy</button></div>${shown ? `<p class="set-note" data-refresh-key="original-${id}">Original: ${esc(item.original)}</p>` : ''}${offers ? `<div class="card-meta" data-refresh-key="offers-${id}">${offers}</div>` : ''}`;
+    return `<div class="set-row" data-refresh-key="${id}">${text}${edited}<button class="btn plain sm" data-action="dictation-copy" data-id="${id}">Copy</button></div>${shown ? `<p class="set-note" data-refresh-key="original-${id}">Original: ${esc(full && full.original != null ? full.original : item.original)}${item.original_cut && !full ? '\u2026' : ''}</p>` : ''}${offers ? `<div class="card-meta" data-refresh-key="offers-${id}">${offers}</div>` : ''}`;
   }).join('') : '<p class="set-note">Your dictations will appear here.</p>';
 }
+function dictationItem(id) {
+  return ((state.dictation && state.dictation.recent) || []).find((i) => i.id === id);
+}
+function showDictationFull(el) {
+  return dictationChange({ action: 'full', id: Number(el.dataset.id) });
+}
 function toggleDictationOriginal(el) {
-  const id = Number(el.dataset.id);
+  const id = Number(el.dataset.id), item = dictationItem(id);
   if (!dictationOriginals.delete(id)) dictationOriginals.add(id);
   showDictationRecent();
+  if (dictationOriginals.has(id) && item && item.original_cut && !dictationFull.has(id)) return dictationChange({ action: 'full', id });
 }
 function showDictationRecent() {
   refreshPanel($('#dictation-recent'), dictationRecent((state.dictation && state.dictation.recent) || []));
@@ -85,10 +93,13 @@ function dictationWordOffers(before, after, known) {
   });
   return phrases.slice(0, 3);
 }
-function startDictationEdit(el) {
-  const id = Number(el.dataset.id), item = ((state.dictation && state.dictation.recent) || []).find((i) => i.id === id);
+async function startDictationEdit(el) {
+  const id = Number(el.dataset.id), item = dictationItem(id);
   if (!item) return;
-  dictationEdit = { id, text: item.text };
+  if (item.cut && !dictationFull.has(id)) await dictationChange({ action: 'full', id });
+  const full = dictationFull.get(id);
+  if (item.cut && !full) return;
+  dictationEdit = { id, text: full ? full.text : item.text };
   showDictationRecent();
   const input = $('[data-edit-text]');
   if (input) { input.focus(); input.select(); }
@@ -99,10 +110,12 @@ function cancelDictationEdit() {
 }
 async function saveDictationEdit() {
   const edit = dictationEdit, text = edit.text.trim();
-  const before = (state.dictation.recent.find((i) => i.id === edit.id) || {}).text || '';
+  const full = dictationFull.get(edit.id);
+  const before = full ? full.text : (state.dictation.recent.find((i) => i.id === edit.id) || {}).text || '';
   dictationEdit = null;
   try {
     if (text && text !== before) {
+      dictationFull.delete(edit.id);
       await dictationChange({ action: 'edit', id: edit.id, text });
       dictationOffers[edit.id] = dictationWordOffers(before, text, state.dictation.settings.custom_words || []);
     }
@@ -134,6 +147,7 @@ function dictationDraft() {
 }
 function pruneDictationOffers(view) {
   for (const id of Object.keys(dictationOffers)) if (!(view.recent || []).some((item) => String(item.id) === id)) delete dictationOffers[id];
+  for (const id of dictationFull.keys()) if (!(view.recent || []).some((item) => item.id === id)) dictationFull.delete(id);
 }
 let dictationGeneration = 0;
 async function dictationChange(change, mine = seq) {
@@ -141,6 +155,7 @@ async function dictationChange(change, mine = seq) {
   const view = await api('/api/dictation', { method: 'POST', body: change });
   if (mine !== seq || generation !== dictationGeneration || state.view !== 'settings') return;
   state.dictation = view;
+  if (view.full) dictationFull.set(view.full.id, view.full);
   dictateKeysSeen(view);
   pruneDictationOffers(view);
   updateDictationStatus(view);
@@ -248,7 +263,7 @@ app.addEventListener('keydown', (e) => {
     else saveDictationEdit().catch(fail);
   } else if ((e.key === 'Enter' || e.key === ' ') && el.dataset?.action === 'dictation-edit') {
     e.preventDefault();
-    startDictationEdit(el);
+    startDictationEdit(el).catch(fail);
   }
 });
 app.addEventListener('input', (e) => {

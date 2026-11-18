@@ -436,3 +436,36 @@ test('word offers for a dictation that left the history are dropped after a refr
   assert.deepEqual(plain(vm.runInContext('state.dictation.recent.map((i) => i.id)', context)), [8]);
   assert.deepEqual(plain(vm.runInContext('Object.keys(dictationOffers)', context)), [], 'row 7 is gone from the history, so its offers should be too');
 });
+function longContext() {
+  const whole = 'start '.repeat(500) + 'the rest';
+  const recent = [{ id: 7, text: whole.slice(0, 2000), cut: true, edited: true, original: 'o'.repeat(2000), original_cut: true }];
+  const { context, calls, panel } = editContext([], recent);
+  context.state.view = 'settings';
+  context.api = async (url, options) => {
+    calls.push(plain(options.body));
+    const full = options.body.action === 'full' ? { full: { id: 7, text: whole, original: 'o'.repeat(3000) } } : {};
+    return { settings: { custom_words: [] }, recent, ...full };
+  };
+  return { context, calls, panel, whole };
+}
+test('a long recent dictation shows its start and opens whole on demand', async () => {
+  const { context, calls, panel, whole } = longContext();
+  context.showDictationRecent();
+  assert.ok(panel.html.includes('data-action="dictation-full" data-id="7">Show all</button>'));
+  assert.ok(panel.html.includes(whole.slice(0, 2000) + '…'));
+  assert.ok(!panel.html.includes('the rest'));
+  await context.showDictationFull({ dataset: { id: '7' } });
+  assert.deepEqual(calls, [{ action: 'full', id: 7 }]);
+  assert.ok(panel.html.includes(whole));
+  assert.ok(!panel.html.includes('dictation-full'));
+  await context.toggleDictationOriginal({ dataset: { id: '7' } });
+  assert.ok(panel.html.includes('Original: ' + 'o'.repeat(3000) + '</p>'));
+  assert.equal(calls.length, 1);
+});
+test('editing a cut row edits the whole text', async () => {
+  const { context, calls, panel, whole } = longContext();
+  await context.startDictationEdit({ dataset: { id: '7' } });
+  assert.deepEqual(calls, [{ action: 'full', id: 7 }]);
+  assert.ok(panel.html.includes(`<textarea class="set-input grow" data-edit-text rows="8" aria-label="Edit dictation">${whole}</textarea>`));
+  assert.equal(vm.runInContext('dictationEdit.text', context), whole);
+});

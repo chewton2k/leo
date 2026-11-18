@@ -15,6 +15,7 @@ const actions = {
   'shortcut-reset': (el) => shortcutReset(el.dataset.name),
   'dictation-record': () => dictationChange({action:'record_shortcut'}),
   'dictation-original': toggleDictationOriginal,
+  'dictation-full': showDictationFull,
   'dictation-clear': clearDictationsAsk, 'dictation-clear-now': clearDictationsNow,
   'dictation-copy': (el) => dictationChange({action:'copy',id:Number(el.dataset.id)}).then(() => pulse(el)),
   'dictation-edit': startDictationEdit,

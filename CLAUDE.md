@@ -171,7 +171,9 @@ settings and credentials are excluded from note exports.
   owns global shortcuts, permissions, in-memory capture, transactional paste
   and a bundled nonactivating popup. Writing AI runs on dictations only when
 the user turns on the AI writing switch (2026-11-02, the user's call; off by default; on keeps a stored `selected`, else `quick`). Recent
-  results are twenty local rows in `leo.db`, never notes or sync data; an edited
+  results are twenty local rows in `leo.db`, kept whole, any length (2026-11-17,
+  principle 1; the list shows each row's first 2,000 characters and opens the whole
+  text on demand), never notes or sync data; an edited
   row keeps its `original` text (Show original). Custom words fix spelling in
   `dictation/text.rs` and, where the speech model supports it, are passed to it
   as vocabulary (a recited-list echo is stripped); the AI check refuses changed

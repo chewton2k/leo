@@ -284,7 +284,9 @@ pub(crate) fn router(state: AppState) -> Router {
             "/api/dictation",
             get(crate::dictation::get)
                 .post(crate::dictation::change)
-                .layer(axum::extract::DefaultBodyLimit::max(200_000)),
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::dictation::MOST_BODY,
+                )),
         )
         .route(
             "/api/speech",
