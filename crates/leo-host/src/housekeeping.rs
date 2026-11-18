@@ -222,6 +222,7 @@ fn kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> Vec<std::pa
         .sessions
         .into_iter()
         .filter(|b| b.saved && b.started < before && !session::locked(&b.dir))
+        .filter(|b| !session::has_retry(&b.dir))
         .map(|b| b.dir);
     let damaged = scan
         .malformed
@@ -233,7 +234,10 @@ fn kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> Vec<std::pa
 fn still_kept(dir: &Path, before: chrono::DateTime<chrono::Utc>) -> bool {
     match Session::open(dir) {
         Ok(found) => {
-            found.manifest.saved && found.manifest.started < before && !session::locked(dir)
+            found.manifest.saved
+                && found.manifest.started < before
+                && !session::locked(dir)
+                && !session::has_retry(dir)
         }
         Err(_) => session::malformed(dir) && old_and_damaged(dir, before),
     }
@@ -661,11 +665,34 @@ mod tests {
         std::fs::write(kept.join("seg-00001.err"), "boom").unwrap();
         let broken = damaged(root, 41, Some("{"), true);
         let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
-        let preview =
-            crate::record::pending_before(root, cutoff).len() + kept_audio(root, cutoff).len();
-        let deleted = expire_kept_audio(root, cutoff);
+        let old: Vec<String> = crate::record::pending_before(root, cutoff)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let preview = old.len() + kept_audio(root, cutoff).len();
+        let deleted = discard_recordings(root, &old) + expire_kept_audio(root, cutoff);
         assert_eq!((preview, deleted), (2, 2));
         assert!(!kept.exists() && !broken.exists());
+    }
+
+    #[test]
+    fn kept_audio_is_not_counted_twice() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let retry = session_of(root, "kept-for-retry", true, 40);
+        std::fs::write(retry.join("seg-00001.wav"), vec![0u8; 4096]).unwrap();
+        std::fs::write(retry.join("seg-00001.err"), "boom").unwrap();
+        let done = session_of(root, "kept-no-retry", true, 41);
+        std::fs::write(done.join("seg-00001.err"), "boom").unwrap();
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        let old: Vec<String> = crate::record::pending_before(root, cutoff)
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(old, ["kept-for-retry"]);
+        assert_eq!(kept_audio(root, cutoff), std::slice::from_ref(&done));
+        assert_eq!(expire_kept_audio(root, cutoff), 1);
+        assert!(retry.exists() && !done.exists());
     }
 
     #[test]

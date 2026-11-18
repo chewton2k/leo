@@ -137,6 +137,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
         commit: Some(Arc::new(move |notes, note| {
             leo_services::session::Session::open(&dir)?.commit(notes, note)
         })),
+        into: None,
     })
 }
 
@@ -357,6 +358,7 @@ fn finish_tracks(
         body,
         writer_failed: written.writer_failed,
         source: Some(source),
+        into: None,
         commit: Some(Arc::new(move |notes, note| {
             leo_core::recording::save_merged(notes, note, &committed)?;
             for (_, dir) in &dirs {
@@ -444,7 +446,8 @@ pub(crate) fn recordings_root() -> Result<Option<std::path::PathBuf>> {
 }
 
 fn waiting(session: &leo_services::session::Session) -> bool {
-    !session.manifest.saved && !leo_services::session::locked(&session.dir)
+    (!session.manifest.saved || leo_services::session::has_retry(&session.dir))
+        && !leo_services::session::locked(&session.dir)
 }
 
 fn grouped(sessions: Vec<leo_services::session::Session>) -> Vec<leo_web::record::Pending> {
@@ -502,7 +505,9 @@ pub fn pending_before(
         leo_services::session::scan(root, leo_services::session::Walk::OlderThan(before))
             .sessions
             .into_iter()
-            .filter(|b| !b.saved && b.started < before)
+            .filter(|b| {
+                (!b.saved || leo_services::session::has_retry(&b.dir)) && b.started < before
+            })
             .filter_map(|b| leo_services::session::Session::open(&b.dir).ok())
             .filter(|s| waiting(s) && s.manifest.started < before)
             .collect();
@@ -515,9 +520,16 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         .as_deref()
         .ok_or_else(|| anyhow!("Choose an interrupted recording."))?;
     let root = recordings_root()?.ok_or_else(|| anyhow!("This recording cannot be recovered."))?;
-    let selected: Vec<_> = leo_services::session::find(&root, id)
+    let found: Vec<_> = leo_services::session::find(&root, id)
         .into_iter()
         .filter(waiting)
+        .collect();
+    let into = found
+        .iter()
+        .filter(|session| session.manifest.saved)
+        .find_map(|session| session.owner());
+    let selected: Vec<_> = found
+        .into_iter()
         .map(|session| (session.manifest.id, session.dir))
         .collect();
     anyhow::ensure!(
@@ -548,14 +560,16 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
             Err(e) => return Err(e),
         }
     }
-    finish_tracks(
+    let mut recorded = finish_tracks(
         dirs,
         warnings,
         id.to_owned(),
         listening.profile,
         listening.wants,
         heard,
-    )
+    )?;
+    recorded.into = into;
+    Ok(recorded)
 }
 
 fn resume_retained(
@@ -941,6 +955,32 @@ mod tests {
                     assert!(kept.saved);
                     assert_eq!(kept.note.as_deref(), Some("call-note-01"));
                 }
+            },
+        );
+    }
+
+    #[test]
+    fn a_saved_recording_recovers_into_its_note() {
+        in_scratch_home(
+            "record::tests::a_saved_recording_recovers_into_its_note",
+            || {
+                let dir = track("kept-retry-01", false);
+                let mut kept = leo_services::session::Session::open(&dir).unwrap();
+                kept.manifest.saved = true;
+                kept.manifest.note = Some("note-owner-1".into());
+                kept.save().unwrap();
+                std::fs::write(dir.join("seg-00000.txt"), "the first part").unwrap();
+                std::fs::write(dir.join("seg-00001.err"), "failed").unwrap();
+                silent_part(&dir);
+                std::fs::rename(dir.join("seg-00000.wav"), dir.join("seg-00001.wav")).unwrap();
+                assert!(super::pending_one(
+                    &leo_services::session::root().unwrap(),
+                    "kept-retry-01"
+                )
+                .is_some());
+                let recorded = super::recover(listening("kept-retry-01"), &mut |_| {}).unwrap();
+                assert_eq!(recorded.into.as_deref(), Some("note-owner-1"));
+                assert_eq!(recorded.source.unwrap().id, "kept-retry-01");
             },
         );
     }
