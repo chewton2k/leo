@@ -1790,8 +1790,9 @@ test.describe('Felix', () => {
   test('a message sent while a file is still being read waits for it, with Felix thinking', async ({ page }) => {
     let release;
     const held = new Promise((resolve) => { release = resolve; });
-    await page.route('**/api/chats/*/files', async (route) => {
-      if (route.request().method() !== 'POST') return route.fulfill({ json: [] });
+    await page.route(/\/api\/chats\/[^/]+\/files(\/|$)/, async (route) => {
+      if (route.request().method() === 'DELETE') return route.fallback();
+      if (route.request().method() !== 'PUT') return route.fulfill({ json: [] });
       await held;
       return route.fulfill({ status: 201, json: { id: 'doc-slow-1', name: 'slow.pdf', chars: 30, excerpt: 'Week 4: Graphs' } });
     });
@@ -2147,9 +2148,11 @@ test.describe('pictures', () => {
     const uploaded = [];
     let finishReading;
     const reading = new Promise(resolve => { finishReading = resolve; });
-    await page.route('**/api/chats/*/files', async (route) => {
-      if (route.request().method() !== 'POST') return route.fulfill({ json: [] });
-      const body = route.request().postDataJSON();
+    await page.route(/\/api\/chats\/[^/]+\/files(\/|$)/, async (route) => {
+      if (route.request().method() === 'DELETE') return route.fallback();
+      if (route.request().method() !== 'PUT') return route.fulfill({ json: [] });
+      const url = new URL(route.request().url());
+      const body = { name: decodeURIComponent(url.pathname.split('/').pop()), type: url.searchParams.get('type'), data: route.request().postDataBuffer() };
       uploaded.push(body);
       await reading;
       return route.fulfill({ status: 201, json: { id: 'doc-pic-1', name: body.name, chars: 40 } });
@@ -2174,7 +2177,7 @@ test.describe('pictures', () => {
     await expect(chip.locator('.file-peek img')).toBeVisible();
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toMatchObject({ name: 'pasted-1.jpg', type: 'image/jpeg' });
-    expect(Buffer.from(uploaded[0].data, 'base64').subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(uploaded[0].data.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     await page.locator('#chat-input').fill('what is this?');
     await page.locator('#chat-input').press('Enter');
     await expect(page.locator('#chat .msg.leo').last()).toContainText('That diagram shows a heap.');
@@ -2598,6 +2601,11 @@ test.describe('uploads', () => {
       sent = route.request().postDataJSON();
       await route.fulfill({ status: 202, json: { id: 'job-into' } });
     });
+    let inserted = null;
+    await page.route('**/api/notes/*/insert', async (route) => {
+      inserted = route.request().postDataJSON();
+      await route.continue({ postData: JSON.stringify({ text: '## Heap proofs\n\nSift down keeps the order.', line: inserted.line, base: inserted.base }) });
+    });
     await page.route('**/api/import/job-into', (route) => {
       polls += 1;
       route.fulfill({ json: polls < 2 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: note.id, section: '## Heap proofs\n\nSift down keeps the order.' } });
@@ -2624,6 +2632,8 @@ test.describe('uploads', () => {
     await expect(page.locator('#doc')).toContainText('Sift down keeps the order.');
     await expect(page).toHaveURL(new RegExp(`#/n/${note.id}$`));
     expect(sent).toMatchObject({ into: note.id, each: false, wants: 'just the proofs', title: null });
+    expect(inserted, 'the page names the upload and sends no text').toMatchObject({ job: 'job-into', line: null });
+    expect(inserted.text).toBeUndefined();
     expect(sent.files.map((f) => f.name)).toEqual(['proofs.pdf', 'board.png']);
     expect(sent.files.map((f) => f.item).sort()).toEqual(puts.map((p) => p.item).sort());
     expect(puts.find((p) => p.name === 'proofs.pdf').body.toString()).toBe('%PDF fake');
