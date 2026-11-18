@@ -567,9 +567,17 @@ fn frame_level(frame: &[f32]) -> f32 {
     (frame.iter().map(|n| n * n).sum::<f32>() / frame.len() as f32).sqrt()
 }
 
-fn speech_chunks(mut pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
+fn speech_chunks(pcm: Vec<f32>, gain: f32) -> Result<Vec<Vec<f32>>> {
+    chunks_with(pcm, gain, super::prepare)
+}
+
+fn chunks_with(
+    mut pcm: Vec<f32>,
+    gain: f32,
+    prepare: fn(Vec<f32>) -> Result<Vec<Vec<f32>>>,
+) -> Result<Vec<Vec<f32>>> {
     pcm.iter_mut().for_each(|n| *n *= gain);
-    let mut chunks = super::prepare(pcm)?;
+    let mut chunks = prepare(pcm)?;
     for chunk in &mut chunks {
         chunk.iter_mut().for_each(|n| *n /= gain);
     }
@@ -879,11 +887,13 @@ mod audio_level_tests {
             })
             .collect();
         let gain = speech_gain(&pcm);
-        let mut old = super::super::prepare(raised(&pcm, gain)).unwrap();
+        let split: fn(Vec<f32>) -> Result<Vec<Vec<f32>>> =
+            |pcm| Ok(pcm.chunks(7 * 16_000).map(<[f32]>::to_vec).collect());
+        let mut old = split(raised(&pcm, gain)).unwrap();
         for chunk in &mut old {
             chunk.iter_mut().for_each(|n| *n /= gain);
         }
-        let new = speech_chunks(pcm, gain).unwrap();
+        let new = chunks_with(pcm, gain, split).unwrap();
         assert_eq!(old.len(), new.len());
         for (a, b) in old.iter().zip(&new) {
             assert!(a

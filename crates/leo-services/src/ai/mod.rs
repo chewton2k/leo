@@ -468,9 +468,15 @@ mod tests {
             std::fs::create_dir_all(path.join("scans")).unwrap();
             std::fs::write(path.join("scans").join("00000.jpg"), [1]).unwrap();
             if old {
-                std::fs::File::options()
-                    .read(true)
-                    .open(&path)
+                let mut open = std::fs::File::options();
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    open.write(true).custom_flags(0x0200_0000);
+                }
+                #[cfg(not(windows))]
+                open.read(true);
+                open.open(&path)
                     .unwrap()
                     .set_modified(
                         std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400),
