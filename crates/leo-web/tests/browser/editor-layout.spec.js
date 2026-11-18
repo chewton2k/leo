@@ -1347,13 +1347,16 @@ test('heading rail keeps every marker reachable in a short viewport and tracks r
     await page.setViewportSize({ width: 2000, height: 500 });
     await page.goto(url);
     const rail = page.locator('.outline-ticks');
-    await expect(rail.locator('[data-tick]')).toHaveCount(300);
+    await expect(rail.locator('[data-tick]')).toHaveCount(24);
+    await expect(rail.locator('.on')).toHaveAttribute('data-tick', '0');
     const box = await rail.boundingBox();
     expect(box.y + box.height).toBeLessThan(500);
     await rail.focus();
     await rail.press('End');
     await expect(page.getByRole('tooltip')).toContainText('Section 300');
-    await expect(rail.locator('.on')).toHaveAttribute('data-tick', '0');
+    await expect(rail.locator('[data-tick]'), 'the rail turns to the last page of headings').toHaveCount(12);
+    await expect(rail.locator('.on'), 'the reading place is not on this page').toHaveCount(0);
+    await expect(page.locator('.note-outline nav button[aria-current]')).toHaveAttribute('data-line', '0');
     await rail.press('Space');
     await expect(page.locator('#doc .blk:focus')).toContainText('Section 300');
     await expect(rail.locator('.on')).toHaveAttribute('data-tick', '897');
