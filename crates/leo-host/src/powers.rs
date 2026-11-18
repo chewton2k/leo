@@ -118,6 +118,24 @@ pub fn powers() -> leo_web::Powers {
                 )
             },
         )),
+        reader_to: Some(std::sync::Arc::new(
+            |path: &std::path::Path,
+             name: &str,
+             mime: &str,
+             progress: &mut dyn FnMut(&str),
+             out: &mut dyn std::io::Write| {
+                leo_services::import::read_to(
+                    path,
+                    name,
+                    mime,
+                    &|prompt, images, most| {
+                        leo_services::ai::see(prompt, images, most).map_err(crate::felix::said)
+                    },
+                    progress,
+                    out,
+                )
+            },
+        )),
         converse: Some(crate::felix::converser()),
         seer: Some(crate::felix::seer()),
         meaning: Some(crate::felix::meaning()),
