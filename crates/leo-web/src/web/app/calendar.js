@@ -830,7 +830,7 @@ function calCompose(day, start, end) {
     box.style.top = `${(start / 60) * CAL_HOUR_PX}px`;
     box.style.height = `${Math.max(34, ((end - start) / 60) * CAL_HOUR_PX - 2)}px`;
   }
-  box.innerHTML = `<input class="cal-compose-input" maxlength="300" placeholder="New task" aria-label="New task${timed ? `, ${esc(calRange(start, end))}` : ''}" autocomplete="off">${timed ? `<span class="cal-sub">${esc(calRange(start, end))}</span>` : ''}`;
+  box.innerHTML = `<input class="cal-compose-input" placeholder="New task" aria-label="New task${timed ? `, ${esc(calRange(start, end))}` : ''}" autocomplete="off">${timed ? `<span class="cal-sub">${esc(calRange(start, end))}</span>` : ''}`;
   host.appendChild(box);
   const input = box.querySelector('input');
   cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false };
@@ -1038,7 +1038,7 @@ function calPeekTask(side, id, on) {
   const scope = (cal.peek && cal.peek.scope) || 'one';
   side.style.setProperty('--tone', `var(${toneOfTask(task)})`);
   side.innerHTML = `${calPeekBar(task.note ? task.note.title || 'Untitled' : 'Task')}
-    <textarea class="kanban-sheet-title cal-peek-title" id="cal-peek-title" rows="1" maxlength="300" aria-label="Title"${leo ? '' : ' readonly'}>${esc(task.title)}</textarea>
+    <textarea class="kanban-sheet-title cal-peek-title" id="cal-peek-title" rows="1" aria-label="Title"${leo ? '' : ' readonly'}>${esc(task.title)}</textarea>
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
     <label class="set-row cal-peek-done"><span class="set-label">${day ? `Done on ${esc(dayName)}` : 'Done'}</span><input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${day ? ` data-on="${esc(day)}"` : ''}${doneNow ? ' checked' : ''}></label>
     ${repeating ? `<div class="set-row"><span class="set-label">Change</span>${segmented({ label: 'Which days change', action: 'cal-scope', key: 'cal-scope', current: scope, choices: [['one', 'This one'], ['all', 'Every time']] })}</div>` : ''}
@@ -1049,7 +1049,7 @@ function calPeekTask(side, id, on) {
     </span></div>
     ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
     <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="cal-peek-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
-    <textarea class="cal-peek-about" id="cal-peek-about" rows="4" maxlength="4000" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
+    <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value" id="cal-peek-google">${esc(calPeekGoogle(task))}</span></div>
     ${repeating && Object.keys(task.moved || {}).length ? '<p class="hint">Google gets the weekly days; days you moved here stay in leo and the .ics file.</p>' : ''}
@@ -1294,8 +1294,8 @@ function newTaskSheet(day = null) {
   const box = sheet(`<h3>New task</h3>
     <div class="task-new">
       <div class="task-left">
-        <input class="set-input task-title" id="task-title" maxlength="300" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
-        <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" maxlength="4000" placeholder="Add a description…"></textarea></label>
+        <input class="set-input task-title" id="task-title" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
+        <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…"></textarea></label>
         <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${k === 'other' ? ' on' : ''}" data-kind="${k}" aria-pressed="${k === 'other'}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
         <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint([]))}</span></div>
       </div>
@@ -1417,7 +1417,7 @@ function taskSheet(id, on = null) {
   const moved = onGoogle && task.date && !onGoogle.all_day && S.dayKey(new Date(onGoogle.start)) !== task.date && task.time;
   const box = sheet(`<h3 class="task-sheet-title">${esc(task.title)}</h3>
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
-    <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" maxlength="4000" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
+    <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
     <div class="set-row"><span class="set-label">${repeating ? 'Starts' : 'Date'}</span><span class="set-value">${esc(when)}<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(task.id)}">${task.date ? 'Change' : 'Set date'}</button></span></div>
     ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
     <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
