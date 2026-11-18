@@ -73,6 +73,8 @@ test('when the browser cannot store a large draft the note is saved to leo and t
   });
   const item = await bigNote(page, 600000);
   await page.goto('/#/n/' + item.id);
+  await page.reload();
+  await expect(page.locator('#doc .blk').first()).toBeVisible();
   await typeAtTop(page, 'kept by leo ');
   await expect(page.locator('.toast')).toContainText('cannot keep a draft');
   await expect(page.locator('#save-state')).toHaveText('Saved');
