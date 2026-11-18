@@ -76,6 +76,11 @@ pub trait Housekeeper: Send + Sync {
     fn discard_recording(&self, _id: &str) -> anyhow::Result<()> {
         Ok(())
     }
+    fn discard_recordings(&self, ids: &[String]) -> usize {
+        ids.iter()
+            .filter(|id| self.discard_recording(id).is_ok())
+            .count()
+    }
     fn expire_kept_audio(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
         0
     }
@@ -241,6 +246,18 @@ pub(crate) fn discard_unless_in_use(
         return None;
     }
     Some(housekeeper.discard_recording(session))
+}
+
+pub(crate) fn discard_all_unless_in_use(
+    recordings: &Recordings,
+    housekeeper: &dyn Housekeeper,
+    mut ids: Vec<String>,
+) -> usize {
+    let held = recordings.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(job) = held.as_ref() {
+        ids.retain(|id| *id != job.view.session);
+    }
+    housekeeper.discard_recordings(&ids)
 }
 
 pub(crate) fn live(recordings: &Recordings) -> bool {

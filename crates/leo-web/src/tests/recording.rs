@@ -747,6 +747,51 @@ fn deleting_and_expiring_unfinished_audio_hold_the_recording_lock_while_they_dis
 }
 
 #[test]
+fn expiry_deletes_with_one_batch_call() {
+    struct Batched {
+        recording: record::Recordings,
+        calls: std::sync::Mutex<Vec<(Vec<String>, bool)>>,
+    }
+    impl record::Housekeeper for Batched {
+        fn pending_recordings(&self) -> anyhow::Result<Vec<record::Pending>> {
+            Ok([("old-one", 90), ("old-two", 40), ("new-one", 2)]
+                .into_iter()
+                .map(|(id, days)| record::Pending {
+                    id: id.into(),
+                    title: None,
+                    directory: String::new(),
+                    source: record::Source::Microphone,
+                    profile: Default::default(),
+                    started: Some(chrono::Utc::now() - chrono::Duration::days(days)),
+                })
+                .collect())
+        }
+        fn discard_recording(&self, _id: &str) -> anyhow::Result<()> {
+            panic!("expiry discards in one batch")
+        }
+        fn discard_recordings(&self, ids: &[String]) -> usize {
+            self.calls
+                .lock()
+                .unwrap()
+                .push((ids.to_vec(), self.recording.try_lock().is_err()));
+            ids.len()
+        }
+    }
+    let (state, _d, _ids) = state_with(&[]);
+    let batched = Batched {
+        recording: state.recording.clone(),
+        calls: Default::default(),
+    };
+    let expired =
+        crate::keeping::expire_audio(&batched, Some(30), chrono::Utc::now(), &state.recording);
+    assert_eq!(expired, 2);
+    assert_eq!(
+        *batched.calls.lock().unwrap(),
+        [(vec!["old-one".to_string(), "old-two".to_string()], true)]
+    );
+}
+
+#[test]
 fn expiry_and_delete_leave_the_recording_being_recovered_alone() {
     let (mut state, _d, _ids) = state_with(&[]);
     let watching = Arc::new(Watching {

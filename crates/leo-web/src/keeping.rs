@@ -3,7 +3,7 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, Utc};
 
-use crate::record::{discard_unless_in_use, Housekeeper, Recordings};
+use crate::record::{discard_all_unless_in_use, Housekeeper, Recordings};
 use crate::AppState;
 
 const MOST_ENTRIES: usize = 100_000;
@@ -172,13 +172,12 @@ pub(crate) fn expire_audio(
     let Ok(pending) = housekeeper.pending_recordings() else {
         return kept;
     };
-    kept + pending
+    let old = pending
         .into_iter()
         .filter(|p| p.started.is_some_and(|started| started < cutoff))
-        .filter(|p| {
-            discard_unless_in_use(recording, housekeeper, &p.id).is_some_and(|done| done.is_ok())
-        })
-        .count()
+        .map(|p| p.id)
+        .collect();
+    kept + discard_all_unless_in_use(recording, housekeeper, old)
 }
 
 pub(crate) async fn expire_now(state: &AppState) {
