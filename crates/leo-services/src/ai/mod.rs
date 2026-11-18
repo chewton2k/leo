@@ -309,12 +309,7 @@ fn why(state: crate::health::WritingState, agent: Option<&str>, text: &str) -> S
 
 pub fn see(prompt: chat::Prompt, images: &[provider::Image], max_tokens: u32) -> Result<String> {
     let (cfg, store) = context();
-    let req = provider::ChatRequest {
-        system: Some(prompt.system),
-        prompt: prompt.user,
-        temperature: 0.2,
-        max_tokens,
-    };
+    let req = prompt.request(0.2, max_tokens);
     let providers = provider::build_chat_chain(&cfg, &store);
     Ok(chain::run_vision_chain(providers, &req, images)?.value)
 }
