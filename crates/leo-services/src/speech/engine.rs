@@ -90,6 +90,13 @@ pub struct Engine {
     dictation_cancels: Arc<AtomicU64>,
     serving_dictation: Arc<Mutex<bool>>,
     hears: fn(&[f32], f32) -> Result<bool>,
+    checked: Mutex<VecDeque<Checked>>,
+}
+
+struct Checked {
+    audio: u64,
+    pieces: Vec<usize>,
+    heard: Vec<bool>,
 }
 
 pub struct Pin(Arc<AtomicUsize>);
@@ -136,6 +143,7 @@ impl Engine {
             dictation_cancels,
             serving_dictation,
             hears,
+            checked: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -183,8 +191,7 @@ impl Engine {
         let chunks = if priority == Priority::Dictation {
             speech_chunks(pcm, 1.0)?.into()
         } else {
-            let gain = speech_gain(&pcm);
-            gated(speech_chunks(pcm, gain)?, gain, self.hears).context(UNFINISHED)?
+            self.checked_once(pcm, priority == Priority::Segment)?
         };
         let (reply, answer) = mpsc::sync_channel(1);
         self.requests
@@ -206,6 +213,44 @@ impl Engine {
                 && self.dictation_cancels.load(Ordering::Acquire) != cancels
         })
         .context("Transcription took too long. Your audio is kept; try a faster speech model.")?
+    }
+
+    fn checked_once(&self, pcm: Vec<f32>, remember: bool) -> Result<VecDeque<Vec<f32>>> {
+        let gain = speech_gain(&pcm);
+        let audio = remember.then(|| {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            pcm.iter().for_each(|n| n.to_bits().hash(&mut hasher));
+            hasher.finish()
+        });
+        let chunks = speech_chunks(pcm, gain)?;
+        let pieces: Vec<usize> = chunks.iter().map(Vec::len).collect();
+        let known = audio.and_then(|audio| {
+            lock(&self.checked)
+                .iter()
+                .find(|c| c.audio == audio && c.pieces == pieces)
+                .map(|c| c.heard.clone())
+        });
+        if let Some(heard) = known {
+            return Ok(chunks
+                .into_iter()
+                .zip(heard)
+                .map(|(chunk, heard)| if heard { chunk } else { Vec::new() })
+                .collect());
+        }
+        let sent = gated(chunks, gain, self.hears).context(UNFINISHED)?;
+        if let Some(audio) = audio {
+            let mut checked = lock(&self.checked);
+            if checked.len() >= QUEUED {
+                checked.pop_front();
+            }
+            checked.push_back(Checked {
+                audio,
+                pieces,
+                heard: sent.iter().map(|piece| !piece.is_empty()).collect(),
+            });
+        }
+        Ok(sent)
     }
 
     pub fn stopping(&self) -> bool {
@@ -1277,6 +1322,44 @@ mod cancel_tests {
         )
     }
 
+    static SCANS: AtomicUsize = AtomicUsize::new(0);
+
+    #[test]
+    fn a_part_retried_while_it_waits_for_a_model_is_scanned_once() {
+        let _guard = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let _worker = Worker;
+        std::env::remove_var("LEO_TRANSCRIBE_WORKER_EXE");
+        let folder = tempfile::tempdir().unwrap();
+        let engine = Engine::with(|_, _| {
+            SCANS.fetch_add(1, Ordering::SeqCst);
+            Ok(true)
+        });
+        let part: Vec<f32> = (0..70 * 16_000usize)
+            .map(|i| if (i / 20) % 2 == 0 { 0.1 } else { -0.1 })
+            .collect();
+        let pieces = speech_chunks(part.clone(), speech_gain(&part))
+            .unwrap()
+            .len();
+        let selected = Selected {
+            id: "test".into(),
+            language: "en".into(),
+            path: folder.path().join("no-such-model"),
+            streaming: false,
+            live: false,
+        };
+        for _ in 0..3 {
+            let _ = engine.transcribe(
+                selected.clone(),
+                part.clone(),
+                Priority::Segment,
+                Vec::new(),
+            );
+        }
+        assert!(pieces > 1);
+        assert_eq!(SCANS.load(Ordering::SeqCst), pieces);
+        engine.stop().unwrap();
+    }
+
     static CHECKED_ON: Mutex<Vec<std::thread::ThreadId>> = Mutex::new(Vec::new());
 
     #[test]
@@ -1333,11 +1416,13 @@ mod cancel_tests {
         for parts in [1u32, 96] {
             *lock(&SHARES) = [Duration::ZERO; 3];
             let began = Instant::now();
-            for _ in 0..parts {
+            for n in 0..parts {
+                let mut part = part.clone();
+                part[0] += n as f32 * 1e-6;
                 engine
                     .transcribe(
                         selected(dir.path(), "speech"),
-                        part.clone(),
+                        part,
                         Priority::Segment,
                         Vec::new(),
                     )

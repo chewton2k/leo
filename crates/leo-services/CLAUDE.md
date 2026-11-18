@@ -170,7 +170,8 @@ target, 40 s max). `vad::detector` is Silero at 0.3, Earshot at 0.5 if Silero
 cannot load. Dictation filters while capturing; the engine only cuts and pads
 clips under a second. Recordings are never trimmed: a chunk goes whole unless
 VAD, on a copy raised to speech level (median frame level to 0.1, gain 1–50),
-hears nothing; the check runs on the caller's thread, never on the engine actor.
+hears nothing; the check runs on the caller's thread, never on the engine actor,
+and a retried recording part reuses its last result (the last eight parts are kept).
 Slow catalog models skip live passes.
 
 The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
