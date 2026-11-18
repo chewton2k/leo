@@ -24,7 +24,9 @@ pub const SEGMENT_SECS: u64 = 300;
 pub const OVERLAP_SECS: u64 = 1;
 const LOCK_FRESH: Duration = Duration::from_secs(30);
 const HEARTBEAT: Duration = Duration::from_secs(5);
-const MOST_SESSIONS: usize = 1000;
+const MOST_SAME_SECOND: usize = 1000;
+const RECHECK: Duration = Duration::from_secs(60);
+const RACY: Duration = Duration::from_secs(2);
 pub const MOST_SESSION_BYTES: u64 = 8_000_000;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,10 +276,92 @@ fn settle_new(dir: PathBuf, manifest: Manifest) -> Result<Session> {
     settled
 }
 
+#[derive(Debug, Clone)]
+pub struct Brief {
+    pub dir: PathBuf,
+    pub id: String,
+    pub saved: bool,
+    pub started: DateTime<Utc>,
+}
+
+#[derive(Clone)]
+enum Seen {
+    Parsed(Brief),
+    Malformed,
+    Unreadable,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: SystemTime,
+    #[cfg(unix)]
+    changed: (i64, i64),
+    #[cfg(unix)]
+    file: (u64, u64),
+}
+
+type Held = std::collections::HashMap<PathBuf, (Option<Stamp>, std::time::Instant, Seen)>;
+
+static SEEN: std::sync::LazyLock<std::sync::Mutex<Held>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn held() -> std::sync::MutexGuard<'static, Held> {
+    SEEN.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+fn stamp_of(meta: &std::fs::Metadata) -> Option<Stamp> {
+    Some(Stamp {
+        len: meta.len(),
+        modified: meta.modified().ok()?,
+        #[cfg(unix)]
+        changed: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ctime(), meta.ctime_nsec())
+        },
+        #[cfg(unix)]
+        file: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ino(), meta.dev())
+        },
+    })
+}
+
+pub enum Walk {
+    Newest { after: Option<String>, limit: usize },
+    OlderThan(DateTime<Utc>),
+    All,
+}
+
+#[derive(Default)]
 pub struct Scan {
-    pub sessions: Vec<Session>,
+    pub sessions: Vec<Brief>,
     pub malformed: Vec<PathBuf>,
     pub unreadable: usize,
+    pub after: Option<String>,
+}
+
+pub fn recording_id(id: &str) -> &str {
+    id.strip_suffix("-you")
+        .or_else(|| id.strip_suffix("-others"))
+        .unwrap_or(id)
+}
+
+fn order_key(name: &str) -> (String, u32) {
+    match name
+        .get(15..)
+        .and_then(|rest| rest.strip_prefix('-'))
+        .and_then(|n| n.parse().ok())
+    {
+        Some(n) => (name.get(..15).unwrap_or(name).to_string(), n),
+        None => (name.to_string(), 1),
+    }
+}
+
+fn started_of(name: &str) -> Option<DateTime<Utc>> {
+    chrono::NaiveDateTime::parse_from_str(name.get(..15)?, "%Y%m%d-%H%M%S")
+        .ok()
+        .map(|t| t.and_utc())
 }
 
 fn read_manifest(dir: &Path) -> std::io::Result<Vec<u8>> {
@@ -294,33 +378,109 @@ fn read_manifest(dir: &Path) -> std::io::Result<Vec<u8>> {
     Ok(bytes)
 }
 
-pub fn scan(root: &Path) -> Scan {
-    let mut found = Scan {
-        sessions: Vec::new(),
-        malformed: Vec::new(),
-        unreadable: 0,
+fn read_seen(dir: &Path) -> Seen {
+    match read_manifest(dir) {
+        Ok(bytes) => match serde_json::from_slice::<Manifest>(&bytes) {
+            Ok(manifest) => match Session::with_manifest(dir, manifest) {
+                Ok(session) => Seen::Parsed(Brief {
+                    dir: session.dir,
+                    id: session.manifest.id,
+                    saved: session.manifest.saved,
+                    started: session.manifest.started,
+                }),
+                Err(_) => Seen::Unreadable,
+            },
+            Err(_) => Seen::Malformed,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Seen::Malformed,
+        Err(_) => Seen::Unreadable,
+    }
+}
+
+fn seen(dir: &Path) -> Seen {
+    let stamp = match std::fs::symlink_metadata(dir.join("session.json")) {
+        Ok(meta) => stamp_of(&meta),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Seen::Malformed,
+        Err(_) => return Seen::Unreadable,
     };
+    if let Some(stamp) = &stamp {
+        if let Some((kept, at, seen)) = held().get(dir) {
+            if kept.as_ref() == Some(stamp) && at.elapsed() < RECHECK {
+                return seen.clone();
+            }
+        }
+    }
+    let read = read_seen(dir);
+    let settled = stamp.filter(|stamp| {
+        SystemTime::now()
+            .duration_since(stamp.modified)
+            .is_ok_and(|age| age >= RACY)
+    });
+    held().insert(
+        dir.to_path_buf(),
+        (settled, std::time::Instant::now(), read.clone()),
+    );
+    read
+}
+
+pub fn scan(root: &Path, walk: Walk) -> Scan {
+    let mut found = Scan::default();
     let Ok(entries) = std::fs::read_dir(root) else {
         return found;
     };
-    let mut dirs: Vec<PathBuf> = entries
-        .take(10 * MOST_SESSIONS)
+    let mut names: Vec<((String, u32), String)> = entries
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| leo_core::paths::contained_path(root, Path::new(&e.file_name())).ok())
+        .filter_map(|e| e.file_name().into_string().ok())
+        .map(|name| (order_key(&name), name))
         .collect();
-    dirs.sort_by(|a, b| b.cmp(a));
-    for dir in dirs {
-        match read_manifest(&dir) {
-            Ok(bytes) => match serde_json::from_slice::<Manifest>(&bytes) {
-                Ok(manifest) => match Session::with_manifest(&dir, manifest) {
-                    Ok(session) => found.sessions.push(session),
-                    Err(_) => found.unreadable += 1,
-                },
-                Err(_) => found.malformed.push(dir),
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => found.malformed.push(dir),
-            Err(_) => found.unreadable += 1,
+    names.sort_by(|a, b| b.0.cmp(&a.0));
+    let present: std::collections::HashSet<PathBuf> =
+        names.iter().map(|(_, name)| root.join(name)).collect();
+    held().retain(|dir, _| dir.parent() != Some(root) || present.contains(dir));
+    let visit: Vec<&String> = match &walk {
+        Walk::Newest { after, .. } => {
+            let after = after.as_deref().map(order_key);
+            names
+                .iter()
+                .filter(|(key, _)| after.as_ref().is_none_or(|after| key < after))
+                .map(|(_, name)| name)
+                .collect()
+        }
+        Walk::OlderThan(cutoff) => names
+            .iter()
+            .rev()
+            .filter(|(_, name)| started_of(name).is_none_or(|started| started < *cutoff))
+            .map(|(_, name)| name)
+            .collect(),
+        Walk::All => names.iter().map(|(_, name)| name).collect(),
+    };
+    let mut recordings = std::collections::HashSet::new();
+    for name in visit {
+        let Ok(dir) = leo_core::paths::contained_path(root, Path::new(name)) else {
+            continue;
+        };
+        match seen(&dir) {
+            Seen::Parsed(brief) => {
+                if let Walk::Newest { limit, .. } = walk {
+                    if brief.saved || locked(&brief.dir) {
+                        continue;
+                    }
+                    let recording = recording_id(&brief.id).to_string();
+                    if recordings.len() >= limit && !recordings.contains(&recording) {
+                        found.after = found
+                            .sessions
+                            .last()
+                            .and_then(|b| b.dir.file_name())
+                            .map(|n| n.to_string_lossy().into_owned());
+                        break;
+                    }
+                    recordings.insert(recording);
+                }
+                found.sessions.push(brief);
+            }
+            Seen::Malformed => found.malformed.push(dir),
+            Seen::Unreadable => found.unreadable += 1,
         }
     }
     if found.unreadable > 0 {
@@ -333,6 +493,34 @@ pub fn scan(root: &Path) -> Scan {
     found
 }
 
+pub fn find(root: &Path, id: &str) -> Vec<Session> {
+    let names = [id.to_string(), format!("{id}-you"), format!("{id}-others")];
+    let open = |dirs: Vec<PathBuf>| -> Vec<Session> {
+        dirs.iter()
+            .filter_map(|dir| Session::open(dir).ok())
+            .filter(|s| names.contains(&s.manifest.id))
+            .collect()
+    };
+    let cached: Vec<PathBuf> = held()
+        .iter()
+        .filter(|(dir, _)| dir.parent() == Some(root))
+        .filter(|(_, (_, _, seen))| matches!(seen, Seen::Parsed(b) if names.contains(&b.id)))
+        .map(|(dir, _)| dir.clone())
+        .collect();
+    let found = open(cached);
+    if !found.is_empty() {
+        return found;
+    }
+    open(
+        scan(root, Walk::All)
+            .sessions
+            .into_iter()
+            .filter(|b| names.contains(&b.id))
+            .map(|b| b.dir)
+            .collect(),
+    )
+}
+
 impl Session {
     pub fn create(root: &Path, manifest: Manifest) -> Result<Session> {
         if let Ok(meta) = std::fs::symlink_metadata(root) {
@@ -343,7 +531,7 @@ impl Session {
         }
         std::fs::create_dir_all(root)?;
         let stamp = manifest.started.format("%Y%m%d-%H%M%S").to_string();
-        for n in 1..=MOST_SESSIONS {
+        for n in 1..=MOST_SAME_SECOND {
             let dir = root.join(if n == 1 {
                 stamp.clone()
             } else {
@@ -435,13 +623,24 @@ impl Session {
         })
     }
 
-    pub fn unfinished(root: &Path) -> Vec<Session> {
-        let mut out: Vec<Session> = scan(root)
+    pub fn unfinished_page(
+        root: &Path,
+        after: Option<String>,
+        limit: usize,
+    ) -> (Vec<Session>, Option<String>) {
+        let found = scan(root, Walk::Newest { after, limit });
+        let sessions = found
             .sessions
-            .into_iter()
-            .filter(|s| !s.manifest.saved && !locked(&s.dir))
-            .take(MOST_SESSIONS)
+            .iter()
+            .filter_map(|brief| Session::open(&brief.dir).ok())
+            .filter(|s| !s.manifest.saved)
             .collect();
+        (sessions, found.after)
+    }
+
+    #[cfg(test)]
+    pub fn unfinished(root: &Path) -> Vec<Session> {
+        let mut out = Session::unfinished_page(root, None, usize::MAX).0;
         out.sort_by(|a, b| a.dir.cmp(&b.dir));
         out
     }
@@ -972,25 +1171,50 @@ mod tests {
         assert_eq!(found, expected);
     }
 
+    fn settled_folder(root: &Path, manifest: &Manifest) -> PathBuf {
+        let dir = root.join(manifest.started.format("%Y%m%d-%H%M%S").to_string());
+        std::fs::create_dir(&dir).unwrap();
+        write_settled(&dir, manifest);
+        dir
+    }
+
+    fn write_settled(dir: &Path, manifest: &Manifest) {
+        let path = dir.join("session.json");
+        std::fs::write(&path, serde_json::to_vec(manifest).unwrap()).unwrap();
+        set_old(&path);
+    }
+
+    fn set_old(path: &Path) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(SystemTime::now() - Duration::from_secs(3600))
+            .unwrap();
+    }
+
     #[test]
-    fn past_a_thousand_folders_the_newest_are_listed() {
+    fn every_recording_is_reachable_a_page_at_a_time() {
         let tmp = tempfile::tempdir().unwrap();
-        let base = chrono::Utc::now() - chrono::Duration::days(2000);
+        let base = chrono::Utc::now() - chrono::Duration::days(400);
         let mut dirs = Vec::new();
-        for n in 0..1001 {
+        for n in 0..5000 {
             let mut manifest = Manifest::new(None, None, "", false);
-            manifest.started = base + chrono::Duration::days(n);
-            dirs.push(Session::create(tmp.path(), manifest).unwrap().dir);
+            manifest.started = base + chrono::Duration::seconds(n * 7);
+            dirs.push(settled_folder(tmp.path(), &manifest));
         }
-        let listed: Vec<PathBuf> = Session::unfinished(tmp.path())
-            .into_iter()
-            .map(|s| s.dir)
-            .collect();
-        assert_eq!(
-            listed,
-            dirs[1..].to_vec(),
-            "the newest 1000 recordings are listed"
-        );
+        dirs.reverse();
+        let (first, mut after) = Session::unfinished_page(tmp.path(), None, 50);
+        let first: Vec<PathBuf> = first.into_iter().map(|s| s.dir).collect();
+        assert_eq!(first, dirs[..50]);
+        let mut seen = first;
+        while let Some(cursor) = after.take() {
+            let (page, next) = Session::unfinished_page(tmp.path(), Some(cursor), 50);
+            assert!(page.len() <= 50);
+            seen.extend(page.into_iter().map(|s| s.dir));
+            after = next;
+        }
+        assert_eq!(seen, dirs);
         let junk = tempfile::tempdir().unwrap();
         for n in 0..1000 {
             std::fs::write(junk.path().join(format!("junk-{n}.txt")), "").unwrap();
@@ -1003,6 +1227,122 @@ mod tests {
             .map(|s| s.dir)
             .collect();
         assert_eq!(found, [only]);
+    }
+
+    #[test]
+    fn a_call_is_never_split_across_pages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = chrono::Utc::now() - chrono::Duration::days(10);
+        for (n, id) in ["single-a", "call-b-you", "call-b-others", "single-c"]
+            .into_iter()
+            .enumerate()
+        {
+            let mut manifest = Manifest::new(None, None, "", false);
+            manifest.id = id.into();
+            manifest.started = base + chrono::Duration::seconds([30, 20, 20, 10][n]);
+            Session::create(tmp.path(), manifest).unwrap();
+        }
+        let ids = |sessions: Vec<Session>| -> Vec<String> {
+            sessions.into_iter().map(|s| s.manifest.id).collect()
+        };
+        let (first, after) = Session::unfinished_page(tmp.path(), None, 1);
+        assert_eq!(ids(first), ["single-a"]);
+        let (second, after) = Session::unfinished_page(tmp.path(), after, 1);
+        let mut second = ids(second);
+        second.sort();
+        assert_eq!(second, ["call-b-others", "call-b-you"]);
+        let (third, after) = Session::unfinished_page(tmp.path(), after, 1);
+        assert_eq!(ids(third), ["single-c"]);
+        assert!(after.is_none());
+    }
+
+    #[test]
+    fn the_folder_name_order_puts_ten_after_two() {
+        let mut names = ["20250101-120000-10", "20250101-120000", "20250101-120000-2"];
+        names.sort_by_key(|n| order_key(n));
+        assert_eq!(
+            names,
+            ["20250101-120000", "20250101-120000-2", "20250101-120000-10"]
+        );
+        assert!(order_key("20250101-120001") > order_key("20250101-120000-10"));
+    }
+
+    #[test]
+    fn a_same_stamp_manifest_edit_is_seen() {
+        let tmp = tempfile::tempdir().unwrap();
+        let saved = || scan(tmp.path(), Walk::All).sessions[0].saved;
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.started = chrono::Utc::now() - chrono::Duration::days(1);
+        let dir = settled_folder(tmp.path(), &manifest);
+        assert!(!saved());
+        let stale = held().get(&dir).unwrap().2.clone();
+        manifest.saved = true;
+        let replaced = dir.join("session.json.new");
+        std::fs::write(&replaced, serde_json::to_vec(&manifest).unwrap()).unwrap();
+        set_old(&replaced);
+        std::fs::rename(&replaced, dir.join("session.json")).unwrap();
+        if cfg!(unix) {
+            assert!(saved());
+        }
+        let stamp =
+            stamp_of(&std::fs::symlink_metadata(dir.join("session.json")).unwrap()).unwrap();
+        held().insert(dir.clone(), (Some(stamp), std::time::Instant::now(), stale));
+        assert!(!saved());
+        if let Some(entry) = held().get_mut(&dir) {
+            entry.1 = std::time::Instant::now()
+                .checked_sub(RECHECK + Duration::from_secs(1))
+                .unwrap();
+        }
+        assert!(saved());
+    }
+
+    #[test]
+    fn a_manifest_rewritten_inside_two_seconds_is_read_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut s = Session::create(tmp.path(), Manifest::new(None, None, "", false)).unwrap();
+        assert_eq!(Session::unfinished(tmp.path()).len(), 1);
+        assert!(held()
+            .get(&s.dir)
+            .is_some_and(|(stamp, _, _)| stamp.is_none()));
+        s.manifest.saved = true;
+        s.save().unwrap();
+        assert!(Session::unfinished(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn an_unchanged_manifest_is_not_read_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = settled_folder(tmp.path(), &Manifest::new(None, None, "", false));
+        let held_at = |dir: &Path| held().get(dir).map(|(_, at, _)| *at);
+        assert_eq!(scan(tmp.path(), Walk::All).sessions.len(), 1);
+        let first = held_at(&dir).unwrap();
+        assert_eq!(scan(tmp.path(), Walk::All).sessions.len(), 1);
+        assert_eq!(held_at(&dir), Some(first));
+        std::fs::remove_dir_all(&dir).unwrap();
+        scan(tmp.path(), Walk::All);
+        assert!(held_at(&dir).is_none());
+    }
+
+    #[test]
+    #[ignore]
+    fn benchmark_recording_listing() {
+        for n in [500usize, 5_000, 50_000] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = chrono::Utc::now() - chrono::Duration::days(400);
+            for i in 0..n {
+                let mut manifest = Manifest::new(None, None, "", false);
+                manifest.started = base + chrono::Duration::seconds(i as i64 * 7);
+                settled_folder(tmp.path(), &manifest);
+            }
+            for view in ["first", "second"] {
+                let start = std::time::Instant::now();
+                let listed = Session::unfinished_page(tmp.path(), None, 50).0.len();
+                println!(
+                    "folders={n} view={view} listed={listed} ms={:.2}",
+                    start.elapsed().as_secs_f64() * 1000.0
+                );
+            }
+        }
     }
 
     #[cfg(unix)]
@@ -1035,7 +1375,7 @@ mod tests {
         let good = folder("20200101-000005");
         std::fs::write(good.join("session.json"), &manifest).unwrap();
         std::fs::write(tmp.path().join("not-a-folder"), "").unwrap();
-        let found = scan(tmp.path());
+        let found = scan(tmp.path(), Walk::All);
         std::fs::set_permissions(
             shut.join("session.json"),
             std::fs::Permissions::from_mode(0o600),
