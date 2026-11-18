@@ -305,10 +305,26 @@ function drawQuick() {
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
 }
 
+const QUICK_DUE_ROWS = 6;
+const QUICK_DUE_PAGE = 50;
+
+function quickDueRows(tasks) {
+  return tasksGroups(tasks).filter(([name]) => name === 'Overdue' || name === 'Today').flatMap(([name, list]) => list.map((t) => ({ ...t, late: name === 'Overdue' }))).slice(0, QUICK_DUE_ROWS);
+}
+
 async function loadQuickDue() {
-  const tasks = (await api('/api/tasks')).tasks || [];
-  const groups = tasksGroups(tasks);
-  quick.due = groups.filter(([name]) => name === 'Overdue' || name === 'Today').flatMap(([name, list]) => list.map((t) => ({ ...t, late: name === 'Overdue' }))).slice(0, 6);
+  const today = S.dayKey(new Date());
+  const tasks = [];
+  for (;;) {
+    const answer = await api(`/api/tasks?offset=${tasks.length}&limit=${QUICK_DUE_PAGE}`);
+    const page = answer.tasks || [];
+    tasks.push(...page);
+    const last = page[page.length - 1];
+    if (!last || tasks.length >= (answer.total ?? 0) || last.done || !last.date || last.date > today) break;
+    const due = quickDueRows(tasks);
+    if (due.length >= QUICK_DUE_ROWS && (due[QUICK_DUE_ROWS - 1].late ? true : last.date >= today)) break;
+  }
+  quick.due = quickDueRows(tasks);
   drawQuickDue();
 }
 
