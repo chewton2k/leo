@@ -373,6 +373,61 @@ fn gathered_notes_respect_the_provider_budget_in_every_chat_style() {
 }
 
 #[test]
+fn chat_context_leaves_out_margin_notes_whose_passage_is_gone() {
+    let (mut state, _dir, ids) = state_with(&[("Logins", "")]);
+    let body = "Save the password in the users table,\nthen login only compares the two, I think?\n\nKEPT words stay here.\n";
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[0]).unwrap().body = body.into();
+        store.save().unwrap();
+    }
+    let place = |prefix: &str, suffix: &str| crate::margin::Place {
+        prefix: prefix.into(),
+        suffix: suffix.into(),
+    };
+    for (quote, around, says) in [
+        ("KEPT words", place("", ""), "KEPT-NOTE-TEXT"),
+        ("words long gone", place("", ""), "GONE-NOTE-TEXT"),
+        (
+            "just checks if it matches",
+            place("table,\nthen login ", ", I think?\n\nKEPT"),
+            "CONTEXT-NOTE-TEXT",
+        ),
+    ] {
+        let thread = crate::margin::new_thread(
+            &ids[0],
+            "ask",
+            around,
+            quote,
+            vec![crate::margin::felix_says(says)],
+        );
+        assert!(crate::margin::put(
+            &state.chats,
+            &thread,
+            crate::margin::MOST_OPEN
+        ));
+    }
+    let (streamer, prompts) = scripted(vec!["Noted."]);
+    state.chat = Some(streamer);
+    let request = serde_json::from_value(serde_json::json!({
+        "note": ids[0],
+        "messages": [{"role":"user", "text":"What did you say about logins?"}]
+    }))
+    .unwrap();
+    run(async {
+        let response = chat_reply(State(state), Json(request)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        axum::body::to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap();
+    });
+    let prompts = prompts.lock().unwrap();
+    assert!(prompts[0].contains("KEPT-NOTE-TEXT"));
+    assert!(prompts[0].contains("CONTEXT-NOTE-TEXT"));
+    assert!(!prompts[0].contains("GONE-NOTE-TEXT"));
+}
+
+#[test]
 fn the_steps_say_which_note_was_read_when_it_was_read_again_and_what_a_retried_call_got_wrong() {
     let (mut state, _d, ids) = state_with(&[("Pipelining", "cs152")]);
     {

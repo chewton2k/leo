@@ -1159,7 +1159,8 @@ target. Check the page sequence after loading preferences.
   passage falls back to `/insert` with one request id per thread (`/insert` and `/weave` dedupe on note
   and request), which re-finds the passage or says it went to the end and skips the
   glow. Other open threads anchored in a rewritten block may lose their place. Ask in chat attaches the quote. `add_margin_note`'s Undo is refused
-  once the user has replied. `chat::gather_seeing` adds open threads of the open note
+  once the user has replied. `chat::gather_seeing` adds the open threads of the open note
+  the page can still place (words found exactly, or between their old surroundings: `margin::shown`)
   after the notes (`margin::context`, at most 3,000 characters and an eighth of the
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes

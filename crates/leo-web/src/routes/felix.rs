@@ -1970,18 +1970,26 @@ pub(crate) async fn chat_reply(
     let note_room = chat::notes_room(body.practice, room);
     let margin_chats = state.chats.clone();
     let margin_note = note.clone();
-    let margin_context = tokio::task::spawn_blocking(move || {
-        margin_note.map_or(String::new(), |id| {
-            crate::margin::context(&crate::margin::open_on(&margin_chats, &id), note_room / 8)
-        })
+    let margin_threads = tokio::task::spawn_blocking(move || {
+        margin_note
+            .map(|id| crate::margin::open_on(&margin_chats, &id))
+            .unwrap_or_default()
     })
     .await
     .unwrap_or_default();
-    let margin_block = margin_context.clone();
     let gathered = state
         .read_store(move |store| {
             let cache = graphs.load();
-            Ok(chat::gather_seeing(
+            let body = note
+                .as_deref()
+                .and_then(|id| store.notes.iter().find(|n| n.id == id))
+                .map_or("", |n| n.body.as_str());
+            let shown: Vec<_> = margin_threads
+                .into_iter()
+                .filter(|t| crate::margin::shown(body, t))
+                .collect();
+            let margin_context = crate::margin::context(&shown, note_room / 8);
+            let gathered = chat::gather_seeing(
                 store,
                 &cache,
                 note.as_deref(),
@@ -1991,11 +1999,12 @@ pub(crate) async fn chat_reply(
                 note_room,
                 Some(&seen),
                 &close,
-                &margin_block,
-            ))
+                &margin_context,
+            );
+            Ok((gathered, margin_context))
         })
         .await;
-    let (sources, notes) = match gathered {
+    let ((sources, notes), margin_context) = match gathered {
         Ok(found) => found,
         Err(code) => return code.into_response(),
     };

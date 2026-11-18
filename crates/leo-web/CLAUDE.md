@@ -802,7 +802,8 @@ Felix (2026-10-19).
 - Settings says text stays here only for a loopback address and a model without
   `cloud` in its name (`ai::reads_stay_here`). Failure text is the writer's own
   sentence (`leo_core::writing_said`), `no_writer()` or `margin::PROBLEM`.
-- Chat context: `margin::context` adds open threads (≤3,000 characters and an
+- Chat context: `margin::context` adds the open threads the page can place
+  (`margin::shown`, the page's `find` rule; ≤3,000 characters and an
   eighth of the note room) with a fence stable while content is (prefix caches).
 - Load margin prefs and reserve their space before positioning search matches or
   restoring reading; check the page sequence after loading. Read completion

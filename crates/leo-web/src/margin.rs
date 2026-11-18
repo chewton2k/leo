@@ -1158,14 +1158,11 @@ fn head_of(text: &str) -> &str {
     &text[..to]
 }
 
-pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
-    let units = |s: &str| s.encode_utf16().count();
-    if text.trim().is_empty()
-        || body.contains(thread.quote.as_str())
-        || units(text) > 2 * units(&thread.quote) + NEAR
-    {
-        return None;
-    }
+fn units(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+fn tails(thread: &Thread) -> Option<(&str, &str)> {
     let (before, after) = (tail_of(&thread.prefix), head_of(&thread.suffix));
     let short = |part: &str, whole: &str| !whole.is_empty() && units(part) < LEAST_TAIL;
     if before.is_empty() && after.is_empty()
@@ -1174,6 +1171,58 @@ pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
     {
         return None;
     }
+    Some((before, after))
+}
+
+pub fn shown(body: &str, thread: &Thread) -> bool {
+    if thread.quote.is_empty() {
+        return false;
+    }
+    if body.contains(thread.quote.as_str()) {
+        return true;
+    }
+    let Some((before, after)) = tails(thread) else {
+        return false;
+    };
+    let room = 2 * units(&thread.quote) + NEAR;
+    let fits = |from: usize| {
+        let to = if after.is_empty() {
+            body.len()
+        } else {
+            let Some(next) = body[from..].chars().next() else {
+                return false;
+            };
+            let past = from + next.len_utf8();
+            match body[past..].find(after) {
+                Some(at) => past + at,
+                None => return false,
+            }
+        };
+        let span = &body[from..to];
+        to > from && units(span) <= room && !span.trim().is_empty()
+    };
+    if before.is_empty() {
+        return fits(0);
+    }
+    let mut at = 0;
+    while let Some(hit) = body[at..].find(before) {
+        let start = at + hit;
+        if fits(start + before.len()) {
+            return true;
+        }
+        at = start + body[start..].chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
+pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
+    if text.trim().is_empty()
+        || body.contains(thread.quote.as_str())
+        || units(text) > 2 * units(&thread.quote) + NEAR
+    {
+        return None;
+    }
+    let (before, after) = tails(thread)?;
     let needle = format!("{before}{text}{after}");
     if thread.prefix.is_empty() {
         body.starts_with(&needle).then_some(0)
@@ -1667,6 +1716,70 @@ mod tests {
             suffix: suffix.into(),
         };
         new_thread("n", "ask", place, quote, vec![felix_says("Hash it.")])
+    }
+
+    #[test]
+    fn shown_agrees_with_the_pages_find() {
+        let source = "Save the password in the users table,\nthen login just checks if it matches, I think?\n\nSessions last a day.";
+        let quote = "just checks if it matches";
+        let near = |q: &str, p: &str, x: &str| about(q, p, x);
+        assert!(shown(source, &near(quote, "", "")));
+        let edited = source.replace("just checks if it matches", "only compares the two");
+        assert!(shown(
+            &edited,
+            &near(quote, "table,\nthen login ", ", I think?\n\nSessions last")
+        ));
+        let opening = "Rewritten opening\n\nrest of the note";
+        assert!(shown(
+            opening,
+            &near("Old opening", "", "\n\nrest of the note")
+        ));
+        assert!(shown(
+            opening,
+            &near("Old tail", "Rewritten opening\n\n", "")
+        ));
+        let around = near(quote, "table,\nthen login ", ", I think?");
+        assert!(!shown("Nothing like it.", &around));
+        assert!(!shown(
+            source,
+            &near("gone words", "then login ", "no such tail here")
+        ));
+        assert!(!shown(source, &near("gone words", "", "")));
+        assert!(!shown(source, &near("", "", "")));
+        let emptied = near(quote, "then login ", ", I think?");
+        assert!(!shown("table,\nthen login , I think?", &emptied));
+        assert!(!shown(
+            "then login   , I think?",
+            &near(quote, "then login ", "  , I think?")
+        ));
+        let far = format!("then login {}, I think?", "word ".repeat(100));
+        assert!(!shown(&far, &near("short", "then login ", ", I think?")));
+        let text = "ab some new words and a long enough tail";
+        assert!(!shown(
+            text,
+            &near("old words", "ab ", " and a long enough tail")
+        ));
+        assert!(!shown(text, &near("old words", "ab some ", " t")));
+        assert!(!shown("anything at all here", &near("old words", "", "")));
+        let pad = "\u{1F600}".repeat(4);
+        let emoji = format!("{pad} said new words here {pad}");
+        assert!(shown(
+            &emoji,
+            &near(
+                "old words",
+                &format!("{pad} said "),
+                &format!(" here {pad}")
+            )
+        ));
+        let wide = format!("{pad} said {} here {pad}", "\u{1F600}".repeat(70));
+        assert!(!shown(
+            &wide,
+            &near(
+                "old words",
+                &format!("{pad} said "),
+                &format!(" here {pad}")
+            )
+        ));
     }
 
     #[test]
