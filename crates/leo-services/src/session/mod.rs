@@ -401,17 +401,17 @@ pub fn has_retry(dir: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return false;
     };
-    let mut failed = std::collections::HashSet::new();
+    let mut done = std::collections::HashSet::new();
     let mut audio = std::collections::HashSet::new();
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         match index_of(&name) {
-            Some((index, "err")) => failed.insert(index),
+            Some((index, "txt")) => done.insert(index),
             Some((index, "wav")) => audio.insert(index),
             _ => false,
         };
     }
-    failed.iter().any(|index| audio.contains(index))
+    audio.iter().any(|index| !done.contains(index))
 }
 
 pub fn kept_owned(root: &Path) -> Vec<(PathBuf, String)> {
@@ -1295,6 +1295,20 @@ mod tests {
             .map(|s| s.dir)
             .collect();
         assert_eq!(offered, [dir]);
+    }
+
+    #[test]
+    fn a_saved_recording_is_offered_while_any_part_has_audio_and_no_text() {
+        let (mut s, _t) = session();
+        s.manifest.saved = true;
+        s.save().unwrap();
+        assert!(!has_retry(&s.dir));
+        std::fs::write(s.dir.join("seg-00000.txt"), "done").unwrap();
+        wav::write(&s.dir.join(wav::done_name(0)), &[1, 2, 3]).unwrap();
+        std::fs::write(s.dir.join("seg-00001.err"), "failed").unwrap();
+        assert!(!has_retry(&s.dir));
+        wav::write(&s.dir.join(wav::done_name(2)), &[1, 2, 3]).unwrap();
+        assert!(has_retry(&s.dir));
     }
 
     fn settled_folder(root: &Path, manifest: &Manifest) -> PathBuf {
