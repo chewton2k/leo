@@ -29,5 +29,5 @@ transcription, and recovery continues while the main window is hidden.
 (unfinished native sessions, unlocked ones only, each with its manifest's `started`) and
 `discard_recording` (validated id, contained paths, refuses a locked session). Settings →
 Keeping's audio expiry calls it, so a recording that is running or being recovered (its
-session is locked) is never discarded. The Storage page, its areas and actions were removed
+session is locked) is never discarded. `discard_recordings` deletes a batch with one scan (expiry uses it). The Storage page, its areas and actions were removed
 on 2026-11-05; files they managed stay on disk.

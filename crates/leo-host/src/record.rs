@@ -426,7 +426,7 @@ fn labelled(
     passage
 }
 
-fn saved_sessions() -> Result<Vec<(String, std::path::PathBuf)>> {
+fn saved_sessions() -> Result<Vec<leo_services::session::Session>> {
     let root = leo_services::session::root()?;
     if !root.exists() {
         return Ok(Vec::new());
@@ -435,14 +435,7 @@ fn saved_sessions() -> Result<Vec<(String, std::path::PathBuf)>> {
         std::fs::symlink_metadata(&root)?.is_dir(),
         "Recording recovery cannot use a symbolic link."
     );
-    Ok(leo_services::session::Session::unfinished(&root)
-        .into_iter()
-        .filter_map(|dir| {
-            let session = leo_services::session::Session::open(&dir).ok()?;
-            let id = session.manifest.id;
-            Some((id, dir))
-        })
-        .collect())
+    Ok(leo_services::session::Session::unfinished(&root))
 }
 
 fn recording_id(id: &str) -> &str {
@@ -453,10 +446,10 @@ fn recording_id(id: &str) -> &str {
 
 pub fn pending() -> Result<Vec<leo_web::record::Pending>> {
     let mut grouped = std::collections::BTreeMap::new();
-    for (id, dir) in saved_sessions()? {
-        let session = leo_services::session::Session::open(&dir)?;
+    for session in saved_sessions()? {
+        let id = &session.manifest.id;
         let call = id.ends_with("-you") || id.ends_with("-others");
-        let id = recording_id(&id).to_owned();
+        let id = recording_id(id).to_owned();
         grouped
             .entry(id.clone())
             .or_insert(leo_web::record::Pending {
@@ -484,7 +477,8 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         .ok_or_else(|| anyhow!("Choose an interrupted recording."))?;
     let selected: Vec<_> = saved_sessions()?
         .into_iter()
-        .filter(|(saved, _)| recording_id(saved) == id)
+        .filter(|session| recording_id(&session.manifest.id) == id)
+        .map(|session| (session.manifest.id, session.dir))
         .collect();
     anyhow::ensure!(
         !selected.is_empty() && selected.len() <= 2,

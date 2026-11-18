@@ -1,4 +1,3 @@
-use std::io::Read;
 use std::path::Path;
 
 use anyhow::Result;
@@ -9,59 +8,47 @@ use leo_web::record::Housekeeper;
 pub struct Housekeeping;
 
 const MOST_RECORDINGS: usize = 1000;
-const MOST_SESSION_BYTES: u64 = 8_000_000;
 
-fn discard_recording(root: &Path, id: &str) -> Result<()> {
-    anyhow::ensure!(
-        leo_core::recording::valid_id(id),
-        "That is not a recording leo knows."
-    );
+fn recordings_root(root: &Path) -> Result<bool> {
     if !root.exists() {
-        return Ok(());
+        return Ok(false);
     }
     anyhow::ensure!(
         !std::fs::symlink_metadata(root)?.file_type().is_symlink(),
         "Recording folders cannot use symbolic links"
     );
+    Ok(true)
+}
+
+fn tracks_of(scan: &session::Scan, id: &str) -> Result<Vec<std::path::PathBuf>> {
+    anyhow::ensure!(
+        leo_core::recording::valid_id(id),
+        "That is not a recording leo knows."
+    );
+    let names = [id.to_string(), format!("{id}-you"), format!("{id}-others")];
     let mut dirs = Vec::new();
-    for (index, entry) in std::fs::read_dir(root)?
-        .take(MOST_RECORDINGS + 1)
-        .enumerate()
+    for found in scan
+        .sessions
+        .iter()
+        .filter(|s| names.contains(&s.manifest.id))
     {
-        anyhow::ensure!(index < MOST_RECORDINGS, "Too many recordings to check.");
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
-        }
-        let dir = leo_core::paths::contained_path(root, Path::new(&entry.file_name()))?;
-        let metadata = leo_core::paths::contained_path(&dir, Path::new("session.json"))?;
-        let Ok(file) = std::fs::File::open(metadata) else {
-            continue;
-        };
-        let mut bytes = Vec::new();
-        file.take(MOST_SESSION_BYTES + 1).read_to_end(&mut bytes)?;
-        anyhow::ensure!(
-            bytes.len() as u64 <= MOST_SESSION_BYTES,
-            "Recording metadata is too large. Try again later."
-        );
-        let Ok(manifest) = serde_json::from_slice::<session::Manifest>(&bytes) else {
-            continue;
-        };
-        if [id.to_string(), format!("{id}-you"), format!("{id}-others")].contains(&manifest.id) {
-            let lock = leo_core::paths::contained_path(&dir, Path::new("lock"))?;
-            if lock.exists() {
-                anyhow::ensure!(
-                    std::fs::metadata(lock)?.len() <= 64,
-                    "The recording lock could not be checked. Try again later."
-                );
-            }
+        let lock = leo_core::paths::contained_path(&found.dir, Path::new("lock"))?;
+        if lock.exists() {
             anyhow::ensure!(
-                !session::locked(&dir),
-                "The recording is still finishing. Try again in a moment."
+                std::fs::metadata(lock)?.len() <= 64,
+                "The recording lock could not be checked. Try again later."
             );
-            dirs.push(dir);
         }
+        anyhow::ensure!(
+            !session::locked(&found.dir),
+            "The recording is still finishing. Try again in a moment."
+        );
+        dirs.push(found.dir.clone());
     }
+    Ok(dirs)
+}
+
+fn remove_tracks(dirs: Vec<std::path::PathBuf>) -> Result<()> {
     for dir in dirs {
         anyhow::ensure!(
             !session::locked(&dir),
@@ -70,6 +57,34 @@ fn discard_recording(root: &Path, id: &str) -> Result<()> {
         std::fs::remove_dir_all(dir)?;
     }
     Ok(())
+}
+
+fn discard_recording(root: &Path, id: &str) -> Result<()> {
+    anyhow::ensure!(
+        leo_core::recording::valid_id(id),
+        "That is not a recording leo knows."
+    );
+    if !recordings_root(root)? {
+        return Ok(());
+    }
+    remove_tracks(tracks_of(&session::scan(root), id)?)
+}
+
+fn discard_recordings(root: &Path, ids: &[String]) -> usize {
+    match recordings_root(root) {
+        Ok(false) => {
+            return ids
+                .iter()
+                .filter(|id| leo_core::recording::valid_id(id))
+                .count()
+        }
+        Err(_) => return 0,
+        Ok(true) => {}
+    }
+    let scan = session::scan(root);
+    ids.iter()
+        .filter(|id| tracks_of(&scan, id).and_then(remove_tracks).is_ok())
+        .count()
 }
 
 fn real_dirs(root: &Path) -> Vec<std::path::PathBuf> {
@@ -88,14 +103,15 @@ fn real_dirs(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn expire_saved(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
-    real_dirs(root)
+    if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
+        return 0;
+    }
+    session::scan(root)
+        .sessions
         .into_iter()
-        .filter(|dir| !session::locked(dir))
-        .filter(|dir| {
-            session::Session::open(dir)
-                .is_ok_and(|s| s.manifest.saved && s.manifest.started < before)
-        })
-        .filter(|dir| std::fs::remove_dir_all(dir).is_ok())
+        .filter(|s| s.manifest.saved && s.manifest.started < before)
+        .filter(|s| !session::locked(&s.dir))
+        .filter(|s| std::fs::remove_dir_all(&s.dir).is_ok())
         .count()
 }
 
@@ -137,6 +153,9 @@ impl Housekeeper for Housekeeping {
     fn discard_recording(&self, id: &str) -> Result<()> {
         discard_recording(&session::root()?, id)
     }
+    fn discard_recordings(&self, ids: &[String]) -> usize {
+        session::root().map_or(0, |root| discard_recordings(&root, ids))
+    }
     fn expire_kept_audio(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
         let saved = session::root().map_or(0, |root| expire_saved(&root, before));
         let browser = leo_core::paths::data_dir().map_or(0, |data| {
@@ -168,6 +187,35 @@ mod tests {
         assert!(keep.exists());
         discard_recording(tmp.path(), "call-failed-01").unwrap();
         assert!(discard_recording(tmp.path(), "../outside").is_err());
+    }
+
+    #[test]
+    fn a_batch_discard_removes_every_track_of_each_recording() {
+        let tmp = tempfile::tempdir().unwrap();
+        let create = |id: &str| {
+            let mut manifest = session::Manifest::new(None, None, "", false);
+            manifest.id = id.into();
+            Session::create(tmp.path(), manifest).unwrap().dir
+        };
+        let you = create("call-0001-you");
+        let others = create("call-0001-others");
+        let single = create("single-0001");
+        let keep = create("keep-01");
+        let running = create("running-01");
+        std::fs::write(running.join("lock"), std::process::id().to_string()).unwrap();
+        let ids: Vec<String> = [
+            "call-0001",
+            "single-0001",
+            "running-01",
+            "../outside",
+            "gone-0001",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(discard_recordings(tmp.path(), &ids), 3);
+        assert!(!you.exists() && !others.exists() && !single.exists());
+        assert!(keep.exists() && running.exists());
+        assert_eq!(discard_recordings(&tmp.path().join("absent"), &ids[..1]), 1);
     }
 
     #[test]
