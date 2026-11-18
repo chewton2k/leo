@@ -50,7 +50,8 @@ This file holds the rules. How each screen behaves, area by area, is in
   tasks (graph, idle, Keeping expiry, calendar) and the server;
   `Running::{port, sign_in_url, stop}`. `stop` stops the background tasks first,
   drains requests and streams for at most `shutdown::GRACE` (5 s), then aborts
-  the server; warm-session cleanup has `shutdown::CLEANUP` (1 s). Tests use
+  the server; it first signals a native recording to stop, refuses new
+  recordings, and waits for the worker within the same grace; warm-session cleanup has `shutdown::CLEANUP` (1 s). Tests use
   `start_in(Places { store, sessions }, …)`. The app passes `fresh_token()`;
   `leo-test-server` uses `saved_token()`, the `<config>/serve-token` file the
   specs read.

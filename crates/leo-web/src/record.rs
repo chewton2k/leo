@@ -238,6 +238,7 @@ pub(crate) struct RecordJob {
     points: Arc<Mutex<Vec<(u64, String)>>>,
     saved_points: Arc<AtomicUsize>,
     wants: Arc<Mutex<Option<String>>>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 struct Writing(Arc<AtomicBool>);
@@ -287,6 +288,14 @@ impl RecordJob {
 }
 
 pub(crate) type Recordings = Arc<Mutex<Option<RecordJob>>>;
+
+pub(crate) fn stop_for_quit(state: &AppState) -> Option<std::thread::JoinHandle<()>> {
+    let mut held = state.recording.lock().unwrap_or_else(|e| e.into_inner());
+    state.quitting.store(true, Ordering::Release);
+    let job = held.as_mut()?;
+    job.stop.store(true, Ordering::Relaxed);
+    job.worker.take()
+}
 
 pub(crate) fn discard_unless_in_use(
     recordings: &Recordings,
@@ -496,6 +505,10 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     let wants: Arc<Mutex<Option<String>>> = Default::default();
     {
         let mut held = state.recording.lock().unwrap_or_else(|e| e.into_inner());
+        if state.quitting.load(Ordering::Acquire) {
+            drop(held);
+            return error(StatusCode::SERVICE_UNAVAILABLE, "leo is quitting.");
+        }
         if held
             .as_ref()
             .is_some_and(|j| j.busy() || j.writing.load(Ordering::Acquire))
@@ -542,6 +555,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
             points: Arc::clone(&points),
             saved_points: Arc::clone(&saved_points),
             wants: Arc::clone(&wants),
+            worker: None,
         });
     }
     let listening = Listening {
@@ -562,10 +576,11 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     };
     let worker = state.clone();
     let job = id.clone();
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let _activity = activity;
         run(worker, job, listener, listening, directory, title)
     });
+    change(&state.recording, &id, |job| job.worker = Some(handle));
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "id": id }))).into_response()
 }
 

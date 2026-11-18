@@ -193,6 +193,7 @@ struct AppState {
     zip_slots: Arc<tokio::sync::Semaphore>,
     combines: Arc<Mutex<std::collections::HashMap<String, routes::combine::CombineJob>>>,
     recording: record::Recordings,
+    quitting: Arc<std::sync::atomic::AtomicBool>,
     capture_activity: leo_core::activity::Gate,
     discarded_recordings: Arc<Mutex<std::collections::VecDeque<String>>>,
     calendar: Arc<calendar::Calendar>,
@@ -592,9 +593,15 @@ impl Running {
             grace,
             ..
         } = self;
+        let deadline = tokio::time::Instant::now() + grace;
+        let worker =
+            record::stop_for_quit(&state).map(|h| tokio::task::spawn_blocking(move || h.join()));
         background.stop();
         let _ = stop.send(());
         shutdown::drain(grace, server).await;
+        if let Some(worker) = worker {
+            let _ = tokio::time::timeout_at(deadline, worker).await;
+        }
         drop(background);
         let warm = Arc::clone(&state.warm);
         drop(state);
@@ -675,6 +682,7 @@ pub(crate) async fn start_in(
         zip_slots: routes::downloads::zip_slots(),
         combines: Default::default(),
         recording: Default::default(),
+        quitting: Default::default(),
         capture_activity: leo_core::activity::global().clone(),
         discarded_recordings: Default::default(),
         calendar: Default::default(),

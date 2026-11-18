@@ -99,6 +99,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         zip_slots: routes::downloads::zip_slots(),
         combines: Default::default(),
         recording: Default::default(),
+        quitting: Default::default(),
         capture_activity: leo_core::activity::Gate::default(),
         discarded_recordings: Default::default(),
         calendar: Default::default(),

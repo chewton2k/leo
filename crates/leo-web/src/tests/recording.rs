@@ -1321,3 +1321,76 @@ fn a_point_is_answered_only_after_it_is_saved() {
     run(record::stop(State(state.clone()), Path(id)));
     recording_until(&state, |s| s == "done");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn stopping_the_engine_ends_the_native_recording_worker() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let dir = tempfile::tempdir().unwrap();
+    let stop_flag: Arc<Mutex<Option<Arc<AtomicBool>>>> = Default::default();
+    let exited = Arc::new(AtomicBool::new(false));
+    let (flag, done) = (stop_flag.clone(), exited.clone());
+    let listener: record::Listener = Arc::new(move |listening, _| {
+        *flag.lock().unwrap() = Some(listening.stop.clone());
+        while !listening.stop.load(Ordering::Relaxed) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        done.store(true, Ordering::Relaxed);
+        anyhow::bail!("stopped")
+    });
+    let running = crate::start_in(
+        crate::Places {
+            store: leo_core::store::Store::load_from(&dir.path().join("notes")).unwrap(),
+            sessions: dir.path().join("sessions.json"),
+        },
+        crate::StartOptions {
+            port: 0,
+            token: "0123456789abcdef0123456789abcdef".into(),
+        },
+        Powers {
+            listener: Some(listener),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let started = record::start(
+        State(running.state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({ "directory": "", "source": "microphone" }))
+                .unwrap(),
+        ),
+    )
+    .await;
+    assert_eq!(started.status(), StatusCode::ACCEPTED);
+    while stop_flag.lock().unwrap().is_none() {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let begun = std::time::Instant::now();
+    running.stop().await;
+    let stop_took = begun.elapsed();
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let flag = stop_flag.lock().unwrap().clone().unwrap();
+    let (signalled, gone) = (flag.load(Ordering::Relaxed), exited.load(Ordering::Relaxed));
+    assert!(
+        signalled && gone,
+        "Running::stop left the recording worker running"
+    );
+    assert!(stop_took < crate::shutdown::GRACE + crate::shutdown::CLEANUP);
+}
+
+#[test]
+fn a_recording_started_while_quitting_is_refused() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.listener = Some(hearing());
+    assert!(record::stop_for_quit(&state).is_none());
+    let started = run(record::start(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(serde_json::json!({ "directory": "", "source": "microphone" }))
+                .unwrap(),
+        ),
+    ));
+    assert_eq!(started.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(json_of(started)["error"], "leo is quitting.");
+    assert!(state.recording.lock().unwrap().is_none());
+}
