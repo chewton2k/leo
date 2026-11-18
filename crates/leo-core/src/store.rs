@@ -2068,13 +2068,11 @@ impl Store {
                     .map(|rest| format!("{to}/{rest}"))
             }
         };
-        let now = Utc::now();
         let dirty = self.dirty.get_mut();
         let feed = self.feed.get_mut();
         for note in &mut self.notes {
             if let Some(dir) = renamed(&note.directory) {
                 note.directory = dir;
-                note.updated_at = now;
                 dirty.insert(note.id.clone());
                 feed.record(note.id.clone());
             }
@@ -2094,7 +2092,6 @@ impl Store {
         self.validate_directory(new_dir).ok()?;
         let note = self.find_note_mut(id_prefix)?;
         note.directory = new_dir.to_string();
-        note.updated_at = Utc::now();
         Some(note.title.clone())
     }
 }
@@ -2199,6 +2196,47 @@ mod tests {
         store.create_note("In cs162", "b", vec![], "cs162").unwrap();
         store.save().unwrap();
         (store, dir)
+    }
+
+    #[test]
+    fn renaming_a_folder_keeps_its_notes_edit_dates() {
+        let (mut store, dir) = store_with_tree();
+        let before: HashMap<String, DateTime<Utc>> = store
+            .notes
+            .iter()
+            .map(|n| (n.id.clone(), n.updated_at))
+            .collect();
+        store.rename_dir("cs130", "cs131").unwrap();
+        let stamped: Vec<String> = store
+            .notes
+            .iter()
+            .filter(|n| before[&n.id] != n.updated_at)
+            .map(|n| n.title.clone())
+            .collect();
+        assert!(stamped.is_empty(), "updated_at changed for {stamped:?}");
+        store.save().unwrap();
+        assert!(dir.path().join("notes/cs131/In cs130.md").exists());
+        assert!(!dir.path().join("notes/cs130/In cs130.md").exists());
+    }
+
+    #[test]
+    fn moving_a_note_keeps_its_edit_date_and_moves_its_file() {
+        let (mut store, dir) = store_with_tree();
+        let id = store
+            .create_note("Mover", "b", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let before = store.notes.iter().find(|n| n.id == id).unwrap().updated_at;
+        store.move_note(&id, "cs162").unwrap();
+        assert_eq!(
+            store.notes.iter().find(|n| n.id == id).unwrap().updated_at,
+            before
+        );
+        store.save().unwrap();
+        assert!(dir.path().join("notes/cs162/Mover.md").exists());
+        assert!(!dir.path().join("notes/Mover.md").exists());
     }
 
     #[test]
