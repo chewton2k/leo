@@ -428,11 +428,17 @@ fn load_directories(notes_dir: &Path) -> Result<(Vec<String>, u64)> {
         Err(e) => {
             let kept = path.with_extension("json.corrupt");
             match fs::rename(&path, &kept) {
-                Ok(()) => crate::diag::warn(format!(
-                    "skipping {}: {e}; kept it as {}",
-                    path.display(),
-                    kept.display()
-                )),
+                Ok(()) => {
+                    let _ = fs::File::options()
+                        .write(true)
+                        .open(&kept)
+                        .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+                    crate::diag::warn(format!(
+                        "skipping {}: {e}; kept it as {}",
+                        path.display(),
+                        kept.display()
+                    ))
+                }
                 Err(moved) => crate::diag::warn(format!(
                     "skipping {}: {e}; could not keep it: {moved}",
                     path.display()
@@ -2890,11 +2896,20 @@ mod tests {
         store.save().unwrap();
         let corrupt = store.notes_dir.join("directories.json.corrupt");
         std::fs::write(&corrupt, "older").unwrap();
-        std::fs::write(store.notes_dir.join("directories.json"), "{not json").unwrap();
+        let list = store.notes_dir.join("directories.json");
+        std::fs::write(&list, "{not json").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&list)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000))
+            .unwrap();
         let store = Store::load_from(&store.notes_dir).unwrap();
         assert_eq!(store.notes.len(), 1);
         assert_eq!(store.directories, vec!["cs162"]);
         assert_eq!(std::fs::read_to_string(&corrupt).unwrap(), "{not json");
+        let kept_at = std::fs::metadata(&corrupt).unwrap().modified().unwrap();
+        assert!(kept_at.elapsed().is_ok_and(|age| age.as_secs() < 600));
     }
 
     #[cfg(unix)]

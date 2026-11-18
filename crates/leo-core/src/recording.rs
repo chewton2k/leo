@@ -1079,6 +1079,20 @@ pub fn remove(notes: &Path, note: &str, ids: &[String]) -> Result<()> {
             }
         }
     }
+    match std::fs::remove_dir(&dir) {
+        Err(e)
+            if !matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+            ) =>
+        {
+            crate::diag::warn(format!(
+                "could not remove the empty recording folder {}: {e}",
+                dir.display()
+            ))
+        }
+        _ => {}
+    }
     Ok(())
 }
 
@@ -1651,6 +1665,66 @@ mod tests {
             3
         );
         assert_eq!(whole(&notes, "note-from").len(), 2);
+    }
+
+    #[test]
+    fn removing_a_transcript_removes_its_saved_original_and_the_empty_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-gone",
+            &spoken("rec-gone01", &[(0, "", "said")]),
+        )
+        .unwrap();
+        edit(
+            &notes,
+            "note-gone",
+            "rec-gone01",
+            1,
+            &[Change {
+                kind: Kind::Passage,
+                seq: 1,
+                text: "fixed".into(),
+            }],
+        )
+        .unwrap();
+        let dir = folder(&notes, "note-gone").unwrap();
+        std::fs::write(dir.join("rec-gone01.original"), "the first wording").unwrap();
+        remove(&notes, "note-gone", &["rec-gone01".to_string()]).unwrap();
+        assert!(!dir.exists());
+        assert!(root(&notes).is_dir());
+    }
+
+    #[test]
+    fn a_folder_with_other_transcripts_stays() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-kept",
+            &spoken("rec-kept01", &[(0, "", "one")]),
+        )
+        .unwrap();
+        save(
+            &notes,
+            "note-kept",
+            &spoken("rec-kept02", &[(0, "", "two")]),
+        )
+        .unwrap();
+        let dir = folder(&notes, "note-kept").unwrap();
+        std::fs::write(dir.join("rec-kept01.original"), "the first wording").unwrap();
+        remove(&notes, "note-kept", &["rec-kept01".to_string()]).unwrap();
+        assert!(!dir.join("rec-kept01.original").exists());
+        assert_eq!(
+            list(&notes, "note-kept")
+                .unwrap()
+                .iter()
+                .map(|h| h.id.as_str())
+                .collect::<Vec<_>>(),
+            ["rec-kept02"]
+        );
+        assert_eq!(whole(&notes, "note-kept")[0].passages[0].text, "two");
     }
 
     #[cfg(unix)]
