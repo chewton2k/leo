@@ -15,6 +15,7 @@
 @media (pointer: coarse), print { .page-marks { display: none; } }
 .note-outline { grid-area: 1 / 1; position: sticky; top: var(--outline-top, 76px); align-self: start; min-width: 0; z-index: 27; }
 .note-outline .source-more { margin: 0; border: 0; padding: 0; }
+.note-outline .source-more:not([open]) > nav { display: none; }
 .note-outline .source-more > summary { display: flex; gap: 8px; padding: 10px 8px; border: 0; color: var(--muted); }
 .note-outline summary .outline-icon { flex: none; display: flex; }
 .note-outline summary svg { flex: none; width: 18px; height: 18px; }

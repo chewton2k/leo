@@ -509,7 +509,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
   each heading row names its `block`, and the current heading is found by binary
   search over those blocks' positions, touching only the previous and new
-  button and tick; preview
+  button and tick. The closed heading list uses `display: none` so WebKit skips
+  layout work for its rows until the disclosure opens. The preview is
   ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
   never redraw the editor.
 
