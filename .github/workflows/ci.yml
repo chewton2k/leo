@@ -130,6 +130,7 @@ jobs:
       - name: Clippy for the app
         if: needs.changes.outputs.rust == 'true'
         run: cargo clippy -p leo-desktop --all-targets --locked -- -D warnings
+
   browser-server:
     needs: changes
     if: needs.changes.outputs.browser == 'true'
