@@ -1949,7 +1949,10 @@ fn an_unreadable_file_stops_the_sweep() {
         margin::MOST_OPEN,
     );
     let start = chrono::Utc::now();
-    assert_eq!(margin::sweep_store(&chats, &store), 0);
+    assert_eq!(
+        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept)),
+        0
+    );
     let held = margin::every(&chats);
     assert_eq!(held.len(), 1);
     let kept = std::collections::HashSet::new();
@@ -2064,7 +2067,10 @@ fn the_sweep_keeps_everything_while_notes_cannot_be_trusted() {
         Vec::new(),
     );
     margin::put(&chats, &thread, margin::MOST_OPEN);
-    assert_eq!(margin::sweep_store(&chats, &store), 0);
+    assert_eq!(
+        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept)),
+        0
+    );
     assert_eq!(margin::open_on(&chats, "note").len(), 1);
 }
 

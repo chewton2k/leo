@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1016,20 +1016,21 @@ pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize 
     forget_notes(chats, &gone)
 }
 
-pub fn sweep_store(chats: &Path, store: &leo_core::store::Store) -> usize {
+pub fn sweep_kept(store: &leo_core::store::Store) -> Option<(HashSet<String>, PathBuf)> {
     if store.notes.is_empty() || !store.unreadable.is_empty() {
-        return 0;
+        return None;
     }
-    let trashed = store.trashed();
-    if trashed.iter().any(|t| !t.readable) {
-        return 0;
+    let kept = store.notes.iter().map(|n| n.id.clone()).collect();
+    Some((kept, store.notes_dir.clone()))
+}
+
+pub fn sweep_store(chats: &Path, (mut kept, notes_dir): (HashSet<String>, PathBuf)) -> usize {
+    for entry in leo_core::store::trash_entries(&notes_dir) {
+        let Some(head) = entry.head else {
+            return 0;
+        };
+        kept.insert(head.id);
     }
-    let kept: HashSet<String> = store
-        .notes
-        .iter()
-        .map(|n| n.id.clone())
-        .chain(trashed.into_iter().map(|t| t.id))
-        .collect();
     sweep(chats, &kept, Utc::now())
 }
 
@@ -1716,6 +1717,102 @@ mod tests {
             suffix: suffix.into(),
         };
         new_thread("n", "ask", place, quote, vec![felix_says("Hash it.")])
+    }
+
+    fn library(notes: usize, trash: usize) -> (tempfile::TempDir, leo_core::store::Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("notes");
+        let bin = root.join(".trash");
+        std::fs::create_dir_all(&bin).unwrap();
+        let body = "word ".repeat(1_000);
+        for n in 0..notes {
+            std::fs::write(
+                root.join(format!("Live {n}.md")),
+                format!("Live {n}\n\n{body}"),
+            )
+            .unwrap();
+        }
+        for n in 0..trash {
+            std::fs::write(
+                bin.join(format!("Gone {n}.md")),
+                format!("Gone {n}\n\n{body}"),
+            )
+            .unwrap();
+        }
+        let store = leo_core::store::Store::load_from(&root).unwrap();
+        let owners: Vec<String> = store
+            .notes
+            .iter()
+            .map(|n| n.id.clone())
+            .chain(leo_core::store::trashed_ids(&root))
+            .collect();
+        let chats = crate::chats::dir_for(&root);
+        db_of(&chats)
+            .with(|c| {
+                let tx = c.transaction()?;
+                for owner in &owners {
+                    let place = Place {
+                        prefix: String::new(),
+                        suffix: String::new(),
+                    };
+                    let thread =
+                        new_thread(owner, "read", place, "some quote", vec![felix_says("Hm.")]);
+                    insert(&tx, &thread, MOST_OPEN)?;
+                }
+                tx.commit()
+            })
+            .unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn a_trashed_file_leo_cannot_read_stops_the_sweep() {
+        let (dir, _) = library(1, 0);
+        let notes = dir.path().join("notes");
+        let broken = notes.join(".trash").join("Broken.md");
+        std::fs::write(&broken, "---\ntitle: [unclosed\n---\nbody\n").unwrap();
+        let store = leo_core::store::Store::load_from(&notes).unwrap();
+        let chats = crate::chats::dir_for(&notes);
+        let place = Place {
+            prefix: String::new(),
+            suffix: String::new(),
+        };
+        assert!(put(
+            &chats,
+            &new_thread("elsewhere", "read", place, "words", Vec::new()),
+            MOST_OPEN
+        ));
+        let missing = |chats: &Path| {
+            state_of::<BTreeMap<String, DateTime<Utc>>>(chats, "missing").unwrap_or_default()
+        };
+        assert_eq!(sweep_store(&chats, sweep_kept(&store).unwrap()), 0);
+        assert!(missing(&chats).is_empty());
+        std::fs::remove_file(&broken).unwrap();
+        assert_eq!(sweep_store(&chats, sweep_kept(&store).unwrap()), 0);
+        assert!(missing(&chats).contains_key("elsewhere"));
+    }
+
+    #[test]
+    #[ignore]
+    fn benchmark_the_sweep_holds_the_notes_lock_briefly() {
+        for (live, trash) in [
+            (5_000, 5_000),
+            (5_000, 50_000),
+            (50_000, 5_000),
+            (50_000, 50_000),
+        ] {
+            let (_dir, store) = library(live, trash);
+            let chats = crate::chats::dir_for(&store.notes_dir);
+            for run in 0..3 {
+                let started = Instant::now();
+                let kept = sweep_kept(&store).unwrap();
+                let locked = started.elapsed().as_secs_f64() * 1e3;
+                let started = Instant::now();
+                let swept = sweep_store(&chats, kept);
+                let outside = started.elapsed().as_secs_f64() * 1e3;
+                eprintln!("sweep live {live} trash {trash} run {run}: sweep_kept {locked:.2} ms, sweep_store {outside:.2} ms, swept {swept}");
+            }
+        }
     }
 
     #[test]

@@ -304,10 +304,14 @@ async fn keep_graph_current(state: AppState) {
         tick.tick().await;
         if margin::sweep_due(swept_at) {
             swept_at = Some(std::time::Instant::now());
-            let chats = state.chats.clone();
-            let _ = state
-                .read_store(move |store| Ok(margin::sweep_store(&chats, store)))
-                .await;
+            if let Ok(Some(kept)) = state
+                .read_store(|store| Ok(margin::sweep_kept(store)))
+                .await
+            {
+                let chats = state.chats.clone();
+                let _ =
+                    tokio::task::spawn_blocking(move || margin::sweep_store(&chats, kept)).await;
+            }
         }
         if !state.visible.load(std::sync::atomic::Ordering::Acquire)
             || state.covered.load(std::sync::atomic::Ordering::Acquire)

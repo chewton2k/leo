@@ -701,8 +701,9 @@ Felix (2026-10-19).
   (`dependents::clear`); a removal that fails is retried on the next delete and daily
   (the `deleting` set in `margin_state`), a recording in use is skipped, and nothing is
   removed for an id that is live or in the trash again, or while a note or trashed file
-  cannot be read. `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
-  while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
+  cannot be read. `sweep_store` reads the trash outside the notes lock (`sweep_kept`
+  copies the live ids under it); it waits `SWEEP_AFTER_DAYS` (7) and never runs
+  while no notes loaded or a file, trashed or live, is unreadable. Export adds `leo/margin.json`
   (personas and instructions are not exported).
 - Modes `along` (default for notes leo made after `Prefs.since`; a v4 id, never a
   headerless file) or `ask`. A note's own row wins; turning the default off pins
