@@ -461,6 +461,7 @@ fn grouped(sessions: Vec<leo_services::session::Session>) -> Vec<leo_web::record
         }
         out.push(leo_web::record::Pending {
             id,
+            note: session.owner(),
             title: session.manifest.title,
             directory: session.manifest.dir,
             profile: session.manifest.profile,
@@ -991,11 +992,10 @@ mod tests {
                 let recorded = super::recover(listening("kept-retry-01"), &mut |_| {}).unwrap();
                 assert_eq!(recorded.into.as_deref(), Some("note-owner-1"));
                 assert_eq!(recorded.source.unwrap().id, "kept-retry-01");
-                assert!(
+                let listed =
                     super::pending_one(&leo_services::session::root().unwrap(), "kept-retry-01")
-                        .is_some(),
-                    "a recovery that is never committed stays recoverable"
-                );
+                        .expect("a recovery that is never committed stays recoverable");
+                assert_eq!(listed.note.as_deref(), Some("note-owner-1"));
             },
         );
     }
