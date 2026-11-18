@@ -78,17 +78,17 @@ pub(crate) async fn add_chat_file(
             "This copy of leo cannot read files.".into(),
         );
     };
-    let bytes = {
+    let data = body.data;
+    let decoded = tokio::task::spawn_blocking(move || {
         use base64::Engine;
-        match base64::engine::general_purpose::STANDARD.decode(body.data.as_bytes()) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                return refuse(
-                    StatusCode::BAD_REQUEST,
-                    format!("{} did not arrive intact; try again.", body.name),
-                )
-            }
-        }
+        base64::engine::general_purpose::STANDARD.decode(data.as_bytes())
+    })
+    .await;
+    let Ok(Ok(bytes)) = decoded else {
+        return refuse(
+            StatusCode::BAD_REQUEST,
+            format!("{} did not arrive intact; try again.", body.name),
+        );
     };
     let name = safe_file_name(&body.name);
     let dir = state.chats.clone();

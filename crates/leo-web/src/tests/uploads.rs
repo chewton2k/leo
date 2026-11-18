@@ -859,3 +859,29 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
         .iter()
         .all(|n| n.chars().count() <= 120 && n.ends_with(".pdf")));
 }
+
+#[test]
+fn an_original_is_sent_whole_and_byte_exact() {
+    let (state, home, ids) = state_with(&[("Big", "")]);
+    let folder = home.path().join("attachments").join(&ids[0]);
+    std::fs::create_dir_all(&folder).unwrap();
+    let data: Vec<u8> = (0..3 * 1024 * 1024 + 17).map(|i| (i % 251) as u8).collect();
+    std::fs::write(folder.join("deck.pdf"), &data).unwrap();
+    let response = run(get_original(
+        State(state),
+        Path((ids[0].clone(), "deck.pdf".into())),
+        Query(OriginalView::default()),
+    ));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "application/pdf");
+    assert_eq!(
+        response.headers()[header::CONTENT_LENGTH],
+        data.len().to_string().as_str()
+    );
+    assert_eq!(
+        response.headers()[header::CONTENT_DISPOSITION],
+        "attachment; filename=\"deck.pdf\""
+    );
+    let sent = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
+    assert_eq!(sent.as_ref(), data.as_slice());
+}

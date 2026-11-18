@@ -26,6 +26,7 @@ pub(crate) struct ImportJob {
 }
 
 pub(crate) const IMPORT_BYTES: usize = 120 * 1024 * 1024;
+const ORIGINAL_PIECE: usize = 64 * 1024;
 const MOST_UPLOAD_FILES: usize = 20;
 const MOST_UPLOAD_BYTES: usize = 90 * 1024 * 1024;
 const MOST_IMPORTS: usize = 2;
@@ -303,26 +304,17 @@ pub(crate) fn remove_originals(
     failed.map_or(Ok(()), Err)
 }
 
-fn read_original(notes_dir: &std::path::Path, note: &str, name: &str) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
+fn open_original(
+    notes_dir: &std::path::Path,
+    note: &str,
+    name: &str,
+) -> std::io::Result<(std::fs::File, u64)> {
     let path = original_path(notes_dir, note, name).ok_or_else(|| {
         std::io::Error::other("Original files must stay inside the attachments folder")
     })?;
-    let refused =
-        || std::io::Error::other("The original file is too large or is not a regular file");
-    let file = match leo_core::paths::open_regular(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::Other => return Err(refused()),
-        opened => opened?,
-    };
-    if file.metadata()?.len() > IMPORT_BYTES as u64 {
-        return Err(refused());
-    }
-    let mut bytes = Vec::new();
-    file.take(IMPORT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > IMPORT_BYTES {
-        return Err(std::io::Error::other("The original file is too large"));
-    }
-    Ok(bytes)
+    let file = leo_core::paths::open_regular(&path)?;
+    let size = file.metadata()?.len();
+    Ok((file, size))
 }
 
 fn set_job(state: &AppState, id: &str, change: impl FnOnce(&mut ImportJob)) {
@@ -901,27 +893,32 @@ pub(crate) async fn list_originals(
     let Some(folder) = originals_dir(&notes_dir, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let mut files: Vec<serde_json::Value> = std::fs::read_dir(&folder)
-        .map(|entries| {
-            entries
-                .take(MOST_UPLOAD_FILES * KEPT_IMPORTS)
-                .flatten()
-                .filter(|e| e.file_type().is_ok_and(|kind| kind.is_file()))
-                .filter(|e| {
-                    e.file_name()
-                        .to_str()
-                        .is_some_and(|name| original_path(&notes_dir, &id, name).is_some())
-                })
-                .map(|e| {
-                    serde_json::json!({
-                        "name": e.file_name().to_string_lossy(),
-                        "size": e.metadata().map(|m| m.len()).unwrap_or(0),
+    let files = tokio::task::spawn_blocking(move || {
+        let mut files: Vec<serde_json::Value> = std::fs::read_dir(&folder)
+            .map(|entries| {
+                entries
+                    .take(MOST_UPLOAD_FILES * KEPT_IMPORTS)
+                    .flatten()
+                    .filter(|e| e.file_type().is_ok_and(|kind| kind.is_file()))
+                    .filter(|e| {
+                        e.file_name()
+                            .to_str()
+                            .is_some_and(|name| original_path(&notes_dir, &id, name).is_some())
                     })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+                    .map(|e| {
+                        serde_json::json!({
+                            "name": e.file_name().to_string_lossy(),
+                            "size": e.metadata().map(|m| m.len()).unwrap_or(0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        files
+    })
+    .await
+    .unwrap_or_default();
     Json(files).into_response()
 }
 
@@ -961,12 +958,12 @@ pub(crate) async fn get_original(
     Query(how): Query<OriginalView>,
 ) -> Response {
     let notes_dir = state.notes_dir.clone();
-    let read = {
+    let opened = {
         let (id, name) = (id.clone(), name.clone());
-        tokio::task::spawn_blocking(move || read_original(&notes_dir, &id, &name)).await
+        tokio::task::spawn_blocking(move || open_original(&notes_dir, &id, &name)).await
     };
-    match read.unwrap_or_else(|_| Err(std::io::Error::other("The original could not be read"))) {
-        Ok(bytes) => {
+    match opened.unwrap_or_else(|_| Err(std::io::Error::other("The original could not be read"))) {
+        Ok((file, size)) => {
             let ascii: String = name
                 .chars()
                 .map(|c| {
@@ -978,8 +975,19 @@ pub(crate) async fn get_original(
                 })
                 .filter(|c| *c != '"')
                 .collect();
-            let mut response = bytes.into_response();
+            let stream = futures_util::stream::try_unfold(
+                (tokio::fs::File::from_std(file), vec![0u8; ORIGINAL_PIECE]),
+                |(mut file, mut piece)| async move {
+                    use tokio::io::AsyncReadExt;
+                    let read = file.read(&mut piece).await?;
+                    Ok::<_, std::io::Error>(
+                        (read > 0).then(|| (piece[..read].to_vec(), (file, piece))),
+                    )
+                },
+            );
+            let mut response = axum::body::Body::from_stream(stream).into_response();
             let headers = response.headers_mut();
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
             if let Ok(value) = HeaderValue::from_str(mime_for(&name)) {
                 headers.insert(header::CONTENT_TYPE, value);
             }

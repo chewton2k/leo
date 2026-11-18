@@ -52,7 +52,12 @@ pub(crate) async fn add_picture(
     State(state): State<AppState>,
     Json(body): Json<NewPicture>,
 ) -> Response {
-    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(body.data.as_bytes()) else {
+    let data = body.data;
+    let decoded = tokio::task::spawn_blocking(move || {
+        base64::engine::general_purpose::STANDARD.decode(data.as_bytes())
+    })
+    .await;
+    let Ok(Ok(bytes)) = decoded else {
         return (
             StatusCode::BAD_REQUEST,
             Json(serde_json::json!({ "error": "That picture did not arrive whole." })),
