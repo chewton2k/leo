@@ -1465,3 +1465,17 @@ test('the saved flag round-trips', () => {
   assert.equal('synced' in C.load(storage), false);
   assert.equal(JSON.parse(store.get([...store.keys()][0])).synced, undefined);
 });
+
+test('the note picker asks for 20 results', async () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('    async function findNotes(query) {');
+  const code = source.slice(start, source.indexOf('\n    }\n', start) + 6);
+  const asked = [];
+  const context = { state: { refs: [{ id: 'b' }] }, request: async (url) => { asked.push(url); return { ok: true, json: async () => [{ id: 'a' }, { id: 'b' }] }; } };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.find = findNotes;`, context);
+  const found = await context.find(' heaps ');
+  assert.deepEqual(asked, ['/api/search?q=heaps&limit=20']);
+  assert.deepEqual(found.map((n) => n.id), ['a']);
+});

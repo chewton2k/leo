@@ -951,7 +951,7 @@ async function showSearch(query) {
   app.innerHTML = `<div class="section-title">Searching…</div><div class="cards">${skeleton(3, 'search')}</div>`;
   let results;
   try {
-    results = await api(`/api/search?q=${enc(query)}&brief=true`);
+    results = await api(`/api/search?q=${enc(query)}&brief=true&limit=${SEARCH_STEP + 1}&offset=0`);
   } catch (e) {
     if (mine === seq) app.innerHTML = empty(ICON.search, 'Search did not finish', e.message || 'Something went wrong.', `<button class="btn primary" data-action="search-retry" data-query="${esc(query)}">Try again</button>`);
     return;
@@ -959,29 +959,56 @@ async function showSearch(query) {
   if (mine !== seq) return;
   const words = query.split(/\s+/).map((w) => w.replace(/^#/, '')).filter(Boolean);
   const draw = (list) => list.map((n) => card(n, { words, showFolder: true, why: n.why })).join('');
-  const count = results.length >= SEARCH_MOST ? `The first ${SEARCH_MOST} notes` : plural(results.length, 'note');
-  app.innerHTML = results.length
-    ? `<div class="section-title">${count}</div><div class="cards">${draw(results.slice(0, SEARCH_STEP))}</div>${results.length > SEARCH_STEP ? '<div class="more-notes" id="more-notes" aria-hidden="true">Loading more notes…</div>' : ''}`
+  const more = results.length > SEARCH_STEP, shown = results.slice(0, SEARCH_STEP);
+  app.innerHTML = shown.length
+    ? `<div class="section-title" id="search-count">${searchCount(shown.length, more)}</div><div class="cards">${draw(shown)}</div>${more ? '<button type="button" class="btn plain more-notes" id="more-notes" data-action="search-more">Show more</button>' : ''}`
     : empty(DRAWN.search, `No notes match “${query}”`, 'Try fewer words, or ask Felix to look for the idea.', `<button class="btn primary" data-action="search-ask" data-query="${esc(query)}">${ICON.chat}Ask Felix</button><button class="btn plain" data-action="search-new" data-query="${esc(query)}">${ICON.filePlus}New note “${esc(query)}”</button>`);
   cascade($('.cards'));
-  let shown = SEARCH_STEP;
   if (moreWatch) moreWatch.disconnect();
-  const sentinel = $('#more-notes');
-  if (!sentinel || typeof IntersectionObserver !== 'function') return;
+  searchPaging = { mine, query, loaded: shown.length, loading: false, draw };
+  const button = $('#more-notes');
+  if (!button || typeof IntersectionObserver !== 'function') return;
   moreWatch = new IntersectionObserver((seen) => {
-    if (mine !== seq || !seen.some((x) => x.isIntersecting)) return;
-    $('.cards').insertAdjacentHTML('beforeend', draw(results.slice(shown, shown + SEARCH_STEP)));
-    shown += SEARCH_STEP;
-    if (shown >= results.length) {
-      moreWatch.disconnect();
-      sentinel.remove();
-    }
+    if (seen.some((x) => x.isIntersecting)) showMore();
   }, { rootMargin: '600px 0px' });
-  moreWatch.observe(sentinel);
+  moreWatch.observe(button);
 }
 
-const SEARCH_MOST = 300;
 const SEARCH_STEP = 60;
+let searchPaging = null;
+function searchCount(loaded, more) {
+  return plural(loaded, 'note') + (more ? ' so far' : '');
+}
+async function showMore() {
+  const page = searchPaging, button = $('#more-notes');
+  if (!page || page.mine !== seq || page.loading || !button) return;
+  page.loading = true;
+  button.disabled = true;
+  button.textContent = 'Loading…';
+  let answer;
+  try {
+    answer = await api(`/api/search?q=${enc(page.query)}&brief=true&limit=${SEARCH_STEP + 1}&offset=${page.loaded}`);
+  } catch (e) {
+    if (page.mine !== seq) return;
+    page.loading = false;
+    button.disabled = false;
+    button.textContent = 'Try again';
+    return;
+  }
+  if (page.mine !== seq) return;
+  page.loading = false;
+  const more = answer.length > SEARCH_STEP, shown = answer.slice(0, SEARCH_STEP);
+  $('.cards').insertAdjacentHTML('beforeend', page.draw(shown));
+  page.loaded += shown.length;
+  $('#search-count').textContent = searchCount(page.loaded, more);
+  if (more) {
+    button.disabled = false;
+    button.textContent = 'Show more';
+  } else {
+    if (moreWatch) moreWatch.disconnect();
+    button.remove();
+  }
+}
 
 async function showRecord(arg) {
   const [dir] = arg.split('?');

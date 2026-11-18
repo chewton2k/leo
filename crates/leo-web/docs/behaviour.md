@@ -515,6 +515,9 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
 
 - Search (`search.rs`): title words and acronyms, text, graph concepts and
   summaries, then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`.
+  The results page shows a page at a time: it asks for 61 and draws 60, and a
+  Show more button (or scrolling near it) asks for the next page with `offset`;
+  the title counts the notes shown so far ("60 notes so far"), with no cut at 300.
 
 - Reading position (`/api/notes/{id}/reading`): saved 2 s after the user
   scrolls, restored once on open unless something else moved the page.

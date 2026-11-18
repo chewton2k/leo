@@ -78,7 +78,7 @@
 .viewer-diagram .drawing-row p { font-family: var(--felix-letters); font-size: 18px; color: var(--text); }
 .viewer-diagram .drawing-title { font-size: 22px; }
 .viewer-diagram .drawing-sub { font-size: var(--fs-base); }
-.more-notes { text-align: center; color: var(--faint); font-size: var(--fs-sm); padding: 18px 0 8px; }
+.btn.more-notes { display: flex; margin: 18px auto 8px; }
 .chat-notes { display: flex; flex-wrap: wrap; gap: 6px; width: 100%; }
 .file-cards { display: flex; gap: 8px; width: 100%; overflow-x: auto; padding: 2px 2px 4px; scrollbar-width: thin; }
 .file-cards.sent { justify-content: flex-end; flex-wrap: wrap; overflow: visible; padding: 0; margin-bottom: 6px; }

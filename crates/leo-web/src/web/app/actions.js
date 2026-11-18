@@ -161,6 +161,7 @@ const actions = {
     }
   },
   'search-retry': (el) => showSearch(el.dataset.query),
+  'search-more': showMore,
   'new-folder': newFolder,
   'create-folder': createFolder,
   settings: () => {

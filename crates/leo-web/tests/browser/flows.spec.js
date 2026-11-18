@@ -867,6 +867,37 @@ test('search shows placeholder cards while it waits', async ({ page }) => {
   await expect(page.locator('#app .cards .skeleton')).toHaveCount(0);
 });
 
+test('search reads a page at a time and Show more asks for the next page', async ({ page }) => {
+  const word = `zzpaged${Date.now().toString(36)}${test.info().project.name.replace(/\W/g, '')}`;
+  const ids = [];
+  for (let n = 0; n < 130; n++) {
+    const note = await (await page.request.post('/api/notes', { data: { title: `${word} ${n}`, body: `${word} note ${n}` } })).json();
+    ids.push(note.id);
+  }
+  await page.addInitScript(() => { delete window.IntersectionObserver; });
+  const asked = [];
+  page.on('request', (request) => { if (request.url().includes('/api/search')) asked.push(new URL(request.url()).searchParams); });
+  try {
+    await page.goto(`/#/search/${word}`);
+    const cards = page.locator('#app .cards .card');
+    await expect(cards).toHaveCount(60);
+    await expect(page.locator('#search-count')).toHaveText('60 notes so far');
+    const more = page.getByRole('button', { name: 'Show more' });
+    await more.click();
+    await expect(cards).toHaveCount(120);
+    await expect(page.locator('#search-count')).toHaveText('120 notes so far');
+    await more.click();
+    await expect(cards).toHaveCount(130);
+    await expect(page.locator('#search-count')).toHaveText('130 notes');
+    await expect(more).toHaveCount(0);
+    await expect(page.locator('#app')).not.toContainText('first 300');
+    expect(asked.map((params) => params.get('offset'))).toEqual(['0', '60', '120']);
+    expect(asked.every((params) => params.get('limit') === '61')).toBe(true);
+  } finally {
+    for (const id of ids) await page.request.delete(`/api/notes/${id}`);
+  }
+});
+
 test('nothing found offers Felix and a new note', async ({ page }) => {
   const tag = Date.now().toString(36);
   const ask = `zzqq-ask-${tag}`;

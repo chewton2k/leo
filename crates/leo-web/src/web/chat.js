@@ -1744,7 +1744,7 @@
     let pickTimer = 0;
     let pickSeq = 0;
     async function findNotes(query) {
-      const url = query.trim() ? `/api/search?q=${encodeURIComponent(query.trim())}` : '/api/notes?limit=12';
+      const url = query.trim() ? `/api/search?q=${encodeURIComponent(query.trim())}&limit=20` : '/api/notes?limit=12';
       const response = await request(url);
       if (!response.ok) return [];
       const notes = await response.json();

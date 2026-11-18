@@ -709,8 +709,12 @@ function printNotes(s) {
 async function openTitle(title) {
   const want = title.trim().toLowerCase();
   if (!want) return;
-  const hits = await api(`/api/search?q=${enc(title)}&brief=true`);
-  const hit = hits.find((n) => n.title.trim().toLowerCase() === want);
+  let hit = null;
+  for (let offset = 0; !hit; offset += SEARCH_STEP) {
+    const hits = await api(`/api/search?q=${enc(title)}&brief=true&limit=${SEARCH_STEP}&offset=${offset}`);
+    hit = hits.find((n) => n.title.trim().toLowerCase() === want);
+    if (hits.length < SEARCH_STEP) break;
+  }
   go(hit ? noteHash(hit.id) : `#/search/${enc(title)}`);
 }
 

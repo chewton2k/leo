@@ -151,7 +151,7 @@ function addSheet({ text }) {
           let found = [];
           if (query) {
             try {
-              found = await api(`/api/search?q=${enc(query)}&brief=true`);
+              found = await api(`/api/search?q=${enc(query)}&brief=true&limit=8`);
             } catch (e) {
               found = [];
             }
