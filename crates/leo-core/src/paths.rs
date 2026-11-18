@@ -109,10 +109,21 @@ pub fn stale_temp(name: &str, meta: &std::fs::Metadata) -> bool {
 }
 
 pub fn write_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    write_atomic_with(path, |w| Ok(w.write_all(contents.as_ref())?))
+}
+
+pub fn write_atomic_with(
+    path: &std::path::Path,
+    fill: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
+) -> Result<()> {
     use std::io::Write;
     let parent = path.parent().context("the file has no parent directory")?;
     let mut temp = tempfile::NamedTempFile::new_in(parent)?;
-    temp.write_all(contents.as_ref())?;
+    {
+        let mut out = std::io::BufWriter::new(temp.as_file_mut());
+        fill(&mut out)?;
+        out.flush()?;
+    }
     temp.as_file().sync_all()?;
     temp.persist(path).map_err(|error| error.error)?;
     #[cfg(unix)]
@@ -440,5 +451,19 @@ mod tests {
         left.sort();
         assert_eq!(left, ["f.json", "folder"]);
         assert!(std::fs::read_dir(&folder).unwrap().next().is_none());
+    }
+
+    #[test]
+    fn a_streamed_write_that_fails_leaves_the_old_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.jsonl");
+        write_atomic_with(&path, |w| Ok(w.write_all(b"one\n")?)).unwrap();
+        let failed = write_atomic_with(&path, |w| {
+            w.write_all(b"two\n")?;
+            anyhow::bail!("stopped")
+        });
+        assert!(failed.is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "one\n");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }
