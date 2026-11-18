@@ -21,13 +21,13 @@ pub struct EventStarting {
 pub trait AppApi: Send + Sync {
     fn view(&self) -> Result<Value>;
     fn change(&self, value: Value) -> Result<Value>;
-    fn health(&self, notes: &Path, fresh: bool) -> Result<Value>;
+    fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value>;
     fn event_starting(&self, _event: EventStarting) {}
 }
 async fn call(
     api: Option<Arc<dyn AppApi>>,
     change: Option<Value>,
-    notes: Option<(PathBuf, bool)>,
+    notes: Option<(PathBuf, leo_core::store::Facts, bool)>,
     margin: Option<String>,
 ) -> Response {
     let Some(api) = api else {
@@ -46,8 +46,8 @@ async fn call(
         );
     }
     match tokio::task::spawn_blocking(move || {
-        if let Some((notes, fresh)) = notes {
-            let mut view = api.health(&notes, fresh)?;
+        if let Some((notes, facts, fresh)) = notes {
+            let mut view = api.health(&notes, facts, fresh)?;
             if let (Some(line), Some(sections)) = (margin, view["sections"].as_array_mut()) {
                 sections.push(json!({
                     "title": "Felix",
@@ -96,11 +96,15 @@ pub(crate) async fn health(
     State(state): State<AppState>,
     Query(query): Query<HealthQuery>,
 ) -> Response {
+    let facts = match state.read_store(|store| Ok(store.facts())).await {
+        Ok(facts) => facts,
+        Err(status) => return error(status, crate::reply::sentence(status)),
+    };
     let notes = state.notes_dir.clone();
     call(
         state.app_settings.clone(),
         None,
-        Some((notes, query.fresh)),
+        Some((notes, facts, query.fresh)),
         state.margin.problem(),
     )
     .await
@@ -130,6 +134,7 @@ mod tests {
         fn health(
             &self,
             _notes: &std::path::Path,
+            _facts: leo_core::store::Facts,
             _fresh: bool,
         ) -> anyhow::Result<serde_json::Value> {
             Ok(serde_json::json!({"sections":[]}))
@@ -141,7 +146,7 @@ mod tests {
         let response = call(
             api,
             None,
-            Some((PathBuf::from("unused"), false)),
+            Some((PathBuf::from("unused"), Default::default(), false)),
             Some("Felix could not read.".into()),
         )
         .await;
@@ -189,7 +194,11 @@ mod tests {
             call(
                 api,
                 None,
-                Some((std::path::PathBuf::from("unused"), false)),
+                Some((
+                    std::path::PathBuf::from("unused"),
+                    Default::default(),
+                    false
+                )),
                 None
             )
             .await

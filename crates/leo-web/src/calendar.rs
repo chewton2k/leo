@@ -1096,7 +1096,12 @@ pub(crate) mod tests {
         fn change(&self, _: serde_json::Value) -> Result<serde_json::Value> {
             self.view()
         }
-        fn health(&self, _: &Path, _: bool) -> Result<serde_json::Value> {
+        fn health(
+            &self,
+            _: &Path,
+            _: leo_core::store::Facts,
+            _: bool,
+        ) -> Result<serde_json::Value> {
             self.view()
         }
         fn event_starting(&self, e: crate::app_settings::EventStarting) {

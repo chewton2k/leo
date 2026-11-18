@@ -1988,7 +1988,7 @@ async fn bad_thread_ids_are_refused_before_anything_runs() {
 }
 
 #[derive(Default)]
-struct Healthy(std::sync::Mutex<Vec<bool>>);
+struct Healthy(std::sync::Mutex<Vec<bool>>, std::sync::Mutex<Vec<usize>>);
 
 impl crate::app_settings::AppApi for Healthy {
     fn view(&self) -> anyhow::Result<serde_json::Value> {
@@ -1997,8 +1997,14 @@ impl crate::app_settings::AppApi for Healthy {
     fn change(&self, _: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
-    fn health(&self, _: &std::path::Path, fresh: bool) -> anyhow::Result<serde_json::Value> {
+    fn health(
+        &self,
+        _: &std::path::Path,
+        facts: leo_core::store::Facts,
+        fresh: bool,
+    ) -> anyhow::Result<serde_json::Value> {
         self.0.lock().unwrap().push(fresh);
+        self.1.lock().unwrap().push(facts.notes);
         Ok(serde_json::json!({ "sections": [] }))
     }
 }
@@ -2014,6 +2020,21 @@ async fn check_again_passes_fresh_to_the_app() {
     assert_eq!(engine.get("/api/health?fresh=true").await.0, 200);
     assert_eq!(engine.get("/api/health").await.0, 200);
     assert_eq!(*healthy.0.lock().unwrap(), vec![true, false]);
+    engine.stop().await;
+}
+
+#[tokio::test]
+async fn health_is_given_the_notes_the_engine_holds() {
+    let healthy = Arc::new(Healthy::default());
+    let engine = Engine::with(Powers {
+        app_settings: Some(healthy.clone()),
+        ..Default::default()
+    })
+    .await;
+    engine.note("One", PASSAGE).await;
+    engine.note("Two", PASSAGE).await;
+    assert_eq!(engine.get("/api/health").await.0, 200);
+    assert_eq!(*healthy.1.lock().unwrap(), vec![2]);
     engine.stop().await;
 }
 
