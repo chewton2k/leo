@@ -93,7 +93,7 @@ Decided: one app, window only (2026-10-31).
   in-memory acknowledgement even if the HTTP client leaves.
 - Recording warnings keep at most 40 entries of 2,000 Unicode characters.
 - Keeping's expiry refuses linked recording and originals roots; every pass is
-  bounded, never follows symlinks, stays in its folder and skips what it cannot
+  bounded (a recordings pass deletes in batches of 256 under the recordings lock until done), never follows symlinks, stays in its folder and skips what it cannot
   delete.
 - Credentials never reach the page or note exports. Writing Settings offers
   Ollama, Codex and Claude Code only; removed AGY/Copilot choices and sign-in
@@ -830,7 +830,8 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   server takes no audio from the page. Native jobs have no page heartbeat.
   `capture_activity` is reserved before a job is created; its lease blocks
   updater installation through the durable save. Recovery lists only what the
-  `Housekeeper` lists (`pending_recordings`); a recovery job carries its session id.
+  `Housekeeper` lists (`pending_page`, every unfinished recording newest first; recover
+  and Delete look one up with `pending_recording`); a recovery job carries its session id.
 - Label speakers (2026-11-16, the user's call: per recording, for meetings,
   not lectures): a switch under the note fields, off by default, remembered as
   `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and
@@ -1047,7 +1048,7 @@ a modal.
   `/api/keep` (`keeping::expire_now`): chats past the choice and orphan chat
   documents, uploads by file mtime (the folder and note
   never touched), transcripts in `recording-sources/`, unfinished audio through
-  `Housekeeper::pending_recordings` + `discard_recordings` (one batch) and
+  `Housekeeper::old_recordings` + `discard_recordings` (batches of 256) and
   `expire_kept_audio`, skipping the session in use (`RecordJob::session_id`) and
   locked sessions. DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it

@@ -7,6 +7,7 @@ use crate::record::{discard_all_unless_in_use, Housekeeper, Recordings};
 use crate::AppState;
 
 const MOST_ENTRIES: usize = 100_000;
+const DISCARD_BATCH: usize = 256;
 
 pub fn data_dir(notes_dir: &Path) -> PathBuf {
     notes_dir.parent().unwrap_or(notes_dir).to_path_buf()
@@ -142,11 +143,9 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
         "upload_days" => old_uploads(&notes_dir, Some(days), now).len(),
         "transcript_days" => old_transcripts(&notes_dir, Some(days), now, active.as_deref()).len(),
         "audio_days" => housekeeper
-            .and_then(|h| h.pending_recordings().ok())
-            .map_or(0, |pending| {
-                pending
-                    .iter()
-                    .filter(|p| p.started.is_some_and(|started| started < before))
+            .and_then(|h| h.old_recordings(before).ok())
+            .map_or(0, |old| {
+                old.iter()
                     .filter(|p| active.as_deref() != Some(p.id.as_str()))
                     .count()
             }),
@@ -169,15 +168,14 @@ pub(crate) fn expire_audio(
         return 0;
     };
     let kept = housekeeper.expire_kept_audio(cutoff);
-    let Ok(pending) = housekeeper.pending_recordings() else {
+    let Ok(old) = housekeeper.old_recordings(cutoff) else {
         return kept;
     };
-    let old = pending
-        .into_iter()
-        .filter(|p| p.started.is_some_and(|started| started < cutoff))
-        .map(|p| p.id)
-        .collect();
-    kept + discard_all_unless_in_use(recording, housekeeper, old)
+    let ids: Vec<String> = old.into_iter().map(|p| p.id).collect();
+    kept + ids
+        .chunks(DISCARD_BATCH)
+        .map(|batch| discard_all_unless_in_use(recording, housekeeper, batch.to_vec()))
+        .sum::<usize>()
 }
 
 pub(crate) async fn expire_now(state: &AppState) {
@@ -397,6 +395,39 @@ mod tests {
         assert!(fake.discarded.lock().unwrap().is_empty());
         assert_eq!(expire_audio(&fake, Some(30), now, &Default::default()), 1);
         assert_eq!(*fake.discarded.lock().unwrap(), ["old-recording"]);
+    }
+
+    #[test]
+    fn expiry_reaches_every_old_recording_in_one_pass() {
+        struct Many {
+            old: Vec<Pending>,
+            batches: Mutex<Vec<usize>>,
+        }
+        impl Housekeeper for Many {
+            fn old_recordings(&self, before: DateTime<Utc>) -> anyhow::Result<Vec<Pending>> {
+                Ok(self
+                    .old
+                    .iter()
+                    .filter(|p| p.started.is_some_and(|s| s < before))
+                    .cloned()
+                    .collect())
+            }
+            fn discard_recordings(&self, ids: &[String]) -> usize {
+                self.batches.lock().unwrap().push(ids.len());
+                ids.len()
+            }
+        }
+        let now = Utc::now();
+        let many = Many {
+            old: (0..600)
+                .map(|n| pending(&format!("old-{n}"), Some(40), now))
+                .collect(),
+            batches: Default::default(),
+        };
+        let cutoff = now - chrono::Duration::days(30);
+        assert_eq!(many.old_recordings(cutoff).unwrap().len(), 600);
+        assert_eq!(expire_audio(&many, Some(30), now, &Default::default()), 600);
+        assert_eq!(*many.batches.lock().unwrap(), [256, 256, 88]);
     }
 
     #[test]

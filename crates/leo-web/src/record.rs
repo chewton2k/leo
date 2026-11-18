@@ -73,6 +73,26 @@ pub trait Housekeeper: Send + Sync {
     fn pending_recordings(&self) -> anyhow::Result<Vec<Pending>> {
         Ok(Vec::new())
     }
+    fn pending_page(
+        &self,
+        _after: Option<&str>,
+        _limit: usize,
+    ) -> anyhow::Result<(Vec<Pending>, Option<String>)> {
+        Ok((self.pending_recordings()?, None))
+    }
+    fn pending_recording(&self, id: &str) -> anyhow::Result<Option<Pending>> {
+        Ok(self.pending_recordings()?.into_iter().find(|p| p.id == id))
+    }
+    fn old_recordings(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Pending>> {
+        Ok(self
+            .pending_recordings()?
+            .into_iter()
+            .filter(|p| p.started.is_some_and(|started| started < before))
+            .collect())
+    }
     fn discard_recording(&self, _id: &str) -> anyhow::Result<()> {
         Ok(())
     }
@@ -313,7 +333,10 @@ pub(crate) async fn overview(State(state): State<AppState>) -> Response {
     let mut checks = Checks::default();
     if let Some(housekeeper) = state.housekeeper.clone() {
         if let Ok((saved, ready)) = tokio::task::spawn_blocking(move || {
-            (housekeeper.pending_recordings(), housekeeper.checks())
+            (
+                housekeeper.pending_page(None, usize::MAX),
+                housekeeper.checks(),
+            )
         })
         .await
         {
@@ -321,6 +344,7 @@ pub(crate) async fn overview(State(state): State<AppState>) -> Response {
             pending.extend(
                 saved
                     .unwrap_or_default()
+                    .0
                     .into_iter()
                     .map(|p| serde_json::to_value(p).unwrap_or_default()),
             );
@@ -647,21 +671,19 @@ pub(crate) async fn status(State(state): State<AppState>, Path(id): Path<String>
 
 pub(crate) async fn recover(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if let Some(housekeeper) = state.housekeeper.clone() {
-        let pending = tokio::task::spawn_blocking(move || housekeeper.pending_recordings()).await;
-        if let Ok(Ok(pending)) = pending {
-            if let Some(saved) = pending.into_iter().find(|p| p.id == id) {
-                return start(
-                    State(state),
-                    Json(StartBody {
-                        recover: Some(saved.id),
-                        directory: saved.directory,
-                        title: saved.title,
-                        source: saved.source,
-                        profile: Some(saved.profile),
-                    }),
-                )
-                .await;
-            }
+        let pending = tokio::task::spawn_blocking(move || housekeeper.pending_recording(&id)).await;
+        if let Ok(Ok(Some(saved))) = pending {
+            return start(
+                State(state),
+                Json(StartBody {
+                    recover: Some(saved.id),
+                    directory: saved.directory,
+                    title: saved.title,
+                    source: saved.source,
+                    profile: Some(saved.profile),
+                }),
+            )
+            .await;
         }
     }
     error(StatusCode::NOT_FOUND, "That recording cannot be recovered.")
@@ -984,7 +1006,7 @@ async fn discard_pending(state: AppState, id: String) -> Response {
     };
     let recordings = state.recording.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<bool>> {
-        if !housekeeper.pending_recordings()?.iter().any(|p| p.id == id) {
+        if housekeeper.pending_recording(&id)?.is_none() {
             return Ok(Some(false));
         }
         discard_unless_in_use(&recordings, &*housekeeper, &id)

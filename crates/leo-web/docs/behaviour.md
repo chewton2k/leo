@@ -1267,7 +1267,7 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   source. The page starts/stops/pauses and shows levels/transcripts; it never
   opens a browser microphone or screen-audio picker, and the server takes no
   audio from the page. Native jobs have no page heartbeat lifetime.
-  Housekeeper's `pending_recordings` supplies retained native sessions; recovery
+  Housekeeper's `pending_page` supplies retained native sessions, newest first; recovery
   starts in Writing state and supports Finish available, and anything the
   Housekeeper does not list is not found.
   When no writing AI could write the notes (`long::Structured.writer_failed`, every
@@ -1616,8 +1616,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   `<data>/attachments/<note-id>/` older than N days by modification time; the
   folder and the note are never touched), transcripts (folders in
   `recording-sources/` by folder time) and unfinished audio
-  (`record::Housekeeper::pending_recordings`, each with `Pending.started`, then
-  `discard_recording`, plus `expire_kept_audio` for saved sessions and old
+  (`record::Housekeeper::old_recordings`, each with `Pending.started`, then
+  `discard_recordings` in batches of 256, plus `expire_kept_audio` for saved sessions and old
   `browser-audio` folders; the session in use, by `RecordJob::session_id`, and
   locked sessions are skipped). DELETE `/api/record/{id}` also deletes a
   waiting recording that has no job; the Record page offers it on each row.
