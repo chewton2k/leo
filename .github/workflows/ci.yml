@@ -130,16 +130,6 @@ jobs:
       - name: Clippy for the app
         if: needs.changes.outputs.rust == 'true'
         run: cargo clippy -p leo-desktop --all-targets --locked -- -D warnings
-      - name: List panic sites on Windows (temporary)
-        if: runner.os == 'Windows' && needs.changes.outputs.rust == 'true'
-        continue-on-error: true
-        shell: bash
-        run: |
-          for target in "leo-desktop --lib --bins" "leo-host --lib --bins" "leo --bins"; do
-            echo "== $target"
-            cargo clippy -p $target --no-deps --locked -- -W clippy::unwrap_used -W clippy::expect_used -W clippy::indexing_slicing -W clippy::string_slice -W clippy::panic 2>&1 >/dev/null | awk '/^warning: /{w=$0} /^ *--> /{print $2"  "w}' || echo "clippy did not finish for $target"
-          done
-
   browser-server:
     needs: changes
     if: needs.changes.outputs.browser == 'true'
