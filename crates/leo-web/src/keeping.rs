@@ -6,7 +6,6 @@ use chrono::{DateTime, Utc};
 use crate::record::{discard_all_unless_in_use, Housekeeper, Recordings};
 use crate::AppState;
 
-const MOST_ENTRIES: usize = 100_000;
 const DISCARD_BATCH: usize = 256;
 
 pub fn data_dir(notes_dir: &Path) -> PathBuf {
@@ -28,54 +27,77 @@ fn real_dir(path: &Path) -> bool {
     std::fs::symlink_metadata(path).is_ok_and(|m| m.is_dir())
 }
 
-fn child_dirs(root: &Path, valid: fn(&str) -> bool) -> Vec<PathBuf> {
-    if !real_dir(root) {
-        return Vec::new();
-    }
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    entries
-        .take(MOST_ENTRIES)
+fn child_dirs(root: &Path, valid: fn(&str) -> bool) -> impl Iterator<Item = PathBuf> + '_ {
+    real_dir(root)
+        .then(|| std::fs::read_dir(root).ok())
+        .flatten()
+        .into_iter()
+        .flatten()
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter(|e| e.file_name().to_str().is_some_and(valid))
-        .filter_map(|e| leo_core::paths::contained_path(root, Path::new(&e.file_name())).ok())
-        .collect()
+        .filter(move |e| e.file_name().to_str().is_some_and(valid))
+        .filter_map(move |e| leo_core::paths::contained_path(root, Path::new(&e.file_name())).ok())
 }
 
 fn upload_note_id(name: &str) -> bool {
     !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
-fn old_uploads(notes_dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> Vec<PathBuf> {
-    let Some(cutoff) = cutoff(days, now) else {
-        return Vec::new();
-    };
+const GIVE_WAY_EVERY: usize = 1_000;
+
+fn stop_asked() -> bool {
+    leo_core::children::current_stop().is_some_and(|s| s.asked())
+}
+
+fn each_old_upload(notes_dir: &Path, cutoff: SystemTime, visit: &mut dyn FnMut(&Path)) {
     let Ok(base) = leo_core::paths::contained_path(&data_dir(notes_dir), Path::new("attachments"))
     else {
-        return Vec::new();
+        return;
     };
-    let mut old = Vec::new();
+    let mut met = 0usize;
+    let mut give_way = || {
+        met += 1;
+        met.is_multiple_of(GIVE_WAY_EVERY) && stop_asked()
+    };
     for dir in child_dirs(&base, upload_note_id) {
+        if give_way() {
+            return;
+        }
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
-        for entry in entries.take(MOST_ENTRIES).flatten() {
+        for entry in entries.flatten() {
+            if give_way() {
+                return;
+            }
             let path = entry.path();
             if entry.file_type().is_ok_and(|t| t.is_file()) && older(&path, cutoff) {
-                old.push(path);
+                visit(&path);
             }
         }
     }
-    old
+}
+
+fn old_upload_count(notes_dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
+    let Some(cutoff) = cutoff(days, now) else {
+        return 0;
+    };
+    let mut count = 0;
+    each_old_upload(notes_dir, cutoff, &mut |_| count += 1);
+    count
 }
 
 pub fn expire_uploads(notes_dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
-    old_uploads(notes_dir, days, now)
-        .into_iter()
-        .filter(|path| std::fs::remove_file(path).is_ok())
-        .count()
+    let Some(cutoff) = cutoff(days, now) else {
+        return 0;
+    };
+    let mut removed = 0;
+    each_old_upload(notes_dir, cutoff, &mut |path| {
+        if std::fs::remove_file(path).is_ok() {
+            removed += 1;
+        }
+    });
+    removed
 }
 
 fn old_transcripts(
@@ -89,7 +111,6 @@ fn old_transcripts(
     };
     let root = leo_core::recording::root(notes_dir);
     child_dirs(&root, leo_core::recording::valid_id)
-        .into_iter()
         .filter(|dir| active.is_none() || dir.file_name().and_then(|n| n.to_str()) != active)
         .filter(|dir| older(dir, cutoff))
         .collect()
@@ -135,12 +156,15 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
             .await
             .unwrap_or(0);
     }
+    let (_stop_on_drop, stop) = crate::stop_when_dropped();
     tokio::task::spawn_blocking(move || match field.as_str() {
         "chat_days" => crate::chats::list(&chats_dir)
             .iter()
             .filter(|c| c.updated_at < before)
             .count(),
-        "upload_days" => old_uploads(&notes_dir, Some(days), now).len(),
+        "upload_days" => {
+            leo_core::children::with_stop(stop, || old_upload_count(&notes_dir, Some(days), now))
+        }
         "transcript_days" => old_transcripts(&notes_dir, Some(days), now, active.as_deref()).len(),
         "audio_days" => housekeeper.map_or(0, |h| audio_count(&*h, before, active.as_deref())),
         _ => 0,
@@ -275,6 +299,14 @@ mod tests {
         dir
     }
 
+    fn uploads_left(notes: &Path) -> usize {
+        std::fs::read_dir(data_dir(notes).join("attachments"))
+            .unwrap()
+            .flatten()
+            .map(|dir| std::fs::read_dir(dir.path()).unwrap().count())
+            .sum()
+    }
+
     #[test]
     fn forever_deletes_nothing() {
         let (_tmp, notes) = data();
@@ -305,6 +337,68 @@ mod tests {
         let outside = upload(&notes, "note-one", "out.pdf", 7, 120);
         assert_eq!(expire_uploads(&notes, Some(7), Utc::now()), 1);
         assert!(inside.exists() && !outside.exists());
+    }
+
+    #[test]
+    #[ignore]
+    fn every_old_upload_is_expired_and_counted() {
+        let now = Utc::now();
+        let (_many_folders, notes) = data();
+        for n in 0..100_200 {
+            upload(&notes, &format!("note-{n}"), "a.pdf", 40, 0);
+        }
+        assert_eq!(old_upload_count(&notes, Some(30), now), 100_200);
+        assert_eq!(expire_uploads(&notes, Some(30), now), 100_200);
+        assert_eq!(uploads_left(&notes), 0);
+        let (_one_folder, notes) = data();
+        for n in 0..100_200 {
+            upload(&notes, "note-one", &format!("{n}.pdf"), 40, 0);
+        }
+        assert_eq!(old_upload_count(&notes, Some(30), now), 100_200);
+        assert_eq!(expire_uploads(&notes, Some(30), now), 100_200);
+        assert_eq!(uploads_left(&notes), 0);
+    }
+
+    #[test]
+    fn old_uploads_are_handled_as_they_are_met() {
+        let (_tmp, notes) = data();
+        for n in 0..5_000 {
+            upload(
+                &notes,
+                &format!("note-{}", n % 50),
+                &format!("{n}.pdf"),
+                40,
+                0,
+            );
+        }
+        let attachments = data_dir(&notes).join("attachments");
+        let cutoff = cutoff(Some(30), Utc::now()).unwrap();
+        let mut visits = 0;
+        each_old_upload(&notes, cutoff, &mut |_| {
+            if visits == 0 {
+                for dir in std::fs::read_dir(&attachments).unwrap().flatten() {
+                    for file in std::fs::read_dir(dir.path()).unwrap().flatten() {
+                        std::fs::remove_file(file.path()).unwrap();
+                    }
+                }
+            }
+            visits += 1;
+        });
+        assert!(visits < 10, "{visits}");
+    }
+
+    #[test]
+    fn a_stopped_preview_gives_way() {
+        let (_tmp, notes) = data();
+        for n in 0..2_500 {
+            upload(&notes, "note-one", &format!("{n}.pdf"), 40, 0);
+        }
+        let stop = leo_core::children::Stop::default();
+        stop.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        let counted =
+            leo_core::children::with_stop(stop, || old_upload_count(&notes, Some(30), Utc::now()));
+        assert!(counted < GIVE_WAY_EVERY, "{counted}");
+        assert_eq!(old_upload_count(&notes, Some(30), Utc::now()), 2_500);
     }
 
     #[cfg(unix)]

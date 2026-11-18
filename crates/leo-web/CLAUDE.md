@@ -92,8 +92,7 @@ Decided: one app, window only (2026-10-31).
 - Point and screenshot workers keep their save guard through I/O and the
   in-memory acknowledgement even if the HTTP client leaves.
 - Recording warnings keep at most 40 entries of 2,000 Unicode characters.
-- Keeping's expiry refuses linked recording and originals roots; every pass is
-  bounded (a recordings pass deletes in batches of 256 under the recordings lock until done), never follows symlinks, stays in its folder and skips what it cannot
+- Keeping's expiry refuses linked recording and originals roots; every pass walks its folder entry by entry in bounded memory (2026-11-17, the owner's principle 1: no entry count; uploads are deleted as they are met and the preview gives way every 1,000 entries when it is abandoned) (a recordings pass deletes in batches of 256 under the recordings lock until done), never follows symlinks, stays in its folder and skips what it cannot
   delete.
 - Credentials never reach the page or note exports. Writing Settings offers
   Ollama, Codex and Claude Code only; removed AGY/Copilot choices and sign-in
