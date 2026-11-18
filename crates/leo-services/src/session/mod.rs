@@ -89,16 +89,6 @@ impl Manifest {
             note: None,
         }
     }
-
-    pub fn jotted(&self) -> Vec<Jotted> {
-        self.points
-            .iter()
-            .map(|p| Jotted {
-                at_secs: p.at_secs,
-                text: p.text.clone(),
-            })
-            .collect()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -597,6 +587,31 @@ pub fn find(root: &Path, id: &str) -> Vec<Session> {
     )
 }
 
+fn whole_lines_end(file: &mut std::fs::File) -> Result<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut end = file.metadata()?.len();
+    let mut last = [0u8];
+    if end > 0 {
+        file.seek(SeekFrom::Start(end - 1))?;
+        file.read_exact(&mut last)?;
+        if last[0] == b'\n' {
+            return Ok(end);
+        }
+    }
+    let mut block = vec![0u8; 64 * 1024];
+    while end > 0 {
+        let start = end.saturating_sub(block.len() as u64);
+        let read = &mut block[..(end - start) as usize];
+        file.seek(SeekFrom::Start(start))?;
+        file.read_exact(read)?;
+        if let Some(at) = read.iter().rposition(|b| *b == b'\n') {
+            return Ok(start + at as u64 + 1);
+        }
+        end = start;
+    }
+    Ok(0)
+}
+
 impl Session {
     pub fn create(root: &Path, manifest: Manifest) -> Result<Session> {
         if let Ok(meta) = std::fs::symlink_metadata(root) {
@@ -644,6 +659,93 @@ impl Session {
             &self.dir.join("session.json"),
             &serde_json::to_string_pretty(&self.manifest)?,
         )
+    }
+
+    pub fn add_points(&self, points: &[Point]) -> Result<u64> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(self.dir.join("points.jsonl"))
+            .context("Could not save a typed point; check disk space and permissions")?;
+        let whole = whole_lines_end(&mut file)?;
+        if whole < file.metadata()?.len() {
+            file.set_len(whole)?;
+            file.sync_data()?;
+        }
+        let mut lines = Vec::new();
+        for point in points {
+            serde_json::to_writer(&mut lines, point)?;
+            lines.push(b'\n');
+        }
+        let added = (|| -> Result<()> {
+            file.seek(SeekFrom::Start(whole))?;
+            file.write_all(&lines)?;
+            file.sync_data()?;
+            file.seek(SeekFrom::Start(whole))?;
+            let mut back = Vec::with_capacity(lines.len());
+            file.read_to_end(&mut back)?;
+            let read: Vec<Point> = back
+                .split_inclusive(|b| *b == b'\n')
+                .map(serde_json::from_slice)
+                .collect::<Result<_, _>>()?;
+            anyhow::ensure!(read == points, "a typed point did not read back as written");
+            Ok(())
+        })();
+        if let Err(e) = added {
+            let _ = file.set_len(whole);
+            return Err(e.context("Could not save a typed point; check disk space and permissions"));
+        }
+        Ok(points.len() as u64)
+    }
+
+    pub fn points(&self) -> Vec<Point> {
+        let mut out = Vec::new();
+        self.each_point(0, |_, point| out.push(point));
+        out
+    }
+
+    pub fn jotted(&self) -> Vec<Jotted> {
+        self.points()
+            .into_iter()
+            .map(|p| Jotted {
+                at_secs: p.at_secs,
+                text: p.text,
+            })
+            .collect()
+    }
+
+    pub fn each_point(&self, from: u64, mut f: impl FnMut(u64, Point)) {
+        use std::io::BufRead;
+        let mut at = 0u64;
+        for point in &self.manifest.points {
+            if at >= from {
+                f(at, point.clone());
+            }
+            at += 1;
+        }
+        let Ok(file) = std::fs::File::open(self.dir.join("points.jsonl")) else {
+            return;
+        };
+        let mut reader = std::io::BufReader::new(file);
+        let mut line = Vec::new();
+        loop {
+            line.clear();
+            match reader.read_until(b'\n', &mut line) {
+                Ok(0) | Err(_) => return,
+                Ok(_) if line.last() != Some(&b'\n') => return,
+                Ok(_) => {
+                    if let Ok(point) = serde_json::from_slice::<Point>(&line) {
+                        if at >= from {
+                            f(at, point);
+                        }
+                        at += 1;
+                    }
+                }
+            }
+        }
     }
 
     pub fn lock(&self) -> Result<Lock> {
@@ -935,12 +1037,11 @@ impl Session {
             started: self.manifest.started,
             passages,
             points: self
-                .manifest
-                .points
-                .iter()
+                .points()
+                .into_iter()
                 .map(|p| leo_core::recording::Point {
                     at_secs: p.at_secs,
-                    text: p.text.clone(),
+                    text: p.text,
                 })
                 .collect(),
             context: self.manifest.profile.context.clone(),
@@ -1004,11 +1105,80 @@ impl Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
 
     fn session() -> (Session, tempfile::TempDir) {
         let tmp = tempfile::tempdir().unwrap();
         let s = Session::create(tmp.path(), Manifest::new(None, None, "", false)).unwrap();
         (s, tmp)
+    }
+
+    fn point(at_secs: u64, text: &str) -> Point {
+        Point {
+            at_secs,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn points_are_added_one_line_at_a_time() {
+        let (s, _t) = session();
+        let manifest = std::fs::read(s.dir.join("session.json")).unwrap();
+        assert_eq!(s.add_points(&[point(1, "first")]).unwrap(), 1);
+        assert_eq!(s.add_points(&[point(2, "second\nline")]).unwrap(), 1);
+        let file = std::fs::read_to_string(s.dir.join("points.jsonl")).unwrap();
+        assert_eq!(file.lines().count(), 2);
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(s.dir.join("points.jsonl"))
+            .unwrap()
+            .write_all(b"{\"at_secs\":3,\"te")
+            .unwrap();
+        assert_eq!(s.points(), [point(1, "first"), point(2, "second\nline")]);
+        let mut seen = Vec::new();
+        s.each_point(1, |at, p| seen.push((at, p.text)));
+        assert_eq!(seen, [(1, "second\nline".to_string())]);
+        assert_eq!(
+            std::fs::read(s.dir.join("session.json")).unwrap(),
+            manifest,
+            "a point never rewrites the manifest"
+        );
+    }
+
+    #[test]
+    fn a_point_after_a_torn_tail_is_kept() {
+        let (s, _t) = session();
+        s.add_points(&[point(1, "kept")]).unwrap();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(s.dir.join("points.jsonl"))
+            .unwrap()
+            .write_all(b"{\"at_secs\":2,\"text\":\"torn")
+            .unwrap();
+        let again = Session::open(&s.dir).unwrap();
+        again.add_points(&[point(3, "after")]).unwrap();
+        let fresh = Session::open(&s.dir).unwrap();
+        assert_eq!(fresh.points(), [point(1, "kept"), point(3, "after")]);
+        let file = std::fs::read_to_string(s.dir.join("points.jsonl")).unwrap();
+        assert!(!file.contains("torn"));
+        assert!(file.ends_with('\n'));
+    }
+
+    #[test]
+    fn an_old_session_keeps_its_manifest_points() {
+        let (mut s, _t) = session();
+        s.manifest.points = vec![point(5, "from the manifest")];
+        s.save().unwrap();
+        let old = Session::open(&s.dir).unwrap();
+        assert!(!old.dir.join("points.jsonl").exists());
+        assert_eq!(old.points(), [point(5, "from the manifest")]);
+        assert_eq!(old.jotted()[0].text, "from the manifest");
+        assert_eq!(old.archive().points[0].text, "from the manifest");
+        old.add_points(&[point(9, "new")]).unwrap();
+        assert_eq!(
+            Session::open(&s.dir).unwrap().points(),
+            [point(5, "from the manifest"), point(9, "new")]
+        );
     }
 
     #[test]

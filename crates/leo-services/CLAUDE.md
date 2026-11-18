@@ -117,7 +117,7 @@ Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
 re-transcribe from `settled_at`, at most
 `LIVE_MOST_SECS` (20); at `SETTLE_AFTER_SECS` (12) settle at `live::quietest`
 between 6 s and end − 2 s; only while no segment is waiting. Typed
-points go through `Controls.points` (`recorder::points_of`) into the manifest.
+points go through `Controls.points` (`recorder::points_of`) into the session's `points.jsonl`.
 Recording needs only speech and a microphone; the writing AI is optional.
 `LEO_NO_MICROPHONE` turns the device off (tests, e2e, CI).
 
@@ -362,7 +362,8 @@ source.
 ### Durable recording workflows
 
 `Session::archive` keeps passages, points, event context, wants, warnings and
-metadata-only diagnostics. A saved session that still holds a failed part's audio
+metadata-only diagnostics.
+Typed points have no count limit (2026-11-17, principle 1): each is appended to the session's `points.jsonl`; the job view carries the newest 50 and a count, and `/api/record/{id}/points` pages the rest. A saved session that still holds a failed part's audio
 (`has_retry`) is offered for recovery while its note is in the notes list; recovery adds the part to its note's sources and leaves the
 note's text. `recorder::write_up` caches by input hash; only a
 successful caller save permits `Session::commit` and audio cleanup. Finish

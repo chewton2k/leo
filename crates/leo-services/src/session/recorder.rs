@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -54,6 +54,7 @@ pub struct Controls {
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     pub points: Arc<Mutex<Vec<Jotted>>>,
+    pub saved_points: Arc<AtomicUsize>,
     pub wants: Arc<Mutex<Option<String>>>,
     pub preview: Option<Arc<AtomicBool>>,
 }
@@ -233,7 +234,7 @@ impl Drafter {
         let fresh = session::assemble(&run, session.manifest.segment_secs).parts;
         let read: Vec<session::Segment> = self.read.values().cloned().collect();
         let all = session::assemble(&read, session.manifest.segment_secs).parts;
-        let points = session.manifest.jotted();
+        let points = session.jotted();
         let profile = self.profile.clone();
         let dir = session.dir.clone();
         let (start, end) = (fresh[0].start_secs, fresh[fresh.len() - 1].end_secs);
@@ -358,7 +359,7 @@ pub fn drafts_for(
         serde_json::from_slice(&std::fs::read(session.dir.join(DRAFTS)).ok()?).ok()?;
     let key = draft_key(
         parts,
-        &session.manifest.jotted(),
+        &session.jotted(),
         &session.manifest.profile,
         drafted.upto,
     );
@@ -631,7 +632,7 @@ pub fn finish(
         }));
         return;
     }
-    if assembled.is_silent() && session.manifest.points.is_empty() {
+    if assembled.is_silent() && session.points().is_empty() {
         let _ = std::fs::remove_dir_all(&session.dir);
         emit(Event::Failed(silent_for(&session).to_string()));
         return;
@@ -880,7 +881,6 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     let mut state = Live::new(live::ROLL_INTERVAL);
     let mut last_roll = Instant::now() - live::ROLL_INTERVAL;
     let mut last_draft = Instant::now();
-    let mut saved_points = 0;
     let mut save_failed = false;
     let mut heard_up_to = 0;
     let mut lost_up_to = 0;
@@ -889,20 +889,12 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         std::thread::sleep(POLL);
         capture.set_paused(controls.pause.load(Ordering::Relaxed));
 
-        let latest_points = controls.points.lock().ok().map(|points| points_of(&points));
-        if let Some(points) = latest_points.filter(|points| points.len() != saved_points) {
-            let count = points.len();
-            session.manifest.points = points;
-            match session.save() {
-                Ok(()) => {
-                    saved_points = count;
-                    save_failed = false;
-                }
-                Err(e) if !std::mem::replace(&mut save_failed, true) => {
-                    session.trace("save-failed", &format!("could not save typed points: {e}"));
-                }
-                Err(_) => {}
+        match save_points(&session, controls) {
+            Ok(()) => save_failed = false,
+            Err(e) if !std::mem::replace(&mut save_failed, true) => {
+                session.trace("save-failed", &format!("could not save typed points: {e}"));
             }
+            Err(_) => {}
         }
         if take_wants(&mut session, controls) {
             let _ = session.save();
@@ -1012,10 +1004,29 @@ fn final_points(session: &mut Session, controls: &Controls, emit: &dyn Fn(Event)
         label: "Transcribing the recording".to_string(),
         steps: None,
     });
-    if let Ok(points) = controls.points.lock() {
-        session.manifest.points = points_of(&points);
+    if let Err(e) = save_points(session, controls) {
+        session.trace("save-failed", &format!("could not save typed points: {e}"));
+        emit(Event::Warning(
+            "Some typed points could not be saved; check free disk space.".into(),
+        ));
     }
     take_wants(session, controls);
+}
+
+fn save_points(session: &Session, controls: &Controls) -> anyhow::Result<()> {
+    let saved = controls.saved_points.load(Ordering::Acquire);
+    let fresh = match controls.points.lock() {
+        Ok(points) => points_of(points.get(saved..).unwrap_or_default()),
+        Err(_) => return Ok(()),
+    };
+    if fresh.is_empty() {
+        return Ok(());
+    }
+    let added = session.add_points(&fresh)?;
+    controls
+        .saved_points
+        .store(saved + added as usize, Ordering::Release);
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -1051,14 +1062,14 @@ pub fn write_up(
         "Writing notes from transcript and typed points",
     );
     let assembled = session.assemble();
-    let points = session.manifest.jotted();
+    let points = session.jotted();
     use sha2::{Digest, Sha256};
     let key = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
         Sha256::digest(serde_json::to_vec(&(
             assembled.text(),
             &assembled.failed,
-            &session.manifest.points,
+            &session.points(),
             &session.manifest.profile,
             existing,
         ))?),
@@ -1460,8 +1471,9 @@ mod tests {
                 });
             }
         });
-        assert_eq!(session.manifest.points.len(), 1);
-        assert_eq!(session.manifest.points[0].text, "The pasted slide");
+        assert_eq!(session.points().len(), 1);
+        assert_eq!(session.points()[0].text, "The pasted slide");
+        assert_eq!(controls.saved_points.load(Ordering::Acquire), 1);
     }
 
     fn drafting_session(dir: &Path, files: &[(&str, &str)]) -> Session {
@@ -1545,7 +1557,7 @@ mod tests {
         assert_eq!(calls.load(Ordering::SeqCst), 2);
         let done = drafter.done.clone().unwrap();
         assert_eq!(done.upto, 2);
-        let points = session.manifest.jotted();
+        let points = session.jotted();
         assert_eq!(
             done.key,
             draft_key(&all, &points, &session.manifest.profile, 2)
