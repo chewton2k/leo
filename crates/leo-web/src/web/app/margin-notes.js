@@ -2,6 +2,7 @@ const MARGIN_KINDS = ['add_margin_note', 'remove_margin_note'];
 const READ_GAP_SECONDS = 90;
 const READ_FACE_AFTER_MS = 200;
 const MARGIN_SETTLE_MS = 1400;
+const REANCHOR_MS = 2000;
 const MARGIN_LAYOUT_KEY = 'leo-margin-layout';
 const GLOW_MS = 2200;
 const NO_COMMENT_MS = 4000;
@@ -45,7 +46,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0 };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -93,6 +94,7 @@ async function marginLoadPrefs() {
 
 function marginLeave() {
   clearTimeout(marginPage.timer);
+  clearTimeout(marginPage.anchorTimer);
   clearTimeout(marginPage.faceTimer);
   clearTimeout(marginPage.statusTimer);
   cancelAnimationFrame(marginPage.frame);
@@ -104,7 +106,7 @@ function marginLeave() {
   marginPage.observer = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
-  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null });
+  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set() });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.revisits.clear();
@@ -161,11 +163,39 @@ async function marginLoad(s, current = () => true, id = s.note.id) {
   marginPage.instructions = view.instructions || '';
   marginPage.threads = view.threads || [];
   marginPage.resolved = view.resolved || [];
+  const first = !marginPage.loaded;
   marginPage.loaded = true;
   cancelAnimationFrame(marginPage.frame);
   marginDraw();
   marginControl();
   marginInstructions();
+  if (first) marginReanchor(s).catch(() => {});
+}
+
+function marginKept(t) {
+  return t.source !== 'read' || t.pinned || (t.messages || []).some((m) => m.from !== 'felix');
+}
+
+async function marginReanchor(s) {
+  if (s !== marginPage.s || !s.note.id) return;
+  await flush(s);
+  if (s !== marginPage.s || saving.unsaved()) return;
+  const source = s.doc.source();
+  const version = s.note.version;
+  for (const { t, at } of [...marginPage.moved]) {
+    if (marginPage.anchoring.has(t.id)) continue;
+    marginPage.anchoring.add(t.id);
+    try {
+      const moved = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'PATCH', body: { version, quote: source.slice(at.from, at.to), ...marginKit.contextAt(source, at.from, at.to) } });
+      if (s !== marginPage.s || !moved?.id) continue;
+      marginPage.threads = marginPage.threads.map((one) => (one.id === moved.id ? moved : one));
+      marginRedraw();
+    } catch (e) {
+      if (e instanceof Locked) throw e;
+    } finally {
+      marginPage.anchoring.delete(t.id);
+    }
+  }
 }
 
 async function marginCreated(s, note) {
@@ -809,6 +839,7 @@ function marginDraw() {
     else gone.push(t.id);
   }
   marginPage.gone = gone;
+  marginPage.moved = placed.filter(({ t, at }) => at.how === 'context' && marginPage.threads.includes(t) && marginKept(t));
   const layout = marginLayout(columns);
   if (columns.dataset.margin !== layout) columns.dataset.margin = layout;
   const margins = layout === 'right' || layout === 'both';
@@ -819,7 +850,7 @@ function marginDraw() {
   const page = $('article.note', columns).getBoundingClientRect();
   const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginIsOpen(box.t) ? marginElement(box.t) : null);
-    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact');
+    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };
   });
   marginCuts(boxes);
@@ -1706,6 +1737,8 @@ function marginEdited(s) {
   marginRedraw();
   if (marginPage.brief) marginSetStatus('');
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
+  clearTimeout(marginPage.anchorTimer);
+  marginPage.anchorTimer = setTimeout(() => marginReanchor(s).catch(() => {}), REANCHOR_MS);
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
   marginArm(s);

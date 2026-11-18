@@ -85,8 +85,17 @@ pub(crate) struct StatusBody {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct PinBody {
-    pinned: bool,
+pub(crate) struct ThreadPatch {
+    #[serde(default)]
+    pinned: Option<bool>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    quote: Option<String>,
+    #[serde(default)]
+    prefix: String,
+    #[serde(default)]
+    suffix: String,
 }
 
 #[derive(Deserialize)]
@@ -654,12 +663,10 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         .iter()
         .filter(|t| {
             !through
-                && t.source == "read"
+                && margin::replaceable(t)
                 && t.prefix.is_empty()
                 && t.suffix.is_empty()
-                && !t.pinned
                 && !body.keep.contains(&t.id)
-                && t.messages.iter().all(|m| m.from == "felix")
                 && !now.body.contains(t.quote.as_str())
                 && margin::one_sentence(&now.body)
         })
@@ -1187,18 +1194,57 @@ pub(crate) async fn weave(
     }
 }
 
-pub(crate) async fn pin(
+pub(crate) async fn change_thread(
     State(state): State<AppState>,
     Path((id, thread)): Path<(String, String)>,
-    Json(body): Json<PinBody>,
+    Json(body): Json<ThreadPatch>,
 ) -> Response {
     if !margin::valid_note(&id) || !margin::valid_note(&thread) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    match blocking(move || margin::set_pinned(&chats, &id, &thread, body.pinned)).await {
-        Ok(Some(found)) => Json(found).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+    if let Some(pinned) = body.pinned {
+        return match blocking(move || margin::set_pinned(&chats, &id, &thread, pinned)).await {
+            Ok(Some(found)) => Json(found).into_response(),
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
+            Err(refused) => *refused,
+        };
+    }
+    let Some(quote) = body.quote else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if quote.chars().count() > margin::MOST_ASKED
+        || body.prefix.chars().count() > margin::MOST_QUOTE
+        || body.suffix.chars().count() > margin::MOST_QUOTE
+    {
+        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    }
+    let version = body.version.unwrap_or_default();
+    if !margin::valid_version(&version) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let note = match open_note(&state, &id).await {
+        Ok(note) => note,
+        Err(refused) => return *refused,
+    };
+    if note.version != version {
+        return StatusCode::CONFLICT.into_response();
+    }
+    let Some(place) = margin::placed_exact(&note.body, &body.prefix, &quote, &body.suffix) else {
+        return said(
+            StatusCode::CONFLICT,
+            "lost",
+            "Those words are not in the note any more.",
+        );
+    };
+    match blocking(move || margin::re_anchor(&chats, &id, &thread, &quote, place)).await {
+        Ok(margin::Moved::Done(found)) => Json(found).into_response(),
+        Ok(margin::Moved::Missing) => StatusCode::NOT_FOUND.into_response(),
+        Ok(margin::Moved::Replaceable) => said(
+            StatusCode::CONFLICT,
+            "replaceable",
+            "Felix may replace this note, so its place is not saved.",
+        ),
         Err(refused) => *refused,
     }
 }

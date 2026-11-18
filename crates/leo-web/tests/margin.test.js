@@ -364,6 +364,34 @@ test('anchor: an empty prefix confirms only a copy at the very start', () => {
   assert.equal(M.find('a beta gamma one. alpha beta gamma.', side).how, 'guess');
 });
 
+test('a kept note re-anchored from its found place survives a second edit beside it', () => {
+  const lead = 'The first paragraph is here and it is fairly long indeed.\n\n';
+  const trail = '\n\nThe closing paragraph follows and it is also fairly long.';
+  const passage = 'The quick brown fox jumps over the lazy dog near the river.';
+  const v0 = lead + passage + trail;
+  const anchor = { quote: passage, ...M.around(v0, passage) };
+  const edited = passage.replace('quick brown', 'slow grey');
+  const v1 = lead + edited + trail;
+  const first = M.find(v1, anchor);
+  assert.equal(first.how, 'context');
+  assert.equal(v1.slice(first.from, first.to), edited);
+  const found = v1.slice(first.from, first.to);
+  const v2 = v1.slice(0, first.from - 24) + 'X'.repeat(24) + found + 'Y'.repeat(24) + v1.slice(first.to + 24);
+  const resaved = { quote: found, ...M.contextAt(v1, first.from, first.to) };
+  const again = M.find(v2, resaved);
+  assert.equal(again.how, 'exact');
+  assert.equal(v2.slice(again.from, again.to), found);
+});
+
+test('contextAt takes the context of the copy it is given', () => {
+  const text = 'one before. beta gamma. two between. beta gamma. three after.';
+  const second = text.lastIndexOf('beta gamma');
+  const got = M.contextAt(text, second, second + 'beta gamma'.length);
+  assert.ok(got.prefix.endsWith('two between. '));
+  assert.ok(got.suffix.startsWith('. three after.'));
+  assert.notDeepEqual(got, M.around(text, 'beta gamma'));
+});
+
 for (const [name, fn] of cases) {
   try {
     fn();

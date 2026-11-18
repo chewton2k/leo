@@ -685,8 +685,13 @@ test('a changed passage says so', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.margin-changed')).toBeHidden();
   await page.locator('#doc .blk', { hasText: 'More words' }).click();
+  const moved = page.waitForResponse((r) => r.url().includes(`/api/notes/${note.id}/margin/threads/`) && r.request().method() === 'PATCH');
   await page.locator('#doc textarea.line-edit').fill('The password is stored as clear text. More words after it.');
   await expect(card.locator('.margin-changed')).toHaveText('The passage changed since Felix wrote this.');
+  await expect(card.locator('.margin-changed')).toBeVisible();
+  expect((await moved).status()).toBe(200);
+  await page.reload();
+  await expect(card).toBeVisible();
   await expect(card.locator('.margin-changed')).toBeVisible();
 });
 

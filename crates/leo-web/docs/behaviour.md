@@ -992,6 +992,11 @@ target. Check the page sequence after loading preferences.
   A note whose passage the page finds only by its context (`how: 'context'`), or on one of
   several copies its context cannot tell apart (`how: 'guess'`), shows one muted
   line, "The passage changed since Felix wrote this."; an exact match shows nothing.
+  A note Felix keeps (an ask, a Read through note, a chat-made, pinned or answered note) that
+  is found by context gets its new words and surroundings saved about 2 seconds after typing
+  stops, so a second edit beside it does not lose it; it keeps the muted line
+  (`margin_threads.reworded`). Untouched read-along notes are never re-saved (the server
+  answers 409 `replaceable`), so a new read-along note still replaces them on a reworded sentence.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
   from the trash removes them at once (`forget_notes`) and its task details, recording
@@ -1115,7 +1120,7 @@ target. Check the page sequence after loading preferences.
   `aria-expanded` and the focus target, and takes no clicks while open. Closed notes show their whole text
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
   text as a whole stops at 12 lines with a bottom fade on the last shown block (`.margin-cut`, set only when it overflows; later text blocks hide), figures and drawings
-  always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
+  always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`; the same PATCH with `{version, quote, prefix, suffix}` re-anchors a kept note; db `VERSION` 5, which an older leo refuses)
   keeps the note open with its reply box in every layout (2026-11-16, the user's call): Escape and a
   click outside leave it, several can stay open, unpinning folds it; a faint tether shows at rest. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).

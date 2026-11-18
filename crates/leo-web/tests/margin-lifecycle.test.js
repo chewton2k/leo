@@ -1106,3 +1106,34 @@ test('a read that replaces a note the page still holds open deletes the new note
   await pending;
   assert.deepEqual(h.state.threads.map((t) => t.id), ['open']);
 });
+
+test('a kept note found by context is re-anchored once after the pause; an untouched read-along note is not', async () => {
+  const h = harness();
+  const source = 'Lead words here. The reworded passage sits here. Trailing words.';
+  h.state.s.doc.source = () => source;
+  const kept = { id: 'k', source: 'ask', messages: [] };
+  const untouched = { id: 'u', source: 'read', messages: [{ from: 'felix', text: 'Hm.' }] };
+  assert.equal(h.context.marginKept(kept), true);
+  assert.equal(h.context.marginKept(untouched), false);
+  assert.equal(h.context.marginKept({ ...untouched, pinned: true }), true);
+  assert.equal(h.context.marginKept({ ...untouched, messages: [{ from: 'you', text: 'Why?' }] }), true);
+  const from = source.indexOf('The reworded');
+  const to = from + 'The reworded passage sits here.'.length;
+  Object.assign(h.state, { mode: 'ask', loaded: true, threads: [kept, untouched] });
+  h.state.moved = [kept, untouched].filter(h.context.marginKept).map((t) => ({ t, at: { from, to, how: 'context' } }));
+  const calls = [];
+  h.context.api = (path, init) => { calls.push({ path, init }); return Promise.resolve({ ...kept, quote: init.body.quote, reworded: true }); };
+  h.context.marginEdited(h.state.s);
+  h.context.marginEdited(h.state.s);
+  const armed = [...h.timers.values()].filter((fn) => fn.delay === 2000);
+  assert.equal(armed.length, 1, 'each edit re-arms the one timer, in Ask mode too');
+  assert.equal(calls.length, 0);
+  armed[0]();
+  for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/api/notes/a/margin/threads/k');
+  assert.equal(calls[0].init.method, 'PATCH');
+  assert.deepEqual({ ...calls[0].init.body }, { version: 'abc', quote: source.slice(from, to), ...kit.contextAt(source, from, to) });
+  assert.equal(h.state.threads[0].reworded, true);
+  assert.equal(h.state.threads[1], untouched);
+});

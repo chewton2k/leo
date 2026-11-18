@@ -115,8 +115,11 @@ pub(crate) fn router(state: AppState) -> Router {
         .route(
             "/api/notes/{id}/margin/threads/{thread}",
             post(margin::set_status)
-                .patch(margin::pin)
-                .delete(margin::forget),
+                .patch(margin::change_thread)
+                .delete(margin::forget)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::margin::BODY_BYTES,
+                )),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/reply",

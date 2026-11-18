@@ -73,6 +73,8 @@ pub struct Thread {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub reworded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -205,6 +207,7 @@ pub fn new_thread(
         created_at: now,
         updated_at: now,
         pinned: false,
+        reworded: false,
     }
 }
 
@@ -228,11 +231,12 @@ fn thread_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         created_at: time(8)?,
         updated_at: time(9)?,
         pinned: row.get(10)?,
+        reworded: row.get(11)?,
     })
 }
 
 const COLUMNS: &str =
-    "id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned";
+    "id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned, reworded";
 
 pub fn open_on(chats: &Path, note: &str) -> Vec<Thread> {
     db_of(chats)
@@ -336,8 +340,8 @@ pub fn room(open: &[Thread], gone: &[String]) -> usize {
 fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::Result<usize> {
     let messages = serde_json::to_string(&thread.messages).unwrap_or_else(|_| "[]".into());
     c.execute(
-        "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12
+        "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned, reworded)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?13
          WHERE ?6 != 'open'
             OR (SELECT count(*) FROM margin_threads WHERE note = ?2 AND status = 'open') < ?11",
         params![
@@ -353,6 +357,7 @@ fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::
             thread.updated_at.to_rfc3339(),
             limit as i64,
             thread.pinned,
+            thread.reworded,
         ],
     )
 }
@@ -370,6 +375,48 @@ pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
 }
 
 pub const FULL: &str = "Felix's margin is full. Resolve a note and he'll read again.";
+
+pub fn replaceable(thread: &Thread) -> bool {
+    thread.source == "read" && !thread.pinned && thread.messages.iter().all(|m| m.from == "felix")
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Moved {
+    Done(Box<Thread>),
+    Missing,
+    Replaceable,
+}
+
+pub fn re_anchor(chats: &Path, note: &str, id: &str, quote: &str, place: Place) -> Moved {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let found = tx
+                .query_row(
+                    &format!("SELECT {COLUMNS} FROM margin_threads WHERE id = ?1 AND note = ?2 AND status = 'open'"),
+                    [id, note],
+                    thread_of,
+                )
+                .optional()?;
+            let Some(mut thread) = found else {
+                return Ok(Moved::Missing);
+            };
+            if replaceable(&thread) {
+                return Ok(Moved::Replaceable);
+            }
+            tx.execute(
+                "UPDATE margin_threads SET quote = ?1, prefix = ?2, suffix = ?3, reworded = 1 WHERE id = ?4 AND note = ?5 AND status = 'open'",
+                params![quote, place.prefix, place.suffix, id, note],
+            )?;
+            tx.commit()?;
+            thread.quote = quote.into();
+            thread.prefix = place.prefix;
+            thread.suffix = place.suffix;
+            thread.reworded = true;
+            Ok(Moved::Done(Box::new(thread)))
+        })
+        .unwrap_or(Moved::Missing)
+}
 
 pub fn evictable(thread: &Thread, keep: &[String]) -> bool {
     !thread.pinned && !keep.contains(&thread.id)
@@ -512,12 +559,7 @@ pub fn resolve_untouched(
     let open = open_on(chats, note);
     let mut untouched: Vec<&Thread> = open
         .iter()
-        .filter(|t| {
-            t.source == "read"
-                && t.id != fresh
-                && evictable(t, keep)
-                && t.messages.iter().all(|m| m.from == "felix")
-        })
+        .filter(|t| replaceable(t) && t.id != fresh && evictable(t, keep))
         .collect();
     untouched.sort_by_key(|t| t.updated_at);
     let excess = open.len().saturating_sub(TIDY_TO);
@@ -2415,6 +2457,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pinned: false,
+            reworded: false,
         }
     }
 
@@ -2470,6 +2513,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pinned: false,
+            reworded: false,
         };
         let all: Vec<Thread> = (0..30).map(thread).collect();
         let text = context(&all, 100_000);

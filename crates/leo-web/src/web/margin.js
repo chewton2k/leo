@@ -84,13 +84,17 @@
     const first = source.indexOf(quote, line > 1 ? start : 0);
     const at = first >= 0 ? first : source.indexOf(quote);
     if (at < 0) return null;
+    return contextAt(source, at, at + quote.length);
+  }
+
+  function contextAt(source, start, end) {
     const low = (code) => code >= 0xdc00 && code <= 0xdfff;
     const high = (code) => code >= 0xd800 && code <= 0xdbff;
-    let from = Math.max(0, at - AROUND);
-    let to = Math.min(source.length, at + quote.length + AROUND);
+    let from = Math.max(0, start - AROUND);
+    let to = Math.min(source.length, end + AROUND);
     if (from > 0 && low(source.charCodeAt(from))) from++;
     if (to < source.length && high(source.charCodeAt(to - 1))) to--;
-    return { prefix: source.slice(from, at), suffix: source.slice(at + quote.length, to) };
+    return { prefix: source.slice(from, start), suffix: source.slice(end, to) };
   }
 
   function lineAfter(source, at) {
@@ -245,7 +249,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, contextAt, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);

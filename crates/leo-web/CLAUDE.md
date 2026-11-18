@@ -621,7 +621,11 @@ Felix (2026-10-19).
   characters of its old surroundings matching, or another copy matches as well), keeps its
   note, with one muted line, "The passage changed since Felix wrote this."
   (`.margin-changed`, set by `marginFill`); an exact match shows nothing. A guess is never
-  sent as reworded text.
+  sent as reworded text. A kept note (not `margin::replaceable`: an ask, Read through,
+  chat-made, pinned or answered note) found by context is re-anchored 2 s after editing
+  stops (PATCH `.../threads/{id}` `{version, quote, prefix, suffix}`, context from the
+  found offset, `margin_threads.reworded`, which keeps the muted line); untouched
+  read-along notes never are, so the 2026-11-16 replace rule holds.
 - An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
   "Show N earlier" button (`.margin-earlier`) that shows them all for that note. From
   `LONG_THREAD` (6) messages it ends with "This has turned into its own question.
@@ -645,8 +649,8 @@ Felix (2026-10-19).
   stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
-  (guarded `ALTER`, db `VERSION` 4; a revert never lowers `VERSION`, in `margin.json`), PATCH
-  `.../threads/{id}` `{pinned}`; a pinned note stays open in every layout
+  (guarded `ALTER`, db `VERSION` 5, a revert keeps 5; a revert never lowers `VERSION`, in `margin.json`), PATCH
+  `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
   unpinning folds it unless it is the one open) and a newest read-along note
   (`marginPage.newest`, `data-newest`) stays undimmed (2026-11-16, the user's call). An open thread's

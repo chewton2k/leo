@@ -1630,6 +1630,96 @@ async fn a_weave_refuses_when_the_note_changed_while_felix_wrote() {
 }
 
 #[tokio::test]
+async fn a_kept_note_found_by_context_is_re_anchored() {
+    let engine = Engine::with(Powers::default()).await;
+    let (lead, trail) = ("Signup stores a hash. ", ". Sessions last a day.");
+    let (id, old) = engine
+        .note("Kept", &format!("{lead}{PASSAGE}{trail}"))
+        .await;
+    let body = format!("{lead}{PASSAGE}{trail}");
+    let made = |source: &str, messages| {
+        let thread = margin::new_thread(
+            &id,
+            source,
+            margin::placed(&body, PASSAGE, &[]).unwrap(),
+            PASSAGE,
+            messages,
+        );
+        assert!(margin::put(&engine.chats(), &thread, margin::MOST_OPEN));
+        thread
+    };
+    let asked = made("ask", vec![margin::felix_says("In plain text?")]);
+    let untouched = made("read", vec![margin::felix_says("In plain text?")]);
+    let pinned = made("read", vec![margin::felix_says("In plain text?")]);
+    let path = |thread: &str| format!("/api/notes/{id}/margin/threads/{thread}");
+    let pin = engine
+        .send_as(
+            &engine.cookie,
+            "PATCH",
+            &path(&pinned.id),
+            Some(r#"{"pinned":true}"#.into()),
+        )
+        .await;
+    assert_eq!(pin.0, 200);
+    let reworded = "then login just compares the stored hash";
+    let version = engine.edit(&id, &format!("{lead}{reworded}{trail}")).await;
+    let held = &engine;
+    let patch = |thread: &str, version: &str, quote: &str| {
+        let body = serde_json::json!({ "version": version, "quote": quote, "prefix": lead, "suffix": trail });
+        let at = path(thread);
+        async move {
+            held.send_as(&held.cookie, "PATCH", &at, Some(body.to_string()))
+                .await
+        }
+    };
+    let before = margin::one(&engine.chats(), &id, &asked.id).unwrap();
+    assert!(!before.reworded);
+    let (code, moved) = patch(&asked.id, &version, reworded).await;
+    assert_eq!(code, 200);
+    assert_eq!(moved["quote"], reworded);
+    assert_eq!(moved["reworded"], true);
+    let after = margin::one(&engine.chats(), &id, &asked.id).unwrap();
+    assert_eq!(after.quote, reworded);
+    assert!(after.reworded);
+    assert_eq!(after.updated_at, before.updated_at);
+    assert_eq!(patch(&asked.id, &old, reworded).await.0, 409);
+    let (code, lost) = patch(&asked.id, &version, "words that are not in it").await;
+    assert_eq!((code, lost["why"].as_str()), (409, Some("lost")));
+    let (code, kept) = patch(&untouched.id, &version, reworded).await;
+    assert_eq!((code, kept["why"].as_str()), (409, Some("replaceable")));
+    assert_eq!(
+        margin::one(&engine.chats(), &id, &untouched.id)
+            .unwrap()
+            .quote,
+        PASSAGE
+    );
+    assert_eq!(patch(&pinned.id, &version, reworded).await.0, 200);
+    assert_eq!(
+        patch(&uuid::Uuid::new_v4().to_string(), &version, reworded)
+            .await
+            .0,
+        404
+    );
+    let padded = |pad: usize| {
+        let body = serde_json::json!({ "pinned": false, "pad": "x".repeat(pad) });
+        let at = path(&asked.id);
+        async move {
+            held.send_as(&held.cookie, "PATCH", &at, Some(body.to_string()))
+                .await
+        }
+    };
+    assert_eq!(padded(margin::BODY_BYTES).await.0, 413);
+    assert_eq!(padded(8).await.0, 200);
+    let long = "x".repeat(margin::MOST_ASKED + 1);
+    assert_eq!(patch(&asked.id, &version, &long).await.0, 413);
+    let neither = engine
+        .send_as(&engine.cookie, "PATCH", &path(&asked.id), Some("{}".into()))
+        .await;
+    assert_eq!(neither.0, 400);
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn a_pin_is_kept_on_the_thread_through_reloads_and_the_export() {
     let engine = Engine::with(Powers::default()).await;
     let (id, _) = engine.note("Pinned", PASSAGE).await;
