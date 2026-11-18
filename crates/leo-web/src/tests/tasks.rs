@@ -538,6 +538,102 @@ fn finding_one_task_copies_one_task_and_not_the_list() {
         .is_none());
 }
 
+fn rev_of(state: &AppState, query: serde_json::Value) -> String {
+    let reply = run(crate::routes::notes::get_rev(
+        State(state.clone()),
+        Query(serde_json::from_value(query).unwrap()),
+    ))
+    .unwrap();
+    reply.0["rev"].as_str().unwrap().to_string()
+}
+
+#[test]
+fn the_revision_moves_when_a_note_or_task_changes() {
+    let (state, dir, ids) = state_with(&[("Lecture 5", "bio")]);
+    let notes_dir = state.notes_dir.clone();
+    state.store.lock().unwrap().changes = Some(crate::store_refresh::Changes::new(&notes_dir));
+    let none = serde_json::json!({});
+    let first = rev_of(&state, none.clone());
+    assert_eq!(first.len(), 16);
+    for _ in 0..3 {
+        assert_eq!(rev_of(&state, none.clone()), first);
+    }
+
+    let id = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&id).unwrap().body = "Something new.".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    let saved = rev_of(&state, none.clone());
+    assert_ne!(saved, first, "a save moves it");
+    assert_eq!(rev_of(&state, none.clone()), saved);
+
+    let folder: crate::routes::notes::CreateDirBody =
+        serde_json::from_value(serde_json::json!({"path": "chem"})).unwrap();
+    let _ = run(crate::routes::notes::create_dir(
+        State(state.clone()),
+        Json(folder),
+    ))
+    .unwrap();
+    let folded = rev_of(&state, none.clone());
+    assert_ne!(folded, saved, "a new folder moves it");
+
+    let made = run(create_task(
+        State(state.clone()),
+        Json(serde_json::from_value(serde_json::json!({"title": "Pay rent"})).unwrap()),
+    ));
+    assert!(made.status().is_success());
+    let tasked = rev_of(&state, none.clone());
+    assert_ne!(tasked, folded, "a task created through the route moves it");
+
+    let board = json_of(run(crate::routes::boards::create_board(
+        State(state.clone()),
+        Json(serde_json::from_value(serde_json::json!({"name": "Plan"})).unwrap()),
+    )));
+    let boarded = rev_of(&state, none.clone());
+    assert_ne!(boarded, tasked);
+    let card = json_of(run(crate::routes::boards::create_card(
+        State(state.clone()),
+        Path(board["id"].as_str().unwrap().to_string()),
+        Json(serde_json::from_value(serde_json::json!({"title": "Aaaa"})).unwrap()),
+    )));
+    let carded = rev_of(&state, none.clone());
+    assert_ne!(carded, boarded);
+    assert_eq!(rev_of(&state, none.clone()), carded);
+
+    let path = dir
+        .path()
+        .join("notes/.leo/cards")
+        .join(format!("{}.json", card["id"].as_str().unwrap()));
+    let before = std::fs::metadata(&path).unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.contains("Aaaa"));
+    std::fs::write(&path, text.replace("Aaaa", "Bbbb")).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(before.modified().unwrap() + std::time::Duration::from_secs(10))
+        .unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), before.len());
+    let rewritten = rev_of(&state, none.clone());
+    assert_ne!(
+        rewritten, carded,
+        "a card file rewritten in place with the same length and a new time moves it"
+    );
+
+    std::fs::write(
+        notes_dir.join("outside.md"),
+        "---\nid: 11111111-2222-4333-8444-555555555555\ntitle: Outside\n---\nWritten by another program.\n",
+    )
+    .unwrap();
+    let seen = rev_of(&state, serde_json::json!({"foreground": "1"}));
+    assert_ne!(seen, rewritten, "foreground=1 reads the disk and moves it");
+    assert_eq!(rev_of(&state, none), seen);
+}
+
 fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let notes_dir = dir.path().join("notes");
@@ -684,5 +780,44 @@ fn audit_bench_all_listed() {
         println!(
             "notes {n}: first {first:.2} ms, repeat (median of 11) {repeat:.2} ms, warm find {found:.4} ms"
         );
+    }
+}
+
+#[test]
+#[ignore]
+fn audit_bench_rev_probe() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_CARDS")
+        .ok()
+        .map(|v| v.split(',').filter_map(|s| s.parse().ok()).collect())
+        .unwrap_or_else(|| vec![5_000, 50_000]);
+    let notes: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5_000);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let (state, dir, _other) = bench_state(notes);
+    let cards = dir.path().join("notes/.leo/cards");
+    std::fs::create_dir_all(&cards).unwrap();
+    let mut written = 0;
+    for target in sizes {
+        while written < target {
+            std::fs::write(cards.join(format!("c{written:08}.json")), "{}").unwrap();
+            written += 1;
+        }
+        let probe = median_ms(11, || {
+            let _ = rt
+                .block_on(crate::routes::notes::get_rev(
+                    State(state.clone()),
+                    Query(serde_json::from_value(serde_json::json!({})).unwrap()),
+                ))
+                .unwrap();
+        });
+        let stamp = median_ms(11, || {
+            crate::jsonline::stamp_of(&state.chats, "cards");
+        });
+        let tasks = median_ms(11, || {
+            crate::jsonline::stamp_of(&state.chats, "tasks");
+        });
+        println!("notes {notes}, card files {written}: probe {probe:.3} ms, card folder stamp {stamp:.3} ms, 1,000 task files stamp {tasks:.3} ms");
     }
 }

@@ -330,6 +330,7 @@ fn counts_as_use(method: &axum::http::Method, path: &str) -> bool {
                 | "/api/writing"
                 | "/api/writing/ollama"
                 | "/api/tasks"
+                | "/api/rev"
                 | "/api/processes"
         )
         || path.starts_with("/api/record/")
@@ -928,6 +929,7 @@ mod activity_tests {
             "/api/writing",
             "/api/writing/ollama",
             "/api/tasks",
+            "/api/rev",
             "/api/processes",
             "/api/activity",
             "/api/record/r1",

@@ -703,6 +703,36 @@ pub(crate) async fn list_folders(
         .await
 }
 
+#[derive(Deserialize)]
+pub(crate) struct RevParams {
+    #[serde(default)]
+    foreground: Option<String>,
+}
+
+pub(crate) async fn get_rev(
+    State(state): State<AppState>,
+    Query(params): Query<RevParams>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    if matches!(params.foreground.as_deref(), Some("1" | "true")) {
+        state
+            .refresh_requested
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+    let fingerprint = state.read_store(|store| Ok(store.fingerprint())).await?;
+    let chats = state.chats.clone();
+    let stamps = tokio::task::spawn_blocking(move || {
+        ["tasks", "boards", "cards"].map(|kind| crate::jsonline::stamp_of(&chats, kind))
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let bytes = std::iter::once(fingerprint)
+        .chain(stamps)
+        .flat_map(u64::to_le_bytes);
+    Ok(Json(
+        serde_json::json!({ "rev": format!("{:016x}", crate::vectors::fnv64(bytes)) }),
+    ))
+}
+
 pub(crate) async fn move_dir(
     State(state): State<AppState>,
     Json(body): Json<MoveDirBody>,

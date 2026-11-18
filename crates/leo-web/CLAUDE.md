@@ -1134,6 +1134,10 @@ AI uses a pen icon, never a sparkle.
   60 s and after native foreground return; a missing watcher checks every access, a broken one at most every 2 s, until it reports events again.
   `with_store` and `store_now` always reconcile before mutations: a save must
   never absorb an unread external edit into its fingerprint.
+- GET `/api/rev[?foreground=1]` answers `{rev}`, 16 hex digits over the store's fingerprint and a
+  stamp of `.leo/tasks`, `.leo/boards` and `.leo/cards` (each regular file's name, length and
+  modified time, so a file rewritten in place moves it). `foreground=1` forces a disk check first.
+  It is signed in like every API route and, as a GET, does not count as use.
 - App-status polling stops while the document or window is hidden and drops late
   responses on visibility changes; return refreshes once. Automatic status GETs
   do not reset user-idle time. Dictation, model-download and recording display

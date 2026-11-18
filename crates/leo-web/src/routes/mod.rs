@@ -35,8 +35,8 @@ use crate::routes::felix::{
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
-    create_dir, create_note, delete_note, get_note, list_folders, list_notes, move_dir, move_note,
-    rename_dir, search_notes, update_note,
+    create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes, move_dir,
+    move_note, rename_dir, search_notes, update_note,
 };
 use crate::routes::pictures::{add_picture, get_picture, PICTURE_BYTES};
 use crate::routes::settings::{change_setting, get_settings, test_setting};
@@ -192,6 +192,7 @@ pub(crate) fn router(state: AppState) -> Router {
             }),
         )
         .route("/api/folders", get(list_folders))
+        .route("/api/rev", get(get_rev))
         .route("/api/trash", get(list_trash))
         .route("/api/trash/{id}/restore", post(restore_note))
         .route("/api/trash/delete", post(delete_from_trash))
