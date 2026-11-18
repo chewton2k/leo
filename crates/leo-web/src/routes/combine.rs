@@ -367,32 +367,11 @@ pub(crate) struct Combined {
 const COMBINED: &str = "combined:";
 
 fn set_combined(chats: &std::path::Path, target: &str, record: &Combined) -> bool {
-    let Ok(text) = serde_json::to_string(record) else {
-        return false;
-    };
-    crate::db::for_chats(chats)
-        .with(|c| {
-            c.execute(
-                "INSERT INTO margin_state (key, data) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET data = excluded.data",
-                [format!("{COMBINED}{target}"), text],
-            )
-        })
-        .is_ok()
+    crate::margin::set_state(chats, &format!("{COMBINED}{target}"), record)
 }
 
 fn combined_of(chats: &std::path::Path, target: &str) -> Option<Combined> {
-    use rusqlite::OptionalExtension;
-    let text: String = crate::db::for_chats(chats)
-        .with(|c| {
-            c.query_row(
-                "SELECT data FROM margin_state WHERE key = ?1",
-                [format!("{COMBINED}{target}")],
-                |r| r.get(0),
-            )
-            .optional()
-        })
-        .ok()??;
-    serde_json::from_str(&text).ok()
+    crate::margin::state_of(chats, &format!("{COMBINED}{target}"))
 }
 
 fn forget_combined(chats: &std::path::Path, target: &str) -> bool {
