@@ -918,7 +918,13 @@ pub fn try_for_chats(chats_dir: &Path) -> Result<Arc<Db>> {
 pub fn put_aside(path: &Path) {
     let mut name = path.as_os_str().to_owned();
     name.push(BEFORE);
-    let _ = std::fs::rename(path, PathBuf::from(name));
+    let aside = PathBuf::from(name);
+    if std::fs::rename(path, &aside).is_ok() {
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(&aside)
+            .and_then(|f| f.set_modified(std::time::SystemTime::now()));
+    }
 }
 
 #[cfg(test)]
@@ -2322,5 +2328,26 @@ mod rewriting {
             !wal(&path, "-wal") && !wal(&path, "-shm"),
             "the last writer to close folds and removes them"
         );
+    }
+}
+
+#[cfg(test)]
+mod set_aside_time {
+    #[test]
+    fn a_file_set_aside_is_stamped_now() {
+        let tmp = tempfile::tempdir().unwrap();
+        let old = tmp.path().join("captions.json");
+        std::fs::write(&old, "{}").unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000))
+            .unwrap();
+        super::put_aside(&old);
+        let aside = tmp.path().join("captions.json.before-database");
+        let at = std::fs::metadata(&aside).unwrap().modified().unwrap();
+        assert!(at.elapsed().is_ok_and(|age| age.as_secs() < 600));
+        assert!(!old.exists());
     }
 }

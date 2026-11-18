@@ -129,6 +129,116 @@ pub fn expire_transcripts(
         .count()
 }
 
+const BACKUP_DAYS: u64 = 30;
+
+fn set_aside_at(meta: &std::fs::Metadata) -> Option<SystemTime> {
+    let modified = meta.modified().ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let changed = u64::try_from(meta.ctime()).ok().map(|secs| {
+            SystemTime::UNIX_EPOCH
+                + std::time::Duration::new(secs, u32::try_from(meta.ctime_nsec()).unwrap_or(0))
+        });
+        Some(changed.map_or(modified, |changed| changed.max(modified)))
+    }
+    #[cfg(not(unix))]
+    Some(modified)
+}
+
+fn past_backup_days(path: &Path, now: SystemTime) -> bool {
+    std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|meta| meta.is_file())
+        .as_ref()
+        .and_then(set_aside_at)
+        .and_then(|at| now.duration_since(at).ok())
+        .is_some_and(|age| age.as_secs() > BACKUP_DAYS * 86_400)
+}
+
+fn table_of(name: &str) -> Option<&'static str> {
+    use leo_core::paths::own::{BEFORE, CAPTIONS, GRAPH, MEANING};
+    let kept = name.strip_suffix(BEFORE)?;
+    [
+        (CAPTIONS, "captions"),
+        (GRAPH, "graph_notes"),
+        (MEANING, "vectors"),
+    ]
+    .into_iter()
+    .find(|(file, _)| *file == kept)
+    .map(|(_, table)| table)
+}
+
+fn proven_backups(data: &Path) -> Vec<PathBuf> {
+    let database = data.join(leo_core::paths::own::DATABASE);
+    if !std::fs::symlink_metadata(&database).is_ok_and(|meta| meta.is_file()) {
+        return Vec::new();
+    }
+    let Ok(db) = crate::db::try_at(&database) else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(data) else {
+        return Vec::new();
+    };
+    let damaged = format!("{}.damaged-", leo_core::paths::own::DATABASE);
+    let mut found = Vec::new();
+    for entry in entries {
+        let Ok(entry) = entry else {
+            return Vec::new();
+        };
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(&damaged) {
+            return Vec::new();
+        }
+        if let Some(table) = table_of(name) {
+            if entry.file_type().is_ok_and(|t| t.is_file()) {
+                found.push((entry.path(), table));
+            }
+        }
+    }
+    found
+        .into_iter()
+        .filter(|(_, table)| {
+            db.with(|c| {
+                c.query_row(&format!("SELECT EXISTS (SELECT 1 FROM {table})"), [], |r| {
+                    r.get::<_, bool>(0)
+                })
+            })
+            .unwrap_or(false)
+        })
+        .map(|(path, _)| path)
+        .collect()
+}
+
+pub(crate) fn expire_backups(data: &Path, notes: &Path, now: SystemTime) -> usize {
+    let mut removed = 0;
+    let mut remove = |path: &Path| match std::fs::remove_file(path) {
+        Ok(()) => removed += 1,
+        Err(e) => leo_core::diag::warn(format!(
+            "could not remove the old backup {}: {e}",
+            path.display()
+        )),
+    };
+    let list = notes.join("directories.json");
+    let list_reads = match std::fs::read(&list) {
+        Ok(raw) => serde_json::from_slice::<Vec<String>>(&raw).is_ok(),
+        Err(e) => e.kind() == std::io::ErrorKind::NotFound,
+    };
+    let corrupt = list.with_extension("json.corrupt");
+    if list_reads && past_backup_days(&corrupt, now) {
+        remove(&corrupt);
+    }
+    for backup in proven_backups(data) {
+        if past_backup_days(&backup, now) {
+            remove(&backup);
+        }
+    }
+    removed
+}
+
 pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32>) -> usize {
     let Some(days) = days else {
         return 0;
@@ -262,6 +372,7 @@ pub(crate) async fn expire_now(state: &AppState) {
         if let Some(housekeeper) = housekeeper {
             expire_audio(&*housekeeper, keep.audio_days, now, &recording);
         }
+        expire_backups(&data_dir(&notes_dir), &notes_dir, SystemTime::from(now));
     })
     .await;
 }
@@ -532,6 +643,127 @@ mod tests {
         assert_eq!(expire_uploads(&notes, Some(7), Utc::now()), 0);
         assert!(secret.exists());
         assert!(real.join("link.txt").symlink_metadata().is_ok());
+    }
+
+    fn set_aside_captions(data: &Path) -> PathBuf {
+        std::fs::write(data.join("captions.json"), r#"{"k": "a heap drawing"}"#).unwrap();
+        crate::captions::Captions::at(data.join("captions.json"));
+        let backup = data.join("captions.json.before-database");
+        assert!(backup.is_file());
+        backup
+    }
+
+    const DAY: std::time::Duration = std::time::Duration::from_secs(86_400);
+
+    #[test]
+    fn old_backups_go_after_thirty_days_and_new_ones_stay() {
+        let (tmp, notes) = data();
+        let data = tmp.path();
+        let captions = set_aside_captions(data);
+        std::fs::write(
+            data.join("meaning.json"),
+            r#"{"notes": {"n1": {"hash": "h", "pieces": [[0, "AACAPwAAAAA="]]}}}"#,
+        )
+        .unwrap();
+        crate::vectors::Vectors::at(data.join("meaning.json"));
+        let meaning = data.join("meaning.json.before-database");
+        std::fs::write(
+            data.join("graph.json"),
+            serde_json::json!({ "notes": { "n1": { "hash": "h", "summary": "heaps", "concepts": ["heap"] } }, "links": [], "built_at": "2026-10-01" }).to_string(),
+        )
+        .unwrap();
+        crate::graph::Graphs::for_notes(&notes, None).load();
+        let graph = data.join("graph.json.before-database");
+        let corrupt = notes.join("directories.json.corrupt");
+        std::fs::write(&corrupt, "[\"old folder\"").unwrap();
+        let theirs = [
+            data.join("mine.json.before-database"),
+            notes.join("mine.json.corrupt"),
+            notes.join("mine.md.before-database"),
+        ];
+        for file in &theirs {
+            std::fs::write(file, "kept").unwrap();
+        }
+        let now = SystemTime::now();
+        assert_eq!(expire_backups(data, &notes, now), 0);
+        assert_eq!(expire_backups(data, &notes, now + DAY * 29), 0);
+        assert!(captions.is_file() && meaning.is_file() && graph.is_file() && corrupt.is_file());
+        assert_eq!(expire_backups(data, &notes, now + DAY * 31), 4);
+        assert!(!captions.exists() && !meaning.exists() && !graph.exists() && !corrupt.exists());
+        assert!(theirs.iter().all(|file| file.is_file()));
+        assert!(data.join("leo.db").is_file());
+    }
+
+    #[test]
+    fn a_backup_whose_content_is_not_proven_stays() {
+        let (tmp, notes) = data();
+        let data = tmp.path();
+        let captions = set_aside_captions(data);
+        let graph = data.join("graph.json.before-database");
+        std::fs::write(&graph, "{}").unwrap();
+        let damaged = data.join("leo.db.damaged-20260101T000000Z");
+        std::fs::write(&damaged, "damaged").unwrap();
+        let corrupt = notes.join("directories.json.corrupt");
+        std::fs::write(&corrupt, "older").unwrap();
+        std::fs::write(notes.join("directories.json"), "{not json").unwrap();
+        let later = SystemTime::now() + DAY * 31;
+        assert_eq!(expire_backups(data, &notes, later), 0);
+        assert!(captions.is_file() && graph.is_file() && corrupt.is_file());
+        std::fs::remove_file(&damaged).unwrap();
+        std::fs::write(notes.join("directories.json"), "[]").unwrap();
+        assert_eq!(expire_backups(data, &notes, later), 2);
+        assert!(!captions.exists() && !corrupt.exists());
+        assert!(graph.is_file(), "an empty table proves nothing");
+    }
+
+    #[test]
+    fn backups_stay_when_the_database_is_gone() {
+        let (tmp, notes) = data();
+        let data = tmp.path();
+        let captions = data.join("captions.json.before-database");
+        std::fs::write(&captions, r#"{"k": "a heap drawing"}"#).unwrap();
+        assert_eq!(
+            expire_backups(data, &notes, SystemTime::now() + DAY * 31),
+            0
+        );
+        assert!(captions.is_file());
+        assert!(!data.join("leo.db").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_backup_renamed_lately_is_dated_by_its_change_time() {
+        let (tmp, notes) = data();
+        let data = tmp.path();
+        let captions = set_aside_captions(data);
+        age(&captions, 400, 0);
+        let corrupt = notes.join("directories.json.corrupt");
+        std::fs::write(&corrupt, "older").unwrap();
+        age(&corrupt, 400, 0);
+        assert_eq!(expire_backups(data, &notes, SystemTime::now()), 0);
+        assert!(captions.is_file() && corrupt.is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_backup_is_never_followed() {
+        let (tmp, notes) = data();
+        let data = tmp.path();
+        let captions = set_aside_captions(data);
+        std::fs::remove_file(&captions).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let (one, two) = (outside.path().join("one"), outside.path().join("two"));
+        std::fs::write(&one, "theirs").unwrap();
+        std::fs::write(&two, "theirs").unwrap();
+        std::os::unix::fs::symlink(&one, &captions).unwrap();
+        let corrupt = notes.join("directories.json.corrupt");
+        std::os::unix::fs::symlink(&two, &corrupt).unwrap();
+        assert_eq!(
+            expire_backups(data, &notes, SystemTime::now() + DAY * 31),
+            0
+        );
+        assert!(captions.is_symlink() && corrupt.is_symlink());
+        assert!(one.is_file() && two.is_file());
     }
 
     #[test]

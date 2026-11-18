@@ -43,7 +43,8 @@ This file holds the rules. How each screen behaves, area by area, is in
   no copy of the text; no database version: it is checked against the notes by
   hash at every start). Old caption, graph and meaning JSON files are
   brought in on first open and renamed `*.before-database` (browser tests seed
-  note connections this way). Writes touch only what changed. New databases
+  note connections this way), and deleted 30 days later by the daily Keeping pass
+  once their table in leo.db holds rows and no `leo.db.damaged-*` sits beside it. Writes touch only what changed. New databases
   give deleted space back in small steps when leo is idle and not recording
   (`Db::give_back`, hourly, 256 pages a step, from 1,024 free pages). A database
   made before 2026-11 is rewritten once while idle into a new file and swapped in
@@ -1176,7 +1177,9 @@ a modal.
   never touched), transcripts in `recording-sources/`, unfinished audio through
   `Housekeeper::old_recordings` + `discard_recordings` (batches of 256) and
   `expire_kept_audio`, skipping the session in use (`RecordJob::session_id`) and
-  locked sessions. DELETE `/api/record/{id}` also deletes a waiting recording
+  locked sessions, and backups leo set aside (30 days, `expire_backups`: the
+  `*.before-database` files and `<notes>/directories.json.corrupt`, dated by the
+  newer of modified and change time, regular files only). DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it
   managed stay untouched.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
