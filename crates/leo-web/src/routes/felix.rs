@@ -1039,12 +1039,7 @@ fn read_original(
         .map(|(i, l)| format!("{}| {l}", i + 1))
         .collect();
     let find = call.text("find");
-    let words: Vec<String> = find
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 3)
-        .map(str::to_string)
-        .collect();
+    let words = tools::search_words(&find);
     let cite = format!("Quote it word for word. Cite a page or slide like [{tag} p4], or lines like [{tag} L120-124].");
     if !words.is_empty() {
         let mut place = String::new();
@@ -1103,26 +1098,9 @@ fn read_original(
             found: vec![name],
         });
     }
-    let mut parts: Vec<String> = vec![String::new()];
-    for line in lines {
-        let last = parts.last_mut().expect("one part");
-        if !last.is_empty() && last.chars().count() + line.chars().count() > size {
-            parts.push(String::new());
-        }
-        let last = parts.last_mut().expect("one part");
-        if !last.is_empty() {
-            last.push('\n');
-        }
-        last.push_str(&chat::clip(&line, size));
-    }
+    let parts = tools::packed(lines, size);
     let total = parts.len();
-    let part = call
-        .text("part")
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(1)
-        .max(1);
-    if part > total {
+    let Ok(part) = tools::part_of(call, total) else {
         return Ok(fail(
             step,
             format!(
@@ -1130,7 +1108,7 @@ fn read_original(
                 if total == 1 { "" } else { "s" }
             ),
         ));
-    }
+    };
     Ok(tools::Done {
         step: if total > 1 {
             format!("Read part {part} of {total} of “{name}”")

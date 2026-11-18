@@ -694,6 +694,44 @@ pub fn has_transcript(notes_dir: &std::path::Path, note: &str) -> bool {
     leo_core::recording::valid_id(note) && leo_core::recording::root(notes_dir).join(note).is_dir()
 }
 
+pub(crate) fn search_words(find: &str) -> Vec<String> {
+    find.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.chars().count() >= 3)
+        .map(str::to_string)
+        .collect()
+}
+
+pub(crate) fn packed(lines: impl IntoIterator<Item = String>, size: usize) -> Vec<String> {
+    let mut parts: Vec<String> = vec![String::new()];
+    for line in lines {
+        let last = parts.last_mut().expect("one part");
+        if !last.is_empty() && last.chars().count() + line.chars().count() > size {
+            parts.push(String::new());
+        }
+        let last = parts.last_mut().expect("one part");
+        if !last.is_empty() {
+            last.push('\n');
+        }
+        last.push_str(&clip(&line, size));
+    }
+    parts
+}
+
+pub(crate) fn part_of(call: &Call, total: usize) -> Result<usize, ()> {
+    let part = call
+        .text("part")
+        .trim()
+        .parse::<usize>()
+        .unwrap_or(1)
+        .max(1);
+    if part > total {
+        Err(())
+    } else {
+        Ok(part)
+    }
+}
+
 fn clock(secs: u64) -> String {
     if secs >= 3600 {
         format!("{}:{:02}:{:02}", secs / 3600, secs / 60 % 60, secs % 60)
@@ -2257,12 +2295,7 @@ impl Desk {
         }
         let size = self.part_chars();
         let find = call.text("find");
-        let words: Vec<String> = find
-            .to_lowercase()
-            .split(|c: char| !c.is_alphanumeric())
-            .filter(|w| w.chars().count() >= 3)
-            .map(str::to_string)
-            .collect();
+        let words = search_words(&find);
         if !words.is_empty() {
             let mut hits: Vec<(usize, usize)> = lines
                 .iter()
@@ -2316,32 +2349,15 @@ impl Desk {
                 found: Vec::new(),
             };
         }
-        let mut parts: Vec<String> = vec![String::new()];
-        for line in lines {
-            let last = parts.last_mut().expect("one part");
-            if !last.is_empty() && last.chars().count() + line.chars().count() > size {
-                parts.push(String::new());
-            }
-            let last = parts.last_mut().expect("one part");
-            if !last.is_empty() {
-                last.push('\n');
-            }
-            last.push_str(&clip(&line, size));
-        }
+        let parts = packed(lines, size);
         let total = parts.len();
-        let part = call
-            .text("part")
-            .trim()
-            .parse::<usize>()
-            .unwrap_or(1)
-            .max(1);
-        if part > total {
+        let Ok(part) = part_of(call, total) else {
             return fail(format!(
                 "the recording of \"{}\" has {total} part{}",
                 note.title,
                 if total == 1 { "" } else { "s" }
             ));
-        }
+        };
         Done {
             step,
             result: format!(
