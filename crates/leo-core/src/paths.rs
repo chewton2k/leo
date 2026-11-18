@@ -96,16 +96,64 @@ pub fn contained_path(root: &std::path::Path, relative: &std::path::Path) -> Res
     Ok(path)
 }
 
+fn temp_name(name: &str) -> bool {
+    const SHAPES: [(&str, &str); 5] = [
+        (".tmp", ""),
+        (".leo-credentials-", ""),
+        (".leo-download-", ".part"),
+        (".leo-download-", ""),
+        (".speaker-", ".wav"),
+    ];
+    SHAPES.iter().any(|(front, back)| {
+        name.strip_prefix(front)
+            .and_then(|rest| rest.strip_suffix(back))
+            .is_some_and(|random| {
+                random.len() == 6 && random.bytes().all(|b| b.is_ascii_alphanumeric())
+            })
+    })
+}
+
 pub fn stale_temp(name: &str, meta: &std::fs::Metadata) -> bool {
-    name.len() == 10
-        && name.starts_with(".tmp")
-        && name.bytes().skip(4).all(|b| b.is_ascii_alphanumeric())
+    temp_name(name)
         && meta.is_file()
         && meta
             .modified()
             .ok()
             .and_then(|at| at.elapsed().ok())
             .is_some_and(|age| age.as_secs() > 3600)
+}
+
+pub fn sweep_stale_temps(dir: &std::path::Path, depth: usize) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if kind.is_dir() {
+            if depth > 0 {
+                removed += sweep_stale_temps(&entry.path(), depth - 1);
+            }
+            continue;
+        }
+        let name = entry.file_name();
+        let stale = name.to_str().is_some_and(|name| {
+            temp_name(name) && entry.metadata().is_ok_and(|meta| stale_temp(name, &meta))
+        });
+        if !stale {
+            continue;
+        }
+        match std::fs::remove_file(entry.path()) {
+            Ok(()) => removed += 1,
+            Err(error) => crate::diag::warn(format!(
+                "could not remove the old temporary file {}: {error}",
+                entry.path().display()
+            )),
+        }
+    }
+    removed
 }
 
 pub fn write_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) -> Result<()> {
@@ -401,6 +449,135 @@ mod tests {
                 .unwrap();
             assert!(contained_path(root, std::path::Path::new("middle/x.md")).is_err());
             assert!(contained_path(root, std::path::Path::new("real/leaf.md")).is_err());
+        }
+    }
+
+    fn aged(path: &std::path::Path, seconds: u64) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(seconds))
+            .unwrap();
+    }
+
+    const OWN_TEMPS: [&str; 5] = [
+        ".tmpAbC123",
+        ".leo-credentials-AbC123",
+        ".leo-download-AbC123.part",
+        ".leo-download-AbC123",
+        ".speaker-AbC123.wav",
+    ];
+
+    #[test]
+    fn leftover_temporary_files_of_every_shape_go_after_an_hour() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in OWN_TEMPS {
+            let old = dir.path().join(name);
+            std::fs::write(&old, "half").unwrap();
+            aged(&old, 7200);
+        }
+        let young = dir.path().join(".tmpYoung1");
+        std::fs::write(&young, "still being written").unwrap();
+        assert_eq!(sweep_stale_temps(dir.path(), 0), OWN_TEMPS.len());
+        for name in OWN_TEMPS {
+            assert!(!dir.path().join(name).exists(), "{name}");
+        }
+        assert!(young.exists());
+        assert_eq!(sweep_stale_temps(&dir.path().join("missing"), 3), 0);
+    }
+
+    #[test]
+    fn names_that_only_look_like_temporary_files_are_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let near = [
+            ".tmpABC12",
+            ".tmpABCDEF.md",
+            ".tmpABC-12",
+            ".leo-download-ABCDE.part",
+            ".leo-download-ABCDEF.partial",
+            ".leo-credentials-ABCDEF.json",
+            ".speaker-ABCDEF",
+            ".speaker-ABCDEF.wav.bak",
+            "tmpABCDEF",
+            "seg-000001.wav",
+            "seg-000001.part.wav",
+            "note.md",
+        ];
+        for name in near {
+            let path = dir.path().join(name);
+            std::fs::write(&path, "x").unwrap();
+            aged(&path, 7200);
+        }
+        assert_eq!(sweep_stale_temps(dir.path(), 0), 0);
+        for name in near {
+            assert!(dir.path().join(name).exists(), "{name}");
+        }
+    }
+
+    #[test]
+    fn a_folder_with_a_temporary_name_is_not_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join(".tmpAbC123");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("kept.md"), "x").unwrap();
+        assert_eq!(sweep_stale_temps(dir.path(), 1), 0);
+        assert!(folder.join("kept.md").exists());
+    }
+
+    #[test]
+    fn the_sweep_goes_only_as_deep_as_it_is_told() {
+        let dir = tempfile::tempdir().unwrap();
+        let deep = dir.path().join("a/b");
+        std::fs::create_dir_all(&deep).unwrap();
+        let levels = [
+            dir.path().join(".tmpAbC123"),
+            dir.path().join("a/.tmpAbC123"),
+            deep.join(".tmpAbC123"),
+        ];
+        for path in &levels {
+            std::fs::write(path, "x").unwrap();
+            aged(path, 7200);
+        }
+        assert_eq!(sweep_stale_temps(dir.path(), 0), 1);
+        assert_eq!(sweep_stale_temps(dir.path(), 1), 1);
+        assert!(levels[2].exists());
+        assert_eq!(sweep_stale_temps(dir.path(), 2), 1);
+        assert!(!levels[2].exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_temporary_name_is_never_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let target = outside.path().join(".tmpAbC123");
+        std::fs::write(&target, "not leo's").unwrap();
+        aged(&target, 7200);
+        std::os::unix::fs::symlink(&target, dir.path().join(".tmpAbC123")).unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("folder")).unwrap();
+        assert_eq!(sweep_stale_temps(dir.path(), 2), 0);
+        assert!(target.exists());
+        assert!(std::fs::symlink_metadata(dir.path().join(".tmpAbC123")).is_ok());
+    }
+
+    #[test]
+    #[ignore = "benchmark: cargo test -p leo-core --release p_c34 -- --ignored --nocapture"]
+    fn p_c34_benchmark_launch_sweep() {
+        for folders in [1_000usize, 10_000] {
+            let dir = tempfile::tempdir().unwrap();
+            for index in 0..folders {
+                let folder = dir.path().join(format!("note-{index}"));
+                std::fs::create_dir(&folder).unwrap();
+                std::fs::write(folder.join("a.pdf"), "x").unwrap();
+                std::fs::write(folder.join("b.png"), "x").unwrap();
+            }
+            let started = std::time::Instant::now();
+            let removed = sweep_stale_temps(dir.path(), 1);
+            println!(
+                "{folders} folders: {:?} ({removed} removed)",
+                started.elapsed()
+            );
         }
     }
 
