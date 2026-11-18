@@ -53,11 +53,11 @@ fn signed_in_now(
     })
 }
 
-pub fn scan(notes: &Path, fresh: bool) -> Result<Value> {
+pub fn scan(notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value> {
     let config = Config::load();
     let secrets = default_store();
     let path = Config::config_path()?;
-    let sections = doctor::scan(&config, secrets.as_ref(), notes, &path);
+    let sections = doctor::scan(&config, secrets.as_ref(), notes, &path, facts);
     let sign_in=config.chat.chain.first().and_then(|name|config.provider(name)).and_then(|provider| {
         let agent=leo_services::ai::provider::agent_cli::Agent::of(provider)?;
         let cli=leo_services::ai::provider::agent_cli::AgentCli::new(agent.program().into(),agent,provider);

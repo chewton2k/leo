@@ -9,7 +9,7 @@ entry point dispatches `--leo-speech-worker` before normal startup.
 
 `health::scan` converts the local doctor checks (`leo_services::doctor::scan`;
 there are no probes: no network or AI requests, and the microphone is never
-opened) to the native Health view. Writing CLI sign-in status is bounded and parsed to a boolean, and a signed-in answer is reused for 20 s unless the request says `fresh`; its
+opened) to the native Health view; the notes rows come from the engine's loaded store (`Facts`), never from a fresh parse. Writing CLI sign-in status is bounded and parsed to a boolean, and a signed-in answer is reused for 20 s unless the request says `fresh`; its
 raw output never reaches the page. The host exposes no backup setup or push
 capability; existing user repositories are never changed by app lifecycle events.
 The browser-test engine has a real startup/session-gate integration test, so
