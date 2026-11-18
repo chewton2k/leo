@@ -286,7 +286,7 @@ plus a legacy list of what earlier versions wrote, which only ever shrinks
 what leo manages, including what it managed before; `tests/owned_files.rs` fails
 when code writes a bare name not listed there). Recordings that belong to kept or
 trashed notes, and unfinished ones, stay in `recordings/`. It defers locked
-Windows removal. Shell-profile edits are atomic and
+Windows removal, writing its output to `leo-uninstall.log` in the temp folder. Shell-profile edits are atomic and
 retain permissions. Tests use scratch bundles and ad-hoc signatures, never the
 real signing keychain. Four persistent signing secrets gate release before bump;
 private values are generated outside the repository and added by the user.

@@ -267,7 +267,7 @@ pub fn aside(bundle: &Path) -> PathBuf {
     bundle.with_file_name(".Leo.app.removing")
 }
 
-pub fn remove_bundle(bundle: &Path) -> Result<()> {
+pub fn remove_bundle(bundle: &Path) -> Result<Option<PathBuf>> {
     #[cfg(not(windows))]
     {
         let aside = aside(bundle);
@@ -287,21 +287,25 @@ pub fn remove_bundle(bundle: &Path) -> Result<()> {
                 aside.display()
             )
         })?;
+        Ok(None)
     }
     #[cfg(windows)]
     {
-        let script = "$ErrorActionPreference='Stop'; Wait-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -Timeout 30 -ErrorAction SilentlyContinue; if(Get-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -ErrorAction SilentlyContinue){exit 1}; $uninstaller=Join-Path $env:LEO_UNINSTALL_APP 'uninstall.exe'; $p=Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru; if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){exit 1}; $bin=Join-Path $env:LEO_UNINSTALL_APP 'bin'; if((Test-Path -LiteralPath $bin -PathType Container) -and -not (Get-ChildItem -LiteralPath $bin -Force)){Remove-Item -LiteralPath $bin}; if((Test-Path -LiteralPath $env:LEO_UNINSTALL_APP -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LEO_UNINSTALL_APP -Force)){Remove-Item -LiteralPath $env:LEO_UNINSTALL_APP}";
+        let script = "$ErrorActionPreference='Stop'; Wait-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -Timeout 30 -ErrorAction SilentlyContinue; if(Get-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -ErrorAction SilentlyContinue){throw 'The leo command did not exit.'}; $uninstaller=Join-Path $env:LEO_UNINSTALL_APP 'uninstall.exe'; $p=Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru; if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){throw 'The Leo uninstaller did not finish.'}; $bin=Join-Path $env:LEO_UNINSTALL_APP 'bin'; if((Test-Path -LiteralPath $bin -PathType Container) -and -not (Get-ChildItem -LiteralPath $bin -Force)){Remove-Item -LiteralPath $bin}; if((Test-Path -LiteralPath $env:LEO_UNINSTALL_APP -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LEO_UNINSTALL_APP -Force)){Remove-Item -LiteralPath $env:LEO_UNINSTALL_APP}";
+        let log = std::env::temp_dir().join("leo-uninstall.log");
+        let file = std::fs::File::create(&log)
+            .context("The uninstall log could not be written. Remove Leo from Installed apps.")?;
         leo_core::children::quiet_command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .env("LEO_UNINSTALL_PARENT_PID", std::process::id().to_string())
             .env("LEO_UNINSTALL_APP", bundle)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(file.try_clone()?))
+            .stderr(std::process::Stdio::from(file))
             .spawn()
             .context("The Windows uninstaller could not start. Remove Leo from Installed apps.")?;
+        Ok(Some(log))
     }
-    Ok(())
 }
 
 pub fn is_cli_link(link: &Path, bundle: &Path) -> bool {

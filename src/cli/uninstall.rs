@@ -313,13 +313,20 @@ pub fn run(yes: bool) -> Result<()> {
             remove_listed(&mut left, path, &home);
         }
     }
+    let mut log = None;
     if let Some(bundle) = bundle.as_ref().filter(|_| last_steps(&left)) {
-        if !left.step("remove the app", super::installation::remove_bundle(bundle)) {
-            app_aside = Some(super::installation::aside(bundle)).filter(|aside| aside.exists());
+        match left.attempt("remove the app", super::installation::remove_bundle(bundle)) {
+            Ok(written) => log = written,
+            Err(()) => {
+                app_aside = Some(super::installation::aside(bundle)).filter(|aside| aside.exists())
+            }
         }
     }
     if last_steps(&left) {
-        println!("  Removed {}", pretty(&exe, &home));
+        match &log {
+            Some(log) => println!("  {}", windows_notice(log)),
+            None => println!("  Removed {}", pretty(&exe, &home)),
+        }
     }
 
     println!();
@@ -353,6 +360,13 @@ pub fn run(yes: bool) -> Result<()> {
     println!("  Thank you for using leo!");
     println!();
     Ok(())
+}
+
+fn windows_notice(log: &Path) -> String {
+    format!(
+        "Leo's app will be removed when this command exits. If it is still there afterwards, see {}.",
+        log.display()
+    )
 }
 
 #[derive(Default)]
@@ -732,6 +746,15 @@ mod tests {
         assert!(left.0.is_empty());
         assert!(!left.step("remove the app", Err(anyhow::anyhow!("busy"))));
         assert_eq!(left.0, ["remove the app"]);
+    }
+
+    #[test]
+    fn the_windows_notice_names_the_log() {
+        let log = Path::new(r"C:\Temp\leo-uninstall.log");
+        assert_eq!(
+            windows_notice(log),
+            r"Leo's app will be removed when this command exits. If it is still there afterwards, see C:\Temp\leo-uninstall.log."
+        );
     }
 
     #[test]

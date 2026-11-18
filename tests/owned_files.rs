@@ -38,6 +38,7 @@ const ELSEWHERE: &[(&str, &str)] = &[
     ("deleting", "database"),
     ("chats", "anchor"),
     ("leo-test-vad", "temp"),
+    ("leo-uninstall.log", "temp"),
     ("bge-small-en-v1.5", "models"),
     ("config.json", "models"),
     ("model.safetensors", "models"),
