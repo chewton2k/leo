@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -1020,41 +1022,53 @@ fn read_original(
             ),
         ));
     };
-    let Some(reader) = state.reader.clone() else {
+    let Some(reader) = state.original_reader() else {
         return Ok(fail(step, "this copy of leo cannot read files".into()));
     };
     let Some(path) = crate::originals::path_of(&notes_dir, &note.id, &name) else {
         return Ok(fail(step, format!("{name} is not there any more")));
     };
-    let text = match state.originals.text(&reader, &path, &name) {
-        Ok(text) => text,
+    let read = match state.originals.lines(&reader, &path, &name) {
+        Ok(read) => read,
         Err(e) => return Ok(fail(step, format!("{name} could not be read ({e})"))),
     };
     let tag = desk.file_tag(&note, &name);
     let step = format!("Read {name}");
     let size = desk.part_chars();
-    let lines: Vec<String> = text
-        .lines()
-        .enumerate()
-        .map(|(i, l)| format!("{}| {l}", i + 1))
-        .collect();
+    let unreadable =
+        |step: String, e: anyhow::Error| fail(step, format!("{name} could not be read ({e})"));
     let find = call.text("find");
     let words = tools::search_words(&find);
     let cite = format!("Quote it word for word. Cite a page or slide like [{tag} p4], or lines like [{tag} L120-124].");
     if !words.is_empty() {
+        let lines = match read.iter() {
+            Ok(lines) => lines,
+            Err(e) => return Ok(unreadable(step, e)),
+        };
+        let most = size / 4 + 2;
         let mut place = String::new();
-        let mut hits: Vec<(usize, usize, String)> = Vec::new();
-        for (i, l) in text.lines().enumerate() {
-            if let Some(p) = crate::originals::place_of(l) {
+        let mut best: BinaryHeap<Reverse<(usize, Reverse<usize>, String)>> = BinaryHeap::new();
+        for (i, l) in lines.enumerate() {
+            if let Some(p) = crate::originals::place_of(&l) {
                 place = p;
             }
             let lower = l.to_lowercase();
             let score = words.iter().filter(|w| lower.contains(w.as_str())).count();
-            if score > 0 {
-                hits.push((i, score, place.clone()));
+            if score == 0 {
+                continue;
+            }
+            let worse = best.len() >= most
+                && best
+                    .peek()
+                    .is_some_and(|Reverse(w)| (score, Reverse(i)) <= (w.0, w.1));
+            if !worse {
+                best.push(Reverse((score, Reverse(i), place.clone())));
+                if best.len() > most {
+                    best.pop();
+                }
             }
         }
-        if hits.is_empty() {
+        if best.is_empty() {
             return Ok(tools::Done {
                 step: format!("Looked for “{}” in “{name}”", chat::clip(&find, 40)),
                 result: format!("Nothing in {name} mentions \"{}\".", chat::clip(&find, 80)),
@@ -1062,16 +1076,37 @@ fn read_original(
                 found: Vec::new(),
             });
         }
-        hits.sort_by_key(|(i, score, _)| (std::cmp::Reverse(*score), *i));
+        let mut hits: Vec<(usize, usize, String)> = best
+            .into_iter()
+            .map(|Reverse((score, Reverse(i), place))| (i, score, place))
+            .collect();
+        hits.sort_by_key(|(i, score, _)| (Reverse(*score), *i));
+        let last = hits.iter().map(|(i, _, _)| i + 1).max().unwrap_or(0);
+        let near: std::collections::HashSet<usize> = hits
+            .iter()
+            .flat_map(|(i, _, _)| i.saturating_sub(1)..=i + 1)
+            .collect();
+        let mut text: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+        match read.iter() {
+            Ok(lines) => {
+                for (n, l) in lines.enumerate().take(last + 1) {
+                    if near.contains(&n) {
+                        text.insert(n, format!("{}| {}", n + 1, chat::clip(&l, size)));
+                    }
+                }
+            }
+            Err(e) => return Ok(unreadable(step, e)),
+        }
         let mut keep = Vec::new();
         let mut used = 0;
         for (i, _, place) in hits {
             if used >= size {
                 break;
             }
-            let from = i.saturating_sub(1);
-            let to = (i + 2).min(lines.len());
-            let piece = lines[from..to].join("\n");
+            let piece = (i.saturating_sub(1)..=i + 1)
+                .filter_map(|n| text.get(&n).cloned())
+                .collect::<Vec<_>>()
+                .join("\n");
             used += piece.chars().count();
             keep.push((i, place, piece));
         }
@@ -1098,8 +1133,16 @@ fn read_original(
             found: vec![name],
         });
     }
-    let parts = tools::packed(lines, size);
-    let total = parts.len();
+    let wanted = tools::part_of(call, usize::MAX).unwrap_or(1);
+    let lines = match read.iter() {
+        Ok(lines) => lines,
+        Err(e) => return Ok(unreadable(step, e)),
+    };
+    let (total, text) = crate::originals::pack_part(
+        lines.enumerate().map(|(i, l)| format!("{}| {l}", i + 1)),
+        size,
+        wanted,
+    );
     let Ok(part) = tools::part_of(call, total) else {
         return Ok(fail(
             step,
@@ -1118,7 +1161,7 @@ fn read_original(
         result: format!(
             "<file id=\"{tag}\" name=\"{}\" part=\"{part}\" of=\"{total}\">\n{}\n</file>\n{cite}",
             chat::attribute(&name),
-            parts[part - 1]
+            text
         ),
         proposal: None,
         found: vec![name],
@@ -1135,7 +1178,7 @@ pub(crate) async fn original_passage(
     Path((id, name)): Path<(String, String)>,
     axum::extract::Query(query): axum::extract::Query<PassageQuery>,
 ) -> Response {
-    let Some(reader) = state.reader.clone() else {
+    let Some(reader) = state.original_reader() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
     let notes_dir = state.notes_dir.clone();
@@ -1143,18 +1186,17 @@ pub(crate) async fn original_passage(
     let found = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, StatusCode> {
         let path =
             crate::originals::path_of(&notes_dir, &id, &name).ok_or(StatusCode::NOT_FOUND)?;
-        let text = originals
-            .text(&reader, &path, &name)
+        let read = originals
+            .lines(&reader, &path, &name)
             .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-        let lines: Vec<&str> = text.lines().collect();
+        let lines = || read.iter().map_err(|_| StatusCode::UNPROCESSABLE_ENTITY);
         let (from, to, label) =
-            crate::originals::passage(&text, &query.at).ok_or(StatusCode::NOT_FOUND)?;
-        let shown: Vec<serde_json::Value> = (from..=to.min(lines.len()))
-            .filter_map(|n| {
-                lines
-                    .get(n - 1)
-                    .map(|l| serde_json::json!({ "n": n, "text": l }))
-            })
+            crate::originals::passage(lines()?, &query.at).ok_or(StatusCode::NOT_FOUND)?;
+        let shown: Vec<serde_json::Value> = lines()?
+            .enumerate()
+            .skip(from - 1)
+            .take(to + 1 - from)
+            .map(|(i, l)| serde_json::json!({ "n": i + 1, "text": l }))
             .collect();
         let page = label
             .strip_prefix("page ")

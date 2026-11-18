@@ -856,6 +856,15 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   upload never makes a conflict copy.
 - Originals live in `<data>/attachments/<note-id>/` (never synced), named by
   `free_original_name`; figures go to the AI via `leo_services::figures`.
+- An original of any size can be read (2026-11-18, the owner's principle 1): `Originals::lines`
+  asks `Powers.reader_to` (leo-services `import::read_to`, which streams a text file in 64 KB pieces) to
+  write into a writer that holds 1 MB and spills the rest to `<attachments>/<note>/.read/<name>.txt`
+  (first line: the original's length and modified time; reused while they match, written by temp file
+  and rename only after the read succeeded, refused through a linked `.read`). A PDF or Office file is
+  still loaded whole, one large one at a time. `Lines::iter` hands out lines of at most 64 KB, the same
+  numbering held or spilled; `pack_part` keeps only the part asked for. The copy is leo's, not the
+  person's: Keeping deletes it with its original, `forget_missing`/`forget_note` and the next read sweep
+  one whose original is gone, and nothing counts, expires or exports it.
 - Recording (`record.rs`, `recording.js`): capture runs in Rust through the
   listener; the page never opens a browser microphone or screen picker and the
   server takes no audio from the page. Native jobs have no page heartbeat.

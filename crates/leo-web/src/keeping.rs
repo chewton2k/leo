@@ -95,6 +95,7 @@ pub fn expire_uploads(notes_dir: &Path, days: Option<u32>, now: DateTime<Utc>) -
     each_old_upload(notes_dir, cutoff, &mut |path| {
         if std::fs::remove_file(path).is_ok() {
             removed += 1;
+            crate::originals::drop_copy_of(path);
         }
     });
     removed
@@ -289,6 +290,60 @@ mod tests {
         std::fs::write(&file, "x").unwrap();
         age(&file, days, extra);
         file
+    }
+
+    fn copy_of_upload(file: &Path) -> PathBuf {
+        let folder = file.parent().unwrap().join(".read");
+        std::fs::create_dir_all(&folder).unwrap();
+        let copy = folder.join(format!(
+            "{}.txt",
+            file.file_name().unwrap().to_string_lossy()
+        ));
+        std::fs::write(&copy, "read copy").unwrap();
+        copy
+    }
+
+    #[test]
+    fn the_read_copy_is_not_counted_expired_alone_or_exported() {
+        let (tmp, notes) = data();
+        let old = upload(&notes, "n1", "old.pdf", 40, 0);
+        let fresh = upload(&notes, "n1", "fresh.pdf", 1, 0);
+        let (old_copy, fresh_copy) = (copy_of_upload(&old), copy_of_upload(&fresh));
+        age(&old_copy, 90, 0);
+        age(&fresh_copy, 90, 0);
+        let now = Utc::now();
+        assert_eq!(old_upload_count(&notes, Some(30), now), 1);
+        let mut zip = std::io::Cursor::new(Vec::new());
+        let parts = crate::export::Parts {
+            uploads: true,
+            ..Default::default()
+        };
+        crate::export::write_zip(&mut zip, &notes, &tmp.path().join("chats"), parts).unwrap();
+        let mut archive = zip::ZipArchive::new(zip).unwrap();
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
+            .collect();
+        assert!(names.iter().any(|n| n.ends_with("fresh.pdf")), "{names:?}");
+        assert!(names.iter().all(|n| !n.contains(".read")), "{names:?}");
+        assert_eq!(expire_uploads(&notes, Some(30), now), 1);
+        assert!(!old.exists() && !old_copy.exists());
+        assert!(fresh.exists() && fresh_copy.exists());
+        assert_eq!(expire_uploads(&notes, Some(30), now), 0);
+        assert!(fresh_copy.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_expired_upload_never_takes_a_file_through_a_linked_copies_folder() {
+        let (tmp, notes) = data();
+        let old = upload(&notes, "n1", "old.pdf", 40, 0);
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::fs::write(outside.join("old.pdf.txt"), "the person's file").unwrap();
+        std::os::unix::fs::symlink(&outside, old.parent().unwrap().join(".read")).unwrap();
+        assert_eq!(expire_uploads(&notes, Some(30), Utc::now()), 1);
+        assert!(!old.exists());
+        assert!(outside.join("old.pdf.txt").is_file());
     }
 
     fn transcript(notes: &Path, id: &str, days: u64, extra: u64) -> PathBuf {

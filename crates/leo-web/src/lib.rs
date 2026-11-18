@@ -110,6 +110,18 @@ pub trait CalendarAccess: Send + Sync {
 
 pub type Reader = Arc<dyn Fn(UploadFile, &mut dyn FnMut(&str)) -> Result<String> + Send + Sync>;
 
+pub type ReaderTo = Arc<
+    dyn Fn(
+            &std::path::Path,
+            &str,
+            &str,
+            &mut dyn FnMut(&str),
+            &mut dyn std::io::Write,
+        ) -> Result<()>
+        + Send
+        + Sync,
+>;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Figure {
     pub place: String,
@@ -152,6 +164,7 @@ pub struct Powers {
     pub calendar_access: Option<Arc<dyn CalendarAccess>>,
     pub housekeeper: Option<Arc<dyn record::Housekeeper>>,
     pub reader: Option<Reader>,
+    pub reader_to: Option<ReaderTo>,
     pub room: Option<Room>,
     pub context: Option<Room>,
     pub converse: Option<chat::Converser>,
@@ -214,6 +227,14 @@ struct Searched {
     query: String,
     stamps: (u64, u64, std::sync::Weak<graph::Cache>),
     hits: Arc<Vec<(String, usize, Option<search::Why>)>>,
+}
+
+impl Powers {
+    pub(crate) fn original_reader(&self) -> Option<ReaderTo> {
+        self.reader_to
+            .clone()
+            .or_else(|| self.reader.clone().map(originals::through))
+    }
 }
 
 impl std::ops::Deref for AppState {
