@@ -101,41 +101,16 @@ fn capture(program: &str, args: &[&std::ffi::OsStr]) -> Result<std::process::Out
 }
 
 #[cfg(any(target_os = "macos", windows))]
-fn capture_command(mut command: std::process::Command) -> Result<std::process::Output> {
-    use std::{
-        io::Read,
-        process::Stdio,
-        time::{Duration, Instant},
-    };
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("A system check took too long. Reopen Leo and try again.");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    if let Some(pipe) = child.stdout.take() {
-        pipe.take(16_384).read_to_end(&mut stdout)?;
-    }
-    if let Some(pipe) = child.stderr.take() {
-        pipe.take(16_384).read_to_end(&mut stderr)?;
-    }
+fn capture_command(command: std::process::Command) -> Result<std::process::Output> {
+    let out = leo_core::children::run_bounded(command, std::time::Duration::from_secs(3), 16_384)?;
+    ensure!(
+        !out.timed_out,
+        "A system check took too long. Reopen Leo and try again."
+    );
     Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
+        status: out.status,
+        stdout: out.stdout,
+        stderr: out.stderr,
     })
 }
 
@@ -337,6 +312,17 @@ pub fn is_cli_link(link: &Path, bundle: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_system_check_with_a_lot_of_output_is_not_called_too_slow() {
+        let mut command = leo_core::children::quiet_command("sh");
+        command.args(["-c", "head -c 200000 /dev/zero"]);
+        let started = std::time::Instant::now();
+        let output = capture_command(command).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(output.status.success());
+        assert!(output.stdout.len() <= 16_384);
+    }
     #[test]
     fn an_unset_local_app_data_is_an_error_not_a_relative_folder() {
         assert!(app_dir_in(None).is_err());
