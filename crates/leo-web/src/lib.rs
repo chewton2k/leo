@@ -464,16 +464,18 @@ async fn keep_graph_current(state: AppState) {
             if let Some(meaning) = state.meaning.clone().filter(|m| m(&[], false).is_ok()) {
                 let vectors = Arc::clone(&state.vectors);
                 let listed = Arc::clone(&vectors);
-                if let Ok(work) = state
+                if let Ok((work, more)) = state
                     .read_store(move |store| {
                         let work = listed.stale(store, vectors::PIECES_PER_TICK);
                         listed.forget_gone(store);
-                        Ok(work)
+                        Ok((work, listed.looking()))
                     })
                     .await
                 {
                     if work.is_empty() {
-                        read_at = Some(seen);
+                        if !more {
+                            read_at = Some(seen);
+                        }
                     } else {
                         let _ = tokio::task::spawn_blocking(move || {
                             vectors::read_in(&vectors, &meaning, &work)
