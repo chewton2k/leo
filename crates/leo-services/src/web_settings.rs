@@ -369,7 +369,7 @@ pub fn test(cfg: &Config, store: &dyn SecretStore, task: &str) -> Result<String>
     let Some(selection) = choice::selection(cfg, store, task) else {
         bail!("choose an AI first");
     };
-    crate::providers::test_provider(&selection.provider)
+    crate::providers::test_provider(cfg, store, &selection.provider)
 }
 
 #[cfg(test)]

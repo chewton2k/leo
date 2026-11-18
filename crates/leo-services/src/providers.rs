@@ -5,6 +5,7 @@
 use anyhow::Result;
 
 use crate::ai;
+use crate::config::secret::SecretStore;
 use crate::config::{self, Config};
 
 /// Build the single transcription provider named by `name`, regardless of
@@ -29,15 +30,36 @@ fn build_one_transcriber(
 /// provider screen can show it in its status line. Transcription providers are
 /// only checked for reachability: exercising one needs audio, and a test that
 /// records from the microphone is not a test anyone wants to run twice.
-pub fn test_provider(name: &str) -> Result<String> {
-    let cfg = Config::load();
-    let store = config::secret::default_store();
+pub fn test_provider(cfg: &Config, store: &dyn SecretStore, name: &str) -> Result<String> {
+    test_with(cfg, store, name, TEST_LIMIT)
+}
+
+const TEST_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn test_with(
+    cfg: &Config,
+    store: &dyn SecretStore,
+    name: &str,
+    limit: std::time::Duration,
+) -> Result<String> {
     let Some(pc) = cfg.provider(name) else {
         anyhow::bail!("no provider named '{name}' in your config");
     };
 
     let started = std::time::Instant::now();
-    if let Some(p) = ai::provider::build_one_chat(name, pc, &store) {
+    let chat: Option<Box<dyn ai::provider::ChatProvider>> =
+        match ai::provider::agent_cli::Agent::of(pc) {
+            Some(agent) => {
+                let mut pc = pc.clone();
+                pc.no_tools = true;
+                Some(Box::new(
+                    ai::provider::agent_cli::AgentCli::new(name.into(), agent, &pc)
+                        .with_limits(limit, limit),
+                ))
+            }
+            None => ai::provider::build_one_chat(name, pc, store),
+        };
+    if let Some(p) = chat {
         if !p.available() {
             anyhow::bail!("{}", p.unavailable_reason());
         }
@@ -327,5 +349,74 @@ mod tests {
         assert_eq!(files_state(dir.path(), &manifest), ModelState::Missing);
         std::fs::write(&a, b"aa").unwrap();
         assert_eq!(files_state(dir.path(), &manifest), ModelState::Damaged);
+    }
+
+    #[cfg(unix)]
+    fn fake_writer(dir: &std::path::Path, body: &str) -> Config {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-agent");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Config::parse(&format!(
+            "[providers.claude_code]\nkind = \"claude_code\"\nbin = \"{}\"\n",
+            path.display()
+        ))
+        .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_settings_test_runs_without_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        let argv = dir.path().join("argv");
+        let cfg = fake_writer(
+            dir.path(),
+            &format!(
+                "echo \"$@\" >> '{}'\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\"}}'",
+                argv.display()
+            ),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let said = test_provider(&cfg, &store, "claude_code").unwrap();
+        assert!(said.contains("ok"), "{said}");
+        let recorded = std::fs::read_to_string(&argv).unwrap();
+        assert!(recorded.contains("--tools"), "{recorded}");
+        assert!(!recorded.contains("WebSearch"), "{recorded}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_test_of_a_stuck_writer_ends_at_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let pids = dir.path().join("pids");
+        let cfg = fake_writer(
+            dir.path(),
+            &format!("echo $$ >> '{}'\ncat >/dev/null\nsleep 20", pids.display()),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let started = std::time::Instant::now();
+        let result = test_with(
+            &cfg,
+            &store,
+            "claude_code",
+            std::time::Duration::from_millis(300),
+        );
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        let pids = std::fs::read_to_string(&pids).unwrap();
+        assert_eq!(pids.lines().count(), 2, "two runs: {pids}");
+        for pid in pids.lines() {
+            let alive = leo_core::children::quiet_command("kill")
+                .args(["-0", pid])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(!alive, "{pid} still runs");
+        }
     }
 }
