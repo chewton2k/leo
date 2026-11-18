@@ -135,6 +135,7 @@
 
     function changed(edit) {
       docVersion++;
+      startsFrom(edit ? edit.at : 0);
       if (edit) typed(edit);
       else rebuilt();
       container.classList.toggle('doc-empty', !lines.some((line) => line.trim()));
@@ -915,10 +916,29 @@
       selection.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
     }
 
+    let lineStarts = [0];
+    let startsOf = lines;
+    let startsCount = lines.length;
+
+    function startsUpTo(line) {
+      if (startsOf !== lines || startsCount !== lines.length) startsFrom(0, true);
+      while (lineStarts.length <= line) {
+        const k = lineStarts.length - 1;
+        lineStarts.push(lineStarts[k] + lines[k].length + 1);
+      }
+    }
+
+    function startsFrom(line, always = false) {
+      if (!always && startsOf !== lines) return;
+      startsOf = lines;
+      startsCount = lines.length;
+      lineStarts.length = Math.max(1, Math.min(lineStarts.length, line + 1));
+    }
+
     function lineStart(line) {
-      let at = 0;
-      for (let k = 0; k < line && k < lines.length; k++) at += lines[k].length + 1;
-      return at;
+      const upTo = Math.max(0, Math.min(line, lines.length));
+      startsUpTo(upTo);
+      return lineStarts[upTo];
     }
 
     function hitsOf(from, to) {
@@ -929,12 +949,19 @@
     }
 
     function lineOf(at) {
-      let start = 0;
-      for (let k = 0; k < lines.length; k++) {
-        if (at <= start + lines[k].length) return k;
-        start += lines[k].length + 1;
+      if (!lines.length) return -1;
+      startsUpTo(0);
+      while (lineStarts.length <= lines.length && lineStarts[lineStarts.length - 1] <= at) startsUpTo(lineStarts.length);
+      const top = lineStarts.length - 1;
+      if (lineStarts[top] <= at) return lines.length - 1;
+      let lo = 1;
+      let hi = top;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (lineStarts[mid] > at) hi = mid;
+        else lo = mid + 1;
       }
-      return lines.length - 1;
+      return lo - 1;
     }
 
     const docLength = () => lines.join('\n').length;

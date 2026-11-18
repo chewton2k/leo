@@ -67,9 +67,9 @@ const coreCtx = { cleanTitle: (t) => String(t).trim(), md, saving: null };
 vm.createContext(coreCtx);
 vm.runInContext(core.slice(core.indexOf('function snapshot('), core.indexOf('function flush(')), coreCtx);
 
-const positions = new Function('lines', `${doc.slice(doc.indexOf('function lineStart(line)'), doc.indexOf('function hitsOf'))}\n${doc.slice(doc.indexOf('function lineOf(at)'), doc.indexOf('const docLength'))}\nreturn { lineStart, lineOf };`);
-const historyOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'lineStart', `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function restore('))}\nreturn { changed, past, future };`);
-const history = (lines, editing, container, onChange, outlineLater, date) => historyOf(lines, editing, container, onChange, outlineLater, date, positions(lines).lineStart);
+const lookups = `${doc.slice(doc.indexOf('let lineStarts'), doc.indexOf('function hitsOf'))}\n${doc.slice(doc.indexOf('function lineOf(at)'), doc.indexOf('const docLength'))}`;
+const positions = new Function('lines', `${lookups}\nreturn { lineStart, lineOf };`);
+const history = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function restore('))}\n${lookups}\nreturn { changed, past, future };`);
 
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc');
@@ -130,6 +130,7 @@ function keystroke(bytes) {
   const mid = lines.length >> 1;
   const at = text.length;
   const { lineStart, lineOf } = positions(lines);
+  const typed = editor(text, clock);
   const quote = (b) => lines[b * 2].slice(10, 70);
   const blocks = lines.length / 2;
   const open = Array.from({ length: 24 }, (_, i) => ({ quote: quote(Math.floor((i * blocks) / 24)), prefix: '', suffix: '' }));
@@ -147,6 +148,7 @@ function keystroke(bytes) {
     'lineStart (last line)': () => lineStart(last),
     'lineOf (end of note)': () => lineOf(at),
     'lineStart + lineOf (middle line)': () => lineOf(lineStart(mid) + 3),
+    'keystroke, then lineStart + lineOf at the edit (middle line)': () => { typed.type(mid, 'x'); typed.api.lineOf(typed.api.lineStart(mid) + 3); },
     'listPrefix with lines above (last line)': () => ed.listPrefix(lines[last - 1], lines.slice(0, last - 1)),
     'listPrefix with lines above (middle line)': () => ed.listPrefix(lines[mid], lines.slice(0, mid)),
     'listPrefixAt, the run of list lines above (last line)': () => ed.listPrefixAt(lines[last - 1], lines, last - 1),
@@ -221,14 +223,11 @@ test('a keystroke joins the note once and copies it without turning it into text
   assert.equal(counts.writes, 0);
 });
 
-const editorOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'lineStart', 'stop', 'draw', 'lineOf', 'selectSpan', 'editSpan',
-  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\nreturn { changed, undo, redo, past, future, get lines() { return lines; }, source: joinedText };`);
+const editorOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'stop', 'draw', 'selectSpan', 'editSpan',
+  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\n${lookups}\nreturn { changed, undo, redo, past, future, lineStart, lineOf, get lines() { return lines; }, set lines(v) { lines = v; }, source: joinedText };`);
 
 function editor(text, clock) {
-  let api = null;
-  const at = () => positions(api.lines);
-  api = editorOf(text.split('\n'), { area: {} }, { classList: { toggle: () => {} } }, () => {}, () => {}, { now: () => clock.t },
-    (line) => at().lineStart(line), () => {}, () => {}, (offset) => at().lineOf(offset), () => {}, () => {});
+  const api = editorOf(text.split('\n'), { area: {} }, { classList: { toggle: () => {} } }, () => {}, () => {}, { now: () => clock.t }, () => {}, () => {}, () => {}, () => {});
   const type = (line, ch) => {
     clock.t += 50;
     const removed = api.lines.splice(line, 1, api.lines[line] + ch);
@@ -279,4 +278,45 @@ test('an undo record is the size of the change, not of the note', () => {
   const held = api.past.concat(api.future).reduce((n, r) => n + r.removed.length + r.inserted.length, 0);
   assert.equal(api.past.length + api.future.length, 50);
   assert.ok(held < 10240, `${held} characters held`);
+});
+
+test('`lineStart` and `lineOf` give the same answers as the loops they replace', () => {
+  const startOf = (lines, line) => { let at = 0; for (let k = 0; k < line && k < lines.length; k++) at += lines[k].length + 1; return at; };
+  const lineAt = (lines, at) => { let start = 0; for (let k = 0; k < lines.length; k++) { if (at <= start + lines[k].length) return k; start += lines[k].length + 1; } return lines.length - 1; };
+  const clock = { t: 1000 };
+  const { api, type } = editor(linesOf(20000).join('\n'), clock);
+  let r = 11;
+  const pick = (n) => (r = (r * 1103515245 + 12345) % 2147483648) % n;
+  const check = (why) => {
+    const lines = api.lines;
+    const total = lines.join('\n').length;
+    for (let q = 0; q < 12; q++) {
+      const line = pick(lines.length + 3) - 1;
+      assert.equal(api.lineStart(line), startOf(lines, line), `${why}: lineStart(${line})`);
+      const at = pick(total + 4) - 1;
+      assert.equal(api.lineOf(at), lineAt(lines, at), `${why}: lineOf(${at})`);
+    }
+  };
+  check('start');
+  for (let step = 0; step < 400; step++) {
+    const kind = pick(5);
+    const line = pick(api.lines.length);
+    if (kind === 0) type(line, 'x');
+    else if (kind === 1) {
+      const removed = api.lines.splice(line, 1, 'one', 'two words');
+      api.changed({ at: line, removed, added: ['one', 'two words'] });
+    } else if (kind === 2 && api.lines.length > 2) {
+      const removed = api.lines.splice(line, 2, api.lines.slice(line, line + 2).join(' '));
+      api.changed({ at: line, removed, added: [api.lines[line]] });
+    } else if (kind === 3) {
+      api.lines.splice(line, pick(3), 'pasted', '', 'block of text');
+      api.changed();
+    } else {
+      api.lines = api.lines.join('\n').replace('a', 'AA').split('\n');
+      check(`reassigned before changed, step ${step}`);
+      api.changed();
+    }
+    check(`step ${step}`);
+    if (step % 50 === 0) { clock.t += 1100; api.undo(); check(`undo ${step}`); }
+  }
 });
