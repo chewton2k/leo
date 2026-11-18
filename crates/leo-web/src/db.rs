@@ -389,16 +389,24 @@ pub fn try_at(path: &Path) -> Result<Arc<Db>> {
             return Ok(Arc::clone(db));
         }
     }
+    let _one = OPENING.lock().unwrap_or_else(|e| e.into_inner());
+    let current = all
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&key)
+        .cloned();
+    if let Some(current) = current {
+        let fresh = cached
+            .as_ref()
+            .is_none_or(|old| !Arc::ptr_eq(old, &current));
+        if fresh && current.path.exists() {
+            return Ok(current);
+        }
+    }
     let db = match Db::open(&key) {
         Err(e) if e.downcast_ref::<Damaged>().is_some() => {
-            let _one = RECOVERING.lock().unwrap_or_else(|e| e.into_inner());
-            match Db::open(&key) {
-                Err(e) if e.downcast_ref::<Damaged>().is_some() => {
-                    put_damaged_aside(&key)?;
-                    Db::open(&key)
-                }
-                opened => opened,
-            }
+            put_damaged_aside(&key)?;
+            Db::open(&key)
         }
         opened => opened,
     }
@@ -434,7 +442,7 @@ pub fn try_at(path: &Path) -> Result<Arc<Db>> {
     Ok(db)
 }
 
-static RECOVERING: Mutex<()> = Mutex::new(());
+static OPENING: Mutex<()> = Mutex::new(());
 
 static SET_ASIDE: Mutex<Option<PathBuf>> = Mutex::new(None);
 
