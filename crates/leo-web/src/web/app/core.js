@@ -806,13 +806,13 @@ const saving = window.leoSaving.create({
   retryable: (error) => error instanceof Offline || error.status >= 500,
 });
 
-function snapshot(s) {
-  const body = s.doc.source();
+function snapshot(s, text) {
+  const body = text ?? s.doc.source();
   const title = cleanTitle(s.title.textContent) || (s.note.id ? s.note.title : md.plain(body).slice(0, 60));
   return { title, body };
 }
 
-function changed(s) { saving.changed(s, snapshot(s)); }
+function changed(s, text) { saving.changed(s, snapshot(s, text)); }
 function flush(s = state.session) { return saving.flush(s); }
 
 let citedLines = null;
@@ -882,7 +882,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     s.title = $('#title');
     drawOriginals(note);
     hideAskFloat();
-    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s); marginEdited(s); readSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
+    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s, text); marginEdited(s); readSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
     marginMount(s, mine).catch(fail);
     if (citedLines && citedLines.id === note.id) showCitedLines();
     else if (passage && highlightSearch(app.querySelector('article.note'), passage.query)) {

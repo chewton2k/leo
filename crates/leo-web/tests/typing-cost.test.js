@@ -63,9 +63,9 @@ function storage() {
   };
 }
 
-const snapshotCtx = { cleanTitle: (t) => String(t).trim(), md };
-vm.createContext(snapshotCtx);
-vm.runInContext(core.slice(core.indexOf('function snapshot(s)'), core.indexOf('function changed(s)')), snapshotCtx);
+const coreCtx = { cleanTitle: (t) => String(t).trim(), md, saving: null };
+vm.createContext(coreCtx);
+vm.runInContext(core.slice(core.indexOf('function snapshot('), core.indexOf('function flush(')), coreCtx);
 
 const positions = new Function('lines', `${doc.slice(doc.indexOf('function lineStart(line)'), doc.indexOf('function hitsOf'))}\n${doc.slice(doc.indexOf('function lineOf(at)'), doc.indexOf('const docLength'))}\nreturn { lineStart, lineOf };`);
 const history = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function restore(text)'))}\nreturn { changed, past, future };`);
@@ -81,31 +81,50 @@ function counting() {
   return { n, restore: () => Object.assign(JSON, real) };
 }
 
+function counted(lines) {
+  const n = { joins: 0 };
+  lines.join = function (...a) { n.joins++; return Array.prototype.join.apply(this, a); };
+  return n;
+}
+
+function typer(lines, h, clock) {
+  const mid = lines.length >> 1;
+  return () => {
+    clock.t += 50;
+    const removed = lines.splice(mid, 1, lines[mid] + 'x');
+    h.changed({ at: mid, removed, added: [lines[mid]] });
+  };
+}
+
 function keystroke(bytes) {
   const lines = linesOf(bytes);
   const text = lines.join('\n');
   const runs = RUNS[bytes] || 7;
-  const note = { id: 'one', title: 'Note', body: text, tags: [], directory: '', version: 'v1' };
+  const note = { id: 'one', title: 'Note', body: text, directory: '', version: 'v1' };
   const local = storage();
-  const m = leoSaving.create({ api: async () => note, storage: local, schedule: () => 1, cancel: () => {} });
+  const clock = { t: 1000 };
+  const fakeDate = { now: () => clock.t };
+  const m = leoSaving.create({ api: async () => note, storage: local, schedule: () => 1, cancel: () => {}, now: fakeDate.now });
   const s = m.open(note);
-  let joins = 0;
-  const session = { doc: { source: () => { joins++; return lines.join('\n'); } }, title: { textContent: 'Note' }, note, tags: [] };
-  const untitled = { doc: session.doc, title: { textContent: '' }, note: { ...note, id: null }, tags: [] };
-
-  const c = counting();
-  joins = 0;
-  const container = { classList: { toggle: () => {} } };
+  const n = counted(lines);
+  s.doc = { source: () => { n.joins++; return Array.prototype.join.call(lines, '\n'); } };
+  s.title = { textContent: 'Note' };
+  coreCtx.saving = m;
+  const untitled = { doc: s.doc, title: { textContent: '' }, note: { ...note, id: null } };
   const editing = { area: {} };
-  const h = history(lines, editing, container, () => {}, () => {}, Date);
-  const before = local.stats().writes;
-  h.changed();
-  joins++;
-  m.changed(s, snapshotCtx.snapshot(session));
-  c.restore();
-  const counts = { joins, stringify: c.n.stringify, parse: c.n.parse, writes: local.stats().writes - before, written: local.stats().written };
+  const container = { classList: { toggle: () => {} } };
+  const h = history(lines, editing, container, (t) => coreCtx.changed(s, t), () => {}, fakeDate);
+  const type = typer(lines, h, clock);
 
-  const edit = snapshotCtx.snapshot(session);
+  type();
+  const c = counting();
+  n.joins = 0;
+  const before = local.stats().writes;
+  type();
+  c.restore();
+  const counts = { joins: n.joins, stringify: c.n.stringify, parse: c.n.parse, writes: local.stats().writes - before, written: local.stats().written };
+
+  const edit = { title: 'Note', body: text };
   const last = lines.length - 1;
   const mid = lines.length >> 1;
   const at = text.length;
@@ -117,13 +136,12 @@ function keystroke(bytes) {
   const body = JSON.stringify({ ...edit, base: 'v1' });
 
   const steps = {
-    'join of the lines (each of the two per key)': () => lines.join('\n'),
-    'doc.js changed(): join, compare, trim, no undo push': () => h.changed(),
-    'snapshot (titled note)': () => snapshotCtx.snapshot(session),
-    'snapshot (untitled new note: plain text for the title)': () => snapshotCtx.snapshot(untitled),
+    'join of the lines': () => lines.join('\n'),
+    'snapshot (titled note, no text handed over)': () => coreCtx.snapshot(s),
+    'snapshot (untitled new note: plain text for the title)': () => coreCtx.snapshot(untitled, text).title,
     'saving copy (stringify + parse)': () => JSON.parse(JSON.stringify(edit)),
-    'draft record (stringify of note and edit)': () => JSON.stringify({ note: s.note, edit: s.edit }),
-    'saving.changed (copy and write to a fake storage)': () => m.changed(s, edit),
+    'draft record (stringify of note and edit)': () => JSON.stringify({ note: s.note, edit }),
+    'draft write (at most four a second once throttled)': () => { clock.t += 1000; m.changed(s, edit); },
     'lineStart (last line)': () => lineStart(last),
     'lineOf (end of note)': () => lineOf(at),
     'lineStart + lineOf (middle line)': () => lineOf(lineStart(mid) + 3),
@@ -135,7 +153,7 @@ function keystroke(bytes) {
   };
   const ms = {};
   for (const [name, fn] of Object.entries(steps)) ms[name] = median(fn, runs);
-  const perKey = median(() => { lines.join('\n'); h.changed(); m.changed(s, snapshotCtx.snapshot(session)); }, runs);
+  const perKey = median(type, runs);
   return { counts, ms, perKey, request: body.length };
 }
 
@@ -177,15 +195,20 @@ test('typing cost: every step of a keystroke, and undo memory, at the sizes the 
   const big = rows[rows.length - 1];
   const out = [];
   out.push(`node ${process.version}, runs ${SIZES.map((b) => RUNS[b]).join('/')}`);
-  out.push('per keystroke today: ' + rows.map((r) => `${mb(r.bytes)} MB: ${r.counts.joins} joins, ${r.counts.stringify} stringify, ${r.counts.parse} parse, ${r.counts.writes} write of ${mb(r.counts.written)} MB`).join(' | '));
+  out.push('per keystroke: ' + rows.map((r) => `${mb(r.bytes)} MB: ${r.counts.joins} joins, ${r.counts.stringify} stringify, ${r.counts.parse} parse, ${r.counts.writes} write of ${mb(r.counts.written)} MB`).join(' | '));
   out.push(`| step | ${rows.map((r) => `${mb(r.bytes)} MB ms`).join(' | ')} | grows |`);
   out.push(`|---|${rows.map(() => '---|').join('')}---|`);
   for (const name of Object.keys(small.ms)) {
     const grows = FULL && (big.ms[name] > GROWS_ABOVE_MS || big.ms[name] > GROWS_ABOVE_RATIO * small.ms[name]);
     out.push(`| ${name} | ${rows.map((r) => fmt(r.ms[name])).join(' | ')} | ${FULL ? (grows ? 'yes' : 'no') : 'n/a'} |`);
   }
-  out.push(`| one keystroke (join, changed, snapshot, saving.changed) | ${rows.map((r) => fmt(r.perKey)).join(' | ')} | ${FULL ? (big.perKey > GROWS_ABOVE_MS || big.perKey > GROWS_ABOVE_RATIO * small.perKey ? 'yes' : 'no') : 'n/a'} |`);
+  out.push(`| one keystroke (doc.js changed, snapshot, saving.changed, as typed) | ${rows.map((r) => fmt(r.perKey)).join(' | ')} | ${FULL ? (big.perKey > GROWS_ABOVE_MS || big.perKey > GROWS_ABOVE_RATIO * small.perKey ? 'yes' : 'no') : 'n/a'} |`);
   out.push(`save request body bytes: ${rows.map((r) => `${mb(r.bytes)} MB: ${r.request}`).join(' | ')}`);
   out.push('undo heap held per typing group: ' + heap.map((h) => `${mb(h.note)} MB note: ${mb(h.perStep)} MB per step over ${h.steps} steps (${h.pushed} records; ${(h.perStep / h.note).toFixed(2)}x the note; 100 keys in one group pushed ${h.groupPushed}; 200 steps = ${(h.perStep * 200 / 1073741824).toFixed(2)} GB)`).join(' | '));
   console.log(out.join('\n'));
+});
+
+test('a keystroke joins the note once and copies it without turning it into text', () => {
+  const { counts } = keystroke(20000);
+  assert.equal(counts.joins, 1);
 });
