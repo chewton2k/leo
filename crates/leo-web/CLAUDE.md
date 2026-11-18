@@ -923,6 +923,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   matches across all of them open the page that holds each); a fix sends only the changed rows
   (`{source, base: revision, changes}`, batches under 1 MB); Combine's Undo sends `{from}` and
   removes the recordings copied from that note (`copied_from`).
+- What you want from the notes and the meeting details are kept whole, of any length (2026-11-18, the owner's principle 1); only what is sent is bounded: the AI reads the first `WANTS_READ_CHARS` (4,000) and `CONTEXT_READ_CHARS` (8,000) characters (`long::read_of`, also what `room_after_profile` charges to the word budget), and the Record page, the live card and the transcript sheet say so under the box once the brief is longer (`data-reads`). Felix's rename of a note keeps the whole title he gives; the file name is shortened by the usual rule.
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the
