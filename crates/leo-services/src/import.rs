@@ -536,6 +536,10 @@ fn extract_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
             upload.name
         );
     }
+    read_into(upload, scratch)
+}
+
+fn read_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
     let ext = extension(&upload.name);
     let mime = upload.mime.to_lowercase();
     let text = |t: &str| Material::with_text(scratch, t);
@@ -789,14 +793,14 @@ pub fn clip_document(text: &str) -> String {
     out
 }
 
-pub fn read_for_chat(
-    upload: &Upload,
+fn seen_pages(
+    images: &[ImageFile],
+    name: &str,
     see: See<'_>,
     progress: &mut dyn FnMut(&str),
-) -> Result<String> {
-    let material = extract(upload)?;
-    let mut text = material.text.head(CHAT_DOC_CHARS + 1)?.trim().to_string();
-    let groups: Vec<&[ImageFile]> = material.images.chunks(PAGES_PER_LOOK).collect();
+    mut each: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    let groups: Vec<&[ImageFile]> = images.chunks(PAGES_PER_LOOK).collect();
     for (i, pages) in groups.iter().enumerate() {
         progress(&if groups.len() > 1 {
             format!("Reading the pages {}/{}", i + 1, groups.len())
@@ -805,25 +809,121 @@ pub fn read_for_chat(
         });
         let prompt = Prompt {
             system: TRANSCRIBING.to_string(),
-            user: format!(
-                "These are pages from \"{}\". Copy out what they say.",
-                upload.name
-            ),
+            user: format!("These are pages from \"{name}\". Copy out what they say."),
         };
         let pages = pages
             .iter()
             .map(ImageFile::load)
             .collect::<Result<Vec<_>>>()?;
-        let seen = see(prompt, &pages, TRANSCRIBE_TOKENS)?;
+        each(see(prompt, &pages, TRANSCRIBE_TOKENS)?.trim())?;
+    }
+    Ok(())
+}
+
+pub fn read_for_chat(
+    upload: &Upload,
+    see: See<'_>,
+    progress: &mut dyn FnMut(&str),
+) -> Result<String> {
+    let material = extract(upload)?;
+    let mut text = material.text.head(CHAT_DOC_CHARS + 1)?.trim().to_string();
+    seen_pages(&material.images, &upload.name, see, progress, |seen| {
         if !text.is_empty() {
             text.push_str("\n\n");
         }
-        text.push_str(seen.trim());
-    }
+        text.push_str(seen);
+        Ok(())
+    })?;
     if text.trim().is_empty() {
         bail!("there is no text in {} for Felix to read", upload.name);
     }
     Ok(clip_document(&text))
+}
+
+const TEXT_PIECE: usize = 64 * 1024;
+
+fn incomplete_tail(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let byte = bytes[bytes.len() - back];
+        if byte & 0xC0 == 0x80 {
+            continue;
+        }
+        let needs = match byte {
+            0xF0..=0xF7 => 4,
+            0xE0..=0xEF => 3,
+            0xC0..=0xDF => 2,
+            _ => 1,
+        };
+        return if needs > back { back } else { 0 };
+    }
+    0
+}
+
+fn copy_text(file: &mut impl Read, out: &mut dyn std::io::Write) -> Result<bool> {
+    let mut buffer = vec![0u8; TEXT_PIECE + 3];
+    let mut held = 0;
+    let mut content = false;
+    loop {
+        let got = file.read(&mut buffer[held..held + TEXT_PIECE])?;
+        if got == 0 {
+            break;
+        }
+        let end = held + got;
+        let whole = end - incomplete_tail(&buffer[..end]);
+        let text = String::from_utf8_lossy(&buffer[..whole]);
+        content = content || !text.trim().is_empty();
+        out.write_all(text.as_bytes())?;
+        buffer.copy_within(whole..end, 0);
+        held = end - whole;
+    }
+    if held > 0 {
+        out.write_all(String::from_utf8_lossy(&buffer[..held]).as_bytes())?;
+    }
+    Ok(content)
+}
+
+pub fn read_to(
+    path: &Path,
+    name: &str,
+    mime: &str,
+    see: See<'_>,
+    progress: &mut dyn FnMut(&str),
+    out: &mut dyn std::io::Write,
+) -> Result<()> {
+    let mut file = leo_core::paths::open_regular(path)
+        .with_context(|| format!("leo could not open {name}"))?;
+    let text_file = !mime.to_lowercase().starts_with("image/")
+        && matches!(extension(name).as_str(), "txt" | "md" | "markdown" | "text");
+    let wrote = if text_file {
+        copy_text(&mut file, out)?
+    } else {
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes)?;
+        let upload = Upload {
+            name: name.to_string(),
+            mime: mime.to_string(),
+            bytes,
+        };
+        let material = read_into(&upload, &Scratch::default())?;
+        drop(upload);
+        let mut wrote = !material.text.is_blank();
+        if !material.text.is_empty() {
+            std::io::copy(&mut material.text.reader()?, out)?;
+        }
+        seen_pages(&material.images, name, see, progress, |seen| {
+            if wrote {
+                out.write_all(b"\n\n")?;
+            }
+            out.write_all(seen.as_bytes())?;
+            wrote = wrote || !seen.is_empty();
+            Ok(())
+        })?;
+        wrote
+    };
+    if !wrote {
+        bail!("there is no text in {name} for Felix to read");
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1298,6 +1398,101 @@ mod tests {
         assert_eq!(read, "Board: Dijkstra uses a heap");
         assert_eq!(*looked.lock().unwrap(), 1);
         assert_eq!(steps, ["Reading the image"]);
+    }
+
+    fn read_file(name: &str, mime: &str, bytes: &[u8]) -> Result<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(name);
+        std::fs::write(&path, bytes).unwrap();
+        let see = |_: Prompt, _: &[Image], _: u32| -> Result<String> { Ok("Board text".into()) };
+        let mut out = Vec::new();
+        read_to(&path, name, mime, &see, &mut |_| {}, &mut out)?;
+        Ok(String::from_utf8(out).unwrap())
+    }
+
+    #[test]
+    fn a_text_file_is_copied_whole_across_a_multibyte_join() {
+        let mut text = "a".repeat(TEXT_PIECE - 1);
+        text.push('é');
+        text.push_str(&"漢字 and more\n".repeat(30_000));
+        assert!(text.len() > 3 * TEXT_PIECE);
+        assert_eq!(
+            read_file("long.md", "text/markdown", text.as_bytes()).unwrap(),
+            text
+        );
+        let mut lossy = b"caf".to_vec();
+        lossy.extend([0xe9, b' ', 0xe2, 0x82]);
+        assert_eq!(
+            read_file("old.txt", "text/plain", &lossy).unwrap(),
+            "caf\u{fffd} \u{fffd}"
+        );
+    }
+
+    #[test]
+    fn a_blank_text_file_or_one_that_is_not_a_file_cannot_be_read() {
+        assert!(read_file("empty.txt", "text/plain", b" \n").is_err());
+        let dir = tempfile::tempdir().unwrap();
+        let see = |_: Prompt, _: &[Image], _: u32| -> Result<String> { Ok(String::new()) };
+        assert!(read_to(
+            dir.path(),
+            "x.txt",
+            "text/plain",
+            &see,
+            &mut |_| {},
+            &mut Vec::new()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn a_photo_and_an_office_file_are_written_to_the_stream() {
+        assert_eq!(
+            read_file("board.jpg", "image/jpeg", &[0xff, 0xd8, 0xff]).unwrap(),
+            "Board text"
+        );
+        let docx = office(&[(
+            "word/document.xml",
+            "<w:document><w:body><w:p><w:r><w:t>Heaps</w:t></w:r></w:p></w:body></w:document>",
+        )]);
+        let read = read_file(
+            "notes.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            &docx,
+        )
+        .unwrap();
+        assert!(read.contains("Heaps"), "{read}");
+    }
+
+    #[test]
+    #[ignore = "writes a 100 MB sparse file"]
+    fn a_text_upload_over_ninety_megabytes_is_read_for_chat() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.txt");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(b"first line\n").unwrap();
+        file.set_len(100 * 1024 * 1024).unwrap();
+        let see = |_: Prompt, _: &[Image], _: u32| -> Result<String> { Ok(String::new()) };
+        let mut counted = 0u64;
+        struct Count<'a>(&'a mut u64);
+        impl std::io::Write for Count<'_> {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                *self.0 += bytes.len() as u64;
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        read_to(
+            &path,
+            "big.txt",
+            "text/plain",
+            &see,
+            &mut |_| {},
+            &mut Count(&mut counted),
+        )
+        .unwrap();
+        assert_eq!(counted, 100 * 1024 * 1024);
     }
 
     fn office(files: &[(&str, &str)]) -> Vec<u8> {
