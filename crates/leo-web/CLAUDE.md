@@ -69,6 +69,13 @@ This file holds the rules. How each screen behaves, area by area, is in
   `leo_session` cookie (`SameSite=Strict`, 30 days, `app-sessions.json`; a
   damaged sessions file loads as none). No
   tunnel, Wi-Fi bind, QR, signed-in browsers list or link rotation.
+- A route that carries the person's own text takes a body of any honest size (2026-11-17, the user's call: no request-size limit):
+  create, save, `suggestion`, `insert`, `felix/act`, `tasks/import` and `/api/chat` carry `routes::text_limit()`
+  (`TEXT_BYTES`, 512 MiB, the one memory bound: a body is read whole and parsed whole, so one request
+  costs about three times its size). Hostile input is stopped before the body is read, not by its size: the
+  engine listens on 127.0.0.1 only, refuses any Host but its own (421) and any request without the window's
+  per-launch session (401). Routes that never carry a note's text keep axum's 2 MB default; the combine, margin,
+  chat-save, import, picture, preferences and dictation routes keep their own limits.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
   fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
@@ -404,8 +411,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   spellcheck off for tables, code, math and lines starting with `-`, `|` or `:`.
 - Saving: autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js` keeps
-  edits that did not reach leo and retries them on the next load; saving admits
-  bounded Unicode JSON bodies. Up to
+  edits that did not reach leo and retries them on the next load; a note of
+  any size saves (see Serving and security). Up to
   `MOST_UNDO` page undo steps per note, each only its changed span. A keystroke
   hands the changed lines along and joins nothing (`doc.js` `changed(edit)`,
   `source()` joins once per change); the draft is written at most four times a

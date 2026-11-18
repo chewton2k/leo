@@ -247,3 +247,164 @@ fn store_now_clears_a_forced_check() {
         .refresh_requested
         .load(std::sync::atomic::Ordering::Acquire));
 }
+
+const THREE_MB: usize = 3 * 1024 * 1024;
+
+async fn send(port: u16, method: &str, path: &str, cookie: &str, body: &str) -> (u16, String) {
+    use tokio::io::AsyncReadExt;
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let head = format!(
+            "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(head.as_bytes()).await;
+        let _ = stream.write_all(body.as_bytes()).await;
+        let mut response = Vec::new();
+        let _ = stream.read_to_end(&mut response).await;
+        let response = String::from_utf8_lossy(&response).into_owned();
+        let status = response
+            .split_whitespace()
+            .nth(1)
+            .and_then(|code| code.parse().ok())
+            .unwrap_or(0);
+        let body = response
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body.to_string())
+            .unwrap_or_default();
+        (status, body)
+    })
+    .await
+    .unwrap()
+}
+
+async fn signed_in(port: u16) -> String {
+    use tokio::io::AsyncReadExt;
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "GET /?token=t HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    response
+        .lines()
+        .find(|line| line.to_ascii_lowercase().starts_with("set-cookie: "))
+        .unwrap()
+        .split_once(": ")
+        .unwrap()
+        .1
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+async fn running_engine() -> (crate::Running, tempfile::TempDir, String) {
+    let (places, dir) = places();
+    let running = start_in(
+        places,
+        StartOptions {
+            port: 0,
+            token: "t".into(),
+        },
+        Powers::default(),
+    )
+    .await
+    .unwrap();
+    let cookie = signed_in(running.port()).await;
+    (running, dir, cookie)
+}
+
+#[tokio::test]
+async fn a_note_larger_than_2_mb_can_be_created_and_saved() {
+    let (running, _dir, cookie) = running_engine().await;
+    let port = running.port();
+    let made = serde_json::json!({"title": "Big", "body": "x".repeat(THREE_MB * 5 / 6)});
+    let (status, body) = send(port, "POST", "/api/notes", &cookie, &made.to_string()).await;
+    assert!((200..300).contains(&status), "create answered {status}");
+    let id = serde_json::from_str::<serde_json::Value>(&body).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let saved = serde_json::json!({"body": "y".repeat(THREE_MB)});
+    let (status, _) = send(
+        port,
+        "PATCH",
+        &format!("/api/notes/{id}"),
+        &cookie,
+        &saved.to_string(),
+    )
+    .await;
+    assert!((200..300).contains(&status), "save answered {status}");
+    let (status, body) = send(port, "GET", &format!("/api/notes/{id}"), &cookie, "").await;
+    assert_eq!(status, 200);
+    let read = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+    assert_eq!(read["body"].as_str().unwrap().len(), THREE_MB);
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn every_route_that_carries_a_notes_text_takes_a_body_over_2_mb() {
+    let (running, _dir, cookie) = running_engine().await;
+    let port = running.port();
+    let big = "x".repeat(THREE_MB);
+    let routes = [
+        (
+            "POST",
+            "/api/notes/none/suggestion",
+            serde_json::json!({"find": "a", "replace": big}),
+        ),
+        (
+            "POST",
+            "/api/notes/none/insert",
+            serde_json::json!({"text": big, "base": "b"}),
+        ),
+        (
+            "POST",
+            "/api/felix/act",
+            serde_json::json!({"kind": "create", "title": "T", "body": big, "folder": ""}),
+        ),
+        (
+            "POST",
+            "/api/tasks/import",
+            serde_json::json!({"tasks": [], "padding": big}),
+        ),
+        (
+            "POST",
+            "/api/chat",
+            serde_json::json!({"messages": [{"role": "user", "text": big}]}),
+        ),
+    ];
+    for (method, path, body) in routes {
+        let (status, _) = send(port, method, path, &cookie, &body.to_string()).await;
+        assert_ne!(status, 413, "{path} refused a 3 MB body");
+        assert_ne!(status, 0, "{path} gave no answer");
+    }
+    running.stop().await;
+}
+
+#[tokio::test]
+async fn a_route_that_never_carries_a_notes_text_keeps_its_limit() {
+    let (running, _dir, cookie) = running_engine().await;
+    let body = serde_json::json!({"directory": "x".repeat(THREE_MB)}).to_string();
+    let (status, _) = send(
+        running.port(),
+        "POST",
+        "/api/notes/none/move",
+        &cookie,
+        &body,
+    )
+    .await;
+    assert_eq!(status, 413);
+    running.stop().await;
+}

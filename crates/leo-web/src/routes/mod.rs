@@ -56,13 +56,25 @@ pub(crate) async fn off<T: Send + 'static>(
         .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
 }
 
+pub(crate) const TEXT_BYTES: usize = 512 * 1024 * 1024;
+
+fn text_limit() -> axum::extract::DefaultBodyLimit {
+    axum::extract::DefaultBodyLimit::max(TEXT_BYTES)
+}
+
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
-        .route("/api/notes", get(list_notes).post(create_note))
+        .route(
+            "/api/notes",
+            get(list_notes).post(create_note).layer(text_limit()),
+        )
         .route(
             "/api/notes/{id}",
-            get(get_note).patch(update_note).delete(delete_note),
+            get(get_note)
+                .patch(update_note)
+                .delete(delete_note)
+                .layer(text_limit()),
         )
         .route(
             "/api/calendar",
@@ -93,9 +105,18 @@ pub(crate) fn router(state: AppState) -> Router {
             "/api/combines/{job}",
             get(combine::job).delete(combine::forget),
         )
-        .route("/api/notes/{id}/suggestion", post(apply_suggestion))
-        .route("/api/felix/act", post(organize::act_route))
-        .route("/api/notes/{id}/insert", post(insert::insert_into_note))
+        .route(
+            "/api/notes/{id}/suggestion",
+            post(apply_suggestion).layer(text_limit()),
+        )
+        .route(
+            "/api/felix/act",
+            post(organize::act_route).layer(text_limit()),
+        )
+        .route(
+            "/api/notes/{id}/insert",
+            post(insert::insert_into_note).layer(text_limit()),
+        )
         .route(
             "/api/notes/{id}/margin",
             get(margin::note_margin).post(margin::set_note_mode),
@@ -153,7 +174,10 @@ pub(crate) fn router(state: AppState) -> Router {
             get(tasks::list_tasks).post(tasks::create_task),
         )
         .route("/api/tasks/promote", post(tasks::promote_task))
-        .route("/api/tasks/import", post(tasks::import_tasks))
+        .route(
+            "/api/tasks/import",
+            post(tasks::import_tasks).layer(text_limit()),
+        )
         .route(
             "/api/tasks/{id}",
             axum::routing::patch(tasks::change_task).delete(tasks::delete_task),
@@ -226,7 +250,7 @@ pub(crate) fn router(state: AppState) -> Router {
         )
         .route("/chat.js", script(assets::CHAT_JS))
         .route("/pane-resize.js", script(assets::PANE_RESIZE_JS))
-        .route("/api/chat", post(chat_reply))
+        .route("/api/chat", post(chat_reply).layer(text_limit()))
         .route("/api/quiz/mark", post(felix::mark_quiz))
         .route(
             "/api/chat/compact",

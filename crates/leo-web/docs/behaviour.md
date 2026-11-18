@@ -1847,7 +1847,7 @@ stay whole; oversized protected sections pass through verbatim. Parts are joined
 without a growing full-note remerge, and every part uses the existing preservation
 checks. Two combines may run at once, with a 15-minute between-request deadline;
 any failed part leaves both source notes unchanged. Review, version checks,
-transcript copies and Undo still apply. Saving admits bounded Unicode JSON bodies.
+transcript copies and Undo still apply. A note of any size saves (up to `TEXT_BYTES`, 512 MiB, the engine's memory bound for one request).
 
 
 ## Retired interview practice

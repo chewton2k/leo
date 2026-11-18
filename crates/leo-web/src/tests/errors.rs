@@ -256,26 +256,13 @@ async fn every_refusal_has_a_worded_error() {
     let big = "a".repeat(3 * 1024 * 1024);
     all.push((
         "oversize",
-        "POST /api/notes 3 MB",
+        "POST /api/notes/{id}/move 3 MB",
         http(
             port,
             "POST",
-            "/api/notes",
+            &format!("/api/notes/{b}/move"),
             &c,
-            json(serde_json::json!({"title": "Big", "body": big})),
-            "",
-        )
-        .await,
-    ));
-    all.push((
-        "oversize",
-        "PATCH /api/notes/{id} 3 MB",
-        http(
-            port,
-            "PATCH",
-            &format!("/api/notes/{b}"),
-            &c,
-            json(serde_json::json!({"body": big})),
+            json(serde_json::json!({"directory": big})),
             "",
         )
         .await,
