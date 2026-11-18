@@ -465,8 +465,13 @@ has no tools; a leading `<think>` block is stripped. Failures are logged without
 the provider's text. The call uses `ChatProvider::complete_until` so cancel or
 deadline stops an agent CLI; every fallback returns a reason the popup shows.
 
-`capture.rs` bounds dictation to 300 s and closes the input before draining and
-transcribing. It returns `Captured { pcm, stalled }`: a capture that stalls 5 s
+`capture.rs` has no length limit (2026-11-17, principle 1) and closes the input
+before draining and transcribing. It returns `Captured { samples, stalled }`; the
+audio goes to the caller as it arrives. From 4 minutes on, `dictation::pieces`
+cuts the dictation at the first pause (at most every 5 minutes), each piece is
+transcribed while listening goes on, and the texts are joined with
+`chunking::join_transcripts`, so memory holds at most four pieces and a backlog
+waits on disk. A capture that stalls 5 s
 after first audio ends and transcribes what was heard, and `Mic::heard_signal`
 tells a silent microphone from a quiet room. Dictation input takes the loudest
 channel instead of the average (recordings keep their downmix); Windows opens a

@@ -2,6 +2,7 @@ pub mod activation;
 pub mod audio_gate;
 pub mod capture;
 pub mod generation;
+pub mod pieces;
 pub mod polish;
 pub mod settings;
 pub mod text;
