@@ -1618,7 +1618,9 @@ async function promoteTask(line) {
 async function openTaskAnywhere(id, on = null) {
   if (!cal.data || !calFind(id)) {
     try {
-      cal.data = { ...(cal.data || {}), tasks: (await api('/api/tasks')).tasks, events: (cal.data && cal.data.events) || [] };
+      const listed = (await api('/api/tasks')).tasks;
+      const own = noteTasks && [...noteTasks.tracked.values()].find((t) => t.id === id);
+      cal.data = { ...(cal.data || {}), tasks: own && !listed.some((t) => t.id === id) ? [...listed, own] : listed, events: (cal.data && cal.data.events) || [] };
     } catch (e) {
       if (e instanceof Locked) throw e;
       return;

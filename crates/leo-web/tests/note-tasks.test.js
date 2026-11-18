@@ -7,7 +7,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync(path.join(__dirname, '../src/web/app/calendar.js'), 'utf8');
 const actions = fs.readFileSync(path.join(__dirname, '../src/web/app/actions.js'), 'utf8');
 const start = source.indexOf('const NOTE_TASKS_PAGE');
-const code = source.slice(start, source.indexOf('async function openTaskAnywhere('));
+const code = source.slice(start, source.indexOf('var tasksWin ='));
 
 function harness({ checkboxes, tracked = [], pages = null }) {
   const body = Array.from({ length: checkboxes }, (_, i) => `- [ ] item ${i}`).join('\n');
@@ -28,12 +28,12 @@ function harness({ checkboxes, tracked = [], pages = null }) {
     },
     sheet: (html) => { sheets.push(html); rows.html = html; },
     sheetButtons: () => '',
-    go() {},
+    go() {}, cal: { data: null }, calFind(id) { return ((context.cal.data && context.cal.data.tasks) || []).find((x) => x.id === id) || null; }, opened: [], taskSheet(id) { context.opened.push(id); },
     $: (selector) => (selector === '#note-task-rows' ? { insertAdjacentHTML: (_, html) => { rows.html += html; } } : selector === '#note-task-foot' ? rows.foot : null),
   };
   rows.foot = { innerHTML: '', removed: false, remove() { this.removed = true; } };
   vm.createContext(context);
-  vm.runInContext(`${code}\n;globalThis.noteTasksSheet = noteTasksSheet; globalThis.noteTasksMore = typeof noteTasksMore === 'function' ? noteTasksMore : null; globalThis.promoteTask = promoteTask;`, context);
+  vm.runInContext(`${code}\n;globalThis.noteTasksSheet = noteTasksSheet; globalThis.noteTasksMore = typeof noteTasksMore === 'function' ? noteTasksMore : null; globalThis.promoteTask = promoteTask; globalThis.openTaskAnywhere = openTaskAnywhere;`, context);
   context.rows = rows;
   return context;
 }
@@ -114,6 +114,15 @@ test('promoting a checkbox far down keeps the rows already shown', async () => {
   await h.promoteTask('350');
   assert.equal(h.sheets.length, asked + 1);
   assert.equal(count(h.sheets[asked]), 400);
+});
+
+test('a tracked task past the library first page still opens', async () => {
+  const h = harness({ checkboxes: 3, tracked: [1] });
+  await h.noteTasksSheet();
+  const real = h.api;
+  h.api = async (url, opts) => (url === '/api/tasks' ? { tasks: [], total: 700 } : real(url, opts));
+  await h.openTaskAnywhere('task-1');
+  assert.deepEqual(h.opened, ['task-1']);
 });
 
 test('the Show more action is wired', () => {
