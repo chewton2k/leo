@@ -33,8 +33,10 @@ fn tidy_rooms_in(dir: &std::path::Path) {
         let Ok(kind) = entry.file_type() else {
             continue;
         };
-        let room =
-            (name.starts_with("leo-writing-") || name.starts_with("leo-usage-")) && kind.is_dir();
+        let room = (name.starts_with("leo-writing-")
+            || name.starts_with("leo-usage-")
+            || name.starts_with("leo-import-"))
+            && kind.is_dir();
         let helper =
             name.starts_with("leo-sign-in-") && name.ends_with(".command") && kind.is_file();
         if (room || helper)
@@ -455,6 +457,32 @@ mod tests {
         let kept = [aged("leo-writing-new", false), aged("someone-else", true)];
         super::tidy_rooms_in(temp.path());
         assert!(stale.iter().all(|path| !path.exists()));
+        assert!(kept.iter().all(|path| path.exists()));
+    }
+
+    #[test]
+    fn an_old_import_folder_is_swept() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = |name: &str, old: bool| {
+            let path = temp.path().join(name);
+            std::fs::create_dir_all(path.join("scans")).unwrap();
+            std::fs::write(path.join("scans").join("00000.jpg"), [1]).unwrap();
+            if old {
+                std::fs::File::options()
+                    .read(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_modified(
+                        std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400),
+                    )
+                    .unwrap();
+            }
+            path
+        };
+        let stale = folder("leo-import-old", true);
+        let kept = [folder("leo-import-new", false), folder("import-old", true)];
+        super::tidy_rooms_in(temp.path());
+        assert!(!stale.exists());
         assert!(kept.iter().all(|path| path.exists()));
     }
 

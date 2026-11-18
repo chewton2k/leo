@@ -280,7 +280,7 @@ stay inside the ZIP and external links are never fetched. PDF text uses
 text on another page must not suppress one; an unreadable scan fails with its
 page number. Scans over 16 million pixels get a 4,000 px reading copy (the PDF is
 never rewritten). Source images ≤64 million pixels, 32,768 px per side, 20 MB
-encoded; decoding under a 192 MiB allocation limit; reading images share 90 MB,
+encoded; decoding under a 192 MiB allocation limit; reading images are written to a private `leo-import-*` folder as they are found and read six at a time (2026-11-17, principle 1: no page, scan or text-size limit; per-page and per-image bounds stay against damaged files; the 90 MB upload bound is P-C64's),
 optional figures 64 MB. Photos and scans need `ai::see`; no local OCR. A tracking
 file name (`filename::file_label`, never camera, scan, screenshot or date names)
 is kept in front of the title (`filename::with_label`; `tracking_label` for
