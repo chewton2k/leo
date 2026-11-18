@@ -145,21 +145,37 @@ pub(crate) async fn delete_from_trash(
     State(state): State<AppState>,
     Json(choice): Json<TrashChoice>,
 ) -> Result<Json<serde_json::Value>, StatusCode> {
-    let chats = state.chats.clone();
-    state
+    let (answer, forgotten, notes, owners) = state
         .with_store(move |store| {
             let emptied = if choice.all {
                 store.empty_trash()
             } else {
                 store.delete_from_trash(&choice.ids)
             };
-            crate::margin::forget_notes(&chats, &emptied.forgotten);
-            Ok(Json(serde_json::json!({
-                "deleted": emptied.deleted,
-                "failed": emptied.failed,
-            })))
+            Ok((
+                serde_json::json!({
+                    "deleted": emptied.deleted,
+                    "failed": emptied.failed,
+                }),
+                emptied.forgotten,
+                store.notes_dir.clone(),
+                crate::dependents::Owners::of(store),
+            ))
         })
-        .await
+        .await?;
+    let chats = state.chats.clone();
+    let active = state
+        .recording
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .map(|job| job.session_id());
+    tokio::task::spawn_blocking(move || {
+        crate::dependents::clear(&chats, &notes, forgotten, active, &owners)
+    })
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    Ok(Json(answer))
 }
 
 pub(crate) async fn restore_many(

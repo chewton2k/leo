@@ -994,7 +994,10 @@ target. Check the page sequence after loading preferences.
   line, "The passage changed since Felix wrote this."; an exact match shows nothing.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
-  from the trash removes them at once (`forget_notes`). The hourly `sweep_store` is
+  from the trash removes them at once (`forget_notes`) and its task details, recording
+  sources and original uploads; a removal that fails is retried on the next delete and
+  daily, a recording in use is skipped, and nothing is removed while a note or a trashed
+  file cannot be read. The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a
   note missing, in case it was a partial sync or a rename, and never runs while no
   notes loaded or a file is unreadable. Export adds `leo/margin.json` with Chats,

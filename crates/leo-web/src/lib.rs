@@ -12,6 +12,7 @@ pub mod chat_files;
 pub mod chats;
 mod combine;
 pub mod db;
+mod dependents;
 pub mod dictation;
 mod drawing;
 pub mod export;

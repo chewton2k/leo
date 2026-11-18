@@ -671,7 +671,11 @@ Felix (2026-10-19).
   `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn(noteWidth, panel)`
   is the widest column the chosen margins allow (Infinity when they are marks).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
-  (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
+  (`forget_notes`) and its task details, recording sources and original uploads
+  (`dependents::clear`); a removal that fails is retried on the next delete and daily
+  (the `deleting` set in `margin_state`), a recording in use is skipped, and nothing is
+  removed for an id that is live or in the trash again, or while a note or trashed file
+  cannot be read. `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
   while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
   (personas and instructions are not exported).
 - Modes `along` (default for notes leo made after `Prefs.since`; a v4 id, never a

@@ -602,11 +602,11 @@ fn state_row(chats: &Path, key: &str) -> anyhow::Result<Option<String>> {
     })
 }
 
-fn state_of<T: serde::de::DeserializeOwned>(chats: &Path, key: &str) -> Option<T> {
+pub(crate) fn state_of<T: serde::de::DeserializeOwned>(chats: &Path, key: &str) -> Option<T> {
     serde_json::from_str(&state_row(chats, key).ok().flatten()?).ok()
 }
 
-fn set_state(chats: &Path, key: &str, value: &impl Serialize) -> bool {
+pub(crate) fn set_state(chats: &Path, key: &str, value: &impl Serialize) -> bool {
     let Ok(text) = serde_json::to_string(value) else {
         return false;
     };
@@ -921,6 +921,11 @@ pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
                 c.execute("DELETE FROM margin_personas WHERE note = ?1", [note])?;
                 c.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
                 c.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
+                c.execute("DELETE FROM note_tasks WHERE note = ?1", [note])?;
+                c.execute(
+                    "DELETE FROM margin_state WHERE key = 'combined:' || ?1",
+                    [note],
+                )?;
                 Ok(threads)
             })
             .unwrap_or(0);
@@ -932,7 +937,7 @@ pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize 
     let held: BTreeSet<String> = db_of(chats)
         .with(|c| {
             let mut query = c.prepare(
-                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending",
+                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks",
             )?;
             let rows = query.query_map([], |r| r.get(0))?;
             rows.collect()
@@ -957,11 +962,15 @@ pub fn sweep_store(chats: &Path, store: &leo_core::store::Store) -> usize {
     if store.notes.is_empty() || !store.unreadable.is_empty() {
         return 0;
     }
+    let trashed = store.trashed();
+    if trashed.iter().any(|t| !t.readable) {
+        return 0;
+    }
     let kept: HashSet<String> = store
         .notes
         .iter()
         .map(|n| n.id.clone())
-        .chain(store.trashed().into_iter().map(|t| t.id))
+        .chain(trashed.into_iter().map(|t| t.id))
         .collect();
     sweep(chats, &kept, Utc::now())
 }

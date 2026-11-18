@@ -562,7 +562,7 @@ pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
 pub fn metas(chats: &Path) -> Vec<Meta> {
     db_of(chats)
         .and_then(|db| db.with(|c| {
-            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks LIMIT ?1")?;
+            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks ORDER BY rowid DESC LIMIT ?1")?;
             let rows = statement.query_map([MOST_TASKS as i64], |r| {
                 Ok(Meta {
                     id: r.get(0)?,
