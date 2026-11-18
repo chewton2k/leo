@@ -43,9 +43,7 @@ pub struct Missed {
 }
 
 fn fnv(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
+    crate::vectors::fnv64(text.bytes())
 }
 
 pub fn key_of(chat: &str, reply: &str) -> String {

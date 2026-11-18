@@ -868,20 +868,14 @@ pub fn kept_from(messages: &[Turn], room: usize, memory: Option<&crate::chats::M
 }
 
 pub fn hash_of(messages: &[Turn]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for turn in messages {
-        for byte in turn
-            .role
+    let bytes = messages.iter().flat_map(|turn| {
+        turn.role
             .bytes()
             .chain([0])
             .chain(turn.text.bytes())
             .chain([0])
-        {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-    }
-    format!("{hash:016x}")
+    });
+    format!("{:016x}", crate::vectors::fnv64(bytes))
 }
 
 pub fn memory_fits(memory: &crate::chats::Memory, messages: &[Turn], start: usize) -> bool {

@@ -160,16 +160,7 @@ pub struct NoteLink {
 }
 
 fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
-    format!("{:016x}", fnv64(bytes))
-}
-
-fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+    format!("{:016x}", crate::vectors::fnv64(bytes))
 }
 
 fn hash_of(source: &Source) -> String {

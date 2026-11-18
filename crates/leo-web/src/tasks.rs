@@ -189,12 +189,7 @@ pub fn clean_kind(kind: &str) -> String {
 }
 
 fn fnv(text: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
+    crate::vectors::fnv64(text.bytes())
 }
 
 pub fn note_task_id(note: &str, text: &str) -> String {

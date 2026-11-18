@@ -106,19 +106,13 @@ pub(crate) struct NoteResponse {
 }
 
 pub(crate) fn version_of(note: &leo_core::notes::Note) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     let parts = [
         note.title.as_str(),
         note.body.as_str(),
         &note.tags.join("\u{1f}"),
     ];
-    for part in parts {
-        for byte in part.bytes().chain([0u8]) {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-        }
-    }
-    format!("{hash:016x}")
+    let bytes = parts.iter().flat_map(|part| part.bytes().chain([0u8]));
+    format!("{:016x}", crate::vectors::fnv64(bytes))
 }
 
 impl NoteResponse {
