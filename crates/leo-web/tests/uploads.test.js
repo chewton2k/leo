@@ -95,3 +95,30 @@ test('when every file fails nothing is posted', async () => {
   assert.equal(c.log.posts.length, 0);
   assert.match(c.log.toasts[0], /file 0\.pdf, file 1\.pdf could not be sent/);
 });
+
+test('a picture of any size is sent as one streamed PUT of its blob, with no size message', async () => {
+  const c = page();
+  const pictures = slice('async function pictureFor(', 'function choosePictures(');
+  const calls = [];
+  const inserted = [];
+  Object.assign(c, {
+    state: { session: null },
+    shrink: async (file) => ({ name: file.name, type: file.type, blob: file }),
+    fail: (e) => calls.push(`failed: ${e.message}`),
+  });
+  const session = { doc: { insert: (text) => inserted.push(text) } };
+  c.state.session = session;
+  c.fetch = async (url, init) => {
+    c.log.puts.push({ url, init });
+    return { ok: true, status: 201, json: async () => ({ path: 'attachments/a.png' }) };
+  };
+  vm.runInContext(`${pictures}\nthis.addPictures = addPictures;`, c);
+  const big = { name: 'scan.png', type: 'image/png', size: 900 * 1024 * 1024 };
+  await c.addPictures(session, [big]);
+  assert.equal(c.log.puts.length, 1);
+  assert.equal(c.log.puts[0].url, '/api/pictures/scan.png');
+  assert.equal(c.log.puts[0].init.method, 'PUT');
+  assert.equal(c.log.puts[0].init.body, big);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(inserted, ['![scan](attachments/a.png)']);
+});

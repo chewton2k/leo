@@ -424,7 +424,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   save; a failed save keeps the editor and address; only a draft persisted in
   this browser may offer Leave, draft kept (rechecked at activation).
 - Pictures: `<notes>/attachments/` (`leo_core::attachments`, sniffed
-  PNG/JPEG/GIF/WebP only, ≤20 MB). Upload names (`safe_file_name`) drop
+  PNG/JPEG/GIF/WebP only), of any size, streamed to disk after their first bytes are checked
+  (`PUT /api/pictures/{name}`, body limit off, 60 s without a byte is a refusal; 2026-11-18, the owner's principle 1); `/api/image` streams a picture back in 64 KB pieces. Upload names (`safe_file_name`) drop
   trailing dots/spaces and dash Windows device names (`CON-.pdf`); older stored
   names still open (`stored_file_name`).
 - Browsing never calls an AI. The explorer is the only folder listing: `#/` is

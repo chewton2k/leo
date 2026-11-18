@@ -38,7 +38,7 @@ use crate::routes::notes::{
     create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes, move_dir,
     move_note, rename_dir, search_notes, update_note,
 };
-use crate::routes::pictures::{add_picture, get_picture, PICTURE_BYTES};
+use crate::routes::pictures::{add_picture, get_picture, put_picture, PICTURE_BYTES};
 use crate::routes::settings::{change_setting, get_settings, test_setting};
 use crate::routes::trash::{
     delete_from_trash, list_trash, move_to_trash, restore_many, restore_note,
@@ -305,6 +305,10 @@ pub(crate) fn router(state: AppState) -> Router {
         .route(
             "/api/images",
             post(add_picture).layer(axum::extract::DefaultBodyLimit::max(PICTURE_BYTES)),
+        )
+        .route(
+            "/api/pictures/{name}",
+            axum::routing::put(put_picture).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route(
             "/api/app",

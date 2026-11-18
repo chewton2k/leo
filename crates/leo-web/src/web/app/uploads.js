@@ -50,7 +50,7 @@ async function addPictures(s, files) {
   for (const [i, file] of list.entries()) {
     try {
       const ready = await pictureFor(file);
-      const saved = await api('/api/images', { method: 'POST', body: { name: pastedName(ready, i), data: await base64(ready.blob) } });
+      const saved = await putBody(`/api/pictures/${enc(pastedName(ready, i))}`, ready.blob);
       if (state.session !== s || !s.doc) return;
       s.doc.insert(`![${altFor(file.name)}](${saved.path})`);
       added += 1;
@@ -164,21 +164,26 @@ async function uploadSheet(files, into, { add = false } = {}) {
 }
 
 async function sendFile(upload, item, ready) {
+  await putBody(`/api/import/files/${enc(upload)}/${enc(item)}?name=${enc(ready.name)}`, ready.blob);
+}
+
+async function putBody(url, blob) {
   let response;
   try {
-    response = await fetch(`/api/import/files/${enc(upload)}/${enc(item)}?name=${enc(ready.name)}`, { method: 'PUT', credentials: 'same-origin', body: ready.blob });
+    response = await fetch(url, { method: 'PUT', credentials: 'same-origin', body: blob });
   } catch (e) {
     throw new Offline();
   }
   if (response.status === 401) throw new Locked();
-  if (response.ok) return;
-  let said = '';
+  if (response.status === 204) return null;
+  let data = null;
   try {
-    said = (await response.json()).error || '';
+    data = await response.json();
   } catch (e) {
-    said = '';
+    data = null;
   }
-  throw new Error(said || `leo answered ${response.status}.`);
+  if (response.ok) return data;
+  throw new Error((data && data.error) || `leo answered ${response.status}.`);
 }
 
 // Each file travels in its own request, two at a time, so nothing holds the
