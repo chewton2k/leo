@@ -27,6 +27,8 @@ const ELSEWHERE: &[(&str, &str)] = &[
     ("io.github.chewton2k.leo", "bundle"),
     ("Microphone", "label"),
     ("leo-quit", "label"),
+    ("leo-file:", "label"),
+    (".read", "attachments"),
     ("main", "window"),
     ("medium", "effort"),
     ("transcribe_worker", "log"),

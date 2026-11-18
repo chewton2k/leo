@@ -72,8 +72,8 @@ fn feed_of(notes: &Path, id: &str) -> Feed {
                     Ok(Feed {
                         fetched_at: time_of(r.get(0)?),
                         tried_at: time_of(r.get(1)?),
-                        etag: r.get(2)?,
-                        modified: r.get(3)?,
+                        etag: kept(r.get(2)?),
+                        modified: kept(r.get(3)?),
                         problem: r.get(4)?,
                     })
                 },
@@ -102,7 +102,18 @@ fn safe(id: &str) -> bool {
 }
 
 fn feeds_dir(notes: &Path) -> PathBuf {
-    data(notes).join("calendar")
+    data(notes).join(leo_core::paths::own::CALENDAR)
+}
+
+const KEPT_IN_A_FILE: &str = "leo-file:";
+
+fn kept(stored: Option<String>) -> Option<String> {
+    stored?.strip_prefix(KEPT_IN_A_FILE).map(str::to_string)
+}
+
+fn keep(sent: &Option<String>) -> Option<String> {
+    sent.as_ref()
+        .map(|value| format!("{KEPT_IN_A_FILE}{value}"))
 }
 
 fn feed_name(name: &str) -> Option<(&str, u64)> {
@@ -440,7 +451,7 @@ fn record(notes: &Path, id: &str, stamp: &str, got: &std::result::Result<Got, Fa
             hash: Some(_),
         }) => c.execute(
             "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, etag, modified, problem, body) VALUES (?1, ?2, ?2, ?3, ?4, NULL, NULL) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, etag = excluded.etag, modified = excluded.modified, problem = NULL, body = NULL",
-            rusqlite::params![id, stamp, streamed.etag, streamed.modified],
+            rusqlite::params![id, stamp, keep(&streamed.etag), keep(&streamed.modified)],
         ),
         Err(failure) => {
             let problem = match failure {
@@ -1645,5 +1656,14 @@ pub(crate) mod tests {
         refresh(&notes, &access, Utc::now() + Duration::seconds(10));
         assert_eq!(access.0.lock().unwrap()[1].0.as_deref(), Some("v1"));
         assert_eq!(feed_files(&notes).len(), 1);
+    }
+
+    #[test]
+    fn stored_fetch_stamps_are_marked_so_an_older_leo_asks_afresh() {
+        let sent = Some("\"v1\"".to_string());
+        assert_eq!(keep(&sent).as_deref(), Some("leo-file:\"v1\""));
+        assert_eq!(kept(keep(&sent)), sent);
+        assert_eq!(kept(Some("\"v1\"".into())), None);
+        assert_eq!(kept(None), None);
     }
 }
