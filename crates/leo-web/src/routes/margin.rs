@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
@@ -586,7 +588,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
     };
     let user = margin::read_prompt(&note.title, &blocks, tag, &earlier);
     let answer = tokio::time::timeout(
-        margin::READ_LIMIT,
+        margin::READ_LIMIT + Duration::from_secs(5),
         tokio::task::spawn_blocking(move || {
             let _reading = reading;
             writer(&system, &user, tokens)
@@ -853,6 +855,8 @@ async fn written(
     let chats = state.chats.clone();
     let started = Instant::now();
     let usage = std::sync::Arc::clone(&state.usage);
+    let stop = Arc::new(AtomicBool::new(false));
+    let _stop = leo_core::children::StopOnDrop(Arc::clone(&stop));
     let reply = blocking(move || {
         let _foreground = foreground;
         let reply = streamer(
@@ -861,7 +865,7 @@ async fn written(
             tokens,
             &mut |_| {},
             &mut || {},
-            &|| false,
+            &|| stop.load(Ordering::Relaxed),
         );
         let spent = reply.as_ref().ok().and_then(|r| r.spent.clone());
         usage.record(

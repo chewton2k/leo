@@ -1461,6 +1461,58 @@ async fn a_resent_reply_while_the_first_still_runs_is_busy_then_gets_its_answer(
 }
 
 #[tokio::test]
+async fn a_reply_whose_page_went_away_stops_the_writer() {
+    let (started, was_started) = tokio::sync::oneshot::channel::<()>();
+    let started = Mutex::new(Some(started));
+    let saw_stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let seen = Arc::clone(&saw_stop);
+    let streamer: crate::chat::Streamer = Arc::new(move |_, _, _, _, _, stopped| {
+        if let Some(started) = started.lock().unwrap().take() {
+            let _ = started.send(());
+        }
+        let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while std::time::Instant::now() < until {
+            if stopped() {
+                seen.store(true, Ordering::SeqCst);
+                anyhow::bail!("stopped");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        Ok(crate::chat::Reply::from("Yes. Argon2id.".to_string()))
+    });
+    let engine = Engine::with(Powers {
+        toolless_chat: Some(streamer),
+        ..Default::default()
+    })
+    .await;
+    let (id, _) = engine.note("Thread", PASSAGE).await;
+    let thread = thread_on(&engine, &id).await;
+    let port = engine.port;
+    let body = serde_json::json!({ "text": "Hash it?", "request": "gone-away" }).to_string();
+    let request = format!(
+        "POST /api/notes/{id}/margin/threads/{thread}/reply HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+        engine.cookie,
+        body.len()
+    );
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream.write_all(request.as_bytes()).await.unwrap();
+    was_started.await.unwrap();
+    drop(stream);
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !saw_stop.load(Ordering::SeqCst) && std::time::Instant::now() < until {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(saw_stop.load(Ordering::SeqCst));
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    let view = engine.get(&format!("/api/notes/{id}/margin")).await.1;
+    let messages = view["threads"][0]["messages"].as_array().unwrap().len();
+    assert_eq!(messages, 1);
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn a_weave_rewrites_only_the_paragraph_and_keeps_the_note_safe() {
     let prompts = Arc::new(Mutex::new(Vec::new()));
     let engine = Engine::with(Powers {

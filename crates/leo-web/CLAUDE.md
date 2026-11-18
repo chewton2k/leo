@@ -765,7 +765,9 @@ Felix (2026-10-19).
   under Reduce Motion, never when its step is remembered); ↻ plays it again.
 - Reads use `Powers.toolless`, never `quick` (`no_tools`: `--tools ""`,
   `web_search="disabled"`, chain cut to its first provider, so a read fails
-  closed). Replies and asks use `Powers.toolless_chat`. Every read is a fresh
+  closed), under a `READ_LIMIT` stop; the engine waits `READ_LIMIT` + 5 s as a
+  backstop. Replies and asks use `Powers.toolless_chat`; a disconnected ask,
+  reply or weave request stops its writer. Every read is a fresh
   process, no warm session, one retry on a stall.
 - Prompt safety: note text sits between tags with a random suffix and is never
   instructions; thread messages are one JSON record per line inside them.
