@@ -2815,4 +2815,64 @@ mod tests {
             .unwrap()
             .contains("Heaps are trees."));
     }
+
+    #[test]
+    #[ignore = "writes 200 MB and prints the memory it took"]
+    fn a_large_text_file_on_disk_is_read_in_little_memory() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = "A line of a long lecture about heaps and queues, kept short.\n";
+        let upload = {
+            let path = dir.path().join("book.txt");
+            let mut file = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+            for _ in 0..(200 * 1024 * 1024 / line.len()) {
+                file.write_all(line.as_bytes()).unwrap();
+            }
+            drop(file);
+            Upload {
+                name: "book.txt".into(),
+                mime: "text/plain".into(),
+                bytes: Vec::new(),
+                path: Some(path),
+            }
+        };
+        let baseline = resident_kb();
+        let peak = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(baseline));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let sampler = {
+            let (peak, done) = (peak.clone(), done.clone());
+            std::thread::spawn(move || {
+                while !done.load(Ordering::SeqCst) {
+                    peak.fetch_max(resident_kb(), Ordering::SeqCst);
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+            })
+        };
+        let started = std::time::Instant::now();
+        let material = extract(&upload).unwrap();
+        let parts = std::sync::atomic::AtomicUsize::new(0);
+        let write = |_: Prompt, _: u32| -> Result<String> {
+            parts.fetch_add(1, Ordering::SeqCst);
+            Ok("Heaps\n\nHow heaps work.".into())
+        };
+        let see = |_: Prompt, _: &[Image], _: u32| -> Result<String> { Ok(String::new()) };
+        write_note(
+            &material,
+            "book.txt",
+            None,
+            "",
+            &write,
+            &see,
+            &mut |_, _, _| {},
+            Budget::AGENT,
+        )
+        .unwrap();
+        done.store(true, Ordering::SeqCst);
+        sampler.join().unwrap();
+        println!(
+            "200 MB text from disk: {} parts, {:?}, memory beyond the start {} KB",
+            parts.load(Ordering::SeqCst),
+            started.elapsed(),
+            peak.load(Ordering::SeqCst).saturating_sub(baseline)
+        );
+    }
 }
