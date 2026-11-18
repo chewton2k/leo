@@ -120,7 +120,7 @@
 
   const noteIcon = (name, hidden = false) => `<svg class="note-icon" data-tone="${NOTE_ICONS[name][1]}" viewBox="0 0 24 24" ${hidden ? 'aria-hidden="true"' : `role="img" aria-label="${NOTE_ICONS[name][0]}"`}>${NOTE_ICONS[name][2]}</svg>`;
 
-  function bracketed(s, opener, pattern, change, bang = false) {
+  function bracketed(s, opener, pattern, change, { bang = false, targetAt } = {}) {
     const last = Math.min(s.lastIndexOf(']'), opener === '![[' ? Infinity : s.lastIndexOf(')'));
     let out = '';
     let at = 0;
@@ -129,11 +129,52 @@
       pattern.lastIndex = start;
       const found = pattern.exec(s);
       if (found) {
+        const target = targetAt?.(pattern.lastIndex);
+        if (target) {
+          found[0] += target[0];
+          found.push(target[1]);
+        }
         out += s.slice(at, start) + change(...found);
-        at = from = pattern.lastIndex;
+        at = from = start + found[0].length;
       } else from += 1;
     }
     return out + s.slice(at);
+  }
+
+  function targetEnding(s, stop) {
+    const tail = /(?:\s+"[^"]*")?\)/y;
+    let close = -1;
+    let end = 0;
+    return (at, from) => {
+      if (close < from) {
+        stop.lastIndex = from;
+        const found = stop.exec(s);
+        close = found ? found.index : s.length;
+        tail.lastIndex = stop.lastIndex;
+        end = found && tail.test(s) ? tail.lastIndex : 0;
+      }
+      return end && close > from ? [s.slice(at, end), s.slice(at + 1, stop.lastIndex)] : null;
+    };
+  }
+
+  function linkTarget(s, angles = false) {
+    const bare = targetEnding(s, /(?=[)\s])/g);
+    const angle = angles && targetEnding(s, />/g);
+    return (at) => {
+      if (s[at] !== '(') return null;
+      if (angle && s[at + 1] === '<') {
+        const found = angle(at, at + 2);
+        if (found) return found;
+      }
+      return bare(at, at + 1);
+    };
+  }
+
+  function closedMath(s, closer, pattern, change) {
+    const last = s.lastIndexOf(closer);
+    if (last < 0) return s;
+    const end = last + closer.length;
+    return s.slice(0, end).replace(pattern, change) + s.slice(end);
   }
 
   function inline(text) {
@@ -147,8 +188,8 @@
       const source = raw(tex).trim();
       return keep(`<span class="math${block ? ' math-block' : ''}" data-tex="${escape(source)}">${escape(source)}</span>`, whole);
     };
-    s = s.replace(/\\\[([\s\S]+?)\\\]/g, (whole, tex) => shown(tex, true, whole));
-    s = s.replace(/\\\(([\s\S]+?)\\\)/g, (whole, tex) => shown(tex, false, whole));
+    s = closedMath(s, '\\]', /\\\[([\s\S]+?)\\\]/g, (whole, tex) => shown(tex, true, whole));
+    s = closedMath(s, '\\)', /\\\(([\s\S]+?)\\\)/g, (whole, tex) => shown(tex, false, whole));
     s = s.replace(/(^|[^\\])\$\$([^$\n]+?)\$\$/g, (whole, lead, tex) => lead + shown(tex, true, whole.slice(lead.length)));
     s = s.replace(/(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (whole, lead, tex) => lead + shown(tex, false, whole.slice(lead.length)));
     s = bracketed(s, '![[', /!\[\[([^\]|\[]+)(?:\|([^\]]*))?\](\])?/y, (whole, name, option, closed) => {
@@ -161,15 +202,15 @@
       const name = raw(title).trim();
       return keep(`<a class="wiki-link" href="#/search/${encodeURIComponent(name)}" data-action="open-title" data-title="${escape(name)}">${label ? escape(label.trim()) : escape(name)}</a>`, whole);
     });
-    s = bracketed(s, '![', /!\[([^\]]*)\](?:\((<[^>]+>|[^)\s]+)(?:\s+"[^"]*")?\))?/y, (whole, alt, target) => {
+    s = bracketed(s, '![', /!\[([^\]]*)\]/y, (whole, alt, target) => {
       if (target === undefined) return whole;
       const img = picture(raw(target), raw(alt));
       return img ? keep(img, whole) : whole;
-    });
-    s = bracketed(s, '[', /!?\[([^\]]*)\](?:\(([^)\s]+)(?:\s+"[^"]*")?\))?/y, (whole, label, url) => {
+    }, { targetAt: linkTarget(s, true) });
+    s = bracketed(s, '[', /!?\[([^\]]*)\]/y, (whole, label, url) => {
       const safe = url === undefined ? null : safeUrl(raw(url));
       return safe ? keep(link(safe, emphasis(escape(label || safe))), whole) : whole;
-    }, true);
+    }, { bang: true, targetAt: linkTarget(s) });
     s = s.replace(/\bhttps?:\/\/[^\s<>()]+[^\s<>().,;:!?'"\]]/g, (whole) => keep(link(raw(whole), escape(raw(whole))), whole));
     s = s.replace(/:([a-z]+):/g, (whole, name, at, all) => (Object.hasOwn(NOTE_ICONS, name) && !/[\w:]/.test(all[at - 1] || '') && !/[\w:]/.test(all[at + whole.length] || '') ? keep(noteIcon(name), whole) : whole));
     s = emphasis(escape(s));

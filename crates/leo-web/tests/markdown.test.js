@@ -478,25 +478,49 @@ test('an edit whose marks would hide a change of line breaks or indentation give
 });
 
 test('a long run of unmatched openers grows linearly', () => {
-  for (const opener of ['![[', '[', '![a|', '[a](', '![a](']) {
-    for (const tail of ['', ']', ')', '])']) {
+  const brackets = ['![[', '[', '![a|', '[a](', '![a]('].map((opener) => [opener, ['', ']', ')', '])']]);
+  for (const [opener, tails, prefix = ''] of [
+    ...brackets,
+    ['\\[', ['', '\\]']],
+    ['\\(', ['', '\\)']],
+    ['\\[', [''], 'Before \\[x\\] '],
+    ['\\(', [''], 'Before \\(x\\) '],
+    ['[a](<', [' )']],
+    ['![a](<', [' )']],
+    ['![a](< ', ['', ')']],
+    ['![a](< )', ['', '>', '>)']],
+  ]) {
+    for (const tail of tails) {
       const time = (n) => {
-        const started = performance.now();
-        render(opener.repeat(n) + tail);
-        md.plain(opener.repeat(n) + tail);
-        return performance.now() - started;
+        const input = prefix + opener.repeat(n) + tail;
+        const started = process.cpuUsage();
+        render(input);
+        md.plain(input);
+        const { user, system } = process.cpuUsage(started);
+        return (user + system) / 1000;
       };
-      const small = time(20000);
-      const large = time(40000);
-      assert.ok(large < 1000 && large <= Math.max(small * 4, 50), `${opener} ${tail} ${small} ${large}`);
+      const small = Math.min(time(20000), time(20000), time(20000));
+      const large = Math.min(time(40000), time(40000), time(40000));
+      assert.ok(large < 1000 && large <= Math.max(small * 3, 50), `${prefix}${opener} ${tail} ${small} ${large}`);
     }
   }
+});
+
+test('math keeps the same delimiters and escaping beside unclosed openers', () => {
+  assert.equal(render('Before \\[x < y\\] and \\[unfinished'), '<p>Before <span class="math math-block" data-tex="x &lt; y">x &lt; y</span> and \\[unfinished</p>');
+  assert.equal(render('Before \\(x_i\\) and \\(unfinished'), '<p>Before <span class="math" data-tex="x_i">x_i</span> and \\(unfinished</p>');
+  assert.equal(render('Before \\[\\] \\(\\) \\[unfinished'), '<p>Before \\[\\] \\(\\) \\[unfinished</p>');
+  assert.equal(render('Before \\[unclosed and \\(x_i\\) and $$y$$'), '<p>Before \\[unclosed and <span class="math" data-tex="x_i">x_i</span> and <span class="math math-block" data-tex="y">y</span></p>');
 });
 
 test('links, pictures and embeds read the same beside unclosed brackets', () => {
   assert.equal(render('[a [b](https://a.b)'), '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">a [b</a></p>');
   assert.equal(render('[a] [b](https://a.b) [c'), '<p>[a] <a href="https://a.b" target="_blank" rel="noopener noreferrer">b</a> [c</p>');
   assert.equal(render('![x](javascript:1)'), '<p>![x](javascript:1)</p>');
+  assert.equal(render('![a](<>) ![b](<c>)'), '<p>![a](&lt;&gt;) <img class="note-img" src="/api/image?path=c&amp;from=" alt="b" loading="lazy"></p>');
+  assert.equal(render('![a](<first) then > broken)'), '<p><img class="note-img" src="/api/image?path=%3Cfirst&amp;from=" alt="a" loading="lazy"> then &gt; broken)</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> "title") ![tail](<'), '<p><img class="note-img" src="/api/image?path=%20)%20then%20!%5Ba%5D(%3Cpath%20with%20spaces.png&amp;from=" alt="bad" loading="lazy"> ![tail](&lt;</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> nope) ![b](fallback.png)'), '<p>![bad](&lt; ) then ![a](&lt;path with spaces.png&gt; nope) <img class="note-img" src="/api/image?path=fallback.png&amp;from=" alt="b" loading="lazy"></p>');
   assert.equal(md.plain('[a] ![[b]] ![c](d) [e](f) [g'), '[a] e [g');
 });
 
