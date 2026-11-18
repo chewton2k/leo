@@ -1017,7 +1017,15 @@ fn old_incoming_folders_are_swept_and_new_ones_stay() {
         std::fs::create_dir_all(incoming.join(name)).unwrap();
         std::fs::write(incoming.join(name).join("item"), "x").unwrap();
     }
-    let old = std::fs::File::open(incoming.join("old")).unwrap();
+    let mut open = std::fs::File::options();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        open.write(true).custom_flags(0x0200_0000);
+    }
+    #[cfg(not(windows))]
+    open.read(true);
+    let old = open.open(incoming.join("old")).unwrap();
     old.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(25 * 3600))
         .unwrap();
     crate::routes::uploads::sweep_incoming(&state.notes_dir);

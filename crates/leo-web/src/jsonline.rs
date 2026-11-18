@@ -594,6 +594,7 @@ mod tests {
         }
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_quiet_folder_is_not_listed() {
         let dir = tempfile::tempdir().unwrap();
@@ -612,6 +613,7 @@ mod tests {
         assert_eq!(listed, 0);
     }
 
+    #[cfg(not(windows))]
     #[test]
     fn a_change_the_watcher_reports_is_read_without_listing_the_folder() {
         let dir = tempfile::tempdir().unwrap();

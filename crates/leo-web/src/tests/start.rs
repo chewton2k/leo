@@ -405,6 +405,9 @@ async fn a_route_that_never_carries_a_notes_text_keeps_its_limit() {
         &body,
     )
     .await;
-    assert_eq!(status, 413);
+    assert!(
+        status == 413 || (cfg!(windows) && status == 0),
+        "{status}: Windows may drop the connection before the refusal is read"
+    );
     running.stop().await;
 }

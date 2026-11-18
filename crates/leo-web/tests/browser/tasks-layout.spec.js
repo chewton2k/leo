@@ -12,6 +12,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
   const styles = pageCss();
   const completion = calendar.slice(calendar.indexOf('function taskDoneOn'), calendar.indexOf('function pickerBody'));
   const panel = calendar.slice(calendar.indexOf('var tasksWin'), calendar.indexOf('const source ='));
+  const windowed = calendar.slice(calendar.indexOf('function withWindow'), calendar.indexOf('function calMovable'));
   const action = actions.slice(actions.indexOf("  'task-done':"), actions.indexOf("  'task-date':"));
   const motion = core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('));
   const fixture = `const S = window.leoSchedule;
@@ -51,6 +52,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
     }
     ${motion}
     ${completion}
+    ${windowed}
     ${panel}
     const actions = {${action}};
     document.addEventListener('click', event => {
@@ -150,6 +152,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
   const actions = fs.readFileSync(path.join(web, 'app/actions.js'), 'utf8');
   const completion = calendar.slice(calendar.indexOf('function taskDoneOn'), calendar.indexOf('function pickerBody'));
   const panel = calendar.slice(calendar.indexOf('var tasksWin'), calendar.indexOf('const source ='));
+  const windowed = calendar.slice(calendar.indexOf('function withWindow'), calendar.indexOf('function calMovable'));
   const action = actions.slice(actions.indexOf("  'task-done':"), actions.indexOf("  'task-date':"));
   const motion = core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('));
   const fixture = `const S = window.leoSchedule;
@@ -185,6 +188,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     }
     ${motion}
     ${completion}
+    ${windowed}
     ${panel}
     const actions = {${action}};
     document.addEventListener('click', event => {
@@ -322,6 +326,7 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     ${core.slice(core.indexOf('function rel('), core.indexOf('const folderLabel'))}
     ${calendar.slice(calendar.indexOf('const CAL_RING_MS'), calendar.indexOf('function calCheck'))}
     ${calendar.slice(calendar.indexOf('function taskDoneOn'), calendar.indexOf('function pickerBody'))}
+    ${calendar.slice(calendar.indexOf('function withWindow'), calendar.indexOf('function calMovable'))}
     ${calendar.slice(calendar.indexOf('var tasksWin'), calendar.indexOf('const source ='))}
     const actions = {${actions.slice(actions.indexOf("  'home-day':"), actions.indexOf("  'cal-prev':"))}${actions.slice(actions.indexOf("  'task-done':"), actions.indexOf("  'task-date':"))}};
     document.addEventListener('click', event => {
