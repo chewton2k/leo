@@ -15,6 +15,7 @@ use super::vad::{detector, CaptureVad, VAD_OFFLINE_HANGOVER_MS};
 
 pub const STOPPED: &str = "Transcription stopped. Your recorded audio is kept.";
 pub const STOPPING: &str = "The speech engine is stopping. Reopen Leo to transcribe again.";
+pub const BUSY: &str = "The speech engine is busy.";
 
 const QUEUED: usize = 8;
 const SHADERS_MARKER: &str = "speech-shaders-ready";
@@ -177,7 +178,7 @@ impl Engine {
             .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
                 (n < QUEUED).then_some(n + 1)
             })
-            .map_err(|_| anyhow::anyhow!("The speech engine is busy. Try again in a moment."))?;
+            .map_err(|_| anyhow::anyhow!("{BUSY} Try again in a moment."))?;
         let admission = Pin(self.admitted.clone());
         let chunks = if priority == Priority::Dictation {
             speech_chunks(pcm, 1.0)?.into()
@@ -186,8 +187,20 @@ impl Engine {
             gated(speech_chunks(pcm, gain)?, gain, self.hears).context(UNFINISHED)?
         };
         let (reply, answer) = mpsc::sync_channel(1);
-        self.requests.try_send(Message::Run(Job { _admission: admission, selected, chunks, text: Vec::new(), priority, words, cancels, reply }))
-            .map_err(|_| anyhow::anyhow!("The speech engine is busy. Your recorded audio is kept; try again in a moment."))?;
+        self.requests
+            .try_send(Message::Run(Job {
+                _admission: admission,
+                selected,
+                chunks,
+                text: Vec::new(),
+                priority,
+                words,
+                cancels,
+                reply,
+            }))
+            .map_err(|_| {
+                anyhow::anyhow!("{BUSY} Your recorded audio is kept; try again in a moment.")
+            })?;
         wait_for(&answer, || {
             priority == Priority::Dictation
                 && self.dictation_cancels.load(Ordering::Acquire) != cancels

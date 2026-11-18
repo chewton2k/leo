@@ -75,6 +75,7 @@ pub fn waiting_for_model(error: &str) -> bool {
     error.contains("Settings → Speech models")
         || error.contains(crate::speech::engine::STOPPED)
         || error.contains(crate::speech::engine::STOPPING)
+        || error.contains(crate::speech::engine::BUSY)
 }
 
 pub fn waiting(dir: &Path) -> Vec<u32> {
@@ -527,12 +528,12 @@ mod tests {
             "Choose and download a model in Settings → Speech models. Your audio is kept until one is ready.",
             crate::speech::engine::STOPPED,
             crate::speech::engine::STOPPING,
+            "The speech engine is busy. Try again in a moment.",
+            "The speech engine is busy. Your recorded audio is kept; try again in a moment.",
         ] {
             assert!(waiting_for_model(message), "{message}");
         }
-        assert!(!waiting_for_model(
-            "The speech engine is busy. Your recorded audio is kept; try again in a moment."
-        ));
+        assert!(!waiting_for_model("offline"));
     }
     use std::sync::atomic::AtomicU32;
     use std::sync::mpsc;
@@ -1018,6 +1019,36 @@ mod tests {
         for i in 0..2 {
             assert!(text_path(dir.path(), i).exists());
         }
+    }
+
+    #[test]
+    fn a_part_that_meets_a_busy_engine_waits_and_is_transcribed_later() {
+        let dir = tempfile::tempdir().unwrap();
+        loud(dir.path(), 0);
+        let calls = Arc::new(AtomicU32::new(0));
+        let seen = calls.clone();
+        let (tx, rx) = mpsc::channel();
+        Transcriber::start(
+            dir.path(),
+            Arc::new(move |_: &Path| {
+                if seen.fetch_add(1, Ordering::SeqCst) < 8 {
+                    Err("The speech engine is busy. Your recorded audio is kept; try again in a moment.".into())
+                } else {
+                    Ok("heard".into())
+                }
+            }),
+            quick(),
+            false,
+            tx,
+        )
+        .wait();
+        assert!(calls.load(Ordering::SeqCst) > quick().attempts_after_stop);
+        assert!(!rx.try_iter().any(|u| matches!(u, Update::Failed { .. })));
+        assert!(!dir.path().join("seg-00000.err").exists());
+        assert_eq!(
+            std::fs::read_to_string(text_path(dir.path(), 0)).unwrap(),
+            "heard"
+        );
     }
 
     #[test]
