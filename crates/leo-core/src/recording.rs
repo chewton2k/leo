@@ -84,7 +84,7 @@ pub fn root(notes: &Path) -> PathBuf {
     notes.parent().unwrap_or(notes).join("recording-sources")
 }
 
-fn folder(notes: &Path, note: &str) -> Result<PathBuf> {
+pub fn folder(notes: &Path, note: &str) -> Result<PathBuf> {
     if !valid_id(note) {
         bail!("Invalid recording note id");
     }
