@@ -1,6 +1,8 @@
 const MERMAID_URL = '/vendor/mermaid-11.4.1.js';
 const DIAGRAMS_KEPT = 60;
-const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0, inked: new WeakMap(), steps: new Map() };
+const DIAGRAM_WAITING = 'figure.diagram:not([data-drawn])';
+const DRAWING_IMAGE = 'figure.drawing > img';
+const diagrams = { loading: null, seq: 0, scheme: '', drawn: new Map(), timer: 0, inked: new WeakMap(), steps: new Map(), waiting: new Set(), images: new Set() };
 const DRAWING_COLOURS = ['--text', '--muted', '--faint', '--line', '--accent', '--accent-soft', '--surface'];
 const DRAWING_URL = 'data:image/svg+xml;charset=utf-8,';
 const MOST_STEPS = 12;
@@ -56,9 +58,14 @@ function paintDrawing(fig, at) {
 }
 
 function stepDrawings() {
-  for (const img of document.querySelectorAll('figure.drawing:not(.pending, [data-inked]) > img')) {
+  for (const img of [...diagrams.images]) {
     const fig = img.parentElement;
-    if (fig.closest('.viewer-diagram')) continue;
+    if (!img.isConnected || !fig || fig.dataset.inked !== undefined) {
+      diagrams.images.delete(img);
+      continue;
+    }
+    if (fig.classList.contains('pending') || fig.closest('.viewer-diagram')) continue;
+    diagrams.images.delete(img);
     fig.dataset.inked = '';
     const src = img.getAttribute('src') || '';
     let source = '';
@@ -182,8 +189,21 @@ function loadMermaid() {
   return diagrams.loading;
 }
 
-const waitingDiagrams = () =>
-  [...document.querySelectorAll('figure.diagram:not([data-drawn])')].filter((fig) => !fig.closest('.msg.pending, .viewer-diagram'));
+function noteDiagrams(node) {
+  if (node.matches(DIAGRAM_WAITING)) diagrams.waiting.add(node);
+  for (const fig of node.querySelectorAll(DIAGRAM_WAITING)) diagrams.waiting.add(fig);
+  if (node.matches(DRAWING_IMAGE)) diagrams.images.add(node);
+  for (const img of node.querySelectorAll(DRAWING_IMAGE)) diagrams.images.add(img);
+}
+
+function waitingDiagrams() {
+  const found = [];
+  for (const fig of diagrams.waiting) {
+    if (!fig.isConnected || fig.dataset.drawn !== undefined) diagrams.waiting.delete(fig);
+    else if (!fig.closest('.msg.pending, .viewer-diagram')) found.push(fig);
+  }
+  return found;
+}
 
 function bigSvg(svg) {
   const copy = svg.cloneNode(true);
@@ -324,19 +344,31 @@ async function drawDiagrams() {
 }
 
 function watchDiagrams(records) {
-  if (records && !records.some((r) => [...r.addedNodes].some((n) => n.nodeType === 1))) return;
+  if (records) {
+    let added = false;
+    for (const r of records) {
+      for (const n of r.addedNodes) {
+        if (n.nodeType !== 1) continue;
+        added = true;
+        noteDiagrams(n);
+      }
+    }
+    if (!added) return;
+  }
   stepDrawings();
   drawKnownDiagrams();
   clearTimeout(diagrams.timer);
   diagrams.timer = setTimeout(() => drawDiagrams().catch(() => {}), 60);
 }
 
+for (const el of document.querySelectorAll(`${DIAGRAM_WAITING}, ${DRAWING_IMAGE}`)) (el.localName === 'img' ? diagrams.images : diagrams.waiting).add(el);
 new MutationObserver(watchDiagrams).observe(document.body, { childList: true, subtree: true });
 window.leoTheme.onChange(() => {
   for (const fig of document.querySelectorAll('figure.drawing.inked')) if (diagrams.inked.has(fig)) paintDrawing(fig, diagrams.inked.get(fig).at);
   for (const fig of document.querySelectorAll('figure.diagram[data-drawn]')) {
     if (fig.closest('.viewer-diagram')) continue;
     fig.removeAttribute('data-drawn');
+    diagrams.waiting.add(fig);
     for (const old of fig.querySelectorAll('.diagram-art, .diagram-error')) old.remove();
   }
   watchDiagrams();
