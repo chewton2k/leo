@@ -210,7 +210,9 @@ models too slow for live text (`Selected.live`) skip the live pass (Voxtral: abo
 103 s for 60 s of speech, estimated); if Silero cannot load, dictation runs
 unfiltered; and when a streaming model's filter kept nothing, the batch run gets
 the raw audio, so quiet speech is not lost whole. Text stays
-visible while the final pass runs. With AI writing on, Escape stays registered through the
+visible while the final pass runs. A dictation of any length is captured: past 4
+minutes it is transcribed in pieces cut at pauses (`dictation::pieces`) and joined;
+under 4 minutes it runs in one piece, unchanged. With AI writing on, Escape stays registered through the
 polishing step (its own `escape` flag, separate from `capturing`), and a
 fallback shows a four-second "Pasted without AI writing" notice with the
 reason. Settings warns when no writing AI is set up (`writing_ready`, which is

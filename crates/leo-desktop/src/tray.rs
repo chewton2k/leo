@@ -295,9 +295,8 @@ fn copy_last_dictation(app: &AppHandle) {
         .spawn(move || {
             let last = leo_core::paths::data_dir()
                 .ok()
-                .and_then(|data| leo_web::dictation::recent(&data).ok())
-                .and_then(|rows| rows.into_iter().next())
-                .and_then(|row| row["text"].as_str().map(str::to_string));
+                .and_then(|data| leo_web::dictation::newest(&data).ok())
+                .flatten();
             if let Some(text) = last {
                 let _ = app.clipboard().write_text(text);
             }
