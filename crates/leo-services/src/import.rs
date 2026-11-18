@@ -580,14 +580,14 @@ fn pdf(bytes: &[u8], scratch: &Scratch) -> Result<Material> {
             if image.width < 200 || image.height < 200 {
                 continue;
             }
-            if image
-                .width
-                .checked_mul(image.height)
+            let (width, height) = (image.width, image.height);
+            if width
+                .checked_mul(height)
                 .is_none_or(|area| area > figures::MOST_PDF_PIXELS as i64)
             {
-                bail!("page {number} contains a scan beyond the safe image limit; export that page at a lower resolution, then try again");
+                bail!("page {number} holds a scan of {width} by {height} pixels, more than the {} million pixels leo reads; export that page at a lower resolution, then try again", figures::MOST_PDF_PIXELS / 1_000_000);
             }
-            let bytes = figures::pdf_figure(&doc, &image).with_context(|| format!("page {number} contains a scanned image leo could not read safely; export that page as a standard JPEG or PNG, then try again"))?;
+            let bytes = figures::pdf_figure(&doc, &image).with_context(|| format!("page {number} contains a scanned image of {width} by {height} pixels that leo could not read safely; export that page as a standard JPEG or PNG, then try again"))?;
             let mime = leo_core::attachments::kind_of(&bytes)
                 .and_then(leo_core::attachments::mime_of)
                 .unwrap_or("image/png");
@@ -2089,6 +2089,33 @@ mod tests {
             .unwrap();
             assert_eq!(read, "Text from the attached high-resolution PDF");
         }
+    }
+
+    #[test]
+    fn a_scan_past_four_thousand_megapixels_is_refused_with_its_size() {
+        let source = pdf_with(None, Some(&[0xff, 0xd8, 0xff, 1]));
+        let mut doc = lopdf::Document::load_mem(&source).unwrap();
+        let image = doc
+            .objects
+            .values_mut()
+            .find_map(|o| {
+                o.as_stream_mut().ok().filter(|s| {
+                    s.dict
+                        .get(b"Subtype")
+                        .is_ok_and(|v| v.as_name().is_ok_and(|n| n == b"Image"))
+                })
+            })
+            .unwrap();
+        image.dict.set("Width", 70_000);
+        image.dict.set("Height", 70_000);
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let refused = extract(&pdf_upload("huge.pdf", "application/pdf", bytes)).unwrap_err();
+        let said = format!("{refused:#}");
+        assert!(
+            said.contains("page 1") && said.contains("70000 by 70000 pixels"),
+            "{said}"
+        );
     }
 
     #[test]

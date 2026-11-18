@@ -286,8 +286,10 @@ by page id (`pdf_page_text`, the same text and the same per-page limit as
 page); a page number must not hide a scan and
 text on another page must not suppress one; an unreadable scan fails with its
 page number. Scans over 16 million pixels get a 4,000 px reading copy (the PDF is
-never rewritten). Source images ≤64 million pixels, 32,768 px per side, 20 MB
-encoded; decoding under a 192 MiB allocation limit; reading images are written to a private `leo-import-*` folder as they are found and read six at a time (2026-11-17, principle 1: no page, scan or text-size limit; per-page and per-image bounds stay against damaged files; the 90 MB upload bound is P-C64's),
+never rewritten). A scan of any real size is read (2026-11-18, the owner's principle 1): a Flate scan over 16 million pixels is read row by row
+into the reading copy (`scaled_rows`: memory is one row plus the copy, 27 MB at 560 million pixels), a JPEG scan is decoded whole
+under a 256 MiB allocation limit (about 89 million pixels); only a page over 4,000 million pixels or 65,535 px a side is refused,
+with its size in the sentence. Reading images are written to a private `leo-import-*` folder as they are found and read six at a time (2026-11-17, principle 1: no page, scan or text-size limit; per-page and per-image bounds stay against damaged files; the 90 MB upload bound is P-C64's),
 figures are written to the import's private folder as found, every one worth showing is kept, and each part is offered only its own pages' figures (2026-11-17, principle 1: no figure, slide or byte count). Photos and scans need `ai::see`; no local OCR. A tracking
 file name (`filename::file_label`, never camera, scan, screenshot or date names)
 is kept in front of the title (`filename::with_label`; `tracking_label` for
