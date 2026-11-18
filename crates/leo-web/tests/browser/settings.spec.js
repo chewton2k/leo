@@ -417,7 +417,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
 test("Trash's All box keeps focus when toggled with the keyboard", async ({ page }) => {
   const web = path.resolve(__dirname, '../../src/web/app');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
-  await page.setContent('<div id="app"></div><div id="floating"></div>');
+  await page.setContent('<div id="crumbs"></div><div id="app"></div><div id="floating"></div>');
   await page.addScriptTag({ content: `
     const app=document.querySelector('#app'), floating=document.querySelector('#floating'), $=selector=>document.querySelector(selector);
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
