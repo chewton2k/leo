@@ -2514,6 +2514,22 @@ fn felix_in_auto_does_it_at_once_and_read_only_can_only_look() {
 }
 
 #[test]
+fn felix_renames_a_note_to_a_title_of_any_length() {
+    let (mut state, _d, ids) = state_with(&[("Heaps", "")]);
+    let title = "Heaps ".repeat(100).trim().to_string();
+    let call: &'static str = Box::leak(
+        format!(
+            "<tool>{{\"name\": \"rename_note\", \"note\": \"Heaps\", \"title\": \"{title}\"}}</tool>"
+        )
+        .into_boxed_str(),
+    );
+    let (streamer, _prompts) = scripted(vec![call, "Done."]);
+    state.chat = Some(streamer);
+    chat_lines_with(&state, "rename it", Some("auto"));
+    assert_eq!(state.fresh().find_note(&ids[0]).unwrap().title, title);
+}
+
+#[test]
 fn felix_renames_pins_restores_and_deletes_folders_only_when_asked_and_finds_old_chats() {
     let (mut state, _d, ids) = state_with(&[("Heaps", "s26"), ("Gone note", "")]);
     {

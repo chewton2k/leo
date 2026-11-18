@@ -232,17 +232,11 @@ pub(crate) fn summary_of(p: &Proposal) -> String {
     }
 }
 
-const MOST_TITLE_CHARS: usize = 300;
 const MOST_CHATS_SHOWN: usize = 5;
 const MOST_CHAT_LINES: usize = 8;
 
 fn rename_note(state: &AppState, desk: &tools::Desk, call: &Call) -> Result<Proposal, String> {
-    let title: String = call
-        .text("title")
-        .trim()
-        .chars()
-        .take(MOST_TITLE_CHARS)
-        .collect();
+    let title = call.text("title").trim().to_string();
     if title.is_empty() {
         return Err("give the new title".into());
     }
