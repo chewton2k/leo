@@ -912,10 +912,19 @@ is hidden or the capture activity gate is busy.
 
 ## Calendar and tasks (`calendar.rs`, `ics.rs`, `tasks.rs`, `routes/tasks.rs`, `app/calendar.js`, `schedule.js`)
 
-- Calendars: up to five secret iCal links through `CalendarAccess`
+- Calendars: any number of secret iCal links through `CalendarAccess`
   (`secret::default_store`), never sent to the page; leo-host fetches them
-  (`fetch_public`, capped at `CALENDAR_BYTES`). Feeds cached in leo.db with ETag /
-  Last-Modified. GET `/api/schedule?from&to&live` (≤43 days).
+  (`fetch_public`). A feed is kept as `<data>/calendar/<feed>.<hash>.ics` (0600,
+  the name carries `fnv64` of its bytes; a same-bytes refresh rewrites nothing; never
+  in a note export) and read as a stream by `ics::read_from`, twice: first for the
+  moved or cancelled occurrences' keys, then event by event for the window. No event
+  count and no count of calendars; links are refreshed one at a time (the fetch's own
+  10 s limit), each no sooner than `STALE_AFTER_MINUTES`; `CALENDAR_BYTES` (1 GB) only
+  stops an endless response (2026-11-17, the owner's principle 1). One line
+  of a feed is read up to 1 MiB (`MOST_LINE`); the repeat-rule guards stay. leo.db
+  `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
+  unconditional fetch); an old stored `body` is moved to a file on first read.
+  GET `/api/schedule?from&to&live` (≤43 days).
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
   guard): a timed event once when start−2 min ≤ now < start+10 min and nothing

@@ -1344,10 +1344,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
 - Task dates read Today, Tomorrow, a weekday within a week, or the date; hovering
   shows the full date. Late tasks are grouped as "Earlier", never "Overdue"
   (2026-11-15). In Day and Week, today's hours before now sit under a faint wash.
-- Calendars: up to five secret iCal links (Settings → Calendar), kept through
+- Calendars: any number of secret iCal links (Settings → Calendar), kept through
   `CalendarAccess` (`secret::default_store`, private file or optional keychain),
-  never sent to the page. Feeds are cached in
-  leo.db with ETag / Last-Modified; `ics::read` expands repeats, EXDATE and
+  never sent to the page. Feeds are kept as files under `<data>/calendar/`
+  (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
 

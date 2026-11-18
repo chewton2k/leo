@@ -4,7 +4,7 @@ mod browse;
 pub mod calc;
 mod calendar;
 mod store_refresh;
-pub const CALENDAR_BYTES: u64 = calendar::MOST_BYTES;
+pub const CALENDAR_BYTES: u64 = 1_000_000_000;
 pub mod app_settings;
 pub mod captions;
 pub mod chat;
@@ -89,8 +89,44 @@ pub struct Fetched {
     pub modified: Option<String>,
 }
 
+pub struct Streamed {
+    pub written: bool,
+    pub etag: Option<String>,
+    pub modified: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct TooBig;
+
+impl std::fmt::Display for TooBig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("This calendar is larger than 1 GB, so leo did not read it.")
+    }
+}
+
+impl std::error::Error for TooBig {}
+
 pub trait CalendarAccess: Send + Sync {
     fn fetch(&self, url: &str) -> Result<Vec<u8>>;
+    fn fetch_into(
+        &self,
+        url: &str,
+        etag: Option<&str>,
+        modified: Option<&str>,
+        sink: &mut dyn std::io::Write,
+    ) -> Result<Streamed> {
+        let got = self.fetch_since(url, etag, modified)?;
+        if let Some(body) = &got.body {
+            for piece in body.chunks(64 * 1024) {
+                sink.write_all(piece)?;
+            }
+        }
+        Ok(Streamed {
+            written: got.body.is_some(),
+            etag: got.etag,
+            modified: got.modified,
+        })
+    }
     fn fetch_since(
         &self,
         url: &str,

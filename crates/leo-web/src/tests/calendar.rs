@@ -172,3 +172,17 @@ fn removing_a_calendar_does_not_undo_a_switch_flipped_while_it_was_removed() {
         serde_json::from_slice(&std::fs::read(&settings).unwrap()).unwrap();
     assert_eq!(saved["offer"], false);
 }
+
+#[test]
+fn eight_calendars_can_be_linked() {
+    let (mut state, _dir, _ids) = state_with(&[]);
+    let fake = Arc::new(Fake::default());
+    state.calendar_access = Some(fake.clone());
+    let mut last = None;
+    for n in 0..8 {
+        let link = format!("https://calendar.example.com/ical/{n}/basic.ics");
+        fake.pages.lock().unwrap().insert(link.clone(), feed());
+        last = Some(json_of(add(&state, &link)));
+    }
+    assert_eq!(last.unwrap()["calendars"].as_array().unwrap().len(), 8);
+}
