@@ -63,6 +63,11 @@ impl QuitGate {
         self.asking = true;
         Step::Ask
     }
+
+    fn held(&mut self) {
+        self.settled = false;
+        self.asking = false;
+    }
 }
 
 static QUIT: Mutex<QuitGate> = Mutex::new(QuitGate {
@@ -205,6 +210,7 @@ pub fn run() {
                 .is_some_and(|updates| updates.on_quit())
             {
                 api.prevent_exit();
+                quit_gate().held();
             }
         }
         RunEvent::Exit => stop_engine(app),
@@ -679,6 +685,19 @@ mod tests {
         gate.settled = true;
         assert_eq!(gate.step(), Step::Exit);
         assert_eq!(gate.step(), Step::Exit, "a quit after that goes on at once");
+    }
+
+    #[test]
+    fn a_quit_an_update_held_asks_the_page_again_next_time() {
+        let mut gate = QuitGate {
+            page_ready: true,
+            ..QuitGate::default()
+        };
+        assert_eq!(gate.step(), Step::Ask);
+        gate.settled = true;
+        assert_eq!(gate.step(), Step::Exit);
+        gate.held();
+        assert_eq!(gate.step(), Step::Ask);
     }
 
     #[test]
