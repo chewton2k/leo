@@ -305,6 +305,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
             Some("accessibility") => crate::permissions::request_accessibility(&self.app)?,
             Some("notifications") => crate::permissions::request_notifications(&self.app)?,
             Some("quit") => self.app.exit(0),
+            Some("settled") => crate::quit_settled(),
             Some("sign_in") => crate::sign_in::start(
                 value["provider"]
                     .as_str()

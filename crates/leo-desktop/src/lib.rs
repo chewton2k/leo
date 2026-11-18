@@ -21,7 +21,7 @@ mod update_window;
 mod updates;
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Condvar, Mutex, MutexGuard, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
@@ -35,6 +35,89 @@ struct Engine(Mutex<Option<leo_web::Running>>);
 
 static START: OnceLock<Instant> = OnceLock::new();
 static POPUP_PREPARED: AtomicBool = AtomicBool::new(false);
+
+const QUIT_WAIT: Duration = Duration::from_secs(3);
+
+#[derive(Default)]
+struct QuitGate {
+    settled: bool,
+    asking: bool,
+    page_ready: bool,
+}
+
+#[derive(Debug, PartialEq)]
+enum Step {
+    Exit,
+    Ask,
+    Wait,
+}
+
+impl QuitGate {
+    fn step(&mut self) -> Step {
+        if self.settled || !self.page_ready {
+            return Step::Exit;
+        }
+        if self.asking {
+            return Step::Wait;
+        }
+        self.asking = true;
+        Step::Ask
+    }
+}
+
+static QUIT: Mutex<QuitGate> = Mutex::new(QuitGate {
+    settled: false,
+    asking: false,
+    page_ready: false,
+});
+static SETTLED: (Mutex<bool>, Condvar) = (Mutex::new(false), Condvar::new());
+
+fn quit_gate() -> MutexGuard<'static, QuitGate> {
+    QUIT.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+pub(crate) fn quit_settled() {
+    let (done, changed) = &SETTLED;
+    *done.lock().unwrap_or_else(PoisonError::into_inner) = true;
+    changed.notify_all();
+}
+
+fn wait_settled(within: Duration) -> bool {
+    let (done, changed) = &SETTLED;
+    let guard = done.lock().unwrap_or_else(PoisonError::into_inner);
+    let (guard, _) = changed
+        .wait_timeout_while(guard, within, |done| !*done)
+        .unwrap_or_else(PoisonError::into_inner);
+    *guard
+}
+
+fn ask_page_to_settle(app: &AppHandle, code: Option<i32>) {
+    *SETTLED.0.lock().unwrap_or_else(PoisonError::into_inner) = false;
+    let asked = app
+        .get_webview_window(MAIN)
+        .is_some_and(|window| window.eval("window.leoFromApp?.('quit', 'now')").is_ok());
+    let leave = {
+        let app = app.clone();
+        move |wait: bool| {
+            if wait {
+                wait_settled(QUIT_WAIT);
+            }
+            quit_gate().settled = true;
+            app.exit(code.unwrap_or(0));
+        }
+    };
+    if !asked {
+        return leave(false);
+    }
+    let left = leave.clone();
+    if std::thread::Builder::new()
+        .name("leo-quit-settle".into())
+        .spawn(move || left(true))
+        .is_err()
+    {
+        leave(false);
+    }
+}
 
 pub fn run() {
     START.get_or_init(Instant::now);
@@ -91,7 +174,7 @@ pub fn run() {
         RunEvent::Reopen { .. } => show(app),
         RunEvent::ExitRequested { api, code, .. } => {
             #[cfg(target_os = "macos")]
-            {
+            if !quit_gate().settled {
                 let leaving = app
                     .try_state::<std::sync::Arc<updates::Updates>>()
                     .is_some_and(|updates| updates.leaving());
@@ -104,8 +187,19 @@ pub fn run() {
                     return;
                 }
             }
-            #[cfg(not(target_os = "macos"))]
-            let _ = code;
+            let step = quit_gate().step();
+            match step {
+                Step::Exit => {}
+                Step::Ask => {
+                    api.prevent_exit();
+                    ask_page_to_settle(app, code);
+                    return;
+                }
+                Step::Wait => {
+                    api.prevent_exit();
+                    return;
+                }
+            }
             if app
                 .try_state::<std::sync::Arc<updates::Updates>>()
                 .is_some_and(|updates| updates.on_quit())
@@ -173,6 +267,7 @@ fn set_up(
         }
         Err(e) => problem_address(&format!("{e:#}")),
     };
+    let engine_started = started.is_ok();
     app.manage(Engine(Mutex::new(started.ok())));
     let builder = WebviewWindowBuilder::new(app, MAIN, address)
         .title("leo")
@@ -186,8 +281,11 @@ fn set_up(
             "window.__LEO_VISIBLE__ = true;"
         })
         .initialization_script(PRINT)
-        .on_page_load(|window, payload| {
+        .on_page_load(move |window, payload| {
             if payload.event() == tauri::webview::PageLoadEvent::Finished {
+                if engine_started {
+                    quit_gate().page_ready = true;
+                }
                 let visible =
                     window.is_visible().unwrap_or(true) && !window.is_minimized().unwrap_or(false);
                 sync_visible(&window, visible, true);
@@ -569,6 +667,37 @@ fn dictation_popup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_quit_asks_the_page_once_then_goes_on() {
+        let mut gate = QuitGate::default();
+        assert_eq!(gate.step(), Step::Exit, "no page yet: nothing to wait for");
+        gate.page_ready = true;
+        assert_eq!(gate.step(), Step::Ask);
+        assert_eq!(gate.step(), Step::Wait);
+        assert_eq!(gate.step(), Step::Wait);
+        gate.settled = true;
+        assert_eq!(gate.step(), Step::Exit);
+        assert_eq!(gate.step(), Step::Exit, "a quit after that goes on at once");
+    }
+
+    #[test]
+    fn the_wait_ends_when_the_page_answers_or_after_three_seconds() {
+        assert_eq!(QUIT_WAIT, Duration::from_secs(3));
+        *SETTLED.0.lock().unwrap() = false;
+        let answered = Instant::now();
+        let page = std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_millis(20));
+            quit_settled();
+        });
+        assert!(wait_settled(Duration::from_secs(2)));
+        assert!(answered.elapsed() < Duration::from_secs(1));
+        page.join().unwrap();
+        *SETTLED.0.lock().unwrap() = false;
+        let silent = Instant::now();
+        assert!(!wait_settled(Duration::from_millis(50)));
+        assert!(silent.elapsed() >= Duration::from_millis(50));
+    }
 
     #[test]
     fn a_failed_part_is_named_in_one_sentence() {

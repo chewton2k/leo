@@ -40,6 +40,11 @@ a test, or leave it unset to see the user's own data.
 - Close hides the window; in macOS full screen it first leaves full screen (`set_fullscreen(false)`) and hides on the first `Resized` that reports windowed, or after 1 s if none arrives, because hiding a full-screen window left a black Space (`LEAVING_FULLSCREEN`, `show` clears it); Dock click and "Open leo" show
   it; on macOS, Leo's Quit menu items or ⌘Q need a second attempt within three seconds
   (the first shows a prompt). Update restarts and error exits bypass this guard.
+  Every quit leo sees (menu, ⌘Q, menu bar, Dock, the page's Quit, an update restart;
+  on Windows the menu bar and the page's Quit) first asks the page to settle its saves
+  (`leoFromApp('quit', 'now')`, answered by `POST /api/app {action: 'settled'}`) and
+  waits up to 3 s (`QuitGate`, `QUIT_WAIT`), before an update on quit installs and
+  before the engine stops (2026-11-17).
   `RunEvent::Exit` stops the engine (6 s cap), without committing or pushing notes.
   The macOS app menu replaces the predefined native Quit item with a regular
   ⌘Q item routed through `app.exit(0)`, so it reaches the guard and update actor.
