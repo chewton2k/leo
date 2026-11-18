@@ -347,6 +347,7 @@ test('compact paging survives repeated Folders sheets and late reads cannot reop
     if (new URL(route.request().url()).searchParams.get('dir') === dir) await new Promise(resolve => { release = resolve; });
     await route.continue();
   });
+  await createNote(page, dir, 'Page 105');
   await folders(page);
   await expect.poll(() => Boolean(release)).toBe(true);
   await page.keyboard.press('Escape');
