@@ -878,7 +878,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `<what_the_user_wants>`. Several files make a note each (`run_each`); a failed
   file is listed in `error` and the rest are made. `into` (a note id, 404 if
   gone, never with `each`) never touches the note: the job returns `section`
-  and the page appends it through version-checked `/insert`, so typing during an
+  and the page appends it through version-checked `/insert`, passing the job's id (`job`), not its text, so a section of any length is added (2026-11-18, the owner's principle 1; a job that is gone or not done is 404 with a sentence), so typing during an
   upload never makes a conflict copy.
 - Originals live in `<data>/attachments/<note-id>/` (never synced), named by
   `free_original_name`; figures go to the AI via `leo_services::figures`.

@@ -122,3 +122,27 @@ test('a picture of any size is sent as one streamed PUT of its blob, with no siz
   assert.deepEqual(calls, []);
   assert.deepEqual(inserted, ['![scan](attachments/a.png)']);
 });
+
+test('a section added to a note is named by its job and its text is never sent back', async () => {
+  const c = page();
+  const calls = [];
+  const toasts = [];
+  Object.assign(c, {
+    state: { view: 'workspace', session: null },
+    ready: async () => null,
+    showNote: async () => {},
+    toast: (text) => toasts.push(text),
+    api: async (url, options = {}) => {
+      calls.push({ url, options });
+      return url.endsWith('/insert') ? { version: 'v2', before: 'old' } : { version: 'v1' };
+    },
+  });
+  vm.runInContext(`${slice('async function addSection(', 'async function showLatest(')}\nthis.addSection = addSection;`, c);
+  await c.addSection({ id: 'n1', title: 'Heaps' }, 'job-9');
+  const insert = calls.find((call) => call.url === '/api/notes/n1/insert');
+  assert.deepEqual(JSON.parse(JSON.stringify(insert.options.body)), { job: 'job-9', line: null, base: 'v1' });
+  assert.deepEqual(toasts, ['Added to “Heaps”']);
+  calls.length = 0;
+  await c.addSection({ id: 'n1', title: 'Heaps' }, '');
+  assert.equal(calls.length, 0);
+});

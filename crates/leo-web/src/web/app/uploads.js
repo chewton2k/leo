@@ -296,7 +296,7 @@ function watchUpload(id, dir, into = null) {
     if (into) {
       if (open) closeSheet();
       if (job.error) toast(job.error, { bad: true });
-      await addSection(into, job.section || '').catch(fail);
+      await addSection(into, (job.section || '').trim() ? id : '').catch(fail);
       return;
     }
     const many = (job.notes || []).length > 1;
@@ -313,11 +313,12 @@ function watchUpload(id, dir, into = null) {
   }, 900);
 }
 
-// Puts an upload's section at the end of the note through the version-checked
+// Puts an upload's section (named by its job, so it never travels back through
+// the page) at the end of the note through the version-checked
 // insert (as Add to note does), using the open editor's own version after
 // saving its draft, so typing during the upload never makes a conflict copy.
-async function addSection(into, section) {
-  if (!section.trim()) return;
+async function addSection(into, job) {
+  if (!job) return;
   const isHere = () => state.view === 'note' && state.session && state.session.note && state.session.note.id === into.id;
   let done = null;
   try {
@@ -329,7 +330,7 @@ async function addSection(into, section) {
       }
       try {
         if (!base) base = (await api(`/api/notes/${enc(into.id)}`)).version;
-        done = await api(`/api/notes/${enc(into.id)}/insert`, { method: 'POST', body: { text: section, line: null, base } });
+        done = await api(`/api/notes/${enc(into.id)}/insert`, { method: 'POST', body: { job, line: null, base } });
       } catch (e) {
         if (e.status !== 409 || attempt) throw e;
       }
