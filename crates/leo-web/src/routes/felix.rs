@@ -99,12 +99,6 @@ pub(crate) async fn add_chat_file(
     };
     let (_guard, stop) = crate::stop_when_dropped();
     let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
-        if chat_files::count(&dir, &id) >= chat_files::MOST_FILES {
-            anyhow::bail!(
-                "a chat holds up to {} documents; remove one first",
-                chat_files::MOST_FILES
-            );
-        }
         let text = leo_core::children::with_stop(stop, || reader(file, &mut |_| {}))?;
         chat_files::add(&dir, &id, &name, &text, chrono::Utc::now())
     })
@@ -432,7 +426,9 @@ struct Ask {
     sources: Vec<chat::SourceRef>,
     room: usize,
     access: tools::Access,
-    documents: Vec<(String, String)>,
+    documents: Vec<chat_files::Named>,
+    chats: std::path::PathBuf,
+    chat: String,
     steer: crate::steer::Steer,
     marking: Option<String>,
     session: Option<tools::Session>,
@@ -1275,6 +1271,8 @@ fn answer(
         room,
         access,
         documents,
+        chats,
+        chat,
         steer,
         marking,
         session,
@@ -1363,7 +1361,7 @@ fn answer(
         room,
     )
     .with_access(access)
-    .with_documents(documents)
+    .with_documents(chats, chat, documents)
     .with_captions(Arc::clone(&state.captions))
     .with_meaning(state.meaning.clone(), Arc::clone(&state.vectors))
     .with_reply(tx.clone())
@@ -2013,8 +2011,11 @@ pub(crate) async fn chat_reply(
         let chat = body.chat.clone();
         let files = body.files.clone();
         match tokio::task::spawn_blocking(move || {
+            let (heads, most) = chat::heads_wanted(files.len());
             let documents = match &chat {
-                Some(chat) if !files.is_empty() => chat_files::texts(&chats_dir, chat, &files),
+                Some(chat) if !files.is_empty() => {
+                    chat_files::texts(&chats_dir, chat, &files, most, heads)
+                }
                 _ => Vec::new(),
             };
             let memory = chat
@@ -2029,6 +2030,13 @@ pub(crate) async fn chat_reply(
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     };
+    let (held, documents): (Vec<chat_files::Named>, Vec<(String, String)>) = documents
+        .into_iter()
+        .map(|(doc, head)| {
+            let name = doc.name.clone();
+            (doc, (name, head))
+        })
+        .unzip();
     let start = chat::kept_from(&body.messages, room, memory.as_ref());
     let documents_room = if body.practice { note_room } else { room };
     let (mut system, mut user) = chat::prompt_material(
@@ -2192,7 +2200,9 @@ pub(crate) async fn chat_reply(
             sources,
             room,
             access,
-            documents,
+            documents: held,
+            chats: state.chats.clone(),
+            chat: body.chat.clone().unwrap_or_default(),
             steer,
             marking,
             session: body_session,

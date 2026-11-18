@@ -808,7 +808,6 @@
     return `${starter.text} for ${list}`;
   }
 
-  const MOST_FILES = 10;
 
   function splitFiles(docs, messages) {
     const ids = new Set();
@@ -1714,10 +1713,7 @@
     }
 
     function addFiles(list) {
-      const room = MOST_FILES - state.files.length - state.sent.length;
-      const files = [...list];
-      if (files.length > room) notify(`A chat holds up to ${MOST_FILES} documents, so ${files.length - Math.max(room, 0)} ${files.length - Math.max(room, 0) === 1 ? 'was' : 'were'} left out.`);
-      for (const file of files.slice(0, Math.max(room, 0))) addFile(file);
+      for (const file of [...list]) addFile(file);
     }
 
     async function removeFile(id) {
@@ -3189,8 +3185,7 @@
         openPick('button', '', 0);
       } else if (what === 'attach-file') {
         attachMenu(false);
-        if (state.files.length + state.sent.length >= MOST_FILES) notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        else $('#chat-file').click();
+        $('#chat-file').click();
       } else if (what === 'unfile') removeFile(el.dataset.id); else if (what === 'pick') choose(Number(el.dataset.i));
       else if (what === 'unref') {
         state.refs = state.refs.filter((r) => r.id !== el.dataset.id);
@@ -3274,10 +3269,7 @@
         drawRefs();
         remember();
       }
-      if (found.length) {
-        if (state.files.length + state.sent.length >= MOST_FILES) notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        else addFiles(pastedNames(found));
-      }
+      if (found.length) addFiles(pastedNames(found));
       input.focus();
     });
 
@@ -3285,10 +3277,6 @@
       const found = [...((e.clipboardData && e.clipboardData.files) || [])];
       if (!found.length) return;
       e.preventDefault();
-      if (state.files.length + state.sent.length >= MOST_FILES) {
-        notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        return;
-      }
       addFiles(pastedNames(found));
     });
 

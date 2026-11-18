@@ -606,7 +606,7 @@ read (root CLAUDE.md, 2026-11-17).
   names who really answered. `Prefs.auto_model` turns it off.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
-- Files for Felix (`chat_files`): ≤10 per chat, text only, deleted with the
+- Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, deleted with the
   chat, with its review marks. Add to note (`routes/insert.rs`) is version-checked and request ids
   dedupe. Chat titles are local; history shows titles only.
 - Felix draws only when asked to see, draw or visualize something (2026-11-14,

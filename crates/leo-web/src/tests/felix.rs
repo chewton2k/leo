@@ -41,6 +41,8 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
         &state.chats,
         "chat-docs-0001",
         &[doc["id"].as_str().unwrap().to_string()],
+        7_000,
+        1,
     )
     .into_iter()
     .map(|(_, text)| text)

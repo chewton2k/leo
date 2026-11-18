@@ -6,7 +6,6 @@ use serde::Serialize;
 
 use crate::chats::valid_id;
 
-pub const MOST_FILES: usize = 10;
 pub const UPLOAD_BYTES: usize = 40 * 1024 * 1024;
 pub const ORPHAN_HOURS: i64 = 24;
 pub const EXCERPT_CHARS: usize = 320;
@@ -80,24 +79,6 @@ fn excerpt_of(text: &str) -> String {
     out.chars().take(EXCERPT_CHARS).collect()
 }
 
-fn count_in(c: &rusqlite::Connection, chat: &str) -> rusqlite::Result<usize> {
-    c.query_row(
-        "SELECT COUNT(*) FROM chat_docs WHERE chat = ?1",
-        [chat],
-        |r| r.get::<_, i64>(0),
-    )
-    .map(|n| n as usize)
-}
-
-pub fn count(dir: &Path, chat: &str) -> usize {
-    if !valid_id(chat) {
-        return 0;
-    }
-    crate::chats::db_of(dir)
-        .with(|c| count_in(c, chat))
-        .unwrap_or_default()
-}
-
 pub fn add(dir: &Path, chat: &str, name: &str, text: &str, now: DateTime<Utc>) -> Result<Doc> {
     if !valid_id(chat) {
         bail!("that is not a chat");
@@ -108,18 +89,7 @@ pub fn add(dir: &Path, chat: &str, name: &str, text: &str, now: DateTime<Utc>) -
         now,
         text,
     );
-    let added = crate::chats::db_of(dir).with(|c| {
-        let tx = c.transaction()?;
-        if count_in(&tx, chat)? >= MOST_FILES {
-            return Ok(false);
-        }
-        insert(&tx, chat, &doc, text)?;
-        tx.commit()?;
-        Ok(true)
-    })?;
-    if !added {
-        bail!("a chat holds up to {MOST_FILES} documents; remove one first");
-    }
+    crate::chats::db_of(dir).with(|c| insert(c, chat, &doc, text))?;
     Ok(doc)
 }
 
@@ -183,7 +153,20 @@ pub fn list(dir: &Path, chat: &str) -> Vec<Doc> {
         .unwrap_or_default()
 }
 
-pub fn texts(dir: &Path, chat: &str, ids: &[String]) -> Vec<(String, String)> {
+#[derive(Debug, Clone, PartialEq)]
+pub struct Named {
+    pub id: String,
+    pub name: String,
+    pub chars: usize,
+}
+
+pub fn texts(
+    dir: &Path,
+    chat: &str,
+    ids: &[String],
+    most: usize,
+    heads: usize,
+) -> Vec<(Named, String)> {
     let ids: Vec<&String> = ids.iter().filter(|id| valid_doc(id)).collect();
     if !valid_id(chat) || ids.is_empty() {
         return Vec::new();
@@ -191,16 +174,54 @@ pub fn texts(dir: &Path, chat: &str, ids: &[String]) -> Vec<(String, String)> {
     let marks = vec!["?"; ids.len()].join(", ");
     crate::chats::db_of(dir)
         .with(|c| {
-            let mut found = c.prepare(&format!(
-                "SELECT name, text FROM chat_docs WHERE chat = ? AND id IN ({marks}) ORDER BY added_at, id"
-            ))?;
-            let rows = found.query_map(
-                rusqlite::params_from_iter(std::iter::once(chat).chain(ids.iter().map(|id| id.as_str()))),
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
-            rows.collect()
+            let named: Vec<Named> = {
+                let mut found = c.prepare(&format!(
+                    "SELECT id, name, COALESCE(chars, length(text)) FROM chat_docs WHERE chat = ? AND id IN ({marks}) ORDER BY added_at, id"
+                ))?;
+                let rows = found.query_map(
+                    rusqlite::params_from_iter(
+                        std::iter::once(chat).chain(ids.iter().map(|id| id.as_str())),
+                    ),
+                    |r| {
+                        Ok(Named {
+                            id: r.get(0)?,
+                            name: r.get(1)?,
+                            chars: r.get::<_, i64>(2)?.max(0) as usize,
+                        })
+                    },
+                )?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut read = c.prepare("SELECT substr(text, 1, ?2) FROM chat_docs WHERE id = ?1")?;
+            named
+                .into_iter()
+                .enumerate()
+                .map(|(i, doc)| {
+                    let head = if i < heads {
+                        read.query_row(rusqlite::params![doc.id, most as i64], |r| r.get(0))?
+                    } else {
+                        String::new()
+                    };
+                    Ok((doc, head))
+                })
+                .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn part(dir: &Path, chat: &str, doc: &str, from: usize, chars: usize) -> Option<String> {
+    if !valid_id(chat) || !valid_doc(doc) {
+        return None;
+    }
+    crate::chats::db_of(dir)
+        .with(|c| {
+            c.query_row(
+                "SELECT substr(text, ?3, ?4) FROM chat_docs WHERE id = ?1 AND chat = ?2",
+                rusqlite::params![doc, chat, from as i64, chars as i64],
+                |r| r.get(0),
+            )
+        })
+        .ok()
 }
 
 pub fn remove(dir: &Path, chat: &str, doc: &str) -> bool {
@@ -331,12 +352,9 @@ mod tests {
     }
 
     #[test]
-    fn two_uploads_at_once_cannot_pass_the_limit() {
+    fn two_uploads_at_once_are_both_kept() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("chats");
-        for i in 0..MOST_FILES - 1 {
-            add(&dir, "chat-aaaa-1", &format!("{i}.txt"), "words", at(1)).unwrap();
-        }
         let both: Vec<_> = (0..2)
             .map(|i| {
                 let dir = dir.clone();
@@ -345,14 +363,8 @@ mod tests {
                 })
             })
             .collect();
-        let added = both
-            .into_iter()
-            .map(|one| one.join().unwrap())
-            .filter(|&ok| ok)
-            .count();
-        assert_eq!(added, 1);
-        assert_eq!(list(&dir, "chat-aaaa-1").len(), MOST_FILES);
-        assert_eq!(count(&dir, "chat-aaaa-1"), MOST_FILES);
+        assert!(both.into_iter().all(|one| one.join().unwrap()));
+        assert_eq!(list(&dir, "chat-aaaa-1").len(), 2);
     }
 
     #[test]
@@ -404,12 +416,17 @@ mod tests {
             listed.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
             ["slides.pdf", "board.jpg"]
         );
+        let named = Named {
+            id: b.id.clone(),
+            name: "board.jpg".into(),
+            chars: 21,
+        };
         assert_eq!(
-            texts(&dir, "chat-aaaa-1", std::slice::from_ref(&b.id)),
-            [("board.jpg".to_string(), "Dijkstra uses a heap.".to_string())]
+            texts(&dir, "chat-aaaa-1", std::slice::from_ref(&b.id), 1_000, 1),
+            [(named, "Dijkstra uses a heap.".to_string())]
         );
         assert!(
-            texts(&dir, "chat-bbbb-2", std::slice::from_ref(&b.id)).is_empty(),
+            texts(&dir, "chat-bbbb-2", std::slice::from_ref(&b.id), 1_000, 1).is_empty(),
             "another chat's document is not reachable"
         );
         assert!(remove(&dir, "chat-aaaa-1", &a.id));
@@ -421,9 +438,9 @@ mod tests {
     }
 
     #[test]
-    fn a_chat_holds_a_limited_number_of_documents() {
+    fn a_chat_holds_any_number_of_documents() {
         let tmp = tempfile::tempdir().unwrap();
-        for i in 0..MOST_FILES {
+        for i in 0..11 {
             add(
                 tmp.path(),
                 "chat-full-0001",
@@ -433,8 +450,59 @@ mod tests {
             )
             .unwrap();
         }
-        let refused = add(tmp.path(), "chat-full-0001", "one more.txt", "x", at(1));
-        assert!(refused.unwrap_err().to_string().contains("up to 10"));
+        assert_eq!(list(tmp.path(), "chat-full-0001").len(), 11);
+    }
+
+    #[test]
+    fn a_message_reads_only_its_share_of_a_long_document() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let long: String = (0..5_000_000)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let mut ids = Vec::new();
+        for i in 0..9 {
+            ids.push(
+                add(
+                    dir,
+                    "chat-aaaa-1",
+                    &format!("s{i}.txt"),
+                    "short words",
+                    at(1),
+                )
+                .unwrap()
+                .id,
+            );
+        }
+        ids.push(
+            add(dir, "chat-aaaa-1", "long.txt", &long, at(2))
+                .unwrap()
+                .id,
+        );
+        let found = texts(dir, "chat-aaaa-1", &ids, 7_000, 10);
+        assert_eq!(found.len(), 10);
+        assert_eq!(found[0].1, "short words");
+        assert_eq!(found[9].0.chars, 5_000_000);
+        assert_eq!(found[9].1.chars().count(), 7_000);
+        assert!(long.starts_with(&found[9].1));
+        let none = texts(dir, "chat-aaaa-1", &ids, 7_000, 3);
+        assert_eq!(none[2].1, "short words");
+        assert_eq!(none[3].1, "");
+        assert_eq!(none[9].0.chars, 5_000_000);
+    }
+
+    #[test]
+    fn a_part_is_cut_from_the_stored_text_by_characters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let doc = add(dir, "chat-aaaa-1", "w.txt", "héllo wörld ünd mehr", at(1)).unwrap();
+        assert_eq!(part(dir, "chat-aaaa-1", &doc.id, 1, 5).unwrap(), "héllo");
+        assert_eq!(
+            part(dir, "chat-aaaa-1", &doc.id, 13, 100).unwrap(),
+            "ünd mehr"
+        );
+        assert_eq!(part(dir, "chat-bbbb-2", &doc.id, 1, 5), None);
+        assert_eq!(part(dir, "chat-aaaa-1", "../x", 1, 5), None);
     }
 
     #[test]

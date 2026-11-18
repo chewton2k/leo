@@ -1479,3 +1479,19 @@ test('the note picker asks for 20 results', async () => {
   assert.deepEqual(asked, ['/api/search?q=heaps&limit=20']);
   assert.deepEqual(found.map((n) => n.id), ['a']);
 });
+
+test('an eleventh document is queued and no limit on documents is left in the page', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(!source.includes('MOST_FILES') && !source.includes('holds up to'));
+  const start = source.indexOf('    function addFiles(list) {');
+  const code = source.slice(start, source.indexOf('\n    }\n', start) + 6);
+  const queued = [];
+  const notices = [];
+  const context = { state: { files: Array.from({ length: 10 }, (_, i) => ({ id: `f${i}` })), sent: [] }, addFile: (f) => queued.push(f), notify: (m) => notices.push(m) };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.add = addFiles;`, context);
+  context.add(['eleventh.txt', 'twelfth.txt']);
+  assert.deepEqual(queued, ['eleventh.txt', 'twelfth.txt']);
+  assert.deepEqual(notices, []);
+});

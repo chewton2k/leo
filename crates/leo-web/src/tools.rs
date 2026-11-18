@@ -10,6 +10,7 @@ use crate::routes::notes::excerpt;
 pub const MOST_STEPS: usize = 12;
 pub const MOST_PROPOSALS: usize = 8;
 const READ_PARTS: usize = 3;
+const UNKNOWN_NAMES: usize = 40;
 const FOUND: usize = 8;
 const OPEN_CHARS: usize = 20_000;
 const CONNECTED: usize = 10;
@@ -625,13 +626,13 @@ pub const SPECS: [Spec; 32] = [
     },
     Spec {
         name: "read_document",
-        purpose: "Read unseen parts of a document attached to this chat.",
+        purpose: "Read unseen parts of an attached document.",
         params: &[
             FRESH,
             Param {
                 name: "document",
                 required: true,
-                about: "Document ID (d1) or filename; several separated by commas",
+                about: "Document ID (d1) or filename; several separated by commas; list = all names",
             },
             Param {
                 name: "part",
@@ -2108,7 +2109,8 @@ pub struct Desk {
     pub proposals: usize,
     room: usize,
     access: Access,
-    documents: Vec<(String, String)>,
+    documents: Vec<crate::chat_files::Named>,
+    chat_docs: (std::path::PathBuf, String),
     captions: Option<std::sync::Arc<crate::captions::Captions>>,
     pub asked: usize,
     pub session: Option<Session>,
@@ -2136,6 +2138,7 @@ impl Desk {
             room,
             access: Access::Ask,
             documents: Vec::new(),
+            chat_docs: Default::default(),
             captions: None,
             asked: 0,
             session: None,
@@ -2252,7 +2255,13 @@ impl Desk {
         ))
     }
 
-    pub fn with_documents(mut self, documents: Vec<(String, String)>) -> Desk {
+    pub fn with_documents(
+        mut self,
+        dir: std::path::PathBuf,
+        chat: String,
+        documents: Vec<crate::chat_files::Named>,
+    ) -> Desk {
+        self.chat_docs = (dir, chat);
         self.documents = documents;
         self
     }
@@ -2266,7 +2275,7 @@ impl Desk {
         let parts: usize = self
             .documents
             .iter()
-            .map(|(_, text)| text.chars().count().div_ceil(size))
+            .map(|doc| doc.chars.div_ceil(size))
             .sum();
         MOST_STEPS + parts.div_ceil(READ_PARTS)
     }
@@ -2406,8 +2415,62 @@ impl Desk {
             .or_else(|| {
                 self.documents
                     .iter()
-                    .position(|(name, _)| name.eq_ignore_ascii_case(wanted))
+                    .position(|doc| doc.name.eq_ignore_ascii_case(wanted))
             })
+    }
+
+    fn list_documents(&self, call: &Call, size: usize) -> Done {
+        let lines: Vec<String> = self
+            .documents
+            .iter()
+            .enumerate()
+            .map(|(i, doc)| format!("d{} {} ({} characters)", i + 1, doc.name, doc.chars))
+            .collect();
+        let mut parts: Vec<Vec<&str>> = Vec::new();
+        let mut used = 0;
+        for line in &lines {
+            let chars = line.chars().count() + 1;
+            if used == 0 || used + chars > size {
+                parts.push(Vec::new());
+                used = 0;
+            }
+            used += chars;
+            if let Some(last) = parts.last_mut() {
+                last.push(line);
+            }
+        }
+        if parts.is_empty() {
+            parts.push(Vec::new());
+        }
+        let of = parts.len();
+        let part = call
+            .text("part")
+            .trim()
+            .parse::<usize>()
+            .unwrap_or(1)
+            .max(1);
+        let (step, result) = match parts.get(part - 1) {
+            Some(lines) => (
+                format!("Listed the documents, part {part} of {of}"),
+                format!(
+                    "<documents part=\"{part}\" of=\"{of}\">\n{}\n</documents>",
+                    lines.join("\n")
+                ),
+            ),
+            None => (
+                "Listed the documents".to_string(),
+                format!(
+                    "That did not work: the list has {of} part{}.",
+                    if of == 1 { "" } else { "s" }
+                ),
+            ),
+        };
+        Done {
+            step,
+            result,
+            proposal: None,
+            found: Vec::new(),
+        }
     }
 
     fn read_document(&self, call: &Call) -> Done {
@@ -2423,17 +2486,27 @@ impl Desk {
                 .documents
                 .iter()
                 .enumerate()
-                .map(|(i, (name, _))| format!("d{} {name}", i + 1))
+                .map(|(i, doc)| format!("d{} {}", i + 1, doc.name))
+                .take(UNKNOWN_NAMES)
                 .collect();
             fail(if names.is_empty() {
                 "no documents were given in this chat".into()
             } else {
                 format!(
-                    "there is no document called \"{one}\"; the documents are {}",
-                    names.join(", ")
+                    "there is no document called \"{one}\"; the documents are {}{}",
+                    names.join(", "),
+                    if self.documents.len() > names.len() {
+                        ", and more (document \"list\")"
+                    } else {
+                        ""
+                    }
                 )
             })
         };
+        let size = self.part_chars();
+        if wanted.eq_ignore_ascii_case("list") && self.document_index(&wanted).is_none() {
+            return self.list_documents(call, size);
+        }
         let mut picked: Vec<usize> = Vec::new();
         for one in wanted.split(',').map(str::trim).filter(|w| !w.is_empty()) {
             let Some(index) = self.document_index(one) else {
@@ -2446,7 +2519,6 @@ impl Desk {
         if picked.is_empty() {
             return unknown(&wanted);
         }
-        let size = self.part_chars();
         let first = call
             .text("part")
             .trim()
@@ -2466,8 +2538,9 @@ impl Desk {
         let mut used = 0;
         let mut full = false;
         for &index in &picked {
-            let (name, text) = &self.documents[index];
-            let parts = text.chars().count().div_ceil(size).max(1);
+            let doc = &self.documents[index];
+            let name = &doc.name;
+            let parts = doc.chars.div_ceil(size).max(1);
             if first > parts {
                 let why = format!(
                     "{name} has {parts} part{}",
@@ -2480,7 +2553,14 @@ impl Desk {
                 continue;
             }
             for part in first..=first.saturating_add(count - 1).min(parts) {
-                let piece: String = text.chars().skip((part - 1) * size).take(size).collect();
+                let piece = crate::chat_files::part(
+                    &self.chat_docs.0,
+                    &self.chat_docs.1,
+                    &doc.id,
+                    (part - 1) * size + 1,
+                    size,
+                )
+                .unwrap_or_default();
                 let chars = piece.chars().count();
                 if full || (!blocks.is_empty() && used + chars > size * READ_PARTS) {
                     full = true;
@@ -2511,7 +2591,7 @@ impl Desk {
         let step = match read[..] {
             [(index, part, parts)] => format!(
                 "Read part {part} of {parts} of “{}”",
-                self.documents[index].0
+                self.documents[index].name
             ),
             _ => {
                 let mut documents: Vec<usize> = read.iter().map(|r| r.0).collect();
@@ -3180,10 +3260,38 @@ mod tests {
         );
     }
 
+    fn holding(documents: Vec<(String, String)>) -> (tempfile::TempDir, Desk) {
+        let tmp = tempfile::tempdir().unwrap();
+        let held: Vec<_> = documents
+            .iter()
+            .map(|(name, text)| {
+                let doc = crate::chat_files::add(
+                    tmp.path(),
+                    "chat-held-0001",
+                    name,
+                    text,
+                    chrono::Utc::now(),
+                )
+                .unwrap();
+                crate::chat_files::Named {
+                    id: doc.id,
+                    name: doc.name,
+                    chars: doc.chars,
+                }
+            })
+            .collect();
+        let desk = Desk::new(Vec::new(), 36_000).with_documents(
+            tmp.path().to_path_buf(),
+            "chat-held-0001".into(),
+            held,
+        );
+        (tmp, desk)
+    }
+
     #[test]
     fn a_long_document_is_read_part_by_part_by_id_or_name() {
         let text = format!("{}{}", "a".repeat(12_000), "b".repeat(5_000));
-        let desk = Desk::new(Vec::new(), 36_000).with_documents(vec![("paper.pdf".into(), text)]);
+        let (_tmp, desk) = holding(vec![("paper.pdf".into(), text)]);
         assert_eq!(desk.part_chars(), 12_000);
         let read = |args: serde_json::Value| {
             desk.read_document(&Call {
@@ -3222,7 +3330,7 @@ mod tests {
         let docs: Vec<(String, String)> = (1..=10)
             .map(|n| (format!("lec{n}.pdf"), "x".repeat(60_000)))
             .collect();
-        let desk = Desk::new(Vec::new(), 36_000).with_documents(docs);
+        let (_tmp, desk) = holding(docs);
         assert_eq!(desk.most_steps(), MOST_STEPS + 17);
     }
 
@@ -3231,7 +3339,7 @@ mod tests {
         let docs: Vec<(String, String)> = (1..=5)
             .map(|n| (format!("lec{n}.pdf"), n.to_string().repeat(20_000)))
             .collect();
-        let desk = Desk::new(Vec::new(), 36_000).with_documents(docs);
+        let (_tmp, desk) = holding(docs);
         let read = |args: serde_json::Value| {
             desk.read_document(&Call {
                 name: "read_document".into(),
@@ -3270,6 +3378,54 @@ mod tests {
             beyond.result.starts_with("That did not work:")
                 && beyond.result.contains("lec1.pdf has 2 parts")
         );
+    }
+
+    #[test]
+    fn read_document_reaches_the_end_of_a_long_document() {
+        let text: String = (0..5_000_000)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let (_tmp, desk) = holding(vec![("long.txt".into(), text.clone())]);
+        let size = desk.part_chars();
+        let parts = text.chars().count().div_ceil(size);
+        let last = desk.read_document(&Call {
+            name: "read_document".into(),
+            args: serde_json::json!({ "document": "d1", "part": parts.to_string() }),
+        });
+        let tail: String = text.chars().skip((parts - 1) * size).collect();
+        assert!(last
+            .result
+            .contains(&format!("part=\"{parts}\" of=\"{parts}\"")));
+        assert!(last.result.contains(&tail));
+    }
+
+    #[test]
+    fn read_document_lists_every_document_a_part_at_a_time() {
+        let docs: Vec<(String, String)> = (1..=5_000)
+            .map(|n| (format!("{n}-{}.txt", "n".repeat(110)), String::new()))
+            .collect();
+        let (_tmp, desk) = holding(docs);
+        let read = |part: usize| {
+            desk.read_document(&Call {
+                name: "read_document".into(),
+                args: serde_json::json!({ "document": "list", "part": part.to_string() }),
+            })
+            .result
+        };
+        let first = read(1);
+        let of: usize = first
+            .split("of=\"")
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap();
+        assert!(of > 1);
+        let all: String = (1..=of).map(read).collect();
+        for n in [1, 40, 41, 2_500, 5_000] {
+            assert!(all.contains(&format!("d{n} {n}-")), "d{n}");
+        }
+        assert_eq!(all.matches(".txt (0 characters)").count(), 5_000);
+        assert!(read(of + 1).starts_with("That did not work:"));
     }
 
     fn source(n: usize, id: &str, title: &str) -> SourceRef {

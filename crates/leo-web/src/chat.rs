@@ -310,7 +310,7 @@ fn turn_room(room: usize, at_default: usize) -> usize {
 pub(crate) fn clip(text: &str, most: usize) -> String {
     let mut out: String = text.chars().take(most).collect();
     if text.chars().count() > most {
-        out.push_str("\n[…the rest of this note is left out]");
+        out.push_str(CLIPPED);
     }
     out
 }
@@ -805,28 +805,93 @@ pub fn scaled(at_default: usize, room: usize) -> usize {
     at_default * room.clamp(LEAST_ROOM, MOST_ROOM) / ROOM
 }
 
+pub const FEW_DOCUMENTS: usize = 10;
+pub const LEAST_SHARE: usize = 200;
+const GOES_ON: &str = "\n[The document goes on. Use read_document to read any part of it.]";
+const CLIPPED: &str = "\n[…the rest of this note is left out]";
+
+pub fn heads_wanted(count: usize) -> (usize, usize) {
+    let most = scaled(DOCS_CHARS, MOST_ROOM);
+    (count.min(most / LEAST_SHARE), most / count.max(1) + 4_096)
+}
+
+fn document_tag(fence: &str, i: usize, name: &str) -> (String, String) {
+    (
+        format!(
+            "<document_{fence} id=\"d{}\" name=\"{}\">\n",
+            i + 1,
+            name.replace('"', "'")
+        ),
+        format!("\n</document_{fence}>\n"),
+    )
+}
+
+fn more_documents(total: usize, listed: usize) -> String {
+    format!(
+        "{} more documents are attached (d{} to d{total}). Use read_document with `document: \"list\"` to see their names, and with their number to read one.\n",
+        total - listed,
+        listed + 1
+    )
+}
+
 fn documents_within(docs: &[(String, String)], budget: usize) -> String {
     if docs.is_empty() {
         return String::new();
     }
-    let share = budget / docs.len();
     let fence = fence();
     let mut out = format!("<documents_{fence}>\n");
-    for (i, (name, text)) in docs.iter().enumerate() {
+    let closing = format!("</documents_{fence}>\n\n");
+    let mut listed = docs.len();
+    let mut share = budget / docs.len();
+    if docs.len() > FEW_DOCUMENTS {
+        let wrap = |i: usize| {
+            let (open, shut) = document_tag(fence, i, &docs[i].0);
+            [&open, &shut, GOES_ON, CLIPPED]
+                .iter()
+                .map(|part| part.chars().count())
+                .sum::<usize>()
+        };
+        let room = budget.saturating_sub(out.chars().count() + closing.chars().count());
+        let mut used = 0;
+        listed = 0;
+        while listed < docs.len() {
+            let next = used + wrap(listed);
+            let rest = if listed + 1 < docs.len() {
+                more_documents(docs.len(), listed + 1).chars().count()
+            } else {
+                0
+            };
+            if next + (listed + 1) * LEAST_SHARE + rest > room {
+                break;
+            }
+            used = next;
+            listed += 1;
+        }
+        if listed == 0 {
+            listed = 1;
+            used = wrap(0);
+        }
+        let rest = if listed < docs.len() {
+            more_documents(docs.len(), listed).chars().count()
+        } else {
+            0
+        };
+        share = room.saturating_sub(used + rest).max(listed * LEAST_SHARE) / listed;
+    }
+    for (i, (name, text)) in docs.iter().enumerate().take(listed) {
         let text = text.trim();
         let more = if text.chars().count() > share {
-            "\n[The document goes on. Use read_document to read any part of it.]"
+            GOES_ON
         } else {
             ""
         };
-        out.push_str(&format!(
-            "<document_{fence} id=\"d{}\" name=\"{}\">\n{}{more}\n</document_{fence}>\n",
-            i + 1,
-            name.replace('"', "'"),
-            clip(text, share)
-        ));
+        let (open, shut) = document_tag(fence, i, name);
+        out.push_str(&format!("{open}{}{more}{shut}", clip(text, share)));
     }
-    out.push_str(&format!("</documents_{fence}>\n\n"));
+    if listed < docs.len() {
+        out.push_str(&more_documents(docs.len(), listed));
+    }
+    out.push_str(&closing);
     out
 }
 
@@ -1617,6 +1682,60 @@ mod tests {
             "two documents share the budget"
         );
         assert!(documents_block(&[]).is_empty());
+    }
+
+    #[test]
+    fn ten_documents_or_fewer_are_shared_exactly_as_before() {
+        let docs: Vec<(String, String)> = (0..10)
+            .map(|n| (format!("d{n}.txt"), "word ".repeat(30_000)))
+            .collect();
+        let block = documents_within(&docs, DOCS_CHARS);
+        let f = fence();
+        let share = DOCS_CHARS / 10;
+        let mut expected = format!("<documents_{f}>\n");
+        for (i, (name, text)) in docs.iter().enumerate() {
+            expected.push_str(&format!(
+                "<document_{f} id=\"d{}\" name=\"{name}\">\n{}{GOES_ON}\n</document_{f}>\n",
+                i + 1,
+                clip(text.trim(), share)
+            ));
+        }
+        expected.push_str(&format!("</documents_{f}>\n\n"));
+        assert_eq!(block.replace(fence(), "F"), expected.replace(fence(), "F"));
+    }
+
+    #[test]
+    fn five_thousand_documents_stay_inside_the_budget() {
+        let docs: Vec<(String, String)> = (0..5_000)
+            .map(|n| {
+                (
+                    format!("{n:04}{}", "n".repeat(116)),
+                    if n % 2 == 0 {
+                        String::new()
+                    } else {
+                        "short text ".repeat(40)
+                    },
+                )
+            })
+            .collect();
+        for room in [LEAST_ROOM, ROOM, MOST_ROOM] {
+            let budget = scaled(DOCS_CHARS, room);
+            let block = documents_within(&docs, budget);
+            let closing = more_documents(docs.len(), 0).chars().count();
+            let listed = block.matches("<document_").count();
+            assert!(listed > 0 && listed < docs.len());
+            assert!(
+                block.chars().count() <= budget + closing,
+                "{room}: {} over {budget}",
+                block.chars().count()
+            );
+            assert!(block.contains(&format!(
+                "{} more documents are attached (d{} to d5000)",
+                5_000 - listed,
+                listed + 1
+            )));
+            assert!(block.contains("document: \"list\""));
+        }
     }
 
     #[test]
