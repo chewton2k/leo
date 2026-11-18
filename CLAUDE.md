@@ -240,8 +240,8 @@ never be copied in. See crates/leo-web/CLAUDE.md.
 
 Keeping expiry runs on blocking workers so filesystem walks do not hold the
 notes lock. The `Housekeeper` in `crates/leo-web/src/record.rs` lists and
-discards unfinished recordings and expires audio kept from saved sessions and
-old browser capture. A recovery job carries its session id, so Delete and
+discards unfinished recordings and expires audio kept from saved sessions.
+A recovery job carries its session id, so Delete and
 expiry act on the recording being recovered, never on the job's own id.
 
 Security cleanup: note roots refuse symlinks, folder scans have depth bounds, and displayed short IDs use

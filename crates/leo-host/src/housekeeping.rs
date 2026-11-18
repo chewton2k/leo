@@ -7,8 +7,6 @@ use leo_web::record::Housekeeper;
 
 pub struct Housekeeping;
 
-const MOST_RECORDINGS: usize = 1000;
-
 fn recordings_root(root: &Path) -> Result<bool> {
     if !root.exists() {
         return Ok(false);
@@ -81,21 +79,6 @@ fn discard_recordings(root: &Path, ids: &[String]) -> usize {
         .count()
 }
 
-fn real_dirs(root: &Path) -> Vec<std::path::PathBuf> {
-    if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
-        return Vec::new();
-    }
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    entries
-        .take(MOST_RECORDINGS)
-        .flatten()
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| leo_core::paths::contained_path(root, Path::new(&e.file_name())).ok())
-        .collect()
-}
-
 fn expire_saved(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
     if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
         return 0;
@@ -111,18 +94,6 @@ fn expire_saved(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
         })
         .filter(|b| !session::locked(&b.dir))
         .filter(|b| std::fs::remove_dir_all(&b.dir).is_ok())
-        .count()
-}
-
-fn expire_browser_audio(root: &Path, before: std::time::SystemTime) -> usize {
-    real_dirs(root)
-        .into_iter()
-        .filter(|dir| {
-            std::fs::symlink_metadata(dir)
-                .and_then(|m| m.modified())
-                .is_ok_and(|modified| modified < before)
-        })
-        .filter(|dir| std::fs::remove_dir_all(dir).is_ok())
         .count()
 }
 
@@ -176,11 +147,7 @@ impl Housekeeper for Housekeeping {
         session::root().map_or(0, |root| discard_recordings(&root, ids))
     }
     fn expire_kept_audio(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
-        let saved = session::root().map_or(0, |root| expire_saved(&root, before));
-        let browser = leo_core::paths::data_dir().map_or(0, |data| {
-            expire_browser_audio(&data.join("browser-audio"), before.into())
-        });
-        saved + browser
+        session::root().map_or(0, |root| expire_saved(&root, before))
     }
 }
 
@@ -257,16 +224,6 @@ mod tests {
         assert_eq!(expire_saved(&sessions, before), 1);
         assert!(!old_saved.exists());
         assert!(new_saved.exists() && old_pending.exists() && locked.exists());
-
-        let browser = tmp.path().join("browser-audio");
-        std::fs::create_dir_all(browser.join("left-behind")).unwrap();
-        std::fs::write(browser.join("left-behind/0.webm"), b"audio").unwrap();
-        let earlier = std::time::SystemTime::now() - std::time::Duration::from_secs(60);
-        assert_eq!(expire_browser_audio(&browser, earlier), 0);
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
-        assert_eq!(expire_browser_audio(&browser, later), 1);
-        assert!(!browser.join("left-behind").exists());
-        assert_eq!(expire_browser_audio(&tmp.path().join("absent"), later), 0);
     }
 
     #[test]

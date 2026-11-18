@@ -1617,8 +1617,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   folder and the note are never touched), transcripts (folders in
   `recording-sources/` by folder time) and unfinished audio
   (`record::Housekeeper::old_recordings`, each with `Pending.started`, then
-  `discard_recordings` in batches of 256, plus `expire_kept_audio` for saved sessions and old
-  `browser-audio` folders; the session in use, by `RecordJob::session_id`, and
+  `discard_recordings` in batches of 256, plus `expire_kept_audio` for saved sessions; the session in use, by `RecordJob::session_id`, and
   locked sessions are skipped). DELETE `/api/record/{id}` also deletes a
   waiting recording that has no job; the Record page offers it on each row.
   Every pass is bounded, never follows symlinks, stays in its folder and
