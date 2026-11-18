@@ -510,7 +510,7 @@ pub fn find(root: &Path, id: &str) -> Vec<Session> {
         .map(|(dir, _)| dir.clone())
         .collect();
     let found = open(cached);
-    if !found.is_empty() {
+    if found.len() > 1 || found.iter().any(|s| s.manifest.id == id) {
         return found;
     }
     open(
@@ -1245,6 +1245,21 @@ mod tests {
         let (third, after) = Session::unfinished_page(tmp.path(), after, 1);
         assert_eq!(ids(third), ["single-c"]);
         assert!(after.is_none());
+    }
+
+    #[test]
+    fn a_call_found_by_id_has_both_sides_when_one_is_remembered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut dirs = Vec::new();
+        for (side, secs) in [("you", 0), ("others", 1)] {
+            let mut manifest = Manifest::new(None, None, "", side == "others");
+            manifest.id = format!("call-1-{side}");
+            manifest.started += chrono::Duration::seconds(secs);
+            dirs.push(Session::create(tmp.path(), manifest).unwrap().dir);
+        }
+        assert_eq!(find(tmp.path(), "call-1").len(), 2);
+        held().remove(&dirs[1]);
+        assert_eq!(find(tmp.path(), "call-1").len(), 2);
     }
 
     #[test]

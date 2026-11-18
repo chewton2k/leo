@@ -258,21 +258,27 @@ mod tests {
         assert!(new_saved.exists() && old_pending.exists() && locked.exists());
     }
 
-    #[cfg(unix)]
     fn set_old(path: &Path, days: u64) {
-        let file = if path.is_dir() {
-            std::fs::File::open(path)
+        let mut open = std::fs::File::options();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            open.write(true).custom_flags(0x0200_0000);
+        }
+        #[cfg(not(windows))]
+        if path.is_dir() {
+            open.read(true);
         } else {
-            std::fs::File::options().write(true).open(path)
-        };
-        file.unwrap()
+            open.write(true);
+        }
+        open.open(path)
+            .unwrap()
             .set_modified(
                 std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400),
             )
             .unwrap();
     }
 
-    #[cfg(unix)]
     fn damaged(root: &Path, days: i64, manifest: Option<&str>, wav: bool) -> std::path::PathBuf {
         let started = chrono::Utc::now() - chrono::Duration::days(days);
         let dir = root.join(started.format("%Y%m%d-%H%M%S").to_string());
@@ -289,7 +295,6 @@ mod tests {
         dir
     }
 
-    #[cfg(unix)]
     fn session_of(root: &Path, id: &str, saved: bool, days: i64) -> std::path::PathBuf {
         let mut manifest = session::Manifest::new(None, None, "", false);
         manifest.id = id.into();
@@ -298,7 +303,6 @@ mod tests {
         Session::create(root, manifest).unwrap().dir
     }
 
-    #[cfg(unix)]
     #[test]
     fn the_audio_preview_counts_what_expiry_deletes() {
         let tmp = tempfile::tempdir().unwrap();
@@ -316,7 +320,6 @@ mod tests {
         assert!(!kept.exists() && !broken.exists());
     }
 
-    #[cfg(unix)]
     #[test]
     fn old_folders_with_damaged_metadata_are_expired() {
         let tmp = tempfile::tempdir().unwrap();
