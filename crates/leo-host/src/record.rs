@@ -6,6 +6,7 @@ use anyhow::{anyhow, Result};
 use leo_services::ai::chat::Jotted;
 use leo_services::session::capture::Source;
 use leo_services::session::recorder::{self, Controls, Event, Request};
+use leo_services::session::recording_id;
 use leo_web::record::{Heard, Listener, Listening, Recorded};
 
 pub fn listener() -> Listener {
@@ -430,48 +431,82 @@ fn labelled(
     passage
 }
 
-fn saved_sessions() -> Result<Vec<leo_services::session::Session>> {
+pub(crate) fn recordings_root() -> Result<Option<std::path::PathBuf>> {
     let root = leo_services::session::root()?;
     if !root.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     anyhow::ensure!(
         std::fs::symlink_metadata(&root)?.is_dir(),
         "Recording recovery cannot use a symbolic link."
     );
-    Ok(leo_services::session::Session::unfinished(&root))
+    Ok(Some(root))
 }
 
-fn recording_id(id: &str) -> &str {
-    id.strip_suffix("-you")
-        .or_else(|| id.strip_suffix("-others"))
-        .unwrap_or(id)
+fn waiting(session: &leo_services::session::Session) -> bool {
+    !session.manifest.saved && !leo_services::session::locked(&session.dir)
 }
 
-pub fn pending() -> Result<Vec<leo_web::record::Pending>> {
-    let mut grouped = std::collections::BTreeMap::new();
-    for session in saved_sessions()? {
+fn grouped(sessions: Vec<leo_services::session::Session>) -> Vec<leo_web::record::Pending> {
+    let mut out: Vec<leo_web::record::Pending> = Vec::new();
+    for session in sessions {
         let id = &session.manifest.id;
         let call = id.ends_with("-you") || id.ends_with("-others");
         let id = recording_id(id).to_owned();
-        grouped
-            .entry(id.clone())
-            .or_insert(leo_web::record::Pending {
-                id,
-                title: session.manifest.title,
-                directory: session.manifest.dir,
-                profile: session.manifest.profile,
-                started: Some(session.manifest.started),
-                source: if call {
-                    leo_web::record::Source::Nativecall
-                } else if session.manifest.screen {
-                    leo_web::record::Source::Screen
-                } else {
-                    leo_web::record::Source::Microphone
-                },
-            });
+        if out.iter().any(|p| p.id == id) {
+            continue;
+        }
+        out.push(leo_web::record::Pending {
+            id,
+            title: session.manifest.title,
+            directory: session.manifest.dir,
+            profile: session.manifest.profile,
+            started: Some(session.manifest.started),
+            source: if call {
+                leo_web::record::Source::Nativecall
+            } else if session.manifest.screen {
+                leo_web::record::Source::Screen
+            } else {
+                leo_web::record::Source::Microphone
+            },
+        });
     }
-    Ok(grouped.into_values().collect())
+    out
+}
+
+pub fn pending(
+    root: &std::path::Path,
+    after: Option<&str>,
+    limit: usize,
+) -> (Vec<leo_web::record::Pending>, Option<String>) {
+    let (sessions, after) =
+        leo_services::session::Session::unfinished_page(root, after.map(String::from), limit);
+    (grouped(sessions), after)
+}
+
+pub fn pending_one(root: &std::path::Path, id: &str) -> Option<leo_web::record::Pending> {
+    if !leo_core::recording::valid_id(id) {
+        return None;
+    }
+    let found = leo_services::session::find(root, id);
+    grouped(found.into_iter().filter(waiting).collect())
+        .into_iter()
+        .next()
+}
+
+pub fn pending_before(
+    root: &std::path::Path,
+    before: chrono::DateTime<chrono::Utc>,
+) -> Vec<leo_web::record::Pending> {
+    let sessions =
+        leo_services::session::scan(root, leo_services::session::Walk::OlderThan(before))
+            .sessions
+            .into_iter()
+            .filter(|b| !b.saved && b.started < before)
+            .filter_map(|b| leo_services::session::Session::open(&b.dir).ok())
+            .filter(|s| waiting(s) && s.manifest.started < before)
+            .collect();
+    grouped(sessions)
 }
 
 fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
@@ -479,9 +514,10 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         .recover
         .as_deref()
         .ok_or_else(|| anyhow!("Choose an interrupted recording."))?;
-    let selected: Vec<_> = saved_sessions()?
+    let root = recordings_root()?.ok_or_else(|| anyhow!("This recording cannot be recovered."))?;
+    let selected: Vec<_> = leo_services::session::find(&root, id)
         .into_iter()
-        .filter(|session| recording_id(&session.manifest.id) == id)
+        .filter(waiting)
         .map(|session| (session.manifest.id, session.dir))
         .collect();
     anyhow::ensure!(

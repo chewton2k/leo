@@ -25,9 +25,11 @@ Lecture listeners pass the engine's shared preview-visibility flag into recorder
 controls, including both call tracks. This flag never pauses capture or final
 transcription, and recovery continues while the main window is hidden.
 
-`housekeeping.rs` holds `Housekeeping`, leo-web's `record::Housekeeper`: `pending_recordings`
-(unfinished native sessions, unlocked ones only, each with its manifest's `started`) and
+`housekeeping.rs` holds `Housekeeping`, leo-web's `record::Housekeeper`: `pending_page`
+(unfinished native sessions, unlocked ones only, each with its manifest's `started`, newest first a
+page at a time, every folder reachable; metadata is remembered until its file changes),
+`pending_recording` (one by id), `old_recordings` (older than the Keeping cutoff) and
 `discard_recording` (validated id, contained paths, refuses a locked session). Settings →
 Keeping's audio expiry calls it, so a recording that is running or being recovered (its
-session is locked) is never discarded. `discard_recordings` deletes a batch with one scan (expiry uses it). The Storage page, its areas and actions were removed
+session is locked) is never discarded. `discard_recordings` deletes a batch, finding each recording by id and rereading its metadata before removing it (expiry uses it). The Storage page, its areas and actions were removed
 on 2026-11-05; files they managed stay on disk.

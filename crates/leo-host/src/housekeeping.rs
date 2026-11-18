@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use leo_services::session;
+use leo_services::session::{self, Session};
 use leo_web::record::Housekeeper;
 
 pub struct Housekeeping;
@@ -20,18 +20,13 @@ fn recordings_root(root: &Path) -> Result<bool> {
     Ok(true)
 }
 
-fn tracks_of(scan: &session::Scan, id: &str) -> Result<Vec<std::path::PathBuf>> {
+fn tracks_of(root: &Path, id: &str) -> Result<Vec<std::path::PathBuf>> {
     anyhow::ensure!(
         leo_core::recording::valid_id(id),
         "That is not a recording leo knows."
     );
-    let names = [id.to_string(), format!("{id}-you"), format!("{id}-others")];
     let mut dirs = Vec::new();
-    for found in scan
-        .sessions
-        .iter()
-        .filter(|s| names.contains(&s.manifest.id))
-    {
+    for found in session::find(root, id) {
         let lock = leo_core::paths::contained_path(&found.dir, Path::new("lock"))?;
         if lock.exists() {
             anyhow::ensure!(
@@ -67,7 +62,7 @@ fn discard_recording(root: &Path, id: &str) -> Result<()> {
     if !recordings_root(root)? {
         return Ok(());
     }
-    remove_tracks(tracks_of(&session::scan(root), id)?)
+    remove_tracks(tracks_of(root, id)?)
 }
 
 fn discard_recordings(root: &Path, ids: &[String]) -> usize {
@@ -81,9 +76,8 @@ fn discard_recordings(root: &Path, ids: &[String]) -> usize {
         Err(_) => return 0,
         Ok(true) => {}
     }
-    let scan = session::scan(root);
     ids.iter()
-        .filter(|id| tracks_of(&scan, id).and_then(remove_tracks).is_ok())
+        .filter(|id| tracks_of(root, id).and_then(remove_tracks).is_ok())
         .count()
 }
 
@@ -106,12 +100,17 @@ fn expire_saved(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
     if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
         return 0;
     }
-    session::scan(root)
+    session::scan(root, session::Walk::OlderThan(before))
         .sessions
         .into_iter()
-        .filter(|s| s.manifest.saved && s.manifest.started < before)
-        .filter(|s| !session::locked(&s.dir))
-        .filter(|s| std::fs::remove_dir_all(&s.dir).is_ok())
+        .filter(|b| b.saved && b.started < before)
+        .filter(|b| {
+            Session::open(&b.dir).is_ok_and(|s| {
+                s.manifest.id == b.id && s.manifest.saved && s.manifest.started < before
+            })
+        })
+        .filter(|b| !session::locked(&b.dir))
+        .filter(|b| std::fs::remove_dir_all(&b.dir).is_ok())
         .count()
 }
 
@@ -147,8 +146,28 @@ impl Housekeeper for Housekeeping {
             headset: session::mic::output_is_headset(),
         }
     }
-    fn pending_recordings(&self) -> Result<Vec<leo_web::record::Pending>> {
-        crate::record::pending()
+    fn pending_page(
+        &self,
+        after: Option<&str>,
+        limit: usize,
+    ) -> Result<(Vec<leo_web::record::Pending>, Option<String>)> {
+        Ok(crate::record::recordings_root()?
+            .map(|root| crate::record::pending(&root, after, limit))
+            .unwrap_or_default())
+    }
+    fn pending_recording(&self, id: &str) -> Result<Option<leo_web::record::Pending>> {
+        Ok(
+            crate::record::recordings_root()?
+                .and_then(|root| crate::record::pending_one(&root, id)),
+        )
+    }
+    fn old_recordings(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Vec<leo_web::record::Pending>> {
+        Ok(crate::record::recordings_root()?
+            .map(|root| crate::record::pending_before(&root, before))
+            .unwrap_or_default())
     }
     fn discard_recording(&self, id: &str) -> Result<()> {
         discard_recording(&session::root()?, id)
@@ -168,7 +187,6 @@ impl Housekeeper for Housekeeping {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use leo_services::session::Session;
 
     #[test]
     fn discarding_a_call_removes_both_tracks_and_keeps_other_recordings() {
@@ -280,6 +298,59 @@ mod tests {
             },
         );
         assert!(!writing_ready(&config, &MemoryStore::default()));
+    }
+
+    #[test]
+    fn recovery_and_delete_find_a_recording_past_the_first_page() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = chrono::Utc::now() - chrono::Duration::days(500);
+        for n in 0..1200 {
+            let mut manifest = session::Manifest::new(None, None, "", false);
+            manifest.id = format!("rec-{n:05}");
+            manifest.started = base + chrono::Duration::seconds(n * 7);
+            Session::create(tmp.path(), manifest).unwrap();
+        }
+        let (first, after) = crate::record::pending(tmp.path(), None, 50);
+        assert_eq!(first.len(), 50);
+        assert_eq!(first[0].id, "rec-01199");
+        assert!(after.is_some());
+        assert!(first.iter().all(|p| p.id != "rec-00000"));
+        let oldest = crate::record::pending_one(tmp.path(), "rec-00000").unwrap();
+        assert_eq!(oldest.id, "rec-00000");
+        discard_recording(tmp.path(), "rec-00000").unwrap();
+        assert!(crate::record::pending_one(tmp.path(), "rec-00000").is_none());
+        assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1199);
+    }
+
+    #[test]
+    fn a_delete_reads_the_manifest_from_disk() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut manifest = session::Manifest::new(None, None, "", false);
+        manifest.id = "cached-01".into();
+        manifest.started = chrono::Utc::now() - chrono::Duration::days(3);
+        let dir = Session::create(tmp.path(), manifest.clone()).unwrap().dir;
+        let path = dir.join("session.json");
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        let age = |path: &Path| {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(old)
+                .unwrap()
+        };
+        age(&path);
+        assert_eq!(crate::record::pending(tmp.path(), None, 50).0.len(), 1);
+        manifest.id = "another-01".into();
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        let replaced = dir.join("session.json.new");
+        std::fs::write(&replaced, bytes).unwrap();
+        age(&replaced);
+        std::fs::rename(&replaced, &path).unwrap();
+        discard_recording(tmp.path(), "cached-01").unwrap();
+        assert!(dir.exists());
+        discard_recordings(tmp.path(), &["cached-01".into()]);
+        assert!(dir.exists());
     }
 
     #[test]
