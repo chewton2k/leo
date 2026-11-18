@@ -42,7 +42,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
         {id:'cemail0001',board:'bwork00001',column:'kdoing0001',title:'Email tutor <b>now</b>',subheading:'',description:'',priority:'low'}]};
     let made=0;
     const gone={};
-    const ranked=board=>db.cards.filter(c=>c.board===board).map((c,i)=>({...c,rank:i+1}));
+    const ranked=board=>db.cards.filter(c=>c.board===board).map((c,i)=>{const text=Array.from(c.description);return {...c,description:text.slice(0,240).join(''),description_more:text.length>240,rank:i+1};});
     const place=(card,after)=>{db.cards=db.cards.filter(c=>c.id!==card.id);const same=db.cards.filter(c=>c.board===card.board&&c.column===card.column);let at;if(after===undefined)at=same.length?db.cards.indexOf(same[same.length-1])+1:db.cards.length;else if(after===null)at=same.length?db.cards.indexOf(same[0]):db.cards.length;else at=db.cards.findIndex(c=>c.id===after)+1;db.cards.splice(at,0,card);};
     window.calls=[];
     window.pending=0;
@@ -71,7 +71,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       if((m=url.match(/^\\/api\\/boards\\/([^/]+)\\/cards$/))){const card={id:body.id||'cmade'+(++made)+'00000',board:m[1],column:body.column||db.boards.find(b=>b.id===m[1]).columns[0].id,title:body.title,subheading:body.subheading||'',description:body.description||'',priority:body.priority||''};place(card,undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/move$/))){const card=db.cards.find(c=>c.id===m[1]);const from=db.boards.find(b=>b.id===card.board);if(body.board&&body.board!==card.board){const to=db.boards.find(b=>b.id===body.board);const name=from.columns.find(c=>c.id===card.column)?.name;card.board=to.id;card.column=body.column||(to.columns.find(c=>c.name===name)||to.columns[0]).id;}else if(body.column)card.column=body.column;place(card,'after' in body?body.after:undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/undelete$/))){const card=window.goneCards[m[1]];place(card,undefined);return {...card,rank:0};}
-      if((m=url.match(/^\\/api\\/cards\\/([^/]+)$/))){const card=db.cards.find(c=>c.id===m[1]);if(method==='GET')return {...card,rank:0};if(method==='DELETE'){(window.goneCards||(window.goneCards={}))[card.id]=card;db.cards=db.cards.filter(c=>c!==card);return {...card,rank:0};}Object.assign(card,body);return {...card,rank:0};}
+      if((m=url.match(/^\\/api\\/cards\\/([^/]+)$/))){const card=db.cards.find(c=>c.id===m[1]);if(method==='GET'){if(window.failCardRead){const e=new Error('Leo could not open the card.');e.status=500;throw e;}return {...card,rank:0};}if(method==='DELETE'){(window.goneCards||(window.goneCards={}))[card.id]=card;db.cards=db.cards.filter(c=>c!==card);return {...card,rank:0};}Object.assign(card,body);return {...card,rank:0};}
       throw new Error('No fake for '+method+' '+url);
     }
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
@@ -1078,5 +1078,31 @@ test('a card saved from its panel while it is being dragged leaves no copy behin
     await expect(page.locator('.kanban-ghost')).toHaveCount(0);
     expect(await titles(page, 'ktodo00001')).toEqual(['Write essay', 'Read chapter 3']);
     expect(await titles(page, 'kdoing0001')).toEqual(['Email tutor <b>now</b>']);
+  });
+});
+
+test('a title typed while a long description is still loading is saved, and the description keeps its whole text', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const whole = 'long words '.repeat(40);
+    await page.evaluate(async text => { window.db.cards.find(c => c.id === 'cread00001').description = text; await kanbanRefresh(); window.slow = 400; }, whole);
+    await page.locator('[data-card="cread00001"]').click();
+    await page.locator('#kanban-card-title').fill('Read chapter four');
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').title)).toBe('Read chapter four');
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe(whole);
+    await expect(page.locator('#kanban-card-description')).toContainText('long words long words');
+    await expect.poll(() => page.evaluate(() => document.querySelector('#kanban-card-description').textContent.length)).toBeGreaterThan(300);
+  });
+});
+
+test('a card whose whole description cannot be read says so and is left as it was', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const whole = 'long words '.repeat(40);
+    await page.evaluate(async text => { window.db.cards.find(c => c.id === 'cread00001').description = text; await kanbanRefresh(); window.failCardRead = true; }, whole);
+    await page.locator('[data-card="cread00001"]').click();
+    await expect(page.locator('#kanban-card-problem')).toContainText('could not be loaded');
+    await expect(page.locator('#kanban-card-description')).toHaveText('');
+    await page.locator('#kanban-card-title').fill('Read chapter four');
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').title)).toBe('Read chapter four');
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe(whole);
   });
 });
