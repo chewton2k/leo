@@ -124,6 +124,7 @@ const actions = {
   'source-apply': () => applyGenerated().catch(fail),
   'rec-finish': () => recorder.finishAvailable().catch(fail),
   'rec-recover': (el) => recorder.recover(el.dataset.id).catch(fail),
+  'rec-older': () => recorder.older().catch(fail),
   close: () => closeSheet(),
   'open-folder': openFolder,
   'open-note': openExplorerNote,

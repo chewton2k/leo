@@ -267,3 +267,19 @@ test('a hidden window pauses the speaker-model poll', async () => {
   }
   assert.equal(asked.length - first, 0);
 });
+
+test('older recordings are appended once, newest page first', () => {
+  const first = { pending: [{ id: 'c' }, { id: 'b' }], more: true, after: '20260102-090000', checks: { speech: true } };
+  const second = { pending: [{ id: 'b' }, { id: 'a' }], more: false, after: null, checks: { speech: true } };
+  const merged = L.mergePages(first, second);
+  assert.deepEqual(merged.pending.map((p) => p.id), ['c', 'b', 'a']);
+  assert.equal(merged.more, false);
+  assert.equal(merged.after, null);
+  assert.deepEqual(first.pending.map((p) => p.id), ['c', 'b']);
+});
+
+test('the quit warning says when there are more than one page', () => {
+  assert.equal(L.unsavedLine(1, false), "1 recording wasn't saved");
+  assert.equal(L.unsavedLine(50, false), "50 recordings weren't saved");
+  assert.equal(L.unsavedLine(50, true), "50 or more recordings weren't saved");
+});

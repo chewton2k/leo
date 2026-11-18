@@ -113,6 +113,16 @@
     return [when, PENDING_KINDS[p.source], p.directory || 'Top level'].filter(Boolean).join(' · ');
   }
 
+  function mergePages(shown, page) {
+    const ids = new Set((shown.pending || []).map((p) => p.id));
+    return { ...page, pending: [...(shown.pending || []), ...(page.pending || []).filter((p) => !ids.has(p.id))], more: page.more, after: page.after };
+  }
+
+  function unsavedLine(n, more) {
+    if (more) return `${n} or more recordings weren't saved`;
+    return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
+  }
+
   function failureOf(view) {
     const error = typeof view.error === 'string' ? view.error.slice(0, 12000) : '';
     const silent = Boolean(error) && error.split('; ').every((part) => /^(?:You: |Others: )?No sound was recorded\./.test(part));
@@ -438,7 +448,7 @@
         + (micDenied('microphone') ? '<p class="set-note">leo can’t hear: microphone access is off. <button class="btn plain sm" data-action="app-command" data-app-action="microphone">' + (desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings') + '</button></p>' : '')
         + (ov.checks && ov.checks.headset ? `<p class="set-note" id="rec-headset" hidden>${esc(HEADSET)}</p>` : '');
       const recover = pending.length
-        ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}</div>`
+        ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}${ov.more ? '<button type="button" class="btn plain sm" data-action="rec-older">Show older</button>' : ''}</div>`
         : '';
       return `<div class="rec rec-idle">
         <div class="section-title">Record</div>
@@ -831,6 +841,12 @@
       async recover(id) {
         await api(`/api/record/${id}/recover`,{method:'POST'}); await refresh();
       },
+      async older() {
+        if (!s.overview?.more) return;
+        const page = await api('/api/record?after=' + encodeURIComponent(s.overview.after));
+        s.overview = mergePages(s.overview, page);
+        draw();
+      },
 
       point: submitPoint,
       dismiss() {
@@ -865,5 +881,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);
