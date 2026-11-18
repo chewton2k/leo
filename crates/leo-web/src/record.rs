@@ -49,6 +49,8 @@ pub struct Pending {
     pub profile: leo_core::recording::Profile,
     #[serde(default)]
     pub started: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -393,9 +395,24 @@ pub(crate) async fn overview(State(state): State<AppState>, Query(page): Query<P
             checks = ready;
             let (saved, next) = saved.unwrap_or_default();
             after = next;
+            let owners: Vec<String> = saved.iter().filter_map(|p| p.note.clone()).collect();
+            let live = state
+                .read_store(move |store| {
+                    Ok(owners
+                        .into_iter()
+                        .filter(|id| store.find_note(id).is_some())
+                        .collect::<std::collections::HashSet<_>>())
+                })
+                .await
+                .ok();
             pending.extend(
                 saved
                     .into_iter()
+                    .filter(|p| {
+                        p.note
+                            .as_ref()
+                            .is_none_or(|note| live.as_ref().is_none_or(|live| live.contains(note)))
+                    })
                     .map(|p| serde_json::to_value(p).unwrap_or_default()),
             );
         }

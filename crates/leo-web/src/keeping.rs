@@ -384,6 +384,7 @@ mod tests {
             source: Source::Microphone,
             profile: Default::default(),
             started: days.map(|d| now - chrono::Duration::days(d) - chrono::Duration::seconds(5)),
+            note: None,
         }
     }
 

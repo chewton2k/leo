@@ -531,6 +531,7 @@ fn native_recordings_can_be_recovered_without_reopening_capture() {
                 source: record::Source::Microphone,
                 profile: Default::default(),
                 started: None,
+                note: None,
             }])
         }
     }
@@ -575,6 +576,7 @@ fn recover_saved_into(
                 source: record::Source::Microphone,
                 profile: Default::default(),
                 started: None,
+                note: None,
             }])
         }
     }
@@ -653,6 +655,44 @@ fn trash(state: &AppState, id: &str, for_good: bool) {
 }
 
 #[test]
+fn a_trashed_notes_audio_is_not_offered() {
+    struct Owned(Vec<(&'static str, Option<String>)>);
+    impl crate::record::Housekeeper for Owned {
+        fn pending_recordings(&self) -> anyhow::Result<Vec<record::Pending>> {
+            Ok(self
+                .0
+                .iter()
+                .map(|(id, note)| record::Pending {
+                    id: (*id).into(),
+                    title: None,
+                    directory: String::new(),
+                    source: record::Source::Microphone,
+                    profile: Default::default(),
+                    started: None,
+                    note: note.clone(),
+                })
+                .collect())
+        }
+    }
+    let (mut state, _dir, ids) = state_with(&[("Live", ""), ("Trashed", "")]);
+    trash(&state, &ids[1], false);
+    state.housekeeper = Some(Arc::new(Owned(vec![
+        ("rec-live-0001", Some(ids[0].clone())),
+        ("rec-trashed-01", Some(ids[1].clone())),
+        ("rec-gone-00001", Some("note-gone-0001".into())),
+        ("rec-unsaved-01", None),
+    ])));
+    let overview = json_of(run(record::overview(State(state), Default::default())));
+    let listed: Vec<&str> = overview["pending"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, ["rec-live-0001", "rec-unsaved-01"]);
+}
+
+#[test]
 fn a_recovered_failed_part_joins_its_notes_transcript() {
     let (mut state, _dir, ids) = state_with(&[("Lecture", "")]);
     let (view, committed) = recover_saved_into(&mut state, &ids[0]);
@@ -710,6 +750,7 @@ fn deleting_after_a_failed_recovery_or_from_the_waiting_list_removes_that_sessio
                     source: record::Source::Microphone,
                     profile: Default::default(),
                     started: None,
+                    note: None,
                 })
                 .collect())
         }
@@ -770,6 +811,7 @@ fn recovering_native_audio_reports_writing_and_can_finish_while_waiting_for_a_mo
                 source: record::Source::Microphone,
                 profile: Default::default(),
                 started: None,
+                note: None,
             }])
         }
     }
@@ -896,6 +938,7 @@ impl record::Housekeeper for Watching {
                 source: record::Source::Microphone,
                 profile: Default::default(),
                 started: Some(chrono::Utc::now() - chrono::Duration::days(90)),
+                note: None,
             })
             .collect())
     }
@@ -945,6 +988,7 @@ fn expiry_deletes_with_one_batch_call() {
                     source: record::Source::Microphone,
                     profile: Default::default(),
                     started: Some(chrono::Utc::now() - chrono::Duration::days(days)),
+                    note: None,
                 })
                 .collect())
         }
@@ -1033,6 +1077,7 @@ fn recovering_a_leftover_call_track_keeps_the_other_sides_passages() {
                 source: record::Source::Nativecall,
                 profile: Default::default(),
                 started: None,
+                note: None,
             }])
         }
     }
