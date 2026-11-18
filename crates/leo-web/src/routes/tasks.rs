@@ -13,7 +13,7 @@ use crate::routes::notes::save;
 use crate::tasks::{self, Meta, Task};
 use crate::AppState;
 
-fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+pub(super) fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,

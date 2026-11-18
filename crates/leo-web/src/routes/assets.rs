@@ -1,5 +1,6 @@
 use axum::http::header;
 use axum::response::{Html, IntoResponse, Response};
+use axum::routing::{get, MethodRouter};
 
 const HTML: &str = concat!(
     include_str!("../web/page-head.html"),
@@ -18,7 +19,7 @@ const HTML: &str = concat!(
     include_str!("../web/styles/13-setup-misc.css"),
     include_str!("../web/page-tail.html"),
 );
-const APP_JS: &str = concat!(
+pub(crate) const APP_JS: &str = concat!(
     "(function () {\n'use strict';\n",
     include_str!("../web/app/refresh.js"),
     include_str!("../web/app/core.js"),
@@ -48,34 +49,31 @@ const APP_JS: &str = concat!(
     include_str!("../web/app/events.js"),
     "})();\n",
 );
-const MARKDOWN_JS: &str = include_str!("../web/markdown.js");
+pub(crate) const MARKDOWN_JS: &str = include_str!("../web/markdown.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.min.js");
 pub(crate) const MERMAID_PATH: &str = "/vendor/mermaid-11.4.1.js";
-const EDITING_JS: &str = include_str!("../web/editing.js");
-const SAVING_JS: &str = include_str!("../web/saving.js");
-const DOC_JS: &str = include_str!("../web/doc.js");
-const SCHEDULE_JS: &str = include_str!("../web/schedule.js");
-const THEME_JS: &str = include_str!("../web/theme.js");
-const CHAT_JS: &str = include_str!("../web/chat.js");
-pub(crate) async fn pane_resize_js() -> Response {
-    javascript(include_str!("../web/pane-resize.js"))
-}
-const RECORDING_JS: &str = include_str!("../web/recording.js");
+pub(crate) const EDITING_JS: &str = include_str!("../web/editing.js");
+pub(crate) const SAVING_JS: &str = include_str!("../web/saving.js");
+pub(crate) const DOC_JS: &str = include_str!("../web/doc.js");
+pub(crate) const SCHEDULE_JS: &str = include_str!("../web/schedule.js");
+pub(crate) const THEME_JS: &str = include_str!("../web/theme.js");
+pub(crate) const CHAT_JS: &str = include_str!("../web/chat.js");
+pub(crate) const PANE_RESIZE_JS: &str = include_str!("../web/pane-resize.js");
+pub(crate) const MARGIN_JS: &str = include_str!("../web/margin.js");
+pub(crate) const RECORDING_JS: &str = include_str!("../web/recording.js");
 
 pub(crate) async fn index() -> Html<&'static str> {
     Html(HTML)
 }
 
-fn javascript(source: &'static str) -> Response {
-    (
-        [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
-        source,
-    )
-        .into_response()
-}
-
-pub(crate) async fn app_js() -> Response {
-    javascript(APP_JS)
+pub(crate) fn script<S: Clone + Send + Sync + 'static>(source: &'static str) -> MethodRouter<S> {
+    get(move || async move {
+        (
+            [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
+            source,
+        )
+            .into_response()
+    })
 }
 
 const KATEX: &[(&str, &[u8], &str)] = &[
@@ -253,30 +251,6 @@ pub(crate) async fn mermaid_js() -> Response {
         .into_response()
 }
 
-pub(crate) async fn markdown_js() -> Response {
-    javascript(MARKDOWN_JS)
-}
-
-pub(crate) async fn editing_js() -> Response {
-    javascript(EDITING_JS)
-}
-
-pub(crate) async fn saving_js() -> Response {
-    javascript(SAVING_JS)
-}
-
-pub(crate) async fn doc_js() -> Response {
-    javascript(DOC_JS)
-}
-
-pub(crate) async fn schedule_js() -> Response {
-    javascript(SCHEDULE_JS)
-}
-
-pub(crate) async fn theme_js() -> Response {
-    javascript(THEME_JS)
-}
-
 const FAVICON: &str = "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"-1 -1 46 34\" shape-rendering=\"crispEdges\">\
 <rect x=\"0\" y=\"18\" width=\"5\" height=\"6\" fill=\"#b4cfe7\"/>\
 <rect x=\"39\" y=\"18\" width=\"5\" height=\"6\" fill=\"#b4cfe7\"/>\
@@ -293,17 +267,6 @@ pub(crate) async fn favicon() -> Response {
         FAVICON,
     )
         .into_response()
-}
-
-pub(crate) async fn margin_js() -> Response {
-    javascript(include_str!("../web/margin.js"))
-}
-pub(crate) async fn chat_js() -> Response {
-    javascript(CHAT_JS)
-}
-
-pub(crate) async fn recording_js() -> Response {
-    javascript(RECORDING_JS)
 }
 
 #[cfg(test)]

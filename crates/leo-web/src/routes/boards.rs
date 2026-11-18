@@ -5,21 +5,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
-use serde::{Deserialize, Deserializer};
+use serde::Deserialize;
 use serde_json::json;
 
 use crate::boards::{self, Board, Card, ColumnInput, Spot};
 use crate::reply::error;
 use crate::routes::insert;
+use crate::routes::tasks::present;
 use crate::AppState;
-
-fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
-where
-    D: Deserializer<'de>,
-    T: Deserialize<'de>,
-{
-    Option::<T>::deserialize(d).map(Some)
-}
 
 async fn blocking(
     state: &AppState,

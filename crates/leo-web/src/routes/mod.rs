@@ -25,9 +25,7 @@ use axum::{
 };
 
 use crate::routes::activity::{activity, page_visible};
-use crate::routes::assets::{
-    app_js, chat_js, doc_js, editing_js, favicon, index, markdown_js, recording_js, saving_js,
-};
+use crate::routes::assets::{favicon, index, script};
 use crate::routes::auth::{auth_middleware, note_peer, security_headers};
 use crate::routes::downloads::{export_zip, originals_zip};
 use crate::routes::felix::{
@@ -199,26 +197,26 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/trash/delete", post(delete_from_trash))
         .route("/api/trash/move", post(move_to_trash))
         .route("/api/trash/restore", post(restore_many))
-        .route("/app.js", get(app_js))
-        .route("/markdown.js", get(markdown_js))
+        .route("/app.js", script(assets::APP_JS))
+        .route("/markdown.js", script(assets::MARKDOWN_JS))
         .route(assets::MERMAID_PATH, get(assets::mermaid_js))
         .route("/vendor/katex-0.16.11/{*path}", get(assets::katex_file))
         .route("/vendor/fonts-5.3.0/{*path}", get(assets::font_file))
-        .route("/editing.js", get(editing_js))
-        .route("/doc.js", get(doc_js))
-        .route("/saving.js", get(saving_js))
-        .route("/schedule.js", get(assets::schedule_js))
-        .route("/margin.js", get(assets::margin_js))
+        .route("/editing.js", script(assets::EDITING_JS))
+        .route("/doc.js", script(assets::DOC_JS))
+        .route("/saving.js", script(assets::SAVING_JS))
+        .route("/schedule.js", script(assets::SCHEDULE_JS))
+        .route("/margin.js", script(assets::MARGIN_JS))
         .route("/prefs.js", get(crate::prefs::script))
-        .route("/theme.js", get(assets::theme_js))
+        .route("/theme.js", script(assets::THEME_JS))
         .route(
             "/api/ui-prefs",
             axum::routing::put(crate::prefs::change).layer(axum::extract::DefaultBodyLimit::max(
                 crate::prefs::BODY_BYTES,
             )),
         )
-        .route("/chat.js", get(chat_js))
-        .route("/pane-resize.js", get(assets::pane_resize_js))
+        .route("/chat.js", script(assets::CHAT_JS))
+        .route("/pane-resize.js", script(assets::PANE_RESIZE_JS))
         .route("/api/chat", post(chat_reply))
         .route("/api/quiz/mark", post(felix::mark_quiz))
         .route(
@@ -323,7 +321,7 @@ pub(crate) fn router(state: AppState) -> Router {
             post(crate::record::finish_available),
         )
         .route("/api/record/{id}/recover", post(crate::record::recover))
-        .route("/recording.js", get(recording_js))
+        .route("/recording.js", script(assets::RECORDING_JS))
         .route("/api/notes/{id}/originals", get(list_originals))
         .route(
             "/api/notes/{id}/originals/{name}/passage",
