@@ -396,8 +396,9 @@ async function quitText() {
 }
 async function warnUnsaved() {
   try {
-    const n = ((await api('/api/record')).pending || []).length;
-    if (n && !/^#\/record/.test(location.hash)) toast(n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`, { action: 'Open Record', run: () => go('#/record') });
+    const ov = await api('/api/record');
+    const n = (ov.pending || []).length;
+    if (n && !/^#\/record/.test(location.hash)) toast(window.leoRecording.unsavedLine(n, ov.more), { action: 'Open Record', run: () => go('#/record') });
   } catch (e) {}
 }
 window.leoFromApp = async (what, which) => {

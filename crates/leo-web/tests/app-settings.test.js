@@ -99,7 +99,8 @@ test('Updates renders ready, busy and release notes safely with independent defa
 
 function tail(extra) {
   const events = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
-  const window = {};
+  require('../src/web/recording.js');
+  const window = { leoRecording: { unsavedLine: globalThis.leoRecording.unsavedLine } };
   const messages = [];
   const calls = [];
   const scope = { window, toast: (text, options) => messages.push([text, options]), go: (hash) => calls.push(hash), location: { hash: '#/' }, setTimeout, saveWebsiteWork() {}, ...extra };
@@ -130,8 +131,8 @@ test('a failed or slow recording check keeps the usual quit text', async () => {
   assert.ok(await usual(() => new Promise((resolve) => setTimeout(() => resolve({ job: { state: 'writing' } }), 1000))));
 });
 test('unsaved recordings are announced once with a way to Record, never on the Record page', async () => {
-  const run = async (pending, hash = '#/') => {
-    const { window, messages, calls } = tail({ api: async () => ({ pending }), location: { hash } });
+  const run = async (pending, hash = '#/', more = false) => {
+    const { window, messages, calls } = tail({ api: async () => ({ pending, more }), location: { hash } });
     await window.warnUnsaved();
     return { messages, calls };
   };
@@ -144,6 +145,7 @@ test('unsaved recordings are announced once with a way to Record, never on the R
   one.messages[0][1].run();
   assert.deepEqual(one.calls, ['#/record']);
   assert.equal((await run([{ id: 'a' }, { id: 'b' }, { id: 'c' }])).messages[0][0], "3 recordings weren't saved");
+  assert.equal((await run([{ id: 'a' }, { id: 'b' }], '#/', true)).messages[0][0], "2 or more recordings weren't saved");
   const { window, messages } = tail({ api: async () => { throw new Error('offline'); } });
   await window.warnUnsaved();
   assert.equal(messages.length, 0);
