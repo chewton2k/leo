@@ -727,6 +727,7 @@ fn run(
                 created.id = id.clone();
                 note = id;
             }
+            store.find_note_mut(&note);
         }
         save(store)?;
         Ok((note, store.notes_dir.clone()))
