@@ -277,6 +277,7 @@ struct Seen {
     disk: u64,
     model: u64,
     fields: u64,
+    place: u64,
     copy: Option<(PathBuf, u64)>,
 }
 
@@ -299,6 +300,13 @@ fn hash_note(note: &Note) -> u64 {
         serde_yaml::to_string(&note.extra).unwrap_or_default(),
     )
         .hash(&mut hasher);
+    hasher.finish()
+}
+
+fn place_of(note: &Note) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (&note.title, &note.directory, note.created_at).hash(&mut hasher);
     hasher.finish()
 }
 
@@ -784,6 +792,7 @@ fn index_notes(mut found: Vec<Found>) -> (Vec<Note>, HashMap<String, Seen>) {
                 disk: hash_str(&content),
                 model,
                 fields,
+                place: place_of(&note),
                 copy: None,
             },
         );
@@ -810,6 +819,10 @@ pub struct Store {
     tidied: std::cell::Cell<Option<std::time::Instant>>,
     dirs_seen: std::cell::Cell<u64>,
     dirs_base: std::cell::RefCell<Vec<String>>,
+    dirty: std::cell::RefCell<HashSet<String>>,
+    removed: std::cell::RefCell<HashSet<String>>,
+    full: std::cell::Cell<bool>,
+    placed: std::cell::Cell<bool>,
 }
 
 impl Store {
@@ -863,6 +876,10 @@ impl Store {
             tidied: std::cell::Cell::new(Some(tidied)),
             dirs_seen: std::cell::Cell::new(dirs_seen),
             dirs_base: std::cell::RefCell::new(dirs_base),
+            dirty: Default::default(),
+            removed: Default::default(),
+            full: std::cell::Cell::new(true),
+            placed: Default::default(),
             unreadable,
             notes,
             directories,
@@ -877,26 +894,26 @@ impl Store {
     pub fn save_files(&self) -> Result<()> {
         check_notes_root(&self.notes_dir)?;
         fs::create_dir_all(&self.notes_dir)?;
-        let mut checked = HashSet::new();
-        for dir in self
-            .notes
-            .iter()
-            .map(|n| n.directory.as_str())
-            .chain(self.directories.iter().map(String::as_str))
-        {
-            if checked.insert(dir) {
-                self.validate_directory(dir)?;
-            }
-        }
+        let stamp = self.tidied.get();
+        let everything = self.full.get() || tidy_due(stamp);
+        let placed = self.placed.replace(false);
+        let mut work = self.marked(everything);
+        self.check_folders(work.iter().copied())?;
         let mut seen = self.seen.borrow_mut();
-        let targets = self.assign_paths(&seen);
-        let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
+        let (targets, _shortcut) = self.place_work(&seen, &mut work, everything, placed)?;
+        #[cfg(debug_assertions)]
+        if !everything {
+            self.check_marks(&seen, &work, &targets, _shortcut);
+        }
         let mut failed: Option<anyhow::Error> = None;
         let mut fp = self.fingerprint.get();
+        let mut moved = false;
+        let mut hashed = Vec::with_capacity(work.len());
 
-        for note in &self.notes {
+        for &note in &work {
             let target = &targets[&note.id];
             let fields = hash_note(note);
+            hashed.push((note, fields, target));
             let previous = seen.get(&note.id).cloned();
             if let Some(previous) = &previous {
                 if previous.fields == fields && self.notes_dir.join(&previous.path) == *target {
@@ -909,11 +926,16 @@ impl Store {
             let mut old_path = None;
             if let Some(previous) = &previous {
                 if previous.model == model && self.notes_dir.join(&previous.path) == *target {
+                    if let Some(entry) = seen.get_mut(&note.id) {
+                        entry.fields = fields;
+                        entry.place = place_of(note);
+                    }
                     continue;
                 }
                 let old = crate::paths::contained_path(&self.notes_dir, &previous.path)?;
                 if !is_clean(&old, previous.disk) {
                     if previous.model != model {
+                        moved = true;
                         let copy = self.conflict_copy(note, previous.copy.as_ref())?;
                         if let Some(entry) = seen.get_mut(&note.id) {
                             entry.model = model;
@@ -927,6 +949,9 @@ impl Store {
             }
             if previous.is_none() {
                 self.tidied.set(None);
+            }
+            if old_path.as_ref() != Some(target) {
+                moved = true;
             }
 
             let relative = target
@@ -990,16 +1015,56 @@ impl Store {
                     disk: model,
                     model,
                     fields,
+                    place: place_of(note),
                     copy: previous.and_then(|previous| previous.copy),
                 },
             );
         }
-
-        let gone: Vec<String> = seen
-            .keys()
-            .filter(|id| !live.contains(id.as_str()))
-            .cloned()
+        let unsettled: HashSet<String> = hashed
+            .into_iter()
+            .filter(|(note, fields, target)| {
+                !seen.get(&note.id).is_some_and(|s| {
+                    s.fields == *fields
+                        && s.place == place_of(note)
+                        && self.notes_dir.join(&s.path) == **target
+                })
+            })
+            .map(|(note, _, _)| note.id.clone())
             .collect();
+        *self.dirty.borrow_mut() = unsettled;
+
+        let removed = self.removed.borrow();
+        let live: HashSet<&str> = if self.live_needed(everything) {
+            self.notes.iter().map(|n| n.id.as_str()).collect()
+        } else {
+            HashSet::new()
+        };
+        let gone: Vec<String> = if everything {
+            seen.keys()
+                .filter(|id| !live.contains(id.as_str()))
+                .cloned()
+                .collect()
+        } else {
+            removed
+                .iter()
+                .filter(|id| seen.contains_key(*id) && !live.contains(id.as_str()))
+                .cloned()
+                .collect()
+        };
+        #[cfg(debug_assertions)]
+        {
+            let all: HashSet<&String> = seen
+                .keys()
+                .filter(|id| !live.contains(id.as_str()))
+                .collect();
+            assert_eq!(
+                gone.iter().collect::<HashSet<_>>(),
+                all,
+                "a note left the store without passing a marking point"
+            );
+        }
+        drop(removed);
+        moved |= !gone.is_empty();
         for id in gone {
             let Some(entry) = seen.get(&id) else {
                 continue;
@@ -1016,18 +1081,166 @@ impl Store {
             }
             seen.remove(&id);
         }
+        self.removed.borrow_mut().clear();
         drop(seen);
         if tidy_due(self.tidied.get()) {
             tidy_trash(&self.notes_dir, &live, trash_cutoff(&self.notes_dir));
-            self.tidied.set(Some(std::time::Instant::now()));
+            self.tidied.set(if everything {
+                Some(std::time::Instant::now())
+            } else {
+                stamp
+            });
         }
 
         self.save_directories(&mut fp)?;
         self.fingerprint.set(fp);
+        self.full.set(false);
+        self.placed.set(!moved && failed.is_none());
         if let Some(e) = failed {
             return Err(e);
         }
         Ok(())
+    }
+
+    fn check_folders<'a>(&'a self, notes: impl Iterator<Item = &'a Note>) -> Result<()> {
+        let mut checked = HashSet::new();
+        for dir in notes
+            .map(|n| n.directory.as_str())
+            .chain(self.directories.iter().map(String::as_str))
+        {
+            if checked.insert(dir) {
+                self.validate_directory(dir)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn marked(&self, everything: bool) -> Vec<&Note> {
+        if everything {
+            return self.notes.iter().collect();
+        }
+        let dirty = self.dirty.borrow();
+        if dirty.is_empty() {
+            return Vec::new();
+        }
+        self.notes
+            .iter()
+            .filter(|n| dirty.contains(&n.id))
+            .collect()
+    }
+
+    fn place_work<'a>(
+        &'a self,
+        seen: &HashMap<String, Seen>,
+        work: &mut Vec<&'a Note>,
+        everything: bool,
+        placed: bool,
+    ) -> Result<(HashMap<String, PathBuf>, bool)> {
+        let shortcut = !everything
+            && placed
+            && self.removed.borrow().is_empty()
+            && work
+                .iter()
+                .all(|n| seen.get(&n.id).is_some_and(|s| s.place == place_of(n)));
+        if shortcut {
+            let targets = work
+                .iter()
+                .map(|n| (n.id.clone(), self.notes_dir.join(&seen[&n.id].path)))
+                .collect();
+            return Ok((targets, true));
+        }
+        let targets = self.assign_paths(seen);
+        if !everything {
+            let marked: HashSet<&str> = work.iter().map(|n| n.id.as_str()).collect();
+            let shifted: Vec<&Note> = self
+                .notes
+                .iter()
+                .filter(|n| {
+                    !marked.contains(n.id.as_str())
+                        && seen
+                            .get(&n.id)
+                            .is_none_or(|s| self.notes_dir.join(&s.path) != targets[&n.id])
+                })
+                .collect();
+            self.check_folders(shifted.iter().copied())?;
+            work.extend(shifted);
+        }
+        Ok((targets, false))
+    }
+
+    fn live_needed(&self, everything: bool) -> bool {
+        everything
+            || cfg!(debug_assertions)
+            || !self.removed.borrow().is_empty()
+            || tidy_due(self.tidied.get())
+    }
+
+    #[cfg(debug_assertions)]
+    fn check_marks(
+        &self,
+        seen: &HashMap<String, Seen>,
+        work: &[&Note],
+        targets: &HashMap<String, PathBuf>,
+        shortcut: bool,
+    ) {
+        let marked: HashSet<&str> = work.iter().map(|n| n.id.as_str()).collect();
+        for note in &self.notes {
+            if marked.contains(note.id.as_str()) {
+                continue;
+            }
+            assert!(
+                seen.get(&note.id)
+                    .is_some_and(|s| s.fields == hash_note(note) && s.place == place_of(note)),
+                "\"{}\" changed without passing a marking point",
+                note.title
+            );
+        }
+        if shortcut {
+            let full = self.assign_paths(seen);
+            for note in &self.notes {
+                let used = targets
+                    .get(&note.id)
+                    .cloned()
+                    .or_else(|| seen.get(&note.id).map(|s| self.notes_dir.join(&s.path)));
+                assert_eq!(
+                    used.as_ref(),
+                    full.get(&note.id),
+                    "\"{}\" was placed differently from a full name assignment",
+                    note.title
+                );
+            }
+        }
+    }
+
+    #[doc(hidden)]
+    pub fn time_save_parts(&self) -> [std::time::Duration; 4] {
+        let seen = self.seen.borrow();
+        let everything = self.full.get() || tidy_due(self.tidied.get());
+        let at = std::time::Instant::now();
+        let mut work = self.marked(everything);
+        let _ = std::hint::black_box(self.check_folders(work.iter().copied()));
+        let folders = at.elapsed();
+        let at = std::time::Instant::now();
+        let _ =
+            std::hint::black_box(self.place_work(&seen, &mut work, everything, self.placed.get()));
+        let paths = at.elapsed();
+        let at = std::time::Instant::now();
+        let live: HashSet<&str> = if self.live_needed(everything) {
+            self.notes.iter().map(|n| n.id.as_str()).collect()
+        } else {
+            HashSet::new()
+        };
+        std::hint::black_box(&live);
+        let ids = at.elapsed();
+        let at = std::time::Instant::now();
+        for note in &work {
+            std::hint::black_box(hash_note(note));
+        }
+        [folders, paths, ids, at.elapsed()]
+    }
+
+    pub fn touch_all(&mut self) {
+        self.full.set(true);
     }
 
     fn save_directories(&self, fp: &mut u64) -> Result<()> {
@@ -1214,6 +1427,7 @@ impl Store {
             };
             add_with_parents(&mut self.directories, &note.directory);
             restored.titles.push(note.title.clone());
+            self.dirty.get_mut().insert(note.id.clone());
             self.notes.push(note);
         }
         if !restored.titles.is_empty() {
@@ -1331,6 +1545,7 @@ impl Store {
         self.validate_directory(directory)?;
         add_with_parents(&mut self.directories, directory);
         let note = Note::new(title, body, tags, directory);
+        self.dirty.get_mut().insert(note.id.clone());
         self.notes.push(note);
         Ok(self.notes.last().unwrap())
     }
@@ -1364,19 +1579,23 @@ impl Store {
 
     /// Find a mutable note by full ID or unique prefix.
     pub fn find_note_mut(&mut self, id_prefix: &str) -> Option<&mut Note> {
-        if let Some(i) = self.notes.iter().position(|n| n.id == id_prefix) {
-            return Some(&mut self.notes[i]);
-        }
-        let mut found = self
-            .notes
-            .iter_mut()
-            .filter(|n| n.id.starts_with(id_prefix));
-        let first = found.next()?;
-        if found.next().is_none() {
-            Some(first)
-        } else {
-            None
-        }
+        let at = match self.notes.iter().position(|n| n.id == id_prefix) {
+            Some(at) => at,
+            None => {
+                let mut found = self
+                    .notes
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, n)| n.id.starts_with(id_prefix));
+                let (first, _) = found.next()?;
+                if found.next().is_some() {
+                    return None;
+                }
+                first
+            }
+        };
+        self.dirty.get_mut().insert(self.notes[at].id.clone());
+        Some(&mut self.notes[at])
     }
 
     /// IDs that more than one note has.
@@ -1395,7 +1614,14 @@ impl Store {
     /// Returns how many were deleted.
     pub fn delete_notes(&mut self, ids: &[String]) -> usize {
         let before = self.notes.len();
-        self.notes.retain(|n| !ids.contains(&n.id));
+        let removed = self.removed.get_mut();
+        self.notes.retain(|n| {
+            let keep = !ids.contains(&n.id);
+            if !keep {
+                removed.insert(n.id.clone());
+            }
+            keep
+        });
         before - self.notes.len()
     }
 
@@ -1551,8 +1777,14 @@ impl Store {
         let prefix = format!("{path}/");
 
         let (notes, dirs) = (self.notes.len(), self.directories.len());
-        self.notes
-            .retain(|n| n.directory != path && !n.directory.starts_with(&prefix));
+        let removed = self.removed.get_mut();
+        self.notes.retain(|n| {
+            let keep = n.directory != path && !n.directory.starts_with(&prefix);
+            if !keep {
+                removed.insert(n.id.clone());
+            }
+            keep
+        });
         self.directories
             .retain(|d| d != path && !d.starts_with(&prefix));
         (notes - self.notes.len(), dirs - self.directories.len())
@@ -1625,10 +1857,12 @@ impl Store {
             }
         };
         let now = Utc::now();
+        let dirty = self.dirty.get_mut();
         for note in &mut self.notes {
             if let Some(dir) = renamed(&note.directory) {
                 note.directory = dir;
                 note.updated_at = now;
+                dirty.insert(note.id.clone());
             }
         }
         let mut directories: Vec<String> = self
@@ -1967,7 +2201,8 @@ mod tests {
                 .extra
                 .insert("rating".into(), serde_yaml::Value::from(4.5));
             store.save().unwrap();
-            change(&mut store.notes[0]);
+            let id = store.notes[0].id.clone();
+            change(store.find_note_mut(&id).unwrap());
             store.save().unwrap();
             let saved = &Store::load_from(&notes_dir).unwrap().notes[0];
             let wanted = &store.notes[0];
@@ -2021,6 +2256,144 @@ mod tests {
         assert!(store.trashed().is_empty());
     }
 
+    fn on_disk_as_in_memory(store: &Store) {
+        let key = |n: &Note| {
+            (
+                n.id.clone(),
+                n.title.clone(),
+                n.body.clone(),
+                n.directory.clone(),
+            )
+        };
+        let mut memory: Vec<_> = store.notes.iter().map(key).collect();
+        let mut disk: Vec<_> = Store::load_from(&store.notes_dir)
+            .unwrap()
+            .notes
+            .iter()
+            .map(key)
+            .collect();
+        memory.sort();
+        disk.sort();
+        assert_eq!(disk, memory);
+    }
+
+    #[test]
+    fn an_autosave_writes_a_note_changed_through_every_mutator() {
+        let (mut store, _tmp) = temp_store();
+        let ids = [("A", "- [ ] one", "f/g"), ("B", "b", "f"), ("C", "c", "")].map(
+            |(title, body, dir)| {
+                store
+                    .create_note(title, body, vec![], dir)
+                    .unwrap()
+                    .id
+                    .clone()
+            },
+        );
+        assert!(store.create_dir("h"));
+        store.save().unwrap();
+        type Step = fn(&mut Store, &[String; 3]);
+        let steps: [Step; 11] = [
+            |s, ids| s.find_note_mut(&ids[0]).unwrap().body = "- [ ] edited".into(),
+            |s, ids| assert_eq!(s.toggle_checkbox(&ids[0], 1), Some(true)),
+            |s, ids| assert!(s.move_note(&ids[1], "h").is_some()),
+            |s, _| assert!(s.rename_dir("f", "renamed").is_some()),
+            |s, _| assert!(s.move_dir("renamed", "h").is_some()),
+            |s, _| {
+                s.create_note("D", "d", vec![], "").unwrap();
+            },
+            |s, ids| assert_eq!(s.delete_notes(std::slice::from_ref(&ids[2])), 1),
+            |s, ids| assert!(s.restore(&ids[2]).is_some()),
+            |s, _| assert_eq!(s.delete_dir_recursive("h"), (2, 3)),
+            |s, ids| assert_eq!(s.restore_many(&ids[..2]).titles.len(), 2),
+            |s, _| {
+                s.notes[0].body = "every note at once".into();
+                s.touch_all();
+            },
+        ];
+        for step in steps {
+            step(&mut store, &ids);
+            store.save().unwrap();
+            on_disk_as_in_memory(&store);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "without passing a marking point")]
+    fn a_change_made_without_marking_is_caught() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.save().unwrap();
+        store.notes[0].body = "unmarked".into();
+        let _ = store.save();
+    }
+
+    #[test]
+    fn the_hourly_save_writes_an_unmarked_change() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.save().unwrap();
+        store.notes[0].body = "unmarked".into();
+        store.tidied.set(None);
+        store.save().unwrap();
+        on_disk_as_in_memory(&store);
+    }
+
+    #[test]
+    fn a_new_note_does_not_put_off_the_hourly_check() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.save().unwrap();
+        let stamp = store.tidied.get();
+        store.create_note("New", "body", vec![], "").unwrap();
+        store.save().unwrap();
+        assert_eq!(store.tidied.get(), stamp);
+    }
+
+    #[test]
+    fn the_shortcut_targets_equal_a_full_name_assignment() {
+        let (mut store, _tmp) = temp_store();
+        let x = store
+            .create_note("Same", "x", vec![], "f")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&x).unwrap().created_at -= chrono::Duration::seconds(5);
+        let y = store
+            .create_note("Same", "y", vec![], "f")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        type Step = fn(&mut Store, &str, &str);
+        let steps: [Step; 8] = [
+            |s, x, _| s.find_note_mut(x).unwrap().title = "Other".into(),
+            |s, _, y| s.find_note_mut(y).unwrap().body = "y2".into(),
+            |s, _, y| assert!(s.move_note(y, "g").is_some()),
+            |s, x, _| s.find_note_mut(x).unwrap().title = "Same".into(),
+            |s, x, _| assert!(s.move_note(x, "g").is_some()),
+            |s, x, _| s.find_note_mut(x).unwrap().body = "x2".into(),
+            |s, _, y| s.find_note_mut(y).unwrap().title = "Other".into(),
+            |s, _, y| s.find_note_mut(y).unwrap().body = "y3".into(),
+        ];
+        for step in steps {
+            step(&mut store, &x, &y);
+            store.save().unwrap();
+            let full = store.assign_paths(&store.seen.borrow());
+            store.save().unwrap();
+            let seen = store.seen.borrow();
+            for note in &store.notes {
+                assert_eq!(
+                    store.notes_dir.join(&seen[&note.id].path),
+                    full[&note.id],
+                    "{}",
+                    note.title
+                );
+            }
+        }
+        assert_eq!(note_files(&store), ["g/Other.md", "g/Same.md"]);
+    }
+
     #[test]
     fn saving_again_with_nothing_changed_rewrites_no_file() {
         let tmp = tempfile::TempDir::new().unwrap();
@@ -2040,7 +2413,8 @@ mod tests {
         store.save().unwrap();
         assert_eq!(stamp("Kept.md"), note);
         assert_eq!(stamp("directories.json"), folders);
-        store.notes[0].body = "changed".into();
+        let id = store.notes[0].id.clone();
+        store.find_note_mut(&id).unwrap().body = "changed".into();
         store.save().unwrap();
         assert_ne!(stamp("Kept.md"), note);
         assert_eq!(stamp("directories.json"), folders);
@@ -2061,6 +2435,10 @@ mod tests {
             tidied: Default::default(),
             dirs_seen: Default::default(),
             dirs_base: Default::default(),
+            dirty: Default::default(),
+            removed: Default::default(),
+            full: std::cell::Cell::new(true),
+            placed: Default::default(),
             notes: vec![make_note()],
             directories: vec![],
             notes_dir: notes_dir.clone(),
