@@ -367,7 +367,7 @@ fn stamp_term(relative: &Path, meta: Option<&fs::Metadata>) -> u64 {
 
 fn fingerprint_of(notes_dir: &Path) -> u64 {
     let mut files = Vec::new();
-    let _ = walk(notes_dir, 0, &mut files, &mut Vec::new());
+    let _ = walk(notes_dir, 0, false, &mut files, &mut Vec::new());
     fingerprint_from(notes_dir, &files)
 }
 
@@ -474,6 +474,7 @@ fn read_dir_or_empty(dir: &Path) -> std::io::Result<Option<fs::ReadDir>> {
 fn walk(
     dir: &Path,
     depth: usize,
+    tidy: bool,
     files: &mut Vec<(PathBuf, fs::Metadata)>,
     errors: &mut Vec<(PathBuf, String)>,
 ) -> std::io::Result<()> {
@@ -511,7 +512,7 @@ fn walk(
         if kind.is_dir() {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             if !name.starts_with('.') {
-                walk(&path, depth + 1, files, errors)?;
+                walk(&path, depth + 1, tidy, files, errors)?;
             }
         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
             #[cfg(windows)]
@@ -522,9 +523,31 @@ fn walk(
                 Ok(meta) => files.push((path, meta)),
                 Err(error) => errors.push((path, error.to_string())),
             }
+        } else if tidy {
+            remove_if_stale(&entry);
         }
     }
     Ok(())
+}
+
+fn remove_if_stale(entry: &fs::DirEntry) {
+    let name = entry.file_name();
+    let Some(name) = name.to_str().filter(|name| name.starts_with(".tmp")) else {
+        return;
+    };
+    if !entry
+        .metadata()
+        .is_ok_and(|meta| crate::paths::stale_temp(name, &meta))
+    {
+        return;
+    }
+    let path = entry.path();
+    if let Err(error) = fs::remove_file(&path) {
+        crate::diag::warn(format!(
+            "could not remove the old temporary file {}: {error}",
+            path.display()
+        ));
+    }
 }
 
 const TRASH: &str = ".trash";
@@ -583,7 +606,7 @@ pub fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
         return Vec::new();
     };
     let mut files = Vec::new();
-    if walk(&trash, 0, &mut files, &mut Vec::new()).is_err() {
+    if walk(&trash, 0, false, &mut files, &mut Vec::new()).is_err() {
         return Vec::new();
     }
     files
@@ -862,7 +885,7 @@ impl Store {
         fs::create_dir_all(notes_dir)?;
         let mut files = Vec::new();
         let mut errors = Vec::new();
-        walk(notes_dir, 0, &mut files, &mut errors)?;
+        walk(notes_dir, 0, true, &mut files, &mut errors)?;
         let fingerprint = fingerprint_from(notes_dir, &files);
         let (mut directories, dirs_seen) = load_directories(notes_dir)?;
         let dirs_base = directories.clone();
@@ -2834,6 +2857,7 @@ mod tests {
         walk(
             &store.notes_dir.join(".trash"),
             0,
+            false,
             &mut files,
             &mut Vec::new(),
         )
@@ -3700,7 +3724,7 @@ mod tests {
 
     fn note_files(store: &Store) -> Vec<String> {
         let mut paths = Vec::new();
-        walk(&store.notes_dir, 0, &mut paths, &mut Vec::new()).unwrap();
+        walk(&store.notes_dir, 0, false, &mut paths, &mut Vec::new()).unwrap();
         let mut names: Vec<String> = paths
             .iter()
             .map(|(p, _)| {
@@ -5117,7 +5141,7 @@ mod tests {
             }
             assert!(store.notes.iter().any(|n| n.body.ends_with("edit 2\n")));
             let t = Instant::now();
-            walk(&dir, 0, &mut Vec::new(), &mut Vec::new()).unwrap();
+            walk(&dir, 0, false, &mut Vec::new(), &mut Vec::new()).unwrap();
             let walk = t.elapsed();
             assert_eq!(store.notes.len(), count + usize::from(big));
             println!(
@@ -5343,6 +5367,48 @@ mod tests {
         set_mtime(&path, when);
         store.refresh().unwrap();
         assert_eq!(store.find_note(&id).unwrap().body, "first text");
+    }
+
+    #[test]
+    fn a_stale_temp_file_is_removed_at_load() {
+        let (store, _tmp) = temp_store();
+        let stale = store.notes_dir.join(".tmpAbC123");
+        fs::write(&stale, "half a note").unwrap();
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        set_mtime(&stale, long_ago);
+        let nested = store.notes_dir.join("cs130/.tmpXyZ789");
+        fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        fs::write(&nested, "half another").unwrap();
+        set_mtime(&nested, long_ago);
+        Store::load_from(&store.notes_dir).unwrap();
+        assert!(!stale.exists(), "a two-hour-old temp file survived load");
+        assert!(
+            !nested.exists(),
+            "a two-hour-old temp file in a folder survived load"
+        );
+    }
+
+    #[test]
+    fn a_young_or_differently_named_temp_file_is_kept_at_load() {
+        let (store, _tmp) = temp_store();
+        let dir = &store.notes_dir;
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        let young = dir.join(".tmpAbC123");
+        fs::write(&young, "a save still running").unwrap();
+        fs::create_dir_all(dir.join(".leo")).unwrap();
+        let mut old = vec![dir.join(".leo/.tmpAbC123")];
+        for name in [".tmpAbC12", ".tmpAbC1234", ".tmpAb-123", "x.tmpAbC1"] {
+            old.push(dir.join(name));
+        }
+        for path in &old {
+            fs::write(path, "someone else's").unwrap();
+            set_mtime(path, long_ago);
+        }
+        Store::load_from(dir).unwrap();
+        assert!(young.exists(), "a young temp file was removed");
+        for path in &old {
+            assert!(path.exists(), "{} was removed", path.display());
+        }
     }
 
     #[test]

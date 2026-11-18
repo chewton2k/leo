@@ -96,6 +96,18 @@ pub fn contained_path(root: &std::path::Path, relative: &std::path::Path) -> Res
     Ok(path)
 }
 
+pub fn stale_temp(name: &str, meta: &std::fs::Metadata) -> bool {
+    name.len() == 10
+        && name.starts_with(".tmp")
+        && name.bytes().skip(4).all(|b| b.is_ascii_alphanumeric())
+        && meta.is_file()
+        && meta
+            .modified()
+            .ok()
+            .and_then(|at| at.elapsed().ok())
+            .is_some_and(|age| age.as_secs() > 3600)
+}
+
 pub fn write_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) -> Result<()> {
     use std::io::Write;
     let parent = path.parent().context("the file has no parent directory")?;

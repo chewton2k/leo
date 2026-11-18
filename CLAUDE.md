@@ -110,6 +110,7 @@ settings and credentials are excluded from note exports.
 - Recording loop: `leo_services::session::recorder` (`record`, `resume`,
   `finish`, `write_up`, `Event`); `Capture` takes native microphone/screen audio.
 - `Store::unreadable`: files that failed to parse; `save` never deletes them.
+  Load removes `write_atomic` temp files older than an hour.
 - Trash: `save` moves any note file that vanished (and was not just moved:
   its id is not live) to `<notes>/.trash/<same relative path>`, mtime = when
   deleted. `tidy_trash` (load, a save that writes a new id, and hourly on save) drops live ids and ones past

@@ -228,6 +228,20 @@ pub fn load(notes: &Path, note: &str) -> Result<Vec<Archive>> {
             "Too many recording sources in this note"
         );
         let entry = entry?;
+        if let Some(name) = entry.file_name().to_str() {
+            if entry
+                .metadata()
+                .is_ok_and(|meta| crate::paths::stale_temp(name, &meta))
+            {
+                if let Err(error) = std::fs::remove_file(entry.path()) {
+                    crate::diag::warn(format!(
+                        "could not remove the old temporary file {}: {error}",
+                        entry.path().display()
+                    ));
+                }
+                continue;
+            }
+        }
         if entry.file_type()?.is_file() && entry.path().extension().is_some_and(|e| e == "json") {
             bytes = bytes.saturating_add(entry.metadata()?.len());
             anyhow::ensure!(
@@ -372,6 +386,45 @@ mod tests {
             ["good-0001"]
         );
         assert_eq!(std::fs::read_to_string(&broken).unwrap(), "{");
+    }
+
+    #[test]
+    fn stray_files_among_the_sources_are_left_out_and_old_temp_files_removed() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        for id in ["one-0001", "two-0001", "three-0001"] {
+            let mut source = spoken(id, &[]);
+            source.id = id.into();
+            save(&notes, "note-0001", &source).unwrap();
+        }
+        let dir = folder(&notes, "note-0001").unwrap();
+        let long_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+        let stale = [dir.join(".tmpAbC123"), dir.join(".tmpXyZ789")];
+        for path in &stale {
+            std::fs::write(path, "{\"half\":").unwrap();
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(long_ago)
+                .unwrap();
+        }
+        let kept = [
+            dir.join(".tmpQrS456"),
+            dir.join("one-0001.original"),
+            dir.join("notes.txt"),
+        ];
+        for path in &kept {
+            std::fs::write(path, "stray").unwrap();
+        }
+        let loaded = load(&notes, "note-0001").unwrap();
+        assert_eq!(loaded.len(), 3);
+        for path in &stale {
+            assert!(!path.exists(), "{} survived", path.display());
+        }
+        for path in &kept {
+            assert!(path.exists(), "{} was removed", path.display());
+        }
     }
 
     fn spoken(id: &str, said: &[(u64, &str, &str)]) -> Archive {
