@@ -70,6 +70,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
             screen,
             input,
             draft: draft_fn(),
+            turns: false,
         },
         &controls,
         &|event| {
@@ -254,6 +255,7 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
                         screen: speaker == "Others",
                         input,
                         draft: None,
+                        turns: true,
                     },
                     &controls,
                     &|event| {
@@ -313,20 +315,8 @@ fn finish_tracks(
     if dirs.is_empty() {
         anyhow::bail!(warnings.join("; "));
     }
-    let mut source = leo_services::session::Session::open(&dirs[0].1)?.archive();
+    let mut source = merged(&dirs)?;
     source.id = id;
-    source.passages.clear();
-    source.points.clear();
-    for (speaker, dir) in &dirs {
-        let session = leo_services::session::Session::open(dir)?;
-        let archive = session.archive();
-        source
-            .passages
-            .extend(archive.passages.into_iter().map(|p| labelled(speaker, p)));
-        source.points.extend(archive.points);
-        source.warnings.extend(archive.warnings);
-    }
-    source.passages.sort_by_key(|p| p.start_secs);
     source.warnings.extend(warnings);
     for warning in &source.warnings {
         heard(Heard::Warning(warning.clone()));
@@ -358,6 +348,56 @@ fn finish_tracks(
             Ok(())
         })),
     })
+}
+
+fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Archive> {
+    let sessions = dirs
+        .iter()
+        .map(|(speaker, dir)| Ok((*speaker, leo_services::session::Session::open(dir)?)))
+        .collect::<Result<Vec<_>>>()?;
+    let first = sessions
+        .first()
+        .ok_or_else(|| anyhow!("This recording cannot be recovered."))?;
+    let earliest = sessions
+        .iter()
+        .map(|(_, session)| session.manifest.started)
+        .min()
+        .unwrap_or(first.1.manifest.started);
+    let mut source = first.1.archive();
+    source.passages.clear();
+    source.points.clear();
+    for (speaker, session) in &sessions {
+        let offset = (session.manifest.started - earliest).num_seconds().max(0) as u64;
+        let archive = session.archive();
+        source
+            .passages
+            .extend(archive.passages.into_iter().map(|p| {
+                let mut p = labelled(speaker, p);
+                p.start_secs += offset;
+                p.end_secs += offset;
+                p
+            }));
+        source.points.extend(archive.points);
+        source.warnings.extend(archive.warnings);
+    }
+    source.passages.sort_by_key(|p| p.start_secs);
+    if sessions.iter().all(|(_, session)| session.manifest.turns) {
+        let mut joined: Vec<leo_core::recording::Passage> = Vec::new();
+        for passage in std::mem::take(&mut source.passages) {
+            match joined.last_mut() {
+                Some(last) if last.speaker == passage.speaker => {
+                    last.end_secs = last.end_secs.max(passage.end_secs);
+                    last.text = leo_services::speech::chunking::join_transcripts(&[
+                        &last.text,
+                        &passage.text,
+                    ]);
+                }
+                _ => joined.push(passage),
+            }
+        }
+        source.passages = joined;
+    }
+    Ok(source)
 }
 
 fn labelled(
@@ -509,6 +549,59 @@ mod tests {
         };
         assert_eq!(super::labelled("", passage.clone()).speaker, "Microphone");
         assert_eq!(super::labelled("You", passage).speaker, "You");
+    }
+
+    #[test]
+    fn a_call_keeps_who_spoke_when() {
+        use leo_services::session::{turns_name, Manifest, Session};
+        let root = tempfile::tempdir().unwrap();
+        let mut dirs = Vec::new();
+        for (speaker, screen, first) in [("You", false, 0u64), ("Others", true, 20)] {
+            let mut manifest = Manifest::new(None, None, "", screen);
+            manifest.duration_secs = Some(120);
+            manifest.turns = true;
+            let session = Session::create(&root.path().join(speaker), manifest).unwrap();
+            let turns: Vec<(u64, String)> = (0..3)
+                .map(|n| {
+                    let at = first + n * 40;
+                    (at * 1000, format!("{speaker} at {at}s."))
+                })
+                .collect();
+            let text: Vec<&str> = turns.iter().map(|(_, text)| text.as_str()).collect();
+            std::fs::write(session.dir.join("seg-00000.txt"), text.join(" ")).unwrap();
+            std::fs::write(
+                session.dir.join(turns_name(0)),
+                serde_json::to_string(&turns).unwrap(),
+            )
+            .unwrap();
+            dirs.push((speaker, session.dir.clone()));
+        }
+        let source = super::merged(&dirs).unwrap();
+        let order: Vec<String> = source
+            .passages
+            .iter()
+            .map(|p| format!("{}@{}-{}s", p.speaker, p.start_secs, p.end_secs))
+            .collect();
+        assert_eq!(
+            order,
+            [
+                "You@0-40s",
+                "Others@20-60s",
+                "You@40-80s",
+                "Others@60-100s",
+                "You@80-120s",
+                "Others@100-120s"
+            ]
+        );
+        assert_eq!(source.passages[3].text, "Others at 60s.");
+
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.duration_secs = Some(600);
+        let single = Session::create(&root.path().join("single"), manifest).unwrap();
+        std::fs::write(single.dir.join("seg-00000.txt"), "First part.").unwrap();
+        std::fs::write(single.dir.join("seg-00001.txt"), "Second part.").unwrap();
+        let kept = super::merged(&[("", single.dir.clone())]).unwrap();
+        assert_eq!(kept.passages.len(), 2, "a single recording keeps its parts");
     }
 
     #[test]
