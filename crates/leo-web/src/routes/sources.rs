@@ -124,7 +124,16 @@ pub(crate) async fn regenerate(
             )
         }
     };
-    match tokio::task::spawn_blocking(move || regenerate(sources, profile)).await {
+    let Ok(slot) = state.regenerating.clone().acquire_owned().await else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || regenerate(sources, profile))
+    })
+    .await
+    {
         Ok(Ok((title, body))) => {
             Json(serde_json::json!({"title": title, "body": body, "base": base})).into_response()
         }

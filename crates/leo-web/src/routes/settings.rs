@@ -126,7 +126,16 @@ pub(crate) async fn test_setting(
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_string();
-    match tokio::task::spawn_blocking(move || settings.test(&task)).await {
+    let Ok(slot) = state.setting_tests.clone().acquire_owned().await else {
+        return crate::reply::error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || settings.test(&task))
+    })
+    .await
+    {
         Ok(Ok(message)) => Json(serde_json::json!({ "message": message })).into_response(),
         Ok(Err(e)) => (
             StatusCode::BAD_REQUEST,

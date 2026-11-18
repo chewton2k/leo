@@ -97,6 +97,7 @@ pub(crate) async fn add_chat_file(
         mime: body.mime,
         bytes,
     };
+    let (_guard, stop) = crate::stop_when_dropped();
     let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
         if chat_files::list(&dir, &id).len() >= chat_files::MOST_FILES {
             anyhow::bail!(
@@ -104,7 +105,7 @@ pub(crate) async fn add_chat_file(
                 chat_files::MOST_FILES
             );
         }
-        let text = reader(file, &mut |_| {})?;
+        let text = leo_core::children::with_stop(stop, || reader(file, &mut |_| {}))?;
         chat_files::add(&dir, &id, &name, &text, chrono::Utc::now())
     })
     .await;
@@ -518,7 +519,16 @@ pub(crate) async fn mark_quiz(
         )
             .into_response();
     };
-    match tokio::task::spawn_blocking(move || mark_with(&writer, &body)).await {
+    let Ok(slot) = state.marking.clone().acquire_owned().await else {
+        return crate::reply::error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || mark_with(&writer, &body))
+    })
+    .await
+    {
         Ok(Some((correct, feedback))) => Json(serde_json::json!({"correct": correct, "feedback": feedback})).into_response(),
         _ => (
             StatusCode::BAD_GATEWAY,

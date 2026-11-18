@@ -157,6 +157,11 @@ pub struct Powers {
     pub meaning: Option<vectors::Meaning>,
 }
 
+pub(crate) fn stop_when_dropped() -> (leo_core::children::StopOnDrop, leo_core::children::Stop) {
+    let stop = leo_core::children::Stop::default();
+    (leo_core::children::StopOnDrop(stop.flag.clone()), stop)
+}
+
 pub(crate) fn no_writer() -> String {
     format!("{}no writing AI is chosen.", leo_core::NO_WRITING_AI)
 }
@@ -178,6 +183,9 @@ struct AppState {
     work: Arc<work::Work>,
     ollama_pulls: Arc<ollama::Pulls>,
     usage_refreshes: Arc<tokio::sync::Semaphore>,
+    marking: Arc<tokio::sync::Semaphore>,
+    regenerating: Arc<tokio::sync::Semaphore>,
+    setting_tests: Arc<tokio::sync::Semaphore>,
     imports: Arc<Mutex<std::collections::HashMap<String, ImportJob>>>,
     import_slots: Arc<routes::uploads::ImportSlots>,
     zip_slots: Arc<tokio::sync::Semaphore>,
@@ -626,6 +634,9 @@ pub(crate) async fn start_in(
         work: Default::default(),
         ollama_pulls: Default::default(),
         usage_refreshes: Arc::new(tokio::sync::Semaphore::new(1)),
+        marking: Arc::new(tokio::sync::Semaphore::new(2)),
+        regenerating: Arc::new(tokio::sync::Semaphore::new(2)),
+        setting_tests: Arc::new(tokio::sync::Semaphore::new(1)),
         imports: Default::default(),
         import_slots: Default::default(),
         zip_slots: routes::downloads::zip_slots(),

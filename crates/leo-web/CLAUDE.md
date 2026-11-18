@@ -553,7 +553,9 @@ the web (root CLAUDE.md).
   Unicode character.
 - Successful replies may contain only proposal, ask or quiz cards. Stopped means
   cancelled; saved replies keep elapsed ms and a cancellation flag.
-- Quizzes: marking never waits for a Felix reply. Multiple choice (needs
+- Quizzes: marking never waits for a Felix reply; two marks at a time; an
+  abandoned mark, rewrite, Settings test or document read stops its AI program
+  (`stop_when_dropped`). Multiple choice (needs
   `explain`) and matching fill-ins are marked by the page; the rest POST
   `/api/quiz/mark` (quick model, `MARK`; `confidence` validated, `thinking`
   bounded to `MOST_THINKING`). How sure is a 0–100% bar (`q.surePct`; `sureOf`

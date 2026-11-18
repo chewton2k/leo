@@ -3200,6 +3200,89 @@ fn a_free_answer_is_marked_by_the_quick_model_without_a_full_felix_reply() {
     assert_eq!(mark(&state, "a stack").status(), StatusCode::BAD_GATEWAY);
 }
 
+fn a_mark() -> Json<crate::routes::felix::MarkBody> {
+    Json(
+        serde_json::from_value(
+            serde_json::json!({"question": "Why a queue?", "answer": "Order", "given": "Order"}),
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn marking_runs_two_at_a_time() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (mut state, _dir, _) = state_with(&[]);
+    let running = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let (now, top) = (Arc::clone(&running), Arc::clone(&most));
+    state.quick = Some(Arc::new(move |_: &str, _: &str, _| {
+        let at = now.fetch_add(1, Ordering::AcqRel) + 1;
+        top.fetch_max(at, Ordering::AcqRel);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        now.fetch_sub(1, Ordering::AcqRel);
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    }));
+    let statuses: Vec<StatusCode> = run(async {
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    crate::routes::felix::mark_quiz(State(state), a_mark())
+                        .await
+                        .status()
+                })
+            })
+            .collect();
+        let mut out = Vec::new();
+        for handle in handles {
+            out.push(handle.await.unwrap());
+        }
+        out
+    });
+    assert!(
+        statuses.iter().all(|s| *s == StatusCode::OK),
+        "{statuses:?}"
+    );
+    assert_eq!(most.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn an_abandoned_quiz_mark_stops_its_work() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut state, _dir, _) = state_with(&[]);
+    let started = Arc::new(AtomicBool::new(false));
+    let returned = Arc::new(Mutex::new(None::<std::time::Instant>));
+    let (begun, ended) = (Arc::clone(&started), Arc::clone(&returned));
+    state.quick = Some(Arc::new(move |_: &str, _: &str, _| {
+        begun.store(true, Ordering::Release);
+        let since = std::time::Instant::now();
+        while !leo_core::children::current_stop().is_some_and(|s| s.asked())
+            && since.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        *ended.lock().unwrap() = Some(std::time::Instant::now());
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    }));
+    let dropped = run(async {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            crate::routes::felix::mark_quiz(State(state.clone()), a_mark()),
+        )
+        .await;
+        std::time::Instant::now()
+    });
+    assert!(started.load(Ordering::Acquire));
+    let waited = std::time::Instant::now();
+    while returned.lock().unwrap().is_none() && waited.elapsed() < std::time::Duration::from_secs(5)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let at = returned.lock().unwrap().expect("the writer never returned");
+    assert!(at.duration_since(dropped) < std::time::Duration::from_secs(1));
+}
+
 #[test]
 fn an_idle_chat_is_compacted_so_the_next_message_sends_a_summary_and_the_last_turns() {
     let (mut state, _dir, _) = state_with(&[]);
