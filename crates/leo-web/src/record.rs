@@ -101,6 +101,9 @@ pub trait Housekeeper: Send + Sync {
             .filter(|id| self.discard_recording(id).is_ok())
             .count()
     }
+    fn kept_audio_count(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
+        0
+    }
     fn expire_kept_audio(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
         0
     }

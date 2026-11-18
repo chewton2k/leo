@@ -1043,7 +1043,7 @@ a modal.
 - Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`): one list (7/30/90 days,
   1 year, Forever) for Trash, Chats, Uploaded files, Recording transcripts,
   Unfinished recording audio. Shortening asks first with a count from POST
-  `/api/keep/preview` (`keeping::would_delete`, deletes nothing); one save at a
+  `/api/keep/preview` (the same list the deletion uses) (`keeping::would_delete`, deletes nothing); one save at a
   time. Forever deletes nothing. Expiry runs at `start_in`, daily and after POST
   `/api/keep` (`keeping::expire_now`): chats past the choice and orphan chat
   documents, uploads by file mtime (the folder and note

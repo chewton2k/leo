@@ -142,17 +142,22 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
             .count(),
         "upload_days" => old_uploads(&notes_dir, Some(days), now).len(),
         "transcript_days" => old_transcripts(&notes_dir, Some(days), now, active.as_deref()).len(),
-        "audio_days" => housekeeper
-            .and_then(|h| h.old_recordings(before).ok())
-            .map_or(0, |old| {
-                old.iter()
-                    .filter(|p| active.as_deref() != Some(p.id.as_str()))
-                    .count()
-            }),
+        "audio_days" => housekeeper.map_or(0, |h| audio_count(&*h, before, active.as_deref())),
         _ => 0,
     })
     .await
     .unwrap_or(0)
+}
+
+fn audio_count(
+    housekeeper: &dyn Housekeeper,
+    before: DateTime<Utc>,
+    active: Option<&str>,
+) -> usize {
+    let pending = housekeeper.old_recordings(before).map_or(0, |old| {
+        old.iter().filter(|p| active != Some(p.id.as_str())).count()
+    });
+    pending + housekeeper.kept_audio_count(before)
 }
 
 pub(crate) fn expire_audio(
@@ -428,6 +433,27 @@ mod tests {
         assert_eq!(many.old_recordings(cutoff).unwrap().len(), 600);
         assert_eq!(expire_audio(&many, Some(30), now, &Default::default()), 600);
         assert_eq!(*many.batches.lock().unwrap(), [256, 256, 88]);
+    }
+
+    #[test]
+    fn the_audio_preview_adds_kept_audio() {
+        struct Kept(Vec<Pending>);
+        impl Housekeeper for Kept {
+            fn pending_recordings(&self) -> anyhow::Result<Vec<Pending>> {
+                Ok(self.0.clone())
+            }
+            fn kept_audio_count(&self, _before: DateTime<Utc>) -> usize {
+                3
+            }
+        }
+        let now = Utc::now();
+        let kept = Kept(vec![
+            pending("old-recording", Some(40), now),
+            pending("in-use", Some(40), now),
+            pending("new-recording", Some(2), now),
+        ]);
+        let before = now - chrono::Duration::days(30);
+        assert_eq!(audio_count(&kept, before, Some("in-use")), 4);
     }
 
     #[test]
