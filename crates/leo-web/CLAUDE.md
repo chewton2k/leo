@@ -589,7 +589,7 @@ the web (root CLAUDE.md).
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
 - Files for Felix (`chat_files`): ≤10 per chat, text only, deleted with the
-  chat. Add to note (`routes/insert.rs`) is version-checked and request ids
+  chat, with its review marks. Add to note (`routes/insert.rs`) is version-checked and request ids
   dedupe. Chat titles are local; history shows titles only.
 - Felix draws only when asked to see, draw or visualize something (2026-11-14,
   replacing the 2026-11-09 threshold): one ```svg, one picture unless it unfolds in order, then 2 to 5 steps (viewBox 320 wide,
@@ -677,7 +677,7 @@ Felix (2026-10-19).
   `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn(noteWidth, panel)`
   is the widest column the chosen margins allow (Infinity when they are marks).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
-  (`forget_notes`) and its task details, recording sources and original uploads
+  (`forget_notes`) and its reading place, task details, recording sources and original uploads
   (`dependents::clear`); a removal that fails is retried on the next delete and daily
   (the `deleting` set in `margin_state`), a recording in use is skipped, and nothing is
   removed for an id that is live or in the trash again, or while a note or trashed file

@@ -922,6 +922,7 @@ pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
                 c.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
                 c.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
                 c.execute("DELETE FROM note_tasks WHERE note = ?1", [note])?;
+                c.execute("DELETE FROM reading WHERE note = ?1", [note])?;
                 c.execute(
                     "DELETE FROM margin_state WHERE key = 'combined:' || ?1",
                     [note],
@@ -937,7 +938,7 @@ pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize 
     let held: BTreeSet<String> = db_of(chats)
         .with(|c| {
             let mut query = c.prepare(
-                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks",
+                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks UNION SELECT note FROM reading",
             )?;
             let rows = query.query_map([], |r| r.get(0))?;
             rows.collect()
@@ -2255,6 +2256,51 @@ mod tests {
             ..body("A", "b")
         };
         assert!(valid_personas(vec![dup("c0123abcd"), dup("c0123abcd")]).is_none());
+    }
+
+    #[test]
+    fn forgetting_a_note_forgets_its_reading_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let place = |note: &str| {
+            db_of(&chats)
+                .with(|c| {
+                    c.execute(
+                        "INSERT INTO reading (note, anchor, at) VALUES (?1, 'h1', '2026-11-17T00:00:00Z')",
+                        [note],
+                    )
+                })
+                .unwrap();
+        };
+        let places = || -> BTreeSet<String> {
+            db_of(&chats)
+                .with(|c| {
+                    let mut q = c.prepare("SELECT note FROM reading")?;
+                    let rows = q.query_map([], |r| r.get(0))?;
+                    rows.collect()
+                })
+                .unwrap()
+        };
+        for note in ["gone", "held", "trashed", "vanished"] {
+            place(note);
+        }
+        forget_notes(&chats, &["gone".into()]);
+        assert_eq!(
+            places(),
+            BTreeSet::from(["held", "trashed", "vanished"].map(String::from))
+        );
+        let kept = HashSet::from(["held", "trashed"].map(String::from));
+        let start = Utc::now();
+        assert_eq!(sweep(&chats, &kept, start), 0);
+        sweep(
+            &chats,
+            &kept,
+            start + chrono::Duration::days(SWEEP_AFTER_DAYS),
+        );
+        assert_eq!(
+            places(),
+            BTreeSet::from(["held", "trashed"].map(String::from))
+        );
     }
 
     #[test]

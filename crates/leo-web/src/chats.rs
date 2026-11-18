@@ -490,6 +490,10 @@ pub fn remove(dir: &Path, id: &str) -> bool {
             let gone = tx.execute("DELETE FROM chats WHERE id = ?1", [id])?;
             tx.execute("DELETE FROM chats_text WHERE id = ?1", [id])?;
             tx.execute("DELETE FROM chat_docs WHERE chat = ?1", [id])?;
+            tx.execute(
+                "DELETE FROM reviewed WHERE substr(key, 1, length(?1) + 1) = ?1 || ':'",
+                [id],
+            )?;
             tx.commit()?;
             Ok(gone > 0)
         })
@@ -942,5 +946,32 @@ mod tests {
         assert_eq!(load(&dir, id).unwrap().messages, kept.messages);
         assert_eq!(kept.messages[1]["text"], "a1");
         assert!(drop_last(&dir, id, 2, 4).unwrap().is_none());
+    }
+
+    #[test]
+    fn deleting_a_chat_removes_its_review_marks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let (gone, longer) = ("chat-aaaa1111", "chat-aaaa1111-2");
+        for id in [gone, longer] {
+            save(&dir, id, saving(vec![said("user", "quiz me")]), at(0)).unwrap();
+        }
+        let keys: Vec<String> = [gone, longer]
+            .iter()
+            .flat_map(|id| (0..3).map(move |i| format!("{id}:{i:016x}")))
+            .collect();
+        db_of(&dir)
+            .with(|c| crate::review::insert_all(c, &keys))
+            .unwrap();
+        assert_eq!(crate::review::count(&dir), 6);
+        assert!(remove(&dir, gone));
+        let left: Vec<String> = db_of(&dir)
+            .with(|c| {
+                let mut q = c.prepare("SELECT key FROM reviewed ORDER BY key")?;
+                let rows = q.query_map([], |r| r.get(0))?;
+                rows.collect()
+            })
+            .unwrap();
+        assert_eq!(left, keys[3..].to_vec());
     }
 }
