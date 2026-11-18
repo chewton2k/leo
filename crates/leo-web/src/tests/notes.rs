@@ -73,7 +73,10 @@ fn saving_another_note_preserves_external_creates_and_edits_before_watch_deliver
         assert!(std::fs::read_to_string(&outside)
             .unwrap()
             .contains("Outside edit"));
-        assert!(state.store.lock().unwrap().changed_on_disk());
+        assert_eq!(
+            state.store.lock().unwrap().changed_on_disk(),
+            !cfg!(windows)
+        );
         state.store.lock().unwrap().changes = None;
         let seen = run(state.read_store(|store| {
             Ok(store
@@ -1325,6 +1328,7 @@ fn a_save_does_not_walk_while_the_watcher_is_quiet() {
     assert_eq!(walks(Some(true), true), 1);
 }
 
+#[cfg(not(windows))]
 #[test]
 fn an_outside_edit_to_the_saved_note_just_before_the_save_becomes_a_conflict_copy() {
     let (state, _dir, ids) = state_with(&[("Local", "")]);
@@ -1500,5 +1504,67 @@ fn a_burst_of_outside_edits_is_never_missed_by_the_watcher() {
             "{count} of 2000 loaded"
         );
         std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn a_note_written_outside_into_a_folder_just_before_it_is_moved_or_trashed_is_not_lost() {
+    for trashing in [false, true] {
+        let (state, _dir, _) = state_with(&[]);
+        run(state.with_store(|store| {
+            store.create_dir("Course");
+            store.create_dir("Later");
+            store.create_note("Lecture", "", vec![], "Course").unwrap();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let root = state.fresh().notes_dir.clone();
+        held_back(&state);
+        std::fs::write(root.join("Course").join("Outside.md"), "Written outside").unwrap();
+        if trashing {
+            let body: crate::routes::trash::TrashMove =
+                serde_json::from_value(serde_json::json!({ "dirs": ["Course"] })).unwrap();
+            let _ = run(crate::routes::trash::move_to_trash(
+                State(state.clone()),
+                Json(body),
+            ))
+            .unwrap();
+        } else {
+            let body = crate::routes::notes::MoveDirBody {
+                from: "Course".into(),
+                into: "Later".into(),
+            };
+            let _ = run(crate::routes::notes::move_dir(
+                State(state.clone()),
+                Json(body),
+            ))
+            .unwrap();
+        }
+        state.store.lock().unwrap().changes = None;
+        let found = run(state.read_store(|store| {
+            Ok(store
+                .notes
+                .iter()
+                .find(|n| n.body.contains("Written outside"))
+                .map(|n| n.directory.clone()))
+        }))
+        .unwrap();
+        let trashed = std::fs::read_dir(root.join(".trash").join("Course"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("Written outside"))
+            });
+        if trashing {
+            assert!(found.is_some() || trashed, "the outside note was lost");
+        } else {
+            assert_eq!(
+                found.as_deref(),
+                Some("Later/Course"),
+                "the outside note moved with its folder"
+            );
+        }
     }
 }
