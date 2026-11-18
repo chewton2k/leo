@@ -1100,6 +1100,8 @@ test('a card whose whole description cannot be read says so and is left as it wa
     await page.evaluate(async text => { window.db.cards.find(c => c.id === 'cread00001').description = text; await kanbanRefresh(); window.failCardRead = true; }, whole);
     await page.locator('[data-card="cread00001"]').click();
     await expect(page.locator('#kanban-card-problem')).toContainText('could not be loaded');
+    await expect.poll(() => page.evaluate(() => window.errors)).toContain('Leo could not open the card.');
+    await page.evaluate(() => { window.errors.length = 0; });
     await expect(page.locator('#kanban-card-description')).toHaveText('');
     await page.locator('#kanban-card-title').fill('Read chapter four');
     await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').title)).toBe('Read chapter four');
