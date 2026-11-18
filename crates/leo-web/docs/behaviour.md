@@ -275,7 +275,9 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   resumes the same textarea. Other blocks stay rendered. The drag anchor is
   captured before mouse movement, since macOS can report `selectionDirection`
   as `none` for a backwards range. Dragging carries on across the lines (`dragAnchor`), Shift+click selects,
-  copy and cut give the Markdown, and typing, Enter, Delete or paste replace it
+  copy and cut give the Markdown (and, when the selection holds a picture, also HTML in which each picture is a `data:` URL, so it
+  pastes into other apps: `leoMarkdown.selectionCopy`, text and links only, never script, handlers or leo's own addresses, a picture over
+  3 MB or past 8 MB in all left as its alt text; the same in Felix's answers, 2026-11-18, the owner's call), and typing, Enter, Delete or paste replace it
   through the raw lines, then only the caret's line stays open.
   Autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js`

@@ -963,6 +963,8 @@
       if (!span || !e.clipboardData) return;
       e.preventDefault();
       e.clipboardData.setData('text/plain', lines.join('\n').slice(span[0], span[1]));
+      const html = md.selectionCopy && md.selectionCopy(root.getSelection().getRangeAt(0));
+      if (html) e.clipboardData.setData('text/html', html);
       if (e.type === 'cut') replaceSelection('');
     }
 

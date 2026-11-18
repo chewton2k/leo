@@ -2034,6 +2034,28 @@ test.describe('pictures', () => {
     await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.naturalWidth)).toBe(320);
   });
 
+  test('copying a selection with a picture puts the picture on the clipboard as a data url, and one without puts text only', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Copied ${test.info().project.name}`, body: 'Before the picture.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Before the picture.');
+    await pastePicture(page, '#doc');
+    const img = page.locator('#doc img.note-img');
+    await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
+    const copy = (selector) => page.evaluate((target) => {
+      getSelection().selectAllChildren(document.querySelector(target));
+      const data = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return { text: data.getData('text/plain'), html: data.getData('text/html') };
+    }, selector);
+    const both = await copy('#doc');
+    expect(both.text).toMatch(/!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)/);
+    expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
+    expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
+    const plain = await copy('#doc .blk:first-child');
+    expect(plain.text).toBe('Before the picture.');
+    expect(plain.html).toBe('');
+  });
+
   test('the Picture button adds a picture from the device', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Chosen ${test.info().project.name}`, body: 'x' } })).json();
     await page.goto(`/#/n/${note.id}`);

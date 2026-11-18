@@ -3216,6 +3216,16 @@
       else if (state.busy) state.busy.abort();
       else send(input.value);
     });
+    body.addEventListener('copy', (e) => {
+      const selection = root.getSelection ? root.getSelection() : null;
+      if (!selection || selection.isCollapsed || !selection.rangeCount || !e.clipboardData || !body.contains(selection.anchorNode)) return;
+      const html = root.leoMarkdown && root.leoMarkdown.selectionCopy(selection.getRangeAt(0));
+      if (!html) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', selection.toString());
+      e.clipboardData.setData('text/html', html);
+    });
+
     body.addEventListener('input', (e) => {
       if (e.target.classList.contains('quiz-input')) state.drafts[`${e.target.dataset.i}:${e.target.dataset.k}`] = e.target.value;
       if (e.target.classList.contains('quiz-thinking')) state.drafts[`think:${e.target.dataset.i}:${e.target.dataset.k}`] = e.target.value;

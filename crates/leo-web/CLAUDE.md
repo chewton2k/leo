@@ -163,6 +163,10 @@ Decided: one app, window only (2026-10-31).
   scrollbars are thin and warm (`* { scrollbar-width:
   thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
   page's own bar for `.page-bar`. Focus rings are unchanged.
+- Copying a selection that holds a picture (note reading view and Felix's answers, 2026-11-18) also puts
+  `text/html` on the clipboard: `leoMarkdown.selectionCopy` draws each loaded picture to a canvas and
+  `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a
+  picture over 3 MB, or past 8 MB in all, stays its alt text). A selection without a picture is untouched.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.

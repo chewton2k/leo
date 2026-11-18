@@ -500,6 +500,45 @@ test('links, pictures and embeds read the same beside unclosed brackets', () => 
   assert.equal(md.plain('[a] ![[b]] ![c](d) [e](f) [g'), '[a] e [g');
 });
 
+test('a copied selection keeps its pictures as data urls and nothing else that is live', () => {
+  const dot = 'data:image/png;base64,iVBORw0KGgo=';
+  const html = `<p>Before <strong>bold</strong> <a href="https://a.b/c?x=1&amp;y=2" class="x" onclick="evil()">link</a></p><p><img class="note-img" src="${dot}" alt="a dot" onerror="evil()"></p>`;
+  assert.equal(md.copyHtml(html), `<p>Before <strong>bold</strong> <a href="https://a.b/c?x=1&amp;y=2">link</a></p><p><img src="${dot}" alt="a dot"></p>`);
+});
+
+test('a picture that cannot be embedded is left as its alt text and local addresses never leave', () => {
+  const html = '<p><img src="/api/image?path=a.png&amp;from=" alt="the &quot;queue&quot; &gt; stack"></p><p><img src="http://127.0.0.1:1234/x.png" alt=""></p><p><a href="#/n/abc123">a note</a> <a href="/api/image?path=a.png">file</a> <a href="http://localhost:5000/x">local</a> <a href="javascript:evil()">js</a></p>';
+  const out = md.copyHtml(html);
+  assert.equal(out, '<p>the &quot;queue&quot; &gt; stack</p><p></p><p>a note file local js</p>');
+  assert.ok(!/127\.0\.0\.1|\/api\/|localhost|javascript|href/.test(out), out);
+});
+
+test('a copied selection never carries script, handlers, styles or inline drawings', () => {
+  const dot = 'data:image/png;base64,AAAA';
+  const html = `<div onclick="x()" style="color:red"><script>alert(1)</script><style>p{}</style><span class="m" data-x="1">kept <em>text</em></span><svg><script>1</script><text>drawn</text></svg><iframe src="/x">hi</iframe><button>go</button><!-- hidden --><img src='${dot}' alt='ok' onload=evil()><textarea>typed</textarea>after</div>`;
+  const out = md.copyHtml(html);
+  assert.equal(out, `<div>kept <em>text</em><img src="${dot}" alt="ok">after</div>`);
+  assert.ok(!/script|onclick|onload|style|svg|iframe|button|alert|typed|hidden/.test(out), out);
+});
+
+test('an attribute holding a > does not end its tag early and bare text stays escaped', () => {
+  const out = md.copyHtml('<p title="a>b"><img alt="x>y" src="/api/image?path=q"> 1 &lt; 2 &amp; 3</p>');
+  assert.equal(out, '<p>x&gt;y 1 &lt; 2 &amp; 3</p>');
+});
+
+test('pictures are bounded one by one and together, the rest left as alt text', () => {
+  const big = (n) => `data:image/png;base64,${'A'.repeat(n)}`;
+  const html = `<img src="${big(50)}" alt="one"><img src="${big(200)}" alt="two"><img src="${big(50)}" alt="three"><img src="${big(50)}" alt="four">`;
+  const out = md.copyHtml(html, { each: 100, all: 150 });
+  assert.equal(out, `<img src="${big(50)}" alt="one">two<img src="${big(50)}" alt="three">four`);
+  assert.equal(md.copyHtml('<img src="data:text/html;base64,AAAA" alt="no"><img src="data:image/png;base64,A&quot;B" alt="no2">'), 'nono2');
+});
+
+test('unbalanced and nested tags come out balanced', () => {
+  assert.equal(md.copyHtml('</b><ul><li>a<li>b</ul><p><em>open'), '<ul><li>a<li>b</li></li></ul><p><em>open</em></p>');
+  assert.equal(md.copyHtml('<ol start="3"><li>x</li></ol>'), '<ol start="3"><li>x</li></ol>');
+});
+
 setImmediate(() => {
   for (const [name, fn] of cases) {
     try {

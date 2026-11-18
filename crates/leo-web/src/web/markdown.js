@@ -537,7 +537,120 @@
     return parts.flatMap((part) => (part.kind === 'same' ? [part] : [{ kind: 'del', text: part.del }, { kind: 'ins', text: part.ins }].filter((p) => p.text)));
   }
 
-  const api = { render, plain, readTime, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const COPY_KEEP = new Set(['p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 'del', 's', 'code', 'pre', 'blockquote', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'a', 'img', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'sup', 'sub', 'div', 'figure', 'figcaption']);
+  const COPY_DROP = new Set(['script', 'style', 'iframe', 'object', 'embed', 'svg', 'math', 'template', 'noscript', 'textarea', 'button', 'select', 'canvas', 'audio', 'video', 'head', 'title']);
+  const COPY_VOID = new Set(['br', 'hr', 'img', 'input', 'link', 'meta', 'source', 'wbr']);
+  const COPY_TOKEN = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s"'<>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>=`]+))?)*)\s*\/?>|[^<]+|</g;
+  const COPY_ATTR = /([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>=`]+)))?/g;
+  const COPY_PICTURE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)(?:;[a-z0-9=.-]+)*[;,][^\s"'<>]*$/i;
+  const COPY_MOST_EACH = 3000000;
+  const COPY_MOST_ALL = 8000000;
+  const COPY_PIXELS = 16000000;
+
+  function unescapeHtml(text) {
+    return String(text).replace(/&(amp|lt|gt|quot|#39|#x27);/g, (_, name) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'" })[name]);
+  }
+
+  function copyHtml(html, { each = COPY_MOST_EACH, all = COPY_MOST_ALL } = {}) {
+    let out = '';
+    let used = 0;
+    let dropping = '';
+    let depth = 0;
+    const open = [];
+    const close = (entry) => (entry.emitted ? `</${entry.name}>` : '');
+    for (const token of String(html).match(COPY_TOKEN) || []) {
+      const tag = /^<(\/?)([a-zA-Z][a-zA-Z0-9-]*)/.exec(token);
+      if (!tag || token.startsWith('<!--')) {
+        if (!dropping && token !== '<' && !token.startsWith('<!--')) out += token;
+        else if (!dropping && token === '<') out += '&lt;';
+        continue;
+      }
+      const name = tag[2].toLowerCase();
+      const ending = tag[1] === '/';
+      if (dropping) {
+        if (name === dropping && !COPY_VOID.has(name)) depth += ending ? -1 : 1;
+        if (depth === 0) dropping = '';
+        continue;
+      }
+      if (COPY_DROP.has(name) && !ending) {
+        dropping = name;
+        depth = token.endsWith('/>') ? 0 : 1;
+        if (!depth) dropping = '';
+        continue;
+      }
+      if (ending) {
+        const at = open.map((entry) => entry.name).lastIndexOf(name);
+        if (at < 0) continue;
+        while (open.length > at) out += close(open.pop());
+        continue;
+      }
+      const attrs = {};
+      for (const [, key, quoted, single, bare] of token.matchAll(COPY_ATTR)) {
+        if (key.toLowerCase() === name) continue;
+        attrs[key.toLowerCase()] = unescapeHtml(quoted ?? single ?? bare ?? '');
+      }
+      const keep = COPY_KEEP.has(name);
+      if (name === 'img') {
+        const src = String(attrs.src || '').trim();
+        const room = COPY_PICTURE.test(src) && src.length <= each && used + src.length <= all;
+        if (room) {
+          used += src.length;
+          out += `<img src="${escape(src)}" alt="${escape(attrs.alt || '')}">`;
+        } else out += escape(attrs.alt || '');
+        continue;
+      }
+      if (COPY_VOID.has(name)) {
+        if (keep) out += `<${name}>`;
+        continue;
+      }
+      let emitted = keep;
+      let extra = '';
+      if (name === 'a') {
+        const href = String(attrs.href || '').trim();
+        emitted = /^(?:https?:\/\/|mailto:)/i.test(href) && !/^https?:\/\/(?:127\.0\.0\.1|localhost|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(href);
+        extra = emitted ? ` href="${escape(href)}"` : '';
+      } else if (name === 'ol' && /^\d{1,6}$/.test(attrs.start || '')) extra = ` start="${attrs.start}"`;
+      if (emitted) out += `<${name}${extra}>`;
+      open.push({ name, emitted });
+    }
+    while (open.length) out += close(open.pop());
+    return out;
+  }
+
+  function pictureData(img) {
+    const shown = img.currentSrc || img.src || '';
+    if (/^data:/i.test(shown)) return shown;
+    if (!img.complete || !img.naturalWidth || img.naturalWidth * img.naturalHeight > COPY_PIXELS) return null;
+    try {
+      const canvas = root.document.createElement('canvas');
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      return canvas.toDataURL(/\.jpe?g(?:&|$)/i.test(decodeURIComponent(shown)) ? 'image/jpeg' : 'image/png', 0.92);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function selectionCopy(range) {
+    const document = root.document;
+    if (!range || !document || range.collapsed) return null;
+    const box = document.createElement('div');
+    box.append(range.cloneContents());
+    const clones = [...box.querySelectorAll('img')];
+    if (!clones.length) return null;
+    const ancestor = range.commonAncestorContainer;
+    const scope = ancestor.nodeType === 1 ? ancestor : ancestor.parentElement;
+    const live = scope ? [...scope.querySelectorAll('img')].filter((img) => range.intersectsNode(img)) : [];
+    clones.forEach((clone, n) => {
+      const data = live.length === clones.length ? pictureData(live[n]) : null;
+      if (data) clone.setAttribute('src', data);
+      else clone.removeAttribute('src');
+    });
+    return copyHtml(box.innerHTML);
+  }
+
+  const api = { render, copyHtml, selectionCopy, plain, readTime, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);
