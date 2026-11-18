@@ -1603,6 +1603,7 @@ fn native_answer(
         crate::usage::Purpose::Retry
     };
     desk.requests += 1;
+    let most_steps = desk.most_steps();
     let started = std::time::Instant::now();
     let outcome = {
         let mut restart = || gap.set(true);
@@ -1614,7 +1615,7 @@ fn native_answer(
                 return tools::NO_MORE_TOOLS.into();
             }
             calls += 1;
-            if calls > tools::MOST_STEPS {
+            if calls > most_steps {
                 return format!("That did not work: {}", tools::NO_MORE_TOOLS);
             }
             let mut call = tools::Call {
@@ -1646,7 +1647,7 @@ fn native_answer(
                 tail: "",
                 last: false,
                 max_tokens: chat::REPLY_TOKENS,
-                most_calls: tools::MOST_STEPS,
+                most_calls: most_steps,
                 stopped: &stopped,
                 tools_done: &|| exhausted.get(),
                 piece: &mut |t| show(t),
@@ -1698,11 +1699,12 @@ fn text_answer(
         shown.set(true);
         send(serde_json::json!({ "t": t }))
     };
-    for step in 0..=tools::MOST_STEPS {
+    let most_steps = desk.most_steps();
+    for step in 0..=most_steps {
         if desk.reply_closed() {
             return Ok(spent);
         }
-        let last = step == tools::MOST_STEPS || desk.asked > 0 || exhausted;
+        let last = step == most_steps || desk.asked > 0 || exhausted;
         let gate = std::cell::RefCell::new(tools::Gate::default());
         let emit = |t: &str| shown_once(t);
         let purpose = if repairing || (step == 0 && desk.requests > 0) {

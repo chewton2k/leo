@@ -846,9 +846,9 @@ const TOOL_USE: &str = "Use tools only as needed: search_notes/open_note/connect
 pub fn manual_for(access: Access) -> String {
     let tools: Vec<String> = offered(access).map(|spec| describe_manual(&spec)).collect();
     let limits = if access.changes() {
-        format!("At most {MOST_STEPS} calls per answer, and at most {MOST_PROPOSALS} changes across every tool that changes notes, folders, tasks or boards.")
+        format!("At most {MOST_STEPS} calls per answer, document reads extra, and at most {MOST_PROPOSALS} changes across every tool that changes notes, folders, tasks or boards.")
     } else {
-        format!("At most {MOST_STEPS} calls per answer.")
+        format!("At most {MOST_STEPS} calls per answer, document reads extra.")
     };
     let when = match access {
         Access::Ask => WHEN_ASK,
@@ -909,9 +909,11 @@ pub fn native_from(specs: impl Iterator<Item = Spec>) -> Vec<crate::chat::ToolSp
 
 pub fn guidance_for(access: Access) -> String {
     let limits = if access.changes() {
-        format!("At most {MOST_STEPS} tool calls per answer, and at most {MOST_PROPOSALS} changes across every tool that changes notes, folders, tasks or boards.")
+        format!("At most {MOST_STEPS} tool calls per answer, document reads extra, and at most {MOST_PROPOSALS} changes across every tool that changes notes, folders, tasks or boards.")
     } else {
-        format!("At most {MOST_STEPS} tool calls per answer.")
+        format!(
+            "At most {MOST_STEPS} tool calls per answer, document reads extra."
+        )
     };
     let when = match access {
         Access::Ask => WHEN_ASK,
@@ -2261,6 +2263,16 @@ impl Desk {
         (self.room / 3).clamp(12_000, 120_000)
     }
 
+    pub fn most_steps(&self) -> usize {
+        let size = self.part_chars();
+        let parts: usize = self
+            .documents
+            .iter()
+            .map(|(_, text)| text.chars().count().div_ceil(size))
+            .sum();
+        MOST_STEPS + parts.div_ceil(READ_PARTS)
+    }
+
     fn read_transcript(&self, notes_dir: &std::path::Path, note: &Note, call: &Call) -> Done {
         let step = format!("Read the recording of “{}”", note.title);
         let fail = |why: String| Done {
@@ -3204,6 +3216,16 @@ mod tests {
             })
             .result
             .contains("no documents were given"));
+    }
+
+    #[test]
+    fn the_call_limit_makes_room_for_every_part_of_the_documents() {
+        assert_eq!(Desk::new(Vec::new(), 36_000).most_steps(), MOST_STEPS);
+        let docs: Vec<(String, String)> = (1..=10)
+            .map(|n| (format!("lec{n}.pdf"), "x".repeat(60_000)))
+            .collect();
+        let desk = Desk::new(Vec::new(), 36_000).with_documents(docs);
+        assert_eq!(desk.most_steps(), MOST_STEPS + 17);
     }
 
     #[test]
