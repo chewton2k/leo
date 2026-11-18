@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -15,7 +15,8 @@ pub const MOST_PIECES: usize = 12;
 pub const PIECES_PER_TICK: usize = 256;
 pub const CLOSE_ENOUGH: f32 = 0.62;
 pub const NEIGHBOURS: usize = 24;
-const MOST_FOR_NEIGHBOURS: usize = 6000;
+pub const NEAR_SLICE: usize = 256;
+const FINISHED_AT_ONCE: usize = 6000;
 
 pub type Near = BTreeMap<String, std::collections::BTreeSet<String>>;
 
@@ -44,13 +45,17 @@ pub struct Vectors {
     known: Mutex<BTreeMap<String, Entry>>,
     version: std::sync::atomic::AtomicU64,
     held: Mutex<Option<Held>>,
+    progress: std::sync::atomic::AtomicU64,
     failed: Mutex<HashMap<String, (String, std::time::Instant)>>,
 }
 
 struct Held {
     most: usize,
+    stamps: BTreeMap<String, (String, usize)>,
     means: BTreeMap<String, Vec<f32>>,
-    near: Near,
+    near: Arc<Near>,
+    worst: BTreeMap<String, f32>,
+    pending: BTreeSet<String>,
 }
 
 fn nearest_to(
@@ -58,18 +63,34 @@ fn nearest_to(
     v: &[f32],
     means: &BTreeMap<String, Vec<f32>>,
     most: usize,
-) -> std::collections::BTreeSet<String> {
+) -> (BTreeSet<String>, f32) {
     let mut scored: Vec<(f32, &String)> = means
         .iter()
         .filter(|(other, _)| other.as_str() != id)
         .map(|(other, w)| (cosine(v, w), other))
         .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(b.1)));
-    scored
-        .into_iter()
-        .take(most)
-        .map(|(_, other)| other.clone())
-        .collect()
+    let first = |a: &(f32, &String), b: &(f32, &String)| b.0.total_cmp(&a.0).then(a.1.cmp(b.1));
+    if most > 0 && scored.len() > most {
+        scored.select_nth_unstable_by(most - 1, first);
+        scored.truncate(most);
+    }
+    scored.sort_by(first);
+    scored.truncate(most);
+    let worst = scored.last().map_or(f32::INFINITY, |(score, _)| *score);
+    (
+        scored.into_iter().map(|(_, other)| other.clone()).collect(),
+        worst,
+    )
+}
+
+fn mean_of(entry: &Entry) -> Option<Vec<f32>> {
+    let width = entry.pieces.first()?.1.len();
+    let mut sum = vec![0f32; width];
+    for (_, v) in &entry.pieces {
+        sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
+    }
+    let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
+    (norm > 0.0).then(|| sum.into_iter().map(|x| x / norm).collect())
 }
 
 fn to_blob(vector: &[f32]) -> Vec<u8> {
@@ -221,6 +242,7 @@ impl Vectors {
             known: Mutex::new(known),
             version: std::sync::atomic::AtomicU64::new(0),
             held: Mutex::new(None),
+            progress: std::sync::atomic::AtomicU64::new(0),
             failed: Mutex::new(HashMap::new()),
         }
     }
@@ -234,70 +256,131 @@ impl Vectors {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    pub fn neighbours(&self, most: usize) -> Near {
-        let means: BTreeMap<String, Vec<f32>> = {
-            let Ok(known) = self.known.lock() else {
-                return Near::new();
-            };
-            if known.len() > MOST_FOR_NEIGHBOURS {
-                return Near::new();
-            }
-            known
-                .iter()
-                .filter_map(|(id, entry)| {
-                    let width = entry.pieces.first()?.1.len();
-                    let mut sum = vec![0f32; width];
-                    for (_, v) in &entry.pieces {
-                        sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
-                    }
-                    let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    (norm > 0.0).then(|| (id.clone(), sum.into_iter().map(|x| x / norm).collect()))
-                })
-                .collect()
+    pub fn near_progress(&self) -> u64 {
+        self.progress.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn near_pending(&self) -> bool {
+        self.held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|held| !held.pending.is_empty())
+    }
+
+    pub fn neighbours(&self, most: usize, budget: usize) -> Arc<Near> {
+        let Ok(known) = self.known.lock() else {
+            return Arc::new(Near::new());
         };
         let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
-        let old = held.take().filter(|old| old.most == most);
-        let near: Near = {
-            let moved = |id: &String| {
-                old.as_ref()
-                    .is_none_or(|old| old.means.get(id) != means.get(id))
-            };
-            let changed: Vec<&Vec<f32>> = means
-                .iter()
-                .filter(|(id, _)| moved(id))
-                .map(|(_, v)| v)
+        let mut now = held
+            .take()
+            .filter(|old| old.most == most)
+            .unwrap_or_else(|| Held {
+                most,
+                stamps: BTreeMap::new(),
+                means: BTreeMap::new(),
+                near: Arc::new(Near::new()),
+                worst: BTreeMap::new(),
+                pending: BTreeSet::new(),
+            });
+        let mut moved: HashSet<String> = HashSet::new();
+        let mut present = 0;
+        for (id, entry) in known.iter() {
+            let stamp = now.stamps.get(id);
+            present += usize::from(stamp.is_some());
+            if stamp
+                .is_some_and(|(hash, pieces)| *hash == entry.hash && *pieces == entry.pieces.len())
+            {
+                continue;
+            }
+            now.stamps
+                .insert(id.clone(), (entry.hash.clone(), entry.pieces.len()));
+            let mean = mean_of(entry);
+            if now.means.get(id) != mean.as_ref() {
+                match mean {
+                    Some(mean) => now.means.insert(id.clone(), mean),
+                    None => now.means.remove(id),
+                };
+                moved.insert(id.clone());
+            }
+        }
+        if present < now.stamps.len() {
+            let gone: Vec<String> = now
+                .stamps
+                .keys()
+                .filter(|id| !known.contains_key(*id))
+                .cloned()
                 .collect();
-            means
-                .iter()
-                .map(|(id, v)| {
-                    let kept = old
-                        .as_ref()
-                        .and_then(|old| old.near.get(id))
-                        .filter(|list| {
-                            list.len() == most
-                                && !moved(id)
-                                && list.iter().all(|other| !moved(other))
-                                && {
-                                    let worst = list
-                                        .iter()
-                                        .map(|other| cosine(v, &means[other]))
-                                        .fold(f32::INFINITY, f32::min);
-                                    changed.iter().all(|c| cosine(v, c) < worst)
-                                }
-                        });
-                    let list = kept
-                        .cloned()
-                        .unwrap_or_else(|| nearest_to(id, v, &means, most));
-                    (id.clone(), list)
-                })
-                .collect()
-        };
-        *held = Some(Held {
-            most,
+            for id in gone {
+                now.stamps.remove(&id);
+                now.means.remove(&id);
+                moved.insert(id);
+            }
+        }
+        drop(known);
+        let Held {
             means,
-            near: near.clone(),
-        });
-        near
+            near,
+            worst,
+            pending,
+            ..
+        } = &mut now;
+        if moved.is_empty() && pending.is_empty() {
+            let out = Arc::clone(near);
+            *held = Some(now);
+            return out;
+        }
+        let near = Arc::make_mut(near);
+        if !moved.is_empty() {
+            let changed: Vec<&Vec<f32>> = moved.iter().filter_map(|id| means.get(id)).collect();
+            let invalid: Vec<String> = near
+                .iter()
+                .filter(|(id, list)| {
+                    moved.contains(*id)
+                        || !means.contains_key(*id)
+                        || list.len() != most
+                        || list.iter().any(|other| moved.contains(other))
+                        || !worst.get(*id).is_some_and(|worst| {
+                            changed.iter().all(|c| cosine(&means[*id], c) < *worst)
+                        })
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in invalid {
+                near.remove(&id);
+                worst.remove(&id);
+                pending.insert(id);
+            }
+            for id in &moved {
+                near.remove(id);
+                worst.remove(id);
+                if means.contains_key(id) {
+                    pending.insert(id.clone());
+                } else {
+                    pending.remove(id);
+                }
+            }
+        }
+        let take = if means.len() <= FINISHED_AT_ONCE {
+            usize::MAX
+        } else {
+            budget
+        };
+        let slice: Vec<String> = pending.iter().take(take).cloned().collect();
+        for id in &slice {
+            pending.remove(id);
+            let (list, least) = nearest_to(id, &means[id], means, most);
+            near.insert(id.clone(), list);
+            worst.insert(id.clone(), least);
+        }
+        if !slice.is_empty() {
+            self.progress
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        let out = Arc::clone(&now.near);
+        *held = Some(now);
+        out
     }
 
     pub fn len(&self) -> usize {
@@ -802,9 +885,9 @@ mod tests {
         }
         let full = |vectors: &Vectors| {
             *vectors.held.lock().unwrap() = None;
-            vectors.neighbours(5)
+            vectors.neighbours(5, usize::MAX)
         };
-        assert_eq!(vectors.neighbours(5), full(&vectors));
+        assert_eq!(vectors.neighbours(5, usize::MAX), full(&vectors));
         for round in 0..6 {
             for n in [3 + round, 20 + round * 2, 59 - round] {
                 place(format!("note-{n:02}"), &format!("round-{round}"));
@@ -815,7 +898,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .remove(&format!("note-{:02}", 40 + round));
-            let updated = vectors.neighbours(5);
+            let updated = vectors.neighbours(5, usize::MAX);
             assert_eq!(updated, full(&vectors), "round {round}");
             assert_eq!(updated.len(), 60);
         }
@@ -844,7 +927,7 @@ mod tests {
         let before = vectors.version();
         catch_up(&store, &vectors, &fake(), 100);
         assert!(vectors.version() > before);
-        let near = vectors.neighbours(1);
+        let near = vectors.neighbours(1, usize::MAX);
         assert_eq!(near[&a].iter().next(), Some(&b));
         assert_eq!(near[&c].len(), 1);
         let graphs = crate::graph::Graphs::new(dir.path().join("graph.json"), None)
@@ -927,5 +1010,168 @@ mod tests {
             close_to(None, &again, "bfs", 5).is_empty(),
             "no model, no meaning search"
         );
+    }
+
+    fn random_unit(seed: &mut u32, width: usize) -> Vec<f32> {
+        let mut v: Vec<f32> = (0..width)
+            .map(|_| {
+                *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (*seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+            })
+            .collect();
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter_mut().for_each(|x| *x /= norm);
+        v
+    }
+
+    fn library_of(count: usize, width: usize, pieces: usize) -> Vectors {
+        let dir = tempfile::tempdir().unwrap();
+        let vectors = Vectors::at(dir.keep().join("meaning.json"));
+        let mut seed = 11u32;
+        {
+            let mut known = vectors.known.lock().unwrap();
+            for n in 0..count {
+                known.insert(
+                    format!("note-{n:06}"),
+                    Entry {
+                        hash: "first".into(),
+                        pieces: (0..pieces)
+                            .map(|at| (at, random_unit(&mut seed, width)))
+                            .collect(),
+                        marks: BTreeMap::new(),
+                        whole: true,
+                    },
+                );
+            }
+        }
+        vectors.changed();
+        vectors
+    }
+
+    #[test]
+    fn lists_are_built_a_slice_at_a_time_and_end_equal_to_a_full_build() {
+        let vectors = Arc::new(library_of(6400, 8, 1));
+        let graphs =
+            crate::graph::Graphs::new(tempfile::tempdir().unwrap().keep().join("graph.json"), None)
+                .with_vectors(Arc::clone(&vectors));
+        let mut sizes = Vec::new();
+        while sizes.is_empty() || vectors.near_pending() {
+            sizes.push(graphs.near().unwrap().len());
+            assert!(sizes.len() <= 25, "a slice is built on every call");
+        }
+        assert_eq!(sizes.len(), 25);
+        assert_eq!(sizes[0], NEAR_SLICE);
+        assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(*sizes.last().unwrap(), 6400);
+        let fresh = library_of(6400, 8, 1);
+        assert_eq!(
+            graphs.near().unwrap(),
+            fresh.neighbours(NEIGHBOURS, usize::MAX)
+        );
+    }
+
+    #[test]
+    fn a_note_without_a_list_yet_is_left_out() {
+        let vectors = library_of(6100, 8, 1);
+        let near = vectors.neighbours(5, 10);
+        assert_eq!(near.len(), 10);
+        assert!(vectors.near_pending());
+        assert!(near.contains_key("note-000000"));
+        assert!(!near.contains_key("note-000010"));
+    }
+
+    #[test]
+    fn a_small_library_gets_its_full_list_in_one_call() {
+        let vectors = library_of(5000, 8, 1);
+        let near = vectors.neighbours(NEIGHBOURS, NEAR_SLICE);
+        assert_eq!(near.len(), 5000);
+        assert!(near.values().all(|list| list.len() == NEIGHBOURS));
+        assert!(!vectors.near_pending());
+    }
+
+    #[test]
+    fn a_library_over_six_thousand_notes_gets_lists() {
+        let vectors = library_of(6100, 8, 1);
+        let near = vectors.neighbours(NEIGHBOURS, usize::MAX);
+        assert_eq!(near.len(), 6100);
+        assert!(near.values().all(|list| list.len() == NEIGHBOURS));
+    }
+
+    #[test]
+    fn an_edit_removal_and_addition_leave_the_lists_equal_to_a_full_build() {
+        let vectors = library_of(300, 8, 3);
+        let first = vectors.neighbours(5, usize::MAX);
+        let mut seed = 5u32;
+        for round in 0..5 {
+            {
+                let mut known = vectors.known.lock().unwrap();
+                let id = format!("note-{:06}", 10 + round * 7);
+                let entry = known.get_mut(&id).unwrap();
+                entry.hash = format!("round-{round}");
+                entry.pieces.push((9, random_unit(&mut seed, 8)));
+                known.remove(&format!("note-{:06}", 100 + round));
+                known.insert(
+                    format!("new-{round}"),
+                    Entry {
+                        hash: "first".into(),
+                        pieces: vec![(0, random_unit(&mut seed, 8))],
+                        marks: BTreeMap::new(),
+                        whole: true,
+                    },
+                );
+            }
+            let updated = vectors.neighbours(5, usize::MAX);
+            *vectors.held.lock().unwrap() = None;
+            assert_eq!(updated, vectors.neighbours(5, usize::MAX), "round {round}");
+        }
+        assert_eq!(first.len(), 300);
+    }
+
+    #[test]
+    #[ignore = "audit benchmark"]
+    fn audit_bench_neighbours() {
+        let sizes: Vec<usize> = std::env::var("BENCH_NOTES")
+            .map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect())
+            .unwrap_or_else(|_| vec![5000]);
+        for count in sizes {
+            let vectors = library_of(count, 384, 6);
+            let time = |label: &str, run: &dyn Fn() -> usize| {
+                let start = std::time::Instant::now();
+                let lists = run();
+                println!(
+                    "P-C49 notes={count} {label}: {:.2} ms, {lists} lists",
+                    start.elapsed().as_secs_f64() * 1000.0
+                );
+            };
+            time("first call", &|| {
+                vectors.neighbours(NEIGHBOURS, NEAR_SLICE).len()
+            });
+            let sync_only = if count > FINISHED_AT_ONCE {
+                0
+            } else {
+                NEAR_SLICE
+            };
+            if count > FINISHED_AT_ONCE {
+                time("39 more slices", &|| {
+                    (0..39)
+                        .map(|_| vectors.neighbours(NEIGHBOURS, NEAR_SLICE).len())
+                        .last()
+                        .unwrap()
+                });
+            }
+            time("nothing changed", &|| {
+                vectors.neighbours(NEIGHBOURS, sync_only).len()
+            });
+            {
+                let mut known = vectors.known.lock().unwrap();
+                let mut seed = 99u32;
+                let entry = known.get_mut("note-000010").unwrap();
+                entry.hash = "second".into();
+                entry.pieces[0].1 = random_unit(&mut seed, 384);
+            }
+            time("one note changed", &|| {
+                vectors.neighbours(NEIGHBOURS, sync_only).len()
+            });
+        }
     }
 }

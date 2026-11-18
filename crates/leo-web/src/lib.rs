@@ -484,6 +484,10 @@ async fn keep_graph_current(state: AppState) {
             }
         }
         let idle = state.activity.idle();
+        if idle >= graph::UPDATE_WHEN_IDLE && state.vectors.near_pending() {
+            let graphs = Arc::clone(&state.graphs);
+            let _ = tokio::task::spawn_blocking(move || graphs.near()).await;
+        }
         if idle < graph::UPDATE_WHEN_IDLE
             || graphed_at == Some(seen)
             || stuck.is_some_and(|(at, when): (_, std::time::Instant)| {

@@ -939,6 +939,8 @@ version) and reads no note when nothing changed; pictures are looked for only in
 the notes the store's changed-notes feed names (`Store::changes_since`, or
 every note after "start over"); whether a build is due is asked every time.
 
+The nearest-notes list (`Vectors::neighbours`, which decides which pairs of notes are worth asking the writing AI about) has no size cut-off (2026-11-17, the owner's principle 1): a library of 6,000 notes or fewer is finished in one call; a larger one is built `NEAR_SLICE` (256) notes per call, the rest are left out of the answer (every pair involving them is asked about, as before) until their slice comes, and after a change only the changed notes and the lists they enter are recomputed. Averages are kept at full precision (the owner chose speed over half-size vectors, 2026-11-18).
+
 ## Calendar and tasks (`calendar.rs`, `ics.rs`, `tasks.rs`, `routes/tasks.rs`, `app/calendar.js`, `schedule.js`)
 
 - Calendars: any number of secret iCal links through `CalendarAccess`

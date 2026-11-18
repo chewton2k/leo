@@ -784,13 +784,15 @@ struct Job {
     message: Option<String>,
 }
 
+type NearHeld = ((u64, u64), Arc<Near>);
+
 pub struct Graphs {
     path: PathBuf,
     db: Arc<crate::db::Db>,
     writer: Option<Writer>,
     room: Option<crate::Room>,
     vectors: Option<Arc<crate::vectors::Vectors>>,
-    near: Mutex<Option<(u64, Arc<Near>)>>,
+    near: Mutex<Option<NearHeld>>,
     held: Mutex<Option<Arc<Cache>>>,
     job: Mutex<Job>,
     auto: Mutex<Option<std::time::Instant>>,
@@ -813,14 +815,16 @@ impl Graphs {
         if vectors.is_empty() {
             return None;
         }
-        let version = vectors.version();
+        let key = (vectors.version(), vectors.near_progress());
         let mut held = self.near.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, near)) = held.as_ref().filter(|(at, _)| *at == version) {
-            let _ = at;
-            return Some(Arc::clone(near));
+        if let Some((at, near)) = held.as_ref() {
+            if *at == key && !vectors.near_pending() {
+                return Some(Arc::clone(near));
+            }
         }
-        let near = Arc::new(vectors.neighbours(crate::vectors::NEIGHBOURS));
-        *held = Some((version, Arc::clone(&near)));
+        *held = None;
+        let near = vectors.neighbours(crate::vectors::NEIGHBOURS, crate::vectors::NEAR_SLICE);
+        *held = Some(((key.0, vectors.near_progress()), Arc::clone(&near)));
         Some(near)
     }
 
