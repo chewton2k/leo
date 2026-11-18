@@ -1,5 +1,7 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
 use leo_core::notes::checkbox_line;
@@ -134,7 +136,7 @@ fn other() -> String {
     "other".into()
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Meta {
     pub id: String,
     pub note: String,
@@ -373,7 +375,7 @@ pub fn standalone(task: &Task, store: Option<&Store>) -> Listed {
     }
 }
 
-pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
+fn in_order(all: &mut [Listed]) {
     all.sort_by(|a, b| {
         a.done
             .cmp(&b.done)
@@ -383,8 +385,89 @@ pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
             .then(a.time.cmp(&b.time))
             .then(a.title.cmp(&b.title))
     });
+}
+
+pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
+    in_order(&mut all);
     all.truncate(MOST_LISTED);
     all
+}
+
+pub struct ListedIndex {
+    pub all: Vec<Listed>,
+    by_id: HashMap<String, usize>,
+}
+
+type Kept = (u64, Vec<Meta>, Vec<Task>, Arc<ListedIndex>);
+
+#[derive(Default)]
+pub struct ListedCache {
+    kept: Mutex<Option<Kept>>,
+    #[cfg(test)]
+    builds: std::sync::atomic::AtomicUsize,
+}
+
+impl ListedCache {
+    pub fn index(
+        &self,
+        generation: &AtomicU64,
+        store: &Store,
+        metas: &[Meta],
+        stored: &[Task],
+    ) -> Arc<ListedIndex> {
+        let at = generation.load(Ordering::Acquire);
+        if let Some((kept_at, kept_metas, kept_stored, index)) =
+            self.kept.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        {
+            if *kept_at == at && kept_metas == metas && kept_stored == stored {
+                return Arc::clone(index);
+            }
+        }
+        #[cfg(test)]
+        self.builds.fetch_add(1, Ordering::Relaxed);
+        let mut all = note_tasks(store, metas);
+        all.extend(stored.iter().map(|t| standalone(t, Some(store))));
+        in_order(&mut all);
+        let by_id = all
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(at, task)| (task.id.clone(), at))
+            .collect();
+        let index = Arc::new(ListedIndex { all, by_id });
+        *self.kept.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((at, metas.to_vec(), stored.to_vec(), Arc::clone(&index)));
+        index
+    }
+
+    pub fn all(
+        &self,
+        generation: &AtomicU64,
+        store: &Store,
+        metas: &[Meta],
+        stored: &[Task],
+    ) -> Vec<Listed> {
+        let index = self.index(generation, store, metas, stored);
+        index.all.iter().take(MOST_LISTED).cloned().collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn find(
+        &self,
+        generation: &AtomicU64,
+        store: &Store,
+        metas: &[Meta],
+        stored: &[Task],
+        id: &str,
+    ) -> Option<Listed> {
+        let index = self.index(generation, store, metas, stored);
+        index.by_id.get(id).map(|&at| index.all[at].clone())
+    }
+
+    #[cfg(test)]
+    pub fn builds(&self) -> usize {
+        self.builds.load(Ordering::Relaxed)
+    }
 }
 
 pub fn ics_of(task: &Listed, stamp: DateTime<Utc>) -> String {

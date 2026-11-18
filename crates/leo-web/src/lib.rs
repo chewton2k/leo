@@ -256,6 +256,8 @@ struct AppState {
     vectors: Arc<vectors::Vectors>,
     searched: Arc<Mutex<Option<Searched>>>,
     titles: Arc<titles::Titles>,
+    generation: Arc<std::sync::atomic::AtomicU64>,
+    listed: Arc<tasks::ListedCache>,
 }
 
 #[derive(Clone)]
@@ -558,6 +560,8 @@ impl AppState {
             store.refresh().unwrap();
             store.reload = false;
         }
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         store
     }
 }
@@ -756,6 +760,8 @@ pub(crate) async fn start_in(
         vectors,
         searched: Default::default(),
         titles: Default::default(),
+        generation: Default::default(),
+        listed: Default::default(),
     };
 
     let expiry = tokio::spawn({
@@ -863,8 +869,16 @@ fn store_access<R>(
             .refresh()
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         store.reload = false;
+        state
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
     }
     let result = work(&mut store);
+    if writing {
+        state
+            .generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    }
     if writing
         && result
             .as_ref()

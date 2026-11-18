@@ -1142,6 +1142,12 @@ AI uses a pen icon, never a sparkle.
   carries the tasks and stamps `tasksWin.at`; the tasks timer only re-arms (with a
   5 s grace so it never races the schedule poll) and loads again once the person
   leaves the Calendar.
+- The task list is rebuilt only after a change: `AppState.generation` moves after every
+  store refresh and every `with_store`/`store_now` call, and `tasks::ListedCache` keeps the
+  last list (note tasks and standalone tasks, sorted once, with an id index for `find`) until
+  the generation, the note-task records or the standalone task files differ; the generation is
+  read inside the store closure, after any refresh. The standalone task files are still read
+  on every request.
 
 ## Retired interview practice
 

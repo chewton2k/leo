@@ -405,3 +405,284 @@ fn a_repeated_request_id_creates_one_task_and_answers_with_the_first() {
     assert_ne!(first["id"], other["id"]);
     assert_eq!(listed(&state).len(), 2);
 }
+
+fn with_action_items(state: &AppState, id: &str, body: &str) {
+    let mut store = state.fresh();
+    store.find_note_mut(id).unwrap().body = body.into();
+    store.save().unwrap();
+}
+
+#[test]
+fn a_second_task_listing_with_nothing_changed_does_not_scan_the_notes_again() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    with_action_items(&state, &ids[0], "## Action items\n- [ ] Submit HW 4");
+    let first = listed(&state);
+    let again = listed(&state);
+    assert_eq!(first, again);
+    assert_eq!(first.len(), 1);
+    assert_eq!(state.listed.builds(), 1);
+}
+
+#[test]
+fn a_saved_note_makes_the_next_listing_scan_again() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    with_action_items(&state, &ids[0], "## Action items\n- [ ] Submit HW 4");
+    assert_eq!(listed(&state).len(), 1);
+    let id = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&id).unwrap().body =
+            "## Action items\n- [ ] Submit HW 4\n- [ ] Email Maya".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    assert_eq!(listed(&state).len(), 2);
+    assert_eq!(state.listed.builds(), 2);
+}
+
+#[test]
+fn a_changed_task_record_makes_the_next_listing_scan_again() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    with_action_items(&state, &ids[0], "## Action items\n- [ ] Submit HW 4");
+    let before = listed(&state);
+    let meta = crate::tasks::Meta {
+        id: before[0]["id"].as_str().unwrap().into(),
+        note: ids[0].clone(),
+        text: "Submit HW 4".into(),
+        description: "Chapter four".into(),
+        ..Default::default()
+    };
+    crate::tasks::put_meta(&state.chats, &meta).unwrap();
+    let after = listed(&state);
+    assert_eq!(after[0]["description"], "Chapter four");
+    assert_eq!(state.listed.builds(), 2);
+}
+
+#[test]
+fn a_standalone_task_saved_makes_the_next_listing_scan_again() {
+    let (state, _d, _ids) = state_with(&[]);
+    assert!(listed(&state).is_empty());
+    let created = run(create_task(
+        State(state.clone()),
+        Json(serde_json::from_value(serde_json::json!({"title": "Pay rent"})).unwrap()),
+    ));
+    assert!(created.status().is_success());
+    assert_eq!(listed(&state)[0]["title"], "Pay rent");
+}
+
+#[test]
+fn a_note_edited_outside_leo_makes_the_next_listing_scan_again() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    with_action_items(&state, &ids[0], "## Action items\n- [ ] Submit HW 4");
+    assert_eq!(listed(&state).len(), 1);
+    let path = std::fs::read_dir(state.notes_dir.join("bio"))
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|e| e == "md"))
+        .unwrap();
+    let text = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(&path, format!("{text}\n- [ ] Email Maya, a longer line\n")).unwrap();
+    state
+        .refresh_requested
+        .store(true, std::sync::atomic::Ordering::Release);
+    assert_eq!(listed(&state).len(), 2);
+    assert_eq!(state.listed.builds(), 2);
+}
+
+#[test]
+fn a_listing_queued_before_a_save_and_run_after_it_shows_the_saved_note() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    with_action_items(&state, &ids[0], "## Action items\n- [ ] Submit HW 4");
+    assert_eq!(listed(&state).len(), 1);
+    let mut held = crate::lock_storage(&state.store);
+    let waiting = {
+        let state = state.clone();
+        std::thread::spawn(move || listed(&state))
+    };
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    held.find_note_mut(&ids[0]).unwrap().body =
+        "## Action items\n- [ ] Submit HW 4\n- [ ] Email Maya".into();
+    held.save().unwrap();
+    state
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+    drop(held);
+    assert_eq!(waiting.join().unwrap().len(), 2);
+}
+
+#[test]
+fn finding_one_task_copies_one_task_and_not_the_list() {
+    let (state, _d, ids) = state_with(&[("Lecture 5", "bio")]);
+    let lines: String = (0..600)
+        .map(|i| format!("- [ ] Task number {i}\n"))
+        .collect();
+    with_action_items(&state, &ids[0], &format!("## Action items\n{lines}"));
+    let metas = crate::tasks::metas(&state.chats);
+    let store = state.fresh();
+    let index = state.listed.index(&state.generation, &store, &metas, &[]);
+    let id = index.all[300].id.clone();
+    let (at, held) = (Arc::as_ptr(&index), Arc::strong_count(&index));
+    let found = state
+        .listed
+        .find(&state.generation, &store, &metas, &[], &id)
+        .unwrap();
+    assert_eq!(found.id, id);
+    assert_eq!(Arc::strong_count(&index), held);
+    let again = state.listed.index(&state.generation, &store, &metas, &[]);
+    assert_eq!(Arc::as_ptr(&again), at);
+    assert_eq!(state.listed.builds(), 1);
+    assert!(state
+        .listed
+        .find(&state.generation, &store, &metas, &[], "nothing")
+        .is_none());
+}
+
+fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let notes_dir = dir.path().join("notes");
+    let mut store = Store::load_from(&notes_dir).unwrap();
+    let filler =
+        "the graph search queue stack heap tree node edge visit order breadth. ".repeat(70);
+    let mut ids = Vec::new();
+    for i in 0..n {
+        let body = if i % 5 == 0 {
+            format!("{filler}\n\n## Action items\n- [ ] Read chapter {i}\n- [ ] Submit lab {i} Oct 16\n")
+        } else {
+            filler.clone()
+        };
+        let id = store
+            .create_note(
+                format!("Lecture {i}"),
+                body,
+                vec![],
+                &format!("Course {}", i % 20),
+            )
+            .unwrap()
+            .id
+            .clone();
+        ids.push(id);
+    }
+    store.save().unwrap();
+    let store = Store::load_from(&notes_dir).unwrap();
+    let (mut state, other, _) = state_with(&[]);
+    state.chats = dir.path().join("chats");
+    state.store = Arc::new(Mutex::new(Storage {
+        changes: Some(store_refresh::Changes::new(&notes_dir)),
+        store,
+        reload: false,
+    }));
+    for (i, id) in ids.iter().enumerate().take(1_000) {
+        let meta = crate::tasks::Meta {
+            id: format!("m{i:08}"),
+            note: id.clone(),
+            text: format!("Read chapter {i}"),
+            ..Default::default()
+        };
+        crate::tasks::put_meta(&state.chats, &meta).unwrap();
+        let task = crate::tasks::Task {
+            id: format!("t{i:08}"),
+            title: format!("Standalone {i}"),
+            description: String::new(),
+            kind: "other".into(),
+            done: false,
+            date: None,
+            time: None,
+            end: None,
+            note: None,
+            sent_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            repeat: Vec::new(),
+            done_on: Vec::new(),
+            moved: Default::default(),
+            deleted: false,
+        };
+        crate::tasks::put(&state.chats, &task).unwrap();
+    }
+    (state, dir, other)
+}
+
+fn median_ms(runs: usize, mut f: impl FnMut()) -> f64 {
+    let mut times: Vec<f64> = (0..runs)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            f();
+            start.elapsed().as_secs_f64() * 1000.0
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times[runs / 2]
+}
+
+#[test]
+#[ignore]
+fn audit_bench_all_listed() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .map(|v| v.split(',').filter_map(|s| s.parse().ok()).collect())
+        .unwrap_or_else(|| vec![5_000, 50_000]);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    for n in sizes {
+        let (state, _dir, _other) = bench_state(n);
+        let before = |state: &AppState| {
+            let (metas, stored) = (
+                crate::tasks::metas(&state.chats),
+                crate::tasks::load_all(&state.chats),
+            );
+            let store = crate::lock_storage(&state.store);
+            let mut all = crate::tasks::note_tasks(&store, &metas);
+            all.extend(
+                stored
+                    .iter()
+                    .map(|t| crate::tasks::standalone(t, Some(&store))),
+            );
+            crate::tasks::sorted(all).len()
+        };
+        let first = median_ms(1, || {
+            rt.block_on(crate::routes::tasks::all_listed(&state))
+                .unwrap();
+        });
+        let repeat = median_ms(11, || {
+            rt.block_on(crate::routes::tasks::all_listed(&state))
+                .unwrap();
+        });
+        let mut paired = [Vec::new(), Vec::new()];
+        for _ in 0..7 {
+            paired[0].push(median_ms(1, || {
+                before(&state);
+            }));
+            paired[1].push(median_ms(1, || {
+                rt.block_on(crate::routes::tasks::all_listed(&state))
+                    .unwrap();
+            }));
+        }
+        paired.iter_mut().for_each(|v| v.sort_by(f64::total_cmp));
+        println!(
+            "notes {n}: old way {:.2} ms, cached way {:.2} ms (median of 7, alternating)",
+            paired[0][3], paired[1][3]
+        );
+        let metas = crate::tasks::metas(&state.chats);
+        let stored = crate::tasks::load_all(&state.chats);
+        let (all, generation) = (state.listed.clone(), state.generation.clone());
+        let found = {
+            let store = crate::lock_storage(&state.store);
+            let id = all.index(&generation, &store, &metas, &stored).all[0]
+                .id
+                .clone();
+            median_ms(11, || {
+                all.find(&generation, &store, &metas, &stored, &id).unwrap();
+            })
+        };
+        let reading_metas = median_ms(11, || {
+            crate::tasks::metas(&state.chats);
+        });
+        let reading_tasks = median_ms(11, || {
+            crate::tasks::load_all(&state.chats);
+        });
+        println!("task records read {reading_metas:.2} ms, standalone task files read {reading_tasks:.2} ms");
+        println!(
+            "notes {n}: first {first:.2} ms, repeat (median of 11) {repeat:.2} ms, warm find {found:.4} ms"
+        );
+    }
+}

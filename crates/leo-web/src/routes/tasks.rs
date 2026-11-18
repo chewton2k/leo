@@ -58,12 +58,10 @@ pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, S
         tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::load_all(&chats)))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let generation = state.generation.clone();
+    let listed = state.listed.clone();
     state
-        .read_store(move |store| {
-            let mut all = tasks::note_tasks(store, &metas);
-            all.extend(stored.iter().map(|t| tasks::standalone(t, Some(store))));
-            Ok(tasks::sorted(all))
-        })
+        .read_store(move |store| Ok(listed.all(&generation, store, &metas, &stored)))
         .await
 }
 
