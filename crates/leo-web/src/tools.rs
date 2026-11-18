@@ -2066,6 +2066,7 @@ pub struct Desk {
         crate::vectors::Meaning,
         std::sync::Arc<crate::vectors::Vectors>,
     )>,
+    close: Option<Vec<(String, f32)>>,
 }
 
 impl Desk {
@@ -2088,6 +2089,22 @@ impl Desk {
             steer: None,
             reply: None,
             meaning: None,
+            close: None,
+        }
+    }
+
+    fn near(&self, query: &str) -> Vec<(String, f32)> {
+        self.meaning
+            .as_ref()
+            .map(|(meaning, vectors)| {
+                crate::vectors::close_to(Some(meaning), vectors, query, FOUND)
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn ready(&mut self, call: &Call) {
+        if call.name == "search_notes" && check(call).is_ok() {
+            self.close = Some(self.near(&call.text("query")));
         }
     }
 
@@ -2528,13 +2545,7 @@ impl Desk {
                 let step = format!("Searched your notes for “{}”", clip(query.trim(), 60));
                 let words: Vec<String> =
                     query.split_whitespace().map(|w| w.to_lowercase()).collect();
-                let close = self
-                    .meaning
-                    .as_ref()
-                    .map(|(meaning, vectors)| {
-                        crate::vectors::close_to(Some(meaning), vectors, &query, FOUND)
-                    })
-                    .unwrap_or_default();
+                let close = self.close.take().unwrap_or_else(|| self.near(&query));
                 let hits = crate::search::with_meaning(
                     store,
                     &query,

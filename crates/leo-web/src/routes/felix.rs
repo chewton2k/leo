@@ -724,7 +724,7 @@ fn lowered(text: &str) -> String {
     })
 }
 
-fn execute_tool(
+pub(crate) fn execute_tool(
     state: &AppState,
     desk: &mut tools::Desk,
     call: &tools::Call,
@@ -866,12 +866,10 @@ fn execute_tool(
     } else if call.name == "read_original" {
         read_original(state, desk, call)?
     } else {
-        let graphs = Arc::clone(&state.graphs);
-        read_now(state, |store| {
-            let cache = graphs.load();
-            Ok(desk.run(store, &cache, call))
-        })
-        .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?
+        desk.ready(call);
+        let cache = state.graphs.load();
+        read_now(state, |store| Ok(desk.run(store, &cache, call)))
+            .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?
     };
     if desk.marking
         && matches!(call.name.as_str(), "quiz" | "end_session")

@@ -3786,3 +3786,34 @@ fn chat_database_reads_wait_off_the_async_worker() {
         "{longest:?}"
     );
 }
+
+#[test]
+fn the_search_tool_embeds_outside_the_notes_lock() {
+    use crate::routes::felix::execute_tool;
+    let (state, _d, ids) = state_with(&[("Queues", "")]);
+    let note = state.store.lock().unwrap().store.notes[0].clone();
+    state.vectors.put(
+        &[vectors::Work {
+            id: ids[0].clone(),
+            hash: vectors::hash_of(&note),
+            pieces: vec![(0, "x".into())],
+            kept: Vec::new(),
+        }],
+        vec![vec![1.0; 8]],
+    );
+    let free = Arc::new(Mutex::new(None));
+    let probe = Arc::clone(&state.store);
+    let seen = Arc::clone(&free);
+    let meaning: vectors::Meaning = Arc::new(move |texts: &[String], _| {
+        *seen.lock().unwrap() = Some(probe.try_lock().is_ok());
+        Ok(texts.iter().map(|_| vec![1.0; 8]).collect())
+    });
+    let mut desk = tools::Desk::new(Vec::new(), 40_000)
+        .with_meaning(Some(meaning), Arc::clone(&state.vectors));
+    let call = tools::Call {
+        name: "search_notes".into(),
+        args: serde_json::json!({"query": "queue order"}),
+    };
+    execute_tool(&state, &mut desk, &call, &|_| {}).unwrap();
+    assert_eq!(*free.lock().unwrap(), Some(true));
+}
