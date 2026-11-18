@@ -153,7 +153,7 @@
 
   async function saveScreenshot(view, file, encode, api, current) {
     if (!live(view)) return null;
-    if (!file || !/^image\/(png|jpeg|gif|webp)$/.test(file.type) || file.size > 20 * 1024 * 1024) throw new Error('Paste a PNG, JPEG, GIF or WebP screenshot under 20 MB.');
+    if (!file || !/^image\/(png|jpeg|gif|webp)$/.test(file.type) ) throw new Error('Paste a PNG, JPEG, GIF or WebP screenshot.');
     const id = view.id;
     const at = view.secs;
     const data = await encode(file);

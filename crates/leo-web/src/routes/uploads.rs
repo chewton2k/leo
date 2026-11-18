@@ -691,12 +691,14 @@ fn write_upload(
     let pictures_dir = read_now(state, |store| Ok(store.notes_dir.clone()))
         .map_err(|_| missed(None, "The note could not be saved."))?;
     let body = settle_figures(&body, &figures, &mut |figure| {
-        let size = std::fs::metadata(&figure.path).ok()?.len();
-        if size > attachments::MOST_BYTES as u64 {
-            return None;
-        }
-        let bytes = std::fs::read(&figure.path).ok()?;
-        let kind = attachments::kind_of(&bytes)?;
+        use std::io::Read as _;
+        let mut file = leo_core::paths::open_regular(&figure.path).ok()?;
+        let mut head = Vec::new();
+        (&mut file)
+            .take(attachments::HEAD_BYTES as u64)
+            .read_to_end(&mut head)
+            .ok()?;
+        let kind = attachments::kind_of(&head)?;
         let name = if figure.photo {
             let named = figure
                 .place
@@ -706,7 +708,7 @@ fn write_upload(
         } else {
             format!("{stem} {}.{kind}", figure.place)
         };
-        attachments::save(&pictures_dir, &name, &bytes).ok()
+        attachments::save_from(&pictures_dir, &name, &head, file).ok()
     });
     drop(scratch);
     let made = store_now(state, |store| {

@@ -7,8 +7,6 @@ use serde::Deserialize;
 
 use crate::AppState;
 
-pub(crate) const PICTURE_BYTES: usize = attachments::MOST_BYTES / 3 * 4 + 64 * 1024;
-
 #[derive(Deserialize)]
 pub(crate) struct PictureAt {
     pub(crate) path: String,

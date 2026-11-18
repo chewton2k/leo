@@ -71,7 +71,7 @@ This file holds the rules. How each screen behaves, area by area, is in
   damaged sessions file loads as none). No
   tunnel, Wi-Fi bind, QR, signed-in browsers list or link rotation.
 - A route that carries the person's own text takes a body of any honest size (2026-11-17, the user's call: no request-size limit):
-  create, save, `suggestion`, `insert`, `felix/act`, `tasks/import` and `/api/chat` carry `routes::text_limit()`
+  create, save, `suggestion`, `insert`, `felix/act`, `tasks/import`, a recording's pasted `snapshot` (a screenshot of any size) and `/api/chat` carry `routes::text_limit()`
   (`TEXT_BYTES`, 512 MiB, the one memory bound: a body is read whole and parsed whole, so one request
   costs about three times its size). Hostile input is stopped before the body is read, not by its size: the
   engine listens on 127.0.0.1 only, refuses any Host but its own (421) and any request without the window's

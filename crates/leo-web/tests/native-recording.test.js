@@ -28,3 +28,13 @@ test('late screenshot encoding cannot attach it to another recording', async () 
   assert.equal(await saved, null);
   assert.equal(calls, 0);
 });
+
+test('a screenshot of any size is sent, and only a file that is not a picture is refused', async () => {
+  const current = { id: 'first', state: 'recording', secs: 42 };
+  const sent = [];
+  const big = { type: 'image/png', size: 300 * 1024 * 1024 };
+  const saved = await global.leoRecording.saveScreenshot(current, big, async () => 'data', async (url, options) => { sent.push([url, options.body]); return { ok: true }; }, () => current);
+  assert.deepEqual(saved, { ok: true });
+  assert.deepEqual(sent, [['/api/record/first/snapshot', { data: 'data', at: 42 }]]);
+  await assert.rejects(global.leoRecording.saveScreenshot(current, { type: 'image/svg+xml', size: 5 }, async () => 'data', async () => ({}), () => current), /Paste a PNG, JPEG, GIF or WebP screenshot\./);
+});

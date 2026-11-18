@@ -1248,3 +1248,42 @@ fn the_status_of_an_upload_into_a_note_counts_its_section_and_never_carries_it()
     .unwrap();
     assert!(none.get("section_chars").is_none());
 }
+
+#[test]
+fn a_photo_over_twenty_megabytes_is_kept_beside_the_note() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, _) = kept(&[("big.png", true)]);
+            let mut big = PICTURE.to_vec();
+            big.resize(21 * 1024 * 1024, 5);
+            std::fs::write(&figures[0].path, big).unwrap();
+            Ok(Made {
+                title: "Big photo".to_string(),
+                body: "A photo.".to_string(),
+                figures,
+                scratch: Some(scratch),
+            })
+        },
+    ));
+    let body = making(&state, &[("big.png", "image/png", b"x")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let bytes = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let job = wait_for(&state, &id);
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    let link = note
+        .body
+        .split("](")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .unwrap()
+        .to_string();
+    let saved = state.fresh().notes_dir.join(&link);
+    assert_eq!(std::fs::metadata(saved).unwrap().len(), 21 * 1024 * 1024);
+}

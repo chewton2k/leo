@@ -345,9 +345,7 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/record/{id}/wants", post(crate::record::wants))
         .route(
             "/api/record/{id}/snapshot",
-            post(crate::record::snapshot).layer(axum::extract::DefaultBodyLimit::max(
-                pictures::PICTURE_BYTES,
-            )),
+            post(crate::record::snapshot).layer(text_limit()),
         )
         .route("/api/record/{id}/stop", post(crate::record::stop))
         .route(
