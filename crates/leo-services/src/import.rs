@@ -15,7 +15,6 @@ use crate::figures::{self, Figure};
 
 const PAGES_PER_LOOK: usize = 6;
 const NOTE_TOKENS: u32 = 8_000;
-const MOST_SOURCE_BYTES: usize = 90 * 1024 * 1024;
 const MOST_PDF_CONTENT_BYTES: usize = 16 * 1024 * 1024;
 const MOST_PDF_OPERATIONS: usize = 300_000;
 const MOST_PDF_DEPTH: usize = 128;
@@ -32,6 +31,7 @@ pub struct Upload {
     pub name: String,
     pub mime: String,
     pub bytes: Vec<u8>,
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -604,25 +604,54 @@ fn pdf(bytes: &[u8], scratch: &Scratch) -> Result<Material> {
 }
 
 pub fn extract(upload: &Upload) -> Result<Material> {
-    extract_into(upload, &Scratch::default())
+    read_into(upload, &Scratch::default())
 }
 
-fn extract_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
-    if upload.bytes.len() > MOST_SOURCE_BYTES {
-        bail!(
-            "{} is too large to read; split it into smaller files",
-            upload.name
-        );
+struct SpillWriter<'a>(&'a mut Spill);
+
+impl std::io::Write for SpillWriter<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        let text = std::str::from_utf8(bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.0.push_str(text).map_err(std::io::Error::other)?;
+        Ok(bytes.len())
     }
-    read_into(upload, scratch)
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn read_whole(path: &Path, name: &str) -> Result<Vec<u8>> {
+    let mut file = leo_core::paths::open_regular(path)
+        .with_context(|| format!("leo could not open {name}"))?;
+    let mut bytes = Vec::with_capacity(file.metadata().map_or(0, |m| m.len() as usize));
+    file.read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
 fn read_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
     let ext = extension(&upload.name);
     let mime = upload.mime.to_lowercase();
+    let is_photo = matches!(
+        mime.as_str(),
+        "image/jpeg" | "image/png" | "image/webp" | "image/gif"
+    );
+    let streamed = match &upload.path {
+        Some(path) if !is_photo && matches!(ext.as_str(), "txt" | "md" | "markdown" | "text") => {
+            let mut file = leo_core::paths::open_regular(path)
+                .with_context(|| format!("leo could not open {}", upload.name))?;
+            let mut material = Material::new(scratch);
+            copy_text(&mut file, &mut SpillWriter(&mut material.text))?;
+            return Ok(material);
+        }
+        Some(path) => Some(read_whole(path, &upload.name)?),
+        None => None,
+    };
+    let bytes: &[u8] = streamed.as_deref().unwrap_or(&upload.bytes);
     let text = |t: &str| Material::with_text(scratch, t);
     let photo = |mime: String| -> Result<Material> {
-        let image = scratch.keep_image(&mime, &upload.bytes)?;
+        let image = scratch.keep_image(&mime, bytes)?;
         Ok(Material {
             figures: vec![Figure {
                 mime,
@@ -634,27 +663,24 @@ fn read_into(upload: &Upload, scratch: &Scratch) -> Result<Material> {
             ..Material::new(scratch)
         })
     };
-    if matches!(
-        mime.as_str(),
-        "image/jpeg" | "image/png" | "image/webp" | "image/gif"
-    ) {
+    if is_photo {
         return photo(mime);
     }
     match ext.as_str() {
-        "pdf" => pdf(&upload.bytes, scratch),
+        "pdf" => pdf(bytes, scratch),
         "docx" => {
             let mut material = Material::new(scratch);
-            office::docx(&upload.bytes, &mut material.text)?;
-            material.figures = figures::from_docx(&upload.bytes, scratch)?;
+            office::docx(bytes, &mut material.text)?;
+            material.figures = figures::from_docx(bytes, scratch)?;
             Ok(material)
         }
         "pptx" => {
             let mut material = Material::new(scratch);
-            office::pptx(&upload.bytes, &mut material.text)?;
-            material.figures = figures::from_pptx(&upload.bytes, scratch)?;
+            office::pptx(bytes, &mut material.text)?;
+            material.figures = figures::from_pptx(bytes, scratch)?;
             Ok(material)
         }
-        "txt" | "md" | "markdown" | "text" => text(&String::from_utf8_lossy(&upload.bytes)),
+        "txt" | "md" | "markdown" | "text" => text(&String::from_utf8_lossy(bytes)),
         "jpg" | "jpeg" | "png" | "webp" | "gif" => photo(format!(
             "image/{}",
             if ext == "jpg" { "jpeg" } else { ext.as_str() }
@@ -669,7 +695,7 @@ pub fn gather(uploads: &[Upload]) -> Result<Material> {
     let scratch = Scratch::default();
     let mut all = Material::new(&scratch);
     for upload in uploads {
-        let found = extract_into(upload, &scratch)?;
+        let found = read_into(upload, &scratch)?;
         if !found.text.is_blank() {
             if uploads.len() > 1 {
                 all.text.push_str(&format!("# {}\n\n", upload.name))?;
@@ -968,19 +994,18 @@ pub fn read_to(
     progress: &mut dyn FnMut(&str),
     out: &mut dyn std::io::Write,
 ) -> Result<()> {
-    let mut file = leo_core::paths::open_regular(path)
-        .with_context(|| format!("leo could not open {name}"))?;
     let text_file = !mime.to_lowercase().starts_with("image/")
         && matches!(extension(name).as_str(), "txt" | "md" | "markdown" | "text");
     let wrote = if text_file {
+        let mut file = leo_core::paths::open_regular(path)
+            .with_context(|| format!("leo could not open {name}"))?;
         copy_text(&mut file, out)?
     } else {
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)?;
         let upload = Upload {
             name: name.to_string(),
             mime: mime.to_string(),
-            bytes,
+            bytes: Vec::new(),
+            path: Some(path.to_path_buf()),
         };
         let material = read_into(&upload, &Scratch::default())?;
         drop(upload);
@@ -1301,11 +1326,13 @@ mod tests {
             name: "board.png".into(),
             mime: "image/png".into(),
             bytes: b"\x89PNG\r\n\x1a\nrest".to_vec(),
+            path: None,
         };
         let text = Upload {
             name: "notes.md".into(),
             mime: "text/markdown".into(),
             bytes: b"# Heaps".to_vec(),
+            path: None,
         };
         let gathered = gather(&[photo.clone(), text]).unwrap();
         assert_eq!(gathered.images.len(), 1);
@@ -1350,6 +1377,7 @@ mod tests {
             name: "notes.md".into(),
             mime: "text/markdown".into(),
             bytes: b"# Heaps\n\nMinimum at the root.".to_vec(),
+            path: None,
         };
         let read = read_for_chat(&text, &never, &mut |_| {}).unwrap();
         assert_eq!(read, "# Heaps\n\nMinimum at the root.");
@@ -1357,6 +1385,7 @@ mod tests {
             name: "long.txt".into(),
             mime: "text/plain".into(),
             bytes: "word ".repeat(CHAT_DOC_CHARS / 5 + 100).into_bytes(),
+            path: None,
         };
         let clipped = read_for_chat(&long, &never, &mut |_| {}).unwrap();
         assert!(clipped.chars().count() < CHAT_DOC_CHARS + 60);
@@ -1365,6 +1394,7 @@ mod tests {
             name: "blank.txt".into(),
             mime: "text/plain".into(),
             bytes: b"   ".to_vec(),
+            path: None,
         };
         assert!(read_for_chat(&blank, &never, &mut |_| {}).is_err());
     }
@@ -1430,6 +1460,7 @@ mod tests {
             name: "notes.md".into(),
             mime: "text/markdown".into(),
             bytes: b"# Heaps\nThe minimum sits at the root.".to_vec(),
+            path: None,
         };
         let material = gather(&[text]).unwrap();
         let imported = write_note(
@@ -1448,6 +1479,7 @@ mod tests {
             name: "board.jpg".into(),
             mime: "image/jpeg".into(),
             bytes: vec![0xff, 0xd8, 0xff],
+            path: None,
         };
         let read = read_for_chat(&photo, &see, &mut |_| {})
             .unwrap_err()
@@ -1470,6 +1502,7 @@ mod tests {
             name: "board.jpg".into(),
             mime: "image/jpeg".into(),
             bytes: vec![0xff, 0xd8, 0xff],
+            path: None,
         };
         let mut steps = Vec::new();
         let read = read_for_chat(&photo, &see, &mut |s| steps.push(s.to_string())).unwrap();
@@ -1594,6 +1627,7 @@ mod tests {
             name: name.into(),
             mime: mime.into(),
             bytes,
+            path: None,
         }
     }
 
@@ -2338,6 +2372,7 @@ mod tests {
             name: name.into(),
             mime: String::new(),
             bytes: vec![],
+            path: None,
         };
         let text = |t: &str| made(t, vec![]);
         let slides = text("# Lecture 1\nIntroduction to proofs");
@@ -2667,6 +2702,7 @@ mod tests {
                 name: name.into(),
                 mime: String::new(),
                 bytes,
+                path: None,
             })?;
             let parts = std::sync::atomic::AtomicUsize::new(0);
             let looks = std::sync::atomic::AtomicUsize::new(0);
@@ -2741,5 +2777,42 @@ mod tests {
                     .unwrap_or("no result")
             );
         }
+    }
+
+    fn on_disk(dir: &Path, name: &str, bytes: &[u8]) -> Upload {
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        Upload {
+            name: name.into(),
+            mime: String::new(),
+            bytes: Vec::new(),
+            path: Some(path),
+        }
+    }
+
+    #[test]
+    fn a_file_on_disk_is_read_from_its_path_and_no_size_refuses_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = "A line of a long lecture.\n";
+        let text = line.repeat((95 * 1024 * 1024) / line.len() + 1);
+        assert!(text.len() > 90 * 1024 * 1024);
+        let upload = on_disk(dir.path(), "lecture.txt", text.as_bytes());
+        let material = extract(&upload).unwrap();
+        assert_eq!(material.text.len(), text.len() as u64);
+        assert_eq!(
+            material.text.head(26).unwrap(),
+            "A line of a long lecture.\n"
+        );
+        let pdf = on_disk(
+            dir.path(),
+            "paper.pdf",
+            &pdf_with_pages(&[(Some("Heaps are trees."), None, false)]),
+        );
+        assert!(extract(&pdf)
+            .unwrap()
+            .text
+            .head(100)
+            .unwrap()
+            .contains("Heaps are trees."));
     }
 }
