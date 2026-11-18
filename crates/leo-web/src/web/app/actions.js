@@ -81,6 +81,7 @@ const actions = {
     drawCalendar();
   },
   'task-new': (el) => newTaskSheet(el.dataset.day || null),
+  'tasks-more': () => tasksMore(),
   'task-open': (el) => taskSheet(el.dataset.id, el.dataset.on || null),
   'task-open-here': (el) => openTaskAnywhere(el.dataset.id, el.dataset.on || null),
   'task-done': (el) => {

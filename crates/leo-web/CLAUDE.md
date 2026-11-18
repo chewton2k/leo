@@ -950,6 +950,11 @@ every note after "start over"); whether a build is due is asked every time.
   table are not read. Descriptions are optional plain text ≤4,000 characters.
   One mutex (`tasks::writing`) serialises task writes; task and board file work
   runs on blocking workers and never holds the notes store lock.
+- The task list has no fixed length (2026-11-17, the owner's principle 1): `GET /api/tasks` takes
+  `offset`, `limit` (500 by default), `q` (a word of the title) and `note` (a note id), and answers
+  `{tasks, total}`; the Tasks card ends with Show more while it holds fewer than `total`, and a poll
+  asks for as many as it already holds. Felix's task tools look through every task. The Calendar's
+  schedule answer still carries the first 500.
 - Note tasks: checkboxes under Action items (or To do, Next steps, Deadlines) plus
   promoted ones (`note_tasks`, located by text and neighbours, never the wrong
   box). A date change is written into the checkbox (409 with a preview when the

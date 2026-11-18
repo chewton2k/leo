@@ -1541,7 +1541,7 @@ async function noteTasksSheet() {
   if (!ready) return;
   let listed = [];
   try {
-    listed = (await api('/api/tasks')).tasks.filter((t) => t.note && t.note.id === s.note.id);
+    listed = (await api(`/api/tasks?note=${enc(s.note.id)}&limit=500`)).tasks.filter((t) => t.note && t.note.id === s.note.id);
   } catch (e) {
     if (e instanceof Locked) throw e;
   }
@@ -1596,7 +1596,8 @@ async function openTaskAnywhere(id, on = null) {
   taskSheet(id, on);
 }
 
-var tasksWin = { timer: 0, at: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
+var tasksWin = { timer: 0, at: 0, tasks: null, total: 0, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
+const TASKS_PAGE = 500;
 const TASKS_AHEAD_DAYS = 7;
 const TASK_GROUP_NAMES = { Overdue: 'Earlier' };
 const TASK_DONE_MS = 1200;
@@ -1878,7 +1879,7 @@ function drawTasksWindow() {
       <button type="button" class="icon-btn tasks-new" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button>
     </div>
     <div class="tasks-body">${tasksRows(groups)}</div>
-    <div class="tasks-foot"><button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
+    <div class="tasks-foot">${tasks.length < tasksWin.total ? '<button type="button" class="btn plain" data-action="tasks-more">Show more</button> ' : ''}<button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
   inkSettle(tasksInked);
   refocusTasks(tasksBox, focus);
   fitTasksWindow();
@@ -1920,7 +1921,7 @@ async function loadTasksWindow() {
     const now = new Date();
     const data = home
       ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
-      : await api('/api/tasks');
+      : await api(`/api/tasks?limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`);
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
     if (data.events) {
@@ -1930,6 +1931,7 @@ async function loadTasksWindow() {
     }
     if (revision === tasksWin.revision) {
       tasksWin.tasks = tasks;
+      tasksWin.total = data.total ?? tasks.length;
       if (cal.data) cal.data = { ...cal.data, tasks };
       else cal.data = { events: [], tasks };
       tasksWin.at = Date.now();
@@ -1940,6 +1942,20 @@ async function loadTasksWindow() {
   if (mine !== tasksWin.load) return;
   drawTasksWindow();
   tasksWin.timer = setTimeout(tasksTick, CAL_POLL_MS);
+}
+
+async function tasksMore() {
+  const held = tasksWin.tasks || [];
+  const revision = tasksWin.revision;
+  try {
+    const data = await api(`/api/tasks?offset=${held.length}`);
+    if (revision !== tasksWin.revision || tasksWin.tasks !== held) return;
+    tasksWin.tasks = held.concat(data.tasks || []);
+    tasksWin.total = data.total ?? tasksWin.tasks.length;
+    drawTasksWindow();
+  } catch (e) {
+    if (!(e instanceof Locked)) fail(e);
+  }
 }
 
 function tasksTick() {

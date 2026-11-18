@@ -12,7 +12,10 @@ fn change(state: &AppState, id: &str, body: serde_json::Value) -> Response {
 }
 
 fn listed(state: &AppState) -> Vec<serde_json::Value> {
-    json_of(run(list_tasks(State(state.clone()))))["tasks"]
+    json_of(run(list_tasks(
+        State(state.clone()),
+        Query(Default::default()),
+    )))["tasks"]
         .as_array()
         .unwrap()
         .clone()
@@ -592,6 +595,70 @@ fn a_task_past_two_thousand_can_be_edited() {
     assert!(body_of(&state, &last).contains("- [x] Hand it in"));
 }
 
+fn page_of(state: &AppState, query: serde_json::Value) -> serde_json::Value {
+    json_of(run(list_tasks(
+        State(state.clone()),
+        Query(serde_json::from_value(query).unwrap()),
+    )))
+}
+
+#[test]
+fn the_task_list_is_read_a_page_at_a_time() {
+    let (state, _d, ids) = state_with(&[("Big", "bio"), ("Small", "bio")]);
+    let lines: String = (0..620)
+        .map(|i| format!("- [ ] Task number {i}\n"))
+        .collect();
+    with_action_items(&state, &ids[0], &format!("## Action items\n{lines}"));
+    with_action_items(
+        &state,
+        &ids[1],
+        "## Action items\n- [ ] Other one\n- [ ] Other two",
+    );
+    let whole = page_of(&state, serde_json::json!({"limit": 10_000}));
+    assert_eq!(whole["total"], 622);
+    let first = page_of(&state, serde_json::json!({}));
+    assert_eq!(first["tasks"].as_array().unwrap().len(), 500);
+    assert_eq!(first["total"], 622);
+    let rest = page_of(&state, serde_json::json!({"offset": 500}));
+    assert_eq!(rest["tasks"].as_array().unwrap().len(), 122);
+    let joined: Vec<&serde_json::Value> = first["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(rest["tasks"].as_array().unwrap())
+        .collect();
+    assert_eq!(
+        joined,
+        whole["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .collect::<Vec<_>>()
+    );
+    let big = page_of(&state, serde_json::json!({"note": ids[0]}));
+    assert_eq!(
+        (big["tasks"].as_array().unwrap().len(), big["total"].clone()),
+        (500, 620.into())
+    );
+    let big_rest = page_of(&state, serde_json::json!({"note": ids[0], "offset": 500}));
+    assert_eq!(big_rest["tasks"].as_array().unwrap().len(), 120);
+    assert_eq!(
+        page_of(&state, serde_json::json!({"note": ids[1]}))["total"],
+        2
+    );
+    let word = page_of(&state, serde_json::json!({"q": "NUMBER 61"}));
+    assert_eq!(word["total"], 11);
+    assert!(word["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|t| t["title"].as_str().unwrap().contains("number 61")));
+    assert_eq!(
+        page_of(&state, serde_json::json!({"offset": 9_999}))["tasks"],
+        serde_json::json!([])
+    );
+}
+
 fn rev_of(state: &AppState, query: serde_json::Value) -> String {
     let reply = run(crate::routes::notes::get_rev(
         State(state.clone()),
@@ -788,7 +855,7 @@ fn audit_bench_all_listed() {
                     .map(|t| crate::tasks::standalone(t, Some(&store))),
             );
             crate::tasks::in_order(&mut all);
-            all.truncate(crate::tasks::MOST_LISTED);
+            all.truncate(crate::tasks::LISTED_PAGE);
             all.len()
         };
         let first = median_ms(1, || {

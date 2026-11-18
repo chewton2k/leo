@@ -2911,6 +2911,47 @@ fn felix_task_descriptions_use_the_same_cards_permissions_and_undo_in_both_proto
 }
 
 #[test]
+fn felix_finds_a_task_past_the_first_page() {
+    let (state, _dir, _) = state_with(&[]);
+    let now = chrono::Utc::now();
+    for i in 0..620 {
+        crate::tasks::put(
+            &state.chats,
+            &crate::tasks::Task {
+                id: format!("t{i:08}"),
+                title: format!("Chore {i:04}"),
+                description: String::new(),
+                kind: "other".into(),
+                done: false,
+                date: None,
+                time: None,
+                end: None,
+                note: None,
+                sent_at: None,
+                created_at: now,
+                updated_at: now,
+                repeat: Vec::new(),
+                done_on: Vec::new(),
+                moved: Default::default(),
+                deleted: false,
+            },
+        )
+        .unwrap();
+    }
+    let mut desk = tools::Desk::new(vec![], 8000);
+    let done = crate::routes::organize::run(
+        &state,
+        &mut desk,
+        tools::Access::Ask,
+        &tools::Call {
+            name: "update_task".into(),
+            args: serde_json::json!({"task": "Chore 0619", "done": "yes"}),
+        },
+    );
+    assert!(done.proposal.is_some(), "{}", done.result);
+}
+
+#[test]
 fn repeated_identical_failed_calls_get_one_final_answer_without_exhausting_the_budget() {
     for broken in [true, false] {
         let (mut state, _dir, _) = state_with(&[]);

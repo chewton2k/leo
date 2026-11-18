@@ -19,6 +19,7 @@ function harness({ view = 'calendar', visible = true } = {}) {
   let next = 1;
   let now = 1000000;
   const asked = [];
+  const urls = [];
   const context = {
     setTimeout(fn, ms) { const id = next++; list.push({ id, fn, ms }); return id; },
     clearTimeout(id) { const at = list.findIndex((t) => t.id === id); if (at >= 0) list.splice(at, 1); },
@@ -26,12 +27,13 @@ function harness({ view = 'calendar', visible = true } = {}) {
     JSON, enc: String, S: require('../src/web/schedule.js'), asked,
     appVisible: () => context.visible, visible,
     Locked: class {}, drawCalendar() {}, drawTasksWindow() {}, loadHomeWeek() {}, tasksAtHome: () => false, calWindow: () => ({ from: 'f', to: 't' }),
-    api: async (url) => { asked.push(url.split('?')[0]); return url.startsWith('/api/schedule') ? { events: [], tasks: [] } : { tasks: [] }; },
+    api: async (url) => { urls.push(url); asked.push(url.split('?')[0]); return url.startsWith('/api/schedule') ? { events: [], tasks: [] } : { tasks: [] }; },
   };
   vm.createContext(context);
   const code = [
     'const CAL_POLL_MS = 150000;',
     'const CAL_TASKS_GRACE_MS = 5000;',
+    'const TASKS_PAGE = 500;',
     between('async function loadSchedule(', 'function calSettled()'),
     between('function calendarShown()', 'document.addEventListener'),
     between('async function loadTasksWindow()', "setTimeout(() => loadTasksWindow().catch"),
@@ -41,7 +43,7 @@ function harness({ view = 'calendar', visible = true } = {}) {
     context,
   );
   return {
-    h: context.h, asked, list, context,
+    h: context.h, asked, urls, list, context,
     async period() {
       now += 150000;
       const due = list.filter((t) => t.ms === 150000);
@@ -100,4 +102,35 @@ test('coming back outside the Calendar still reloads stale tasks', async () => {
   t.h.calendarShown();
   await settle();
   assert.deepEqual(t.asked, ['/api/tasks']);
+});
+
+test('a poll keeps the pages already shown', async () => {
+  const t = harness();
+  t.h.state.view = 'folder';
+  t.h.tasksWin.tasks = Array.from({ length: 620 }, (_, i) => ({ id: `t${i}` }));
+  await t.h.loadTasksWindow();
+  assert.deepEqual(t.urls, ['/api/tasks?limit=620']);
+  t.h.tasksWin.tasks = [];
+  t.urls.length = 0;
+  await t.h.loadTasksWindow();
+  assert.deepEqual(t.urls, ['/api/tasks?limit=500']);
+});
+
+test('the Tasks card offers Show more when there are more tasks than it holds', () => {
+  const drawn = [];
+  const box = { hidden: true, setAttribute() {}, set innerHTML(html) { drawn.push(html); } };
+  const context = {
+    tasksWin: { tasks: [{ id: 'a' }, { id: 'b' }], total: 3 }, cal: { data: null }, state: { view: 'folder' }, location: { hash: '#/n/x' },
+    tasksAtHome: () => false, drawHomeToday() {}, tasksGroups: (tasks) => [['Today', tasks]], tasksFocus: () => null,
+    inkSettle() {}, refocusTasks() {}, fitTasksWindow() {}, tasksRows: () => '', tasksInked() {}, ICON: { check: '', plus: '' },
+    tasksBox: box, esc: String, TASK_GROUP_NAMES: {},
+  };
+  vm.createContext(context);
+  vm.runInContext(`${between('function drawTasksWindow()', 'function fitTasksWindow()')}\n;globalThis.draw = drawTasksWindow;`, context);
+  context.draw();
+  assert.equal(box.hidden, false);
+  assert.match(drawn[0], /data-action="tasks-more"/);
+  context.tasksWin.total = 2;
+  context.draw();
+  assert.doesNotMatch(drawn[1], /tasks-more/);
 });

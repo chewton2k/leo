@@ -28,7 +28,7 @@ pub fn description_of(text: &str) -> Result<String, &'static str> {
     }
     Ok(text.to_string())
 }
-pub const MOST_LISTED: usize = 500;
+pub const LISTED_PAGE: usize = 500;
 pub const KINDS: [&str; 6] = [
     "assignment",
     "exam",
@@ -414,6 +414,14 @@ pub struct ListedIndex {
     by_id: HashMap<String, usize>,
 }
 
+impl std::ops::Deref for ListedIndex {
+    type Target = [Listed];
+
+    fn deref(&self) -> &[Listed] {
+        &self.all
+    }
+}
+
 type Kept = (u64, Vec<Meta>, Vec<Task>, Arc<ListedIndex>);
 
 #[derive(Default)]
@@ -456,20 +464,6 @@ impl ListedCache {
         *self.kept.lock().unwrap_or_else(|e| e.into_inner()) =
             Some((at, metas.to_vec(), stored.to_vec(), Arc::clone(&index)));
         index
-    }
-
-    pub fn all(
-        &self,
-        generation: &AtomicU64,
-        store: &Store,
-        metas: &[Meta],
-        stored: &[Task],
-    ) -> Vec<Listed> {
-        let index = self.index(generation, store, metas, stored);
-        #[cfg(test)]
-        self.cloned
-            .fetch_add(index.all.len().min(MOST_LISTED), Ordering::Relaxed);
-        index.all.iter().take(MOST_LISTED).cloned().collect()
     }
 
     pub fn find(

@@ -1,4 +1,6 @@
-use axum::extract::{Path, State};
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -45,14 +47,49 @@ fn time_of(text: Option<&str>) -> Result<Option<NaiveTime>, ()> {
     }
 }
 
-pub(crate) async fn list_tasks(State(state): State<AppState>) -> Response {
-    match all_listed(&state).await {
-        Ok(all) => Json(serde_json::json!({ "tasks": all })).into_response(),
-        Err(code) => code.into_response(),
-    }
+#[derive(Deserialize, Default)]
+pub(crate) struct Page {
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+    q: Option<String>,
+    note: Option<String>,
 }
 
-pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, StatusCode> {
+pub(crate) async fn list_tasks(
+    State(state): State<AppState>,
+    Query(page): Query<Page>,
+) -> Response {
+    let index = match listed_index(&state).await {
+        Ok(index) => index,
+        Err(code) => return code.into_response(),
+    };
+    let word = page
+        .q
+        .as_deref()
+        .map(str::to_lowercase)
+        .filter(|q| !q.is_empty());
+    let note = page.note.as_deref().filter(|n| !n.is_empty());
+    let matching = index
+        .iter()
+        .filter(|t| note.is_none_or(|n| t.note.as_ref().is_some_and(|r| r.id == n)))
+        .filter(|t| {
+            word.as_ref()
+                .is_none_or(|w| t.title.to_lowercase().contains(w))
+        });
+    let mut total = 0;
+    let mut tasks = Vec::new();
+    let limit = page.limit.unwrap_or(tasks::LISTED_PAGE);
+    for task in matching {
+        if total >= page.offset && tasks.len() < limit {
+            tasks.push(task);
+        }
+        total += 1;
+    }
+    Json(serde_json::json!({ "tasks": tasks, "total": total })).into_response()
+}
+
+async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, StatusCode> {
     let chats = state.chats.clone();
     let (metas, stored) =
         tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::load_all(&chats)))
@@ -61,8 +98,13 @@ pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, S
     let generation = state.generation.clone();
     let listed = state.listed.clone();
     state
-        .read_store(move |store| Ok(listed.all(&generation, store, &metas, &stored)))
+        .read_store(move |store| Ok(listed.index(&generation, store, &metas, &stored)))
         .await
+}
+
+pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, StatusCode> {
+    let index = listed_index(state).await?;
+    Ok(index.iter().take(tasks::LISTED_PAGE).cloned().collect())
 }
 
 #[derive(Deserialize)]
@@ -497,7 +539,7 @@ pub(crate) async fn promote_task(
 }
 
 pub(crate) async fn task_ics(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let Ok(all) = all_listed(&state).await else {
+    let Ok(all) = listed_index(&state).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Some(task) = all.iter().find(|t| t.id == id) else {
