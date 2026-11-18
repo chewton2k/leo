@@ -238,6 +238,7 @@
       const levels = ed.listLevels(lines);
       const starts = listStarts(levels);
       let boxes = 0;
+      const tail = container.querySelector('.doc-tail');
       rendered = blocks.map((block, i) => {
         const text = lines.slice(block.start, block.end).join('\n');
         const level = block.kind === 'line' ? levels[block.start] : 0;
@@ -256,18 +257,18 @@
         if (level > 0) el.style.marginLeft = `${level * 1.5}em`;
         el.innerHTML = renderBlock(block, before, levels, starts);
         if (old && old.el.parentNode === container) old.el.replaceWith(el);
-        else container.insertBefore(el, container.querySelector('.doc-tail'));
+        else container.insertBefore(el, tail);
         return { key, el };
       });
       for (const el of container.querySelectorAll('.blk')) {
         if (Number(el.dataset.i) >= blocks.length) el.remove();
       }
       container.classList.toggle('doc-empty', !lines.join('').trim());
-      if (!container.querySelector('.doc-tail')) {
-        const tail = document.createElement('div');
-        tail.className = 'doc-tail';
-        tail.dataset.tail = '1';
-        container.appendChild(tail);
+      if (!tail) {
+        const end = document.createElement('div');
+        end.className = 'doc-tail';
+        end.dataset.tail = '1';
+        container.appendChild(end);
       }
       outlineScroll();
     }
@@ -287,6 +288,7 @@
     const outlineDownArrow = outlineNav ? document.createElement('button') : null;
     let outlineStart = 0;
     let outlineAt = -1;
+    const outlinePlaced = { top: null, center: null };
     let outlineButton = null;
     let outlineTick = null;
     let outlineFollowed = null;
@@ -527,8 +529,15 @@
       outlineFrame = 0;
       if (!outline || !outline.isConnected || outline.hidden) return;
       const top = outlineTop();
-      outline.style.setProperty('--outline-top', `${top}px`);
-      outline.style.setProperty('--outline-center', `${Math.max(top, (root.innerHeight - outline.offsetHeight) / 2)}px`);
+      if (top !== outlinePlaced.top) {
+        outlinePlaced.top = top;
+        outline.style.setProperty('--outline-top', `${top}px`);
+      }
+      const center = Math.max(top, (root.innerHeight - outline.offsetHeight) / 2);
+      if (center !== outlinePlaced.center) {
+        outlinePlaced.center = center;
+        outline.style.setProperty('--outline-center', `${center}px`);
+      }
       const bottom = root.scrollY > 0 && root.scrollY + root.innerHeight >= document.documentElement.scrollHeight - 2;
       const limit = bottom ? root.innerHeight : top + 24;
       let low = 0;
