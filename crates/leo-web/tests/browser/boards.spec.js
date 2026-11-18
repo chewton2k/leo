@@ -49,6 +49,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     window.failNext=null;window.slow=0;
     async function fakeApi(url,{method='GET',body}={}){
       window.calls.push(method+' '+url);
+      if(url==='/api/boards'&&method==='POST')(window.boardBodies||(window.boardBodies=[])).push(structuredClone(body));
       let early=null;
       if(window.early&&method==='GET'){const found=url.match(/^\\/api\\/boards\\/([^/]+)$/);const b=found&&db.boards.find(x=>x.id===found[1]);if(b)early={board:structuredClone(b),cards:ranked(b.id)};}
       await new Promise(r=>setTimeout(r,5+window.slow));
@@ -414,6 +415,24 @@ test('no boards shows the drawn empty state with its facts and the New board but
     await expect(none.locator('h3')).toHaveText('No boards yet');
     await expect(none.locator('[data-action="kanban-new-board"]')).toBeVisible();
     expect(await none.locator('svg.drawn-board').evaluate(el => [el.getAttribute('fill'), el.getAttribute('stroke')])).toEqual(['none', 'currentColor']);
+  });
+});
+
+test('a board create that is retried sends the same request id', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-action="kanban-new-board"]').click();
+    await page.locator('#kanban-board-name').fill('Job search');
+    await page.evaluate(() => { window.failNext = 'Leo could not make the board.'; });
+    await page.locator('#kanban-board-make').click();
+    await expect(page.locator('.toast')).toContainText('Leo could not make the board.');
+    await expect(page.locator('#kanban-board-make')).toBeEnabled();
+    await page.locator('#kanban-board-make').click();
+    await expect(page.locator('.kanban-tab.on .kanban-title')).toHaveValue('Job search');
+    const bodies = await page.evaluate(() => window.boardBodies);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[0].request).toBeTruthy();
+    expect(bodies[1].request).toBe(bodies[0].request);
+    expect(bodies[1].name).toBe('Job search');
   });
 });
 

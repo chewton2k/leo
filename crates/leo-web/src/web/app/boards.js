@@ -322,11 +322,14 @@ async function kanbanNewBoard() {
   </div>`);
   const name = $('#kanban-board-name', box);
   const make = $('#kanban-board-make', box);
+  let attempt = null;
   const save = async () => {
     if (make.disabled) return;
     make.disabled = true;
     try {
-      const board = await kanbanWrite('/api/boards', { method: 'POST', body: { name: name.value.trim() } });
+      const wanted = name.value.trim();
+      if (!attempt || attempt.name !== wanted) attempt = { name: wanted, request: requestId() };
+      const board = await kanbanWrite('/api/boards', { method: 'POST', body: { name: wanted, request: attempt.request } });
       closeSheet();
       kanbanRemember(board.id);
       go(`#/boards/${enc(board.id)}`);
