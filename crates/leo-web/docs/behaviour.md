@@ -233,7 +233,7 @@ selection drags while keeping file drops and pointer-driven board/resize actions
 
 Page toolbars share one geometry across notes, workspace, calendar, boards, recording
 and Settings: 760 px at most below 1000 px, the page's width less `min(8%, 128px)` each
-side from 1000 px. Every Settings section uses the same Settings / section breadcrumb;
+side from 1000 px. The bar shows no breadcrumbs on any page (its empty row is kept as spacing);
 Keeping and Trash keep their routes and controllers inside that frame.
 Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
@@ -450,12 +450,12 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   Settings pinned below (Trash and Keeping live inside Settings since
   2026-11-02, the user's call; the rail shows Settings for them). The rail has no
   Notes button (2026-11-03, the user's call: notes open from the explorer; the
-  workspace is reached from the breadcrumbs' first crumb or the leo name). Buttons retain accessible names,
+  workspace is reached from the leo name). Buttons retain accessible names,
   tooltips and active states, with space between controls and unboxed shortcut
   hints. The separate explorer shows nested folders and
   individual notes. Folder labels and chevrons toggle their children; note rows
   open notes directly. The selected folder scopes New note, Record and imports;
-  breadcrumbs reveal folders in the explorer. The explorer narrows
+  the bar shows no breadcrumbs. The explorer narrows
   below 1200 px to leave room for notes, originals and Felix. Its right edge is a
   keyboard-accessible resize handle; `leo-side-width` remembers the expanded
   width while the 52 px rail stays fixed. `pane-resize.js` shares bounded sizing,

@@ -52,9 +52,6 @@ a { color: var(--accent); }
 .brand-mark { width: .8em; height: .8em; margin-right: .2em; vertical-align: -.05em; }
 .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
 .crumbs { visibility: hidden; flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; overflow: hidden; white-space: nowrap; color: var(--muted); font-size: var(--fs-md); }
-.crumbs button { border: 0; background: none; padding: 4px 6px; border-radius: var(--r-tile); color: var(--muted); max-width: 40vw; overflow: hidden; text-overflow: ellipsis; }
-.crumbs button:last-child { color: var(--text); font-weight: 600; }
-.crumbs .sep { color: var(--faint); }
 .icon-btn {
   width: 40px; height: 40px; flex: none; display: grid; place-items: center;
   border: 0; border-radius: var(--r-md); background: transparent; color: var(--text);

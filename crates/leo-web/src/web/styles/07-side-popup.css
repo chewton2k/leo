@@ -112,9 +112,6 @@ body.chat-open .quick-perch { display: none; }
 .side-count { margin-left: auto; font-size: var(--fs-xs); color: var(--faint); font-variant-numeric: tabular-nums; }
 .side-none { margin: 2px 10px 0; font-size: var(--fs-sm); line-height: 1.45; color: var(--muted); }
 .side-row .felix { width: 22px; height: auto; flex: none; margin: 0 -1px; }
-body.on-calendar #crumbs .page-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-.page-name { display: none; color: var(--text); font-weight: 650; font-size: 16px; padding: 4px 6px; }
-@media (min-width: 1000px) { .page-name { display: inline; } }
 @media (min-width: 1000px) { .bar-row { max-width: none; padding-inline: min(8%, 128px); } }
 body.side-mini .side { grid-template-columns: 52px; }
 body.side-mini .side-explorer, body.side-mini .side-head .brand { display: none; }

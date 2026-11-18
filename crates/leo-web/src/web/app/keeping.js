@@ -10,7 +10,6 @@ async function showKeeping() {
   const mine = ++seq;
   state = { view: 'keeping', dir: '' };
   chrome();
-  $('#crumbs').innerHTML = settingsCrumbs('keeping');
   document.title = 'Keeping · leo';
   refreshPanel(app, settingsFrame('keeping', skeleton(4, 'keeping')));
   let keep;

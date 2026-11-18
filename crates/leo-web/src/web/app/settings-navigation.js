@@ -92,10 +92,6 @@ function settingsTitle(section) {
   return settingsItems().find(([id]) => id === section)?.[1] || 'General';
 }
 let settingsDrawn = '', settingsPillFrom = null;
-function settingsCrumbs(section) {
-  const [, title] = settingsItems().find(([id]) => id === section) || settingsItems()[0];
-  return `<span class="sep">/</span><button data-action="settings">Settings</button><span class="sep">/</span><button aria-current="page">${esc(title)}</button>`;
-}
 
 const settingsFind = { query: '', active: 0 };
 function settingsMatches(query) {

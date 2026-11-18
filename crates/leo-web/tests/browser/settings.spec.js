@@ -397,14 +397,12 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.getByRole('link',{name:'Keeping',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/keeping');
       await expect(page.getByRole('heading',{level:1,name:'Keeping'})).toBeVisible();
-      await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Keeping');
       await expect(page.locator('select[data-keep]')).toHaveCount(5);
       await expect(page.locator('select[data-keep="upload_days"]')).toHaveValue('90');
       await page.getByRole('link',{name:'Trash',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/trash');
       await expect(page.getByText('Nothing thrown away.',{exact:true})).toBeVisible();
       await expect(page.locator('.empty svg.drawn-trash')).toBeVisible();
-      await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Trash');
       expect(await keptNav.evaluate(el=>el.isConnected)).toBe(true);
       await page.setViewportSize({width:620,height:850});
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -422,7 +420,7 @@ test("Trash's All box keeps focus when toggled with the keyboard", async ({ page
     const app=document.querySelector('#app'), floating=document.querySelector('#floating'), $=selector=>document.querySelector(selector);
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const ICON=new Proxy({}, {get:()=>'<svg></svg>'}), DRAWN=ICON, plural=(n,w)=>n+' '+w+(n===1?'':'s'), rel=()=>'now';
-    const chrome=()=>{}, settingsCrumbs=()=>'', skeleton=()=>'', cascade=()=>{}, pulse=()=>{}, toast=()=>{}, empty=()=>'', confirmSheet=()=>{}, closeSheet=()=>{}, refreshSideTree=async()=>{};
+    const chrome=()=>{}, skeleton=()=>'', cascade=()=>{}, pulse=()=>{}, toast=()=>{}, empty=()=>'', confirmSheet=()=>{}, closeSheet=()=>{}, refreshSideTree=async()=>{};
     const settingsFrame=(section,content)=>content;
     let seq=0,state={view:'folder'};
     async function api(url){ if(url==='/api/trash') return [{id:'a',title:'First',directory:'',deleted_at:1,readable:true},{id:'b',title:'Second',directory:'',deleted_at:1,readable:true}]; return null; }

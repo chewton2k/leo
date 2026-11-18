@@ -5839,14 +5839,14 @@ for (const width of [1280, 390]) {
   test(`Record and Settings keep consistent headers at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     let reference;
-    for (const [route, crumb] of [
-      ['record', 'Record'],
-      ['settings/general', 'Settings / General'],
-      ['settings/keeping', 'Settings / Keeping'],
-      ['settings/trash', 'Settings / Trash'],
+    for (const [route, title] of [
+      ['record', 'Record · leo'],
+      ['settings/general', 'Settings · leo'],
+      ['settings/keeping', 'Keeping · leo'],
+      ['settings/trash', 'Trash · leo'],
     ]) {
       await page.goto('/#/' + route);
-      await expect(page.locator('#crumbs')).toContainText(new RegExp(crumb.replaceAll(' / ', '\\s*/\\s*')));
+      await expect(page).toHaveTitle(title);
       const header = await page.locator('.bar-row').boundingBox();
       if (width < 1000) expect(header.width).toBeLessThanOrEqual(760);
       if (reference) {

@@ -52,7 +52,6 @@ async function showCalendar() {
   const mine = ++seq;
   state = { view: 'calendar', dir: '' };
   chrome();
-  $('#crumbs').innerHTML = '<span class="sep">/</span><button>Calendar</button>';
   document.title = 'Calendar · leo';
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   cal.peek = null;

@@ -21,7 +21,6 @@ async function showSettings(section) {
   state = { view: 'settings', dir: '', section };
   scheduleAppStatus(appPollGeneration);
   chrome();
-  $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
   refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
   const wants = SETTINGS_WANTS[section] || [];

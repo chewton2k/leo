@@ -46,12 +46,6 @@ test('switches stay checkboxes and segmented choices carry their value', () => {
   assert.ok(buttons.includes('data-action="theme-pick" data-theme="dark" aria-pressed="true"'));
   assert.ok(!buttons.includes('type="hidden"') && buttons.includes('role="group"'));
 });
-test('every Settings section names its current page in the same breadcrumb', () => {
-  const h = helpers();
-  for (const [id, title] of [['general', 'General'], ['shortcuts', 'Shortcuts'], ['dictation', 'Dictation'], ['models', 'Speech models'], ['writing', 'Writing AI'], ['calendar', 'Calendar'], ['keeping', 'Keeping'], ['trash', 'Trash'], ['health', 'Health'], ['updates', 'Updates &amp; about']]) {
-    assert.equal(h.settingsCrumbs(id), `<span class="sep">/</span><button data-action="settings">Settings</button><span class="sep">/</span><button aria-current="page">${title}</button>`);
-  }
-});
 
 const sources = ['settings.js', 'app-settings.js', 'dictation.js', 'keeping.js', 'trash.js', 'margin-notes.js'].map(name => fs.readFileSync(path.join(__dirname, '../src/web/app', name), 'utf8')).join('\n');
 test('every searchable setting names a real section and a target the page draws', () => {

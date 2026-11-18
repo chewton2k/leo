@@ -989,7 +989,6 @@ async function showRecord(arg) {
   const mine = ++seq;
   state = { view: 'record', dir: '' };
   chrome();
-  $('#crumbs').innerHTML = '<span class="sep">/</span><button>Record</button>';
   document.title = 'Record · leo';
   app.innerHTML = '<div id="rec-box"></div>';
   let folders = [];

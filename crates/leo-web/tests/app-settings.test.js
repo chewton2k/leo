@@ -156,7 +156,7 @@ test('the export text matches what the zip holds', () => {
 test('Keeping that could not be opened shows the broken pencil drawing', async () => {
   const keeping = fs.readFileSync(path.join(__dirname, '../src/web/app/keeping.js'), 'utf8');
   const shown = [];
-  const ctx = { seq: 0, state: {}, app: { addEventListener() {} }, chrome() {}, $: () => ({}), document: {}, settingsCrumbs: () => '', skeleton: () => 'loading', settingsFrame: (name, html) => html, refreshPanel: (box, html) => shown.push(html), DRAWN: { broken: '<svg class="drawn drawn-broken"></svg>' }, empty: (icon, title) => `${icon}<h3>${title}</h3>`, api: async () => { throw new Error('offline'); } };
+  const ctx = { seq: 0, state: {}, app: { addEventListener() {} }, chrome() {}, $: () => ({}), document: {}, skeleton: () => 'loading', settingsFrame: (name, html) => html, refreshPanel: (box, html) => shown.push(html), DRAWN: { broken: '<svg class="drawn drawn-broken"></svg>' }, empty: (icon, title) => `${icon}<h3>${title}</h3>`, api: async () => { throw new Error('offline'); } };
   vm.createContext(ctx);
   vm.runInContext(keeping, ctx);
   await assert.rejects(ctx.showKeeping());

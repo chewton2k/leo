@@ -16,7 +16,6 @@
   main, .bar { padding-inline: 28px; }
 }
 .segmented, [role="tablist"], .settings-nav, .kanban-tabs, #side { -webkit-user-select: none; user-select: none; }
-.dragging .crumbs [data-action="home"] { outline: 1px dashed var(--accent); outline-offset: 2px; }
 .card {
   display: block; width: 100%; text-align: left; border: 0; cursor: pointer;
   background: var(--raised); border-radius: var(--radius); padding: 14px 16px;
