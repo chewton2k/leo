@@ -58,7 +58,7 @@ async function sourcePick(source) {
 
 async function sourceMatch(source, at) {
   if (changedSources().length) return toast('Save your fixes first.');
-  await loadSourcePage(source, { passages: Number(at), points: 0 }, []);
+  await loadSourcePage(source, { passages: Number(at), points: 0 }, Number(at) > 0 ? [{ passages: 0, points: 0 }] : []);
   const row = document.querySelector(`[data-passage="${at}"]`);
   if (row) row.scrollIntoView({ block: 'center' });
 }
@@ -200,10 +200,15 @@ async function saveSource() {
   const mine = seq;
   const changes = changedSources();
   if (!changes.length) return toast('Nothing has changed.');
-  let base = page.page.head.revision;
-  for (const batch of sourceBatches(changes)) {
-    const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: page.page.head.id, base, changes: batch } });
-    base = saved.revision;
+  const { head } = page.page;
+  try {
+    for (const batch of sourceBatches(changes)) {
+      const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: head.id, base: head.revision, changes: batch } });
+      head.revision = saved.revision;
+    }
+  } catch (e) {
+    if (e.status === 409) throw new Error('This recording changed while you were fixing it. Your fixes are still on this page: copy them, then close the transcript and open it again.');
+    throw e;
   }
   if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
   await loadSourcePage(page.page.head.id, page.page.at, page.back);
