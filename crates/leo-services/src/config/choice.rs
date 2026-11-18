@@ -66,6 +66,8 @@ pub const WRITING: &[Choice] = &[
             m("gpt-6-luna", "included in your ChatGPT plan"),
             m("gpt-6-sol", "included in your ChatGPT plan"),
             m("gpt-6.1-sol", "included in your ChatGPT plan"),
+            m("gpt-6.2-sol", "included in your ChatGPT plan"),
+            m("gpt-6.2-astra", "included in your ChatGPT plan"),
             m("gpt-6.1-terra", "included in your ChatGPT plan"),
             m("gpt-6-astra", "included in your ChatGPT plan"),
         ],
@@ -330,6 +332,11 @@ mod tests {
             ["low", "medium", "high", "xhigh"]
         );
         assert_eq!(efforts("openai", "gpt-6-luna"), ["low", "medium", "high"]);
+        assert_eq!(efforts("openai", "gpt-6.2-sol"), ["low", "medium", "high"]);
+        assert_eq!(
+            efforts("codex", "gpt-6.2-astra"),
+            ["low", "medium", "high", "xhigh"]
+        );
         assert!(efforts("openai", "gpt-4.1").is_empty());
         assert!(efforts("ollama", "qwen3:8b").is_empty());
         assert_eq!(effort_for("codex", "", None).as_deref(), Some("medium"));
@@ -508,6 +515,8 @@ mod tests {
             "gpt-6-luna",
             "gpt-6-sol",
             "gpt-6.1-sol",
+            "gpt-6.2-sol",
+            "gpt-6.2-astra",
             "gpt-6.1-terra",
             "gpt-6-astra",
         ] {
