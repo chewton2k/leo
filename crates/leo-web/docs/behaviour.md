@@ -723,7 +723,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   `sureOf` maps it to `SURE`'s sure ≥75, think ≥40, else guess for marking and scoring, and Felix
   hears the percent; set it before answering, since a choice submits at once) and an Add your
   thinking switch (up to `MOST_THINKING`, a separate `think:i:k` draft, sent only while the switch
-  is on; with thinking, a multiple-choice answer also goes to `/api/quiz/mark` for feedback that opens by
+  is on, opened and closed in place by the shared switch (never a redraw, so its knob moves like Settings') and a height reveal of
+  the box (`leoMotion.slide`, none under Reduced Motion) (2026-11-18, the owner's call); with thinking, a multiple-choice answer also goes to `/api/quiz/mark` for feedback that opens by
   answering the thinking, while the page keeps its own verdict) (2026-11-09, the user's call). Both go to `/api/quiz/mark` (`confidence` is
   validated, `thinking` bounded and sealed) and to Felix inside the answer line
   (`aside`), which must stay one line: `send` folds held results by taking their

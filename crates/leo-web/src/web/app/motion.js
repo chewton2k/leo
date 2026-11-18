@@ -227,4 +227,4 @@ function liftedRect(el) {
   return { left: r.left + (r.width - el.offsetWidth) / 2, top: r.top + (r.height - el.offsetHeight) / 2, tilt: parseFloat(getComputedStyle(el).getPropertyValue('--tilt')) || 0 };
 }
 
-window.leoMotion = { unfold, fold, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };
+window.leoMotion = { unfold, fold, slide: slideHeight, cascade, pulse, rubber, iconSwap, overlapOut, stillMotion, dock: dockPanel };

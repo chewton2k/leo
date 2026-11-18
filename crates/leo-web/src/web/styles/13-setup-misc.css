@@ -417,6 +417,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-think-toggle .switch::before { width: 16px; height: 16px; }
 .quiz-think-toggle .switch:checked::before { transform: translateX(14px); }
 @media (forced-colors: active) { .quiz-sure-range::-webkit-slider-runnable-track { background: CanvasText; } }
+.quiz-thinking-wrap { box-sizing: border-box; margin-top: -10px; padding-top: 10px; }
 .quiz-thinking { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: var(--fs-base); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: 8px 10px; }
 .quiz-thinking:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 .quiz-own { font-size: var(--fs-sm); color: var(--muted); white-space: pre-wrap; }

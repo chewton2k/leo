@@ -1029,8 +1029,10 @@ test.describe('Felix', () => {
     await check.locator('.quiz-sure-range').fill('30');
     await expect(check.locator('.quiz-sure-pct')).toHaveText('30%');
     await expect(check.locator('[data-chat="quiz-think"]')).toHaveAttribute('role', 'switch');
+    const thinkSwitch = await check.locator('[data-chat="quiz-think"]').elementHandle();
     await check.locator('[data-chat="quiz-think"]').click();
     await expect(check.locator('.quiz-thinking')).toBeFocused();
+    expect(await thinkSwitch.evaluate((el) => el.isConnected && el.checked), 'the switch itself moves, it is not redrawn').toBe(true);
     await page.keyboard.type('fairness maybe');
     await check.locator('.quiz-input').fill('so nobody waits forever');
     await check.locator('[data-chat="quiz-check"]').click();

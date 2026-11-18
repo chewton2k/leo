@@ -568,7 +568,8 @@ read (root CLAUDE.md, 2026-11-17).
   `/api/quiz/mark` (quick model, `MARK`; `confidence` validated, `thinking`
   bounded to `MOST_THINKING`). How sure is a 0–100% bar (`q.surePct`; `sureOf`
   maps ≥75 sure, ≥40 think, else guess for `SURE`); thinking is sent only while
-  its switch is on (2026-11-09). Hidden grading accepts only the exact verdict
+  its switch is on (2026-11-09); the switch is toggled in place and its box slides open and shut with
+  `leoMotion.slide` (2026-11-18). Hidden grading accepts only the exact verdict
   words; a hidden check is authoritative for the card; an invalid check leaves
   the answer ungraded and releases the warm session. Predictions (`predict:
   yes`) are never marked, scored or counted. `quiz_from` shuffles options and

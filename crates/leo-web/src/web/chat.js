@@ -2173,6 +2173,10 @@
       return `<svg class="quiz-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path pathLength="1"${writing} d="${path}"/></svg>`;
     }
 
+    function thinkingBox(where, text, off = '') {
+      return `<div class="quiz-thinking-wrap"><textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(text)}</textarea></div>`;
+    }
+
     function quizCard(q, i, k, pending, sources) {
       const where = `data-i="${i}" data-k="${k}"`;
       const done = typeof q.given === 'string';
@@ -2197,7 +2201,7 @@
       const result = checking.has(q) ? `<div class="quiz-result">${BLOT}Checking your answer…</div>` : marking && !(reply && reply.text) ? `<div class="quiz-result">${BLOT}Felix is reading your answer…</div>` : '';
       const open = !done && !q.predict;
       const writing = thinkingOpen.has(q);
-      const thinking = open && writing ? `<textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(state.drafts[`think:${i}:${k}`] || '')}</textarea>` : '';
+      const thinking = open && writing ? thinkingBox(where, state.drafts[`think:${i}:${k}`] || '', off) : '';
       const pct = Number.isFinite(q.surePct) ? q.surePct : null;
       const sure = open ? `<div class="quiz-sure"><label class="quiz-sure-meter${pct === null ? ' unset' : ''}" style="--pct: ${pct ?? 50}%"><span class="quiz-sure-label">How sure?</span><input type="range" class="quiz-sure-range" ${where} min="0" max="100" step="5" value="${pct ?? 50}" aria-label="How sure are you"${pct === null ? ' aria-valuetext="Not set"' : ''}${off}><output class="quiz-sure-pct">${pct === null ? '–' : `${pct}%`}</output></label><label class="quiz-think-toggle"><input type="checkbox" class="switch" role="switch" data-chat="quiz-think" ${where}${writing ? ' checked' : ''}${off}><span>Add your thinking</span></label></div>${thinking}` : '';
       const own = done && (sureText(q) || q.thinking) ? `<div class="quiz-own">${[sureText(q), q.thinking].filter(Boolean).map(escape).join(' · ')}</div>` : '';
@@ -3126,10 +3130,28 @@
       } else if (what === 'quiz-think') {
         const q = state.messages[Number(el.dataset.i)]?.quizzes?.[Number(el.dataset.k)];
         if (!q) return;
-        if (thinkingOpen.has(q)) thinkingOpen.delete(q);
-        else thinkingOpen.add(q);
-        draw(false);
-        if (thinkingOpen.has(q)) body.querySelector(`.quiz-thinking[data-i="${el.dataset.i}"][data-k="${el.dataset.k}"]`)?.focus();
+        const opening = !thinkingOpen.has(q);
+        if (opening) thinkingOpen.add(q);
+        else thinkingOpen.delete(q);
+        const sure = el.closest('.quiz-sure');
+        const slide = root.leoMotion?.slide;
+        let box = sure?.nextElementSibling?.matches('.quiz-thinking-wrap') ? sure.nextElementSibling : null;
+        if (!sure) draw(false);
+        else if (opening) {
+          const from = box ? box.offsetHeight : 0;
+          if (!box) {
+            sure.insertAdjacentHTML('afterend', thinkingBox(`data-i="${el.dataset.i}" data-k="${el.dataset.k}"`, state.drafts[`think:${el.dataset.i}:${el.dataset.k}`] || ''));
+            box = sure.nextElementSibling;
+          }
+          box.inert = false;
+          box.getAnimations?.().forEach((run) => run.cancel());
+          if (slide) slide(box, from, box.offsetHeight);
+        } else if (box) {
+          box.inert = true;
+          if (slide) slide(box, box.offsetHeight, 0, () => box.remove());
+          else box.remove();
+        }
+        if (opening) body.querySelector(`.quiz-thinking[data-i="${el.dataset.i}"][data-k="${el.dataset.k}"]`)?.focus();
       } else if (what === 'quiz-hint') {
         askHint(Number(el.dataset.i), Number(el.dataset.k));
       } else if (what === 'quiz-check') {
