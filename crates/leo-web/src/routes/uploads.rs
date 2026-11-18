@@ -30,7 +30,7 @@ const ORIGINAL_PIECE: usize = 64 * 1024;
 const MOST_IMPORTS: usize = 2;
 const KEPT_IMPORTS: usize = 40;
 const UPLOAD_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
-const INCOMING: &str = "incoming";
+const INCOMING: &str = leo_core::paths::own::INCOMING;
 const INCOMING_KEPT: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 type Task = Box<dyn FnOnce() + Send>;

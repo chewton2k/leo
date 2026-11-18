@@ -23,7 +23,7 @@ pub(crate) fn activity_tasks(
 ) -> Vec<Task> {
     let mut out: Vec<Task> = imports
         .values()
-        .filter(|job| job.state == "working")
+        .filter(|job| job.state == "working" || job.state == "waiting")
         .map(|job| Task {
             kind: "upload",
             label: job.label.clone(),

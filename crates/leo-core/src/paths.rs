@@ -222,6 +222,7 @@ pub mod own {
     pub const UI_PREFS: &str = "ui-prefs.json";
     pub const CALENDARS: &str = "calendars.json";
     pub const CALENDAR: &str = "calendar";
+    pub const INCOMING: &str = "incoming";
     pub const CAPTIONS: &str = "captions.json";
     pub const GRAPH: &str = "graph.json";
     pub const MEANING: &str = "meaning.json";
@@ -257,6 +258,7 @@ pub mod own {
         UI_PREFS,
         CALENDARS,
         CALENDAR,
+        INCOMING,
         CAPTIONS,
         GRAPH,
         MEANING,
