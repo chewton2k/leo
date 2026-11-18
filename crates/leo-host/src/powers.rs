@@ -84,12 +84,14 @@ pub fn powers() -> leo_web::Powers {
                     figures: made
                         .figures
                         .into_iter()
-                        .map(|f| leo_web::Figure {
-                            place: f.place,
-                            bytes: f.bytes,
-                            photo: f.photo,
+                        .map(|f| {
+                            Ok(leo_web::Figure {
+                                place: f.place,
+                                bytes: std::fs::read(&f.path)?,
+                                photo: f.photo,
+                            })
                         })
-                        .collect(),
+                        .collect::<anyhow::Result<_>>()?,
                 })
             },
         )),
