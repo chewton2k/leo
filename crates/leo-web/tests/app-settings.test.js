@@ -244,3 +244,19 @@ test('the notifications fix button opens the system settings only once notificat
   assert.match(button('not_requested'), />Allow access<\/button>/);
   assert.match(button('denied'), />Open System Settings<\/button>/);
 });
+test('Check again asks for a fresh Health check; other reloads do not', async () => {
+  const { value } = context();
+  const paths = [];
+  value.ICON = new Proxy({}, { get: () => '' });
+  value.api = async (url) => { paths.push(url); return { sections: [] }; };
+  value.document.querySelector = () => null;
+  value.state = { view: 'settings', section: 'health' };
+  vm.runInContext('var seq = 0', value);
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/actions.js'), 'utf8');
+  const line = source.split('\n').find(text => text.includes("'health-refresh'"));
+  const refresh = vm.runInContext(`({${line}})['health-refresh']`, value);
+  await refresh({ dataset: {} });
+  await value.loadHealth();
+  await value.loadHealth({ dataset: {} });
+  assert.deepEqual(paths, ['/api/health?fresh=true', '/api/health', '/api/health']);
+});

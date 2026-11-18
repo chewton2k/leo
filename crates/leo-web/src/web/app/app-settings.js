@@ -81,13 +81,13 @@ function healthCards(view) {
   }).join('');
   return `<section class="set-card hc-card">${head}${rows ? `<div class="hc-needs">${rows}</div>` : ''}${tiles ? `<div class="hc-tiles">${tiles}</div>` : ''}</section>`;
 }
-async function loadHealth() {
+async function loadHealth(fresh = false) {
   const mine = seq;
   const button = document.querySelector('[data-action="health-refresh"]');
   const label = button ? button.innerHTML : '';
   if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); button.textContent = 'Checking…'; }
   try {
-    const view = await api('/api/health');
+    const view = await api(fresh === true ? '/api/health?fresh=true' : '/api/health');
     if (mine !== seq || state.view !== 'settings' || state.section !== 'health') return;
     state.health = view;
     const box = $('#app-health');

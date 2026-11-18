@@ -1,6 +1,6 @@
 const actions = {
   'app-command': (el) => appChange({action:el.dataset.appAction}),
-  'health-refresh': loadHealth,
+  'health-refresh': () => loadHealth(true),
   'onboarding-next': finishOnboarding,
   'onboarding-model': onboardingModel,
   'onboarding-skip': skipOnboarding,
