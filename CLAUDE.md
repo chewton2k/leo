@@ -149,7 +149,7 @@ settings and credentials are excluded from note exports.
   or `str::get`.
 - Tests must never open the microphone: doctor's recording section only reads the
   device name (`health::microphone_device`), and tests set `LEO_NO_MICROPHONE`.
-- Install: `install.sh` downloads the latest GitHub release. Releases are
+- Install: `install.sh` downloads the latest GitHub release. The install scripts refuse a running leo before downloading, publish the command and record before swapping the app, and put back the app, command and record if any step fails before the install is complete; a failed PATH line is a warning. Releases are
   automatic: `ci.yml` calls `release.yml` after every job passes on a push to
   main; `scripts/next-version.sh` picks the version (patch + 1, or Cargo.toml's
   if newer, nothing if src/crates/Cargo.* are unchanged since the last tag,
