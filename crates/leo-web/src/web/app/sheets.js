@@ -78,9 +78,14 @@ function trapSheetFocus(scrim) {
   });
 }
 
+function sheetButtons(primary, { cancel = 'Cancel', action = 'close', middle = '', kind = 'primary' } = {}) {
+  const [label, attrs] = primary || [];
+  return `<div class="buttons"><button type="button" class="btn plain" data-action="${action}">${cancel}</button>${middle}${primary ? `<button type="button" class="btn ${kind}" ${attrs}>${label}</button>` : ''}</div>`;
+}
+
 function confirmSheet({ title, text, yes, action, data = '', danger = true, cancel = 'close' }) {
   const lines = (Array.isArray(text) ? text : [text]).filter(Boolean).map((line) => `<p>${line}</p>`).join('');
-  return sheet(`<h3>${title}</h3>${lines}<div class="buttons"><button class="btn plain" data-action="${cancel}">Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" data-action="${action}"${data}>${yes}</button></div>`);
+  return sheet(`<h3>${title}</h3>${lines}${sheetButtons([yes, `data-action="${action}"${data}`], { action: cancel, kind: danger ? 'danger' : 'primary' })}`);
 }
 
 const SWIPE_CLOSE = 90;
@@ -419,7 +424,7 @@ function newFolder(el) {
   }
   const scrim = sheet(`<h3>New folder${parent ? ` in ${esc(folderLabel(parent))}` : ''}</h3>
     <label class="field">${ICON.folder}<input id="folder-name" data-parent="${esc(parent)}" placeholder="${parent ? 'Name, e.g. week 3' : 'Name, e.g. cs130'}" maxlength="120" autocomplete="off"></label>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" data-action="create-folder">Create</button></div>`);
+    ${sheetButtons(['Create', 'data-action="create-folder"'])}`);
   const input = $('#folder-name', scrim);
   input.focus();
   input.addEventListener('keydown', (e) => {

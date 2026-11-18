@@ -56,7 +56,7 @@ function drawRecordingSources(query = '') {
     <label class="field">${ICON.search}<input id="source-query" value="${esc(query)}" placeholder="Find a word, name or phrase" autocomplete="off"></label>
     <div id="source-passages" class="source-list">${body}<p class="hint source-none" hidden>Nothing in the transcript matches.</p></div>
     <label class="source-wants"><span>What you want from the note</span><textarea id="regenerate-wants" class="set-input" rows="2" maxlength="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wants)}</textarea></label>
-    <div class="buttons"><button class="btn plain" data-action="close">Close</button><button class="btn plain" data-action="source-save">Save fixes</button><button class="btn primary" data-action="source-regenerate">Write the note again</button></div>`);
+    ${sheetButtons(['Write the note again', 'data-action="source-regenerate"'], { cancel: 'Close', middle: '<button type="button" class="btn plain" data-action="source-save">Save fixes</button>' })}`);
   $('.sheet', box).classList.add('source-sheet');
   if (typedWants !== null) $('#regenerate-wants', box).value = typedWants;
   const grow = (area) => {
@@ -135,7 +135,7 @@ async function regenerateSource() {
       <p>Your current note stays as it is until you use this one.</p>
       <label class="source-keep"><span class="grow">Keep the current title</span>${settingsSwitch('id="regenerate-title"', true)}</label>
       <div class="prose combine-preview">${md.render(preview.body)}</div>
-      <div class="buttons"><button class="btn plain" data-action="source-back">Back</button><button class="btn primary" data-action="source-apply">Use this version</button></div>`);
+      ${sheetButtons(['Use this version', 'data-action="source-apply"'], { cancel: 'Back', action: 'source-back' })}`);
     $('.sheet', box).classList.add('source-sheet');
   } catch (e) {
     if (button.isConnected) {

@@ -318,7 +318,7 @@ async function kanbanNewBoard() {
       ${[['todo', 'To do'], ['doing', 'In progress'], ['done', 'Done']].map(([tone, name]) => `<div class="kanban-start-column" data-tone="${tone}"><span><i class="kanban-dot"></i>${name}</span><div class="kanban-start-card" aria-hidden="true"><i></i><i></i></div></div>`).join('')}
     </div>
     <p class="kanban-start-help" id="kanban-start-help">Your starting columns. Rename, add or reorder them any time.</p>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="kanban-board-make">Create board</button></div>
+    ${sheetButtons(['Create board', 'id="kanban-board-make"'])}
   </div>`);
   const name = $('#kanban-board-name', box);
   const make = $('#kanban-board-make', box);

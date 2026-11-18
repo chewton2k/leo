@@ -115,7 +115,7 @@ function addSheet({ text }) {
     <div class="add-target" id="add-target"></div>
     <div class="add-preview prose">${md.render(text)}</div>
     <div class="add-where" id="add-where"></div>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="add-go">Add</button></div>`);
+    ${sheetButtons(['Add', 'id="add-go"'])}`);
   const targetBox = $('#add-target', box);
   const whereBox = $('#add-where', box);
   const go = $('#add-go', box);

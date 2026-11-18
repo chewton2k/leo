@@ -734,7 +734,7 @@ async function calMove(task, next, scope = null) {
 
 function calAskScope(task, next) {
   const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task.repeat, calLocale()).toLowerCase())}.</p>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn" id="cal-move-all">Every time</button><button type="button" class="btn primary" id="cal-move-one">Only this one</button></div>`);
+    ${sheetButtons(['Only this one', 'id="cal-move-one"'], { middle: '<button type="button" class="btn" id="cal-move-all">Every time</button>' })}`);
   $('#cal-move-one', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'one').catch(fail); });
   $('#cal-move-all', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'all').catch(fail); });
   $('#cal-move-one', box).focus();
@@ -1236,7 +1236,7 @@ function dateSheet(id) {
   const task = calFind(id);
   if (!task) return;
   const box = sheet(`<h3>${task.date ? 'Change the date' : 'Set a date'}</h3><p class="hint">${esc(task.title)}</p><div class="picker-box" id="pick-box"></div>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="pick-save">Save</button></div>`);
+    ${sheetButtons(['Save', 'id="pick-save"'])}`);
   const pick = pickerBody($('#pick-box', box), task, { meeting: task.kind === 'meeting' });
   $('#pick-save', box).addEventListener('click', () => saveDate(task, pick, false));
 }
@@ -1253,7 +1253,7 @@ async function saveDate(task, pick, confirm) {
       if (preview) {
         const box = sheet(`<h3>Check the change</h3><p>leo could not find the old date in this task, so it adds the new one after it.</p>
           <div class="sched-preview"><span class="set-label">Before</span><p>${esc(preview.before)}</p><span class="set-label">After</span><p>${esc(preview.after)}</p></div>
-          <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="pick-confirm">Change it</button></div>`);
+          ${sheetButtons(['Change it', 'id="pick-confirm"'])}`);
         $('#pick-confirm', box).addEventListener('click', () => saveDate(task, pick, true));
         return;
       }
@@ -1283,7 +1283,7 @@ function newTaskSheet(day = null) {
       </div>
       <div class="picker-box" id="pick-box"></div>
     </div>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="task-add">Add task</button></div>`);
+    ${sheetButtons(['Add task', 'id="task-add"'])}`);
   let kind = 'other';
   let repeat = [];
   const pick = pickerBody($('#pick-box', box), { date: day }, { meeting: false });
@@ -1559,7 +1559,7 @@ async function noteTasksSheet() {
   sheet(`<h3>Tasks in this note</h3>
     <p class="hint">Checkboxes under an Action items heading are tasks already. Add any other checkbox to show it on the Calendar.</p>
     ${rows || '<p class="hint">This note has no checkboxes yet.</p>'}
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Close</button><button type="button" class="btn primary" data-action="calendar">Open the Calendar</button></div>`);
+    ${sheetButtons(['Open the Calendar', 'data-action="calendar"'], { cancel: 'Close' })}`);
 }
 
 async function ready_() {

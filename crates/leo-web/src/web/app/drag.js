@@ -196,7 +196,7 @@ function combineSheet(from, into) {
     <h3>Combine these notes?</h3>
     <p>“${esc(from.title)}” will be merged into “${esc(into.title)}”.</p>
     <p class="hint">Heads up: the AI writes the combined note, so it may not be fully accurate.</p>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="combine-go">Combine</button></div>
+    ${sheetButtons(['Combine', 'id="combine-go"'])}
   </div>`);
   $('#combine-go', box).addEventListener('click', () => combineNow(from, into).catch(fail));
 }
@@ -209,7 +209,7 @@ async function combineNow(from, into) {
     job = await api(`/api/notes/${enc(into.id)}/combine`, { method: 'POST', body: { with: from.id } });
   } catch (e) {
     const open = $('.scrim .combine');
-    if (open) open.innerHTML = `<h3>The notes could not be combined</h3><p class="upload-error">${esc(e.message)}</p><div class="buttons"><button class="btn plain" data-action="close">Close</button></div>`;
+    if (open) open.innerHTML = `<h3>The notes could not be combined</h3><p class="upload-error">${esc(e.message)}</p>${sheetButtons(null, { cancel: 'Close' })}`;
     return;
   }
   if ($('.scrim .combine')) closeSheet();

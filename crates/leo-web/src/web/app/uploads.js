@@ -85,7 +85,7 @@ function noteFields({ id, folders, here, most, before = '' }) {
 function dropChoice(files) {
   const list = [...files];
   const box = sheet(`<h3>What should leo do with these?</h3>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn plain" id="drop-make">Make notes from them</button><button class="btn primary" id="drop-ask">Ask Felix about these</button></div>`);
+    ${sheetButtons(['Ask Felix about these', 'id="drop-ask"'], { middle: '<button type="button" class="btn plain" id="drop-make">Make notes from them</button>' })}`);
   $('#drop-make', box).addEventListener('click', () => uploadSheet(list).catch(fail));
   $('#drop-ask', box).addEventListener('click', () => {
     closeSheet();
@@ -140,7 +140,7 @@ async function uploadSheet(files, into, { add = false } = {}) {
     ${where}
     <label class="source-keep" id="upload-together-row" hidden><span class="grow">Make one note from all of them</span>${settingsSwitch('id="upload-together"', false)}</label>
     ${noteFields({ id: 'upload', folders: folders.map((d) => d.name), here, most: 2000 })}
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="upload-go" data-action="upload-go" disabled>Make the note</button></div>`);
+    ${sheetButtons(['Make the note', 'id="upload-go" data-action="upload-go" disabled'])}`);
   $('#upload-together').addEventListener('change', drawPicked);
   $('#upload-where')?.addEventListener('change', drawPicked);
   $('#upload-input').addEventListener('change', (e) => {
@@ -233,7 +233,7 @@ function watchUpload(id, dir, into = null) {
     const open = $('.upload-working');
     if (job.state === 'failed') {
       if (open) {
-        open.innerHTML = `${felix.felix(72, 'droop')}<h3>${into ? 'The file could not be added' : 'The note could not be made'}</h3><p class="upload-error">${esc(job.error || 'Something went wrong.')}</p><div class="buttons"><button class="btn plain" data-action="close">Close</button>${noAi(job.error) ? '<a class="btn plain" href="#/settings/writing">Set up writing AI</a>' : ''}<button class="btn primary" data-action="upload"${into ? ' data-add="yes"' : ''}>Try again</button></div>`;
+        open.innerHTML = `${felix.felix(72, 'droop')}<h3>${into ? 'The file could not be added' : 'The note could not be made'}</h3><p class="upload-error">${esc(job.error || 'Something went wrong.')}</p>${sheetButtons(['Try again', `data-action="upload"${into ? ' data-add="yes"' : ''}`], { cancel: 'Close', middle: noAi(job.error) ? '<a class="btn plain" href="#/settings/writing">Set up writing AI</a>' : '' })}`;
       } else {
         toast(job.error || 'The upload failed.', { bad: true });
       }

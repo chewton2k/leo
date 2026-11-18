@@ -897,6 +897,7 @@
       if (response.status === 401) onLocked();
       return response;
     };
+    const sentenceOf = async (response) => { try { return (await response.json()).error || ''; } catch (e) { return ''; } };
     const saved = load(storage);
     const stepChevron = (icons.chevron || '').replace('<svg ', '<svg class="msg-step-chevron" ');
     const state = { open: false, id: saved.id || newId(), messages: saved.messages, refs: saved.refs, context: null, dropped: null, fresh: false, busy: null, streak: 0, pick: null, chats: null, sidebar: null, doomed: null, asking: null, files: [], sent: [], filesFor: null, review: [], drafts: {}, found: null, selection: null };
@@ -1653,12 +1654,7 @@
         return drop();
       }
       if (!reply.ok) {
-        let said = '';
-        try {
-          said = (await reply.json()).error || '';
-        } catch (e) {
-          said = '';
-        }
+        const said = await sentenceOf(reply);
         notify(said ? `Felix could not read ${file.name}: ${said}` : reply.status === 413 ? `${file.name} is too large for Felix.` : `Felix could not read ${file.name}.`);
         return drop();
       }
@@ -2337,12 +2333,7 @@
           body: JSON.stringify(post[1]),
         });
         if (!response.ok) {
-          let said = '';
-          try {
-            said = (await response.json()).error || '';
-          } catch (e) {
-            said = '';
-          }
+          const said = await sentenceOf(response);
           throw new Error(said || (p.kind === 'create' ? 'The note could not be made.' : 'The change could not be applied.'));
         }
         note = await response.json();
@@ -2816,12 +2807,7 @@
         });
         if (response.status === 401) throw new Error('leo needs to sign in again. Quit leo and open it again.');
         if (!response.ok || !response.body) {
-          let said = '';
-          try {
-            said = (await response.json()).error || '';
-          } catch (e) {
-            said = '';
-          }
+          const said = await sentenceOf(response);
           throw new Error(said || `leo answered ${response.status}.`);
         }
         const reader = response.body.getReader();

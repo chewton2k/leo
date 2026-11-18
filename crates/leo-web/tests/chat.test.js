@@ -1180,6 +1180,9 @@ test('a failed upload shows the writer sentence with the setup link, and other e
       $: (sel) => (sel === '.upload-working' ? open : null), setTimeout: (fn) => { fn(); return 1; }, clearTimeout() {},
     };
     vm.createContext(context);
+    const sheets = fs.readFileSync(path.join(__dirname, '../src/web/app/sheets.js'), 'utf8').replace(/\r\n/g, '\n');
+    const footer = sheets.indexOf('function sheetButtons(');
+    vm.runInContext(sheets.slice(footer, sheets.indexOf('\n}\n', footer) + 3), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/uploads.js'), 'utf8'), context);
     context.watchUpload('job', '');
     await new Promise(setImmediate);
@@ -1327,4 +1330,18 @@ test('quiz answer fields and the note picker have accessible names', () => {
     }
     assert.match(html, new RegExp(`<(input|textarea) class="quiz-input"[^>]* aria-label="${name}"`));
   }
+});
+
+test("a refused reply's sentence is read one way at the three sites", async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const line = source.split('\n').find((l) => l.trim().startsWith('const sentenceOf = async'));
+  const context = vm.createContext({});
+  vm.runInContext(`${line}\nthis.sentenceOf = sentenceOf;`, context);
+  assert.equal(await context.sentenceOf({ json: async () => ({ error: 'That note is gone.' }) }), 'That note is gone.');
+  assert.equal(await context.sentenceOf({ json: async () => { throw new SyntaxError('not JSON'); } }), '');
+  assert.equal(await context.sentenceOf({ json: async () => ({}) }), '');
+  assert.equal(source.includes('said = (await'), false);
+  assert.equal((source.match(/const said = await sentenceOf\(/g) || []).length, 3);
 });
