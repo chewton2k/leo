@@ -126,8 +126,10 @@ impl Hub {
                             *waiting = Waiting::All;
                         }
                     } else if name(parent).as_deref() == Some(".leo") {
-                        if let Some(kind) = name(Some(&path)) {
-                            *waiting.entry(kind).or_default() = Waiting::All;
+                        if let Some(kind) =
+                            name(Some(&path)).and_then(|kind| waiting.get_mut(&kind))
+                        {
+                            *kind = Waiting::All;
                         }
                     } else if name(parent.and_then(Path::parent)).as_deref() == Some(".leo") {
                         if let Some(kind) = name(parent) {

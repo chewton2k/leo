@@ -24,6 +24,36 @@ fn a_deleted_note_is_in_the_trash_and_can_be_restored() {
 }
 
 #[test]
+fn the_trash_list_shows_an_outside_change_the_watcher_saw() {
+    let (state, _d, ids) = state_with(&[("Mine", "")]);
+    state.store.lock().unwrap().changes =
+        Some(crate::store_refresh::Changes::new(&state.notes_dir));
+    assert_eq!(
+        run(delete_note(State(state.clone()), Path(ids[0].clone()))),
+        StatusCode::NO_CONTENT
+    );
+    let Json(trash) = run(list_trash(State(state.clone()))).unwrap();
+    assert_eq!(trash.len(), 1);
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let _ = run(list_trash(State(state.clone())));
+    let id = uuid::Uuid::new_v4().to_string();
+    std::fs::write(
+        state.notes_dir.join(".trash").join("Outside.md"),
+        format!("---\nid: {id}\ntitle: Outside\n---\nhi\n"),
+    )
+    .unwrap();
+    let start = std::time::Instant::now();
+    loop {
+        let Json(trash) = run(list_trash(State(state.clone()))).unwrap();
+        if trash.iter().any(|t| t.id == id) {
+            break;
+        }
+        assert!(start.elapsed() < std::time::Duration::from_secs(10));
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[test]
 fn chosen_notes_and_folders_go_to_the_trash_and_the_root_is_refused() {
     let (state, _d, ids) = state_with(&[
         ("Keep", ""),
@@ -227,6 +257,8 @@ fn p02_benchmark_trash_requests() {
     let big = std::env::var("LEO_BENCH_BIG").is_ok_and(|v| v == "1");
     let body = "word ".repeat(1024);
     let (state, _d, _) = state_with(&[]);
+    state.store.lock().unwrap().changes =
+        Some(crate::store_refresh::Changes::new(&state.notes_dir));
     let trash = state.fresh().notes_dir.join(".trash");
     std::fs::create_dir_all(&trash).unwrap();
     let ids: Vec<String> = (0..size)
@@ -260,7 +292,25 @@ fn p02_benchmark_trash_requests() {
             started.elapsed().as_secs_f64() * 1000.0
         );
     };
+    measure("first list", &|| {
+        let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
+        assert_eq!(listed.len(), total);
+    });
+    for _ in 0..2 {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
+        assert_eq!(listed.len(), total);
+    }
     measure("list", &|| {
+        let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
+        assert_eq!(listed.len(), total);
+    });
+    let notes = state.fresh().notes_dir.clone();
+    measure("restart", &|| {
+        let store = Store::load_from(&notes).unwrap();
+        state.store.lock().unwrap().store = store;
+    });
+    measure("list after restart", &|| {
         let Json(listed) = run(list_trash(State(state.clone()))).unwrap();
         assert_eq!(listed.len(), total);
     });

@@ -661,6 +661,7 @@ impl AppState {
     #[cfg(test)]
     fn fresh(&self) -> MutexGuard<'_, Storage> {
         let mut store = lock_storage(&self.store);
+        store.trash_may_have_changed();
         if store.reload || store.changed_on_disk() {
             if store.reload {
                 store.forget_changes();
@@ -1048,6 +1049,13 @@ fn store_access<R>(
             .generation
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         state.search_index.wake.notify_one();
+    }
+    if store
+        .changes
+        .as_ref()
+        .is_none_or(|changes| changes.trash_changed())
+    {
+        store.trash_may_have_changed();
     }
     let result = work(&mut store);
     if writing {

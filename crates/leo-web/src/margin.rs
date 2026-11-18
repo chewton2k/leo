@@ -1,5 +1,5 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -1016,16 +1016,21 @@ pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize 
     forget_notes(chats, &gone)
 }
 
-pub fn sweep_kept(store: &leo_core::store::Store) -> Option<(HashSet<String>, PathBuf)> {
+pub fn sweep_kept(
+    store: &leo_core::store::Store,
+) -> Option<(HashSet<String>, Vec<leo_core::store::TrashEntry>)> {
     if store.notes.is_empty() || !store.unreadable.is_empty() {
         return None;
     }
     let kept = store.notes.iter().map(|n| n.id.clone()).collect();
-    Some((kept, store.notes_dir.clone()))
+    Some((kept, store.trash_snapshot()))
 }
 
-pub fn sweep_store(chats: &Path, (mut kept, notes_dir): (HashSet<String>, PathBuf)) -> usize {
-    for entry in leo_core::store::trash_entries(&notes_dir) {
+pub fn sweep_store(
+    chats: &Path,
+    (mut kept, trash): (HashSet<String>, Vec<leo_core::store::TrashEntry>),
+) -> usize {
+    for entry in trash {
         let Some(head) = entry.head else {
             return 0;
         };

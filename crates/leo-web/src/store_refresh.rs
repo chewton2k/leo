@@ -45,6 +45,12 @@ impl Changes {
         due
     }
 
+    pub fn trash_changed(&self) -> bool {
+        self.watch
+            .as_ref()
+            .is_none_or(|watch| watch.take_trash() | watch.broken() | cfg!(windows))
+    }
+
     #[cfg(test)]
     pub fn delayed() -> Self {
         Self {
