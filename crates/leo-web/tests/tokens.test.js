@@ -262,3 +262,17 @@ test('the later chip rule is the only one', () => {
   assert.ok(!/\.pick-chip/.test(schedule));
   assert.equal(all.filter((r) => r.selector === '.pick-chip').length, 1);
 });
+
+test('the dark tokens are written once and both dark blocks carry the same ones', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/styles/01-tokens.css'), 'utf8');
+  assert.ok(!source.includes('prefers-color-scheme: dark'));
+  assert.ok(!source.includes('data-theme="dark"'));
+  const media = new Map(declarations(themes['dark media'].body));
+  const theme = new Map(declarations(themes['dark theme'].body));
+  assert.equal(theme.get('color-scheme'), 'dark');
+  theme.delete('color-scheme');
+  assert.ok(media.size > 40);
+  assert.deepEqual([...media], [...theme]);
+});

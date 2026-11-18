@@ -318,13 +318,45 @@ pub fn hide(app: &AppHandle) {
 pub fn tokens() -> &'static str {
     concat!(
         "\n",
-        include_str!("../../leo-web/src/web/styles/01-tokens.css")
+        include_str!("../../leo-web/src/web/styles/01-tokens.css"),
+        "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme=\"light\"]) {\n",
+        include_str!("../../leo-web/src/web/dark-tokens.css"),
+        "  }\n}\n:root[data-theme=\"dark\"] {\n",
+        include_str!("../../leo-web/src/web/dark-tokens.css"),
+        "  color-scheme: dark;\n}\n:root[data-theme=\"light\"] { color-scheme: light; }\n",
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_popup_theme_carries_the_dark_colours() {
+        let css = tokens();
+        let (_, after) = css
+            .split_once("@media (prefers-color-scheme: dark)")
+            .unwrap();
+        let (media, theme) = after.split_once(":root[data-theme=\"dark\"] {").unwrap();
+        assert!(media.contains(":root:not([data-theme=\"light\"])"));
+        for value in [
+            "--bg: #181715;",
+            "--text: #e9e7e2;",
+            "--felix: #b4cfe7;",
+            "--hue-slate: #a3a29c;",
+        ] {
+            assert!(
+                media.contains(value),
+                "{value} missing for the system dark theme"
+            );
+            assert!(
+                theme.contains(value),
+                "{value} missing for the chosen dark theme"
+            );
+        }
+        assert!(theme.contains("color-scheme: dark;"));
+        assert!(css.contains(":root[data-theme=\"light\"] { color-scheme: light; }"));
+    }
 
     #[test]
     fn a_panic_while_building_the_popup_becomes_an_error() {

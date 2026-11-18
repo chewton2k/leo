@@ -5,6 +5,11 @@ use axum::routing::{get, MethodRouter};
 const HTML: &str = concat!(
     include_str!("../web/page-head.html"),
     include_str!("../web/styles/01-tokens.css"),
+    "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme=\"light\"]) {\n",
+    include_str!("../web/dark-tokens.css"),
+    "  }\n}\n:root[data-theme=\"dark\"] {\n",
+    include_str!("../web/dark-tokens.css"),
+    "  color-scheme: dark;\n}\n:root[data-theme=\"light\"] { color-scheme: light; }\n",
     include_str!("../web/styles/02-base.css"),
     include_str!("../web/styles/03-note.css"),
     include_str!("../web/styles/04-surfaces.css"),

@@ -4,13 +4,18 @@ const path = require('node:path');
 const web = path.resolve(__dirname, '../src/web');
 const read = (name) => fs.readFileSync(path.join(web, name), 'utf8');
 
+function darkBlocks() {
+  const dark = read('dark-tokens.css');
+  return `@media (prefers-color-scheme: dark) {\n  :root:not([data-theme="light"]) {\n${dark}  }\n}\n:root[data-theme="dark"] {\n${dark}  color-scheme: dark;\n}\n:root[data-theme="light"] { color-scheme: light; }\n`;
+}
+
 function pageCss() {
   const dir = path.join(web, 'styles');
   return fs
     .readdirSync(dir)
     .filter((name) => name.endsWith('.css'))
     .sort()
-    .map((name) => fs.readFileSync(path.join(dir, name), 'utf8'))
+    .map((name) => fs.readFileSync(path.join(dir, name), 'utf8') + (name === '01-tokens.css' ? darkBlocks() : ''))
     .join('');
 }
 
