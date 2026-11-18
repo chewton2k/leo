@@ -396,15 +396,19 @@ pub(crate) async fn overview(State(state): State<AppState>, Query(page): Query<P
             let (saved, next) = saved.unwrap_or_default();
             after = next;
             let owners: Vec<String> = saved.iter().filter_map(|p| p.note.clone()).collect();
-            let live = state
-                .read_store(move |store| {
-                    Ok(owners
-                        .into_iter()
-                        .filter(|id| store.find_note(id).is_some())
-                        .collect::<std::collections::HashSet<_>>())
-                })
-                .await
-                .ok();
+            let live = if owners.is_empty() {
+                None
+            } else {
+                state
+                    .read_store(move |store| {
+                        Ok(owners
+                            .into_iter()
+                            .filter(|id| store.find_note(id).is_some())
+                            .collect::<std::collections::HashSet<_>>())
+                    })
+                    .await
+                    .ok()
+            };
             pending.extend(
                 saved
                     .into_iter()
