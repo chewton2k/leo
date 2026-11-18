@@ -350,6 +350,10 @@ body.files-over main::after {
 .source-text:hover { border-color: var(--line); }
 .source-text:focus { outline: 0; border-color: var(--focus); background: var(--bg); }
 .source-label { padding: 14px 0 4px; }
+.source-match { display: flex; align-items: flex-start; justify-content: flex-start; gap: 10px; width: calc(100% - 24px); margin: 0 12px 4px; padding: 7px 10px; border-radius: var(--r-tile); text-align: left; font-size: var(--fs-md); font-weight: 450; line-height: 1.5; overflow-wrap: anywhere; }
+.source-match .rec-at { padding-top: 3px; }
+.source-paging { display: flex; gap: 8px; padding: 8px 0 4px; }
+.source-paging [data-action="source-later"] { margin-left: auto; }
 .source-more > summary { list-style: none; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: var(--fs-sm); color: var(--muted); padding: 10px 0; }
 .source-more > summary::-webkit-details-marker { display: none; }
 .source-more > summary > svg { width: 15px; height: 15px; flex: none; }
