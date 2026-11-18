@@ -316,15 +316,7 @@ pub fn hide(app: &AppHandle) {
     });
 }
 pub fn tokens() -> &'static str {
-    concat!(
-        "\n",
-        include_str!("../../leo-web/src/web/styles/01-tokens.css"),
-        "@media (prefers-color-scheme: dark) {\n  :root:not([data-theme=\"light\"]) {\n",
-        include_str!("../../leo-web/src/web/dark-tokens.css"),
-        "  }\n}\n:root[data-theme=\"dark\"] {\n",
-        include_str!("../../leo-web/src/web/dark-tokens.css"),
-        "  color-scheme: dark;\n}\n:root[data-theme=\"light\"] { color-scheme: light; }\n",
-    )
+    leo_web::THEME
 }
 
 #[cfg(test)]

@@ -58,6 +58,7 @@ use crate::routes::uploads::ImportJob;
 
 pub use chat::{Conversation, Converser, Exchange, Instructions, Reply, Spent, Streamer, ToolSpec};
 pub use graph::Writer;
+pub use routes::assets::THEME;
 pub use vectors::Meaning;
 
 pub trait SettingsApi: Send + Sync {
