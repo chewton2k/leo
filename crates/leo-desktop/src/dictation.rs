@@ -44,6 +44,7 @@ const FINISH_TO_SAVE: &str = "Finish dictating before changing its settings.";
 const UNREADABLE: &str =
     "These dictation settings could not be read. Check the fields and try again.";
 const FINISH_TO_RECORD: &str = "Finish dictating before recording a shortcut.";
+const SHORTCUTS_OFF: &str = "Shortcuts are not running in this session. Reopen leo and try again.";
 const CHOOSE_RECENT: &str = "Choose a recent dictation.";
 const CHOOSE_THEME: &str = "Choose Light, Dark or Match.";
 const CHOOSE_ACTION: &str = "Choose an action in Dictation settings.";
@@ -796,11 +797,11 @@ impl leo_web::dictation::DictationApi for Dictation {
                 ensure!(!self.capturing.load(Ordering::Acquire), FINISH_TO_RECORD);
                 self.shortcut
                     .get()
-                    .unwrap()
+                    .context(SHORTCUTS_OFF)?
                     .record()
                     .map_err(anyhow::Error::msg)?;
             }
-            Some("resume_shortcut") => self.shortcut.get().unwrap().resume(),
+            Some("resume_shortcut") => self.shortcut.get().context(SHORTCUTS_OFF)?.resume(),
             Some("cancel") => self.cancel(),
             Some("copy") => {
                 let text = value["text"].as_str().context(CHOOSE_RECENT)?;
