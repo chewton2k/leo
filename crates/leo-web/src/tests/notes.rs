@@ -159,8 +159,8 @@ fn a_note_can_be_pinned_from_the_phone() {
 #[test]
 fn folders_come_with_how_many_notes_they_hold() {
     let (state, _d, _ids) = state_with(&[("A", "cs130"), ("B", "cs130/lec"), ("C", "")]);
-    let Json(dirs) = run(list_dirs(State(state), Query(DirParams { parent: None }))).unwrap();
-    assert_eq!(dirs.len(), 1);
+    let Json(dirs) = run(list_folders(State(state))).unwrap();
+    assert_eq!(dirs.len(), 2);
     assert_eq!(dirs[0].name, "cs130");
     assert_eq!(dirs[0].notes, 2);
 }
@@ -306,7 +306,6 @@ fn a_reload_failure_is_reported_instead_of_serving_a_stale_store() {
             offset: 0,
             brief: false,
             sort: None,
-            recent: None,
             show: None,
         }),
     ));
@@ -319,7 +318,7 @@ fn an_empty_folder_created_by_another_app_is_visible_without_restarting() {
     let mut other = Store::load_from(&dir.path().join("notes")).unwrap();
     other.create_dir("new-folder");
     other.save_files().unwrap();
-    let Json(dirs) = run(list_dirs(State(state), Query(DirParams { parent: None }))).unwrap();
+    let Json(dirs) = run(list_folders(State(state))).unwrap();
     assert_eq!(dirs[0].name, "new-folder");
 }
 #[test]
@@ -356,7 +355,6 @@ fn a_large_folder_comes_in_pages_with_its_total_and_short_cards() {
                 offset,
                 brief: true,
                 sort: None,
-                recent: None,
                 show: None,
             }),
         ))
@@ -513,30 +511,21 @@ fn library_sorting_happens_before_pagination_and_brief_results_include_visuals()
                 .into();
         store.save().unwrap();
     }
-    let page = |sort: &str, offset: usize, recent: Option<String>| {
-        run(list_notes(State(state.clone()), Query(serde_json::from_value(serde_json::json!({ "sort": sort, "offset": offset, "limit": 1, "brief": true, "recent": recent })).unwrap())))
+    let page = |sort: &str, offset: usize| {
+        run(list_notes(State(state.clone()), Query(serde_json::from_value(serde_json::json!({ "sort": sort, "offset": offset, "limit": 1, "brief": true })).unwrap())))
     };
-    for sort in ["title", "folder", "opened", "updated"] {
-        let out = page(sort, 0, Some(ids[0].clone())).unwrap();
+    for sort in ["title", "updated"] {
+        let out = page(sort, 0).unwrap();
         assert_eq!(out.headers()["x-total"], "3");
         assert_eq!(json_of(out)[0]["id"], ids[2]);
     }
-    let alpha = json_of(page("title", 1, None).unwrap());
+    let alpha = json_of(page("title", 1).unwrap());
     assert_eq!(alpha[0]["id"], ids[1]);
     assert_eq!(alpha[0]["summary"], "A useful description of this lecture.");
     assert_eq!(alpha[0]["preview"], "```mermaid\ngraph LR\n A --> B\n```");
-    assert_eq!(
-        json_of(page("opened", 1, Some(ids[0].clone())).unwrap())[0]["id"],
-        ids[0]
-    );
-    assert_eq!(
-        page("unknown", 0, None).err(),
-        Some(StatusCode::BAD_REQUEST)
-    );
-    assert_eq!(
-        page("opened", 0, Some("../escape".into())).err(),
-        Some(StatusCode::BAD_REQUEST)
-    );
+    for unknown in ["unknown", "opened", "folder"] {
+        assert_eq!(page(unknown, 0).err(), Some(StatusCode::BAD_REQUEST));
+    }
 }
 
 #[test]
@@ -672,21 +661,6 @@ fn folder_note_counts_include_everything_below_and_ignore_lookalike_names() {
         (count("cs130"), count("cs130/week1"), count("cs13")),
         (3, 2, 1)
     );
-    drop(store);
-    let Json(top) = run(list_dirs(
-        State(state.clone()),
-        Query(DirParams { parent: None }),
-    ))
-    .unwrap();
-    assert_eq!(top.iter().find(|d| d.name == "cs130").unwrap().notes, 3);
-    let Json(nested) = run(list_dirs(
-        State(state),
-        Query(DirParams {
-            parent: Some("cs130".into()),
-        }),
-    ))
-    .unwrap();
-    assert_eq!(nested.iter().find(|d| d.name == "week1").unwrap().notes, 2);
 }
 
 #[test]

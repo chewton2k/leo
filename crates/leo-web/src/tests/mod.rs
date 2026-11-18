@@ -40,9 +40,9 @@ use crate::routes::felix::{
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
-    create_dir, create_note, delete_note, excerpt, get_note, list_dirs, list_folders, list_notes,
-    move_dir, move_note, tasks_in, update_note, CreateBody, CreateDirBody, DirParams, ListParams,
-    MoveBody, MoveDirBody, NoteResponse, UpdateBody, EXCERPT_CHARS,
+    create_dir, create_note, delete_note, excerpt, get_note, list_folders, list_notes, move_dir,
+    move_note, tasks_in, update_note, CreateBody, CreateDirBody, ListParams, MoveBody, MoveDirBody,
+    NoteResponse, UpdateBody, EXCERPT_CHARS,
 };
 use crate::routes::pictures::{add_picture, get_picture, NewPicture, PictureAt};
 use crate::routes::trash::{

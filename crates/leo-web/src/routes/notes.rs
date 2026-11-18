@@ -19,7 +19,6 @@ pub(crate) struct ListParams {
     #[serde(default)]
     pub(crate) brief: bool,
     pub(crate) sort: Option<String>,
-    pub(crate) recent: Option<String>,
     pub(crate) show: Option<String>,
 }
 
@@ -32,11 +31,6 @@ pub(crate) struct SearchParams {
     pub(crate) offset: usize,
     #[serde(default)]
     pub(crate) brief: bool,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct DirParams {
-    pub(crate) parent: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -220,7 +214,7 @@ pub(crate) async fn list_notes(
                 store.list_notes(params.tag.as_deref(), usize::MAX)
             };
             crate::browse::only(&mut notes, params.show.as_deref(), chrono::Utc::now())?;
-            crate::browse::order(&mut notes, params.sort.as_deref(), params.recent.as_deref())?;
+            crate::browse::order(&mut notes, params.sort.as_deref())?;
             let total = notes.len();
             let page: Vec<leo_core::notes::Note> = notes
                 .into_iter()
@@ -703,36 +697,6 @@ fn note_counts(store: &Store) -> std::collections::HashMap<String, usize> {
         *counts.entry(directory.to_string()).or_default() += 1;
     }
     counts
-}
-
-pub(crate) async fn list_dirs(
-    State(state): State<AppState>,
-    Query(params): Query<DirParams>,
-) -> Result<Json<Vec<DirResponse>>, StatusCode> {
-    state
-        .read_store(move |store| {
-            let parent = params.parent.unwrap_or_default();
-            directory(store, &parent)?;
-            let counts = note_counts(store);
-            Ok(Json(
-                store
-                    .subdirs(&parent)
-                    .into_iter()
-                    .map(|name| {
-                        let full = if parent.is_empty() {
-                            name.clone()
-                        } else {
-                            format!("{parent}/{name}")
-                        };
-                        DirResponse {
-                            name,
-                            notes: counts.get(&full).copied().unwrap_or(0),
-                        }
-                    })
-                    .collect(),
-            ))
-        })
-        .await
 }
 
 pub(crate) async fn list_folders(

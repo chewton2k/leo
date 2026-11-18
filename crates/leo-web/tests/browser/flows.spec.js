@@ -741,8 +741,8 @@ test.describe('drag and drop', () => {
     await expect(page.locator('.toast')).toContainText(`Moved ${b} into ${a}`);
     expect(await where()).toBe(`${a}/${b}`);
     await expect(page.locator(`#side .side-row[data-action="open-folder"][data-dir="${b}"]`)).toHaveCount(0);
-    const inside = await (await page.request.get(`/api/dirs?parent=${a}`)).json();
-    expect(inside.map((d) => d.name)).toEqual([b]);
+    const folders = await (await page.request.get('/api/folders')).json();
+    expect(folders.map((d) => d.name).filter((name) => name.startsWith(`${a}/`))).toEqual([`${a}/${b}`]);
     await page.locator('.toast button').click();
     await expect(page.locator(`#side .side-row[data-action="open-folder"][data-dir="${b}"]`)).toBeVisible();
     expect(await where()).toBe(b);
@@ -3185,7 +3185,7 @@ test.describe('the kinds of bugs that reached people before', () => {
     await call('POST', '/api/dirs/move', { from: `contract-moved-${tag}`, into: `contract-${tag}` });
     await call('POST', `/api/notes/${made.id}/suggestion`, { find: 'new', replace: 'newer' });
     await call('PUT', `/api/chats/contract-${tag}`, { title: 'Contract', messages: [{ role: 'user', text: 'hi' }] });
-    for (const url of ['/api/notes', '/api/folders', '/api/dirs', `/api/search?q=contract`, '/api/trash', '/api/chats', `/api/chats/contract-${tag}`, '/api/review', '/api/activity', '/api/settings', '/api/keep', '/api/speech', '/api/record']) {
+    for (const url of ['/api/notes', '/api/folders', `/api/search?q=contract`, '/api/trash', '/api/chats', `/api/chats/contract-${tag}`, '/api/review', '/api/activity', '/api/settings', '/api/keep', '/api/speech', '/api/record']) {
       await call('GET', url);
     }
     const trashed = json(await call('POST', '/api/trash/move', { notes: [made.id], dirs: [] }));

@@ -1,53 +1,20 @@
-use std::collections::HashMap;
-
 use axum::http::StatusCode;
 use leo_core::notes::Note;
 
-const MOST_RECENT: usize = 100;
-const MOST_RECENT_BYTES: usize = MOST_RECENT * 65;
 const MOST_SCAN: usize = 32_000;
 const MOST_PREVIEW: usize = 1_600;
 const MOST_SUMMARY: usize = 220;
 const MOST_LINES: usize = 800;
 
-pub(crate) fn order(
-    notes: &mut [&Note],
-    sort: Option<&str>,
-    recent: Option<&str>,
-) -> Result<(), StatusCode> {
+pub(crate) fn order(notes: &mut [&Note], sort: Option<&str>) -> Result<(), StatusCode> {
     let sort = sort.unwrap_or("updated");
     if !matches!(
         sort,
-        "updated"
-            | "oldest"
-            | "created"
-            | "created-asc"
-            | "opened"
-            | "folder"
-            | "title"
-            | "title-desc"
+        "updated" | "oldest" | "created" | "created-asc" | "title" | "title-desc"
     ) {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let recent = recent.unwrap_or_default();
-    if recent.len() > MOST_RECENT_BYTES {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let mut opened = HashMap::new();
-    for (i, id) in recent.split(',').filter(|id| !id.is_empty()).enumerate() {
-        if i >= MOST_RECENT || !crate::chats::valid_id(id) {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        opened.entry(id).or_insert(i);
-    }
     notes.sort_by(|a, b| {
-        let rank = |note: &Note| {
-            if sort == "opened" {
-                *opened.get(note.id.as_str()).unwrap_or(&usize::MAX)
-            } else {
-                0
-            }
-        };
         let title = |note: &Note| note.title.to_lowercase();
         let by = match sort {
             "oldest" => a.updated_at.cmp(&b.updated_at),
@@ -55,14 +22,10 @@ pub(crate) fn order(
             "created-asc" => a.created_at.cmp(&b.created_at),
             "title" => title(a).cmp(&title(b)),
             "title-desc" => title(b).cmp(&title(a)),
-            "folder" => {
-                (a.directory.to_lowercase(), title(a)).cmp(&(b.directory.to_lowercase(), title(b)))
-            }
             _ => std::cmp::Ordering::Equal,
         };
         (!a.pinned)
             .cmp(&!b.pinned)
-            .then(rank(a).cmp(&rank(b)))
             .then(by)
             .then(b.updated_at.cmp(&a.updated_at))
             .then(a.id.cmp(&b.id))
@@ -194,26 +157,23 @@ mod tests {
         let d = note("Date", 0, 20);
         let all = [&a, &b, &c, &d];
         let mut list = all.to_vec();
-        order(&mut list, None, None).unwrap();
+        order(&mut list, None).unwrap();
         assert_eq!(titles(&list), ["Date", "banana", "Apple", "Cherry"]);
-        order(&mut list, Some("oldest"), None).unwrap();
+        order(&mut list, Some("oldest")).unwrap();
         assert_eq!(titles(&list), ["Cherry", "Apple", "banana", "Date"]);
-        order(&mut list, Some("created"), None).unwrap();
+        order(&mut list, Some("created")).unwrap();
         assert_eq!(titles(&list), ["banana", "Cherry", "Apple", "Date"]);
-        order(&mut list, Some("created-asc"), None).unwrap();
+        order(&mut list, Some("created-asc")).unwrap();
         assert_eq!(titles(&list), ["Date", "Apple", "Cherry", "banana"]);
-        order(&mut list, Some("title"), None).unwrap();
+        order(&mut list, Some("title")).unwrap();
         assert_eq!(titles(&list), ["Apple", "banana", "Cherry", "Date"]);
-        order(&mut list, Some("title-desc"), None).unwrap();
+        order(&mut list, Some("title-desc")).unwrap();
         assert_eq!(titles(&list), ["Date", "Cherry", "banana", "Apple"]);
         c.pinned = true;
         let mut list = vec![&a, &b, &c, &d];
-        order(&mut list, None, None).unwrap();
+        order(&mut list, None).unwrap();
         assert_eq!(titles(&list), ["Cherry", "Date", "banana", "Apple"]);
-        assert_eq!(
-            order(&mut list, Some("size"), None),
-            Err(StatusCode::BAD_REQUEST)
-        );
+        assert_eq!(order(&mut list, Some("size")), Err(StatusCode::BAD_REQUEST));
     }
 
     #[test]
