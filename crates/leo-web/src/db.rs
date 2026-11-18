@@ -239,7 +239,7 @@ fn put_back_finished_rewrite(path: &Path) -> Result<()> {
     if rewriting() {
         return Ok(());
     }
-    let ready = named(path, REWRITE_READY);
+    let (copy, ready) = rewrite_files(path);
     if !path.exists() && ready.exists() {
         std::fs::rename(&ready, path).with_context(|| {
             format!(
@@ -250,7 +250,7 @@ fn put_back_finished_rewrite(path: &Path) -> Result<()> {
         sync_folder(path);
     }
     remove_with_logs(&ready);
-    remove_with_logs(&named(path, REWRITE));
+    remove_with_logs(&copy);
     Ok(())
 }
 
@@ -406,8 +406,10 @@ impl Db {
         if self.checkpoint()? {
             return Ok(Rewritten::Changed);
         }
-        let copy = named(&self.path, REWRITE);
-        let ready = named(&self.path, REWRITE_READY);
+        if self.path.file_name() != Some(std::ffi::OsStr::new(FILE)) {
+            return Ok(Rewritten::Stopped);
+        }
+        let (copy, ready) = rewrite_files(&self.path);
         remove_with_logs(&copy);
         remove_with_logs(&ready);
         let outcome = self.copy_and_swap(stop, &copy, &ready);
@@ -429,6 +431,9 @@ impl Db {
         let version =
             |c: &Connection| c.query_row("PRAGMA data_version", [], |r| r.get::<_, i64>(0));
         let before = version(&reader)?;
+        if stop.load(Ordering::Relaxed) {
+            return Ok(Rewritten::Stopped);
+        }
         let interrupt = reader.get_interrupt_handle();
         let done = AtomicBool::new(false);
         let copied = std::thread::scope(|scope| {
@@ -436,7 +441,6 @@ impl Db {
                 while !done.load(Ordering::Relaxed) {
                     if stop.load(Ordering::Relaxed) {
                         interrupt.interrupt();
-                        return;
                     }
                     std::thread::sleep(std::time::Duration::from_millis(20));
                 }
@@ -497,8 +501,13 @@ impl Db {
     }
 }
 
-const REWRITE: &str = ".rewrite";
-const REWRITE_READY: &str = ".rewrite-ready";
+fn rewrite_files(path: &Path) -> (PathBuf, PathBuf) {
+    use leo_core::paths::own::{DATABASE_REWRITE, DATABASE_REWRITE_READY};
+    (
+        path.with_file_name(DATABASE_REWRITE),
+        path.with_file_name(DATABASE_REWRITE_READY),
+    )
+}
 
 static REWRITING: AtomicBool = AtomicBool::new(false);
 static UNCACHED: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
@@ -1684,9 +1693,10 @@ mod rewriting {
     }
 
     fn no_leftovers(path: &Path) {
-        for end in [REWRITE, REWRITE_READY] {
+        let (copy, ready) = rewrite_files(path);
+        for file in [copy, ready] {
             for log in ["", "-wal", "-shm"] {
-                assert!(!exists(path, &format!("{end}{log}")), "{end}{log} was left");
+                assert!(!exists(&file, log), "{}{log} was left", file.display());
             }
         }
     }
@@ -2006,14 +2016,15 @@ mod rewriting {
         let watched = path.clone();
         hooks::on(move |point| {
             if point == "renamed" {
-                for end in [
-                    "-wal",
-                    "-shm",
-                    &format!("{REWRITE}-wal"),
-                    &format!("{REWRITE}-shm"),
+                let copy = rewrite_files(&watched).0;
+                for (file, end) in [
+                    (&watched, "-wal"),
+                    (&watched, "-shm"),
+                    (&copy, "-wal"),
+                    (&copy, "-shm"),
                 ] {
-                    if exists(&watched, end) {
-                        saw.lock().unwrap().push(end.to_string());
+                    if exists(file, end) {
+                        saw.lock().unwrap().push(format!("{}{end}", file.display()));
                     }
                 }
             }
@@ -2042,8 +2053,9 @@ mod rewriting {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(FILE);
         drop(Db::open(&path).unwrap());
-        std::fs::write(named(&path, REWRITE), b"half a copy").unwrap();
-        std::fs::write(named(&path, &format!("{REWRITE}-wal")), b"log").unwrap();
+        let copy = rewrite_files(&path).0;
+        std::fs::write(&copy, b"half a copy").unwrap();
+        std::fs::write(named(&copy, "-wal"), b"log").unwrap();
         drop(Db::open(&path).unwrap());
         no_leftovers(&path);
     }
@@ -2061,7 +2073,7 @@ mod rewriting {
         })
         .unwrap();
         drop(made);
-        std::fs::rename(&path, named(&path, REWRITE_READY)).unwrap();
+        std::fs::rename(&path, rewrite_files(&path).1).unwrap();
         let db = Db::open(&path).unwrap();
         assert_eq!(rows(&db, "dictations"), 1);
         no_leftovers(&path);
@@ -2082,7 +2094,7 @@ mod rewriting {
         drop(made);
         let other = dir.path().join("other.db");
         drop(Db::open(&other).unwrap());
-        std::fs::rename(&other, named(&path, REWRITE_READY)).unwrap();
+        std::fs::rename(&other, rewrite_files(&path).1).unwrap();
         let db = Db::open(&path).unwrap();
         assert_eq!(rows(&db, "dictations"), 1);
         no_leftovers(&path);
