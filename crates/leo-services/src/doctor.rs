@@ -196,17 +196,6 @@ fn notes_checks(notes_dir: &Path) -> Vec<Check> {
         ));
     }
 
-    let dupes = store.duplicate_ids();
-    if !dupes.is_empty() {
-        checks.push(Check::missing(
-            "duplicate note IDs",
-            "finding and editing notes",
-            &format!(
-                "more than one note file has the id {}; change the id: line in one of them",
-                dupes.join(", ")
-            ),
-        ));
-    }
     let copies: Vec<&str> = store
         .notes
         .iter()
