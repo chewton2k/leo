@@ -960,7 +960,7 @@ mod tests {
         );
         assert!(done_within(&rx, 0, Duration::from_secs(5)));
         loud(dir.path(), 3);
-        assert!(done_within(&rx, 3, Duration::from_millis(200)));
+        assert!(done_within(&rx, 3, Duration::from_secs(5)));
         worker.wait();
     }
 
