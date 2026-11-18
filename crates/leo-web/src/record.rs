@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -23,6 +23,7 @@ const WAIT_FOR_WRITES: Duration = Duration::from_secs(5);
 const MOST_WARNINGS: usize = 40;
 const WARNING_CHARS: usize = 2_000;
 const SLIDE_TEXT_CHARS: usize = 6500;
+pub const RECORD_PAGE: usize = 50;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -331,23 +332,48 @@ fn keep_tail(text: String) -> String {
     text.chars().skip(count - MOST_TRANSCRIPT_CHARS).collect()
 }
 
-pub(crate) async fn overview(State(state): State<AppState>) -> Response {
+#[derive(Default, Deserialize)]
+pub(crate) struct Page {
+    pub(crate) after: Option<String>,
+}
+
+fn folder_name(name: &str) -> bool {
+    let (stamp, rest) = name.split_at_checked(15).unwrap_or((name, "x"));
+    chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d-%H%M%S").is_ok()
+        && (rest.is_empty()
+            || rest
+                .strip_prefix('-')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+}
+
+pub(crate) async fn overview(State(state): State<AppState>, Query(page): Query<Page>) -> Response {
+    if page
+        .after
+        .as_deref()
+        .is_some_and(|after| !folder_name(after))
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "That page of recordings does not exist.",
+        );
+    }
     let mut pending = Vec::new();
+    let mut after = None;
     let mut checks = Checks::default();
     if let Some(housekeeper) = state.housekeeper.clone() {
         if let Ok((saved, ready)) = tokio::task::spawn_blocking(move || {
             (
-                housekeeper.pending_page(None, usize::MAX),
+                housekeeper.pending_page(page.after.as_deref(), RECORD_PAGE),
                 housekeeper.checks(),
             )
         })
         .await
         {
             checks = ready;
+            let (saved, next) = saved.unwrap_or_default();
+            after = next;
             pending.extend(
                 saved
-                    .unwrap_or_default()
-                    .0
                     .into_iter()
                     .map(|p| serde_json::to_value(p).unwrap_or_default()),
             );
@@ -364,6 +390,8 @@ pub(crate) async fn overview(State(state): State<AppState>) -> Response {
         "local": true,
         "job": job,
         "pending": pending,
+        "more": after.is_some(),
+        "after": after,
         "checks": checks,
     }))
     .into_response()

@@ -1267,7 +1267,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   source. The page starts/stops/pauses and shows levels/transcripts; it never
   opens a browser microphone or screen-audio picker, and the server takes no
   audio from the page. Native jobs have no page heartbeat lifetime.
-  Housekeeper's `pending_page` supplies retained native sessions, newest first; recovery
+  Housekeeper's `pending_page` supplies retained native sessions, newest first, 50 a page
+  (`/api/record?after=<last folder name>`, any other cursor is refused with 400); recovery
   starts in Writing state and supports Finish available, and anything the
   Housekeeper does not list is not found.
   When no writing AI could write the notes (`long::Structured.writer_failed`, every

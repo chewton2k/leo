@@ -464,15 +464,58 @@ fn the_overview_says_what_would_stop_a_recording_from_being_written_up() {
         }
     }
     let (mut state, _dir, _) = state_with(&[]);
-    let ready = json_of(run(record::overview(State(state.clone()))));
+    let ready = json_of(run(record::overview(
+        State(state.clone()),
+        Default::default(),
+    )));
     assert_eq!(ready["checks"]["speech"], true);
     assert_eq!(ready["checks"]["writing"], true);
     assert_eq!(ready["checks"]["headset"], false);
     state.housekeeper = Some(Arc::new(Gaps));
-    let gaps = json_of(run(record::overview(State(state))));
+    let gaps = json_of(run(record::overview(State(state), Default::default())));
     assert_eq!(gaps["checks"]["speech"], false);
     assert_eq!(gaps["checks"]["writing"], false);
     assert_eq!(gaps["checks"]["headset"], true);
+}
+
+#[test]
+fn a_bad_cursor_is_refused() {
+    struct Paged(std::sync::Mutex<Vec<(Option<String>, usize)>>);
+    impl crate::record::Housekeeper for Paged {
+        fn pending_page(
+            &self,
+            after: Option<&str>,
+            limit: usize,
+        ) -> anyhow::Result<(Vec<record::Pending>, Option<String>)> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((after.map(str::to_owned), limit));
+            Ok((Vec::new(), Some("20260101-090000-2".into())))
+        }
+    }
+    let asked = Arc::new(Paged(Default::default()));
+    let (mut state, _dir, _) = state_with(&[]);
+    state.housekeeper = Some(asked.clone());
+    let page = |after: &str| {
+        run(record::overview(
+            State(state.clone()),
+            axum::extract::Query(record::Page {
+                after: Some(after.into()),
+            }),
+        ))
+    };
+    for bad in ["../x", "20260101-090000/..", "20260101-090000-", "x", ""] {
+        assert_eq!(page(bad).status(), StatusCode::BAD_REQUEST, "{bad}");
+    }
+    let next = json_of(page("20260101-090000-3"));
+    assert_eq!(next["more"], true);
+    assert_eq!(next["after"], "20260101-090000-2");
+    assert_eq!(
+        *asked.0.lock().unwrap(),
+        vec![(Some("20260101-090000-3".to_string()), record::RECORD_PAGE)]
+    );
+    assert_eq!(record::RECORD_PAGE, 50);
 }
 
 #[test]
@@ -500,7 +543,10 @@ fn native_recordings_can_be_recovered_without_reopening_capture() {
             ..Default::default()
         })
     }));
-    let overview = json_of(run(record::overview(State(state.clone()))));
+    let overview = json_of(run(record::overview(
+        State(state.clone()),
+        Default::default(),
+    )));
     assert_eq!(overview["pending"][0]["id"], "native-saved");
     let recovered = run(record::recover(
         State(state.clone()),
