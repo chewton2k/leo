@@ -1087,12 +1087,13 @@ mod tests {
                 .map(|(i, line)| format!("{}| {line}", i + 1))
         };
         let pick = |size, wanted| read.part(size, wanted).unwrap();
-        let marker = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(100);
+        let marker = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000_000);
         for size in [60, 200, 1_000] {
             let parts = crate::tools::packed(numbered(), size);
             assert_eq!(pick(size, 1), (parts.len(), parts[0].clone()));
             let file = std::fs::File::options().write(true).open(&index).unwrap();
             file.set_modified(marker).unwrap();
+            drop(file);
             for (i, part) in parts.iter().enumerate() {
                 assert_eq!(pick(size, i + 1), (parts.len(), part.clone()));
             }
@@ -1114,6 +1115,14 @@ mod tests {
         assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
         assert_eq!(std::fs::read(&index).unwrap(), intact);
 
+        std::fs::remove_file(&index).unwrap();
+        std::fs::create_dir(&index).unwrap();
+        assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
+        assert!(index.is_dir());
+        std::fs::remove_dir(&index).unwrap();
+        assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
+        assert_eq!(std::fs::read(&index).unwrap(), intact);
+
         let before = std::fs::metadata(&copy).unwrap();
         std::fs::write(&copy, format!("leo-read 1 1\n{}", text.replace('w', "z"))).unwrap();
         std::fs::File::options()
@@ -1122,7 +1131,10 @@ mod tests {
             .unwrap()
             .set_modified(marker)
             .unwrap();
-        assert_eq!(std::fs::metadata(&copy).unwrap().len(), before.len());
+        let after = std::fs::metadata(&copy).unwrap();
+        assert_eq!(after.len(), before.len());
+        assert_eq!(after.modified().unwrap(), marker);
+        assert_ne!(after.modified().unwrap(), before.modified().unwrap());
         let parts = crate::tools::packed(numbered(), 1_000);
         assert_eq!(pick(1_000, 2), (parts.len(), parts[1].clone()));
         assert_ne!(std::fs::read(&index).unwrap(), intact);
