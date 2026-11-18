@@ -1197,7 +1197,7 @@ fn audit_bench_task_files() {
             written += 1;
         }
         let first = median_ms(1, || {
-            rt.block_on(crate::routes::tasks::all_listed(&state))
+            rt.block_on(crate::routes::tasks::listed_index(&state))
                 .unwrap();
         });
         let create = median_ms(5, || {
@@ -1208,7 +1208,7 @@ fn audit_bench_task_files() {
             assert_eq!(response.status(), 201);
         });
         let repeat = median_ms(11, || {
-            rt.block_on(crate::routes::tasks::all_listed(&state))
+            rt.block_on(crate::routes::tasks::listed_index(&state))
                 .unwrap();
         });
         let probe = median_ms(11, || {
