@@ -621,6 +621,14 @@ save retains the editor and address. Only a draft successfully persisted in this
 browser offers an explicit Leave, draft kept action, which rechecks session and
 persistence at activation; an in-memory-only draft cannot bypass the save.
 
+The browser draft is written at most four times a second while typing, and at
+once before a save starts, when the window hides and when leo quits. A draft up
+to 256 KB lives in localStorage; a larger one is one whole IndexedDB record
+(`leo-drafts`); if neither store takes it the page says so and saves the note to
+leo instead. `saving.settle()` makes every unsaved edit safe (stored in this
+browser or saved to leo) or gives up after 5 s with "Not saved · keep this page
+open". Undo keeps only the changed span of each step (2026-11-17).
+
 Text-input and virtual Enter (`beforeinput` newline/paragraph/line-break) share
 list continuation with keydown Enter. Shift+Enter and composition keep their own
 paths. Heading previews and menus use 240 ms motion (192 ms out), a taller hover peak, and

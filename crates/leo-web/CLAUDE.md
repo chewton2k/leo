@@ -397,7 +397,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js` keeps
   edits that did not reach leo and retries them on the next load; saving admits
   bounded Unicode JSON bodies. Up to
-  `MOST_UNDO` page undo snapshots per note. Navigation serialises the departing
+  `MOST_UNDO` page undo steps per note, each only its changed span. A keystroke
+  hands the changed lines along and joins nothing (`doc.js` `changed(edit)`,
+  `source()` joins once per change); the draft is written at most four times a
+  second, then before a save, on hide and at quit; drafts over 256 KB
+  (`SMALL_DRAFT`) are one IndexedDB record (`leo-drafts`), and `saving.settle()`
+  makes every edit safe or gives up after 5 s (2026-11-17, the user's call: no
+  typed text is lost). Navigation serialises the departing
   save; a failed save keeps the editor and address; only a draft persisted in
   this browser may offer Leave, draft kept (rechecked at activation).
 - Pictures: `<notes>/attachments/` (`leo_core::attachments`, sniffed
