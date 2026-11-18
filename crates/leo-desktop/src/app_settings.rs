@@ -324,8 +324,8 @@ impl leo_web::app_settings::AppApi for AppSettings {
     fn event_starting(&self, event: leo_web::app_settings::EventStarting) {
         crate::notify::starting(&self.app, event);
     }
-    fn health(&self, notes: &Path, fresh: bool) -> Result<Value> {
-        let mut view = leo_host::health::scan(notes, fresh)?;
+    fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value> {
+        let mut view = leo_host::health::scan(notes, facts, fresh)?;
         let permissions = self.permission_view(true);
         let model = leo_services::speech::library::library()?.selected().is_ok();
         let (shortcut, keys) = self.dictation.shortcut_health();
