@@ -3969,6 +3969,7 @@ fn taking_back_the_last_reply_removes_it_and_refuses_a_stale_count() {
         "chat-take-0001",
         chats::Saving {
             existed: false,
+            from: None,
             title: String::new(),
             refs: vec![],
             messages: vec![said("user"), said("assistant")],

@@ -325,6 +325,7 @@ mod tests {
             id,
             chats::Saving {
                 existed: false,
+                from: None,
                 title: String::new(),
                 refs: vec![],
                 messages,
@@ -508,6 +509,15 @@ mod tests {
 
     #[test]
     fn review_finds_every_kind_of_miss_and_skips_plain_chats() {
+        finds_every_kind_of_miss(false);
+    }
+
+    #[test]
+    fn review_finds_every_kind_of_miss_in_chats_saved_before_message_rows() {
+        finds_every_kind_of_miss(true);
+    }
+
+    fn finds_every_kind_of_miss(column: bool) {
         let dir = tempfile::tempdir().unwrap();
         let mut shouted = quiz();
         shouted[3]["text"] = serde_json::json!("[[Incorrect]] Not quite: BFS uses a queue.");
@@ -566,6 +576,17 @@ mod tests {
             ],
             at(1, 13),
         );
+        if column {
+            for id in [
+                "chat-reply-0001",
+                "chat-card-00001",
+                "chat-graded-001",
+                "chat-plain-0001",
+                "chat-right-0001",
+            ] {
+                chats::as_column(dir.path(), id);
+            }
+        }
         let found = missed(dir.path(), at(3, 9));
         let seen: Vec<(&str, &str, &str)> = found
             .iter()

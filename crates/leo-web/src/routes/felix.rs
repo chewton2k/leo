@@ -185,10 +185,23 @@ pub(crate) async fn list_chats(
     }
 }
 
-pub(crate) async fn get_chat(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct PageQuery {
+    #[serde(default)]
+    pub(crate) before: Option<usize>,
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
+}
+
+pub(crate) async fn get_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<PageQuery>,
+) -> Response {
     let dir = state.chats.clone();
-    match tokio::task::spawn_blocking(move || chats::load(&dir, &id)).await {
-        Ok(Some(chat)) => Json(chat).into_response(),
+    let most = query.limit.unwrap_or(chats::PAGE).min(chats::PAGE);
+    match tokio::task::spawn_blocking(move || chats::page(&dir, &id, query.before, most)).await {
+        Ok(Some(page)) => Json(page).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -204,16 +217,24 @@ pub(crate) async fn put_chat(
     }
     let dir = state.chats.clone();
     match tokio::task::spawn_blocking(move || {
-        let mut chat = chats::save(&dir, &id, body, chrono::Utc::now())?;
-        if chat.wants_name() && chats::rename(&dir, &id, &chat.title) {
-            chat.named = true;
+        let mut saved = chats::save_from(&dir, &id, body, chrono::Utc::now())?;
+        if saved.chat.wants_name() && chats::rename(&dir, &id, &saved.chat.title) {
+            saved.chat.named = true;
         }
-        anyhow::Ok(chat)
+        anyhow::Ok(saved)
     })
     .await
     {
-        Ok(Ok(chat)) => Json(chat.summary()).into_response(),
+        Ok(Ok(saved)) => Json(saved.summary()).into_response(),
         Ok(Err(e)) if e.is::<chats::Gone>() => StatusCode::GONE.into_response(),
+        Ok(Err(e)) if e.is::<chats::Conflict>() => {
+            let count = e.downcast_ref::<chats::Conflict>().map_or(0, |c| c.count);
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "error": "This chat changed in another window.", "count": count })),
+            )
+                .into_response()
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }

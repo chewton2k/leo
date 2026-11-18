@@ -7,7 +7,7 @@ use rusqlite::{Connection, ErrorCode};
 
 pub const FILE: &str = "leo.db";
 pub const BEFORE: &str = ".before-database";
-const VERSION: i64 = 6;
+const VERSION: i64 = 7;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS dictations (
@@ -53,6 +53,14 @@ CREATE TABLE IF NOT EXISTS chats (
 );
 CREATE INDEX IF NOT EXISTS chats_by_time ON chats(updated_at);
 CREATE VIRTUAL TABLE IF NOT EXISTS chats_text USING fts5(id UNINDEXED, title, body, tokenize = 'unicode61 remove_diacritics 2');
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY,
+    chat TEXT NOT NULL,
+    n INTEGER NOT NULL,
+    message TEXT NOT NULL,
+    UNIQUE (chat, n)
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS chat_words USING fts5(body, content = '', contentless_delete = 1, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS chat_docs (
     id TEXT PRIMARY KEY,
     chat TEXT NOT NULL,
@@ -388,6 +396,7 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "dictations", "original", "TEXT")?;
+    add_column(&tx, "chats", "rows", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "chat_docs", "chars", "INTEGER")?;
     add_column(&tx, "chat_docs", "bytes", "INTEGER")?;
     add_column(&tx, "chat_docs", "excerpt", "TEXT")?;
@@ -1031,11 +1040,79 @@ mod task_descriptions {
                     ("a quote".into(), "resolved".into(), true, "felix".into())
                 );
                 let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-                assert_eq!(version, 6);
+                assert_eq!(version, VERSION);
                 Ok(())
             })
             .unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod chat_rows {
+    use super::*;
+
+    #[test]
+    fn existing_chats_gain_a_rows_mark_without_losing_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        drop(Db::open(&path).unwrap());
+        let old = Connection::open(&path).unwrap();
+        let messages = serde_json::json!([
+            { "role": "user", "text": "quiz me on heaps" },
+            { "role": "assistant", "text": "[[incorrect]] A heap keeps the smallest on top." }
+        ])
+        .to_string();
+        old.execute_batch(
+            "DROP TABLE chat_messages; DROP TABLE chat_words; ALTER TABLE chats DROP COLUMN rows;",
+        )
+        .unwrap();
+        old.execute(
+            "INSERT INTO chats (id, title, mode, refs, messages, named, about, memory, count, created_at, updated_at)
+             VALUES ('chat-v6-000001', 'Heaps', 'chat', '[]', ?1, 1, 'about heaps', NULL, 2, '2026-11-01T00:00:00.000000Z', '2026-11-01T00:00:00.000000Z')",
+            [&messages],
+        )
+        .unwrap();
+        old.execute_batch(
+            "INSERT INTO chats_text (id, title, body) VALUES ('chat-v6-000001', 'Heaps', 'quiz me on heaps');
+             INSERT INTO reviewed (key, n) VALUES ('chat-v6-000001:00000000000000aa', 1);",
+        )
+        .unwrap();
+        old.pragma_update(None, "user_version", 6).unwrap();
+        drop(old);
+        let chats = dir.path().join("chats");
+        let chat = crate::chats::load(&chats, "chat-v6-000001").unwrap();
+        assert_eq!(chat.messages.len(), 2);
+        assert_eq!(chat.title, "Heaps");
+        assert_eq!(crate::review::count(&chats), 1);
+        assert_eq!(crate::chats::search(&chats, "heaps").len(), 1);
+        assert_eq!(crate::chats::with_misses(&chats).len(), 1);
+        assert_eq!(user_version(&path), VERSION);
+        let rows: i64 = at(&path)
+            .with(|c| c.query_row("SELECT rows FROM chats", [], |r| r.get(0)))
+            .unwrap();
+        assert_eq!(rows, 0);
+        let mut more = chat.messages.clone();
+        more.push(serde_json::json!({ "role": "user", "text": "next" }));
+        crate::chats::save(
+            &chats,
+            "chat-v6-000001",
+            serde_json::from_value(serde_json::json!({ "messages": more })).unwrap(),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+        let moved = crate::chats::load(&chats, "chat-v6-000001").unwrap();
+        assert_eq!(moved.messages, more);
+        assert_eq!(moved.title, "Heaps");
+        assert_eq!(crate::chats::with_misses(&chats).len(), 1);
+        assert_eq!(crate::review::count(&chats), 1);
+    }
+
+    fn user_version(path: &Path) -> i64 {
+        Connection::open(path)
+            .unwrap()
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap()
     }
 }
 
