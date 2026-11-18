@@ -35,21 +35,24 @@ async function loadSourcePage(source, cursor, back) {
   if (list) list.scrollTop = 0;
 }
 
-function sourceEarlier() {
+async function sourceEarlier() {
   if (changedSources().length) return toast('Save your fixes first.');
   const back = sourcePage.back.slice();
   const cursor = back.pop();
   if (cursor) return loadSourcePage(sourcePage.page.head.id, cursor, back);
 }
 
-function sourceLater() {
+async function sourceLater() {
   if (changedSources().length) return toast('Save your fixes first.');
   const { page } = sourcePage;
   if (page.next) return loadSourcePage(page.head.id, page.next, [...sourcePage.back, page.at]);
 }
 
-function sourcePick(source) {
-  if (changedSources().length) return toast('Save your fixes first.');
+async function sourcePick(source) {
+  if (changedSources().length) {
+    $('#source-pick').value = sourcePage.page.head.id;
+    return toast('Save your fixes first.');
+  }
   return loadSourcePage(source, { passages: 0, points: 0 }, []);
 }
 
