@@ -74,7 +74,7 @@ function choosePictures() {
 
 const UPLOAD_READS = 2000;
 
-document.addEventListener('input', (e) => {
+globalThis.document?.addEventListener('input', (e) => {
   const area = e.target.closest ? e.target.closest('[data-reads]') : null;
   const hint = area && document.getElementById(`${area.id}-hint`);
   if (hint) hint.hidden = Array.from(area.value.trim()).length <= Number(area.dataset.reads);
