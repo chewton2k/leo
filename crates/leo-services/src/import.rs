@@ -19,6 +19,7 @@ const MOST_SOURCE_BYTES: usize = 90 * 1024 * 1024;
 const MOST_PDF_CONTENT_BYTES: usize = 16 * 1024 * 1024;
 const MOST_PDF_OPERATIONS: usize = 300_000;
 const MOST_PDF_DEPTH: usize = 128;
+const PDF_WORD_GAP: i64 = -100;
 const SCAN_TEXT_LETTERS: usize = 40;
 const SCAN_PAGE_SHARE: f32 = 0.65;
 const SPILL_AT: usize = 8 * 1024 * 1024;
@@ -465,17 +466,94 @@ fn full_page_image(doc: &lopdf::Document, page: lopdf::ObjectId) -> Result<bool>
     Ok(false)
 }
 
+fn pdf_text_operands(
+    text: &mut String,
+    encoding: &lopdf::Encoding<'_>,
+    operands: &[lopdf::Object],
+) -> lopdf::Result<()> {
+    for operand in operands {
+        match operand {
+            lopdf::Object::String(bytes, _) => encoding.write_to_string(bytes, text)?,
+            lopdf::Object::Array(items) => {
+                pdf_text_operands(text, encoding, items)?;
+                text.push(' ');
+            }
+            lopdf::Object::Integer(spacing) if *spacing < PDF_WORD_GAP => text.push(' '),
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn pdf_page_text(doc: &lopdf::Document, page: lopdf::ObjectId) -> lopdf::Result<String> {
+    let mut first_error = None;
+    let mut encodings = std::collections::BTreeMap::new();
+    for (name, font) in doc.get_page_fonts(page)? {
+        match font.get_font_encoding_with_limit(doc, MOST_PDF_CONTENT_BYTES) {
+            Ok(encoding) => {
+                encodings.insert(name, encoding);
+            }
+            Err(error) => {
+                first_error.get_or_insert(error);
+            }
+        }
+    }
+    let content = lopdf::content::Content::decode(
+        &doc.get_page_content_with_limit(page, MOST_PDF_CONTENT_BYTES)?,
+    )?;
+    let mut encoding = None;
+    let mut text = String::new();
+    let mut chunk_start = 0;
+    for operation in content.operations {
+        let operator = operation.operator.as_str();
+        let needs_newline = text.len() == chunk_start || !text.ends_with('\n');
+        match (operator, encoding) {
+            ("Tf", _) => {
+                let font = operation
+                    .operands
+                    .first()
+                    .ok_or_else(|| lopdf::Error::Syntax("missing font operand".to_string()))?;
+                encoding = match font.as_name() {
+                    Ok(name) => encodings.get(name),
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                        None
+                    }
+                };
+                chunk_start = text.len();
+            }
+            ("Tj" | "TJ" | "'" | "\"", Some(encoding)) => {
+                if needs_newline && matches!(operator, "'" | "\"") {
+                    text.push('\n');
+                }
+                let operands = if operator == "\"" {
+                    operation.operands.get(2..3).unwrap_or_default()
+                } else {
+                    &operation.operands
+                };
+                if let Err(error) = pdf_text_operands(&mut text, encoding, operands) {
+                    first_error.get_or_insert(error);
+                }
+            }
+            ("T*" | "ET", _) if needs_newline => text.push('\n'),
+            _ => {}
+        }
+    }
+    first_error.map_or(Ok(text), Err)
+}
+
 fn pdf(bytes: &[u8], scratch: &Scratch) -> Result<Material> {
     let doc = lopdf::Document::load_mem(bytes)
         .context("this PDF could not be opened (it may be damaged or password-protected)")?;
-    let pages = doc.get_pages();
-    if pages.is_empty() {
+    let mut pages = doc.page_iter().peekable();
+    if pages.peek().is_none() {
         bail!("this PDF has no pages");
     }
     let mut material = Material::new(scratch);
     let mut prepared = std::collections::HashMap::new();
-    for (&number, &page) in &pages {
-        let extracted = match doc.extract_text_with_limit(&[number], MOST_PDF_CONTENT_BYTES) {
+    for (index, page) in pages.enumerate() {
+        let number = (index + 1) as u32;
+        let extracted = match pdf_page_text(&doc, page) {
             Err(lopdf::Error::Decompress(lopdf::DecompressError::MemoryLimitExceeded {
                 ..
             })) => bail!("a PDF page expands to too much content; export a simpler PDF"),
@@ -1582,7 +1660,7 @@ mod tests {
 
     #[test]
     fn native_sources_read_short_pdf_text_without_vision() {
-        let source = upload(
+        let source = pdf_upload(
             "short.pdf",
             "application/pdf",
             pdf_with(Some("Quiz"), Some(&[0xff, 0xd8, 0xff, 1])),
@@ -1650,6 +1728,19 @@ mod tests {
 
     fn pdf_with(text: Option<&str>, jpeg: Option<&[u8]>) -> Vec<u8> {
         pdf_with_pages(&[(text, jpeg, false)])
+    }
+
+    fn pdf_upload(name: &str, mime: &str, bytes: Vec<u8>) -> Upload {
+        let doc = lopdf::Document::load_mem(&bytes).unwrap();
+        for (number, page) in doc.get_pages() {
+            let old = doc.extract_text_with_limit(&[number], MOST_PDF_CONTENT_BYTES);
+            assert_eq!(
+                pdf_page_text(&doc, page).map_err(|error| format!("{error:?}")),
+                old.map_err(|error| format!("{error:?}")),
+                "{name}, page {number}"
+            );
+        }
+        upload(name, mime, bytes)
     }
 
     type PdfPart<'a> = (Option<&'a str>, Option<&'a [u8]>, bool);
@@ -1725,16 +1816,49 @@ mod tests {
             Some("Dijkstra uses a priority queue to pick the closest vertex next"),
             None,
         );
-        let got = extract(&upload("paper.pdf", "application/pdf", typed)).unwrap();
+        let got = extract(&pdf_upload("paper.pdf", "application/pdf", typed)).unwrap();
         assert!(text_of(&got).contains("priority queue"));
         assert!(got.images.is_empty());
         let fake_jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
         let scanned = pdf_with(None, Some(&fake_jpeg));
-        let got = extract(&upload("scan.pdf", "application/pdf", scanned)).unwrap();
+        let got = extract(&pdf_upload("scan.pdf", "application/pdf", scanned)).unwrap();
         assert_eq!(got.images.len(), 1);
         assert_eq!(pixels(&got.images[0]), fake_jpeg);
-        assert!(extract(&upload("empty.pdf", "", pdf_with(None, None))).is_err());
+        assert!(extract(&pdf_upload("empty.pdf", "", pdf_with(None, None))).is_err());
         assert!(extract(&upload("junk.pdf", "", b"not a pdf".to_vec())).is_err());
+    }
+
+    #[test]
+    fn pdf_pages_keep_their_own_font_and_text_spacing() {
+        use lopdf::{dictionary, Document, Stream};
+
+        let mut doc = Document::load_mem(&pdf_with_pages(&[(None, None, false); 2])).unwrap();
+        for ((_, page), encoding) in doc
+            .get_pages()
+            .into_iter()
+            .zip(["WinAnsiEncoding", "MacRomanEncoding"])
+        {
+            let font = doc.add_object(dictionary! {
+                "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Courier", "Encoding" => encoding,
+            });
+            let content = doc.add_object(Stream::new(
+                dictionary! {},
+                br#"BT (ignored) Tj /F1 12 Tf (\200) Tj [[(A) -101 (B)] -100 (C)] TJ (next) ' 1 2 (last) " T* /F1 12 Tf T* (tail) Tj ET"#.to_vec(),
+            ));
+            let page = doc.get_dictionary_mut(page).unwrap();
+            page.set(
+                "Resources",
+                dictionary! { "Font" => dictionary! { "F1" => font } },
+            );
+            page.set("Contents", content);
+        }
+        let mut bytes = Vec::new();
+        doc.save_to(&mut bytes).unwrap();
+        let material = extract(&pdf_upload("fonts.pdf", "", bytes)).unwrap();
+        assert_eq!(
+            text_of(&material),
+            "[page 1]\n€A B C \nnext\nlast\n\ntail\n\n[page 2]\nÄA B C \nnext\nlast\n\ntail"
+        );
     }
 
     #[test]
@@ -1745,7 +1869,7 @@ mod tests {
             if reversed {
                 parts.reverse();
             }
-            let source = upload("mixed.pdf", "", pdf_with_pages(&parts));
+            let source = pdf_upload("mixed.pdf", "", pdf_with_pages(&parts));
             let calls = Mutex::new(0);
             let see = |_: Prompt, images: &[Image], _: u32| {
                 *calls.lock().unwrap() += 1;
@@ -1892,7 +2016,8 @@ mod tests {
             let mut bytes = Vec::new();
             doc.save_to(&mut bytes).unwrap();
             let original = bytes.clone();
-            let material = extract(&upload("large-scan.pdf", "application/pdf", bytes)).unwrap();
+            let material =
+                extract(&pdf_upload("large-scan.pdf", "application/pdf", bytes)).unwrap();
             assert_eq!(material.images.len(), 1, "predictor {predictor}");
             let (w, h) = leo_core::attachments::dimensions(&pixels(&material.images[0])).unwrap();
             assert!(w <= 4096 && h <= 4096 && w < width as u32 && h < height as u32);
@@ -1953,7 +2078,7 @@ mod tests {
         image.dict.set("DecodeParms", dictionary! { "Predictor" => 15, "Colors" => 3, "BitsPerComponent" => 8, "Columns" => 400 });
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
-        let material = extract(&upload("scan.pdf", "", out)).unwrap();
+        let material = extract(&pdf_upload("scan.pdf", "", out)).unwrap();
         assert_eq!(material.images.len(), 1);
         assert_eq!(material.images[0].mime, "image/png");
         assert_eq!(
@@ -1972,10 +2097,35 @@ mod tests {
             .set("Contents", Object::Reference(id));
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
-        let error = extract(&upload("bomb.pdf", "", out))
+        let error = extract(&pdf_upload("bomb.pdf", "", out))
             .unwrap_err()
             .to_string();
-        assert!(error.contains("too much content"), "{error}");
+        assert_eq!(
+            error,
+            "a PDF page expands to too much content; export a simpler PDF"
+        );
+
+        let font = doc
+            .objects
+            .values_mut()
+            .filter_map(|object| object.as_dict_mut().ok())
+            .find(|dict| dict.has_type(b"Font"))
+            .unwrap();
+        font.set("ToUnicode", id);
+        for (content, refused) in [(b"/F1 12 Tf".as_slice(), true), (b"Tf".as_slice(), false)] {
+            let content = doc.add_object(Stream::new(dictionary! {}, content.to_vec()));
+            doc.get_dictionary_mut(page)
+                .unwrap()
+                .set("Contents", content);
+            let mut out = Vec::new();
+            doc.save_to(&mut out).unwrap();
+            let result = extract(&pdf_upload("font-limit.pdf", "", out));
+            if refused {
+                assert_eq!(result.unwrap_err().to_string(), error);
+            } else {
+                assert_eq!(result.unwrap().images.len(), 1);
+            }
+        }
     }
 
     #[test]
@@ -2070,7 +2220,7 @@ mod tests {
                 )
             })
             .collect();
-        let got = extract(&upload(
+        let got = extract(&pdf_upload(
             "long.pdf",
             "application/pdf",
             pdf_with_pages(&parts),
@@ -2086,7 +2236,7 @@ mod tests {
     fn a_pdf_with_forty_one_scanned_pages_is_read_six_at_a_time() {
         let jpeg = [0xFF, 0xD8, 0xFF, 0xE0, 1, 2, 3, 4];
         let parts: Vec<PdfPart<'_>> = (0..41).map(|_| (None, Some(&jpeg[..]), true)).collect();
-        let material = extract(&upload(
+        let material = extract(&pdf_upload(
             "scan.pdf",
             "application/pdf",
             pdf_with_pages(&parts),
@@ -2139,7 +2289,7 @@ mod tests {
             .set("Contents", Object::Reference(id));
         let mut out = Vec::new();
         doc.save_to(&mut out).unwrap();
-        let got = extract(&upload("drawing.pdf", "", out)).unwrap();
+        let got = extract(&pdf_upload("drawing.pdf", "", out)).unwrap();
         assert!(text_of(&got).contains("Fig 1"));
     }
 
