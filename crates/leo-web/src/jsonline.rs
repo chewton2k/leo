@@ -622,8 +622,13 @@ mod tests {
         write_file(&chats, &named("item-0001", "One")).unwrap();
         let index = Index::<Item>::default();
         let _ = titles(&index, &chats);
-        std::thread::sleep(Duration::from_millis(500));
-        let _ = titles(&index, &chats);
+        let mut quiet = 0;
+        until(|| {
+            std::thread::sleep(Duration::from_millis(100));
+            let (_, listed) = counted(|| drop(titles(&index, &chats)));
+            quiet = if listed == 0 { quiet + 1 } else { 0 };
+            quiet == 5
+        });
         let folder = checked_dir(&chats, "items").unwrap();
         std::fs::write(
             folder.join("item-0002.json"),
