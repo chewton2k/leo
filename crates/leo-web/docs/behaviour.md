@@ -822,6 +822,11 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   read_transcript, read_original, look_at_picture, calculate (`calc.rs`, a
   safe evaluator), list_schedule, list_trash, search_chats, list_boards,
   open_board.
+  `read_document` takes several documents (comma-separated) and `count`
+  consecutive parts in one call, up to three parts' worth of text, and ends with
+  what it left for the next call. Asked to learn, study or be tested on attached
+  documents, Felix reads every part the request covers before he plans or asks,
+  and says which he skipped and why (2026-11-18, the owner's call).
 
 - Change tools: edit_note / create_note (cards; Apply POSTs
   `/api/notes/{id}/suggestion`, 409 unless `find` is there exactly once),

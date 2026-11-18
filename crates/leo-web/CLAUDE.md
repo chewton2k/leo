@@ -521,6 +521,9 @@ read (root CLAUDE.md, 2026-11-17).
   `LAST_REPLY_CHARS` (12,000), full at `FULL_ROOM` (32,000), never below
   `TURN_CHARS` (4,000). Warm follow-ups and steering (`steer::MOST_CHARS`) use the
   same cap. `clip_turn` closes a fence it cut and says what was left out.
+- Documents: `read_document` takes several documents (comma-separated) and `count`
+  parts in one call, at most `READ_PARTS` (3) parts' worth, naming what it left; `HELPING`
+  tells Felix to read every part a study request covers first (2026-11-18).
 - Tools: a text protocol (`<tool>{…}</tool>`) for every provider plus native
   sessions (Claude Code MCP bridge, isolation-capable Codex, compatible Ollama),
   all generated from `tools::SPECS` and `check`ed. At most `MOST_STEPS` (12)

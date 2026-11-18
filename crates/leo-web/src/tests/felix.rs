@@ -464,6 +464,109 @@ fn felix_searches_opens_and_suggests_a_change_with_tools_then_answers() {
 }
 
 #[test]
+fn teaching_from_ten_documents_reads_every_part_of_each_before_the_first_question() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.room = Some(Arc::new(|| 36_000));
+    let mut files = Vec::new();
+    for n in 1..=10 {
+        files.push(
+            crate::chat_files::add(
+                &state.chats,
+                "chat-teach-0001",
+                &format!("lecture{n}.pdf"),
+                &format!("L{n:02} ").repeat(5_250),
+                chrono::Utc::now(),
+            )
+            .unwrap()
+            .id,
+        );
+    }
+    let prompts = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = Arc::clone(&prompts);
+    let pass = Arc::new(Mutex::new(1));
+    let streamer: chat::Streamer = Arc::new(
+        move |system: &str,
+              user: &str,
+              _: u32,
+              piece: &mut dyn FnMut(&str),
+              _: &mut dyn FnMut(),
+              _: &dyn Fn() -> bool| {
+            seen.lock().unwrap().push(format!("{system}\n{user}"));
+            let mut at = pass.lock().unwrap();
+            let result = user.rsplit("<tool_result").next().unwrap();
+            let left = result
+                .split("read_document them next: ")
+                .nth(1)
+                .map(|rest| {
+                    rest.split(".]")
+                        .next()
+                        .unwrap()
+                        .split(", ")
+                        .map(|entry| entry.split(' ').next().unwrap().to_string())
+                        .collect::<Vec<_>>()
+                });
+            let reply = match left {
+                Some(ids) => read_of(&ids.join(","), *at),
+                None if *at == 1 && result.contains("document name=") => {
+                    *at = 2;
+                    read_of("d1,d2,d3,d4,d5,d6,d7,d8,d9,d10", 2)
+                }
+                None if *at == 1 => read_of("d1,d2,d3,d4,d5,d6,d7,d8,d9,d10", 1),
+                None => "Ready to teach.".to_string(),
+            };
+            piece(&reply);
+            Ok(reply.into())
+        },
+    );
+    fn read_of(ids: &str, part: usize) -> String {
+        format!("<tool>{{\"name\": \"read_document\", \"document\": \"{ids}\", \"part\": \"{part}\"}}</tool>")
+    }
+    state.chat = Some(streamer);
+    let body = chat::ChatBody {
+        messages: vec![chat::Turn {
+            role: "user".into(),
+            text: "teach me these for my midterm".into(),
+        }],
+        note: None,
+        refs: vec![],
+        chat: Some("chat-teach-0001".into()),
+        files,
+        access: None,
+        recent: vec![],
+        practice: false,
+        mark: false,
+        selection: None,
+        session: None,
+    };
+    let text = run(async {
+        let response = chat_reply(State(state.clone()), Json(body)).await;
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    });
+    let lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(lines.iter().all(|l| l.get("error").is_none()));
+    let prompts = prompts.lock().unwrap();
+    let heard = prompts[1..].join("\n");
+    for n in 1..=10 {
+        for part in 1..=2 {
+            assert!(
+                heard.contains(&format!("name=\"lecture{n}.pdf\" part=\"{part}\" of=\"2\"")),
+                "lecture{n} part {part} was not read"
+            );
+        }
+    }
+    assert!(
+        prompts[0].contains("read every part the request covers"),
+        "the instructions must tell Felix to read them all first"
+    );
+}
+
+#[test]
 fn felix_stops_using_tools_after_the_most_steps_and_answers() {
     let (mut state, _d, _ids) = state_with(&[("Heaps", "")]);
     let (streamer, prompts) = scripted(vec![
