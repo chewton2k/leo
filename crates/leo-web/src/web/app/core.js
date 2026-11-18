@@ -858,6 +858,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
   const mine = ++seq;
   const note = fresh || (await api(`/api/notes/${enc(id)}`));
   await marginLoadPrefs();
+  await saving.ready;
   if (mine !== seq) return;
   let s;
   const opened = swap(`n:${note.id || 'new'}`, () => {

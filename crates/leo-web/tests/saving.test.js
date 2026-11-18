@@ -288,3 +288,283 @@ test('persistDue writes a draft that was waiting', async () => {
   const again = manager(async () => note(), local).open(note());
   assert.equal(again.edit.body, 'second');
 });
+
+const SMALL_DRAFT = 262144;
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+function fakeIndexedDB({ failOpen = false } = {}) {
+  const data = new Map();
+  const ctl = { data, puts: 0, failPut: false, hold: false, held: [], made: false };
+  const later = (fn) => setTimeout(fn, 0);
+  const db = {
+    createObjectStore: () => ({}),
+    transaction() {
+      const tx = { error: null };
+      const ops = [];
+      const request = (op) => { const r = {}; ops.push(() => { r.result = op(); }); return r; };
+      const store = {
+        put: (value, key) => { ctl.puts++; return request(() => { if (ctl.failPut) throw new Error('QuotaExceededError'); data.set(key, structuredClone(value)); }); },
+        delete: (key) => request(() => data.delete(key)),
+        getAllKeys: () => request(() => [...data.keys()]),
+        getAll: () => request(() => [...data.values()].map((v) => structuredClone(v))),
+      };
+      tx.objectStore = () => store;
+      const finish = () => {
+        try {
+          for (const op of ops) op();
+          later(() => tx.oncomplete && tx.oncomplete());
+        } catch (error) {
+          tx.error = error;
+          later(() => tx.onerror && tx.onerror());
+        }
+      };
+      later(() => (ctl.hold ? ctl.held.push(finish) : finish()));
+      return tx;
+    },
+  };
+  ctl.release = () => { ctl.hold = false; for (const f of ctl.held.splice(0)) f(); };
+  return {
+    ctl,
+    open() {
+      const request = {};
+      later(() => {
+        if (failOpen) { request.error = new Error('blocked'); return request.onerror && request.onerror(); }
+        request.result = db;
+        if (!ctl.made) { ctl.made = true; request.onupgradeneeded && request.onupgradeneeded(); }
+        request.onsuccess();
+      });
+      return request;
+    },
+  };
+}
+
+function limited() {
+  const local = storage();
+  const setItem = local.setItem;
+  local.setItem = (k, v) => { if (v.length > SMALL_DRAFT * 2) throw new Error('quota'); setItem(k, v); };
+  return local;
+}
+
+const big = (n, fill = 'a') => fill.repeat(n);
+const settled = async () => { for (let i = 0; i < 6; i++) await tick(); };
+
+test('a draft over the small limit is written to the large store whole and read back after a reload', async () => {
+  const idb = fakeIndexedDB();
+  const local = limited();
+  const m = manager(async () => { throw Object.assign(new Error('offline'), { status: 500 }); }, local, { indexedDB: idb });
+  await m.ready;
+  const s = m.open(note());
+  const body = big(SMALL_DRAFT + 10);
+  m.changed(s, edit(body));
+  await settled();
+  assert.equal(local.length, 0, 'nothing large in localStorage');
+  assert.equal(idb.ctl.data.get(s.key).edit.body, body);
+  assert.equal(idb.ctl.data.get(s.key).note.body, '');
+  assert.equal(s.durableRevision, s.revision);
+  let told = 0;
+  const again = manager(async () => note(), local, { indexedDB: idb, recovered: (n) => { told = n; } });
+  await again.ready;
+  assert.equal(told, 1);
+  const r = again.open(note());
+  assert.equal(r.edit.body, body);
+  assert.equal(r.note.version, 'v1');
+  assert.equal(again.unsaved(), true);
+});
+
+test('`settle` waits for a first write still in flight and resolves true once it confirms', async () => {
+  const idb = fakeIndexedDB();
+  const m = manager(async () => new Promise(() => {}), limited(), { indexedDB: idb });
+  await m.ready;
+  idb.ctl.hold = true;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT + 1)));
+  let done = null;
+  m.settle().then((v) => { done = v; });
+  await settled();
+  assert.equal(done, null, 'still waiting on the write');
+  idb.ctl.release();
+  await settled();
+  assert.equal(done, true);
+  assert.equal(idb.ctl.puts, 1);
+});
+
+test('a large paste is stored whole, not as a span', async () => {
+  const idb = fakeIndexedDB();
+  let clock = 1000;
+  const m = manager(async () => new Promise(() => {}), limited(), { indexedDB: idb, now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit('short'));
+  clock += 1000;
+  const pasted = 'short' + big(1048576, 'p');
+  m.changed(s, edit(pasted));
+  await settled();
+  assert.equal(idb.ctl.data.get(s.key).edit.body, pasted);
+});
+
+test('two edits at opposite ends of a 20 MB note are stored whole', async () => {
+  const idb = fakeIndexedDB();
+  let clock = 1000;
+  const m = manager(async () => new Promise(() => {}), limited(), { indexedDB: idb, now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  const middle = big(20000000, 'm');
+  m.changed(s, edit('A' + middle));
+  await settled();
+  clock += 10;
+  const both = 'A' + middle + 'Z';
+  m.changed(s, edit(both));
+  assert.equal(await m.settle(), true);
+  const kept = idb.ctl.data.get(s.key).edit.body;
+  assert.equal(kept.length, both.length);
+  assert.equal(kept[0], 'A');
+  assert.equal(kept.at(-1), 'Z');
+});
+
+test('when the large store refuses the write the session is not durable, the message shows once and `settle` saves the note to leo', async () => {
+  const idb = fakeIndexedDB();
+  idb.ctl.failPut = true;
+  let warning = 0;
+  const marks = [];
+  const sent = [];
+  let clock = 1000;
+  const m = manager(async (_, { body }) => { sent.push(body.body.length); return { ...note(), ...body, version: 'v2' }; }, limited(), { indexedDB: idb, storageError: () => warning++, mark: (_, t) => marks.push(t), now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT * 3)));
+  await settled();
+  clock += 1000;
+  m.changed(s, edit(big(SMALL_DRAFT * 3 + 1)));
+  await settled();
+  assert.equal(s.persisted, false);
+  assert.notEqual(s.durableRevision, s.revision);
+  assert.equal(warning, 1);
+  assert.ok(marks.includes('Not saved · keep this page open'));
+  assert.equal(await m.settle(), true);
+  assert.deepEqual(sent, [SMALL_DRAFT * 3 + 1]);
+  assert.equal(m.unsaved(), false);
+});
+
+test('`settle` resolves false after 5 s when neither store nor leo answers and the message stays', async () => {
+  const idb = fakeIndexedDB({ failOpen: true });
+  const timers = [];
+  const marks = [];
+  const m = manager(() => new Promise(() => {}), limited(), { indexedDB: idb, schedule: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, mark: (_, t) => marks.push(t) });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT * 3)));
+  let done = null;
+  m.settle().then((v) => { done = v; });
+  await settled();
+  assert.equal(done, null);
+  const five = timers.find((t) => t.ms === 5000);
+  assert.ok(five, 'a 5 s limit');
+  five.fn();
+  await settled();
+  assert.equal(done, false);
+  assert.equal(marks.at(-1), 'Not saved · keep this page open');
+  assert.equal(m.unsaved(), true);
+});
+
+test('a hide starts the write at once', async () => {
+  const idb = fakeIndexedDB();
+  let clock = 1000;
+  const m = manager(async () => new Promise(() => {}), limited(), { indexedDB: idb, now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT + 1)));
+  await settled();
+  clock += 10;
+  m.changed(s, edit(big(SMALL_DRAFT + 2)));
+  assert.equal(s.persistDue, true);
+  m.retry();
+  await settled();
+  assert.equal(idb.ctl.puts, 2);
+  assert.equal(idb.ctl.data.get(s.key).edit.body.length, SMALL_DRAFT + 2);
+});
+
+test('an old draft in localStorage bigger than the limit is read once and its old key is removed only after the large write confirms', async () => {
+  const idb = fakeIndexedDB();
+  const local = storage();
+  const key = 'leo-draft-v1:one';
+  local.setItem(key, JSON.stringify({ note: note(), edit: edit(big(SMALL_DRAFT + 5)) }));
+  const m = manager(async () => new Promise(() => {}), local, { indexedDB: idb });
+  await m.ready;
+  const s = m.open(note());
+  assert.equal(s.edit.body.length, SMALL_DRAFT + 5);
+  idb.ctl.hold = true;
+  m.changed(s, edit(big(SMALL_DRAFT + 6)));
+  await settled();
+  assert.ok(local.getItem(key), 'the old key stays until the write confirms');
+  idb.ctl.release();
+  await settled();
+  assert.equal(local.getItem(key), null);
+  assert.equal(idb.ctl.data.get(key).edit.body.length, SMALL_DRAFT + 6);
+});
+
+test('a draft that shrinks below the limit goes back to `localStorage`', async () => {
+  const idb = fakeIndexedDB();
+  const local = storage();
+  let clock = 1000;
+  const m = manager(async () => new Promise(() => {}), local, { indexedDB: idb, now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT + 1)));
+  await settled();
+  assert.ok(idb.ctl.data.has(s.key));
+  clock += 1000;
+  m.changed(s, edit('short again'));
+  assert.equal(JSON.parse(local.getItem(s.key)).edit.body, 'short again');
+  await settled();
+  assert.equal(idb.ctl.data.has(s.key), false);
+  const again = manager(async () => note(), local, { indexedDB: idb });
+  await again.ready;
+  assert.equal(again.open(note()).edit.body, 'short again');
+});
+
+test('when the large store cannot open the draft falls back and the failure is shown once', async () => {
+  const idb = fakeIndexedDB({ failOpen: true });
+  let warning = 0;
+  const local = storage();
+  let clock = 1000;
+  const m = manager(async () => new Promise(() => {}), local, { indexedDB: idb, storageError: () => warning++, now: () => clock });
+  await m.ready;
+  const s = m.open(note());
+  m.changed(s, edit(big(SMALL_DRAFT + 1)));
+  await settled();
+  assert.equal(JSON.parse(local.getItem(s.key)).edit.body.length, SMALL_DRAFT + 1, 'kept in localStorage instead');
+  assert.equal(s.durableRevision, s.revision);
+  assert.equal(warning, 0);
+  const tight = limited();
+  const n = manager(async () => new Promise(() => {}), tight, { indexedDB: fakeIndexedDB({ failOpen: true }), storageError: () => warning++, now: () => clock });
+  await n.ready;
+  const t = n.open(note());
+  n.changed(t, edit(big(SMALL_DRAFT * 3)));
+  await settled();
+  clock += 1000;
+  n.changed(t, edit(big(SMALL_DRAFT * 3 + 1)));
+  await settled();
+  assert.equal(warning, 1);
+  assert.equal(t.persisted, false);
+});
+
+test('a saved large note leaves no draft behind in either store', async () => {
+  const idb = fakeIndexedDB();
+  const local = storage();
+  const m = manager(async (_, { body }) => ({ ...note(), ...body, version: 'v2' }), local, { indexedDB: idb });
+  await m.ready;
+  const s = m.open(note());
+  idb.ctl.hold = true;
+  m.changed(s, edit(big(SMALL_DRAFT + 1)));
+  const saved = m.flush(s);
+  idb.ctl.release();
+  await saved;
+  await settled();
+  await settled();
+  assert.equal(m.unsaved(), false);
+  assert.equal(idb.ctl.data.size, 0);
+  assert.equal(local.length, 0);
+  const again = manager(async () => note(), local, { indexedDB: idb });
+  await again.ready;
+  assert.equal(again.unsaved(), false);
+});

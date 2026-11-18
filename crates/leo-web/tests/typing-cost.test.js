@@ -142,6 +142,7 @@ function keystroke(bytes) {
     'saving copy (stringify + parse)': () => JSON.parse(JSON.stringify(edit)),
     'draft record (stringify of note and edit)': () => JSON.stringify({ note: s.note, edit }),
     'draft write (at most four a second once throttled)': () => { clock.t += 1000; m.changed(s, edit); },
+    'large draft copy (structured clone: the main-thread part of an IndexedDB put)': () => structuredClone({ note: s.note, edit }),
     'lineStart (last line)': () => lineStart(last),
     'lineOf (end of note)': () => lineOf(at),
     'lineStart + lineOf (middle line)': () => lineOf(lineStart(mid) + 3),
