@@ -10,7 +10,6 @@ use serde::Deserialize;
 use crate::AppState;
 
 pub(crate) const MOST_RELATED: usize = 20;
-const MOST_POSITIONS: i64 = 2_000;
 const MOST_ANCHOR_BYTES: usize = 1_024;
 
 #[derive(Deserialize)]
@@ -137,10 +136,6 @@ pub(crate) async fn put_reading(
         c.execute(
             "INSERT INTO reading (note, anchor, at) VALUES (?1, ?2, ?3) ON CONFLICT(note) DO UPDATE SET anchor = excluded.anchor, at = excluded.at",
             [&id, &text, &now],
-        )?;
-        c.execute(
-            "DELETE FROM reading WHERE note NOT IN (SELECT note FROM reading ORDER BY at DESC LIMIT ?1)",
-            [MOST_POSITIONS],
         )
         })
     })

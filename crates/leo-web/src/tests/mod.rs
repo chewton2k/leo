@@ -14,6 +14,7 @@ mod ollama;
 mod passages;
 mod pictures;
 mod recording;
+mod related;
 mod sources;
 mod speech;
 mod start;
