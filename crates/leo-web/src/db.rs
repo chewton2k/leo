@@ -388,6 +388,9 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     add_column(&tx, "vectors", "piece", "TEXT NOT NULL DEFAULT ''")?;
     add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "dictations", "original", "TEXT")?;
+    add_column(&tx, "chat_docs", "chars", "INTEGER")?;
+    add_column(&tx, "chat_docs", "bytes", "INTEGER")?;
+    add_column(&tx, "chat_docs", "excerpt", "TEXT")?;
     add_column(
         &tx,
         "margin_threads",
@@ -902,6 +905,44 @@ mod task_descriptions {
                         Ok((r.get(0)?, r.get(1)?))
                     })?;
                 assert_eq!(row, ("abc".into(), "".into()));
+                Ok(())
+            })
+            .unwrap();
+        }
+    }
+
+    #[test]
+    fn existing_chat_documents_gain_their_facts_without_losing_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch(
+            "CREATE TABLE chat_docs (id TEXT PRIMARY KEY, chat TEXT NOT NULL, name TEXT NOT NULL, added_at TEXT NOT NULL, text TEXT NOT NULL);
+             INSERT INTO chat_docs VALUES ('doc-one', 'chat-one', 'w.pdf', '2026-10-08T01:00:00Z', 'Heaps keep the minimum.');",
+        )
+        .unwrap();
+        old.pragma_update(None, "user_version", VERSION).unwrap();
+        drop(old);
+        for _ in 0..2 {
+            let db = Db::open(&path).unwrap();
+            db.with(|c| {
+                let row: (String, String, Option<i64>, Option<i64>, Option<String>) = c.query_row(
+                    "SELECT name, text, chars, bytes, excerpt FROM chat_docs",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                )?;
+                assert_eq!(
+                    row,
+                    (
+                        "w.pdf".into(),
+                        "Heaps keep the minimum.".into(),
+                        None,
+                        None,
+                        None
+                    )
+                );
+                let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+                assert_eq!(version, VERSION);
                 Ok(())
             })
             .unwrap();

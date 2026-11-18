@@ -99,7 +99,7 @@ pub(crate) async fn add_chat_file(
     };
     let (_guard, stop) = crate::stop_when_dropped();
     let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
-        if chat_files::list(&dir, &id).len() >= chat_files::MOST_FILES {
+        if chat_files::count(&dir, &id) >= chat_files::MOST_FILES {
             anyhow::bail!(
                 "a chat holds up to {} documents; remove one first",
                 chat_files::MOST_FILES

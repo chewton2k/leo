@@ -4353,3 +4353,54 @@ fn a_chat_expired_by_tidy_is_not_recreated_by_a_later_save_that_carries_the_flag
     );
     assert!(crate::chats::load(&state.chats, "chat-aged-0001").is_none());
 }
+
+#[test]
+#[ignore = "benchmark"]
+fn benchmark_a_chats_documents_are_listed_and_added() {
+    for size in [200_000usize, 20_000_000] {
+        let (mut state, _dir, _) = state_with(&[]);
+        let text: String = "Dijkstra keeps a heap of the nearest nodes. ".repeat(size / 44);
+        let given = text.clone();
+        state.reader = Some(Arc::new(move |_: UploadFile, _: &mut dyn FnMut(&str)| {
+            Ok(given.clone())
+        }));
+        let chat = "chat-docs-0009";
+        for i in 0..9 {
+            chat_files::add(
+                &state.chats,
+                chat,
+                &format!("doc{i}.pdf"),
+                &text,
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        }
+        let mut list_ms = Vec::new();
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            let listed = json_of(run(list_chat_files(
+                State(state.clone()),
+                Path(chat.into()),
+            )));
+            list_ms.push(started.elapsed().as_secs_f64() * 1e3);
+            assert_eq!(listed.as_array().unwrap().len(), 9);
+        }
+        let started = std::time::Instant::now();
+        let added = run(add_chat_file(
+            State(state.clone()),
+            Path(chat.into()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "name": "new.pdf", "type": "application/pdf", "data": "JVBERg==" }))
+                    .unwrap(),
+            ),
+        ));
+        let add_ms = started.elapsed().as_secs_f64() * 1e3;
+        assert_eq!(added.status(), StatusCode::CREATED);
+        list_ms.sort_by(f64::total_cmp);
+        eprintln!(
+            "documents of {} bytes, 9 listed: median {:.2} ms; the tenth added in {add_ms:.2} ms",
+            text.len(),
+            list_ms[2]
+        );
+    }
+}

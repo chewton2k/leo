@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::chats::valid_id;
 
@@ -10,14 +10,6 @@ pub const MOST_FILES: usize = 10;
 pub const UPLOAD_BYTES: usize = 40 * 1024 * 1024;
 pub const ORPHAN_HOURS: i64 = 24;
 pub const EXCERPT_CHARS: usize = 320;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-struct Stored {
-    id: String,
-    name: String,
-    added_at: DateTime<Utc>,
-    text: String,
-}
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct Doc {
@@ -41,56 +33,30 @@ fn valid_doc(id: &str) -> bool {
     id.len() == 32 && id.chars().all(|c| c.is_ascii_hexdigit())
 }
 
-fn insert(c: &rusqlite::Connection, chat: &str, doc: &Stored) -> rusqlite::Result<usize> {
+fn insert(c: &rusqlite::Connection, chat: &str, doc: &Doc, text: &str) -> rusqlite::Result<usize> {
     c.execute(
-        "INSERT OR IGNORE INTO chat_docs (id, chat, name, added_at, text) VALUES (?1, ?2, ?3, ?4, ?5)",
+        "INSERT OR IGNORE INTO chat_docs (id, chat, name, added_at, text, chars, bytes, excerpt) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         rusqlite::params![
             doc.id,
             chat,
             doc.name,
             doc.added_at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true),
-            doc.text
+            text,
+            doc.chars as i64,
+            doc.bytes as i64,
+            doc.excerpt
         ],
     )
 }
 
-fn stored(dir: &Path, chat: &str) -> Vec<(Stored, u64)> {
-    if !valid_id(chat) {
-        return Vec::new();
-    }
-    crate::chats::db_of(dir)
-        .with(|c| {
-            let mut found = c.prepare(
-                "SELECT id, name, added_at, text FROM chat_docs WHERE chat = ?1 ORDER BY added_at, id",
-            )?;
-            let rows = found.query_map([chat], |r| {
-                let text: String = r.get(3)?;
-                let name: String = r.get(1)?;
-                let bytes = (text.len() + name.len()) as u64;
-                Ok((
-                    Stored {
-                        id: r.get(0)?,
-                        name,
-                        added_at: DateTime::parse_from_rfc3339(&r.get::<_, String>(2)?)
-                            .map_or_else(|_| Utc::now(), |t| t.with_timezone(&Utc)),
-                        text,
-                    },
-                    bytes,
-                ))
-            })?;
-            rows.collect()
-        })
-        .unwrap_or_default()
-}
-
-fn info((doc, bytes): &(Stored, u64)) -> Doc {
+fn described(id: String, name: String, added_at: DateTime<Utc>, text: &str) -> Doc {
     Doc {
-        id: doc.id.clone(),
-        name: doc.name.clone(),
-        chars: doc.text.chars().count(),
-        bytes: *bytes,
-        added_at: doc.added_at,
-        excerpt: excerpt_of(&doc.text),
+        id,
+        chars: text.chars().count(),
+        bytes: (text.len() + name.len()) as u64,
+        name,
+        added_at,
+        excerpt: excerpt_of(text),
     }
 }
 
@@ -114,34 +80,127 @@ fn excerpt_of(text: &str) -> String {
     out.chars().take(EXCERPT_CHARS).collect()
 }
 
+fn count_in(c: &rusqlite::Connection, chat: &str) -> rusqlite::Result<usize> {
+    c.query_row(
+        "SELECT COUNT(*) FROM chat_docs WHERE chat = ?1",
+        [chat],
+        |r| r.get::<_, i64>(0),
+    )
+    .map(|n| n as usize)
+}
+
+pub fn count(dir: &Path, chat: &str) -> usize {
+    if !valid_id(chat) {
+        return 0;
+    }
+    crate::chats::db_of(dir)
+        .with(|c| count_in(c, chat))
+        .unwrap_or_default()
+}
+
 pub fn add(dir: &Path, chat: &str, name: &str, text: &str, now: DateTime<Utc>) -> Result<Doc> {
     if !valid_id(chat) {
         bail!("that is not a chat");
     }
-    if stored(dir, chat).len() >= MOST_FILES {
+    let doc = described(
+        uuid::Uuid::new_v4().simple().to_string(),
+        name.chars().take(120).collect(),
+        now,
+        text,
+    );
+    let added = crate::chats::db_of(dir).with(|c| {
+        let tx = c.transaction()?;
+        if count_in(&tx, chat)? >= MOST_FILES {
+            return Ok(false);
+        }
+        insert(&tx, chat, &doc, text)?;
+        tx.commit()?;
+        Ok(true)
+    })?;
+    if !added {
         bail!("a chat holds up to {MOST_FILES} documents; remove one first");
     }
-    let doc = Stored {
-        id: uuid::Uuid::new_v4().simple().to_string(),
-        name: name.chars().take(120).collect(),
-        added_at: now,
-        text: text.to_string(),
-    };
-    crate::chats::db_of(dir).with(|c| insert(c, chat, &doc))?;
-    let bytes = (doc.text.len() + doc.name.len()) as u64;
-    Ok(info(&(doc, bytes)))
+    Ok(doc)
 }
 
+fn added_at(stamp: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(stamp).map_or_else(|_| Utc::now(), |t| t.with_timezone(&Utc))
+}
+
+type Listed = (
+    String,
+    String,
+    String,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+);
+
 pub fn list(dir: &Path, chat: &str) -> Vec<Doc> {
-    stored(dir, chat).iter().map(info).collect()
+    if !valid_id(chat) {
+        return Vec::new();
+    }
+    crate::chats::db_of(dir)
+        .with(|c| {
+            let rows: Vec<Listed> = {
+                let mut found = c.prepare(
+                    "SELECT id, name, added_at, chars, bytes, excerpt FROM chat_docs WHERE chat = ?1 ORDER BY added_at, id",
+                )?;
+                let rows = found.query_map([chat], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
+                })?;
+                rows.collect::<rusqlite::Result<_>>()?
+            };
+            let mut docs = Vec::with_capacity(rows.len());
+            for (id, name, stamp, chars, bytes, excerpt) in rows {
+                let doc = match (chars, bytes, excerpt) {
+                    (Some(chars), Some(bytes), Some(excerpt)) => Doc {
+                        id,
+                        name,
+                        chars: chars as usize,
+                        bytes: bytes as u64,
+                        added_at: added_at(&stamp),
+                        excerpt,
+                    },
+                    _ => {
+                        let text: String = c.query_row(
+                            "SELECT text FROM chat_docs WHERE id = ?1",
+                            [&id],
+                            |r| r.get(0),
+                        )?;
+                        let doc = described(id, name, added_at(&stamp), &text);
+                        c.execute(
+                            "UPDATE chat_docs SET chars = ?2, bytes = ?3, excerpt = ?4 WHERE id = ?1",
+                            rusqlite::params![doc.id, doc.chars as i64, doc.bytes as i64, doc.excerpt],
+                        )?;
+                        doc
+                    }
+                };
+                docs.push(doc);
+            }
+            Ok(docs)
+        })
+        .unwrap_or_default()
 }
 
 pub fn texts(dir: &Path, chat: &str, ids: &[String]) -> Vec<(String, String)> {
-    stored(dir, chat)
-        .into_iter()
-        .filter(|(doc, _)| ids.contains(&doc.id))
-        .map(|(doc, _)| (doc.name, doc.text))
-        .collect()
+    let ids: Vec<&String> = ids.iter().filter(|id| valid_doc(id)).collect();
+    if !valid_id(chat) || ids.is_empty() {
+        return Vec::new();
+    }
+    let marks = vec!["?"; ids.len()].join(", ");
+    crate::chats::db_of(dir)
+        .with(|c| {
+            let mut found = c.prepare(&format!(
+                "SELECT name, text FROM chat_docs WHERE chat = ? AND id IN ({marks}) ORDER BY added_at, id"
+            ))?;
+            let rows = found.query_map(
+                rusqlite::params_from_iter(std::iter::once(chat).chain(ids.iter().map(|id| id.as_str()))),
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            rows.collect()
+        })
+        .unwrap_or_default()
 }
 
 pub fn remove(dir: &Path, chat: &str, doc: &str) -> bool {
@@ -213,6 +272,87 @@ mod tests {
 
     fn at(hour: u32) -> DateTime<Utc> {
         chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 10, 8, hour, 0, 0).unwrap()
+    }
+
+    fn raw(dir: &Path, sql: &str) {
+        crate::chats::db_of(dir)
+            .with(|c| c.execute_batch(sql))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_list_reads_no_document_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let doc = add(
+            &dir,
+            "chat-aaaa-1",
+            "w.pdf",
+            "Week 3\n\nHeaps keep the minimum.",
+            at(1),
+        )
+        .unwrap();
+        raw(&dir, "UPDATE chat_docs SET text = ''");
+        let listed = list(&dir, "chat-aaaa-1");
+        assert_eq!(listed, vec![doc.clone()]);
+        assert_eq!(listed[0].chars, 31);
+        assert_eq!(listed[0].bytes, 31 + 5);
+        assert_eq!(listed[0].excerpt, "Week 3\nHeaps keep the minimum.");
+    }
+
+    #[test]
+    fn documents_from_before_are_described_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let fresh = add(&dir, "chat-aaaa-1", "new.txt", "Newer words.", at(2)).unwrap();
+        raw(
+            &dir,
+            "INSERT INTO chat_docs (id, chat, name, added_at, text) VALUES ('00000000000000000000000000000001', 'chat-aaaa-1', 'old.txt', '2026-10-08T01:00:00.000000Z', 'Old  words\n\nsecond line')",
+        );
+        let listed = list(&dir, "chat-aaaa-1");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].name, "old.txt");
+        assert_eq!(listed[0].chars, 23);
+        assert_eq!(listed[0].bytes, 23 + 7);
+        assert_eq!(listed[0].excerpt, "Old words\nsecond line");
+        assert_eq!(listed[1], fresh);
+        let described: i64 = crate::chats::db_of(&dir)
+            .with(|c| {
+                c.query_row(
+                    "SELECT COUNT(*) FROM chat_docs WHERE chars IS NOT NULL AND bytes IS NOT NULL AND excerpt IS NOT NULL",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(described, 2);
+        raw(&dir, "UPDATE chat_docs SET text = ''");
+        assert_eq!(list(&dir, "chat-aaaa-1"), listed);
+    }
+
+    #[test]
+    fn two_uploads_at_once_cannot_pass_the_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        for i in 0..MOST_FILES - 1 {
+            add(&dir, "chat-aaaa-1", &format!("{i}.txt"), "words", at(1)).unwrap();
+        }
+        let both: Vec<_> = (0..2)
+            .map(|i| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    add(&dir, "chat-aaaa-1", &format!("late{i}.txt"), "words", at(2)).is_ok()
+                })
+            })
+            .collect();
+        let added = both
+            .into_iter()
+            .map(|one| one.join().unwrap())
+            .filter(|&ok| ok)
+            .count();
+        assert_eq!(added, 1);
+        assert_eq!(list(&dir, "chat-aaaa-1").len(), MOST_FILES);
+        assert_eq!(count(&dir, "chat-aaaa-1"), MOST_FILES);
     }
 
     #[test]
