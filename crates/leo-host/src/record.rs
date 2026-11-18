@@ -33,6 +33,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
         stop,
         pause,
         points,
+        saved_points,
         wants,
     } = listening;
     let controls = Controls {
@@ -41,6 +42,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
         stop,
         pause,
         points: Default::default(),
+        saved_points,
         wants,
     };
     let input = Source::from_env(screen);
@@ -51,15 +53,11 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
         let (Ok(from), Ok(mut to)) = (points.lock(), controls.points.lock()) else {
             return;
         };
-        if from.len() != to.len() {
-            *to = from
-                .iter()
-                .map(|(at_secs, text)| Jotted {
-                    at_secs: *at_secs,
-                    text: text.clone(),
-                })
-                .collect();
-        }
+        let start = to.len();
+        to.extend(from.iter().skip(start).map(|(at_secs, text)| Jotted {
+            at_secs: *at_secs,
+            text: text.clone(),
+        }));
     };
     recorder::record(
         Request {
@@ -219,6 +217,7 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
         pause,
         finish_now,
         points,
+        saved_points,
         wants,
         ..
     } = listening;
@@ -243,6 +242,11 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
                 stop: stop.clone(),
                 pause: pause.clone(),
                 points: Default::default(),
+                saved_points: if speaker == "You" {
+                    saved_points.clone()
+                } else {
+                    Default::default()
+                },
                 wants: wants.clone(),
             };
             let points = points.clone();
@@ -264,13 +268,11 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
                         if speaker == "You" {
                             if let (Ok(from), Ok(mut to)) = (points.lock(), controls.points.lock())
                             {
-                                *to = from
-                                    .iter()
-                                    .map(|(at_secs, text)| Jotted {
-                                        at_secs: *at_secs,
-                                        text: text.clone(),
-                                    })
-                                    .collect();
+                                let start = to.len();
+                                to.extend(from.iter().skip(start).map(|(at_secs, text)| Jotted {
+                                    at_secs: *at_secs,
+                                    text: text.clone(),
+                                }));
                             }
                         }
                         let _ = tx.send((speaker, event));
@@ -563,6 +565,7 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
             stop: listening.stop.clone(),
             pause: listening.pause.clone(),
             points: Default::default(),
+            saved_points: Default::default(),
             wants: listening.wants.clone(),
         };
         match resume_retained(&dir, &controls, heard) {
@@ -917,6 +920,7 @@ mod tests {
             finish_now: Default::default(),
             pause: Default::default(),
             points: Default::default(),
+            saved_points: Default::default(),
             wants: Default::default(),
         }
     }
