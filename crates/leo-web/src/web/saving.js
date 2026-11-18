@@ -127,7 +127,7 @@
     }
 
     function changed(s, edit) {
-      s.edit = copyEdit(edit);
+      s.edit = edit;
       s.revision++;
       s.dirty = true;
       pending.set(s.key, s);
@@ -156,7 +156,7 @@
         s.note.copyRequest ||= draftId();
         persist(s);
         const note = await api('/api/notes', { method: 'POST', body: { ...edit, title, directory: s.note.directory, request: s.note.copyRequest } });
-        s.edit.title = `${s.edit.title} (conflict from leo)`;
+        s.edit = { title: `${s.edit.title} (conflict from leo)`, body: s.edit.body };
         conflict(s, note);
         return note;
       }

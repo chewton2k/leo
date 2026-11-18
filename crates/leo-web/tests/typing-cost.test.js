@@ -18,7 +18,7 @@ const doc = read('doc.js');
 const FULL = process.env.LEO_MEASURE_TYPING === '1';
 const SIZES = FULL ? [200000, 2000000, 20000000] : [200000];
 const RUNS = { 200000: 31, 2000000: 15, 20000000: 7 };
-const UNDO_STEPS = { 200000: 200, 2000000: 200, 20000000: 10 };
+const UNDO_STEPS = { 200000: 200, 2000000: 200, 20000000: 200 };
 const GROWS_ABOVE_MS = 3;
 const GROWS_ABOVE_RATIO = 8;
 
@@ -68,7 +68,8 @@ vm.createContext(coreCtx);
 vm.runInContext(core.slice(core.indexOf('function snapshot('), core.indexOf('function flush(')), coreCtx);
 
 const positions = new Function('lines', `${doc.slice(doc.indexOf('function lineStart(line)'), doc.indexOf('function hitsOf'))}\n${doc.slice(doc.indexOf('function lineOf(at)'), doc.indexOf('const docLength'))}\nreturn { lineStart, lineOf };`);
-const history = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function restore(text)'))}\nreturn { changed, past, future };`);
+const historyOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'lineStart', `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function restore('))}\nreturn { changed, past, future };`);
+const history = (lines, editing, container, onChange, outlineLater, date) => historyOf(lines, editing, container, onChange, outlineLater, date, positions(lines).lineStart);
 
 v8.setFlagsFromString('--expose-gc');
 const gc = vm.runInNewContext('gc');
@@ -138,7 +139,7 @@ function keystroke(bytes) {
   const steps = {
     'join of the lines': () => lines.join('\n'),
     'snapshot (titled note, no text handed over)': () => coreCtx.snapshot(s),
-    'snapshot (untitled new note: plain text for the title)': () => coreCtx.snapshot(untitled, text).title,
+    'snapshot (untitled new note: plain text for the title)': () => coreCtx.snapshot(untitled, () => text).title,
     'saving copy (stringify + parse)': () => JSON.parse(JSON.stringify(edit)),
     'draft record (stringify of note and edit)': () => JSON.stringify({ note: s.note, edit }),
     'draft write (at most four a second once throttled)': () => { clock.t += 1000; m.changed(s, edit); },
@@ -168,18 +169,19 @@ function undoHeap(bytes) {
   const fakeDate = { now: () => clock };
   gc();
   const base = process.memoryUsage().heapUsed;
-  const h = history(lines, { area: {} }, { classList: { toggle: () => {} } }, () => {}, () => {}, fakeDate);
+  const editing = { area: {} };
+  const h = history(lines, editing, { classList: { toggle: () => {} } }, () => {}, () => {}, fakeDate);
   const last = lines.length - 2;
+  const key = (ch) => { const removed = lines.splice(last, 1, lines[last] + ch); h.changed({ at: last, removed, added: [lines[last]] }); };
   for (let i = 0; i < steps; i++) {
     clock += 1100;
-    lines[last] += 'x';
-    h.changed();
+    key('x');
   }
   gc();
   const held = process.memoryUsage().heapUsed - base;
   const pushed = h.past.length;
-  const inGroup = history(lines, { area: {} }, { classList: { toggle: () => {} } }, () => {}, () => {}, { now: () => 5000 });
-  for (let i = 0; i < 100; i++) { lines[last] += 'y'; inGroup.changed(); }
+  const inGroup = history(lines, editing, { classList: { toggle: () => {} } }, () => {}, () => {}, { now: () => 5000 });
+  for (let i = 0; i < 100; i++) { const removed = lines.splice(last, 1, lines[last] + 'y'); inGroup.changed({ at: last, removed, added: [lines[last]] }); }
   return { steps, pushed, perStep: held / steps, note: text.length, groupPushed: inGroup.past.length };
 }
 
@@ -213,8 +215,68 @@ test('typing cost: every step of a keystroke, and undo memory, at the sizes the 
 
 test('a keystroke joins the note once and copies it without turning it into text', () => {
   const { counts } = keystroke(20000);
-  assert.equal(counts.joins, 1);
+  assert.equal(counts.joins, 0);
   assert.equal(counts.parse, 0);
   assert.equal(counts.stringify, 0);
   assert.equal(counts.writes, 0);
+});
+
+const editorOf = new Function('lines', 'editing', 'container', 'onChange', 'outlineLater', 'Date', 'lineStart', 'stop', 'draw', 'lineOf', 'selectSpan', 'editSpan',
+  `${doc.slice(doc.indexOf('const MOST_UNDO'), doc.indexOf('function historyKey('))}\nreturn { changed, undo, redo, past, future, get lines() { return lines; }, source: joinedText };`);
+
+function editor(text, clock) {
+  let api = null;
+  const at = () => positions(api.lines);
+  api = editorOf(text.split('\n'), { area: {} }, { classList: { toggle: () => {} } }, () => {}, () => {}, { now: () => clock.t },
+    (line) => at().lineStart(line), () => {}, () => {}, (offset) => at().lineOf(offset), () => {}, () => {});
+  const type = (line, ch) => {
+    clock.t += 50;
+    const removed = api.lines.splice(line, 1, api.lines[line] + ch);
+    api.changed({ at: line, removed, added: [api.lines[line]] });
+  };
+  return { api, type };
+}
+
+test('undo and redo return the text before and after each edit made as a span', () => {
+  const clock = { t: 1000 };
+  const { api, type } = editor('alpha\nbeta\ngamma', clock);
+  const states = [api.source()];
+  for (const ch of 'XYZ') type(1, ch);
+  states.push(api.source());
+  clock.t += 1100;
+  for (const ch of 'qr') type(2, ch);
+  states.push(api.source());
+  clock.t += 50;
+  api.lines.splice(0, 1, 'pasted', 'text here', 'alpha');
+  api.changed();
+  states.push(api.source());
+  assert.equal(states[3], 'pasted\ntext here\nalpha\nbetaXYZ\ngammaqr');
+  for (let i = 3; i > 0; i--) {
+    assert.equal(api.undo(), true);
+    assert.equal(api.source(), states[i - 1]);
+    assert.equal(api.lines.join('\n'), states[i - 1]);
+  }
+  assert.equal(api.undo(), false);
+  for (let i = 1; i <= 2; i++) {
+    assert.equal(api.redo(), true);
+    assert.equal(api.source(), states[i]);
+  }
+  type(0, '!');
+  assert.equal(api.redo(), false, 'a new edit clears redo');
+  assert.equal(api.undo(), true);
+  assert.equal(api.source(), states[2]);
+});
+
+test('an undo record is the size of the change, not of the note', () => {
+  const clock = { t: 1000 };
+  const { api, type } = editor(linesOf(1000000).join('\n'), clock);
+  const rows = api.lines.length;
+  for (let g = 0; g < 50; g++) {
+    clock.t += 1100;
+    for (const ch of 'abc') type((g * 97) % rows, ch);
+  }
+  api.undo();
+  const held = api.past.concat(api.future).reduce((n, r) => n + r.removed.length + r.inserted.length, 0);
+  assert.equal(api.past.length + api.future.length, 50);
+  assert.ok(held < 10240, `${held} characters held`);
 });

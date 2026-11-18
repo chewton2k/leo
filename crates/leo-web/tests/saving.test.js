@@ -568,3 +568,27 @@ test('a saved large note leaves no draft behind in either store', async () => {
   await again.ready;
   assert.equal(again.unsaved(), false);
 });
+
+test('a live edit read through getters is kept as it is and survives a conflict copy', async () => {
+  let text = 'Typed body';
+  let joins = 0;
+  const live = { get title() { return 'Note'; }, get body() { joins++; return text; } };
+  const requests = [];
+  const m = manager(async (path, options) => {
+    requests.push(options);
+    if (options.method === 'PATCH') throw Object.assign(new Error('conflict'), { status: 409 });
+    return { ...note(), ...options.body, id: 'copy', version: 'copy-v1' };
+  }, storage(), { now: () => 1000 });
+  const s = m.open(note());
+  m.changed(s, live);
+  joins = 0;
+  m.changed(s, live);
+  assert.equal(joins, 0, 'a throttled keystroke reads no text');
+  assert.equal(s.edit, live);
+  text = 'Typed body, more';
+  await m.flush(s);
+  assert.equal(requests[0].body.body, 'Typed body, more');
+  assert.equal(requests[1].body.title, 'Note (conflict from leo)');
+  assert.equal(s.note.id, 'copy');
+  assert.equal(m.unsaved(), false);
+});

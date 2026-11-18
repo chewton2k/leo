@@ -806,10 +806,13 @@ const saving = window.leoSaving.create({
   retryable: (error) => error instanceof Offline || error.status >= 500,
 });
 
-function snapshot(s, text) {
-  const body = text ?? s.doc.source();
-  const title = cleanTitle(s.title.textContent) || (s.note.id ? s.note.title : md.plain(body).slice(0, 60));
-  return { title, body };
+function snapshot(s, text = () => s.doc.source()) {
+  const typed = cleanTitle(s.title.textContent);
+  const { id, title } = s.note;
+  return {
+    get title() { return typed || (id ? title : md.plain(text()).slice(0, 60)); },
+    get body() { return text(); },
+  };
 }
 
 function changed(s, text) { saving.changed(s, snapshot(s, text)); }
@@ -847,7 +850,7 @@ function readSoon(text) {
   const line = $('#note-read');
   clearTimeout(readTimer);
   readTimer = setTimeout(() => {
-    if (line) line.textContent = readLine(text);
+    if (line) line.textContent = readLine(text());
   }, 300);
 }
 

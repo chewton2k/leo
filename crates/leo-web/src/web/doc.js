@@ -16,61 +16,168 @@
     const TYPING_GROUP = 4000;
     const past = [];
     const future = [];
-    let current = lines.join('\n');
+    let wholeText = lines.join('\n');
+    let wholeSince = [];
+    let typingGroup = null;
     let typing = { in: null, last: 0, since: 0 };
+    let docVersion = 0;
+    let joined = wholeText;
+    let joinedAt = 0;
 
-    function changed() {
-      const next = lines.join('\n');
-      if (next !== current) {
-        const now = Date.now();
-        const keystroke = Math.abs(next.length - current.length) <= 1;
-        const same = keystroke && editing && typing.in === editing.area && now - typing.last < TYPING_PAUSE && now - typing.since < TYPING_GROUP;
-        if (!same) {
-          past.push(current);
-          if (past.length > MOST_UNDO) past.shift();
-          typing = { in: keystroke && editing ? editing.area : null, last: now, since: now };
-        } else {
-          typing.last = now;
-        }
-        future.length = 0;
-        current = next;
+    function joinedText() {
+      if (joinedAt !== docVersion) {
+        joined = lines.join('\n');
+        joinedAt = docVersion;
       }
-      container.classList.toggle('doc-empty', !next.trim());
-      onChange(next);
+      return joined;
+    }
+
+    function spanOf(start, before, after) {
+      const most = Math.min(before.length, after.length);
+      let from = 0;
+      while (from < most && before[from] === after[from]) from++;
+      let tail = 0;
+      while (tail < most - from && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+      if (from === before.length && from === after.length) return null;
+      return { start: start + from, removed: before.slice(from, before.length - tail), inserted: after.slice(from, after.length - tail) };
+    }
+
+    function spliced(pieces, { start, removed, inserted }) {
+      const end = start + removed.length;
+      const out = [];
+      let at = 0;
+      let placed = false;
+      for (const piece of pieces) {
+        const from = at;
+        at += piece.length;
+        if (at <= start || from >= end) {
+          if (from >= end && !placed) { out.push(inserted); placed = true; }
+          out.push(piece);
+          continue;
+        }
+        if (from < start) out.push(piece.slice(0, start - from));
+        if (!placed) { out.push(inserted); placed = true; }
+        if (at > end) out.push(piece.slice(end - from));
+      }
+      if (!placed) out.push(inserted);
+      return out;
+    }
+
+    const applyAll = () => wholeSince.reduce(spliced, [wholeText]).join('');
+
+    function remember(span) {
+      if (!span) return;
+      past.push(span);
+      if (past.length > MOST_UNDO) past.shift();
+      wholeSince.push(span);
+      if (wholeSince.length > MOST_UNDO) {
+        wholeText = applyAll();
+        wholeSince = [];
+      }
+    }
+
+    function closeGroup() {
+      if (!typingGroup) return;
+      remember(spanOf(typingGroup.offset, typingGroup.before.join('\n'), typingGroup.after.join('\n')));
+      typingGroup = null;
+    }
+
+    function widen(at, removed, added) {
+      const g = typingGroup;
+      const lo = Math.min(g.at, at);
+      const hi = Math.max(g.at + g.after.length, at + removed.length);
+      const before = (k) => (k < at ? lines[k] : k < at + removed.length ? removed[k - at] : lines[k - removed.length + added.length]);
+      const above = [];
+      for (let k = lo; k < g.at; k++) above.push(before(k));
+      const below = [];
+      for (let k = g.at + g.after.length; k < hi; k++) below.push(before(k));
+      g.before = above.concat(g.before, below);
+      if (lo < g.at) g.offset = lineStart(lo);
+      g.at = lo;
+      g.after = lines.slice(lo, hi - removed.length + added.length);
+    }
+
+    function typed({ at, removed, added }) {
+      let delta = 0;
+      for (const line of removed) delta -= line.length + 1;
+      for (const line of added) delta += line.length + 1;
+      let same = removed.length === added.length;
+      for (let k = 0; same && k < added.length; k++) same = removed[k] === added[k];
+      if (same) return;
+      const now = Date.now();
+      const keystroke = Math.abs(delta) <= 1;
+      future.length = 0;
+      if (typingGroup && keystroke && editing && typing.in === editing.area && now - typing.last < TYPING_PAUSE && now - typing.since < TYPING_GROUP) {
+        typing.last = now;
+        widen(at, removed, added);
+        return;
+      }
+      closeGroup();
+      typing = { in: keystroke && editing ? editing.area : null, last: now, since: now };
+      typingGroup = { at, before: removed.slice(), after: added.slice(), offset: lineStart(at) };
+    }
+
+    function rebuilt() {
+      closeGroup();
+      const before = applyAll();
+      const next = lines.join('\n');
+      wholeText = next;
+      wholeSince = [];
+      joined = next;
+      joinedAt = docVersion;
+      typing = { in: null, last: 0, since: 0 };
+      const span = spanOf(0, before, next);
+      if (!span) return;
+      future.length = 0;
+      past.push(span);
+      if (past.length > MOST_UNDO) past.shift();
+    }
+
+    function changed(edit) {
+      docVersion++;
+      if (edit) typed(edit);
+      else rebuilt();
+      container.classList.toggle('doc-empty', !lines.some((line) => line.trim()));
+      onChange(joinedText);
       outlineLater();
     }
 
-    function restore(text) {
-      const before = current;
+    function restore(text, from, to) {
       stop();
+      typingGroup = null;
       typing = { in: null, last: 0, since: 0 };
-      current = text;
       lines = text.split('\n');
-      onChange(text);
+      wholeText = text;
+      wholeSince = [];
+      docVersion++;
+      joined = text;
+      joinedAt = docVersion;
+      onChange(joinedText);
       outlineLater();
       draw();
-      let from = 0;
-      while (from < before.length && from < text.length && before[from] === text[from]) from++;
-      let tail = 0;
-      while (tail < before.length - from && tail < text.length - from && before[before.length - 1 - tail] === text[text.length - 1 - tail]) tail++;
-      const to = Math.max(from, text.length - tail);
       if (lineOf(from) !== lineOf(to)) selectSpan(from, to);
       else editSpan(from, to);
     }
 
     function undo() {
-      if (!past.length) return false;
+      if (!past.length && !typingGroup) return false;
       if (editing) stop();
-      future.push(current);
-      restore(past.pop());
+      closeGroup();
+      if (!past.length) return false;
+      const span = past.pop();
+      const now = joinedText();
+      future.push(span);
+      restore(now.slice(0, span.start) + span.removed + now.slice(span.start + span.inserted.length), span.start, span.start + span.removed.length);
       return true;
     }
 
     function redo() {
       if (!future.length) return false;
       if (editing) stop();
-      past.push(current);
-      restore(future.pop());
+      const span = future.pop();
+      const now = joinedText();
+      past.push(span);
+      restore(now.slice(0, span.start) + span.inserted + now.slice(span.start + span.removed.length), span.start, span.start + span.inserted.length);
       return true;
     }
 
@@ -1098,11 +1205,11 @@
       editing.initialHeight = null;
       area.closest('.blk').style.minHeight = '';
       const next = (editing.prefix + area.value).split('\n');
-      lines.splice(start, editing.end - start, ...next);
+      const removed = lines.splice(start, editing.end - start, ...next);
       editing.end = start + next.length;
       look(area);
       fit(area);
-      changed();
+      changed({ at: start, removed, added: next });
       if (!e?.isComposing) slashSeen();
       const marker = ed.listPrefixAt(editing.prefix + area.value, lines, start);
       if (editing.kind === 'line' && !e?.isComposing && marker.length > editing.prefix.length && /[^\S\n]$/.test(marker)) {
@@ -1790,7 +1897,7 @@
         container.removeEventListener('drop', onDrop);
       },
       insert,
-      source: () => lines.join('\n'),
+      source: joinedText,
       stop,
       isEditing: () => editing !== null,
       selection() {
