@@ -3333,7 +3333,6 @@ dependencies = [
  "leo-host",
  "leo-services",
  "leo-web",
- "libc",
  "log",
  "mac-usernotifications",
  "objc2",

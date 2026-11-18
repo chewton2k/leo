@@ -122,7 +122,13 @@ fn plan(dirs: &[PathBuf], notes: &Path, home: &Path, root: &Path, temp: Option<&
     if let Some(entries) = temp.and_then(|t| std::fs::read_dir(t).ok()) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if own::LEGACY_TEMP.iter().any(|p| name.starts_with(p)) && name.ends_with(".wav") {
+            let old_audio =
+                own::LEGACY_TEMP.iter().any(|p| name.starts_with(p)) && name.ends_with(".wav");
+            let room = leo_services::ai::ROOM_PREFIXES
+                .iter()
+                .any(|p| name.starts_with(p))
+                && entry.file_type().is_ok_and(|kind| kind.is_dir());
+            if old_audio || room {
                 out.push(entry.path());
             }
         }
@@ -530,6 +536,32 @@ fn pretty(path: &Path, home: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn leos_temporary_work_folders_are_removed_and_nothing_else_there() {
+        let temp = tempfile::tempdir().unwrap();
+        let data = temp.path().join("data");
+        std::fs::create_dir_all(&data).unwrap();
+        let scratch = temp.path().join("scratch");
+        for name in ["leo-writing-1", "leo-dictation-2", "someone-else"] {
+            std::fs::create_dir_all(scratch.join(name)).unwrap();
+        }
+        std::fs::write(scratch.join("leo-writing-notes.txt"), "mine").unwrap();
+        let planned = super::plan(
+            std::slice::from_ref(&data),
+            &data.join("notes"),
+            std::path::Path::new(""),
+            &data.join("recordings"),
+            Some(&scratch),
+        );
+        assert_eq!(
+            planned.doomed,
+            [
+                scratch.join("leo-dictation-2"),
+                scratch.join("leo-writing-1")
+            ]
+        );
+    }
+
     use super::*;
 
     #[test]

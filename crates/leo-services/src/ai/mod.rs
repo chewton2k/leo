@@ -23,6 +23,13 @@ pub fn tidy_rooms() {
     tidy_rooms_in(&std::env::temp_dir());
 }
 
+pub const ROOM_PREFIXES: &[&str] = &[
+    "leo-writing-",
+    "leo-usage-",
+    "leo-import-",
+    "leo-dictation-",
+];
+
 fn tidy_rooms_in(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -33,11 +40,7 @@ fn tidy_rooms_in(dir: &std::path::Path) {
         let Ok(kind) = entry.file_type() else {
             continue;
         };
-        let room = (name.starts_with("leo-writing-")
-            || name.starts_with("leo-usage-")
-            || name.starts_with("leo-import-")
-            || name.starts_with("leo-dictation-"))
-            && kind.is_dir();
+        let room = ROOM_PREFIXES.iter().any(|p| name.starts_with(p)) && kind.is_dir();
         let helper =
             name.starts_with("leo-sign-in-") && name.ends_with(".command") && kind.is_file();
         if (room || helper)
