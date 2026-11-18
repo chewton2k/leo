@@ -104,14 +104,13 @@ pub fn powers() -> leo_web::Powers {
                     figures: made
                         .figures
                         .into_iter()
-                        .map(|f| {
-                            Ok(leo_web::Figure {
-                                place: f.place,
-                                bytes: std::fs::read(&f.path)?,
-                                photo: f.photo,
-                            })
+                        .map(|f| leo_web::Figure {
+                            place: f.place,
+                            path: f.path,
+                            photo: f.photo,
                         })
-                        .collect::<anyhow::Result<_>>()?,
+                        .collect(),
+                    scratch: Some(leo_web::Scratch(std::sync::Arc::new(made.scratch))),
                 })
             },
         )),
