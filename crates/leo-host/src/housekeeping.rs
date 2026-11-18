@@ -79,21 +79,50 @@ fn discard_recordings(root: &Path, ids: &[String]) -> usize {
         .count()
 }
 
-fn expire_saved(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
-    if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
-        return 0;
+fn newest(dir: &Path) -> Option<std::time::SystemTime> {
+    let mut newest = std::fs::symlink_metadata(dir).ok()?.modified().ok()?;
+    for entry in std::fs::read_dir(dir).ok()? {
+        newest = newest.max(entry.ok()?.metadata().ok()?.modified().ok()?);
     }
-    session::scan(root, session::Walk::OlderThan(before))
+    Some(newest)
+}
+
+fn old_and_damaged(dir: &Path, before: chrono::DateTime<chrono::Utc>) -> bool {
+    !session::locked(dir)
+        && newest(dir).is_some_and(|newest| newest < std::time::SystemTime::from(before))
+}
+
+fn kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> Vec<std::path::PathBuf> {
+    if !std::fs::symlink_metadata(root).is_ok_and(|m| m.is_dir()) {
+        return Vec::new();
+    }
+    let scan = session::scan(root, session::Walk::OlderThan(before));
+    let saved = scan
         .sessions
         .into_iter()
-        .filter(|b| b.saved && b.started < before)
-        .filter(|b| {
-            Session::open(&b.dir).is_ok_and(|s| {
-                s.manifest.id == b.id && s.manifest.saved && s.manifest.started < before
-            })
-        })
-        .filter(|b| !session::locked(&b.dir))
-        .filter(|b| std::fs::remove_dir_all(&b.dir).is_ok())
+        .filter(|b| b.saved && b.started < before && !session::locked(&b.dir))
+        .map(|b| b.dir);
+    let damaged = scan
+        .malformed
+        .into_iter()
+        .filter(|dir| old_and_damaged(dir, before));
+    saved.chain(damaged).collect()
+}
+
+fn still_kept(dir: &Path, before: chrono::DateTime<chrono::Utc>) -> bool {
+    match Session::open(dir) {
+        Ok(found) => {
+            found.manifest.saved && found.manifest.started < before && !session::locked(dir)
+        }
+        Err(_) => session::malformed(dir) && old_and_damaged(dir, before),
+    }
+}
+
+fn expire_kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
+    kept_audio(root, before)
+        .into_iter()
+        .filter(|dir| still_kept(dir, before))
+        .filter(|dir| std::fs::remove_dir_all(dir).is_ok())
         .count()
 }
 
@@ -146,8 +175,11 @@ impl Housekeeper for Housekeeping {
     fn discard_recordings(&self, ids: &[String]) -> usize {
         session::root().map_or(0, |root| discard_recordings(&root, ids))
     }
+    fn kept_audio_count(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
+        session::root().map_or(0, |root| kept_audio(&root, before).len())
+    }
     fn expire_kept_audio(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
-        session::root().map_or(0, |root| expire_saved(&root, before))
+        session::root().map_or(0, |root| expire_kept_audio(&root, before))
     }
 }
 
@@ -221,9 +253,112 @@ mod tests {
         let locked = create("old-locked-01", true, 40);
         std::fs::write(locked.join("lock"), std::process::id().to_string()).unwrap();
         let before = chrono::Utc::now() - chrono::Duration::days(30);
-        assert_eq!(expire_saved(&sessions, before), 1);
+        assert_eq!(expire_kept_audio(&sessions, before), 1);
         assert!(!old_saved.exists());
         assert!(new_saved.exists() && old_pending.exists() && locked.exists());
+    }
+
+    #[cfg(unix)]
+    fn set_old(path: &Path, days: u64) {
+        let file = if path.is_dir() {
+            std::fs::File::open(path)
+        } else {
+            std::fs::File::options().write(true).open(path)
+        };
+        file.unwrap()
+            .set_modified(
+                std::time::SystemTime::now() - std::time::Duration::from_secs(days * 86_400),
+            )
+            .unwrap();
+    }
+
+    #[cfg(unix)]
+    fn damaged(root: &Path, days: i64, manifest: Option<&str>, wav: bool) -> std::path::PathBuf {
+        let started = chrono::Utc::now() - chrono::Duration::days(days);
+        let dir = root.join(started.format("%Y%m%d-%H%M%S").to_string());
+        std::fs::create_dir(&dir).unwrap();
+        if let Some(text) = manifest {
+            std::fs::write(dir.join("session.json"), text).unwrap();
+            set_old(&dir.join("session.json"), days as u64);
+        }
+        if wav {
+            std::fs::write(dir.join("seg-00000.wav"), vec![0u8; 4096]).unwrap();
+            set_old(&dir.join("seg-00000.wav"), days as u64);
+        }
+        set_old(&dir, days as u64);
+        dir
+    }
+
+    #[cfg(unix)]
+    fn session_of(root: &Path, id: &str, saved: bool, days: i64) -> std::path::PathBuf {
+        let mut manifest = session::Manifest::new(None, None, "", false);
+        manifest.id = id.into();
+        manifest.saved = saved;
+        manifest.started = chrono::Utc::now() - chrono::Duration::days(days);
+        Session::create(root, manifest).unwrap().dir
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_audio_preview_counts_what_expiry_deletes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let kept = session_of(root, "kept-for-retry", true, 40);
+        std::fs::write(kept.join("seg-00000.txt"), "said").unwrap();
+        std::fs::write(kept.join("seg-00001.wav"), vec![0u8; 4096]).unwrap();
+        std::fs::write(kept.join("seg-00001.err"), "boom").unwrap();
+        let broken = damaged(root, 41, Some("{"), true);
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        let preview =
+            crate::record::pending_before(root, cutoff).len() + kept_audio(root, cutoff).len();
+        let deleted = expire_kept_audio(root, cutoff);
+        assert_eq!((preview, deleted), (2, 2));
+        assert!(!kept.exists() && !broken.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn old_folders_with_damaged_metadata_are_expired() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let empty = damaged(root, 40, None, false);
+        let broken = damaged(root, 41, Some("{"), true);
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        assert_eq!(kept_audio(root, cutoff).len(), 2);
+        assert_eq!(expire_kept_audio(root, cutoff), 2);
+        assert!(!empty.exists() && !broken.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn damaged_folders_that_are_new_or_unreadable_are_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let fresh = damaged(root, 0, Some("{"), true);
+        let started_now = root.join("20990101-000000");
+        std::fs::create_dir(&started_now).unwrap();
+        let touched = damaged(root, 40, Some("{"), false);
+        std::fs::write(touched.join("seg-00000.wav"), vec![0u8; 4096]).unwrap();
+        set_old(&touched, 40);
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
+        use std::os::unix::fs::PermissionsExt;
+        let manifest =
+            serde_json::to_string(&session::Manifest::new(None, None, "", false)).unwrap();
+        let shut = damaged(root, 42, Some(&manifest), true);
+        let mode = |mode| {
+            std::fs::set_permissions(
+                shut.join("session.json"),
+                std::fs::Permissions::from_mode(mode),
+            )
+            .unwrap()
+        };
+        mode(0o000);
+        set_old(&shut, 42);
+        let selected = kept_audio(root, cutoff).len();
+        let deleted = expire_kept_audio(root, cutoff);
+        mode(0o600);
+        assert_eq!((selected, deleted), (0, 0));
+        assert!(fresh.exists() && started_now.exists() && touched.exists() && shut.exists());
     }
 
     #[test]
