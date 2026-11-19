@@ -205,6 +205,7 @@ fn class_name(directory: &str) -> &str {
     }
 }
 
+#[cfg(test)]
 pub fn plan(stale: &[&Source]) -> Vec<Vec<usize>> {
     plan_at(stale, &Scale::default())
 }
@@ -279,6 +280,7 @@ When a concept is already in the vocabulary, use exactly that name, so the same 
 Reply with JSON only, no other text, in this shape:
 {\"notes\": [{\"id\": \"n1\", \"summary\": \"How breadth-first search explores a graph level by level\", \"concepts\": [\"breadth-first search\", \"queue\"]}]}";
 
+#[cfg(test)]
 pub fn read_prompt(batch: &[&Source], vocabulary: &[String]) -> (String, String) {
     read_prompt_at(batch, vocabulary, NOTE_CHARS)
 }
@@ -593,6 +595,7 @@ fn settle_old_pairs(sources: &[Source], cache: &mut Cache) {
 
 pub type Write<'a> = &'a (dyn Fn(&str, &str, u32) -> Result<String> + Sync);
 
+#[cfg(test)]
 pub fn build(
     sources: &[Source],
     cache: &mut Cache,
@@ -609,6 +612,7 @@ fn in_parallel<T: Send>(jobs: Vec<Box<dyn FnOnce() -> T + Send + '_>>) -> Vec<Op
     })
 }
 
+#[cfg(test)]
 pub fn build_at(
     sources: &[Source],
     cache: &mut Cache,
@@ -863,6 +867,7 @@ impl Graphs {
         Graphs::new(base.join("graph.json"), writer)
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -1111,6 +1116,7 @@ impl Graphs {
         self.start(sources);
     }
 
+    #[cfg(test)]
     pub fn update_if_due(
         self: &Arc<Self>,
         sources: Vec<Source>,

@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 pub type Meaning = Arc<dyn Fn(&[String], bool) -> Result<Vec<Vec<f32>>> + Send + Sync>;
 
 pub const PIECE_CHARS: usize = 1200;
+#[cfg(test)]
 pub const MOST_PIECES: usize = 12;
 pub const PIECES_PER_TICK: usize = 256;
 pub const CLOSE_ENOUGH: f32 = 0.62;
@@ -738,6 +739,7 @@ pub fn close_to(
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub fn catch_up(store: &Store, vectors: &Vectors, meaning: &Meaning, most_pieces: usize) -> usize {
     let work = vectors.stale(store, most_pieces);
     vectors.forget_gone(store);
