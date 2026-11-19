@@ -554,7 +554,7 @@ mod tests {
     fn note(title: &str, dir: &str, body: &str) -> Note {
         let mut store =
             leo_core::store::Store::load_from(&tempfile::tempdir().unwrap().keep()).unwrap();
-        let mut n = store.create_note(title, body, vec![], "").unwrap().clone();
+        let mut n = store.create_note(title, body, "").unwrap().clone();
         n.directory = dir.into();
         n
     }

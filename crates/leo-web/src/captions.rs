@@ -377,12 +377,7 @@ mod tests {
         other.push(1);
         std::fs::write(notes.join("attachments/b.png"), other).unwrap();
         store
-            .create_note(
-                "Two",
-                "![a](attachments/a.png) ![b](attachments/b.png)",
-                vec![],
-                "",
-            )
+            .create_note("Two", "![a](attachments/a.png) ![b](attachments/b.png)", "")
             .unwrap();
         let captions = Captions::for_notes(&notes);
         let failing: Seer = Arc::new(|_: &str, _: &str, _: Vec<Picture>| anyhow::bail!("no"));
@@ -406,12 +401,10 @@ mod tests {
         std::fs::create_dir_all(notes.join("attachments")).unwrap();
         std::fs::write(notes.join("attachments/a.png"), png()).unwrap();
         store
-            .create_note("Pictured", "![a](attachments/a.png)", vec![], "")
+            .create_note("Pictured", "![a](attachments/a.png)", "")
             .unwrap();
-        store.create_note("Plain", "words", vec![], "").unwrap();
-        store
-            .create_note("Other", "more words", vec![], "")
-            .unwrap();
+        store.create_note("Plain", "words", "").unwrap();
+        store.create_note("Other", "more words", "").unwrap();
         store
     }
 
@@ -518,7 +511,7 @@ mod tests {
                     let body = format!("![p](attachments/p{}.png)", step % 6);
                     ids.push(
                         store
-                            .create_note(format!("Note {step}"), body, vec![], "")
+                            .create_note(format!("Note {step}"), body, "")
                             .unwrap()
                             .id
                             .clone(),
@@ -598,7 +591,7 @@ mod tests {
             std::fs::write(path, png()).unwrap();
         }
         store
-            .create_note("One", "![a](attachments/a.png)", vec![], "")
+            .create_note("One", "![a](attachments/a.png)", "")
             .unwrap();
         let captions = Captions::for_notes(&notes);
         let live = key_of(&shown).unwrap();
@@ -629,7 +622,6 @@ mod tests {
             .create_note(
                 "Heaps",
                 "A heap:\n![min heap](attachments/heap.png) and ![[missing.png]]",
-                vec![],
                 "",
             )
             .unwrap();

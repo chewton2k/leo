@@ -806,12 +806,7 @@ fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
             filler.clone()
         };
         let id = store
-            .create_note(
-                format!("Lecture {i}"),
-                body,
-                vec![],
-                &format!("Course {}", i % 20),
-            )
+            .create_note(format!("Lecture {i}"), body, &format!("Course {}", i % 20))
             .unwrap()
             .id
             .clone();

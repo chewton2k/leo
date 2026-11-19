@@ -963,7 +963,7 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
     let wide: &'static str = Box::leak(format!("{}.pdf", "w".repeat(116)).into_boxed_str());
     let target = state
         .fresh()
-        .create_note("Target", "", vec![], "")
+        .create_note("Target", "", "")
         .unwrap()
         .id
         .clone();

@@ -124,14 +124,13 @@ fn seeded_store(dir: &tempfile::TempDir) -> (Store, String, String) {
         .create_note(
             "Alpha".to_string(),
             "First line\n\nPlain line".to_string(),
-            vec![],
             "",
         )
         .unwrap()
         .id
         .clone();
     let b = store
-        .create_note("Beta".to_string(), "Beta body".to_string(), vec![], "")
+        .create_note("Beta".to_string(), "Beta body".to_string(), "")
         .unwrap()
         .id
         .clone();

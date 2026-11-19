@@ -154,7 +154,6 @@ fn a_note_can_be_pinned_from_the_phone() {
     let body = UpdateBody {
         title: None,
         body: None,
-        tags: None,
         pinned: Some(true),
         base: None,
         written: None,
@@ -198,7 +197,6 @@ fn edit(
         Json(UpdateBody {
             title: None,
             body: Some(body.to_string()),
-            tags: None,
             pinned: None,
             base,
             written: None,
@@ -612,7 +610,7 @@ fn the_unused_checkbox_toggle_route_is_gone() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Boxes", "- [ ] one", vec![], "")
+            .create_note("Boxes", "- [ ] one", "")
             .unwrap()
             .id
             .clone();
@@ -1099,7 +1097,6 @@ fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
             .create_note(
                 format!("Lecture {i} {}", BENCH_WORDS[i % BENCH_WORDS.len()]),
                 bench_body(i),
-                vec![],
                 &format!("Course {}", i % 20),
             )
             .unwrap();
@@ -1514,7 +1511,7 @@ fn a_note_written_outside_into_a_folder_just_before_it_is_moved_or_trashed_is_no
         run(state.with_store(|store| {
             store.create_dir("Course");
             store.create_dir("Later");
-            store.create_note("Lecture", "", vec![], "Course").unwrap();
+            store.create_note("Lecture", "", "Course").unwrap();
             store.save().unwrap();
             Ok(())
         }))

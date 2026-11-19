@@ -284,11 +284,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         for (title, body) in notes {
-            let id = store
-                .create_note(*title, "", vec![], "")
-                .unwrap()
-                .id
-                .clone();
+            let id = store.create_note(*title, "", "").unwrap().id.clone();
             store.find_note_mut(&id).unwrap().body = body.to_string();
         }
         (dir, store)

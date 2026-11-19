@@ -21,12 +21,8 @@ fn picture_library(n: usize, trashed: usize) -> (tempfile::TempDir, Store, Vec<S
         let body = format!(
             "Lecture {i} words about the subject.\n\n![one](attachments/{a})\n\nMore words.\n\n![[{b}]]\n"
         );
-        let note = leo_core::notes::Note::new(
-            format!("Note {i}"),
-            body,
-            vec![],
-            format!("Course {}", i % 40),
-        );
+        let note =
+            leo_core::notes::Note::new(format!("Note {i}"), body, format!("Course {}", i % 40));
         let root = if i < trashed {
             notes.join(".trash")
         } else {

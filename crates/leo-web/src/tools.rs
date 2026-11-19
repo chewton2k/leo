@@ -4089,11 +4089,7 @@ mod tests {
         let ids = notes
             .iter()
             .map(|(title, body, folder)| {
-                let id = store
-                    .create_note(*title, "", vec![], folder)
-                    .unwrap()
-                    .id
-                    .clone();
+                let id = store.create_note(*title, "", folder).unwrap().id.clone();
                 store.find_note_mut(&id).unwrap().body = body.to_string();
                 id
             })

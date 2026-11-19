@@ -327,8 +327,8 @@ mod tests {
     fn the_notes_are_counted_and_an_unreadable_one_is_named() {
         let (_tmp, notes, config) = setup();
         let mut store = leo_core::store::Store::load_from(&notes).unwrap();
-        store.create_note("A", "a", vec![], "").unwrap();
-        store.create_note("B", "b", vec![], "cs130").unwrap();
+        store.create_note("A", "a", "").unwrap();
+        store.create_note("B", "b", "cs130").unwrap();
         store.create_dir("cs130");
         store.save().unwrap();
         std::fs::write(notes.join("broken.md"), "---\ntitle: [unclosed\n---\nx").unwrap();
@@ -391,7 +391,7 @@ mod tests {
         let (_tmp, notes, config) = setup();
         let mut store = leo_core::store::Store::load_from(&notes).unwrap();
         store
-            .create_note("Shared (conflict from leo)", "x", vec![], "")
+            .create_note("Shared (conflict from leo)", "x", "")
             .unwrap();
         store.save().unwrap();
 

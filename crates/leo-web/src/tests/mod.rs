@@ -69,7 +69,7 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
     let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
     let ids = notes
         .iter()
-        .map(|(title, d)| store.create_note(*title, "", vec![], d).unwrap().id.clone())
+        .map(|(title, d)| store.create_note(*title, "", d).unwrap().id.clone())
         .collect();
     store.save().unwrap();
     let graphs = Arc::new(graph::Graphs::for_notes(&store.notes_dir, None));

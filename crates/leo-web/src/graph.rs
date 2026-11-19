@@ -1324,7 +1324,6 @@ mod tests {
         let mut note = Note::new(
             "Queues",
             "FIFO queues process the earliest item first.",
-            vec![],
             "CS130",
         );
         let mut cache = Cache::default();
@@ -1355,7 +1354,7 @@ mod tests {
         let body = "BFS uses a queue — très vite.";
         let read = source("a", title, body, "cs130");
         assert_eq!(hash_of(&read), "f29dc93fe22f93cd");
-        let note = Note::new(title, body, Vec::new(), "cs130");
+        let note = Note::new(title, body, "cs130");
         assert_eq!(hash_of(&read), crate::vectors::hash_of(&note));
     }
 

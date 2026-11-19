@@ -1273,14 +1273,13 @@ mod tests {
             .create_note(
                 "Neuro-Symbolic Drive",
                 "The method pairs planner traces with trajectories.",
-                vec![],
                 "research",
             )
             .unwrap()
             .id
             .clone();
         let other = store
-            .create_note("Heaps", "Minimum at the root.", vec![], "")
+            .create_note("Heaps", "Minimum at the root.", "")
             .unwrap()
             .id
             .clone();
@@ -1322,13 +1321,7 @@ mod tests {
                 "work",
             ),
         ] {
-            ids.push(
-                store
-                    .create_note(title, body, vec![], folder)
-                    .unwrap()
-                    .id
-                    .clone(),
-            );
+            ids.push(store.create_note(title, body, folder).unwrap().id.clone());
         }
         (store, dir, ids)
     }
@@ -1836,12 +1829,7 @@ mod tests {
         let mut close = Vec::new();
         for i in 0..40 {
             let id = store
-                .create_note(
-                    format!("Queue drill {i}"),
-                    "queue ".repeat(2_000),
-                    vec![],
-                    "",
-                )
+                .create_note(format!("Queue drill {i}"), "queue ".repeat(2_000), "")
                 .unwrap()
                 .id
                 .clone();

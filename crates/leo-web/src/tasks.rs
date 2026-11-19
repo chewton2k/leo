@@ -748,7 +748,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Lecture 5", body, vec![], "bio")
+            .create_note("Lecture 5", body, "bio")
             .unwrap()
             .id
             .clone();

@@ -817,13 +817,13 @@ mod tests {
     fn note(title: &str, body: &str) -> Note {
         let mut store =
             Store::load_from(&tempfile::tempdir().unwrap().keep().join("notes")).unwrap();
-        store.create_note(title, body, vec![], "").unwrap().clone()
+        store.create_note(title, body, "").unwrap().clone()
     }
 
     #[test]
     fn stored_hashes_do_not_change() {
-        let mut tagged = Note::new("Héaps", "sift down\nand up", vec![], "cs");
-        tagged.tags = vec!["exam".into(), "week 3".into()];
+        let mut tagged = Note::new("Héaps", "sift down\nand up", "cs");
+        tagged.extra.insert("tags".into(), "exam".into());
         let turns = [
             crate::chat::Turn {
                 role: "user".into(),
@@ -850,7 +850,7 @@ mod tests {
                 "chat-1:e1477ec64d3700ca",
                 "n0ddeeeee2af88de5",
                 "c5d3e84b0dec08b3",
-                "f406bea19db6735a",
+                "0ba7c3bd07c6acc3",
             ]
         );
     }
@@ -862,7 +862,7 @@ mod tests {
         let part = |c: &str| c.repeat(PIECE_CHARS - 100);
         let body = |last: &str| format!("{}\n\n{}\n\n{}", part("a"), part("b"), last);
         let id = store
-            .create_note("Three", body(&part("c")), vec![], "")
+            .create_note("Three", body(&part("c")), "")
             .unwrap()
             .id
             .clone();
@@ -922,9 +922,7 @@ mod tests {
             } else {
                 format!("note {n}")
             };
-            store
-                .create_note(format!("Note {n}"), body, vec![], "")
-                .unwrap();
+            store.create_note(format!("Note {n}"), body, "").unwrap();
         }
         let tries = Arc::new(Mutex::new(0usize));
         let seen = Arc::clone(&tries);
@@ -966,7 +964,7 @@ mod tests {
             .iter()
             .map(|title| {
                 store
-                    .create_note(*title, format!("{title} text"), vec![], "")
+                    .create_note(*title, format!("{title} text"), "")
                     .unwrap()
                     .id
                     .clone()
@@ -992,11 +990,7 @@ mod tests {
             "{}\n\nPlants turn light into sugar.",
             "x".repeat(PIECE_CHARS * 30)
         );
-        let id = store
-            .create_note("Long", body, vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Long", body, "").unwrap().id.clone();
         let vectors = Vectors::for_notes(&store.notes_dir);
         for _ in 0..4 {
             let work = vectors.stale(&store, 8);
@@ -1016,12 +1010,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Plants", "Plants turn light into sugar.", vec![], "")
+            .create_note("Plants", "Plants turn light into sugar.", "")
             .unwrap()
             .id
             .clone();
         store
-            .create_note("Rocks", "Rocks wear into sand.", vec![], "")
+            .create_note("Rocks", "Rocks wear into sand.", "")
             .unwrap();
         store.save().unwrap();
         let vectors = Vectors::for_notes(&store.notes_dir);
@@ -1065,12 +1059,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Plants", "Plants turn light into sugar.", vec![], "")
+            .create_note("Plants", "Plants turn light into sugar.", "")
             .unwrap()
             .id
             .clone();
         store
-            .create_note("Rocks", "Rocks wear into sand.", vec![], "")
+            .create_note("Rocks", "Rocks wear into sand.", "")
             .unwrap();
         store.save().unwrap();
         let vectors = Vectors::for_notes(&store.notes_dir);
@@ -1144,21 +1138,13 @@ mod tests {
     fn every_note_knows_its_nearest_notes_and_the_list_is_rebuilt_only_after_changes() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        let a = store
-            .create_note("BFS", "queue", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let a = store.create_note("BFS", "queue", "").unwrap().id.clone();
         let b = store
-            .create_note("Breadth first", "queue order", vec![], "")
+            .create_note("Breadth first", "queue order", "")
             .unwrap()
             .id
             .clone();
-        let c = store
-            .create_note("Plants", "light", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let c = store.create_note("Plants", "light", "").unwrap().id.clone();
         let vectors = Vectors::for_notes(&store.notes_dir);
         let before = vectors.version();
         catch_up(&store, &vectors, &fake(), 100);
@@ -1211,14 +1197,13 @@ mod tests {
             .create_note(
                 "Graph search",
                 "Breadth first takes the oldest from a queue.",
-                vec![],
                 "",
             )
             .unwrap()
             .id
             .clone();
         store
-            .create_note("Biology", "Plants turn light into sugar.", vec![], "")
+            .create_note("Biology", "Plants turn light into sugar.", "")
             .unwrap();
         let vectors = Vectors::for_notes(&store.notes_dir);
         let meaning = fake();
@@ -1371,7 +1356,7 @@ mod tests {
             .iter()
             .map(|title| {
                 store
-                    .create_note(*title, format!("{title} text"), vec![], "")
+                    .create_note(*title, format!("{title} text"), "")
                     .unwrap()
                     .id
                     .clone()
@@ -1406,7 +1391,7 @@ mod tests {
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         for n in 0..40 {
             store
-                .create_note(format!("Big {n}"), "x".repeat(1 << 20), vec![], "")
+                .create_note(format!("Big {n}"), "x".repeat(1 << 20), "")
                 .unwrap();
         }
         let vectors = Vectors::for_notes(&store.notes_dir);
@@ -1438,7 +1423,7 @@ mod tests {
             .iter()
             .map(|title| {
                 store
-                    .create_note(*title, format!("{title} text"), vec![], "")
+                    .create_note(*title, format!("{title} text"), "")
                     .unwrap()
                     .id
                     .clone()
@@ -1462,7 +1447,7 @@ mod tests {
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         for n in 0..12 {
             store
-                .create_note(format!("Note {n}"), format!("queue {n}"), vec![], "")
+                .create_note(format!("Note {n}"), format!("queue {n}"), "")
                 .unwrap();
         }
         let meaning = fake();
@@ -1497,7 +1482,7 @@ mod tests {
                 }
                 3 => {
                     store
-                        .create_note(format!("New {step}"), format!("breadth {step}"), vec![], "")
+                        .create_note(format!("New {step}"), format!("breadth {step}"), "")
                         .unwrap();
                 }
                 4 => store.forget_changes(),
@@ -1578,9 +1563,7 @@ mod tests {
                         format!("note {n} line {line} about queues and plants and light\n\n")
                     })
                     .collect();
-                store
-                    .create_note(format!("Note {n}"), body, vec![], "")
-                    .unwrap();
+                store.create_note(format!("Note {n}"), body, "").unwrap();
             }
             println!(
                 "P-C55 notes={count} fixture built in {:.1} s",

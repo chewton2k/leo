@@ -162,6 +162,8 @@ settings and credentials are excluded from note exports.
 - Headerless `.md` files load as notes: title = stem, id = `stable_id(path)`
   (FNV-1a 128 → UUID v8, golden-tested: never change it), dates = mtime. `Note.extra` keeps unknown front matter, `tags` included,
   as values in file order (a note leo edits is written back in leo's layout).
+  Note constructors take title, body and folder. Old browser requests may still
+  send tags, which the engine ignores and leaves as frontmatter.
 - `Store.seen: id → Seen { path, disk, model }`: save writes only notes whose
   rendered hash changed; if the file on disk no longer matches `disk`
   (edited/renamed/deleted elsewhere) and leo changed the note too, it writes

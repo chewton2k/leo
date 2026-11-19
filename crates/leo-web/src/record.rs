@@ -754,7 +754,7 @@ fn run(
             }
         }
         let mut note = store
-            .create_note(title, body.trim().to_string(), vec![], &directory)
+            .create_note(title, body.trim().to_string(), &directory)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .id
             .clone();

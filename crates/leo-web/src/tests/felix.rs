@@ -689,7 +689,6 @@ fn a_suggested_change_is_applied_only_while_the_text_is_still_there() {
             Json(UpdateBody {
                 title: None,
                 body: Some("BFS takes the newest vertex.".into()),
-                tags: None,
                 pinned: None,
                 base: Some(base.into()),
                 written: None,

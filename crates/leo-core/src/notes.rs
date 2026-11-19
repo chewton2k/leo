@@ -19,9 +19,6 @@ pub struct Note {
     /// Last-modified timestamp (UTC)
     pub updated_at: DateTime<Utc>,
 
-    /// Free-form tags for organisation
-    pub tags: Vec<String>,
-
     /// Directory path (empty string = root)
     #[serde(default)]
     pub directory: String,
@@ -38,7 +35,6 @@ impl Note {
     pub fn new(
         title: impl Into<String>,
         body: impl Into<String>,
-        tags: Vec<String>,
         directory: impl Into<String>,
     ) -> Self {
         let now = Utc::now();
@@ -48,7 +44,6 @@ impl Note {
             body: body.into(),
             created_at: now,
             updated_at: now,
-            tags,
             directory: directory.into(),
             pinned: false,
             extra: serde_yaml::Mapping::new(),
@@ -175,7 +170,6 @@ mod tests {
         let mut note = Note::new(
             "T",
             "- [ ] dash\n* [ ] star\n+ [x] plus\n1. [ ] one\n2) [X] two\n  - [ ]\n-   [ ] wide\n*  [x] wide\n-[ ] not\n-     [ ] code\n- [y] not\ncode [ ] not\n",
-            vec![],
             "",
         );
         assert_eq!(
@@ -197,7 +191,6 @@ mod tests {
         let note = Note::new(
             "T",
             "a) [ ] one\nbb. [x] two\nA) [ ] three\nB.  [x] four\nC. [ ] name\nabc) [ ] no\nab) [ ] no\naaa. [ ] no\n",
-            vec![],
             "",
         );
         assert_eq!(note.checkboxes(), vec![false, true, false, true]);
@@ -205,12 +198,7 @@ mod tests {
 
     #[test]
     fn checkboxes_lists_each_box_in_order() {
-        let note = Note::new(
-            "T",
-            "- [ ] a\ntext\n  - [x] b\n- [X] c\n- [ ]\n",
-            vec![],
-            "",
-        );
+        let note = Note::new("T", "- [ ] a\ntext\n  - [x] b\n- [X] c\n- [ ]\n", "");
         assert_eq!(note.checkboxes(), vec![false, true, true, false]);
     }
 }

@@ -2005,7 +2005,7 @@ fn an_unreadable_file_stops_the_sweep() {
     let dir = tempfile::tempdir().unwrap();
     let notes = dir.path().join("notes");
     let mut store = Store::load_from(&notes).unwrap();
-    store.create_note("Kept", "", vec![], "").unwrap();
+    store.create_note("Kept", "", "").unwrap();
     store.save().unwrap();
     std::fs::write(
         notes.join("Broken.md"),
@@ -2286,7 +2286,7 @@ fn gathering_includes_open_threads_after_the_notes_within_the_budget() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
     let id = store
-        .create_note("Long", "word ".repeat(20_000), vec![], "")
+        .create_note("Long", "word ".repeat(20_000), "")
         .unwrap()
         .id
         .clone();
@@ -2319,7 +2319,7 @@ fn a_thread_on_a_trashed_note_exports_only_with_the_trash() {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
     let id = store
-        .create_note("Gone", "words here", vec![], "")
+        .create_note("Gone", "words here", "")
         .unwrap()
         .id
         .clone();

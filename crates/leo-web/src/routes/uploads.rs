@@ -701,7 +701,7 @@ fn write_upload(
             }
             None => {
                 let note = store
-                    .create_note(title, written, vec![], dir)
+                    .create_note(title, written, dir)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                     .id
                     .clone();

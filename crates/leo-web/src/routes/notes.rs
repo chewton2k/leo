@@ -45,7 +45,6 @@ pub(crate) struct CreateBody {
 pub(crate) struct UpdateBody {
     pub(crate) title: Option<String>,
     pub(crate) body: Option<String>,
-    pub(crate) tags: Option<Vec<String>>,
     pub(crate) pinned: Option<bool>,
     pub(crate) base: Option<String>,
     #[serde(default)]
@@ -97,11 +96,7 @@ pub(crate) struct NoteResponse {
 }
 
 pub(crate) fn version_of(note: &leo_core::notes::Note) -> String {
-    let parts = [
-        note.title.as_str(),
-        note.body.as_str(),
-        &note.tags.join("\u{1f}"),
-    ];
+    let parts = [note.title.as_str(), note.body.as_str(), ""];
     let bytes = parts.iter().flat_map(|part| part.bytes().chain([0u8]));
     format!("{:016x}", crate::vectors::fnv64(bytes))
 }
@@ -282,7 +277,7 @@ pub(crate) fn make_note(
         return Err(StatusCode::BAD_REQUEST);
     }
     let note = store
-        .create_note(title.to_string(), body.to_string(), Vec::new(), dir)
+        .create_note(title.to_string(), body.to_string(), dir)
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(NoteResponse::from_note(note))
 }
@@ -327,7 +322,7 @@ pub(crate) async fn update_note(
         .with_store(move |store| {
             let recorded = crate::tools::has_transcript(&store.notes_dir, &id);
             let note = store.find_note_mut(&id).ok_or(StatusCode::NOT_FOUND)?;
-            let mut edited = body.title.is_some() || body.body.is_some() || body.tags.is_some();
+            let mut edited = body.title.is_some() || body.body.is_some();
             if edited
                 && body
                     .base
@@ -335,8 +330,7 @@ pub(crate) async fn update_note(
                     .is_some_and(|base| base != version_of(note))
             {
                 let same = body.title.as_ref().is_none_or(|title| *title == note.title)
-                    && body.body.as_ref().is_none_or(|text| *text == note.body)
-                    && body.tags.as_ref().is_none_or(|tags| *tags == note.tags);
+                    && body.body.as_ref().is_none_or(|text| *text == note.body);
                 if !same {
                     return Err(StatusCode::CONFLICT);
                 }
@@ -347,9 +341,6 @@ pub(crate) async fn update_note(
             }
             if let Some(text) = body.body {
                 note.body = text;
-            }
-            if let Some(tags) = body.tags {
-                note.tags = tags;
             }
             if let Some(pinned) = body.pinned {
                 note.pinned = pinned;

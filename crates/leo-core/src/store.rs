@@ -254,7 +254,6 @@ fn parse_note(
             id,
             title,
             body,
-            tags: Vec::new(),
             directory,
             created_at,
             updated_at,
@@ -3470,12 +3469,11 @@ impl Store {
         &mut self,
         title: impl Into<String>,
         body: impl Into<String>,
-        tags: Vec<String>,
         directory: &str,
     ) -> Result<&Note> {
         self.validate_directory(directory)?;
         add_with_parents(&mut self.directories, directory);
-        let note = Note::new(title, body, tags, directory);
+        let note = Note::new(title, body, directory);
         self.dirty.get_mut().insert(note.id.clone());
         self.feed.get_mut().record(note.id.clone());
         self.notes.push(note);
@@ -3849,7 +3847,6 @@ mod tests {
             id: "550e8400-e29b-41d4-a716-446655440000".to_string(),
             title: "Test Note".to_string(),
             body: "Hello **world**".to_string(),
-            tags: vec![],
             directory: "".to_string(),
             created_at: chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
                 .unwrap()
@@ -3868,15 +3865,11 @@ mod tests {
         store.create_dir("cs130");
         store.create_dir("cs130/lec");
         store.create_dir("cs162");
-        store.create_note("Root note", "b", vec![], "").unwrap();
-        store.create_note("In cs130", "b", vec![], "cs130").unwrap();
-        store
-            .create_note("In lec 1", "b", vec![], "cs130/lec")
-            .unwrap();
-        store
-            .create_note("In lec 2", "b", vec![], "cs130/lec")
-            .unwrap();
-        store.create_note("In cs162", "b", vec![], "cs162").unwrap();
+        store.create_note("Root note", "b", "").unwrap();
+        store.create_note("In cs130", "b", "cs130").unwrap();
+        store.create_note("In lec 1", "b", "cs130/lec").unwrap();
+        store.create_note("In lec 2", "b", "cs130/lec").unwrap();
+        store.create_note("In cs162", "b", "cs162").unwrap();
         store.save().unwrap();
         (store, dir)
     }
@@ -3905,11 +3898,7 @@ mod tests {
     #[test]
     fn moving_a_note_keeps_its_edit_date_and_moves_its_file() {
         let (mut store, dir) = store_with_tree();
-        let id = store
-            .create_note("Mover", "b", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Mover", "b", "").unwrap().id.clone();
         store.save().unwrap();
         let before = store.notes.iter().find(|n| n.id == id).unwrap().updated_at;
         store.move_note(&id, "cs162").unwrap();
@@ -4099,7 +4088,7 @@ mod tests {
             let tmp = tempfile::TempDir::new().unwrap();
             let notes_dir = tmp.path().join("notes");
             let mut store = Store::load_from(&notes_dir).unwrap();
-            store.create_note("Kept", "body", vec![], "").unwrap();
+            store.create_note("Kept", "body", "").unwrap();
             store.notes[0]
                 .extra
                 .insert("rating".into(), serde_yaml::Value::from(4.5));
@@ -4135,13 +4124,9 @@ mod tests {
     fn a_restored_note_leaves_the_trash_even_when_its_save_failed_midway() {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _tmp) = temp_store();
-        let b = store
-            .create_note("B", "b", vec![], "sub")
-            .unwrap()
-            .id
-            .clone();
+        let b = store.create_note("B", "b", "sub").unwrap().id.clone();
         store.notes[0].created_at -= chrono::Duration::seconds(1);
-        let a = store.create_note("A", "a", vec![], "").unwrap().id.clone();
+        let a = store.create_note("A", "a", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&a));
         store.save().unwrap();
@@ -4183,15 +4168,8 @@ mod tests {
     #[test]
     fn an_autosave_writes_a_note_changed_through_every_mutator() {
         let (mut store, _tmp) = temp_store();
-        let ids = [("A", "- [ ] one", "f/g"), ("B", "b", "f"), ("C", "c", "")].map(
-            |(title, body, dir)| {
-                store
-                    .create_note(title, body, vec![], dir)
-                    .unwrap()
-                    .id
-                    .clone()
-            },
-        );
+        let ids = [("A", "- [ ] one", "f/g"), ("B", "b", "f"), ("C", "c", "")]
+            .map(|(title, body, dir)| store.create_note(title, body, dir).unwrap().id.clone());
         assert!(store.create_dir("h"));
         store.save().unwrap();
         type Step = fn(&mut Store, &[String; 3]);
@@ -4207,7 +4185,7 @@ mod tests {
             |s, _| assert!(s.rename_dir("f", "renamed").is_some()),
             |s, _| assert!(s.move_dir("renamed", "h").is_some()),
             |s, _| {
-                s.create_note("D", "d", vec![], "").unwrap();
+                s.create_note("D", "d", "").unwrap();
             },
             |s, ids| assert_eq!(s.delete_notes(std::slice::from_ref(&ids[2])), 1),
             |s, ids| assert!(s.restore(&ids[2]).is_some()),
@@ -4230,7 +4208,7 @@ mod tests {
     #[should_panic(expected = "without passing a marking point")]
     fn a_change_made_without_marking_is_caught() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.create_note("Kept", "body", "").unwrap();
         store.save().unwrap();
         store.notes[0].body = "unmarked".into();
         let _ = store.save();
@@ -4239,7 +4217,7 @@ mod tests {
     #[test]
     fn the_hourly_save_writes_an_unmarked_change() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.create_note("Kept", "body", "").unwrap();
         store.save().unwrap();
         store.notes[0].body = "unmarked".into();
         store.tidied.set(None);
@@ -4250,10 +4228,10 @@ mod tests {
     #[test]
     fn a_new_note_does_not_put_off_the_hourly_check() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.create_note("Kept", "body", "").unwrap();
         store.save().unwrap();
         let stamp = store.tidied.get();
-        store.create_note("New", "body", vec![], "").unwrap();
+        store.create_note("New", "body", "").unwrap();
         store.save().unwrap();
         assert_eq!(store.tidied.get(), stamp);
     }
@@ -4261,17 +4239,9 @@ mod tests {
     #[test]
     fn the_shortcut_targets_equal_a_full_name_assignment() {
         let (mut store, _tmp) = temp_store();
-        let x = store
-            .create_note("Same", "x", vec![], "f")
-            .unwrap()
-            .id
-            .clone();
+        let x = store.create_note("Same", "x", "f").unwrap().id.clone();
         store.find_note_mut(&x).unwrap().created_at -= chrono::Duration::seconds(5);
-        let y = store
-            .create_note("Same", "y", vec![], "f")
-            .unwrap()
-            .id
-            .clone();
+        let y = store.create_note("Same", "y", "f").unwrap().id.clone();
         store.save().unwrap();
         type Step = fn(&mut Store, &str, &str);
         let steps: [Step; 8] = [
@@ -4307,7 +4277,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let notes_dir = tmp.path().join("notes");
         let mut store = Store::load_from(&notes_dir).unwrap();
-        store.create_note("Kept", "body", vec![], "").unwrap();
+        store.create_note("Kept", "body", "").unwrap();
         store.save().unwrap();
         let stamp = |name: &str| {
             std::fs::metadata(notes_dir.join(name))
@@ -4387,9 +4357,9 @@ mod tests {
     #[test]
     fn a_stores_facts_name_unreadable_files_and_conflict_copies() {
         let (mut store, _d) = temp_store();
-        store.create_note("A", "a", vec![], "").unwrap();
+        store.create_note("A", "a", "").unwrap();
         store
-            .create_note(format!("B{CONFLICT_SUFFIX}"), "b", vec![], "cs130")
+            .create_note(format!("B{CONFLICT_SUFFIX}"), "b", "cs130")
             .unwrap();
         store.create_dir("cs130");
         store.save().unwrap();
@@ -4418,18 +4388,13 @@ mod tests {
         let (mut store, d) = temp_store();
         store.create_dir("cs130");
         store
-            .create_note("Rust ownership", "borrow checker rules", vec![], "")
+            .create_note("Rust ownership", "borrow checker rules", "")
             .unwrap();
         store
-            .create_note(
-                "Graph traversals",
-                "BFS explores level by level",
-                vec![],
-                "cs130",
-            )
+            .create_note("Graph traversals", "BFS explores level by level", "cs130")
             .unwrap();
         store
-            .create_note("Lecture 4", "graphs: BFS, then DFS", vec![], "cs130")
+            .create_note("Lecture 4", "graphs: BFS, then DFS", "cs130")
             .unwrap();
         (store, d)
     }
@@ -4492,9 +4457,9 @@ mod tests {
     #[test]
     fn deleting_notes_removes_only_the_chosen_ones() {
         let (mut store, _d) = temp_store();
-        let a = store.create_note("A", "", vec![], "").unwrap().id.clone();
-        let b = store.create_note("B", "", vec![], "").unwrap().id.clone();
-        store.create_note("C", "", vec![], "").unwrap();
+        let a = store.create_note("A", "", "").unwrap().id.clone();
+        let b = store.create_note("B", "", "").unwrap().id.clone();
+        store.create_note("C", "", "").unwrap();
         assert_eq!(store.delete_notes(&["nope".to_string()]), 0);
         assert_eq!(store.delete_notes(&[a, b]), 2);
         assert_eq!(titles(store.notes.iter().collect()), vec!["C"]);
@@ -4506,7 +4471,7 @@ mod tests {
     #[test]
     fn a_note_leo_cannot_read_survives_a_save() {
         let (mut store, _d) = temp_store();
-        store.create_note("Good", "fine", vec![], "").unwrap();
+        store.create_note("Good", "fine", "").unwrap();
         store.save().unwrap();
         let broken = store.notes_dir.join("broken.md");
         std::fs::write(&broken, "---\ntitle: [unclosed\n---\nmy words").unwrap();
@@ -4520,7 +4485,7 @@ mod tests {
         );
         assert!(store.unreadable[0].0.ends_with("broken.md"));
 
-        store.create_note("Another", "x", vec![], "").unwrap();
+        store.create_note("Another", "x", "").unwrap();
         store.save().unwrap();
         assert!(broken.exists(), "saving deleted a note leo could not read");
         assert!(std::fs::read_to_string(&broken)
@@ -4531,7 +4496,7 @@ mod tests {
     #[test]
     fn a_file_that_cannot_be_read_is_listed_and_the_rest_still_load() {
         let (mut store, _d) = temp_store();
-        store.create_note("Good", "fine", vec![], "").unwrap();
+        store.create_note("Good", "fine", "").unwrap();
         store.save().unwrap();
         let binary = store.notes_dir.join("binary.md");
         std::fs::write(&binary, [0xff, 0xfe, 0x00, 0x80]).unwrap();
@@ -4572,7 +4537,7 @@ mod tests {
         let blocked = std::fs::read_dir(&locked).is_err();
         let folders: Vec<String> = (0..4).map(|i| format!("f{i}")).collect();
         for folder in &folders {
-            store.create_note("Note", "x", vec![], folder).unwrap();
+            store.create_note("Note", "x", folder).unwrap();
         }
         store.save().unwrap();
         let changed: Vec<bool> = folders
@@ -4594,7 +4559,7 @@ mod tests {
     #[test]
     fn a_corrupt_folder_list_still_loads_the_notes() {
         let (mut store, _d) = temp_store();
-        store.create_note("Deep", "x", vec![], "cs162").unwrap();
+        store.create_note("Deep", "x", "cs162").unwrap();
         store.save().unwrap();
         let corrupt = store.notes_dir.join("directories.json.corrupt");
         std::fs::write(&corrupt, "older").unwrap();
@@ -4619,11 +4584,7 @@ mod tests {
     fn a_note_whose_trash_move_failed_is_trashed_on_the_next_save() {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _d) = temp_store();
-        let id = store
-            .create_note("Gone", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Gone", "x", "").unwrap().id.clone();
         store.save().unwrap();
         let trash = store.notes_dir.join(TRASH);
         std::fs::create_dir_all(&trash).unwrap();
@@ -4647,7 +4608,7 @@ mod tests {
     fn directories_are_derived_from_where_notes_live() {
         let (mut store, _d) = temp_store();
         store.create_dir("cs130");
-        store.create_note("Deep", "x", vec![], "cs162/lec").unwrap();
+        store.create_note("Deep", "x", "cs162/lec").unwrap();
         store.save().unwrap();
         std::fs::write(store.notes_dir.join("directories.json"), "[\"cs130\"]").unwrap();
 
@@ -4678,7 +4639,7 @@ mod tests {
     fn a_deleted_note_goes_to_the_trash() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "BFS", vec![], "cs130")
+            .create_note("Lecture 4", "BFS", "cs130")
             .unwrap()
             .id
             .clone();
@@ -4698,7 +4659,7 @@ mod tests {
     #[test]
     fn a_moved_note_is_not_trashed() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("A", "a", vec![], "").unwrap().id.clone();
+        let id = store.create_note("A", "a", "").unwrap().id.clone();
         store.save().unwrap();
         store.move_note(&id, "cs130").unwrap();
         store.save().unwrap();
@@ -4709,7 +4670,7 @@ mod tests {
     fn a_restored_note_comes_back_where_it_was_and_leaves_the_trash() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "BFS", vec![], "cs130")
+            .create_note("Lecture 4", "BFS", "cs130")
             .unwrap()
             .id
             .clone();
@@ -4730,8 +4691,8 @@ mod tests {
     #[test]
     fn deleting_a_directory_trashes_its_notes() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("One", "", vec![], "cs130/lec").unwrap();
-        store.create_note("Two", "", vec![], "cs130").unwrap();
+        store.create_note("One", "", "cs130/lec").unwrap();
+        store.create_note("Two", "", "cs130").unwrap();
         store.save().unwrap();
         store.delete_dir_recursive("cs130");
         store.save().unwrap();
@@ -4743,7 +4704,7 @@ mod tests {
     #[test]
     fn emptying_the_trash_deletes_for_good() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("A", "a", vec![], "").unwrap().id.clone();
+        let id = store.create_note("A", "a", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -4757,7 +4718,7 @@ mod tests {
         let (mut store, _tmp) = temp_store();
         let ids: Vec<String> = ["A", "B", "C"]
             .iter()
-            .map(|t| store.create_note(*t, "x", vec![], "").unwrap().id.clone())
+            .map(|t| store.create_note(*t, "x", "").unwrap().id.clone())
             .collect();
         store.save().unwrap();
         for id in &ids {
@@ -4796,8 +4757,8 @@ mod tests {
     #[test]
     fn p02_emptying_the_trash_leaves_no_empty_folders() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Deep", "x", vec![], "a/b").unwrap();
-        store.create_note("Mid", "x", vec![], "a").unwrap();
+        store.create_note("Deep", "x", "a/b").unwrap();
+        store.create_note("Mid", "x", "a").unwrap();
         store.save().unwrap();
         store.delete_dir_recursive("a");
         store.save().unwrap();
@@ -4835,7 +4796,7 @@ mod tests {
     #[test]
     fn emptying_the_trash_counts_a_file_leo_cannot_read() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "x", vec![], "").unwrap();
+        store.create_note("Kept", "x", "").unwrap();
         store.save().unwrap();
         let id = store.notes[0].id.clone();
         store.delete_notes(&[id]);
@@ -4863,9 +4824,7 @@ mod tests {
         let (mut store, _tmp) = temp_store();
         for dir in dirs {
             for n in 0..3 {
-                store
-                    .create_note(format!("{dir}{n}"), "x", vec![], dir)
-                    .unwrap();
+                store.create_note(format!("{dir}{n}"), "x", dir).unwrap();
             }
         }
         store.save().unwrap();
@@ -4971,11 +4930,7 @@ mod tests {
     #[test]
     fn restore_reads_only_the_chosen_files() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Keep", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Keep", "x", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -4994,12 +4949,8 @@ mod tests {
     #[test]
     fn deleting_a_deep_note_for_good_leaves_no_folder_in_the_trash() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Deep", "x", vec![], "a/b")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("Top", "x", vec![], "").unwrap();
+        let id = store.create_note("Deep", "x", "a/b").unwrap().id.clone();
+        store.create_note("Top", "x", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -5015,11 +4966,7 @@ mod tests {
     #[test]
     fn an_expired_note_takes_its_folder_out_of_the_trash() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Deep", "x", vec![], "a/b")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Deep", "x", "a/b").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -5034,13 +4981,7 @@ mod tests {
         let (mut store, _tmp) = temp_store();
         let ids: Vec<String> = ["A", "B", "C", "D"]
             .iter()
-            .map(|t| {
-                store
-                    .create_note(*t, "x", vec![], "x/y")
-                    .unwrap()
-                    .id
-                    .clone()
-            })
+            .map(|t| store.create_note(*t, "x", "x/y").unwrap().id.clone())
             .collect();
         store.save().unwrap();
         store.delete_notes(&ids[..3]);
@@ -5061,11 +5002,7 @@ mod tests {
     #[test]
     fn deleting_a_trashed_copy_of_a_live_note_forgets_nothing() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Live", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Live", "x", "").unwrap().id.clone();
         store.save().unwrap();
         trashed_file(
             &store,
@@ -5080,8 +5017,8 @@ mod tests {
     #[test]
     fn the_trash_forgets_notes_after_thirty_days() {
         let (mut store, _tmp) = temp_store();
-        let old = store.create_note("Old", "", vec![], "").unwrap().id.clone();
-        let new = store.create_note("New", "", vec![], "").unwrap().id.clone();
+        let old = store.create_note("Old", "", "").unwrap().id.clone();
+        let new = store.create_note("New", "", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&old));
         store.save().unwrap();
@@ -5103,7 +5040,7 @@ mod tests {
     #[test]
     fn the_trash_follows_how_long_it_was_asked_to_keep_notes() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
+        let id = store.create_note("Old", "", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -5132,11 +5069,7 @@ mod tests {
         store.tidy_trash_now();
         assert!(store.trashed().is_empty(), "a year is up");
 
-        let id = store
-            .create_note("Recent", "", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Recent", "", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -5152,7 +5085,7 @@ mod tests {
     #[test]
     fn restoring_a_note_that_is_not_in_the_trash_does_nothing() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("A", "a", vec![], "").unwrap().id.clone();
+        let id = store.create_note("A", "a", "").unwrap().id.clone();
         store.save().unwrap();
         assert_eq!(store.restore(&id), None);
         assert_eq!(store.restore("nope"), None);
@@ -5163,11 +5096,11 @@ mod tests {
     fn pinned_notes_come_first_and_stay_pinned_on_disk() {
         let (mut store, _tmp) = temp_store();
         let old = store
-            .create_note("Syllabus", "", vec![], "cs130")
+            .create_note("Syllabus", "", "cs130")
             .unwrap()
             .id
             .clone();
-        store.create_note("Lecture 1", "", vec![], "cs130").unwrap();
+        store.create_note("Lecture 1", "", "cs130").unwrap();
         store.find_note_mut(&old).unwrap().updated_at -= chrono::Duration::days(30);
         store.find_note_mut(&old).unwrap().pinned = true;
         store.save().unwrap();
@@ -5194,12 +5127,8 @@ mod tests {
     #[test]
     fn a_save_leaves_an_unread_outside_edit_visible() {
         let (mut store, _tmp) = temp_store();
-        let a = store
-            .create_note("A", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("B", "two", vec![], "").unwrap();
+        let a = store.create_note("A", "one", "").unwrap().id.clone();
+        store.create_note("B", "two", "").unwrap();
         store.save().unwrap();
         let b = store.notes_dir.join("B.md");
         fs::write(
@@ -5217,26 +5146,10 @@ mod tests {
     #[test]
     fn a_save_that_writes_moves_and_trashes_notes_records_what_it_wrote() {
         let (mut store, _tmp) = temp_store();
-        let edited = store
-            .create_note("Edited", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        let renamed = store
-            .create_note("Renamed", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        let moved = store
-            .create_note("Moved", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        let trashed = store
-            .create_note("Trashed", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let edited = store.create_note("Edited", "x", "").unwrap().id.clone();
+        let renamed = store.create_note("Renamed", "x", "").unwrap().id.clone();
+        let moved = store.create_note("Moved", "x", "").unwrap().id.clone();
+        let trashed = store.create_note("Trashed", "x", "").unwrap().id.clone();
         store.save().unwrap();
         assert!(!store.changed_on_disk());
         store.find_note_mut(&edited).unwrap().body = "y".to_string();
@@ -5244,7 +5157,7 @@ mod tests {
         store.create_dir("Inner");
         store.move_note(&moved, "Inner").unwrap();
         store.delete_notes(std::slice::from_ref(&trashed));
-        store.create_note("Fresh", "x", vec![], "Inner").unwrap();
+        store.create_note("Fresh", "x", "Inner").unwrap();
         store.save().unwrap();
         assert!(!store.changed_on_disk(), "{:?}", note_files(&store));
         let reloaded = Store::load_from(&store.notes_dir).unwrap();
@@ -5254,11 +5167,7 @@ mod tests {
     #[test]
     fn a_title_changed_only_in_case_renames_its_file() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("apple", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("apple", "x", "").unwrap().id.clone();
         store.save().unwrap();
         store.find_note_mut(&id).unwrap().title = "Apple".to_string();
         store.save().unwrap();
@@ -5271,7 +5180,7 @@ mod tests {
     #[test]
     fn a_save_that_rewrites_only_the_folder_list_records_it() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Note", "x", vec![], "").unwrap();
+        store.create_note("Note", "x", "").unwrap();
         store.save().unwrap();
         store.create_dir("Empty");
         store.save().unwrap();
@@ -5349,12 +5258,12 @@ mod tests {
     #[test]
     fn a_save_leaves_notes_another_program_added_alone() {
         let (mut app, _tmp) = temp_store();
-        let mine = app.create_note("Mine", "", vec![], "").unwrap().id.clone();
+        let mine = app.create_note("Mine", "", "").unwrap().id.clone();
         app.save().unwrap();
 
         let mut phone = Store::load_from(&app.notes_dir).unwrap();
         let theirs = phone
-            .create_note("From the phone", "", vec![], "")
+            .create_note("From the phone", "", "")
             .unwrap()
             .id
             .clone();
@@ -5385,9 +5294,9 @@ mod tests {
     #[test]
     fn saving_rewrites_only_the_notes_that_changed() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "same", vec![], "").unwrap();
+        store.create_note("Kept", "same", "").unwrap();
         let edited = store
-            .create_note("Edited", "before", vec![], "")
+            .create_note("Edited", "before", "")
             .unwrap()
             .id
             .clone();
@@ -5420,12 +5329,8 @@ mod tests {
     #[test]
     fn saving_one_note_leaves_another_programs_edit_to_a_different_note_alone() {
         let (mut store, _tmp) = temp_store();
-        let mine = store
-            .create_note("Mine", "a", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("Theirs", "b", vec![], "").unwrap();
+        let mine = store.create_note("Mine", "a", "").unwrap().id.clone();
+        store.create_note("Theirs", "b", "").unwrap();
         store.save().unwrap();
         let theirs_file = store.notes_dir.join("Theirs.md");
         let edited = fs::read_to_string(&theirs_file)
@@ -5442,11 +5347,7 @@ mod tests {
     #[test]
     fn deleting_a_note_that_was_edited_elsewhere_keeps_the_edit() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "one", "").unwrap().id.clone();
         store.save().unwrap();
         let file = store.notes_dir.join("Shared.md");
         fs::write(
@@ -5468,11 +5369,7 @@ mod tests {
     fn test_save_handles_directory_move() {
         let (mut store, _tmp) = temp_store();
         store.create_dir("ideas");
-        let id = store
-            .create_note("Moving", "body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Moving", "body", "").unwrap().id.clone();
         store.save().unwrap();
         let root_file = store.notes_dir.join("Moving.md");
         assert!(root_file.exists());
@@ -5490,11 +5387,7 @@ mod tests {
     #[test]
     fn test_save_trashes_a_note_it_no_longer_has() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "body", "").unwrap().id.clone();
         store.save().unwrap();
         let file = store.notes_dir.join("Old.md");
 
@@ -5524,10 +5417,8 @@ mod tests {
     #[test]
     fn notes_are_saved_under_their_titles() {
         let (mut store, _tmp) = temp_store();
-        store
-            .create_note("Lecture 4", "BFS", vec![], "cs130")
-            .unwrap();
-        store.create_note("Reading list", "", vec![], "").unwrap();
+        store.create_note("Lecture 4", "BFS", "cs130").unwrap();
+        store.create_note("Reading list", "", "").unwrap();
         store.save().unwrap();
         assert_eq!(
             note_files(&store),
@@ -5538,16 +5429,8 @@ mod tests {
     #[test]
     fn notes_with_the_same_title_are_numbered_oldest_first() {
         let (mut store, _tmp) = temp_store();
-        let older = store
-            .create_note("Same", "first", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        let newer = store
-            .create_note("Same", "second", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let older = store.create_note("Same", "first", "").unwrap().id.clone();
+        let newer = store.create_note("Same", "second", "").unwrap().id.clone();
         store.find_note_mut(&newer).unwrap().created_at += chrono::Duration::seconds(5);
         store.save().unwrap();
 
@@ -5561,12 +5444,8 @@ mod tests {
     #[test]
     fn saving_again_changes_no_file_name() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Same", "a", vec![], "").unwrap();
-        let newer = store
-            .create_note("Same", "b", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        store.create_note("Same", "a", "").unwrap();
+        let newer = store.create_note("Same", "b", "").unwrap().id.clone();
         store.find_note_mut(&newer).unwrap().created_at += chrono::Duration::seconds(5);
         store.save().unwrap();
         let first = note_files(&store);
@@ -5582,7 +5461,7 @@ mod tests {
             "written by another program",
         )
         .unwrap();
-        store.create_note("Taken", "mine", vec![], "").unwrap();
+        store.create_note("Taken", "mine", "").unwrap();
         store.save().unwrap();
         assert_eq!(
             fs::read_to_string(store.notes_dir.join("Taken.md")).unwrap(),
@@ -5594,11 +5473,7 @@ mod tests {
     #[test]
     fn renaming_a_note_moves_its_file() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old title", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old title", "x", "").unwrap().id.clone();
         store.save().unwrap();
         store.find_note_mut(&id).unwrap().title = "New title".to_string();
         store.save().unwrap();
@@ -5608,11 +5483,7 @@ mod tests {
     #[test]
     fn a_rename_that_only_changes_case_leaves_one_file() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("lower", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("lower", "x", "").unwrap().id.clone();
         store.save().unwrap();
         store.find_note_mut(&id).unwrap().title = "Lower".to_string();
         store.save().unwrap();
@@ -5626,8 +5497,8 @@ mod tests {
     #[test]
     fn titles_that_differ_only_by_case_get_separate_files() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Notes", "a", vec![], "").unwrap();
-        store.create_note("notes", "b", vec![], "").unwrap();
+        store.create_note("Notes", "a", "").unwrap();
+        store.create_note("notes", "b", "").unwrap();
         store.save().unwrap();
         assert_eq!(note_files(&store).len(), 2, "{:?}", note_files(&store));
         assert_eq!(Store::load_from(&store.notes_dir).unwrap().notes.len(), 2);
@@ -5638,8 +5509,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("notes");
         fs::create_dir_all(dir.join("cs130")).unwrap();
-        let root = Note::new("Graphs", "BFS", vec![], "");
-        let nested = Note::new("Lecture", "DFS", vec![], "cs130");
+        let root = Note::new("Graphs", "BFS", "");
+        let nested = Note::new("Lecture", "DFS", "cs130");
         fs::write(
             dir.join(format!("{}.md", root.id)),
             note_to_markdown(&root).unwrap(),
@@ -5663,19 +5534,11 @@ mod tests {
     #[test]
     fn a_second_deleted_note_with_the_same_name_does_not_replace_the_first_in_the_trash() {
         let (mut store, _tmp) = temp_store();
-        let first = store
-            .create_note("Draft", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let first = store.create_note("Draft", "one", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&first));
         store.save().unwrap();
-        let second = store
-            .create_note("Draft", "two", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let second = store.create_note("Draft", "two", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&second));
         store.save().unwrap();
@@ -5949,11 +5812,7 @@ mod tests {
                 0..=2 => {
                     let title = titles[next(titles.len())];
                     let folder = folders[next(folders.len())];
-                    let id = store
-                        .create_note(title, "body", vec![], folder)
-                        .unwrap()
-                        .id
-                        .clone();
+                    let id = store.create_note(title, "body", folder).unwrap().id.clone();
                     store.save().unwrap();
                     store.delete_notes(&[id]);
                     store.save().unwrap();
@@ -6042,11 +5901,7 @@ mod tests {
     #[test]
     fn an_outside_edit_to_a_trashed_file_is_read_again() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Before", "body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Before", "body", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -6080,11 +5935,7 @@ mod tests {
     #[test]
     fn a_damaged_index_file_starts_empty_and_warns() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Kept", "body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Kept", "body", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -6104,7 +5955,7 @@ mod tests {
     fn a_restart_trusts_the_index_for_unchanged_files() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Real title", "body", vec![], "")
+            .create_note("Real title", "body", "")
             .unwrap()
             .id
             .clone();
@@ -6127,7 +5978,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Locked later", "body", vec![], "")
+            .create_note("Locked later", "body", "")
             .unwrap()
             .id
             .clone();
@@ -6148,11 +5999,7 @@ mod tests {
     #[test]
     fn deletions_always_check_the_trash_first() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old id", "body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old id", "body", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -6253,7 +6100,7 @@ mod tests {
         let mut findings = Vec::new();
         let mut damaged = Vec::new();
         let mut check = |title: &str, extra: &serde_yaml::Mapping, body: &str| {
-            let mut note = Note::new(title, body, vec![], "");
+            let mut note = Note::new(title, body, "");
             note.extra = extra.clone();
             let text = note_to_markdown(&note).unwrap();
             let relative = format!("{}.md", filename::file_name(title));
@@ -6340,11 +6187,7 @@ mod tests {
     fn the_stamp_fallback_rewrite_reads_back() {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Locked", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Locked", "x", "").unwrap().id.clone();
         store.save().unwrap();
         let path = store.notes_dir.join("Locked.md");
         fs::set_permissions(&path, fs::Permissions::from_mode(0o444)).unwrap();
@@ -6357,11 +6200,7 @@ mod tests {
     #[test]
     fn a_conflict_copy_reads_back() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "mine", vec![], "a")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "mine", "a").unwrap().id.clone();
         store.save().unwrap();
         let path = store.notes_dir.join("a/Shared.md");
         let theirs = fs::read_to_string(&path).unwrap().replace("mine", "theirs");
@@ -6377,7 +6216,7 @@ mod tests {
     fn a_restored_note_is_written_readable() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Back: again", "x", vec![], "a/b")
+            .create_note("Back: again", "x", "a/b")
             .unwrap()
             .id
             .clone();
@@ -6394,11 +6233,7 @@ mod tests {
     #[test]
     fn a_save_racing_an_outside_rename_leaves_every_file_readable() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Moving", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Moving", "x", "").unwrap().id.clone();
         store.save().unwrap();
         fs::rename(
             store.notes_dir.join("Moving.md"),
@@ -6413,11 +6248,7 @@ mod tests {
     #[test]
     fn an_outside_edit_mid_save_leaves_every_file_leo_wrote_readable() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Half", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Half", "x", "").unwrap().id.clone();
         store.save().unwrap();
         let path = store.notes_dir.join("Half.md");
         fs::write(&path, "---\ntitle: [\n---\nbody").unwrap();
@@ -6434,11 +6265,11 @@ mod tests {
     fn a_failed_write_leaves_no_partial_md() {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _tmp) = temp_store();
-        store.create_note("First", "x", vec![], "locked").unwrap();
+        store.create_note("First", "x", "locked").unwrap();
         store.save().unwrap();
         let locked = store.notes_dir.join("locked");
         fs::set_permissions(&locked, fs::Permissions::from_mode(0o500)).unwrap();
-        store.create_note("Second", "y", vec![], "locked").unwrap();
+        store.create_note("Second", "y", "locked").unwrap();
         let saved = store.save();
         let names: Vec<String> = fs::read_dir(&locked)
             .unwrap()
@@ -6480,7 +6311,7 @@ mod tests {
         let file = store.notes_dir.join("Plain.md");
         fs::write(&file, "from another app").unwrap();
         let mut store = Store::load_from(&store.notes_dir).unwrap();
-        store.create_note("Other", "x", vec![], "").unwrap();
+        store.create_note("Other", "x", "").unwrap();
         store.save().unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), "from another app");
     }
@@ -6660,11 +6491,7 @@ mod tests {
     #[test]
     fn a_rename_made_in_another_app_is_not_undone_by_a_save() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old name", "x", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old name", "x", "").unwrap().id.clone();
         store.save().unwrap();
         fs::rename(
             store.notes_dir.join("Old name.md"),
@@ -6674,7 +6501,7 @@ mod tests {
 
         let mut reloaded = Store::load_from(&store.notes_dir).unwrap();
         assert_eq!(reloaded.find_note(&id).unwrap().title, "New name");
-        reloaded.create_note("Other", "y", vec![], "").unwrap();
+        reloaded.create_note("Other", "y", "").unwrap();
         reloaded.save().unwrap();
 
         assert_eq!(note_files(&reloaded), ["New name.md", "Other.md"]);
@@ -6683,11 +6510,7 @@ mod tests {
     #[test]
     fn a_note_changed_elsewhere_and_edited_here_keeps_both_versions() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "one", "").unwrap().id.clone();
         store.save().unwrap();
         let file = store.notes_dir.join("Shared.md");
         fs::write(
@@ -6716,11 +6539,7 @@ mod tests {
     #[test]
     fn saving_again_does_not_pile_up_conflict_copies() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "one", "").unwrap().id.clone();
         store.save().unwrap();
         let file = store.notes_dir.join("Shared.md");
         fs::write(
@@ -6738,11 +6557,7 @@ mod tests {
     #[test]
     fn saving_after_a_conflict_keeps_one_copy_and_the_outside_edit() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "one", "").unwrap().id.clone();
         store.save().unwrap();
         let file = store.notes_dir.join("Shared.md");
         fs::write(
@@ -6773,12 +6588,12 @@ mod tests {
     #[test]
     fn a_note_changed_elsewhere_but_not_here_is_left_alone() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Shared", "one", vec![], "").unwrap();
+        store.create_note("Shared", "one", "").unwrap();
         store.save().unwrap();
         let file = store.notes_dir.join("Shared.md");
         let edited = fs::read_to_string(&file).unwrap().replace("one", "two");
         fs::write(&file, &edited).unwrap();
-        store.create_note("Unrelated", "x", vec![], "").unwrap();
+        store.create_note("Unrelated", "x", "").unwrap();
         store.save().unwrap();
         assert_eq!(fs::read_to_string(&file).unwrap(), edited);
         assert_eq!(note_files(&store).len(), 2);
@@ -6787,11 +6602,7 @@ mod tests {
     #[test]
     fn a_note_deleted_elsewhere_and_edited_here_comes_back_as_a_copy() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Shared", "one", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Shared", "one", "").unwrap().id.clone();
         store.save().unwrap();
         fs::remove_file(store.notes_dir.join("Shared.md")).unwrap();
         store.find_note_mut(&id).unwrap().body = "still writing".to_string();
@@ -6812,7 +6623,7 @@ mod tests {
     fn the_store_notices_another_programs_change_but_not_its_own_saves() {
         let (mut store, _tmp) = temp_store();
         assert!(!store.changed_on_disk());
-        store.create_note("Mine", "a", vec![], "").unwrap();
+        store.create_note("Mine", "a", "").unwrap();
         store.save().unwrap();
         assert!(
             !store.changed_on_disk(),
@@ -6829,7 +6640,7 @@ mod tests {
     #[test]
     fn refreshing_tidies_the_trash_at_most_hourly() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "a", vec![], "").unwrap();
+        store.create_note("Kept", "a", "").unwrap();
         store.save().unwrap();
         let trashed = store.notes_dir.join(".trash/Kept.md");
         fs::create_dir_all(trashed.parent().unwrap()).unwrap();
@@ -6849,7 +6660,7 @@ mod tests {
     fn a_note_duplicated_in_another_app_is_its_own_note_and_both_survive_a_save() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "the original", vec![], "")
+            .create_note("Lecture 4", "the original", "")
             .unwrap()
             .id
             .clone();
@@ -6889,7 +6700,7 @@ mod tests {
         let (mut store, _tmp) = temp_store();
         store.create_dir("locked");
         let id = store
-            .create_note("Moving", "body", vec![], "locked")
+            .create_note("Moving", "body", "locked")
             .unwrap()
             .id
             .clone();
@@ -6918,7 +6729,7 @@ mod tests {
     fn a_copy_with_the_same_mtime_leaves_the_original_its_id() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "the original", vec![], "")
+            .create_note("Lecture 4", "the original", "")
             .unwrap()
             .id
             .clone();
@@ -6951,7 +6762,7 @@ mod tests {
     fn editing_the_original_keeps_its_id_on_the_next_launch() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture 4", "the original", vec![], "")
+            .create_note("Lecture 4", "the original", "")
             .unwrap()
             .id
             .clone();
@@ -6986,9 +6797,7 @@ mod tests {
     #[test]
     fn a_deleted_copy_sharing_its_originals_id_waits_in_the_trash_and_comes_back() {
         let (mut store, _tmp) = temp_store();
-        store
-            .create_note("Lecture 4", "the original", vec![], "")
-            .unwrap();
+        store.create_note("Lecture 4", "the original", "").unwrap();
         store.save().unwrap();
         let original = store.notes_dir.join("Lecture 4.md");
         let copied_text = fs::read_to_string(&original)
@@ -7027,11 +6836,7 @@ mod tests {
     #[test]
     fn a_read_only_note_last_edited_long_ago_keeps_its_days_in_the_trash() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "keep me", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "keep me", "").unwrap().id.clone();
         store.save().unwrap();
         let path = store.notes_dir.join("Old.md");
         fs::File::options()
@@ -7117,7 +6922,7 @@ mod tests {
     fn changing_a_public_note_directory_is_checked_before_any_file_is_written() {
         let temp = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&temp.path().join("notes")).unwrap();
-        store.create_note("Escape", "body", vec![], "").unwrap();
+        store.create_note("Escape", "body", "").unwrap();
         store.notes[0].directory = "../outside".to_string();
         assert!(store.save().is_err());
         assert!(!temp.path().join("outside").exists());
@@ -7430,7 +7235,7 @@ mod tests {
             ("Windows lines", "one\r\ntwo\r\n"),
             ("Blank first", "\n\nafter blank lines"),
         ] {
-            store.create_note(title, body, vec![], "m").unwrap();
+            store.create_note(title, body, "m").unwrap();
         }
         store.save().unwrap();
         append(&file(14), "after leo saved");
@@ -7454,7 +7259,7 @@ mod tests {
     fn an_unchanged_stamp_is_not_read_again() {
         let (mut store, _d) = temp_store();
         let id = store
-            .create_note("Same size", "first text", vec![], "")
+            .create_note("Same size", "first text", "")
             .unwrap()
             .id
             .clone();
@@ -7513,11 +7318,7 @@ mod tests {
     #[test]
     fn a_note_keeps_its_file_when_its_path_is_spelled_another_way() {
         let (mut store, _d) = temp_store();
-        let id = store
-            .create_note("Kept", "a", vec![], "m/deep")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Kept", "a", "m/deep").unwrap().id.clone();
         store.save().unwrap();
         store.seen.borrow_mut().get_mut(&id).unwrap().path =
             Path::new("m").join(".").join("deep").join("Kept.md");
@@ -7529,11 +7330,7 @@ mod tests {
     #[test]
     fn a_note_changed_in_memory_is_read_again_on_refresh() {
         let (mut store, _d) = temp_store();
-        let id = store
-            .create_note("Kept", "on disk", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Kept", "on disk", "").unwrap().id.clone();
         store.save().unwrap();
         store.find_note_mut(&id).unwrap().body = "only in memory".to_string();
         store.refresh().unwrap();
@@ -7604,9 +7401,7 @@ mod tests {
     fn a_reader_given_everything_after_the_list_overflows_sees_every_change() {
         let (mut store, _d) = temp_store();
         for i in 0..MOST_LOGGED + 10 {
-            store
-                .create_note(format!("Note {i}"), "first", vec![], "")
-                .unwrap();
+            store.create_note(format!("Note {i}"), "first", "").unwrap();
         }
         let mut reader = Reader::default();
         assert!(reader.catch_up(&store));
@@ -7629,7 +7424,7 @@ mod tests {
     fn a_reader_that_never_looked_gets_everything() {
         let (mut store, _d) = temp_store();
         assert_eq!(store.changes_since(0).1, Changed::Everything);
-        store.create_note("One", "a", vec![], "").unwrap();
+        store.create_note("One", "a", "").unwrap();
         assert_eq!(store.changes_since(0).1, Changed::Everything);
     }
 
@@ -7637,7 +7432,7 @@ mod tests {
     fn a_cold_load_says_everything() {
         let (mut store, _d) = temp_store();
         for title in ["One", "Two", "Three"] {
-            store.create_note(title, "a", vec![], "").unwrap();
+            store.create_note(title, "a", "").unwrap();
         }
         store.save().unwrap();
         let (seen, changed) = store.changes_since(0);
@@ -7652,7 +7447,7 @@ mod tests {
     fn refresh_keeps_the_feed_and_adds_what_it_read() {
         let (mut store, _d) = temp_store();
         for title in ["One", "Two", "Three"] {
-            store.create_note(title, "a", vec![], "").unwrap();
+            store.create_note(title, "a", "").unwrap();
         }
         store.save().unwrap();
         let mut reader = Reader::default();
@@ -7881,7 +7676,7 @@ mod tests {
                 (13, _, _) => {
                     let gone = format!("gone{step}");
                     store
-                        .create_note(titles[next(titles.len())], "doomed", vec![], &gone)
+                        .create_note(titles[next(titles.len())], "doomed", &gone)
                         .unwrap();
                     agrees(&mut reader, &store, step);
                     store.save().unwrap();
@@ -7892,7 +7687,7 @@ mod tests {
                 }
                 _ => {
                     store
-                        .create_note(titles[next(titles.len())], "made", vec![], &folder)
+                        .create_note(titles[next(titles.len())], "made", &folder)
                         .unwrap();
                     agrees(&mut reader, &store, step);
                     store.save().unwrap();
@@ -7939,16 +7734,9 @@ mod tests {
     #[test]
     fn a_picture_is_counted_for_every_note_that_links_it() {
         let (mut store, _tmp) = picture_store();
+        store.create_note("A", linking(PICTURE), "").unwrap();
         store
-            .create_note("A", linking(PICTURE), vec![], "")
-            .unwrap();
-        store
-            .create_note(
-                "B",
-                format!("![[{}]]", PICTURE.to_uppercase()),
-                vec![],
-                "Course",
-            )
+            .create_note("B", format!("![[{}]]", PICTURE.to_uppercase()), "Course")
             .unwrap();
         store.save().unwrap();
         assert_eq!(store.picture_owners(PICTURE), 2);
@@ -7959,11 +7747,11 @@ mod tests {
     fn a_picture_follows_its_note_into_the_trash_and_back() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -7986,11 +7774,11 @@ mod tests {
     fn deleting_a_note_for_good_makes_its_picture_due_now() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8005,16 +7793,16 @@ mod tests {
     fn a_shared_picture_waits_for_its_last_owner() {
         let (mut store, _tmp) = picture_store();
         let a = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
         let b = store
-            .create_note("B", linking(PICTURE), vec![], "")
+            .create_note("B", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(&[a.clone(), b.clone()]);
         store.save().unwrap();
@@ -8034,7 +7822,7 @@ mod tests {
         let (mut store, _tmp) = picture_store();
         fs::remove_file(store.notes_dir.join("attachments").join(OTHER)).unwrap();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
@@ -8068,7 +7856,7 @@ mod tests {
         let (mut store, _tmp) = picture_store();
         fs::remove_file(store.notes_dir.join("attachments").join(OTHER)).unwrap();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
@@ -8098,11 +7886,11 @@ mod tests {
     fn the_picture_counts_survive_a_reload() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8132,9 +7920,9 @@ mod tests {
     #[test]
     fn reconcile_adds_a_trashed_file_it_did_not_know_and_releases_a_vanished_one() {
         let (mut store, _tmp) = picture_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         let gone = store
-            .create_note("Gone", linking(OTHER), vec![], "")
+            .create_note("Gone", linking(OTHER), "")
             .unwrap()
             .id
             .clone();
@@ -8183,7 +7971,7 @@ mod tests {
     #[test]
     fn a_trashed_file_with_an_unreadable_head_stops_the_picture_pass() {
         let (mut store, _tmp) = picture_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         trashed_file(&store, "Broken.md", "---\ntitle: [unclosed\n---\nbody\n");
         assert_eq!(
@@ -8199,10 +7987,8 @@ mod tests {
     #[test]
     fn a_refresh_keeps_the_counts_of_unchanged_files() {
         let (mut store, _tmp) = picture_store();
-        store
-            .create_note("A", linking(PICTURE), vec![], "")
-            .unwrap();
-        store.create_note("B", linking(OTHER), vec![], "").unwrap();
+        store.create_note("A", linking(PICTURE), "").unwrap();
+        store.create_note("B", linking(OTHER), "").unwrap();
         store.save().unwrap();
         fs::write(
             store.notes_dir.join("B.md"),
@@ -8227,9 +8013,9 @@ mod tests {
     fn an_unreadable_trash_folder_keeps_its_notes_and_stops_picture_deletion() {
         use std::os::unix::fs::PermissionsExt;
         let (mut store, _tmp) = picture_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         let id = store
-            .create_note("Deep", linking(PICTURE), vec![], "course")
+            .create_note("Deep", linking(PICTURE), "course")
             .unwrap()
             .id
             .clone();
@@ -8264,15 +8050,10 @@ mod tests {
     fn a_picture_named_in_front_matter_or_html_or_a_plain_link_is_counted() {
         let (mut store, _tmp) = picture_store();
         store
-            .create_note(
-                "Html",
-                format!("<img src=\"attachments/{PICTURE}\">"),
-                vec![],
-                "",
-            )
+            .create_note("Html", format!("<img src=\"attachments/{PICTURE}\">"), "")
             .unwrap();
         store
-            .create_note("Plain", format!("[see](attachments/{OTHER})"), vec![], "")
+            .create_note("Plain", format!("[see](attachments/{OTHER})"), "")
             .unwrap();
         store.save().unwrap();
         fs::write(
@@ -8289,7 +8070,7 @@ mod tests {
     fn a_clock_that_jumps_forward_does_not_ripen_a_picture() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
@@ -8319,7 +8100,7 @@ mod tests {
     fn a_link_put_back_outside_leo_takes_the_picture_off_the_trash_at_once() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
@@ -8339,8 +8120,8 @@ mod tests {
     #[test]
     fn a_keeping_file_leo_cannot_read_expires_nothing() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        let id = store.create_note("Old", "", "").unwrap().id.clone();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8360,12 +8141,12 @@ mod tests {
     fn a_note_removed_outside_leo_is_gone_only_while_its_folder_is_still_there() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Lecture", "", vec![], "course")
+            .create_note("Lecture", "", "course")
             .unwrap()
             .id
             .clone();
-        store.create_note("Kept", "", vec![], "course").unwrap();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Kept", "", "course").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         assert!(store.confirmed_gone().is_empty());
         fs::remove_file(store.notes_dir.join("course/Lecture.md")).unwrap();
@@ -8413,7 +8194,7 @@ mod tests {
     #[test]
     fn a_note_that_comes_back_or_was_only_renamed_is_never_gone() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         fs::write(store.notes_dir.join("Plain.md"), "no header here\n").unwrap();
         store.refresh().unwrap();
@@ -8460,12 +8241,8 @@ mod tests {
     #[test]
     fn a_departure_keeps_the_device_seen_while_the_note_existed() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Removed", "", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        let id = store.create_note("Removed", "", "").unwrap().id.clone();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         let current = device_of(&store.notes_dir).unwrap();
         store.seen.get_mut().get_mut(&id).unwrap().device = Some(current.wrapping_add(1));
@@ -8486,11 +8263,7 @@ mod tests {
     #[test]
     fn a_note_enters_trash_at_the_current_observed_time() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Removed", "", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Removed", "", "").unwrap().id.clone();
         store.save().unwrap();
         store.trash_snapshot();
         store
@@ -8511,11 +8284,7 @@ mod tests {
     #[test]
     fn a_divergent_trash_copy_survives_even_when_its_id_is_live() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "Original", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "Original", "").unwrap().id.clone();
         store.save().unwrap();
         let path = store.notes_dir.join("Old.md");
         let original = fs::read_to_string(&path).unwrap();
@@ -8533,11 +8302,7 @@ mod tests {
     #[test]
     fn an_incomplete_trash_scan_never_expires_known_paths() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "Original", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "Original", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8555,11 +8320,7 @@ mod tests {
     #[test]
     fn a_trash_replacement_with_the_indexed_stamp_does_not_expire() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "old body", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "old body", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8579,11 +8340,7 @@ mod tests {
     #[test]
     fn automatic_expiry_keeps_a_trashed_note_with_an_unreadable_body() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Old", "Original", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Old", "Original", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8599,8 +8356,8 @@ mod tests {
     #[test]
     fn a_clock_that_jumps_forward_expires_no_trashed_note() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        let id = store.create_note("Old", "", "").unwrap().id.clone();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8632,8 +8389,8 @@ mod tests {
     #[test]
     fn a_trash_choice_leo_does_not_offer_expires_nothing() {
         let (mut store, _tmp) = temp_store();
-        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        let id = store.create_note("Old", "", "").unwrap().id.clone();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
@@ -8666,7 +8423,7 @@ mod tests {
     fn an_unlinked_picture_waits_in_the_trash_and_comes_back_when_linked() {
         let (mut store, _tmp) = picture_store();
         let id = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
@@ -8728,16 +8485,16 @@ mod tests {
     fn only_a_deletion_the_person_asked_for_lets_a_picture_go_in_one_step() {
         let (mut store, _tmp) = picture_store();
         let a = store
-            .create_note("A", linking(PICTURE), vec![], "")
+            .create_note("A", linking(PICTURE), "")
             .unwrap()
             .id
             .clone();
         let b = store
-            .create_note("B", linking(OTHER), vec![], "")
+            .create_note("B", linking(OTHER), "")
             .unwrap()
             .id
             .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         store.delete_notes(&[a.clone(), b.clone()]);
         store.save().unwrap();
@@ -8763,28 +8520,16 @@ mod tests {
     #[test]
     fn a_folder_left_empty_as_by_an_unplugged_disk_ages_none_of_its_notes() {
         let (mut store, _tmp) = temp_store();
-        let a = store
-            .create_note("A", "", vec![], "drive")
-            .unwrap()
-            .id
-            .clone();
-        let b = store
-            .create_note("B", "", vec![], "drive")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("Other", "", vec![], "").unwrap();
+        let a = store.create_note("A", "", "drive").unwrap().id.clone();
+        let b = store.create_note("B", "", "drive").unwrap().id.clone();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         fs::remove_file(store.notes_dir.join("drive/A.md")).unwrap();
         fs::remove_file(store.notes_dir.join("drive/B.md")).unwrap();
         store.refresh().unwrap();
         let gone = store.confirmed_gone();
         assert!(!gone.contains(&a) && !gone.contains(&b), "{gone:?}");
-        let c = store
-            .create_note("C", "", vec![], "drive")
-            .unwrap()
-            .id
-            .clone();
+        let c = store.create_note("C", "", "drive").unwrap().id.clone();
         store.save().unwrap();
         store.refresh().unwrap();
         assert!(
@@ -8810,7 +8555,7 @@ mod tests {
     fn a_trashed_note_replaced_while_it_is_hashed_is_kept() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Gone soon", "old", vec![], "")
+            .create_note("Gone soon", "old", "")
             .unwrap()
             .id
             .clone();
@@ -8844,9 +8589,7 @@ mod tests {
     #[test]
     fn a_hidden_copy_survives_an_edit_during_its_final_verification() {
         let (mut store, _tmp) = temp_store();
-        store
-            .create_note("Double", "original text", vec![], "")
-            .unwrap();
+        store.create_note("Double", "original text", "").unwrap();
         store.save().unwrap();
         let live = store.notes_dir.join("Double.md");
         let trash = store.notes_dir.join(".trash/Double.md");
@@ -8866,11 +8609,7 @@ mod tests {
     #[test]
     fn a_synced_clock_cannot_age_a_local_trash_entry_on_restart() {
         let (mut store, _tmp) = temp_store();
-        let id = store
-            .create_note("Local", "", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Local", "", "").unwrap().id.clone();
         store.save().unwrap();
         store.delete_notes(&[id]);
         store.save().unwrap();
@@ -8887,7 +8626,7 @@ mod tests {
     fn a_hidden_trash_copy_starts_its_clock_when_its_note_leaves() {
         let (mut store, _tmp) = temp_store();
         let id = store
-            .create_note("Kept", "live text", vec![], "")
+            .create_note("Kept", "live text", "")
             .unwrap()
             .id
             .clone();
@@ -8916,7 +8655,7 @@ mod tests {
     #[test]
     fn two_generations_first_seen_in_the_trash_mark_their_id_reused() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Live", "", vec![], "").unwrap();
+        store.create_note("Live", "", "").unwrap();
         store.save().unwrap();
         let id = "a1b2c3d4-0000-4000-8000-0000000000aa";
         let trash = store.notes_dir.join(".trash");
@@ -8940,7 +8679,7 @@ mod tests {
     #[test]
     fn an_outside_edit_never_marks_a_note_reused() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Kept", "first", vec![], "").unwrap();
+        store.create_note("Kept", "first", "").unwrap();
         store.save().unwrap();
         let id = store.notes[0].id.clone();
         let file = store.notes_dir.join("Kept.md");
@@ -8967,7 +8706,7 @@ mod tests {
     #[test]
     fn an_edited_headerless_note_moved_to_another_folder_is_unresolved() {
         let (mut store, _dir) = temp_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         let original = store.notes_dir.join("Loose.md");
         fs::write(&original, "First version").unwrap();
@@ -8991,7 +8730,7 @@ mod tests {
     #[test]
     fn a_headerless_note_renamed_and_edited_in_one_refresh_is_never_gone() {
         let (mut store, _tmp) = temp_store();
-        store.create_note("Other", "", vec![], "").unwrap();
+        store.create_note("Other", "", "").unwrap();
         store.save().unwrap();
         fs::write(store.notes_dir.join("Plain.md"), "first words\n").unwrap();
         store.refresh().unwrap();
@@ -9011,9 +8750,7 @@ mod tests {
     #[test]
     fn a_batch_keeps_the_picture_list_once_at_its_end() {
         let (mut store, _tmp) = picture_store();
-        store
-            .create_note("A", linking(PICTURE), vec![], "")
-            .unwrap();
+        store.create_note("A", linking(PICTURE), "").unwrap();
         store.save().unwrap();
         let kept = pictures_path(&store.notes_dir).unwrap();
         let _ = fs::remove_file(&kept);

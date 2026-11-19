@@ -153,7 +153,7 @@ mod tests {
     use chrono::{Duration, Utc};
 
     fn note(title: &str, edited_days_ago: i64, created_days_ago: i64) -> Note {
-        let mut n = Note::new(title, "", vec![], "");
+        let mut n = Note::new(title, "", "");
         n.updated_at = Utc::now() - Duration::days(edited_days_ago);
         n.created_at = Utc::now() - Duration::days(created_days_ago);
         n

@@ -60,15 +60,12 @@ fn library(n: usize, big: bool) -> (tempfile::TempDir, Store) {
             .create_note(
                 format!("Lecture {i} {}", WORDS[i % WORDS.len()]),
                 body_for(i),
-                vec![],
                 &directory,
             )
             .unwrap();
     }
     if big {
-        store
-            .create_note("Big", big_body(), vec![], "Course 0")
-            .unwrap();
+        store.create_note("Big", big_body(), "Course 0").unwrap();
     }
     store.save().unwrap();
     let store = Store::load_from(&notes_dir).unwrap();

@@ -87,12 +87,8 @@ mod tests {
     fn a_renamed_note_is_found_by_its_new_title_only() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        let id = store
-            .create_note("Graphs", "", vec![], "")
-            .unwrap()
-            .id
-            .clone();
-        store.create_note("Trees", "", vec![], "").unwrap();
+        let id = store.create_note("Graphs", "", "").unwrap().id.clone();
+        store.create_note("Trees", "", "").unwrap();
         store.save().unwrap();
         let titles = Titles::default();
         assert_eq!(titles.exact(&store, "graphs").unwrap().id, id);
@@ -106,8 +102,8 @@ mod tests {
     fn two_notes_with_one_title_give_the_first() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        store.create_note("Week one", "a", vec![], "A").unwrap();
-        store.create_note("week ONE", "b", vec![], "B").unwrap();
+        store.create_note("Week one", "a", "A").unwrap();
+        store.create_note("week ONE", "b", "B").unwrap();
         store.save().unwrap();
         let scanned = store
             .notes
@@ -126,7 +122,7 @@ mod tests {
     fn a_table_out_of_step_with_the_notes_is_never_believed() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
+        let id = store.create_note("Old", "", "").unwrap().id.clone();
         store.save().unwrap();
         let titles = Titles::default();
         let table = titles.of(&store);

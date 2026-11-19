@@ -153,7 +153,7 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     const noteHash = id => '#/n/' + encodeURIComponent(id);
     ${core.slice(core.indexOf('const SEARCH_HIGHLIGHT_MS'), core.indexOf('async function go('))}
     const source = {}, chat = {setContext() {}};
-    const saving = {open(note) {return {note, edit: {...note, tags: []}}}};
+    const saving = {open(note) {return {note, edit: {...note}}}};
     const chrome = () => {}, arriveOnPage = () => {}, drawOriginals = () => {}, hideAskFloat = () => {}, restoreReading = () => {}, drawRelated = () => {}, placeAskFloat = () => {};
     const swap = (_key, draw) => draw(), scrollToTop = () => window.scrollTo(0, 0);
     const marginLoadPrefs = async () => {}, marginMount = async () => {}, marginEdited = () => {}, marginIdle = fn => setTimeout(fn, 0), fail = error => { throw error; };

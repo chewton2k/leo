@@ -475,7 +475,6 @@ pub(crate) fn bench_library(n: usize) -> (tempfile::TempDir, Store) {
             .create_note(
                 format!("Lecture {i} {}", WORDS[i % WORDS.len()]),
                 body,
-                vec![],
                 &format!("Course {}", i % 20),
             )
             .unwrap();
@@ -499,7 +498,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         for (title, body) in notes {
-            store.create_note(*title, *body, vec![], "").unwrap();
+            store.create_note(*title, *body, "").unwrap();
         }
         store.save().unwrap();
         let index = SearchIndex::for_notes(&store.notes_dir);
@@ -609,7 +608,7 @@ mod tests {
         );
         assert_eq!(through(&index, &store, "minimum")[0].0, "Heaps");
         store
-            .create_note("Graphs", "A graph has an edge.", vec![], "")
+            .create_note("Graphs", "A graph has an edge.", "")
             .unwrap();
         store.save().unwrap();
         catch_up(&index, &store);
@@ -655,9 +654,7 @@ mod tests {
     fn a_search_before_the_index_caught_up_uses_the_old_path_and_finds_the_note() {
         let (_d, mut store, index) = library(&[("Heaps", "minimum")]);
         catch_up(&index, &store);
-        store
-            .create_note("Late", "minimum arrived", vec![], "")
-            .unwrap();
+        store.create_note("Late", "minimum arrived", "").unwrap();
         store.save().unwrap();
         let candidates = index.for_query("arrived");
         let usable = candidates.as_ref().filter(|c| c.usable(&store));
@@ -730,9 +727,7 @@ mod tests {
         catch_up(&index, &store);
         let candidates = index.for_query("minimum").unwrap();
         assert!(candidates.usable(&store));
-        store
-            .create_note("New", "minimum again", vec![], "")
-            .unwrap();
+        store.create_note("New", "minimum again", "").unwrap();
         store.save().unwrap();
         catch_up(&index, &store);
         assert!(!candidates.usable(&store));
