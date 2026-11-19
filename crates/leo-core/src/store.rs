@@ -5894,7 +5894,7 @@ mod tests {
             }
             assert_eq!(listed(&store), read_in_full(&store), "step {step}");
         }
-        assert!(notes.join(".leo").join(TRASH_INDEX).exists());
+        assert!(trash_index_path(&notes).unwrap().exists());
     }
 
     #[test]
@@ -5939,7 +5939,7 @@ mod tests {
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
         assert_eq!(store.trashed().len(), 1);
-        let index = store.notes_dir.join(".leo").join(TRASH_INDEX);
+        let index = trash_index_path(&store.notes_dir).unwrap();
         fs::write(&index, "{ not the index").unwrap();
         let again = Store::load_from(&store.notes_dir).unwrap();
         assert_eq!(listed(&again), read_in_full(&again));
@@ -5962,7 +5962,7 @@ mod tests {
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
         assert_eq!(store.trashed().len(), 1);
-        let index = store.notes_dir.join(".leo").join(TRASH_INDEX);
+        let index = trash_index_path(&store.notes_dir).unwrap();
         let mut kept: serde_json::Value =
             serde_json::from_slice(&fs::read(&index).unwrap()).unwrap();
         kept[1][0][1]["head"]["title"] = "Only in the index".into();
