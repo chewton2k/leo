@@ -1335,6 +1335,8 @@ keys and downloaded runtimes stay untouched.
   the "on a phone" test in flows.spec.js. There is no visual suite.
 - Fixture specs (boards.spec.js, calendar.spec.js) run the real CSS and page code
   over an in-memory API; flows.spec.js joins the page to the real routes.
+  The manual search paging test disables the scroll observer in the signed-in
+  document before changing the hash and moves its fixture notes to trash in one request.
 
 The note API preserves the preexisting version hash for ordinary notes after removing the unused tags field.
 

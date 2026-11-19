@@ -882,15 +882,16 @@ test('search reads a page at a time and Show more asks for the next page', async
   test.slow();
   const word = `zzpaged${Date.now().toString(36)}${test.info().project.name.replace(/\W/g, '')}`;
   const ids = [];
-  for (let n = 0; n < 130; n++) {
-    const note = await (await page.request.post('/api/notes', { data: { title: `${word} ${n}`, body: `${word} note ${n}` } })).json();
-    ids.push(note.id);
-  }
-  await page.addInitScript(() => { delete window.IntersectionObserver; });
-  const asked = [];
-  page.on('request', (request) => { if (request.url().includes('/api/search')) asked.push(new URL(request.url()).searchParams); });
   try {
+    for (let n = 0; n < 130; n++) {
+      const note = await (await page.request.post('/api/notes', { data: { title: `${word} ${n}`, body: `${word} note ${n}` } })).json();
+      ids.push(note.id);
+    }
+    await page.evaluate(() => { delete window.IntersectionObserver; });
+    const asked = [];
+    page.on('request', (request) => { if (request.url().includes('/api/search')) asked.push(new URL(request.url()).searchParams); });
     await page.goto(`/#/search/${word}`);
+    expect(await page.evaluate(() => typeof window.IntersectionObserver)).toBe('undefined');
     const cards = page.locator('#app .cards .card');
     await expect(cards).toHaveCount(60);
     await expect(page.locator('#search-count')).toHaveText('60 notes so far');
@@ -906,7 +907,9 @@ test('search reads a page at a time and Show more asks for the next page', async
     expect(asked.map((params) => params.get('offset'))).toEqual(['0', '60', '120']);
     expect(asked.every((params) => params.get('limit') === '61')).toBe(true);
   } finally {
-    for (const id of ids) await page.request.delete(`/api/notes/${id}`);
+    if (ids.length) {
+      await expect(await page.request.post('/api/trash/move', { data: { notes: ids } })).toBeOK();
+    }
   }
 });
 
