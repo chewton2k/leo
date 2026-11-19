@@ -2086,7 +2086,26 @@ mod rewriting {
 
     #[test]
     fn an_uncached_handle_stops_the_rewrite() {
-        let _one = hooks::Clear;
+        let output = leo_core::children::quiet_command(std::env::current_exe().unwrap())
+            .args([
+                "db::rewriting::checks_rewrite_when_the_cache_is_full",
+                "--ignored",
+                "--exact",
+                "--test-threads=1",
+            ])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    #[ignore = "started by an_uncached_handle_stops_the_rewrite"]
+    fn checks_rewrite_when_the_cache_is_full() {
         let dir = tempfile::tempdir().unwrap();
         let filling: Vec<Arc<Db>> = (0..MOST_OPEN + 4)
             .map(|i| {
