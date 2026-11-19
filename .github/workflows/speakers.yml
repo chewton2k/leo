@@ -56,6 +56,8 @@ jobs:
           mkdir speaker-check
           cp "$check" speaker-check/check
           cp target/debug/leo-test-server speaker-check/leo-test-server
+      - name: Prepare the shared meeting fixture
+        run: python3 -I scripts/speaker_check.py --meeting speaker-check/meeting
       - uses: actions/upload-artifact@v6
         with:
           name: speaker-check
@@ -81,14 +83,14 @@ jobs:
           name: speaker-check
           path: speaker-check
       - run: chmod +x speaker-check/check speaker-check/leo-test-server
-      - name: Download the model, the speaker model and a meeting
-        run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL" "$RUNNER_TEMP/meeting"
+      - name: Download the model and speaker model
+        run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL"
       - name: Label a seven-minute meeting
         env:
           LEO_HOME: ${{ runner.temp }}/home
-          LEO_SPEAKER_AUDIO: ${{ runner.temp }}/meeting/meeting.wav
-          LEO_SPEAKER_TRUTH: ${{ runner.temp }}/meeting/meeting.rttm
-          LEO_SPEAKER_WORDS: ${{ runner.temp }}/meeting/meeting.txt
+          LEO_SPEAKER_AUDIO: ${{ github.workspace }}/speaker-check/meeting/meeting.wav
+          LEO_SPEAKER_TRUTH: ${{ github.workspace }}/speaker-check/meeting/meeting.rttm
+          LEO_SPEAKER_WORDS: ${{ github.workspace }}/speaker-check/meeting/meeting.txt
         shell: bash
         working-directory: crates/leo-services
         run: |
