@@ -194,6 +194,13 @@ pub fn write_atomic_with(
 pub fn open_regular(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
+    open_regular_with(path, options)
+}
+
+pub(crate) fn open_regular_with(
+    path: &std::path::Path,
+    mut options: std::fs::OpenOptions,
+) -> std::io::Result<std::fs::File> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;

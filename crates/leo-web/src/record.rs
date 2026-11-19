@@ -1117,7 +1117,6 @@ pub(crate) async fn snapshot(
 ) -> Response {
     use base64::Engine;
     writes_done(&state, &id).await;
-    let notes = state.notes_dir.clone();
     let input = with_job(&state, &id, |job| -> anyhow::Result<_> {
         anyhow::ensure!(job.live(), "Start a recording before pasting a screenshot.");
         Ok((Writing::take(job)?, body.at.min(job.view.secs)))
@@ -1126,6 +1125,12 @@ pub(crate) async fn snapshot(
         Ok(Ok(input)) => input,
         Ok(Err(problem)) => return error(StatusCode::CONFLICT, problem.to_string()),
         Err((status, problem)) => return error(status, problem),
+    };
+    let Ok(notes) = state.read_store(|store| Ok(store.notes_dir.clone())).await else {
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The notes folder could not be checked. Try pasting the screenshot again.",
+        );
     };
     let saved = tokio::task::spawn_blocking(move || -> Result<Kept> {
         let _lease = lease;

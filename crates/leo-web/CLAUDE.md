@@ -1259,6 +1259,7 @@ a modal.
   the task and board writer locks belong to each library, never the process. Keeping's
   age-based expiry (uploads, transcripts, unfinished and kept audio, backups) is the
   person's own choice and is not under this rule.
+- Recording snapshots take the picture destination from the loaded notes store. The request only supplies the image and recording metadata.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
   Held originals and transcripts are included when Trash and Uploads are selected.
   Restore tasks refuses a zip or file without task ids. An export has no item or size limit

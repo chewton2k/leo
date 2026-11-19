@@ -139,6 +139,7 @@ pub fn save_from(notes_dir: &Path, name: &str, head: &[u8], mut rest: impl Read)
         .and_then(|()| temp.as_file().sync_all())
         .with_context(|| format!("could not write {name}"))?;
     let digest: crate::paths::FileDigest = hash.finalize().into();
+    let dir = crate::paths::contained_path(notes_dir, Path::new(DIR))?;
     let base = format!(
         "{}-{}",
         chrono::Local::now().format("%Y%m%d-%H%M%S"),
@@ -151,15 +152,16 @@ pub fn save_from(notes_dir: &Path, name: &str, head: &[u8], mut rest: impl Read)
             format!("{base}-{n}.{extension}")
         };
         let path = dir.join(&file);
-        match temp.persist_noclobber(&path) {
-            Ok(_) => {}
+        let saved = match temp.persist_noclobber(&path) {
+            Ok(saved) => saved,
             Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {
                 temp = e.file;
                 continue;
             }
             Err(e) => return Err(e.error).with_context(|| format!("could not write {name}")),
-        }
-        let recorded = std::fs::metadata(&path)
+        };
+        let recorded = saved
+            .metadata()
             .map_err(anyhow::Error::from)
             .and_then(|meta| record_made(notes_dir, &file, &meta, digest));
         if let Err(e) = recorded {
@@ -379,14 +381,29 @@ fn record_made(
     digest: crate::paths::FileDigest,
 ) -> Result<()> {
     let _held = LEDGER.lock().unwrap_or_else(|e| e.into_inner());
-    let path = ledger(notes_dir)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+    let root = notes_dir.canonicalize()?;
+    let folder = crate::paths::contained_path(&root, Path::new(".leo"))?;
+    if !folder.starts_with(&root) {
+        bail!("leo could not verify the picture ledger directory");
     }
-    let mut out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)?;
+    match std::fs::create_dir(&folder) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+        Err(error) => return Err(error.into()),
+    }
+    let parent = folder.canonicalize()?;
+    if !parent.starts_with(&root)
+        || parent.parent() != Some(root.as_path())
+        || !parent
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".leo"))
+    {
+        bail!("leo could not verify the picture ledger directory");
+    }
+    let path = crate::paths::contained_path(&parent, Path::new(MADE))?;
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true).append(true);
+    let mut out = crate::paths::open_regular_with(&path, options)?;
     let (len, modified) = written(meta);
     let digest = crate::paths::digest_text(&digest);
     out.write_all(format!("{file}\t{len}\t{modified}\t{digest}\n").as_bytes())?;
@@ -585,6 +602,39 @@ mod tests {
         assert_eq!(&written[..PNG.len()], PNG);
         assert!(written[PNG.len()..].iter().all(|b| *b == 7));
         assert_eq!(files_in(dir.path()).len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_picture_save_refuses_a_folder_linked_during_upload() {
+        let library = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let attachments = library.path().join(DIR);
+        let moved = outside.path().join(DIR);
+        struct Finishing<F>(Option<F>);
+
+        impl<F: FnOnce()> Read for Finishing<F> {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                if let Some(finish) = self.0.take() {
+                    finish();
+                }
+                Ok(0)
+            }
+        }
+
+        let changed = Finishing(Some(|| {
+            std::fs::rename(&attachments, &moved).unwrap();
+            std::os::unix::fs::symlink(&moved, &attachments).unwrap();
+        }));
+        let saved = save_from(library.path(), "picture.png", PNG, changed);
+        assert!(saved.is_err(), "leo published a picture through a link");
+        assert!(std::fs::read_dir(&moved).unwrap().all(|entry| {
+            entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".tmp")
+        }));
     }
 
     #[test]

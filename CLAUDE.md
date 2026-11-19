@@ -138,7 +138,10 @@ settings and credentials are excluded from note exports.
   once. A picture is leo's while it matches the
   SHA-256 digest (with size and time) recorded when leo saved it (`<notes>/.leo/pictures-made`); older ones
   are listed on the Trash page as "Pictures no note uses", deleted only when asked.
-  When leo is not sure, it keeps the file. Counts and clock live beside the local trash index. A hidden copy goes only while the verified live file still has the same stamp.
+  Picture uploads check the attachment folder again before publishing, and record
+  metadata from the published file handle. The ledger stays under the resolved
+  notes folder and opens without following a link. When leo is not sure, it keeps
+  the file. Counts and clock live beside the local trash index. A hidden copy goes only while the verified live file still has the same stamp.
 - Updates: the app's signed updater is the only update path
   (`crates/leo-desktop/src/updates.rs`; `leo update` removed 2026-11-17).
   `LEO_NO_UPDATE_CHECK=1` disables its automatic check (e2e and the browser
