@@ -375,9 +375,8 @@ fn undoing_a_combine_of_1001_recordings_works() {
     let notes = state.fresh().notes_dir.clone();
     leo_core::recording::save(&notes, &ids[0], &transcript("session-graphs")).unwrap();
     leo_core::recording::save(&notes, &ids[1], &transcript("session-bfs00")).unwrap();
-    leo_core::recording::copy_to(&notes, &ids[1], &ids[0], "BFS").unwrap();
-    let dir = leo_core::recording::folder(&notes, &ids[0]).unwrap();
-    let mut head = leo_core::recording::head(&notes, &ids[0], "session-bfs00").unwrap();
+    let dir = leo_core::recording::folder(&notes, &ids[1]).unwrap();
+    let mut head = leo_core::recording::head(&notes, &ids[1], "session-bfs00").unwrap();
     for n in 1..1001 {
         head.id = format!("session-bfs{n:04}");
         std::fs::write(
@@ -393,6 +392,19 @@ fn undoing_a_combine_of_1001_recordings_works() {
             .unwrap();
         }
     }
+    let (base, with_base) = {
+        let store = state.fresh();
+        (
+            crate::routes::notes::version_of(store.find_note(&ids[0]).unwrap()),
+            crate::routes::notes::version_of(store.find_note(&ids[1]).unwrap()),
+        )
+    };
+    let saved = keep(
+        &state,
+        &ids[0],
+        serde_json::json!({ "with": ids[1], "body": "Both.", "base": base, "with_base": with_base }),
+    );
+    assert_eq!(saved.status(), StatusCode::OK);
     assert_eq!(
         leo_core::recording::list(&notes, &ids[0]).unwrap().len(),
         1002
@@ -408,7 +420,10 @@ fn undoing_a_combine_of_1001_recordings_works() {
         left.iter().map(|h| h.id.as_str()).collect::<Vec<_>>(),
         ["session-graphs"]
     );
-    assert_eq!(leo_core::recording::list(&notes, &ids[1]).unwrap().len(), 1);
+    assert_eq!(
+        leo_core::recording::list(&notes, &ids[1]).unwrap().len(),
+        1001
+    );
 }
 
 fn echoing(state: &mut AppState, asked: &Arc<std::sync::atomic::AtomicUsize>) {

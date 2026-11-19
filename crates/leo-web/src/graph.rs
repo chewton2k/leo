@@ -966,6 +966,25 @@ impl Graphs {
             .unwrap_or_default()
     }
 
+    fn read_back(&self, cache: &mut Cache, sources: &[Source]) {
+        let _ = self.db.with(|c| {
+            let mut found = c.prepare_cached("SELECT data FROM graph_notes WHERE id = ?1")?;
+            let missing: Vec<&Source> = sources
+                .iter()
+                .filter(|s| !cache.notes.contains_key(&s.id))
+                .collect();
+            for source in missing {
+                let data: Option<String> = rusqlite::OptionalExtension::optional(
+                    found.query_row([&source.id], |r| r.get(0)),
+                )?;
+                if let Some(read) = data.and_then(|data| serde_json::from_str::<Read>(&data).ok()) {
+                    cache.notes.insert(source.id.clone(), read);
+                }
+            }
+            Ok(())
+        });
+    }
+
     fn save(&self, cache: &Cache) -> Result<()> {
         self.write_all(cache, false)
     }
@@ -988,9 +1007,6 @@ impl Graphs {
                         [id, &data],
                     )?;
                 }
-            }
-            for id in stored.keys().filter(|id| !cache.notes.contains_key(*id)) {
-                tx.execute("DELETE FROM graph_notes WHERE id = ?1", [id])?;
             }
             tx.execute("DELETE FROM graph_links", [])?;
             for (n, link) in cache.links.iter().enumerate() {
@@ -1168,6 +1184,7 @@ impl Graphs {
             return;
         };
         let mut cache = (*self.load()).clone();
+        self.read_back(&mut cache, sources);
         let scale = self.scale();
         let near = self.near();
         let problems = build_near(
@@ -2032,6 +2049,31 @@ mod tests {
             user.chars().count() < NOTE_CHARS + 400,
             "a long note is clipped"
         );
+    }
+
+    #[test]
+    fn a_trashed_notes_summary_stays_in_the_database_and_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let graphs = Graphs::for_notes(&dir.path().join("notes"), None);
+        let mut cache = Cache::default();
+        cache.notes.insert(
+            "n1".into(),
+            Read {
+                summary: "heaps".into(),
+                ..Read::default()
+            },
+        );
+        graphs.save(&cache).unwrap();
+        graphs.save(&Cache::default()).unwrap();
+        let mut back = Cache::default();
+        let source = Source {
+            id: "n1".into(),
+            title: "Heaps".into(),
+            body: String::new(),
+            directory: String::new(),
+        };
+        graphs.read_back(&mut back, &[source]);
+        assert_eq!(back.notes["n1"].summary, "heaps");
     }
 
     #[test]

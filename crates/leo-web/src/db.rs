@@ -765,6 +765,8 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
         "closed_by",
         "TEXT NOT NULL DEFAULT 'felix'",
     )?;
+    crate::margin::set_up_held_rows(&tx)?;
+    add_column(&tx, "held_note_rows", "digest", "TEXT")?;
     tx.pragma_update(None, "user_version", VERSION.max(stored))?;
     tx.commit()
 }

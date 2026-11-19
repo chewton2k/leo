@@ -973,23 +973,138 @@ pub fn sweep_due(last: Option<Instant>) -> bool {
     last.is_none_or(|at| at.elapsed() >= SWEEP_EVERY)
 }
 
+const DEPENDENT_ROWS: &[(&str, &str, &[&str])] = &[
+    ("margin_threads", "note = ?1", &["id"]),
+    ("margin_modes", "note = ?1", &["note"]),
+    ("margin_personas", "note = ?1", &["note"]),
+    ("margin_instructions", "note = ?1", &["note"]),
+    ("writeup_pending", "note = ?1", &["note"]),
+    ("note_tasks", "note = ?1", &["id"]),
+    ("reading", "note = ?1", &["note"]),
+    ("vectors", "note = ?1", &["note", "at"]),
+    ("graph_notes", "id = ?1", &["id"]),
+    ("margin_state", "key = 'combined:' || ?1", &["key"]),
+];
+
+fn row_key(columns: &[&str], prefix: &str) -> String {
+    let arguments = columns
+        .iter()
+        .map(|column| format!("{prefix}{column}"))
+        .collect::<Vec<_>>();
+    format!("json_array({})", arguments.join(","))
+}
+
+pub(crate) fn set_up_held_rows(tx: &rusqlite::Connection) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS held_note_rows (
+             kind TEXT NOT NULL, row_key TEXT NOT NULL, ticket TEXT NOT NULL,
+             PRIMARY KEY(kind, row_key)
+         );
+         CREATE INDEX IF NOT EXISTS held_note_rows_by_ticket ON held_note_rows(ticket);",
+    )?;
+    for (table, _, key) in DEPENDENT_ROWS {
+        let old = row_key(key, "OLD.");
+        let new = row_key(key, "NEW.");
+        for (event, ids) in [
+            ("INSERT", new.clone()),
+            ("UPDATE", format!("{old}, {new}")),
+            ("DELETE", old),
+        ] {
+            tx.execute_batch(&format!(
+                "CREATE TRIGGER IF NOT EXISTS held_{table}_{event} AFTER {event} ON {table}
+                 BEGIN DELETE FROM held_note_rows WHERE kind = '{table}' AND row_key IN ({ids}); END;"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn row_digests(
+    tx: &rusqlite::Connection,
+    table: &str,
+    owner: &str,
+    key: &str,
+    note: &str,
+) -> rusqlite::Result<Vec<(String, String)>> {
+    use rusqlite::types::ValueRef;
+    let mut rows = tx.prepare(&format!("SELECT {key}, * FROM {table} WHERE {owner}"))?;
+    let columns = rows.column_count();
+    let found = rows.query_map([note], |row| {
+        let mut bytes = Vec::new();
+        for at in 1..columns {
+            let (kind, value): (u8, Vec<u8>) = match row.get_ref(at)? {
+                ValueRef::Null => (0, Vec::new()),
+                ValueRef::Integer(n) => (1, n.to_le_bytes().to_vec()),
+                ValueRef::Real(n) => (2, n.to_bits().to_le_bytes().to_vec()),
+                ValueRef::Text(text) => (3, text.to_vec()),
+                ValueRef::Blob(blob) => (4, blob.to_vec()),
+            };
+            bytes.push(kind);
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(&value);
+        }
+        let digest = leo_core::paths::digest_text(&leo_core::paths::digest(&bytes));
+        Ok((row.get::<_, String>(0)?, digest))
+    })?;
+    found.collect()
+}
+
+pub(crate) fn record_held_rows(chats: &Path, note: &str) -> anyhow::Result<String> {
+    let ticket = uuid::Uuid::new_v4().to_string();
+    db_of(chats).with(|c| {
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for (table, owner, key) in DEPENDENT_ROWS {
+            for (row, digest) in row_digests(&tx, table, owner, &row_key(key, ""), note)? {
+                tx.execute(
+                    "INSERT OR REPLACE INTO held_note_rows (kind, row_key, ticket, digest)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    [table, &row.as_str(), &ticket.as_str(), &digest.as_str()],
+                )?;
+            }
+        }
+        tx.commit()?;
+        Ok(ticket)
+    })
+}
+
+pub(crate) fn finish_held_rows(chats: &Path, note: &str, ticket: &str, delete: bool) -> bool {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if delete {
+                for (table, owner, key) in DEPENDENT_ROWS {
+                    let key = row_key(key, "");
+                    for (row, digest) in row_digests(&tx, table, owner, &key, note)? {
+                        tx.execute(
+                            &format!(
+                                "DELETE FROM {table} WHERE {owner} AND {key} = ?2 AND EXISTS
+                             (SELECT 1 FROM held_note_rows WHERE ticket = ?3 AND kind = '{table}'
+                              AND row_key = ?2 AND digest = ?4)"
+                            ),
+                            [note, &row, ticket, &digest],
+                        )?;
+                    }
+                }
+            }
+            tx.execute("DELETE FROM held_note_rows WHERE ticket = ?1", [ticket])?;
+            tx.commit()
+        })
+        .is_ok()
+}
+
 pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
     db_of(chats)
         .with(|c| {
             let tx = c.transaction()?;
             let mut removed = 0;
             for note in notes {
-                removed += tx.execute("DELETE FROM margin_threads WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM margin_modes WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM margin_personas WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM note_tasks WHERE note = ?1", [note])?;
-                tx.execute("DELETE FROM reading WHERE note = ?1", [note])?;
-                tx.execute(
-                    "DELETE FROM margin_state WHERE key = 'combined:' || ?1",
-                    [note],
-                )?;
+                for (table, owner, _) in DEPENDENT_ROWS {
+                    let count =
+                        tx.execute(&format!("DELETE FROM {table} WHERE {owner}"), [note])?;
+                    if *table == "margin_threads" {
+                        removed += count;
+                    }
+                }
             }
             tx.commit()?;
             Ok(removed)
@@ -997,52 +1112,161 @@ pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
         .unwrap_or(0)
 }
 
-pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
-    let held: BTreeSet<String> = db_of(chats)
-        .with(|c| {
-            let mut query = c.prepare(
-                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks UNION SELECT note FROM reading",
-            )?;
-            let rows = query.query_map([], |r| r.get(0))?;
-            rows.collect()
-        })
-        .unwrap_or_default();
-    let mut missing: BTreeMap<String, DateTime<Utc>> =
-        state_of(chats, "missing").unwrap_or_default();
-    missing.retain(|note, _| held.contains(note) && !kept.contains(note));
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) struct Missing {
+    pub(crate) since: DateTime<Utc>,
+    pub(crate) observed: i64,
+    pub(crate) last: DateTime<Utc>,
+}
+
+#[cfg(test)]
+impl Missing {
+    pub(crate) fn for_days(days: i64) -> Missing {
+        let now = Utc::now();
+        Missing {
+            since: now - chrono::Duration::days(days),
+            observed: chrono::Duration::days(days).num_seconds(),
+            last: now,
+        }
+    }
+}
+
+pub(crate) fn sweep_credit(last: &mut Option<Instant>, now: Instant) -> chrono::Duration {
+    let day = chrono::Duration::days(1);
+    last.replace(now)
+        .and_then(|at| chrono::Duration::from_std(now.saturating_duration_since(at)).ok())
+        .map_or_else(chrono::Duration::zero, |seen| seen.min(day))
+}
+
+#[test]
+fn the_first_sweep_does_not_credit_downtime() {
+    let mut last = None;
+    let now = Instant::now();
+    assert_eq!(sweep_credit(&mut last, now), chrono::Duration::zero());
+    assert_eq!(
+        sweep_credit(&mut last, now + std::time::Duration::from_secs(42)),
+        chrono::Duration::seconds(42)
+    );
+    assert_eq!(
+        sweep_credit(&mut None, now + std::time::Duration::from_secs(86_400)),
+        chrono::Duration::zero()
+    );
+}
+
+pub fn reset_missing(chats: &Path) {
+    set_state(chats, "missing", &BTreeMap::<String, Missing>::new());
+}
+
+pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> Vec<String> {
+    sweep_with(chats, kept, None, BTreeSet::new(), now, None)
+}
+
+fn sweep_with(
+    chats: &Path,
+    kept: &HashSet<String>,
+    only: Option<&HashSet<String>>,
+    mut held: BTreeSet<String>,
+    now: DateTime<Utc>,
+    cap: Option<chrono::Duration>,
+) -> Vec<String> {
+    let Ok(rows) = db_of(chats).with(|c| {
+        let mut query = c.prepare(
+            "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks UNION SELECT note FROM reading UNION SELECT note FROM vectors UNION SELECT id FROM graph_notes",
+        )?;
+        let rows = query.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()
+    }) else {
+        return Vec::new();
+    };
+    held.extend(rows);
+    held.retain(|note| !kept.contains(note) && only.is_none_or(|only| only.contains(note)));
+    let mut missing: BTreeMap<String, Missing> = state_of(chats, "missing").unwrap_or_default();
+    missing.retain(|note, _| held.contains(note));
     let mut gone = Vec::new();
-    for note in held.iter().filter(|note| !kept.contains(*note)) {
-        let since = *missing.entry(note.clone()).or_insert(now);
-        if now - since >= chrono::Duration::days(SWEEP_AFTER_DAYS) {
+    for note in &held {
+        let clock = missing.entry(note.clone()).or_insert(Missing {
+            since: now,
+            observed: 0,
+            last: now,
+        });
+        let passed = (now - clock.last).max(chrono::Duration::zero());
+        let credit = cap.map_or(passed, |cap| passed.min(cap));
+        clock.observed = clock.observed.saturating_add(credit.num_seconds());
+        clock.last = clock.last.max(now);
+        if clock.observed >= chrono::Duration::days(SWEEP_AFTER_DAYS).num_seconds() {
             gone.push(note.clone());
         }
     }
     missing.retain(|note, _| !gone.contains(note));
     set_state(chats, "missing", &missing);
-    forget_notes(chats, &gone)
+    gone
 }
 
-pub fn sweep_kept(
-    store: &leo_core::store::Store,
-) -> Option<(HashSet<String>, Vec<leo_core::store::TrashEntry>)> {
+fn folder_names(folder: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| {
+            !name.is_empty()
+                && !name.starts_with('.')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .collect()
+}
+
+pub type Kept = (
+    HashSet<String>,
+    Vec<leo_core::store::TrashEntry>,
+    HashSet<String>,
+);
+
+pub fn sweep_kept(store: &leo_core::store::Store) -> Option<Kept> {
     if store.notes.is_empty() || !store.unreadable.is_empty() {
         return None;
     }
+    let trash = store.trash_snapshot();
+    if !store.trash_complete() {
+        return None;
+    }
     let kept = store.notes.iter().map(|n| n.id.clone()).collect();
-    Some((kept, store.trash_snapshot()))
+    Some((kept, trash, store.confirmed_gone()))
 }
 
-pub fn sweep_store(
+#[cfg(test)]
+pub fn sweep_store(chats: &Path, kept: Kept, kept_audio: &[String], data: &Path) -> Vec<String> {
+    sweep_store_at(chats, kept, kept_audio, data, chrono::Duration::zero())
+}
+
+pub(crate) fn sweep_store_at(
     chats: &Path,
-    (mut kept, trash): (HashSet<String>, Vec<leo_core::store::TrashEntry>),
-) -> usize {
+    (mut kept, trash, confirmed): Kept,
+    kept_audio: &[String],
+    data: &Path,
+    observed: chrono::Duration,
+) -> Vec<String> {
     for entry in trash {
         let Some(head) = entry.head else {
-            return 0;
+            reset_missing(chats);
+            return Vec::new();
         };
         kept.insert(head.id);
     }
-    sweep(chats, &kept, Utc::now())
+    let mut held: BTreeSet<String> = kept_audio.iter().cloned().collect();
+    for folder in ["attachments", "recording-sources"] {
+        held.extend(folder_names(&data.join(folder)));
+    }
+    sweep_with(
+        chats,
+        &kept,
+        Some(&confirmed),
+        held,
+        Utc::now(),
+        Some(observed),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -1734,6 +1958,10 @@ pub const PROBLEM: &str = "Felix could not read your note just now. Try again in
 mod tests {
     use super::*;
 
+    fn swept(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
+        forget_notes(chats, &sweep(chats, kept, now))
+    }
+
     fn about(quote: &str, prefix: &str, suffix: &str) -> Thread {
         let place = Place {
             prefix: prefix.into(),
@@ -1806,13 +2034,22 @@ mod tests {
             MOST_OPEN
         ));
         let missing = |chats: &Path| {
-            state_of::<BTreeMap<String, DateTime<Utc>>>(chats, "missing").unwrap_or_default()
+            state_of::<BTreeMap<String, Missing>>(chats, "missing").unwrap_or_default()
         };
-        assert_eq!(sweep_store(&chats, sweep_kept(&store).unwrap()), 0);
+        assert_eq!(
+            sweep_store(&chats, sweep_kept(&store).unwrap(), &[], &chats).len(),
+            0
+        );
         assert!(missing(&chats).is_empty());
         std::fs::remove_file(&broken).unwrap();
-        assert_eq!(sweep_store(&chats, sweep_kept(&store).unwrap()), 0);
-        assert!(missing(&chats).contains_key("elsewhere"));
+        assert_eq!(
+            sweep_store(&chats, sweep_kept(&store).unwrap(), &[], &chats).len(),
+            0
+        );
+        assert!(
+            missing(&chats).is_empty(),
+            "a note leo never saw leave is never counted as gone"
+        );
     }
 
     #[test]
@@ -1831,7 +2068,7 @@ mod tests {
                 let kept = sweep_kept(&store).unwrap();
                 let locked = started.elapsed().as_secs_f64() * 1e3;
                 let started = Instant::now();
-                let swept = sweep_store(&chats, kept);
+                let swept = sweep_store(&chats, kept, &[], &chats).len();
                 let outside = started.elapsed().as_secs_f64() * 1e3;
                 eprintln!("sweep live {live} trash {trash} run {run}: sweep_kept {locked:.2} ms, sweep_store {outside:.2} ms, swept {swept}");
             }
@@ -2218,13 +2455,13 @@ mod tests {
         let start = Utc::now();
         let days = |n| start + chrono::Duration::days(n);
         let none = HashSet::new();
-        assert_eq!(sweep(&chats, &none, start), 0);
-        assert_eq!(sweep(&chats, &none, days(SWEEP_AFTER_DAYS - 1)), 0);
+        assert_eq!(swept(&chats, &none, start), 0);
+        assert_eq!(swept(&chats, &none, days(SWEEP_AFTER_DAYS - 1)), 0);
         let back = HashSet::from(["n".to_string()]);
-        assert_eq!(sweep(&chats, &back, days(SWEEP_AFTER_DAYS)), 0);
-        assert_eq!(sweep(&chats, &none, days(SWEEP_AFTER_DAYS + 1)), 0);
-        assert_eq!(sweep(&chats, &none, days(2 * SWEEP_AFTER_DAYS)), 0);
-        assert_eq!(sweep(&chats, &none, days(2 * SWEEP_AFTER_DAYS + 1)), 1);
+        assert_eq!(swept(&chats, &back, days(SWEEP_AFTER_DAYS)), 0);
+        assert_eq!(swept(&chats, &none, days(SWEEP_AFTER_DAYS + 1)), 0);
+        assert_eq!(swept(&chats, &none, days(2 * SWEEP_AFTER_DAYS)), 0);
+        assert_eq!(swept(&chats, &none, days(2 * SWEEP_AFTER_DAYS + 1)), 1);
         assert!(every(&chats).is_empty());
     }
 
@@ -2578,8 +2815,8 @@ mod tests {
         );
         let kept = HashSet::from(["held", "trashed"].map(String::from));
         let start = Utc::now();
-        assert_eq!(sweep(&chats, &kept, start), 0);
-        sweep(
+        assert_eq!(swept(&chats, &kept, start), 0);
+        swept(
             &chats,
             &kept,
             start + chrono::Duration::days(SWEEP_AFTER_DAYS),
@@ -2796,7 +3033,7 @@ mod tests {
             assert!(put(&chats, &closed("n", n), MOST_OPEN));
         }
         db_of(&chats)
-            .with(|c| c.execute_batch("CREATE TEMP TRIGGER no_prune BEFORE DELETE ON margin_threads BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+            .with(|c| c.execute_batch("CREATE TRIGGER no_prune BEFORE DELETE ON margin_threads BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
             .unwrap();
         let extra = closed("n", MOST_CLOSED);
         let stored = put(&chats, &extra, MOST_OPEN);
@@ -2830,7 +3067,7 @@ mod tests {
                         "INSERT INTO reading (note, anchor, at) VALUES ('gone-note', 'a', 't')",
                         [],
                     )?;
-                    c.execute_batch(&format!("CREATE TEMP TRIGGER no_forget BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+                    c.execute_batch(&format!("CREATE TRIGGER no_forget BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
                 })
                 .unwrap();
             let removed = forget_notes(&chats, &["gone-note".to_string()]);

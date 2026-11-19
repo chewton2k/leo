@@ -965,8 +965,13 @@ fn deleting_and_expiring_unfinished_audio_hold_the_recording_lock_while_they_dis
         Path("old-one".into()),
     ));
     assert_eq!(deleted.status(), StatusCode::OK);
-    let expired =
-        crate::keeping::expire_audio(&*watching, Some(30), chrono::Utc::now(), &state.recording);
+    let expired = crate::keeping::expire_audio(
+        &*watching,
+        Some(30),
+        chrono::Utc::now(),
+        &state.recording,
+        &Default::default(),
+    );
     assert_eq!(expired, 2);
     assert_eq!(*watching.locked_during.lock().unwrap(), [true, true, true]);
 }
@@ -1008,8 +1013,13 @@ fn expiry_deletes_with_one_batch_call() {
         recording: state.recording.clone(),
         calls: Default::default(),
     };
-    let expired =
-        crate::keeping::expire_audio(&batched, Some(30), chrono::Utc::now(), &state.recording);
+    let expired = crate::keeping::expire_audio(
+        &batched,
+        Some(30),
+        chrono::Utc::now(),
+        &state.recording,
+        &Default::default(),
+    );
     assert_eq!(expired, 2);
     assert_eq!(
         *batched.calls.lock().unwrap(),
@@ -1032,8 +1042,13 @@ fn expiry_and_delete_leave_the_recording_being_recovered_alone() {
         Path("recovering-one".into()),
     ));
     assert_eq!(recovered.status(), StatusCode::ACCEPTED);
-    let expired =
-        crate::keeping::expire_audio(&*watching, Some(30), chrono::Utc::now(), &state.recording);
+    let expired = crate::keeping::expire_audio(
+        &*watching,
+        Some(30),
+        chrono::Utc::now(),
+        &state.recording,
+        &Default::default(),
+    );
     assert_eq!(expired, 0);
     let deleted = run(record::discard(
         State(state.clone()),

@@ -259,6 +259,9 @@ struct AppState {
     import_slots: Arc<routes::uploads::ImportSlots>,
     zip_slots: Arc<tokio::sync::Semaphore>,
     combines: Arc<Mutex<std::collections::HashMap<String, routes::combine::CombineJob>>>,
+    audio_work: Arc<Mutex<()>>,
+    clearing: Arc<Mutex<()>>,
+    picture_cleanup: Arc<Mutex<()>>,
     recording: record::Recordings,
     quitting: Arc<std::sync::atomic::AtomicBool>,
     capture_activity: leo_core::activity::Gate,
@@ -441,6 +444,33 @@ async fn keep_search_current(state: AppState) {
     }
 }
 
+const DEPENDENTS_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
+
+fn cleanup_idle(state: &AppState) -> bool {
+    state.activity.idle() >= DEPENDENTS_IDLE
+        && !state.capture_activity.busy()
+        && !record::live(&state.recording)
+        && !state.quitting.load(std::sync::atomic::Ordering::Acquire)
+}
+
+async fn keep_dependents_current(state: AppState) {
+    let mut tick = tokio::time::interval(IDLE_CHECK);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        if !cleanup_idle(&state) {
+            continue;
+        }
+        let cleanup = state.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if cleanup_idle(&cleanup) {
+                keeping::expire_dependents(&cleanup);
+            }
+        })
+        .await;
+    }
+}
+
 async fn keep_graph_current(state: AppState) {
     let mut tick = tokio::time::interval_at(tokio::time::Instant::now() + GRAPH_CHECK, GRAPH_CHECK);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -454,15 +484,29 @@ async fn keep_graph_current(state: AppState) {
     let mut more_pictures = false;
     loop {
         tick.tick().await;
-        if margin::sweep_due(swept_at) {
-            swept_at = Some(std::time::Instant::now());
+        if cleanup_idle(&state) && margin::sweep_due(swept_at) {
+            let observed = margin::sweep_credit(&mut swept_at, std::time::Instant::now());
             if let Ok(Some(kept)) = state
                 .read_store(|store| Ok(margin::sweep_kept(store)))
                 .await
             {
+                let swept = state.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let audio = swept
+                        .housekeeper
+                        .as_ref()
+                        .map(|housekeeper| housekeeper.kept_for_notes())
+                        .unwrap_or_default();
+                    let data = swept.notes_dir.parent().unwrap_or(&swept.notes_dir);
+                    let gone = margin::sweep_store_at(&swept.chats, kept, &audio, data, observed);
+                    if !gone.is_empty() && cleanup_idle(&swept) {
+                        dependents::clear(&swept, gone, dependents::Why::Swept);
+                    }
+                })
+                .await;
+            } else {
                 let chats = state.chats.clone();
-                let _ =
-                    tokio::task::spawn_blocking(move || margin::sweep_store(&chats, kept)).await;
+                let _ = tokio::task::spawn_blocking(move || margin::reset_missing(&chats)).await;
             }
         }
         if !state.visible.load(std::sync::atomic::Ordering::Acquire)
@@ -700,6 +744,7 @@ struct Background {
     graph: tokio::task::JoinHandle<()>,
     idle: tokio::task::JoinHandle<()>,
     expiry: tokio::task::JoinHandle<()>,
+    dependents: tokio::task::JoinHandle<()>,
     calendar: tokio::task::JoinHandle<()>,
     give_back: tokio::task::JoinHandle<()>,
     search: tokio::task::JoinHandle<()>,
@@ -710,6 +755,7 @@ impl Background {
         self.graph.abort();
         self.idle.abort();
         self.expiry.abort();
+        self.dependents.abort();
         self.calendar.abort();
         self.give_back.abort();
         self.search.abort();
@@ -817,7 +863,9 @@ pub(crate) async fn start_in(
     )?;
     let swept = notes.clone();
     tokio::task::spawn_blocking(move || sweep_leftover_temps(&swept));
-    let vectors = Arc::new(vectors::Vectors::for_notes(&store.notes_dir));
+    let live: std::collections::HashSet<String> =
+        store.notes.iter().map(|n| n.id.clone()).collect();
+    let vectors = Arc::new(vectors::Vectors::for_live(&store.notes_dir, &live));
     let graphs = Arc::new(
         graph::Graphs::for_notes(&store.notes_dir, powers.writer.clone())
             .with_room(powers.room.clone())
@@ -858,6 +906,9 @@ pub(crate) async fn start_in(
         import_slots: Default::default(),
         zip_slots: routes::downloads::zip_slots(),
         combines: Default::default(),
+        audio_work: Default::default(),
+        clearing: Default::default(),
+        picture_cleanup: Default::default(),
         recording: Default::default(),
         quitting: Default::default(),
         capture_activity: leo_core::activity::global().clone(),
@@ -883,13 +934,22 @@ pub(crate) async fn start_in(
         move || routes::uploads::sweep_incoming(&notes)
     });
 
+    let _ = tokio::task::spawn_blocking({
+        let state = state.clone();
+        move || {
+            dependents::recover_holds(&state);
+            routes::combine::reconcile_retargets(&state, true);
+        }
+    })
+    .await;
+
     let expiry = tokio::spawn({
         let state = state.clone();
         async move {
             let mut daily = tokio::time::interval(KEEPING_EVERY);
             loop {
                 daily.tick().await;
-                keeping::expire_now(&state).await;
+                keeping::expire_choices(&state).await;
             }
         }
     });
@@ -898,6 +958,7 @@ pub(crate) async fn start_in(
         graph: tokio::spawn(keep_graph_current(state.clone())),
         idle: tokio::spawn(stop_idle_sessions(Arc::clone(&state.warm))),
         expiry,
+        dependents: tokio::spawn(keep_dependents_current(state.clone())),
         calendar: tokio::spawn(calendar::offer_to_record(state.clone())),
         give_back: tokio::spawn(give_back_when_idle(state.clone())),
         search: tokio::spawn(keep_search_current(state.clone())),

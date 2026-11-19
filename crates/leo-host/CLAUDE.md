@@ -32,9 +32,13 @@ page at a time, every folder reachable; metadata is remembered until its file ch
 `discard_recording` (validated id, contained paths, refuses a locked session). Settings →
 Keeping's audio expiry calls it, so a recording that is running or being recovered (its
 session is locked) is never discarded. `discard_recordings` deletes a batch, finding each recording by id and rereading its metadata before removing it (expiry uses it). A saved session that kept audio names its note (`Manifest.note`);
-`discard_kept_for_notes` removes it when that note is deleted for good (for the trash's removal
-pass); a session saved before `note` existed is matched through its trace line `Note {id} saved`.
-`retarget_kept` moves a combined note's sessions to the note that remains (all or none, refused
-while one is locked) and `restore_kept` gives them back on Undo; every delete or move rereads the
-manifest from disk. The Storage page, its areas and actions were removed
+the hold records its folder, session ID, start time and a digest of the session
+folder (its `lock` left out, at most 1 GiB). `verify_held_audio` hashes it again outside
+the notes lock and returns the files' stamps; `discard_held_audio`, under the lock,
+rereads the fields, the saved status and note owner and deletes only when the stamps
+are unchanged. Combine persists the
+audio plan and previous manifest owners before applying it so startup can
+replay a saved combine and Undo can restore the same sessions. Ambiguous combine
+intents protect affected audio from automatic expiry. Held cleanup inventories
+recordings outside the notes lock. The Storage page, its areas and actions were removed
 on 2026-11-05; files they managed stay on disk.

@@ -427,7 +427,12 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   PNG/JPEG/GIF/WebP only), of any size, streamed to disk after their first bytes are checked
   (`PUT /api/pictures/{name}`, body limit off, 60 s without a byte is a refusal; 2026-11-18, the owner's principle 1); `/api/image` streams a picture back in 64 KB pieces. Upload names (`safe_file_name`) drop
   trailing dots/spaces and dash Windows device names (`CON-.pdf`); older stored
-  names still open (`stored_file_name`).
+  names still open (`stored_file_name`). Counted per linking note; removed by the
+  rule in root CLAUDE.md, Dependents (`dependents::pictures_asked`: every text file in
+  the notes folder, live and held recordings, task descriptions and chat text can
+  name pictures. Saved chat rows carry quiz and study content. Typed recording
+  points live in session or transcript files. The pass scans outside the notes
+  lock and checks counts, revisions and the saved file digest before deletion).
 - Browsing never calls an AI. The explorer is the only folder listing: `#/` is
   an empty workspace, legacy `#/f/<path>` selects the folder then replaces the
   hash with `#/`. Explorer actions capture their target before opening a menu
@@ -741,7 +746,13 @@ Felix (2026-10-19).
   is the widest column the chosen margins allow (Infinity when they are marks).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`) and its reading place, task details, recording sources and original uploads
-  (`dependents::clear`); a removal that fails is retried on the next delete and daily
+  (`dependents::clear`), and so do trash expiry and the hourly sweep of notes gone
+  outside leo (the sweep also tracks kept audio and the originals and transcript
+  folders, counts only notes `Store::confirmed_gone` names, starts its clock again
+  whenever it cannot run, and returns the missing ids to `dependents::clear`, which
+  checks again under the notes lock and never follows a link); expiry and the sweep
+  first move the files to `<data>/held/` (Trash rows "Files of a removed note", with
+  Restore) and delete them with the rows a trash period later; a removal that fails is retried on the next delete and daily
   (the `deleting` set in `margin_state`), a recording in use is skipped, and nothing is
   removed for an id that is live or in the trash again, or while a note or trashed file
   cannot be read. `sweep_kept` copies the live ids and the trash index, checked against
@@ -960,7 +971,9 @@ Decided: one note per uploaded file (2026-10-20).
 ## Note connections (`graph.rs`; "map" in storage)
 
 Embeddings, summaries, concepts and note links are shared by search, related
-notes and Felix, and refresh when idle. The graph page, canvas renderer and
+notes and Felix, and refresh when idle. A trashed note keeps its rows in `leo.db`,
+out of memory, search and connections, and gets them back on restore with no AI
+request; they go when it is deleted for good. The graph page, canvas renderer and
 `/api/graph*` routes are removed; connection caches stay. A note the meaning model refuses waits 10 minutes, or until edited, while the rest index. Graph, vector and
 caption maintenance starts after its first interval and defers while the window
 is hidden or the capture activity gate is busy. The idle check compares version
@@ -1190,7 +1203,7 @@ a modal.
   behind one refresh slot; a failed refresh keeps saved meters. `usage::Usage`
   keeps content-free counts, `usage_days`, `usage_calls` and `usage_tools` (90 days), never prompt or reply
   text; `/api/processes` never sends arguments to the page.
-- Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`): one list (7/30/90 days,
+- Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`; its daily pass also runs trash expiry and its dependents): one list (7/30/90 days,
   1 year, Forever) for Trash, Chats, Uploaded files, Recording transcripts,
   Unfinished recording audio. Shortening asks first with a count from POST
   `/api/keep/preview` (the same list the deletion uses) (`keeping::would_delete`, deletes nothing); one save at a
@@ -1205,10 +1218,43 @@ a modal.
   newer of modified and change time, regular files only). DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it
   managed stay untouched.
-  Chat expiry checks the saved update time and removes the chat and its related
-  rows in one transaction. Expiry removes task, board and card tombstones only
-  when a fresh digest under the writer lock matches the scan.
+- Automatic note, picture and dependent cleanup runs on an idle tick and defers
+  during recording or dictation. Save Keeping responds before applying expiry.
+  Move records survive restart and name the held directories and audio sessions.
+  A hold expires while its owner is gone. Directory digests verify the contents,
+  and only row versions enrolled by that hold can be deleted. A first missing-note
+  sweep after launch gives no time credit. Restore gives conflicts separate names
+  and reports files that could only partly be restored.
+- One rule for every move and deletion in that cleanup and in Delete for good: it is
+  authorised only by a SHA-256 digest leo recorded earlier for exactly those bytes,
+  checked again just before the step (the `pictures-made` ledger's fourth column, the
+  trash index, a hold's folder and audio digests, an older unused picture's digest from
+  the pass that listed it, a removed note's `created_at` and digest). Anything without
+  one, or whose generation leo cannot prove (an id seen reused: two different
+  `created_at` among the live notes, the trash and the recorded removals), is kept. Trash
+  rows carry `revision` (held rows: their recorded folder and audio digests); Delete for
+  good sends back what the page showed, and a changed item, or a picture whose bytes
+  changed, answers 409 with a sentence so the page asks again. Held folders and audio are
+  hashed outside the notes lock (`paths::digest_directory` returns the folder's stamps:
+  size, times, file id); under the lock leo rechecks those stamps and the notes folder's
+  fingerprint just before acting. Moves into the trash and `held/` never replace what is
+  there (`paths::move_new`, `paths::write_new`). Held rows are deleted only while their
+  content digest (`held_note_rows.digest`) is the one recorded. A file is hashed through
+  its open handle (`paths::digest_stamped`: file id, size and times taken from the handle
+  before and after, and the path checked to still be that file); the same stamp is
+  checked again on the path just before it is unlinked. A Delete for good that has to
+  wait (a recording running) queues the folder digests and held-row revisions it was
+  shown (`margin_state` `deleting-shown`); the retry purges only what still matches, and
+  anything found later gets its own trash period. A combine copies transcripts into a
+  private staging folder, records each copy's digest from the staged bytes, publishes it
+  without replacing anything, and records it only while it still matches (originals:
+  the digest of the source bytes); a failed save or Undo removes only those that still
+  match. The cleanup locks (`audio_work`, `clearing`, `picture_cleanup`) and
+  the task and board writer locks belong to each library, never the process. Keeping's
+  age-based expiry (uploads, transcripts, unfinished and kept audio, backups) is the
+  person's own choice and is not under this rule.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
+  Held originals and transcripts are included when Trash and Uploads are selected.
   Restore tasks refuses a zip or file without task ids. An export has no item or size limit
   (2026-11-17, the owner's principle 1); it is streamed entry by entry into a temporary file
   the response then sends (a file in 64 KB pieces, a chat's messages and a board's cards a page

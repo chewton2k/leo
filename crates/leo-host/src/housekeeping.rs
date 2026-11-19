@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::Path;
 
 use anyhow::Result;
@@ -73,6 +74,7 @@ fn name_of(dir: &Path) -> String {
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 fn remove_kept(root: &Path, dir: &Path, notes: &[String]) -> Result<bool> {
     let dir = session_dir(root, &name_of(dir))?;
     let found = Session::open(&dir)?;
@@ -84,6 +86,7 @@ fn remove_kept(root: &Path, dir: &Path, notes: &[String]) -> Result<bool> {
     Ok(true)
 }
 
+#[cfg(test)]
 fn discard_kept_for_notes(root: &Path, notes: &[String]) -> Result<Vec<String>> {
     if !recordings_root(root)? {
         return Ok(Vec::new());
@@ -96,6 +99,123 @@ fn discard_kept_for_notes(root: &Path, notes: &[String]) -> Result<Vec<String>> 
     retry.sort();
     retry.dedup();
     Ok(retry)
+}
+
+const SESSION_BYTES: u64 = 1024 * 1024 * 1024;
+
+fn identity(found: &Session) -> leo_web::record::KeptSession {
+    leo_web::record::KeptSession {
+        digest: None,
+        folder: name_of(&found.dir),
+        session: found.manifest.id.clone(),
+        started: found.manifest.started,
+    }
+}
+
+fn kept_snapshot(found: &Session) -> leo_web::record::KeptSession {
+    let mut expected = identity(found);
+    expected.digest = leo_core::paths::digest_directory(&found.dir, SESSION_BYTES, &["lock"])
+        .ok()
+        .map(|(digest, _)| digest);
+    expected
+}
+
+fn kept_sessions(
+    root: &Path,
+    note: &str,
+    describe: fn(&Session) -> leo_web::record::KeptSession,
+) -> Result<Vec<leo_web::record::KeptSession>> {
+    if !recordings_root(root)? {
+        return Ok(Vec::new());
+    }
+    let mut sessions = Vec::new();
+    for brief in kept_by(root, |owner| owner == note) {
+        let found = Session::open(&session_dir(root, &name_of(&brief.dir))?)?;
+        if found.manifest.saved && found.owner().as_deref() == Some(note) {
+            sessions.push(describe(&found));
+        }
+    }
+    Ok(sessions)
+}
+
+fn held_session(
+    root: &Path,
+    note: &str,
+    expected: &leo_web::record::KeptSession,
+) -> Result<Option<std::path::PathBuf>> {
+    let dir = match session_dir(root, &expected.folder) {
+        Err(e)
+            if e.downcast_ref::<std::io::Error>()
+                .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(None)
+        }
+        result => result?,
+    };
+    let found = Session::open(&dir)?;
+    let same = found.manifest.id == expected.session
+        && found.manifest.started == expected.started
+        && found.manifest.saved
+        && found.owner().as_deref() == Some(note);
+    if same {
+        unlocked(&dir)?;
+    }
+    Ok(same.then_some(dir))
+}
+
+fn verify_held_audio(
+    root: &Path,
+    note: &str,
+    sessions: &[leo_web::record::KeptSession],
+) -> Result<Vec<Option<leo_core::paths::FolderStamps>>> {
+    if !recordings_root(root)? {
+        return Ok(vec![None; sessions.len()]);
+    }
+    let mut verified = Vec::new();
+    for expected in sessions {
+        let Some(dir) = held_session(root, note, expected)? else {
+            verified.push(None);
+            continue;
+        };
+        anyhow::ensure!(
+            expected.digest.is_some(),
+            "The held recording was never checked. leo kept its audio."
+        );
+        let (digest, stamps) = leo_core::paths::digest_directory(&dir, SESSION_BYTES, &["lock"])?;
+        anyhow::ensure!(
+            expected.digest == Some(digest),
+            "The held recording changed. leo kept its audio."
+        );
+        verified.push(Some(stamps));
+    }
+    Ok(verified)
+}
+
+fn discard_held_audio(
+    root: &Path,
+    note: &str,
+    sessions: &[leo_web::record::KeptSession],
+    verified: &[Option<leo_core::paths::FolderStamps>],
+) -> Result<()> {
+    anyhow::ensure!(
+        verified.len() == sessions.len(),
+        "The held recording was not checked. leo kept its audio."
+    );
+    if !recordings_root(root)? {
+        return Ok(());
+    }
+    for (expected, stamps) in sessions.iter().zip(verified) {
+        let Some(stamps) = stamps else { continue };
+        let Some(dir) = held_session(root, note, expected)? else {
+            continue;
+        };
+        anyhow::ensure!(
+            leo_core::paths::folder_stamps(&dir, &["lock"])? == *stamps,
+            "The held recording changed. leo kept its audio."
+        );
+        std::fs::remove_dir_all(dir)?;
+    }
+    Ok(())
 }
 
 fn kept_for_notes(root: &Path) -> Vec<String> {
@@ -111,38 +231,71 @@ fn kept_for_notes(root: &Path) -> Vec<String> {
     owners
 }
 
-fn retarget_kept(root: &Path, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
-    if from == target || !recordings_root(root)? {
+fn plan_retarget(root: &Path, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
+    if from == target {
         return Ok(Vec::new());
     }
-    let mut sessions = Vec::new();
-    for brief in kept_by(root, |owner| owner == from) {
-        let Ok(found) = Session::open(&session_dir(root, &name_of(&brief.dir))?) else {
-            continue;
-        };
-        if !found.manifest.saved || found.owner().as_deref() != Some(from) {
-            continue;
-        }
+    let mut moved = Vec::new();
+    for expected in kept_sessions(root, from, identity)? {
+        let found = Session::open(&session_dir(root, &expected.folder)?)?;
         anyhow::ensure!(
             !session::locked(&found.dir),
             "A recording of this note is being recovered; try again in a moment."
         );
-        sessions.push(found);
-    }
-    let mut moved = Vec::new();
-    for mut found in sessions {
-        let previous = found.manifest.note.replace(target.to_owned());
-        if let Err(e) = found.save() {
-            let _ = restore_kept(root, &moved);
-            return Err(e);
+        if identity(&found) == expected && found.owner().as_deref() == Some(from) {
+            moved.push(leo_web::record::Moved {
+                session: expected.folder.clone(),
+                identity: Some(identity(&found)),
+                previous: found.manifest.note,
+                target: target.to_owned(),
+            });
         }
-        moved.push(leo_web::record::Moved {
-            session: name_of(&found.dir),
-            previous,
-            target: target.to_owned(),
-        });
     }
     Ok(moved)
+}
+
+fn apply_retarget(
+    root: &Path,
+    from: &str,
+    target: &str,
+    planned: &[leo_web::record::Moved],
+) -> Result<()> {
+    let mut applied = Vec::new();
+    for each in planned {
+        let Ok(dir) = session_dir(root, &each.session) else {
+            continue;
+        };
+        let mut found = Session::open(&dir)?;
+        if !found.manifest.saved
+            || each.target != target
+            || each
+                .identity
+                .as_ref()
+                .is_some_and(|expected| *expected != identity(&found))
+            || found.manifest.note.as_deref() == Some(target)
+            || found.manifest.note != each.previous
+            || found.owner().as_deref() != Some(from)
+        {
+            continue;
+        }
+        let saved = unlocked(&dir).and_then(|()| {
+            found.manifest.note = Some(target.to_string());
+            found.save()
+        });
+        if let Err(e) = saved {
+            let _ = restore_kept(root, &applied);
+            return Err(e);
+        }
+        applied.push(each.clone());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+fn retarget_kept(root: &Path, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
+    let planned = plan_retarget(root, from, target)?;
+    apply_retarget(root, from, target, &planned)?;
+    Ok(planned)
 }
 
 fn restore_kept(root: &Path, moved: &[leo_web::record::Moved]) -> Result<()> {
@@ -153,9 +306,15 @@ fn restore_kept(root: &Path, moved: &[leo_web::record::Moved]) -> Result<()> {
         let Ok(mut found) = Session::open(&dir) else {
             continue;
         };
-        if found.manifest.note.as_deref() != Some(each.target.as_str()) {
+        if found.manifest.note.as_deref() != Some(each.target.as_str())
+            || each
+                .identity
+                .as_ref()
+                .is_some_and(|expected| *expected != identity(&found))
+        {
             continue;
         }
+        unlocked(&dir)?;
         found.manifest.note = each.previous.clone();
         found.save()?;
     }
@@ -231,22 +390,34 @@ fn kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> Vec<std::pa
     saved.chain(damaged).collect()
 }
 
-fn still_kept(dir: &Path, before: chrono::DateTime<chrono::Utc>) -> bool {
+fn still_kept(
+    dir: &Path,
+    before: chrono::DateTime<chrono::Utc>,
+    protected: &HashSet<String>,
+) -> bool {
     match Session::open(dir) {
         Ok(found) => {
             found.manifest.saved
                 && found.manifest.started < before
                 && !session::locked(dir)
                 && !session::has_retry(dir)
+                && (protected.is_empty()
+                    || found
+                        .owner()
+                        .is_some_and(|owner| !protected.contains(&owner)))
         }
-        Err(_) => session::malformed(dir) && old_and_damaged(dir, before),
+        Err(_) => protected.is_empty() && session::malformed(dir) && old_and_damaged(dir, before),
     }
 }
 
-fn expire_kept_audio(root: &Path, before: chrono::DateTime<chrono::Utc>) -> usize {
+fn expire_kept_audio(
+    root: &Path,
+    before: chrono::DateTime<chrono::Utc>,
+    protected: &HashSet<String>,
+) -> usize {
     kept_audio(root, before)
         .into_iter()
-        .filter(|dir| still_kept(dir, before))
+        .filter(|dir| still_kept(dir, before, protected))
         .filter(|dir| std::fs::remove_dir_all(dir).is_ok())
         .count()
 }
@@ -303,17 +474,68 @@ impl Housekeeper for Housekeeping {
     fn kept_audio_count(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
         session::root().map_or(0, |root| kept_audio(&root, before).len())
     }
-    fn expire_kept_audio(&self, before: chrono::DateTime<chrono::Utc>) -> usize {
-        session::root().map_or(0, |root| expire_kept_audio(&root, before))
+    fn expire_kept_audio(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+        protected: &HashSet<String>,
+    ) -> usize {
+        session::root().map_or(0, |root| expire_kept_audio(&root, before, protected))
     }
-    fn discard_kept_for_notes(&self, notes: &[String]) -> Result<Vec<String>> {
-        discard_kept_for_notes(&session::root()?, notes)
+    fn kept_sessions(&self, note: &str) -> Result<Vec<leo_web::record::KeptSession>> {
+        kept_sessions(&session::root()?, note, kept_snapshot)
+    }
+    fn kept_sessions_for(
+        &self,
+        notes: &std::collections::HashSet<String>,
+    ) -> Result<std::collections::HashMap<String, Vec<leo_web::record::KeptSession>>> {
+        let root = session::root()?;
+        let mut inventory: std::collections::HashMap<_, Vec<_>> = notes
+            .iter()
+            .cloned()
+            .map(|note| (note, Vec::new()))
+            .collect();
+        if recordings_root(&root)? {
+            for brief in kept_by(&root, |owner| notes.contains(owner)) {
+                let found = Session::open(&session_dir(&root, &name_of(&brief.dir))?)?;
+                if found.manifest.saved {
+                    if let Some(sessions) =
+                        found.owner().and_then(|owner| inventory.get_mut(&owner))
+                    {
+                        sessions.push(kept_snapshot(&found));
+                    }
+                }
+            }
+        }
+        Ok(inventory)
+    }
+    fn verify_held_audio(
+        &self,
+        note: &str,
+        sessions: &[leo_web::record::KeptSession],
+    ) -> Result<Vec<Option<leo_core::paths::FolderStamps>>> {
+        verify_held_audio(&session::root()?, note, sessions)
+    }
+    fn discard_held_audio(
+        &self,
+        note: &str,
+        sessions: &[leo_web::record::KeptSession],
+        verified: &[Option<leo_core::paths::FolderStamps>],
+    ) -> Result<()> {
+        discard_held_audio(&session::root()?, note, sessions, verified)
     }
     fn kept_for_notes(&self) -> Vec<String> {
         session::root().map_or_else(|_| Vec::new(), |root| kept_for_notes(&root))
     }
-    fn retarget_kept(&self, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
-        retarget_kept(&session::root()?, from, target)
+    fn plan_retarget(&self, from: &str, target: &str) -> Result<Vec<leo_web::record::Moved>> {
+        plan_retarget(&session::root()?, from, target)
+    }
+    fn apply_retarget(
+        &self,
+        from: &str,
+        target: &str,
+        moved: &[leo_web::record::Moved],
+    ) -> Result<()> {
+        apply_retarget(&session::root()?, from, target, moved)
     }
     fn restore_kept(&self, moved: &[leo_web::record::Moved]) -> Result<()> {
         restore_kept(&session::root()?, moved)
@@ -403,6 +625,132 @@ mod tests {
     }
 
     #[test]
+    fn a_hold_preserves_a_recording_whose_audio_was_edited() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = kept(tmp.path(), 0, Some(A), None);
+        let wav = dir.join("seg-00000.wav");
+        std::fs::write(&wav, b"audio").unwrap();
+        let expected = kept_sessions(tmp.path(), A, kept_snapshot).unwrap();
+        let clock = std::fs::metadata(&wav).unwrap().modified().unwrap();
+        std::fs::write(&wav, b"other").unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&wav)
+            .unwrap()
+            .set_modified(clock)
+            .unwrap();
+        let _ = discard_held_audio(
+            tmp.path(),
+            A,
+            &expected,
+            &verify_held_audio(tmp.path(), A, &expected).unwrap_or_default(),
+        );
+        assert_eq!(std::fs::read(wav).unwrap(), b"other");
+    }
+
+    #[test]
+    #[ignore]
+    fn held_audio_lock_benchmark() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = kept(tmp.path(), 0, Some(A), None);
+        let wav = std::fs::File::create(dir.join("seg-00000.wav")).unwrap();
+        let chunk = vec![7u8; 1 << 20];
+        let mut out = std::io::BufWriter::new(wav);
+        for _ in 0..1023 {
+            std::io::Write::write_all(&mut out, &chunk).unwrap();
+        }
+        drop(out);
+        let start = std::time::Instant::now();
+        let expected = kept_sessions(tmp.path(), A, kept_snapshot).unwrap();
+        let enrolled = start.elapsed();
+        let start = std::time::Instant::now();
+        let verified = verify_held_audio(tmp.path(), A, &expected).unwrap();
+        let outside = start.elapsed();
+        let start = std::time::Instant::now();
+        discard_held_audio(tmp.path(), A, &expected, &verified).unwrap();
+        let under_lock = start.elapsed();
+        assert!(!dir.exists());
+        eprintln!(
+            "held audio 1 GiB: hashed when held {:.1} ms, checked again outside the lock {:.1} ms, under the notes lock at deletion {:.1} ms",
+            enrolled.as_secs_f64() * 1000.0,
+            outside.as_secs_f64() * 1000.0,
+            under_lock.as_secs_f64() * 1000.0
+        );
+    }
+
+    #[test]
+    fn audio_replaced_after_its_check_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = kept(tmp.path(), 0, Some(A), None);
+        let wav = dir.join("seg-00000.wav");
+        std::fs::write(&wav, b"audio").unwrap();
+        let expected = kept_sessions(tmp.path(), A, kept_snapshot).unwrap();
+        let verified = verify_held_audio(tmp.path(), A, &expected).unwrap();
+        std::fs::remove_file(&wav).unwrap();
+        std::fs::write(&wav, b"other").unwrap();
+        assert!(discard_held_audio(tmp.path(), A, &expected, &verified).is_err());
+        assert_eq!(std::fs::read(wav).unwrap(), b"other");
+    }
+
+    #[test]
+    fn a_stale_lock_left_after_the_hold_does_not_keep_its_audio() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = kept(tmp.path(), 0, Some(A), None);
+        std::fs::write(dir.join("seg-00000.wav"), b"audio").unwrap();
+        let expected = kept_sessions(tmp.path(), A, kept_snapshot).unwrap();
+        let lock = dir.join("lock");
+        std::fs::write(&lock, "1").unwrap();
+        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&lock)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        discard_held_audio(
+            tmp.path(),
+            A,
+            &expected,
+            &verify_held_audio(tmp.path(), A, &expected).unwrap_or_default(),
+        )
+        .unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_hold_deletes_only_unchanged_sessions_it_recorded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let matched = kept(tmp.path(), 0, Some(A), None);
+        let transferred = kept(tmp.path(), 1, Some(A), None);
+        let replaced = kept(tmp.path(), 2, Some(A), None);
+        let planned = kept_sessions(tmp.path(), A, kept_snapshot).unwrap();
+        assert_eq!(planned.len(), 3);
+        let later = kept(tmp.path(), 3, Some(A), None);
+        let mut change = Session::open(&transferred).unwrap();
+        change.manifest.note = Some(B.to_string());
+        change.save().unwrap();
+        let mut change = Session::open(&replaced).unwrap();
+        change.manifest.id = "fresh-id".into();
+        change.save().unwrap();
+        discard_held_audio(
+            tmp.path(),
+            A,
+            &planned,
+            &verify_held_audio(tmp.path(), A, &planned).unwrap_or_default(),
+        )
+        .unwrap();
+        assert!(!matched.exists());
+        assert!(later.exists() && transferred.exists() && replaced.exists());
+        discard_held_audio(
+            tmp.path(),
+            A,
+            &planned,
+            &verify_held_audio(tmp.path(), A, &planned).unwrap_or_default(),
+        )
+        .unwrap();
+    }
+
+    #[test]
     fn kept_audio_follows_a_combined_note() {
         let tmp = tempfile::tempdir().unwrap();
         let a = kept(tmp.path(), 0, Some(A), None);
@@ -425,6 +773,7 @@ mod tests {
             moved,
             [leo_web::record::Moved {
                 session: name_of(&a),
+                identity: Some(identity(&Session::open(&a).unwrap())),
                 previous: Some(A.into()),
                 target: B.into(),
             }]
@@ -471,6 +820,7 @@ mod tests {
         assert_eq!(note_of(&a).as_deref(), Some(C));
         let outside = [leo_web::record::Moved {
             session: "../x".into(),
+            identity: None,
             previous: None,
             target: C.into(),
         }];
@@ -589,6 +939,23 @@ mod tests {
     }
 
     #[test]
+    fn an_unresolved_combine_protects_its_saved_recordings_from_keeping() {
+        let tmp = tempfile::tempdir().unwrap();
+        let waiting = kept(tmp.path(), 0, Some(A), None);
+        let other = kept(tmp.path(), 1, Some(B), None);
+        assert_eq!(
+            expire_kept_audio(
+                tmp.path(),
+                chrono::Utc::now(),
+                &HashSet::from([A.to_string()])
+            ),
+            1
+        );
+        assert!(waiting.exists());
+        assert!(!other.exists());
+    }
+
+    #[test]
     fn kept_audio_past_its_time_goes_and_everything_else_stays() {
         let tmp = tempfile::tempdir().unwrap();
         let sessions = tmp.path().join("recordings");
@@ -606,7 +973,7 @@ mod tests {
         let locked = create("old-locked-01", true, 40);
         std::fs::write(locked.join("lock"), std::process::id().to_string()).unwrap();
         let before = chrono::Utc::now() - chrono::Duration::days(30);
-        assert_eq!(expire_kept_audio(&sessions, before), 1);
+        assert_eq!(expire_kept_audio(&sessions, before, &HashSet::new()), 1);
         assert!(!old_saved.exists());
         assert!(new_saved.exists() && old_pending.exists() && locked.exists());
     }
@@ -671,7 +1038,8 @@ mod tests {
             .map(|p| p.id)
             .collect();
         let preview = old.len() + kept_audio(root, cutoff).len();
-        let deleted = discard_recordings(root, &old) + expire_kept_audio(root, cutoff);
+        let deleted =
+            discard_recordings(root, &old) + expire_kept_audio(root, cutoff, &HashSet::new());
         assert_eq!((preview, deleted), (2, 2));
         assert!(!kept.exists() && !broken.exists());
     }
@@ -692,7 +1060,7 @@ mod tests {
             .collect();
         assert_eq!(old, ["kept-for-retry"]);
         assert_eq!(kept_audio(root, cutoff), std::slice::from_ref(&done));
-        assert_eq!(expire_kept_audio(root, cutoff), 1);
+        assert_eq!(expire_kept_audio(root, cutoff, &HashSet::new()), 1);
         assert!(retry.exists() && !done.exists());
     }
 
@@ -704,7 +1072,7 @@ mod tests {
         let broken = damaged(root, 41, Some("{"), true);
         let cutoff = chrono::Utc::now() - chrono::Duration::days(30);
         assert_eq!(kept_audio(root, cutoff).len(), 2);
-        assert_eq!(expire_kept_audio(root, cutoff), 2);
+        assert_eq!(expire_kept_audio(root, cutoff, &HashSet::new()), 2);
         assert!(!empty.exists() && !broken.exists());
     }
 
@@ -734,7 +1102,7 @@ mod tests {
         mode(0o000);
         set_old(&shut, 42);
         let selected = kept_audio(root, cutoff).len();
-        let deleted = expire_kept_audio(root, cutoff);
+        let deleted = expire_kept_audio(root, cutoff, &HashSet::new());
         mode(0o600);
         assert_eq!((selected, deleted), (0, 0));
         assert!(fresh.exists() && started_now.exists() && touched.exists() && shut.exists());

@@ -220,6 +220,7 @@ fn a_kept_notes_failed_recording_reopens_after_uninstall() {
     };
     let owned = recording(true, Some("note-k0001"));
     let combined = recording(true, Some("note-k0001"));
+    let held = recording(true, Some("note-absent"));
     let unfinished = recording(false, None);
     let exe = leo.installed();
 
@@ -227,10 +228,10 @@ fn a_kept_notes_failed_recording_reopens_after_uninstall() {
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.success(), "{}", describe(&out));
     assert!(
-        said.contains("Kept 2 recordings that belong to your notes, and 1 unfinished recording not yet saved as notes, in ~/recordings."),
+        said.contains("Kept 3 saved recordings and 1 unfinished recording not yet saved as notes, in ~/recordings."),
         "{said}"
     );
-    for dir in [owned, combined, unfinished] {
+    for dir in [owned, combined, held, unfinished] {
         assert!(Session::open(&dir).is_ok(), "{dir:?} went");
         assert!(
             dir.join("seg-00001.wav").is_file(),

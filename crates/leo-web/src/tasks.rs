@@ -11,10 +11,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::jsonline;
 
-static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(crate) type FolderLocks = OnceLock<Mutex<HashMap<std::path::PathBuf, &'static Mutex<()>>>>;
 
-pub fn writing() -> std::sync::MutexGuard<'static, ()> {
-    WRITING.lock().unwrap_or_else(|e| e.into_inner())
+pub(crate) fn folder_lock(
+    locks: &'static FolderLocks,
+    chats: &Path,
+) -> std::sync::MutexGuard<'static, ()> {
+    let key = chats.parent().unwrap_or(chats).to_path_buf();
+    let lock: &'static Mutex<()> = locks
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_insert_with(|| Box::leak(Box::default()));
+    lock.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub fn writing(chats: &Path) -> std::sync::MutexGuard<'static, ()> {
+    static WRITING: FolderLocks = OnceLock::new();
+    folder_lock(&WRITING, chats)
 }
 
 pub const LISTED_PAGE: usize = 500;

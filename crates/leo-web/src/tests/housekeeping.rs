@@ -266,3 +266,25 @@ fn old_board_undo_records_expire_with_the_trash_period() {
             .is_some()
     );
 }
+
+#[tokio::test]
+async fn saving_keeping_replies_while_cleanup_is_blocked() {
+    let (state, _dir, _) = state_with(&[]);
+    let (ready, held) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let chats = state.chats.clone();
+    let worker = std::thread::spawn(move || {
+        let _tasks = crate::tasks::writing(&chats);
+        ready.send(()).unwrap();
+        wait.recv().unwrap();
+    });
+    held.recv().unwrap();
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        set_keep(State(state), Json(Default::default())),
+    )
+    .await;
+    release.send(()).unwrap();
+    worker.join().unwrap();
+    assert_eq!(reply.unwrap().status(), StatusCode::OK);
+}

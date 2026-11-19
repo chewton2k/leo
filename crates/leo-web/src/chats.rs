@@ -1468,6 +1468,16 @@ mod tests {
             })
             .unwrap();
         assert_eq!(words, 1);
+        let rows: i64 = db_of(&dir)
+            .with(|c| {
+                c.query_row(
+                    "SELECT count(*) FROM chat_messages WHERE chat = ?1",
+                    [gone],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        assert_eq!(rows, 0);
     }
 
     #[test]

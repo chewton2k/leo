@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -257,13 +258,7 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
     let notes_dir = state.notes_dir.clone();
     if field == "trash_days" {
         return state
-            .read_store(move |store| {
-                Ok(store
-                    .trashed()
-                    .iter()
-                    .filter(|t| t.deleted_at < before)
-                    .count())
-            })
+            .read_store(move |store| Ok(store.would_expire(days)))
             .await
             .unwrap_or(0);
     }
@@ -300,6 +295,7 @@ pub(crate) fn expire_audio(
     days: Option<u32>,
     now: DateTime<Utc>,
     recording: &Recordings,
+    protected: &HashSet<String>,
 ) -> usize {
     let Some(days) = days else {
         return 0;
@@ -307,34 +303,66 @@ pub(crate) fn expire_audio(
     let Some(cutoff) = now.checked_sub_signed(chrono::Duration::days(i64::from(days))) else {
         return 0;
     };
-    let kept = housekeeper.expire_kept_audio(cutoff);
+    let blocked: HashSet<String> = if protected.is_empty() {
+        HashSet::new()
+    } else {
+        let Ok(sessions) = housekeeper.kept_sessions_for(protected) else {
+            return 0;
+        };
+        sessions
+            .into_values()
+            .flatten()
+            .map(|recording| {
+                let id = recording.session;
+                id.strip_suffix("-you")
+                    .or_else(|| id.strip_suffix("-others"))
+                    .unwrap_or(&id)
+                    .to_string()
+            })
+            .collect()
+    };
+    let kept = housekeeper.expire_kept_audio(cutoff, protected);
     let Ok(old) = housekeeper.old_recordings(cutoff) else {
         return kept;
     };
-    let ids: Vec<String> = old.into_iter().map(|p| p.id).collect();
+    let ids: Vec<String> = old
+        .into_iter()
+        .map(|p| p.id)
+        .filter(|id| !blocked.contains(id))
+        .collect();
     kept + ids
         .chunks(DISCARD_BATCH)
         .map(|batch| discard_all_unless_in_use(recording, housekeeper, batch.to_vec()))
         .sum::<usize>()
 }
 
-pub(crate) async fn expire_now(state: &AppState) {
-    let Ok((notes_dir, keep, owners)) = state
-        .read_store(|store| {
-            Ok((
-                store.notes_dir.clone(),
-                leo_core::keep::load(&store.notes_dir),
-                crate::dependents::Owners::of(store),
-            ))
-        })
-        .await
-    else {
+pub(crate) fn expire_dependents(state: &AppState) {
+    let Ok(expired) = crate::store_now(state, |store| Ok(store.tidy_trash_now())) else {
         return;
     };
-    let housekeeper = state.housekeeper.clone();
-    let chats = state.chats.clone();
-    let recording = state.recording.clone();
-    let originals = state.originals.clone();
+    crate::dependents::clear(state, expired, crate::dependents::Why::Expired);
+    crate::dependents::pictures(state, Utc::now());
+}
+
+pub(crate) async fn expire_choices(state: &AppState) {
+    let state = state.clone();
+    let _ = tokio::task::spawn_blocking(move || apply_choices(&state)).await;
+}
+
+#[cfg(test)]
+pub(crate) async fn expire_now(state: &AppState) {
+    let state = state.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        apply_choices(&state);
+        expire_dependents(&state);
+    })
+    .await;
+}
+
+pub(crate) fn apply_choices(state: &AppState) {
+    let notes_dir = &state.notes_dir;
+    let keep = leo_core::keep::load(notes_dir);
+    let chats = &state.chats;
     let stop = leo_core::children::Stop {
         flag: state.quitting.clone(),
         deadline: None,
@@ -345,36 +373,43 @@ pub(crate) async fn expire_now(state: &AppState) {
         .unwrap_or_else(|e| e.into_inner())
         .as_ref()
         .map(|job| job.session_id());
-    let _ = tokio::task::spawn_blocking(move || {
-        let now = Utc::now();
-        {
-            let _writing = crate::tasks::writing();
-            crate::tasks::forget_deleted(&chats, keep.trash_days, now);
-        }
-        {
-            let _writing = crate::boards::writing();
-            crate::boards::finish_deletes(&chats);
-            crate::boards::forget_deleted(&chats, keep.trash_days, now);
-            crate::boards::forget_changes(&chats, keep.trash_days, now);
-        }
-        crate::chats::tidy(&chats, keep.chat_days, now);
-        crate::chat_files::tidy_orphans(&chats, now);
-        crate::routes::combine::forget_old_combines(&chats, now - chrono::Duration::days(1));
-        leo_core::children::with_stop(stop.clone(), || {
-            expire_uploads(&notes_dir, keep.upload_days, now);
-        });
-        if stop.asked() {
-            return;
-        }
-        originals.forget_missing();
-        expire_transcripts(&notes_dir, keep.transcript_days, now, active.as_deref());
-        crate::dependents::clear(&chats, &notes_dir, Vec::new(), active.clone(), &owners);
-        if let Some(housekeeper) = housekeeper {
-            expire_audio(&*housekeeper, keep.audio_days, now, &recording);
-        }
-        expire_backups(&data_dir(&notes_dir), &notes_dir, SystemTime::from(now));
-    })
-    .await;
+    let now = Utc::now();
+    {
+        let _writing = crate::tasks::writing(chats);
+        crate::tasks::forget_deleted(chats, keep.trash_days, now);
+    }
+    {
+        let _writing = crate::boards::writing(chats);
+        crate::boards::finish_deletes(chats);
+        crate::boards::forget_deleted(chats, keep.trash_days, now);
+        crate::boards::forget_changes(chats, keep.trash_days, now);
+    }
+    crate::chats::tidy(chats, keep.chat_days, now);
+    crate::chat_files::tidy_orphans(chats, now);
+    crate::routes::combine::forget_old_combines(chats, now - chrono::Duration::days(1));
+    leo_core::children::with_stop(stop.clone(), || {
+        expire_uploads(notes_dir, keep.upload_days, now);
+    });
+    if stop.asked() {
+        return;
+    }
+    state.originals.forget_missing();
+    expire_transcripts(notes_dir, keep.transcript_days, now, active.as_deref());
+    if let Some(housekeeper) = &state.housekeeper {
+        let _audio = crate::routes::combine::audio(state);
+        let protected = crate::routes::combine::pending_retargets(chats)
+            .into_iter()
+            .flat_map(|(from, target)| [from, target])
+            .collect();
+        expire_audio(
+            &**housekeeper,
+            keep.audio_days,
+            now,
+            &state.recording,
+            &protected,
+        );
+    }
+    expire_backups(&data_dir(notes_dir), notes_dir, SystemTime::from(now));
 }
 
 #[cfg(test)]
@@ -838,9 +873,21 @@ mod tests {
             ],
             ..Default::default()
         };
-        assert_eq!(expire_audio(&fake, None, now, &Default::default()), 0);
+        assert_eq!(
+            expire_audio(&fake, None, now, &Default::default(), &Default::default()),
+            0
+        );
         assert!(fake.discarded.lock().unwrap().is_empty());
-        assert_eq!(expire_audio(&fake, Some(30), now, &Default::default()), 1);
+        assert_eq!(
+            expire_audio(
+                &fake,
+                Some(30),
+                now,
+                &Default::default(),
+                &Default::default()
+            ),
+            1
+        );
         assert_eq!(*fake.discarded.lock().unwrap(), ["old-recording"]);
     }
 
@@ -873,7 +920,16 @@ mod tests {
         };
         let cutoff = now - chrono::Duration::days(30);
         assert_eq!(many.old_recordings(cutoff).unwrap().len(), 600);
-        assert_eq!(expire_audio(&many, Some(30), now, &Default::default()), 600);
+        assert_eq!(
+            expire_audio(
+                &many,
+                Some(30),
+                now,
+                &Default::default(),
+                &Default::default()
+            ),
+            600
+        );
         assert_eq!(*many.batches.lock().unwrap(), [256, 256, 88]);
     }
 
@@ -917,7 +973,13 @@ mod tests {
         }
         let stubborn = Stubborn(Mutex::new(Vec::new()));
         assert_eq!(
-            expire_audio(&stubborn, Some(30), Utc::now(), &Default::default()),
+            expire_audio(
+                &stubborn,
+                Some(30),
+                Utc::now(),
+                &Default::default(),
+                &Default::default()
+            ),
             1
         );
         assert_eq!(stubborn.0.lock().unwrap().len(), 2);

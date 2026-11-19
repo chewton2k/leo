@@ -64,7 +64,8 @@ explain beyond the source but facts stay the source's.
 
 A `Session` is `<data>/leo/recordings/<stamp>/` with `session.json`
 (`Manifest`), a `lock` (pid + 5 s heartbeat; stale when old or the pid is dead)
-and segments. `capture::Capture` reads s16 PCM from `mic::Mic`
+and segments. Manifest, trace and lock reads use regular files and bounded reads.
+`capture::Capture` reads s16 PCM from `mic::Mic`
 (`Source::Microphone`, `Source::Screen`: macOS 14.6+ process tap or Windows
 loopback, else BlackHole or `LEO_SCREEN_DEVICE`, see `mic::find_device`;
 `Source::Replay` from `LEO_FAKE_AUDIO` at `LEO_FAKE_SPEED`; `Source::Synthetic`

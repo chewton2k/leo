@@ -1953,12 +1953,31 @@ async fn threads_follow_their_note_through_the_trash() {
         .send_as(&engine.cookie, "DELETE", &format!("/api/notes/{id}"), None)
         .await;
     let (status, _) = engine
-        .post("/api/trash/delete", serde_json::json!({ "all": true }))
+        .post(
+            "/api/trash/delete",
+            serde_json::json!({ "all": true, "revisions": trash_revisions(&engine).await }),
+        )
         .await;
     assert_eq!(status, 200);
     assert!(margin::one(&engine.chats(), &id, &thread).is_none());
     assert_eq!(margin::open_on(&engine.chats(), &keep).len(), 1);
     engine.stop().await;
+}
+
+async fn trash_revisions(engine: &Engine) -> serde_json::Value {
+    let rows = engine.get("/api/trash").await.1;
+    rows.as_array()
+        .unwrap()
+        .iter()
+        .filter(|row| row["revision"].is_string())
+        .map(|row| {
+            (
+                row["id"].as_str().unwrap().to_string(),
+                row["revision"].clone(),
+            )
+        })
+        .collect::<serde_json::Map<_, _>>()
+        .into()
 }
 
 #[tokio::test]
@@ -1973,7 +1992,7 @@ async fn deleting_the_last_note_for_good_takes_its_threads_at_once() {
     let (status, _) = engine
         .post(
             "/api/trash/delete",
-            serde_json::json!({ "ids": [id.clone()] }),
+            serde_json::json!({ "ids": [id.clone()], "revisions": trash_revisions(&engine).await }),
         )
         .await;
     assert_eq!(status, 200);
@@ -2012,7 +2031,8 @@ fn an_unreadable_file_stops_the_sweep() {
     );
     let start = chrono::Utc::now();
     assert_eq!(
-        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept)),
+        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept, &[], &chats)
+            .len()),
         0
     );
     let held = margin::every(&chats);
@@ -2020,7 +2040,7 @@ fn an_unreadable_file_stops_the_sweep() {
     let kept = std::collections::HashSet::new();
     margin::sweep(&chats, &kept, start);
     assert_eq!(
-        margin::sweep(&chats, &kept, start + chrono::Duration::days(8)),
+        margin::sweep(&chats, &kept, start + chrono::Duration::days(8)).len(),
         1,
         "without the guard the same thread would go"
     );
@@ -2167,7 +2187,8 @@ fn the_sweep_keeps_everything_while_notes_cannot_be_trusted() {
     );
     margin::put(&chats, &thread, margin::MOST_OPEN);
     assert_eq!(
-        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept)),
+        margin::sweep_kept(&store).map_or(0, |kept| margin::sweep_store(&chats, kept, &[], &chats)
+            .len()),
         0
     );
     assert_eq!(margin::open_on(&chats, "note").len(), 1);

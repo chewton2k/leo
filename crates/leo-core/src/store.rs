@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -145,6 +145,7 @@ fn head_and_renamed(props: &mut serde_yaml::Mapping, relative_path: &Path) -> (H
             id,
             title,
             directory,
+            created_at: props.get("created_at").cloned().and_then(date_from),
         },
         !named,
     )
@@ -179,7 +180,7 @@ fn read_more(file: &mut fs::File, bytes: &mut Vec<u8>) -> Option<bool> {
 }
 
 fn read_head(path: &Path, relative: &Path) -> Option<Head> {
-    let mut file = fs::File::open(path).ok()?;
+    let mut file = crate::paths::open_regular(path).ok()?;
     let mut bytes = Vec::new();
     while bytes.len() < 8 && read_more(&mut file, &mut bytes)? {}
     let start = if bytes.starts_with(b"\xef\xbb\xbf") {
@@ -231,6 +232,7 @@ fn parse_note(
             id,
             title,
             directory,
+            ..
         },
         renamed,
     ) = head_and_renamed(&mut props, relative_path);
@@ -275,12 +277,16 @@ fn conflict_notice(title: &str) -> String {
 struct Seen {
     path: PathBuf,
     disk: u64,
+    digest: crate::paths::FileDigest,
     model: u64,
     fields: u64,
     place: u64,
     copy: Option<(PathBuf, u64)>,
     stamp: Option<Stamp>,
     renamed: bool,
+    pictures: Vec<String>,
+    device: Option<u64>,
+    created_at: DateTime<Utc>,
 }
 
 type Stamp = (u64, u128, i64);
@@ -492,6 +498,7 @@ fn walk(
     errors: &mut Vec<(PathBuf, String)>,
 ) -> std::io::Result<()> {
     if depth > MOST_DEPTH {
+        errors.push((dir.to_path_buf(), "folders nested too deep".to_string()));
         return Ok(());
     }
     let entries = match read_dir_or_empty(dir) {
@@ -572,6 +579,7 @@ pub struct Trashed {
     pub directory: String,
     pub deleted_at: DateTime<Utc>,
     pub readable: bool,
+    pub revision: Option<crate::paths::FileDigest>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -585,6 +593,8 @@ pub struct Head {
     pub id: String,
     pub title: String,
     pub directory: String,
+    #[serde(default)]
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 pub struct TrashEntry {
@@ -607,19 +617,29 @@ fn unreadable_id(relative: &Path) -> String {
 }
 
 const TRASH_INDEX: &str = "trash.json";
-const TRASH_INDEX_VERSION: u32 = 1;
+const TRASH_INDEX_VERSION: u32 = 2;
+const MOST_TRASH_NOTE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Indexed {
     stamp: Stamp,
+    #[serde(default)]
+    digest: Option<crate::paths::FileDigest>,
     deleted_at: DateTime<Utc>,
     head: Option<Head>,
+    #[serde(default)]
+    pictures: Option<Vec<String>>,
+    #[serde(default)]
+    entered: Option<i64>,
+    #[serde(default)]
+    hidden: bool,
 }
 
 #[derive(Default)]
 struct TrashIndex {
     files: std::collections::BTreeMap<PathBuf, Indexed>,
     changed: bool,
+    incomplete: bool,
 }
 
 fn trash_index_path(notes_dir: &Path) -> Result<PathBuf> {
@@ -655,6 +675,7 @@ impl TrashIndex {
                 .map(|(relative, entry)| (relative.split('/').collect(), entry))
                 .collect(),
             changed: false,
+            incomplete: true,
         }
     }
 
@@ -685,35 +706,51 @@ impl TrashIndex {
         }
     }
 
-    fn check(&mut self, notes_dir: &Path) {
+    fn check(&mut self, notes_dir: &Path, clock: i64) {
         let mut files = Vec::new();
-        let walked = trash_dir(notes_dir)
-            .filter(|trash| walk(trash, 0, false, &mut files, &mut Vec::new()).is_ok());
-        let Some(trash) = walked else {
-            self.changed |= !self.files.is_empty();
-            self.files.clear();
+        let mut errors = Vec::new();
+        let Some(trash) = trash_dir(notes_dir) else {
+            self.incomplete = true;
             return;
         };
+        if walk(&trash, 0, false, &mut files, &mut errors).is_err() {
+            self.incomplete = true;
+            return;
+        }
+        self.incomplete = !errors.is_empty();
         let mut known = std::mem::take(&mut self.files);
         for (path, meta) in files {
             let (Ok(modified), Ok(relative)) = (meta.modified(), path.strip_prefix(&trash)) else {
+                self.incomplete = true;
                 continue;
             };
             let stamp = stamp_of(&meta);
-            let entry = match known.remove(relative) {
+            let mut entry = match known.remove(relative) {
                 Some(entry) if entry.stamp == stamp => entry,
                 _ => {
                     self.changed = true;
                     Indexed {
                         stamp,
+                        digest: crate::paths::digest_file(&path, MOST_TRASH_NOTE_BYTES).ok(),
                         deleted_at: modified.into(),
                         head: read_head(&path, relative),
+                        pictures: None,
+                        entered: Some(clock),
+                        hidden: false,
                     }
                 }
             };
+            if entry.entered.is_none_or(|entered| entered > clock) {
+                entry.entered = Some(clock);
+                self.changed = true;
+            }
             self.files.insert(relative.to_path_buf(), entry);
         }
-        self.changed |= !known.is_empty();
+        if self.incomplete {
+            self.files.extend(known);
+        } else {
+            self.changed |= !known.is_empty();
+        }
     }
 
     fn entries(&self, notes_dir: &Path) -> Vec<TrashEntry> {
@@ -732,11 +769,278 @@ impl TrashIndex {
     }
 }
 
+const PICTURES: &str = "pictures.json";
+
+fn pictures_path(notes_dir: &Path) -> Result<PathBuf> {
+    crate::paths::contained_path(notes_dir, &Path::new(".leo").join(PICTURES))
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Grace {
+    at: DateTime<Utc>,
+    #[serde(default)]
+    entered: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    file: Option<(u64, u128)>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    digest: Option<crate::paths::FileDigest>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    returning: Option<String>,
+}
+
+impl Grace {
+    fn from(at: DateTime<Utc>, entered: i64) -> Grace {
+        Grace {
+            at,
+            entered,
+            file: None,
+            digest: None,
+            returning: None,
+        }
+    }
+
+    fn now() -> Grace {
+        Grace::from(DateTime::<Utc>::UNIX_EPOCH, 0)
+    }
+
+    fn due(&self, clock: i64, period: Option<chrono::Duration>) -> bool {
+        self.at == DateTime::<Utc>::UNIX_EPOCH
+            || period
+                .is_some_and(|period| clock.saturating_sub(self.entered) >= period.num_seconds())
+    }
+}
+
+#[derive(Default, Clone, Copy, Serialize, Deserialize)]
+struct Clock {
+    secs: i64,
+    last: Option<DateTime<Utc>>,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+struct Left {
+    path: String,
+    disk: u64,
+    twin: bool,
+    #[serde(default)]
+    device: Option<u64>,
+    #[serde(default)]
+    created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    digest: Option<crate::paths::FileDigest>,
+}
+
+fn device_of(path: &Path) -> Option<u64> {
+    let meta = fs::symlink_metadata(path)
+        .ok()
+        .filter(|meta| meta.is_dir())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        Some(meta.dev()).filter(|device| *device != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        None
+    }
+}
+
+fn folder_of(path: &Path) -> PathBuf {
+    path.parent().map(Path::to_path_buf).unwrap_or_default()
+}
+
+#[derive(Default, Serialize, Deserialize)]
+struct Released {
+    #[serde(default)]
+    clock: Clock,
+    #[serde(default)]
+    binned: BTreeMap<String, Grace>,
+    #[serde(default)]
+    unused_files: BTreeMap<String, crate::attachments::SeenPicture>,
+    #[serde(default)]
+    gone: BTreeMap<String, Left>,
+    #[serde(default)]
+    expired: BTreeMap<String, Option<DateTime<Utc>>>,
+    #[serde(default)]
+    retired: BTreeMap<String, (DateTime<Utc>, crate::paths::FileDigest)>,
+    #[serde(default)]
+    reused: BTreeSet<String>,
+    #[serde(default)]
+    released: BTreeMap<String, Grace>,
+    #[serde(default)]
+    kept: BTreeSet<String>,
+}
+
+impl Released {
+    fn load(notes_dir: &Path) -> Released {
+        let read = || -> Result<Released> {
+            use std::io::Read;
+            let mut bytes = Vec::new();
+            match crate::paths::open_regular(&pictures_path(notes_dir)?) {
+                Ok(mut file) => file.read_to_end(&mut bytes)?,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Ok(Released::default())
+                }
+                Err(e) => return Err(e.into()),
+            };
+            Ok(serde_json::from_slice(&bytes)?)
+        };
+        read().unwrap_or_else(|e| {
+            crate::diag::warn(format!(
+                "leo could not read which pictures no note links, so it starts their count again: {e:#}"
+            ));
+            Released::default()
+        })
+    }
+
+    fn persist(&self, notes_dir: &Path) -> bool {
+        let write = || -> Result<()> {
+            let path = pictures_path(notes_dir)?;
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            write_atomic(&path, serde_json::to_vec(self)?)
+        };
+        if let Err(e) = write() {
+            crate::diag::warn(format!(
+                "leo could not keep which pictures no note links: {e:#}"
+            ));
+            return false;
+        }
+        true
+    }
+}
+
+#[derive(Default)]
+struct Pictures {
+    live: HashMap<String, usize>,
+    saved: Released,
+    changed: bool,
+}
+
+impl Pictures {
+    fn counted(mut saved: Released, seen: &HashMap<String, Seen>) -> Pictures {
+        let mut live: HashMap<String, usize> = HashMap::new();
+        for name in seen.values().flat_map(|entry| &entry.pictures) {
+            *live.entry(name.clone()).or_default() += 1;
+        }
+        let before = (saved.released.len(), saved.kept.len());
+        saved.released.retain(|name, _| !live.contains_key(name));
+        saved.kept.retain(|name| !live.contains_key(name));
+        let changed = before != (saved.released.len(), saved.kept.len());
+        Pictures {
+            live,
+            saved,
+            changed,
+        }
+    }
+
+    fn linked(&mut self, name: &str) {
+        let count = self.live.entry(name.to_string()).or_default();
+        *count += 1;
+        if *count == 1 {
+            let released = self.saved.released.remove(name).is_some();
+            let kept = self.saved.kept.remove(name);
+            self.changed |= released || kept;
+        }
+    }
+
+    fn unlinked(&mut self, name: &str, release: Option<DateTime<Utc>>) {
+        let Some(count) = self.live.get_mut(name) else {
+            return;
+        };
+        *count -= 1;
+        if *count > 0 {
+            return;
+        }
+        self.live.remove(name);
+        if let Some(at) = release.filter(|_| !self.saved.kept.contains(name)) {
+            self.saved
+                .released
+                .entry(name.to_string())
+                .or_insert(Grace::from(at, self.saved.clock.secs));
+            self.changed = true;
+        }
+    }
+
+    fn deleted(&mut self, names: &[String], asked: bool) {
+        let grace = if asked {
+            Grace::now()
+        } else {
+            Grace::from(Utc::now(), i64::MIN / 4)
+        };
+        for name in names {
+            if !self.live.contains_key(name) && !self.saved.kept.contains(name) {
+                self.saved.released.insert(name.clone(), grace.clone());
+                self.changed = true;
+            }
+        }
+    }
+}
+
+fn departures(
+    gone: &mut BTreeMap<String, Left>,
+    leftover: HashMap<String, Seen>,
+    seen: &HashMap<String, Seen>,
+) -> bool {
+    let before = (gone.len(), gone.values().filter(|left| left.twin).count());
+    for (id, entry) in leftover {
+        if seen.contains_key(&id) {
+            continue;
+        }
+        let parts: Option<Vec<&str>> = entry.path.iter().map(|part| part.to_str()).collect();
+        if let Some(parts) = parts {
+            gone.entry(id.clone()).or_insert(Left {
+                path: parts.join("/"),
+                disk: entry.disk,
+                twin: id == stable_id(&entry.path),
+                device: entry.device,
+                created_at: Some(entry.created_at),
+                digest: Some(entry.digest),
+            });
+        }
+    }
+    gone.retain(|id, _| !seen.contains_key(id));
+    if gone.values().any(|left| !left.twin) {
+        let disks: HashSet<u64> = seen.values().map(|entry| entry.disk).collect();
+        for left in gone.values_mut() {
+            left.twin |= disks.contains(&left.disk);
+        }
+    }
+    before != (gone.len(), gone.values().filter(|left| left.twin).count())
+}
+
+fn read_regular_text(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+    let mut text = String::new();
+    crate::paths::open_regular(path)?.read_to_string(&mut text)?;
+    Ok(text)
+}
+
+fn pictures_read(path: &Path) -> Option<Vec<String>> {
+    Some(crate::attachments::mentioned(
+        &read_regular_text(path).ok()?,
+    ))
+}
+
+pub struct Owed {
+    pub path: PathBuf,
+    relative: PathBuf,
+    stamp: Stamp,
+}
+
+impl Owed {
+    pub fn read(&self) -> Option<Vec<String>> {
+        pictures_read(&self.path)
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Emptied {
     pub deleted: usize,
     pub failed: usize,
     pub forgotten: Vec<String>,
+    pub changed: bool,
 }
 
 fn trash_dir(notes_dir: &Path) -> Option<PathBuf> {
@@ -767,6 +1071,23 @@ pub fn trash_entries(notes_dir: &Path) -> Vec<TrashEntry> {
         .collect()
 }
 
+pub fn trashed_ids_if_complete(notes_dir: &Path) -> Option<HashSet<String>> {
+    let trash = trash_dir(notes_dir)?;
+    let mut files = Vec::new();
+    let mut errors = Vec::new();
+    walk(&trash, 0, false, &mut files, &mut errors).ok()?;
+    if !errors.is_empty() {
+        return None;
+    }
+    files
+        .into_iter()
+        .map(|(path, _)| {
+            let relative = path.strip_prefix(&trash).ok()?;
+            read_head(&path, relative).map(|head| head.id)
+        })
+        .collect()
+}
+
 pub fn trashed_ids(notes_dir: &Path) -> HashSet<String> {
     trash_entries(notes_dir)
         .into_iter()
@@ -774,10 +1095,24 @@ pub fn trashed_ids(notes_dir: &Path) -> HashSet<String> {
         .collect()
 }
 
-fn trash_cutoff(notes_dir: &Path) -> Option<DateTime<Utc>> {
-    crate::keep::load(notes_dir)
-        .trash_days
-        .map(|days| Utc::now() - chrono::Duration::days(i64::from(days)))
+pub fn trash_days_now(notes_dir: &Path) -> Option<Option<u32>> {
+    let text = match read_regular_text(&crate::keep::path_for(notes_dir)) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Some(Some(crate::keep::DEFAULT_TRASH_DAYS))
+        }
+        read => read.ok()?,
+    };
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    match value.as_object()?.get("trash_days") {
+        None => Some(Some(crate::keep::DEFAULT_TRASH_DAYS)),
+        Some(serde_json::Value::Null) => Some(None),
+        Some(days) => {
+            let days = u32::try_from(days.as_u64()?).ok()?;
+            crate::keep::CHOICES
+                .contains(&Some(days))
+                .then_some(Some(days))
+        }
+    }
 }
 
 pub const MOST_EMPTY_FOLDERS: usize = 10_000;
@@ -846,8 +1181,10 @@ struct Found {
     modified: std::time::SystemTime,
     renamed: bool,
     disk: u64,
+    digest: crate::paths::FileDigest,
     stamp: Stamp,
     kept: Option<Seen>,
+    pictures: Vec<String>,
 }
 
 fn skip(unreadable: &mut Vec<(PathBuf, String)>, path: &Path, error: &dyn std::fmt::Display) {
@@ -861,7 +1198,7 @@ fn read_found(
     meta: &fs::Metadata,
     unreadable: &mut Vec<(PathBuf, String)>,
 ) -> Option<Found> {
-    let content = match fs::read_to_string(path) {
+    let content = match read_regular_text(path) {
         Ok(content) => content,
         Err(error) => {
             skip(unreadable, path, &error);
@@ -872,7 +1209,9 @@ fn read_found(
     let changed = modified.map_or_else(Utc::now, DateTime::<Utc>::from);
     match parse_note(&content, &relative, changed) {
         Ok((note, renamed)) => Some(Found {
+            pictures: crate::attachments::mentioned(&content),
             disk: hash_str(&content),
+            digest: crate::paths::digest(content.as_bytes()),
             relative,
             note,
             modified: modified.unwrap_or(std::time::UNIX_EPOCH),
@@ -909,8 +1248,10 @@ fn index_notes(
         mut note,
         renamed,
         disk,
+        digest,
         stamp,
         kept,
+        pictures,
         ..
     } in found
     {
@@ -924,6 +1265,7 @@ fn index_notes(
         if let Some(feed) = feed.as_deref_mut().filter(|_| reassigned || kept.is_none()) {
             feed.record(note.id.clone());
         }
+        let pictures = kept.as_ref().map_or(pictures, |kept| kept.pictures.clone());
         let (model, fields) = match &kept {
             _ if reassigned => (0, 0),
             Some(kept) => (kept.model, kept.fields),
@@ -939,12 +1281,16 @@ fn index_notes(
             Seen {
                 path: relative,
                 disk,
+                digest,
                 model,
                 fields,
                 place: kept.map_or_else(|| place_of(&note), |kept| kept.place),
                 copy: None,
                 stamp: Some(stamp),
                 renamed,
+                pictures,
+                device: None,
+                created_at: note.created_at,
             },
         );
         notes.push(note);
@@ -1029,6 +1375,10 @@ pub struct Store {
     feed: std::cell::RefCell<Feed>,
     trash: std::cell::RefCell<Option<TrashIndex>>,
     trash_stale: std::cell::Cell<bool>,
+    pictures: std::cell::RefCell<Pictures>,
+    clock_sample: std::cell::Cell<std::time::Instant>,
+    batching: std::cell::Cell<bool>,
+    holding: std::cell::RefCell<Option<Option<HashMap<String, usize>>>>,
 }
 
 impl Store {
@@ -1055,10 +1405,18 @@ impl Store {
     ) -> Result<Self> {
         check_notes_root(notes_dir)?;
         fs::create_dir_all(notes_dir)?;
+        let initial = old.is_none();
         let mut old = old;
+        let clock_sample = old
+            .as_deref()
+            .map_or_else(std::time::Instant::now, |old| old.clock_sample.get());
         let (trash, trash_stale) = old.as_deref_mut().map_or((None, true), |old| {
             (old.trash.take(), old.trash_stale.get())
         });
+        let released = old.as_deref_mut().map_or_else(
+            || Released::load(notes_dir),
+            |old| std::mem::take(&mut old.pictures.get_mut().saved),
+        );
         let mut files = Vec::new();
         let mut errors = Vec::new();
         walk(notes_dir, 0, true, &mut files, &mut errors)?;
@@ -1080,8 +1438,12 @@ impl Store {
         for (path, why) in &errors {
             skip(&mut unreadable, path, why);
         }
-        let (mut kept, mut feed) = match old {
-            Some(old) => (old.take_unchanged(&files), Some(old.feed.take())),
+        let (mut kept, mut feed, leftover) = match old {
+            Some(old) => (
+                old.take_unchanged(&files),
+                Some(old.feed.take()),
+                std::mem::take(old.seen.get_mut()),
+            ),
             None => Default::default(),
         };
         let found = files
@@ -1092,14 +1454,23 @@ impl Store {
                     modified: meta.modified().unwrap_or(std::time::UNIX_EPOCH),
                     renamed: seen.renamed,
                     disk: seen.disk,
+                    digest: seen.digest,
                     stamp: stamp_of(&meta),
                     note,
                     kept: Some(seen),
+                    pictures: Vec::new(),
                 }),
                 None => read_found(&path, relative, &meta, &mut unreadable),
             })
             .collect();
-        let (notes, seen) = index_notes(found, feed.as_mut());
+        let (notes, mut seen) = index_notes(found, feed.as_mut());
+        let mut devices = HashMap::new();
+        for entry in seen.values_mut() {
+            let folder = folder_of(&entry.path);
+            entry.device = *devices
+                .entry(folder.clone())
+                .or_insert_with(|| device_of(&notes_dir.join(folder)));
+        }
 
         // The directory list on disk only needs to remember empty directories:
         // every note's directory, and its parents, is known from where it is.
@@ -1107,7 +1478,15 @@ impl Store {
             add_with_parents(&mut directories, &note.directory);
         }
         let kept = tidied.filter(|at| !tidy_due(Some(*at)));
+        let mut released = released;
+        let departed = departures(&mut released.gone, leftover, &seen);
+        let mut pictures = Pictures::counted(released, &seen);
+        pictures.changed |= departed;
         let store = Store {
+            pictures: std::cell::RefCell::new(pictures),
+            clock_sample: std::cell::Cell::new(clock_sample),
+            batching: Default::default(),
+            holding: Default::default(),
             seen: std::cell::RefCell::new(seen),
             fingerprint: std::cell::Cell::new(fingerprint),
             tidied: std::cell::Cell::new(Some(kept.unwrap_or_else(std::time::Instant::now))),
@@ -1125,9 +1504,14 @@ impl Store {
             directories,
             notes_dir: notes_dir.to_path_buf(),
         };
+        store.observe_generations();
         if kept.is_none() {
-            store.tidy_trash(&store.notes.iter().map(|n| n.id.as_str()).collect());
+            store.tidy_trash(&store.notes.iter().map(|n| n.id.as_str()).collect(), false);
         }
+        if initial {
+            store.recover_picture_rows();
+        }
+        store.keep_pictures();
         Ok(store)
     }
 
@@ -1269,17 +1653,32 @@ impl Store {
                 hash_note(&back) == fields && back.directory == note.directory
             });
             self.feed.borrow_mut().record(note.id.clone());
+            let pictures = crate::attachments::mentioned(&content);
+            {
+                let mut counts = self.pictures.borrow_mut();
+                let before = previous.as_ref().map_or(&[][..], |p| &p.pictures[..]);
+                for name in pictures.iter().filter(|name| !before.contains(name)) {
+                    counts.linked(name);
+                }
+                for name in before.iter().filter(|name| !pictures.contains(name)) {
+                    counts.unlinked(name, Some(Utc::now()));
+                }
+            }
             seen.insert(
                 note.id.clone(),
                 Seen {
                     path: relative,
                     disk: model,
+                    digest: crate::paths::digest(content.as_bytes()),
                     model,
                     fields,
                     place: place_of(note),
                     copy: previous.and_then(|previous| previous.copy),
                     stamp: exact.then(|| stamp_of(&written)),
                     renamed,
+                    pictures,
+                    device: target.parent().and_then(device_of),
+                    created_at: note.created_at,
                 },
             );
         }
@@ -1343,12 +1742,17 @@ impl Store {
                     fp = fp.wrapping_sub(term);
                 }
             }
-            seen.remove(&id);
+            if let Some(entry) = seen.remove(&id) {
+                let mut counts = self.pictures.borrow_mut();
+                for name in &entry.pictures {
+                    counts.unlinked(name, None);
+                }
+            }
         }
         self.removed.borrow_mut().clear();
         drop(seen);
         if tidy_due(self.tidied.get()) {
-            self.tidy_trash(&live);
+            self.tidy_trash(&live, false);
             self.tidied.set(if everything {
                 Some(std::time::Instant::now())
             } else {
@@ -1356,6 +1760,7 @@ impl Store {
             });
         }
 
+        self.keep_pictures();
         self.save_directories(&mut fp)?;
         self.fingerprint.set(fp);
         self.full.set(false);
@@ -1686,12 +2091,12 @@ impl Store {
         if note.id != id {
             note.id = id.to_string();
             let written = note_to_markdown(&note)?;
-            let moved = write_atomic(&dest, &written);
+            let moved = crate::paths::write_new(&dest, &written);
             self.trashed_by_leo(&dest, &written, moved.is_ok());
             moved?;
             return Ok(fs::remove_file(path)?);
         }
-        let moved = fs::rename(path, &dest)
+        let moved = crate::paths::move_new(path, &dest)
             .map_err(anyhow::Error::from)
             .and_then(|()| {
                 if stamp_deleted(&dest).is_err() {
@@ -1704,6 +2109,7 @@ impl Store {
     }
 
     fn trashed_by_leo(&self, dest: &Path, text: &str, moved: bool) {
+        let clock = self.sample_clock();
         let mut slot = self.trash.borrow_mut();
         let Some(index) = slot.as_mut() else {
             return;
@@ -1711,13 +2117,21 @@ impl Store {
         let known = (|| {
             let relative = dest.strip_prefix(trash_dir(&self.notes_dir)?).ok()?;
             let meta = fs::metadata(dest).ok().filter(|_| moved)?;
-            let head = split_front_matter(&normalised(text))
+            let (head, pictures) = split_front_matter(&normalised(text))
                 .ok()
-                .map(|(front, _)| head_of(&mut front.unwrap_or_default(), relative));
+                .map(|(front, _)| {
+                    let head = head_of(&mut front.unwrap_or_default(), relative);
+                    (head, crate::attachments::mentioned(text))
+                })
+                .unzip();
             let entry = Indexed {
                 stamp: stamp_of(&meta),
+                digest: Some(crate::paths::digest(text.as_bytes())),
                 deleted_at: meta.modified().ok()?.into(),
                 head,
+                pictures,
+                entered: Some(clock),
+                hidden: false,
             };
             Some((relative.to_path_buf(), entry))
         })();
@@ -1730,14 +2144,87 @@ impl Store {
         }
     }
 
+    fn clock(&self) -> i64 {
+        self.pictures.borrow().saved.clock.secs
+    }
+
+    pub fn observed_seconds(&self) -> i64 {
+        self.clock()
+    }
+
+    pub fn sample_clock(&self) -> i64 {
+        let elapsed = self.clock_sample.get().elapsed().as_secs();
+        if elapsed != 0 {
+            let whole = std::time::Duration::from_secs(elapsed);
+            self.clock_sample.set(self.clock_sample.get() + whole);
+            let mut pictures = self.pictures.borrow_mut();
+            pictures.saved.clock.secs = pictures.saved.clock.secs.saturating_add(elapsed as i64);
+            pictures.changed = true;
+        }
+        self.clock()
+    }
+
+    pub fn observe(&self, now: DateTime<Utc>, seen: Option<chrono::Duration>) {
+        self.clock_sample.set(std::time::Instant::now());
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            let clock = &mut pictures.saved.clock;
+            let zero = chrono::Duration::zero();
+            let passed = clock.last.map_or(zero, |last| (now - last).max(zero));
+            let credit = seen
+                .unwrap_or_else(|| passed.min(chrono::Duration::days(1)))
+                .max(zero);
+            clock.secs = clock.secs.saturating_add(credit.num_seconds());
+            clock.last = Some(clock.last.map_or(now, |last| last.max(now)));
+            pictures.changed = true;
+        }
+        self.keep_pictures();
+    }
+
+    pub fn would_expire(&self, days: u32) -> usize {
+        let clock = self.sample_clock();
+        let live: HashSet<&str> = self.notes.iter().map(|n| n.id.as_str()).collect();
+        self.with_trash(true, |index| {
+            if index.incomplete || !self.unreadable.is_empty() {
+                return 0;
+            }
+            index
+                .files
+                .values()
+                .filter(|entry| {
+                    entry
+                        .head
+                        .as_ref()
+                        .is_some_and(|head| !live.contains(head.id.as_str()))
+                        && clock.saturating_sub(entry.entered.unwrap_or(clock))
+                            >= i64::from(days) * 86_400
+                })
+                .count()
+        })
+    }
+
     fn with_trash<R>(&self, check: bool, work: impl FnOnce(&mut TrashIndex) -> R) -> R {
+        let clock = self.sample_clock();
         let mut slot = self.trash.borrow_mut();
         let index = slot.get_or_insert_with(|| {
             self.trash_stale.set(true);
             TrashIndex::load(&self.notes_dir)
         });
         if self.trash_stale.replace(false) | check {
-            index.check(&self.notes_dir);
+            index.check(&self.notes_dir, clock);
+        }
+        if let Ok(live) = self.seen.try_borrow() {
+            for entry in index.files.values_mut() {
+                let Some(head) = &entry.head else { continue };
+                let hidden = live.contains_key(&head.id);
+                if hidden != entry.hidden {
+                    if !hidden {
+                        entry.entered = Some(clock);
+                    }
+                    entry.hidden = hidden;
+                    index.changed = true;
+                }
+            }
         }
         let out = work(index);
         if std::mem::take(&mut index.changed) {
@@ -1748,6 +2235,65 @@ impl Store {
 
     pub fn trash_may_have_changed(&self) {
         self.trash_stale.set(true);
+    }
+
+    fn observe_heads(&self, index: &TrashIndex) {
+        let mut first: HashMap<String, DateTime<Utc>> = HashMap::new();
+        let mut reused = Vec::new();
+        let mut note = |id: &str, created: DateTime<Utc>| {
+            let id = id.to_ascii_lowercase();
+            match first.get(&id) {
+                Some(seen) if *seen != created => reused.push(id),
+                Some(_) => {}
+                None => {
+                    first.insert(id, created);
+                }
+            }
+        };
+        for (id, entry) in self.seen.borrow().iter() {
+            note(id, entry.created_at);
+        }
+        for head in index.files.values().filter_map(|entry| entry.head.as_ref()) {
+            if let Some(created) = head.created_at {
+                note(&head.id, created);
+            }
+        }
+        let mut pictures = self.pictures.borrow_mut();
+        let saved = &pictures.saved;
+        for (id, created) in saved
+            .gone
+            .iter()
+            .filter_map(|(id, left)| Some((id, left.created_at?)))
+            .chain(
+                saved
+                    .retired
+                    .iter()
+                    .map(|(id, (created, _))| (id, *created)),
+            )
+            .chain(
+                saved
+                    .expired
+                    .iter()
+                    .filter_map(|(id, created)| Some((id, (*created)?))),
+            )
+        {
+            note(id, created);
+        }
+        for id in reused {
+            pictures.changed |= pictures.saved.reused.insert(id);
+        }
+    }
+
+    pub fn observe_generations(&self) {
+        self.with_trash(false, |index| self.observe_heads(index));
+    }
+
+    pub fn reused_id(&self, id: &str) -> bool {
+        self.pictures
+            .borrow()
+            .saved
+            .reused
+            .contains(&id.to_ascii_lowercase())
     }
 
     pub fn trash_snapshot(&self) -> Vec<TrashEntry> {
@@ -1769,6 +2315,7 @@ impl Store {
                             directory: place.directory,
                             deleted_at: entry.deleted_at,
                             readable: false,
+                            revision: entry.digest,
                         });
                     };
                     (!live.contains(head.id.as_str())).then(|| Trashed {
@@ -1777,6 +2324,7 @@ impl Store {
                         directory: head.directory.clone(),
                         deleted_at: entry.deleted_at,
                         readable: true,
+                        revision: entry.digest,
                     })
                 })
                 .collect()
@@ -1815,7 +2363,7 @@ impl Store {
                 }
                 continue;
             };
-            let note = fs::read_to_string(&entry.path).ok().and_then(|text| {
+            let note = read_regular_text(&entry.path).ok().and_then(|text| {
                 parse_note_from_markdown(&text, &entry.relative, entry.deleted_at).ok()
             });
             taken.insert(id.clone());
@@ -1837,31 +2385,119 @@ impl Store {
 
     pub fn delete_from_trash(&self, ids: &[String]) -> Emptied {
         let chosen: HashSet<&str> = ids.iter().map(String::as_str).collect();
-        self.clear_trash(Some(&chosen))
+        self.clear_trash(Some(&chosen), None)
+    }
+
+    pub fn delete_shown(
+        &self,
+        ids: Option<&[String]>,
+        shown: &HashMap<String, crate::paths::FileDigest>,
+    ) -> Emptied {
+        let chosen: Option<HashSet<&str>> = ids.map(|ids| ids.iter().map(String::as_str).collect());
+        self.clear_trash(chosen.as_ref(), Some(shown))
     }
 
     pub fn tidy_trash_now(&self) -> Vec<String> {
-        self.tidy_trash(&self.notes.iter().map(|n| n.id.as_str()).collect())
+        self.tidy_trash(&self.notes.iter().map(|n| n.id.as_str()).collect(), true)
     }
 
-    fn tidy_trash(&self, live: &HashSet<&str>) -> Vec<String> {
-        let cutoff = trash_cutoff(&self.notes_dir);
-        self.with_trash(true, |index| {
+    fn carried(index: &TrashIndex, entry: &TrashEntry) -> Option<Vec<String>> {
+        index
+            .files
+            .get(&entry.relative)
+            .and_then(|indexed| indexed.pictures.clone())
+            .or_else(|| entry.head.as_ref().and_then(|_| pictures_read(&entry.path)))
+    }
+
+    fn tidy_trash(&self, live: &HashSet<&str>, expire: bool) -> Vec<String> {
+        let clock = self.sample_clock();
+        let period = trash_days_now(&self.notes_dir)
+            .filter(|_| expire)
+            .flatten()
+            .map(|days| i64::from(days) * 86_400);
+        let mut carried = Vec::new();
+        let expired = self.with_trash(true, |index| {
+            if index.incomplete || !self.unreadable.is_empty() {
+                return Vec::new();
+            }
+            self.observe_heads(index);
+            let seen = self.seen.borrow();
+            let entries: Vec<_> = index
+                .entries(&self.notes_dir)
+                .into_iter()
+                .filter(|entry| {
+                    let Some(head) = &entry.head else {
+                        return false;
+                    };
+                    let indexed = &index.files[&entry.relative];
+                    if live.contains(head.id.as_str()) {
+                        return seen.get(&head.id).is_some_and(|seen| {
+                            crate::paths::contained_path(&self.notes_dir, &seen.path)
+                                .ok()
+                                .and_then(|path| read_regular_text(&path).ok())
+                                .is_some_and(|live| {
+                                    read_regular_text(&entry.path)
+                                        .is_ok_and(|trashed| live == trashed)
+                                })
+                        });
+                    }
+                    period.is_some_and(|period| {
+                        clock.saturating_sub(indexed.entered.unwrap_or(clock)) >= period
+                    })
+                })
+                .collect();
+            {
+                let mut pictures = self.pictures.borrow_mut();
+                let mut has_expiry = false;
+                for entry in &entries {
+                    let Some(head) = entry
+                        .head
+                        .as_ref()
+                        .filter(|head| !live.contains(head.id.as_str()))
+                    else {
+                        continue;
+                    };
+                    has_expiry = true;
+                    let created = head.created_at.or_else(|| {
+                        read_head(&entry.path, &entry.relative).and_then(|head| head.created_at)
+                    });
+                    pictures.saved.expired.insert(head.id.clone(), created);
+                    if let (Some(created), Some(digest)) =
+                        (created, index.files[&entry.relative].digest)
+                    {
+                        pictures
+                            .saved
+                            .retired
+                            .insert(head.id.clone(), (created, digest));
+                    }
+                }
+                if has_expiry && !pictures.saved.persist(&self.notes_dir) {
+                    pictures.changed = true;
+                    return Vec::new();
+                }
+            }
             let mut expired = Vec::new();
             let mut removed = false;
-            for entry in index.entries(&self.notes_dir) {
-                let id = entry.head.as_ref().map(|head| head.id.as_str());
-                let is_live = id.is_some_and(|id| live.contains(id));
-                if !is_live && !cutoff.is_some_and(|c| entry.deleted_at < c) {
-                    continue;
-                }
-                match fs::remove_file(&entry.path) {
+            for entry in entries {
+                let head = entry
+                    .head
+                    .as_ref()
+                    .expect("only readable heads were selected");
+                let is_live = live.contains(head.id.as_str());
+                let pictures = if is_live {
+                    Some(Vec::new())
+                } else {
+                    Self::carried(index, &entry)
+                };
+                let Some(pictures) = pictures else { continue };
+                match self.unlink_trash(&entry.relative, &index.files[&entry.relative]) {
                     Ok(()) => {
                         removed = true;
                         index.files.remove(&entry.relative);
                         index.changed = true;
-                        if let Some(id) = id.filter(|_| !is_live) {
-                            expired.push(id.to_string());
+                        carried.extend(pictures);
+                        if !is_live {
+                            expired.push(head.id.clone());
                         }
                     }
                     Err(e) => crate::diag::warn(format!("could not tidy the trash: {e}")),
@@ -1873,33 +2509,149 @@ impl Store {
                 }
             }
             expired
+        });
+        self.pictures.borrow_mut().deleted(&carried, false);
+        self.keep_pictures();
+        expired
+    }
+
+    fn unlink_trash(&self, relative: &Path, entry: &Indexed) -> std::io::Result<()> {
+        let path = crate::paths::contained_path(&self.notes_dir, &Path::new(TRASH).join(relative))
+            .map_err(std::io::Error::other)?;
+        let changed = || std::io::Error::other("the trashed file changed");
+        let meta = fs::symlink_metadata(&path)?;
+        if !meta.is_file() || stamp_of(&meta) != entry.stamp {
+            return Err(changed());
+        }
+        let (digest, stamp) = crate::paths::digest_stamped(&path, MOST_TRASH_NOTE_BYTES)?;
+        if entry.digest != Some(digest) || !crate::paths::same_stamp(&path, &stamp) {
+            return Err(changed());
+        }
+        fs::remove_file(path)
+    }
+
+    pub fn expired_notes(&self) -> Vec<String> {
+        self.pictures
+            .borrow()
+            .saved
+            .expired
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    pub fn removed_note_generation(
+        &self,
+        id: &str,
+    ) -> Option<(DateTime<Utc>, crate::paths::FileDigest)> {
+        if self.reused_id(id) {
+            return None;
+        }
+        self.recorded_generation(id)
+    }
+
+    pub fn recorded_generation(
+        &self,
+        id: &str,
+    ) -> Option<(DateTime<Utc>, crate::paths::FileDigest)> {
+        let pictures = self.pictures.borrow();
+        pictures.saved.retired.get(id).copied().or_else(|| {
+            let gone = pictures.saved.gone.get(id)?;
+            Some((gone.created_at?, gone.digest?))
         })
     }
 
     pub fn empty_trash(&self) -> Emptied {
-        self.clear_trash(None)
+        self.clear_trash(None, None)
     }
 
-    fn clear_trash(&self, chosen: Option<&HashSet<&str>>) -> Emptied {
+    fn clear_trash(
+        &self,
+        chosen: Option<&HashSet<&str>>,
+        shown: Option<&HashMap<String, crate::paths::FileDigest>>,
+    ) -> Emptied {
         let mut emptied = Emptied::default();
         let mut removed: Vec<String> = Vec::new();
         let mut present: HashSet<String> = HashSet::new();
         let mut any = false;
+        let mut carried = Vec::new();
+        let mut kept: HashSet<PathBuf> = HashSet::new();
         self.with_trash(true, |index| {
+            if let Some(shown) = shown {
+                let entries = index.entries(&self.notes_dir);
+                let digest_of = |entry: &TrashEntry| index.files[&entry.relative].digest;
+                for entry in &entries {
+                    let id = entry.id();
+                    if chosen.is_some_and(|ids| !ids.contains(id.as_str())) {
+                        continue;
+                    }
+                    let digest = digest_of(entry);
+                    match (digest, shown.get(&id)) {
+                        (Some(found), Some(seen)) if found == *seen => {}
+                        (None, _) => {
+                            emptied.failed += 1;
+                            kept.insert(entry.relative.clone());
+                        }
+                        (Some(_), None) if chosen.is_none() => {
+                            kept.insert(entry.relative.clone());
+                        }
+                        (Some(_), Some(seen))
+                            if entries.iter().any(|other| {
+                                other.id() == id && digest_of(other) == Some(*seen)
+                            }) =>
+                        {
+                            emptied.failed += 1;
+                            kept.insert(entry.relative.clone());
+                        }
+                        _ => emptied.changed = true,
+                    }
+                }
+                if emptied.changed {
+                    return;
+                }
+            }
+            {
+                let mut pictures = self.pictures.borrow_mut();
+                let mut planned = false;
+                for (relative, indexed) in &index.files {
+                    if kept.contains(relative) {
+                        continue;
+                    }
+                    if let (Some(head), Some(digest)) = (&indexed.head, indexed.digest) {
+                        if let Some(created) = head
+                            .created_at
+                            .filter(|_| chosen.is_none_or(|ids| ids.contains(head.id.as_str())))
+                        {
+                            pictures
+                                .saved
+                                .retired
+                                .insert(head.id.clone(), (created, digest));
+                            planned = true;
+                        }
+                    }
+                }
+                if planned && !pictures.saved.persist(&self.notes_dir) {
+                    pictures.changed = true;
+                    emptied.failed += 1;
+                    return;
+                }
+            }
             for entry in index.entries(&self.notes_dir) {
                 let (wanted, counted) = match &entry.head {
                     Some(head) => (chosen.is_none_or(|c| c.contains(head.id.as_str())), true),
                     None => (chosen.is_none_or(|c| c.contains(entry.id().as_str())), true),
                 };
-                if !wanted {
+                if !wanted || kept.contains(&entry.relative) {
                     continue;
                 }
+                let pictures = Self::carried(index, &entry).unwrap_or_default();
                 let head_id = entry.head.map(|head| head.id);
-                match fs::remove_file(&entry.path) {
+                match self.unlink_trash(&entry.relative, &index.files[&entry.relative]) {
                     Ok(()) => {
                         index.files.remove(&entry.relative);
                         index.changed = true;
                         any = true;
+                        carried.extend(pictures);
                         emptied.deleted += usize::from(counted);
                         removed.extend(head_id);
                     }
@@ -1926,7 +2678,729 @@ impl Store {
                 remove_emptied(&trash);
             }
         }
+        self.pictures.borrow_mut().deleted(&carried, true);
+        self.keep_pictures();
         emptied
+    }
+
+    pub fn picture_batch<R>(&self, work: impl FnOnce() -> R) -> R {
+        let was = self.batching.replace(true);
+        let out = work();
+        self.batching.set(was);
+        self.holding.take();
+        self.keep_pictures();
+        out
+    }
+
+    fn keep_pictures(&self) {
+        if self.batching.get() {
+            return;
+        }
+        let back: Vec<String> = {
+            let pictures = self.pictures.borrow();
+            pictures
+                .saved
+                .binned
+                .keys()
+                .filter(|name| {
+                    pictures.live.contains_key(*name)
+                        || pictures.saved.binned[*name].returning.is_some()
+                })
+                .cloned()
+                .collect()
+        };
+        for name in back {
+            self.unbin(&name, false);
+        }
+        let mut pictures = self.pictures.borrow_mut();
+        if std::mem::take(&mut pictures.changed) {
+            pictures.changed = !pictures.saved.persist(&self.notes_dir);
+        }
+    }
+
+    fn bin_dir(&self) -> Result<PathBuf> {
+        crate::paths::contained_path(
+            &self.notes_dir,
+            &Path::new(TRASH).join(crate::attachments::DIR),
+        )
+    }
+
+    fn picture_dir(&self) -> Result<PathBuf> {
+        crate::paths::contained_path(&self.notes_dir, Path::new(crate::attachments::DIR))
+    }
+
+    fn plain_file(path: &Path) -> bool {
+        fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_file())
+    }
+
+    fn free(path: &Path) -> bool {
+        matches!(fs::symlink_metadata(path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+    }
+
+    fn recover_picture_rows(&self) {
+        const MOST_BIN_FILES: usize = 100_000;
+        let Ok(entries) = self.bin_dir().and_then(|bin| Ok(fs::read_dir(bin)?)) else {
+            return;
+        };
+        let mut pictures = self.pictures.borrow_mut();
+        for entry in entries.take(MOST_BIN_FILES).flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !crate::attachments::own_name(&name) || pictures.saved.binned.contains_key(&name) {
+                continue;
+            }
+            if let Ok(meta) = entry.metadata() {
+                if !meta.is_file() {
+                    continue;
+                }
+                let at = meta.modified().map_or_else(|_| Utc::now(), DateTime::from);
+                pictures.saved.binned.insert(name, Grace::from(at, 0));
+                pictures.changed = true;
+            }
+        }
+    }
+
+    pub fn binned_picture_names(&self) -> Vec<String> {
+        self.pictures
+            .borrow()
+            .saved
+            .binned
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn binned_file_matches(&self, name: &str, path: &Path) -> bool {
+        crate::attachments::own_name(name)
+            && self
+                .pictures
+                .borrow()
+                .saved
+                .binned
+                .get(name)
+                .and_then(|grace| Self::picture_matches(path, grace))
+                .is_some()
+    }
+
+    fn picture_matches(path: &Path, grace: &Grace) -> Option<crate::paths::EntryStamp> {
+        let seen = crate::attachments::SeenPicture {
+            stamp: grace.file?,
+            digest: grace.digest?,
+        };
+        crate::attachments::same_bytes(path, &seen)
+    }
+
+    pub fn delete_binned_picture(&self, name: &str) -> std::io::Result<()> {
+        let bin = self.bin_dir().map_err(std::io::Error::other)?;
+        let path = bin.join(name);
+        if self
+            .pictures
+            .borrow()
+            .saved
+            .binned
+            .get(name)
+            .is_some_and(|grace| grace.returning.is_some())
+        {
+            return Err(std::io::Error::other(
+                "the picture in the trash could not be verified",
+            ));
+        }
+        let stamp = self
+            .pictures
+            .borrow()
+            .saved
+            .binned
+            .get(name)
+            .filter(|_| crate::attachments::own_name(name))
+            .and_then(|grace| Self::picture_matches(&path, grace));
+        if !stamp.is_some_and(|stamp| crate::paths::same_stamp(&path, &stamp)) {
+            return Err(std::io::Error::other(
+                "the picture in the trash could not be verified",
+            ));
+        }
+        fs::remove_file(path)?;
+        self.binned_gone(name);
+        Ok(())
+    }
+
+    fn unbin(&self, name: &str, manual: bool) -> bool {
+        if !crate::attachments::own_name(name) {
+            return false;
+        }
+        let (Ok(bin), Ok(home)) = (self.bin_dir(), self.picture_dir()) else {
+            return false;
+        };
+        let from = bin.join(name);
+        let Some(grace) = self.pictures.borrow().saved.binned.get(name).cloned() else {
+            return false;
+        };
+        let exact = |path: &Path| Self::picture_matches(path, &grace).is_some();
+        if let Some(to) = grace
+            .returning
+            .as_deref()
+            .filter(|name| crate::attachments::own_name(name))
+        {
+            if Self::free(&from) && exact(&home.join(to)) {
+                self.remove_bin_row(name);
+                return true;
+            }
+        }
+        if !(exact(&from) || manual && grace.digest.is_none() && Self::plain_file(&from)) {
+            return false;
+        }
+        if fs::create_dir_all(&home).is_err() {
+            return false;
+        }
+        let wanted = home.join(name);
+        const MOST_HOME_PICTURES: usize = 100_000;
+        let Ok(entries) = fs::read_dir(&home) else {
+            return false;
+        };
+        let mut occupied = false;
+        for (n, entry) in entries.enumerate() {
+            let Ok(entry) = entry else { return false };
+            if n >= MOST_HOME_PICTURES {
+                return false;
+            }
+            if entry.file_name().eq_ignore_ascii_case(name) {
+                occupied = true;
+                break;
+            }
+        }
+        let to = if !occupied && Self::free(&wanted) {
+            wanted
+        } else {
+            let Some((stem, ext)) = name.rsplit_once('.') else {
+                return false;
+            };
+            home.join(format!("{stem}-restored-{}.{ext}", uuid::Uuid::new_v4()))
+        };
+        let Ok(meta) = fs::symlink_metadata(&from) else {
+            return false;
+        };
+        let stamp = crate::attachments::written(&meta);
+        if !meta.is_file() || grace.file.is_some_and(|file| file != stamp) {
+            return false;
+        }
+        let digest = match grace.digest {
+            Some(digest) => digest,
+            None => match crate::paths::digest_file(&from, crate::attachments::MOST_BYTES as u64) {
+                Ok(digest) => digest,
+                Err(_) => return false,
+            },
+        };
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            let row = pictures.saved.binned.get_mut(name).unwrap();
+            row.file = Some(stamp);
+            row.digest = Some(digest);
+            row.returning = to
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_string);
+            if manual {
+                pictures.saved.released.remove(name);
+                pictures.saved.kept.insert(name.to_string());
+            }
+            if !pictures.saved.persist(&self.notes_dir) {
+                return false;
+            }
+        }
+        if Self::free(&to)
+            && self.binned_file_matches(name, &from)
+            && crate::paths::move_new(&from, &to).is_ok()
+        {
+            self.remove_bin_row(name);
+            return true;
+        }
+        false
+    }
+
+    fn remove_bin_row(&self, name: &str) {
+        let mut pictures = self.pictures.borrow_mut();
+        pictures.changed |= pictures.saved.binned.remove(name).is_some();
+    }
+
+    pub fn bin_pictures(
+        &self,
+        files: &[(String, PathBuf, crate::attachments::SavedPicture)],
+    ) -> std::io::Result<()> {
+        if files.is_empty() {
+            return Ok(());
+        }
+        let refused = || std::io::Error::other("leo moves only an unchanged picture it saved");
+        let home = self.picture_dir().map_err(|_| refused())?;
+        let bin = self.bin_dir().map_err(|_| refused())?;
+        fs::create_dir_all(&bin)?;
+        const MOST_BATCH_BYTES: u64 = 64 * 1024 * 1024;
+        let mut remaining = MOST_BATCH_BYTES;
+        let mut ready = Vec::new();
+        for (name, file, record) in files {
+            let Some(digest) = record.digest else {
+                continue;
+            };
+            let stamp = record.stamp;
+            if !crate::attachments::own_name(name)
+                || file.parent() != Some(home.as_path())
+                || !file
+                    .file_name()
+                    .is_some_and(|file| file.eq_ignore_ascii_case(name))
+                || !Self::free(&bin.join(name))
+                || !fs::symlink_metadata(file)
+                    .is_ok_and(|meta| meta.is_file() && crate::attachments::written(&meta) == stamp)
+            {
+                continue;
+            }
+            if stamp.0 > remaining {
+                break;
+            }
+            ready.push((name, file, stamp, digest));
+            remaining -= stamp.0;
+        }
+        let entered = self.sample_clock();
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            for (name, _, stamp, digest) in &ready {
+                pictures.saved.binned.insert(
+                    name.to_string(),
+                    Grace {
+                        at: Utc::now(),
+                        entered,
+                        file: Some(*stamp),
+                        digest: Some(*digest),
+                        returning: None,
+                    },
+                );
+            }
+            if !ready.is_empty() && !pictures.saved.persist(&self.notes_dir) {
+                return Err(std::io::Error::other("leo could not save the picture move"));
+            }
+        }
+        for (name, file, stamp, digest) in ready {
+            let to = bin.join(name);
+            let seen = crate::attachments::SeenPicture { stamp, digest };
+            if Self::free(&to)
+                && crate::attachments::same_bytes(file, &seen)
+                    .is_some_and(|found| crate::paths::same_stamp(file, &found))
+            {
+                match crate::paths::move_new(file, &to) {
+                    Ok(()) => {
+                        let mut pictures = self.pictures.borrow_mut();
+                        pictures.saved.released.remove(name);
+                        pictures.changed = true;
+                    }
+                    Err(e) => crate::diag::warn(format!(
+                        "could not move the picture {name} to the trash: {e}"
+                    )),
+                }
+            }
+        }
+        self.keep_pictures();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn bin_picture(&self, name: &str, file: &Path) -> std::io::Result<()> {
+        let stamp = crate::attachments::written(&fs::symlink_metadata(file)?);
+        let digest = crate::paths::digest_file(file, crate::attachments::MOST_BYTES as u64)?;
+        self.bin_pictures(&[(
+            name.to_string(),
+            file.to_path_buf(),
+            crate::attachments::SavedPicture {
+                stamp,
+                digest: Some(digest),
+            },
+        )])
+    }
+
+    pub fn picture_files(&self) -> Vec<(String, PathBuf, Option<crate::attachments::SeenPicture>)> {
+        let (Ok(bin), Ok(home)) = (self.bin_dir(), self.picture_dir()) else {
+            return Vec::new();
+        };
+        let pictures = self.pictures.borrow();
+        let binned = pictures.saved.binned.iter().map(|(name, grace)| {
+            let seen = grace
+                .file
+                .zip(grace.digest)
+                .map(|(stamp, digest)| crate::attachments::SeenPicture { stamp, digest });
+            (format!("picture:{name}"), bin.join(name), seen)
+        });
+        let unused = pictures
+            .saved
+            .unused_files
+            .iter()
+            .map(|(name, seen)| (format!("unused:{name}"), home.join(name), Some(*seen)));
+        binned.chain(unused).collect()
+    }
+
+    pub fn picture_changed(&self, id: &str, seen: Option<crate::attachments::SeenPicture>) {
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            if let Some(grace) = id
+                .strip_prefix("picture:")
+                .and_then(|name| pictures.saved.binned.get_mut(name))
+            {
+                grace.digest = None;
+                grace.file = None;
+                pictures.changed = true;
+            } else if let Some(name) = id.strip_prefix("unused:") {
+                match seen {
+                    Some(seen) => pictures.saved.unused_files.insert(name.to_string(), seen),
+                    None => pictures.saved.unused_files.remove(name),
+                };
+                pictures.changed = true;
+            }
+        }
+        self.keep_pictures();
+    }
+
+    pub fn binned_pictures(&self) -> Vec<(String, PathBuf)> {
+        let Ok(bin) = self.bin_dir() else {
+            return Vec::new();
+        };
+        self.pictures
+            .borrow()
+            .saved
+            .binned
+            .keys()
+            .filter(|name| crate::attachments::own_name(name))
+            .map(|name| (name.clone(), bin.join(name)))
+            .filter(|(_, path)| Self::plain_file(path))
+            .collect()
+    }
+
+    pub fn ripe_binned(&self, period: Option<chrono::Duration>) -> Vec<String> {
+        let clock = self.clock();
+        self.pictures
+            .borrow()
+            .saved
+            .binned
+            .iter()
+            .filter(|(_, grace)| {
+                grace.digest.is_some()
+                    && grace.returning.is_none()
+                    && grace.at != DateTime::<Utc>::UNIX_EPOCH
+                    && grace.due(clock, period)
+            })
+            .map(|(name, _)| name.clone())
+            .collect()
+    }
+
+    pub fn binned_gone(&self, name: &str) {
+        self.remove_bin_row(name);
+        self.keep_pictures();
+    }
+
+    pub fn unbin_picture(&self, name: &str) -> bool {
+        let back = self.unbin(name, false);
+        self.keep_pictures();
+        back
+    }
+
+    pub fn released_by_user(&self, name: &str) -> bool {
+        self.pictures
+            .borrow()
+            .saved
+            .released
+            .get(name)
+            .is_some_and(|grace| grace.at == DateTime::<Utc>::UNIX_EPOCH)
+    }
+
+    pub fn set_unused(&self, files: BTreeMap<String, crate::attachments::SeenPicture>) {
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            if pictures.saved.unused_files != files {
+                pictures.saved.unused_files = files;
+                pictures.changed = true;
+            }
+        }
+        self.keep_pictures();
+    }
+
+    pub fn unused_files(&self) -> BTreeMap<String, crate::attachments::SeenPicture> {
+        self.pictures.borrow().saved.unused_files.clone()
+    }
+
+    pub fn binned_digest(&self, name: &str) -> Option<crate::paths::FileDigest> {
+        self.pictures
+            .borrow()
+            .saved
+            .binned
+            .get(name)
+            .and_then(|grace| grace.digest)
+    }
+
+    pub fn unused_rows(&self) -> Vec<Trashed> {
+        let (Ok(home), live) = (self.picture_dir(), &self.pictures.borrow().live) else {
+            return Vec::new();
+        };
+        let pictures = self.pictures.borrow();
+        pictures
+            .saved
+            .unused_files
+            .iter()
+            .filter(|(name, _)| !live.contains_key(*name) && Self::plain_file(&home.join(name)))
+            .map(|(name, seen)| Trashed {
+                id: format!("unused:{name}"),
+                title: name.clone(),
+                directory: crate::attachments::DIR.to_string(),
+                deleted_at: DateTime::<Utc>::UNIX_EPOCH,
+                readable: true,
+                revision: Some(seen.digest),
+            })
+            .collect()
+    }
+
+    pub fn trashed_ids(&self) -> HashSet<String> {
+        self.trash_snapshot()
+            .into_iter()
+            .filter_map(|entry| entry.head.map(|head| head.id))
+            .collect()
+    }
+
+    pub fn trashed_picture_counts(&self) -> HashMap<String, usize> {
+        self.with_trash(false, |index| {
+            index
+                .files
+                .values()
+                .filter_map(|entry| {
+                    let head = entry.head.as_ref()?;
+                    let count = entry.pictures.as_ref().map_or(0, Vec::len);
+                    (count > 0).then(|| (head.id.clone(), count))
+                })
+                .collect()
+        })
+    }
+
+    pub fn confirmed_gone(&self) -> HashSet<String> {
+        if !self.unreadable.is_empty() || self.pictures.borrow().saved.gone.is_empty() {
+            return HashSet::new();
+        }
+        let folders: HashSet<PathBuf> = self
+            .seen
+            .borrow()
+            .values()
+            .map(|entry| folder_of(&entry.path))
+            .collect();
+        let pictures = self.pictures.borrow();
+        pictures
+            .saved
+            .gone
+            .iter()
+            .filter(|(_, left)| {
+                let folder = folder_of(Path::new(&left.path));
+                !left.twin
+                    && left.digest.is_some()
+                    && left.device.is_some_and(|device| device != 0)
+                    && device_of(&self.notes_dir.join(&folder)) == left.device
+                    && folders.contains(&folder)
+                    && crate::paths::contained_path(&self.notes_dir, Path::new(&left.path))
+                        .is_ok_and(|path| {
+                            matches!(fs::symlink_metadata(&path), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+                                && path.parent().is_some_and(|folder| {
+                                    fs::symlink_metadata(folder).is_ok_and(|m| m.is_dir())
+                                        && fs::read_dir(folder).is_ok()
+                                })
+                        })
+            })
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    pub fn forget_departed(&self, ids: &[String]) -> bool {
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            let before = pictures.saved.gone.len();
+            pictures.saved.gone.retain(|id, _| !ids.contains(id));
+            pictures.changed |= before != pictures.saved.gone.len();
+            for id in ids {
+                pictures.changed |= pictures.saved.expired.remove(id).is_some();
+                pictures.changed |= pictures.saved.retired.remove(id).is_some();
+            }
+        }
+        self.keep_pictures();
+        !self.pictures.borrow().changed
+    }
+
+    pub fn revalidate_trash(&self) -> bool {
+        self.with_trash(true, |index| {
+            !index.incomplete && index.files.values().all(|entry| entry.head.is_some())
+        })
+    }
+
+    pub fn trash_complete(&self) -> bool {
+        self.with_trash(false, |index| !index.incomplete)
+    }
+
+    fn held_in_trash(&self, name: &str) -> Option<usize> {
+        if !self.batching.get() {
+            return self
+                .trash_holds(false)
+                .map(|held| held.get(name).copied().unwrap_or(0));
+        }
+        if self.holding.borrow().is_none() {
+            *self.holding.borrow_mut() = Some(self.trash_holds(false));
+        }
+        self.holding
+            .borrow()
+            .as_ref()
+            .and_then(|held| held.as_ref())
+            .map(|held| held.get(name).copied().unwrap_or(0))
+    }
+
+    fn trash_holds(&self, check: bool) -> Option<HashMap<String, usize>> {
+        self.with_trash(check, |index| {
+            if index.incomplete {
+                return None;
+            }
+            let mut held: HashMap<String, usize> = HashMap::new();
+            for entry in index.files.values() {
+                entry.head.as_ref()?;
+                for name in entry.pictures.as_ref()? {
+                    *held.entry(name.clone()).or_default() += 1;
+                }
+            }
+            Some(held)
+        })
+    }
+
+    pub fn trash_reads_owed(&self) -> Vec<Owed> {
+        let Some(trash) = trash_dir(&self.notes_dir) else {
+            return Vec::new();
+        };
+        self.with_trash(true, |index| {
+            index
+                .files
+                .iter()
+                .filter(|(_, entry)| entry.head.is_some() && entry.pictures.is_none())
+                .map(|(relative, entry)| Owed {
+                    path: trash.join(relative),
+                    relative: relative.clone(),
+                    stamp: entry.stamp,
+                })
+                .collect()
+        })
+    }
+
+    pub fn settle_owed(&self, read: Vec<(Owed, Vec<String>)>) {
+        self.with_trash(false, |index| {
+            for (owed, pictures) in read {
+                if let Some(entry) = index
+                    .files
+                    .get_mut(&owed.relative)
+                    .filter(|entry| entry.stamp == owed.stamp)
+                {
+                    entry.pictures = Some(pictures);
+                    index.changed = true;
+                }
+            }
+        });
+    }
+
+    pub fn picture_pass(
+        &self,
+        listed: &[String],
+        now: DateTime<Utc>,
+        period: Option<chrono::Duration>,
+    ) -> Option<Vec<String>> {
+        let clock = self.sample_clock();
+        let in_trash = self.trash_holds(false)?;
+        let mut pictures = self.pictures.borrow_mut();
+        let Pictures {
+            live,
+            saved,
+            changed,
+        } = &mut *pictures;
+        let listed: HashSet<&str> = listed.iter().map(String::as_str).collect();
+        let before = (saved.released.len(), saved.kept.len());
+        saved
+            .released
+            .retain(|name, _| listed.contains(name.as_str()));
+        saved.kept.retain(|name| listed.contains(name.as_str()));
+        *changed |= before != (saved.released.len(), saved.kept.len());
+        let owned = |name: &str| live.contains_key(name) || in_trash.contains_key(name);
+        for &name in &listed {
+            if owned(name) {
+                let released = saved.released.remove(name).is_some();
+                let kept = saved.kept.remove(name);
+                *changed |= released || kept;
+            } else if !saved.kept.contains(name) && !saved.released.contains_key(name) {
+                saved
+                    .released
+                    .insert(name.to_string(), Grace::from(now, clock));
+                *changed = true;
+            }
+        }
+        let due = saved
+            .released
+            .iter()
+            .filter(|(name, grace)| !owned(name.as_str()) && grace.due(clock, period))
+            .map(|(name, _)| name.clone())
+            .collect();
+        drop(pictures);
+        self.keep_pictures();
+        Some(due)
+    }
+
+    pub fn picture_owners(&self, name: &str) -> usize {
+        let live = self.pictures.borrow().live.get(name).copied().unwrap_or(0);
+        live + self.held_in_trash(name).unwrap_or(0)
+    }
+
+    pub fn released_pictures(&self) -> Vec<String> {
+        self.pictures
+            .borrow()
+            .saved
+            .released
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    pub fn picture_still_due(&self, name: &str, period: Option<chrono::Duration>) -> bool {
+        let pictures = self.pictures.borrow();
+        !pictures.live.contains_key(name)
+            && !pictures.saved.kept.contains(name)
+            && pictures
+                .saved
+                .released
+                .get(name)
+                .is_some_and(|grace| grace.due(self.clock(), period))
+            && self.held_in_trash(name) == Some(0)
+    }
+
+    pub fn picture_gone(&self, name: &str) {
+        {
+            let mut pictures = self.pictures.borrow_mut();
+            let released = pictures.saved.released.remove(name).is_some();
+            let kept = pictures.saved.kept.remove(name);
+            pictures.changed |= released || kept;
+        }
+        self.keep_pictures();
+    }
+
+    pub fn picture_rows(&self) -> Vec<Trashed> {
+        let there: HashSet<String> = self.binned_pictures().into_iter().map(|(n, _)| n).collect();
+        self.pictures
+            .borrow()
+            .saved
+            .binned
+            .iter()
+            .filter(|(name, _)| there.contains(*name))
+            .map(|(name, grace)| Trashed {
+                id: format!("picture:{name}"),
+                title: name.clone(),
+                directory: crate::attachments::DIR.to_string(),
+                deleted_at: grace.at,
+                readable: true,
+                revision: grace.digest,
+            })
+            .collect()
+    }
+
+    pub fn keep_picture(&self, name: &str) -> bool {
+        let back = self.unbin(name, true);
+        self.keep_pictures();
+        back
     }
 
     fn assign_paths(&self, seen: &HashMap<String, Seen>) -> HashMap<String, PathBuf> {
@@ -2847,6 +4321,10 @@ mod tests {
             feed: Default::default(),
             trash: Default::default(),
             trash_stale: Default::default(),
+            pictures: Default::default(),
+            clock_sample: std::cell::Cell::new(std::time::Instant::now()),
+            batching: Default::default(),
+            holding: Default::default(),
             notes: vec![make_note()],
             directories: vec![],
             notes_dir: notes_dir.clone(),
@@ -3517,16 +4995,7 @@ mod tests {
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
         let trash = store.notes_dir.join(".trash");
-        for path in trash_files(&store) {
-            fs::File::options()
-                .write(true)
-                .open(&path)
-                .unwrap()
-                .set_modified(
-                    std::time::SystemTime::now() - std::time::Duration::from_secs(40 * 24 * 3600),
-                )
-                .unwrap();
-        }
+        let_days_pass(&store, 40);
         assert_eq!(store.tidy_trash_now(), [id]);
         assert!(!trash.join("a").exists(), "{:?}", dirs_under(&trash));
     }
@@ -3585,27 +5054,19 @@ mod tests {
         let old = store.create_note("Old", "", vec![], "").unwrap().id.clone();
         let new = store.create_note("New", "", vec![], "").unwrap().id.clone();
         store.save().unwrap();
-        store.delete_notes(&[old.clone(), new.clone()]);
+        store.delete_notes(std::slice::from_ref(&old));
+        store.save().unwrap();
+        let_days_pass(&store, 31);
+        store.delete_notes(std::slice::from_ref(&new));
         store.save().unwrap();
 
-        let path = trash_files(&store)
-            .into_iter()
-            .find(|p| {
-                fs::read_to_string(p)
-                    .unwrap()
-                    .contains(&format!("id: {old}"))
-            })
-            .unwrap();
-        let long_ago =
-            std::time::SystemTime::now() - std::time::Duration::from_secs(31 * 24 * 3600);
-        fs::File::options()
-            .write(true)
-            .open(&path)
-            .unwrap()
-            .set_modified(long_ago)
-            .unwrap();
-
         let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(
+            reloaded.trashed().len(),
+            2,
+            "a load never expires the trash"
+        );
+        assert_eq!(reloaded.tidy_trash_now(), [old]);
         let left: Vec<String> = reloaded.trashed().into_iter().map(|t| t.id).collect();
         assert_eq!(left, vec![new]);
     }
@@ -3617,18 +5078,8 @@ mod tests {
         store.save().unwrap();
         store.delete_notes(std::slice::from_ref(&id));
         store.save().unwrap();
-        fn aged(store: &Store, days: u64) {
-            for path in trash_files(store) {
-                fs::File::options()
-                    .write(true)
-                    .open(&path)
-                    .unwrap()
-                    .set_modified(
-                        std::time::SystemTime::now()
-                            - std::time::Duration::from_secs(days * 24 * 3600),
-                    )
-                    .unwrap();
-            }
+        fn aged(store: &Store, days: i64) {
+            let_days_pass(store, days);
         }
         let dir = store.notes_dir.clone();
         let keep = |days| {
@@ -3664,7 +5115,7 @@ mod tests {
         aged(&store, 5);
         store.tidy_trash_now();
         assert_eq!(store.trashed().len(), 1, "inside a week");
-        aged(&store, 8);
+        aged(&store, 3);
         store.tidy_trash_now();
         assert!(store.trashed().is_empty());
     }
@@ -4414,6 +5865,8 @@ mod tests {
                         directory: place.directory,
                         deleted_at: entry.deleted_at,
                         readable: false,
+                        revision: crate::paths::digest_file(&entry.path, MOST_TRASH_NOTE_BYTES)
+                            .ok(),
                     })
                 }
                 Some(head) => (!live.contains(head.id.as_str())).then(|| Trashed {
@@ -4422,6 +5875,7 @@ mod tests {
                     directory: head.directory.clone(),
                     deleted_at: entry.deleted_at,
                     readable: true,
+                    revision: crate::paths::digest_file(&entry.path, MOST_TRASH_NOTE_BYTES).ok(),
                 }),
             })
             .collect();
@@ -5761,6 +7215,7 @@ mod tests {
         std::collections::BTreeSet<(String, String, String, String, String)>,
         Vec<String>,
         Vec<String>,
+        BTreeMap<String, usize>,
     );
 
     fn snapshot(store: &Store) -> Snapshot {
@@ -5795,7 +7250,8 @@ mod tests {
         unreadable.sort();
         let mut directories = store.directories.clone();
         directories.sort();
-        (notes, unreadable, directories)
+        let pictures = store.pictures.borrow().live.clone().into_iter().collect();
+        (notes, unreadable, directories, pictures)
     }
 
     fn same_as_fresh(store: &mut Store, step: &str) {
@@ -5848,7 +7304,14 @@ mod tests {
         }
         let file = |i: usize| dir.join(folders[i % 3]).join(format!("Note {i}.md"));
         for i in 0..50 {
-            fs::write(file(i), headed(&format!("Note {i}"), &format!("body {i}"))).unwrap();
+            fs::write(
+                file(i),
+                headed(
+                    &format!("Note {i}"),
+                    &format!("body {i} ![p](attachments/20261117-101500-p{}.png)", i % 3),
+                ),
+            )
+            .unwrap();
         }
         let mut store = Store::load_from(&dir).unwrap();
 
@@ -6413,5 +7876,1086 @@ mod tests {
     fn agrees(reader: &mut Reader, store: &Store, step: usize) {
         reader.catch_up(store);
         assert_eq!(reader.map, scan(store), "step {step}");
+    }
+    const PICTURE: &str = "20261117-101500-slide.png";
+    const OTHER: &str = "20261117-101500-board.png";
+
+    fn picture_store() -> (Store, tempfile::TempDir) {
+        let (store, tmp) = temp_store();
+        let folder = store.notes_dir.join("attachments");
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(PICTURE), b"png").unwrap();
+        fs::write(folder.join(OTHER), b"png").unwrap();
+        (store, tmp)
+    }
+
+    fn linking(name: &str) -> String {
+        format!("Words\n\n![a picture](attachments/{name})\n")
+    }
+
+    fn own_pictures() -> Vec<String> {
+        vec![PICTURE.to_string(), OTHER.to_string()]
+    }
+
+    fn due(store: &Store, now: DateTime<Utc>) -> Vec<String> {
+        let target = (now - Utc::now()).num_seconds();
+        if target > store.clock() {
+            store.observe(now, Some(chrono::Duration::seconds(target - store.clock())));
+        }
+        store
+            .picture_pass(&own_pictures(), now, Some(chrono::Duration::days(30)))
+            .unwrap()
+    }
+
+    #[test]
+    fn a_picture_is_counted_for_every_note_that_links_it() {
+        let (mut store, _tmp) = picture_store();
+        store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap();
+        store
+            .create_note(
+                "B",
+                format!("![[{}]]", PICTURE.to_uppercase()),
+                vec![],
+                "Course",
+            )
+            .unwrap();
+        store.save().unwrap();
+        assert_eq!(store.picture_owners(PICTURE), 2);
+        assert_eq!(store.picture_owners(OTHER), 0);
+    }
+
+    #[test]
+    fn a_picture_follows_its_note_into_the_trash_and_back() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        assert_eq!(
+            store.picture_owners(PICTURE),
+            1,
+            "the trashed note still holds it"
+        );
+        assert_eq!(store.trashed_picture_counts()[&id], 1);
+        let later = Utc::now() + chrono::Duration::days(400);
+        assert!(!due(&store, later).contains(&PICTURE.to_string()));
+        store.restore(&id).unwrap();
+        store.save().unwrap();
+        assert_eq!(store.picture_owners(PICTURE), 1);
+        assert!(store.trashed_picture_counts().is_empty());
+        assert!(!due(&store, later).contains(&PICTURE.to_string()));
+    }
+
+    #[test]
+    fn deleting_a_note_for_good_makes_its_picture_due_now() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        store.delete_from_trash(std::slice::from_ref(&id));
+        assert_eq!(store.picture_owners(PICTURE), 0);
+        assert_eq!(due(&store, Utc::now()), [PICTURE]);
+        store.picture_gone(PICTURE);
+        assert!(!store.picture_still_due(PICTURE, Some(chrono::Duration::days(30))));
+    }
+
+    #[test]
+    fn a_shared_picture_waits_for_its_last_owner() {
+        let (mut store, _tmp) = picture_store();
+        let a = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        let b = store
+            .create_note("B", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(&[a.clone(), b.clone()]);
+        store.save().unwrap();
+        store.delete_from_trash(std::slice::from_ref(&a));
+        assert!(
+            due(&store, Utc::now()).is_empty(),
+            "B in the trash still holds it"
+        );
+        store.restore(&b).unwrap();
+        store.save().unwrap();
+        assert_eq!(store.picture_owners(PICTURE), 1);
+        assert!(due(&store, Utc::now()).is_empty());
+    }
+
+    #[test]
+    fn removing_a_link_releases_the_picture_and_undo_takes_it_back() {
+        let (mut store, _tmp) = picture_store();
+        fs::remove_file(store.notes_dir.join("attachments").join(OTHER)).unwrap();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        assert_eq!(store.picture_owners(PICTURE), 0);
+        assert!(
+            due(&store, Utc::now()).is_empty(),
+            "kept for the trash period"
+        );
+        assert!(
+            store.picture_rows().is_empty(),
+            "it shows in the trash only once it was moved there"
+        );
+        assert_eq!(
+            due(&store, Utc::now() + chrono::Duration::days(31)),
+            [OTHER, PICTURE]
+        );
+        store.find_note_mut(&id).unwrap().body = linking(PICTURE);
+        store.save().unwrap();
+        assert_eq!(
+            due(&store, Utc::now() + chrono::Duration::days(31)),
+            [OTHER]
+        );
+        assert!(store.picture_rows().is_empty());
+    }
+
+    #[test]
+    fn restoring_a_picture_row_keeps_the_file_and_it_is_not_trashed_again() {
+        let (mut store, _tmp) = picture_store();
+        fs::remove_file(store.notes_dir.join("attachments").join(OTHER)).unwrap();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        let file = store.notes_dir.join("attachments").join(PICTURE);
+        store.bin_picture(PICTURE, &file).unwrap();
+        assert!(store.keep_picture(PICTURE));
+        assert!(file.exists());
+        assert!(store.picture_rows().is_empty());
+        assert!(due(&store, Utc::now() + chrono::Duration::days(400)).is_empty());
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert!(reloaded.picture_rows().is_empty());
+        assert!(reloaded
+            .picture_pass(
+                &own_pictures(),
+                Utc::now() + chrono::Duration::days(400),
+                Some(chrono::Duration::days(30))
+            )
+            .unwrap()
+            .iter()
+            .all(|name| name != PICTURE));
+    }
+
+    #[test]
+    fn the_picture_counts_survive_a_reload() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        store.delete_from_trash(std::slice::from_ref(&id));
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.picture_owners(PICTURE), 0);
+        assert_eq!(
+            due(&reloaded, Utc::now()),
+            [PICTURE],
+            "the deletion is remembered"
+        );
+    }
+
+    #[test]
+    fn a_damaged_picture_file_starts_empty_and_warns() {
+        let (store, _tmp) = picture_store();
+        fs::create_dir_all(store.notes_dir.join(".leo")).unwrap();
+        fs::write(store.notes_dir.join(".leo/pictures.json"), "{not json").unwrap();
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert!(crate::diag::recent()
+            .iter()
+            .any(|w| w.contains("pictures no note links")));
+        assert!(reloaded.picture_rows().is_empty());
+    }
+
+    #[test]
+    fn reconcile_adds_a_trashed_file_it_did_not_know_and_releases_a_vanished_one() {
+        let (mut store, _tmp) = picture_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        let gone = store
+            .create_note("Gone", linking(OTHER), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&gone));
+        store.save().unwrap();
+        trashed_file(
+            &store,
+            "Outside.md",
+            &format!(
+                "---\nid: outside\ntitle: Outside\n---\n{}",
+                linking(PICTURE)
+            ),
+        );
+        let now = Utc::now();
+        assert_eq!(
+            store.picture_pass(&own_pictures(), now, Some(chrono::Duration::days(30))),
+            None,
+            "an unread trashed file makes the pass unsure"
+        );
+        let owed = store.trash_reads_owed();
+        assert_eq!(owed.len(), 1);
+        let read = owed
+            .into_iter()
+            .map(|o| {
+                let p = o.read().unwrap();
+                (o, p)
+            })
+            .collect();
+        store.settle_owed(read);
+        assert!(due(&store, now).is_empty());
+        assert_eq!(store.picture_owners(PICTURE), 1);
+        for path in trash_files(&store) {
+            if fs::read_to_string(&path).unwrap().contains(&gone) {
+                fs::remove_file(path).unwrap();
+            }
+        }
+        store.trash_may_have_changed();
+        assert!(
+            due(&store, now).is_empty(),
+            "a vanished trashed file gives its pictures the period"
+        );
+        assert_eq!(due(&store, now + chrono::Duration::days(31)), [OTHER]);
+    }
+
+    #[test]
+    fn a_trashed_file_with_an_unreadable_head_stops_the_picture_pass() {
+        let (mut store, _tmp) = picture_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        trashed_file(&store, "Broken.md", "---\ntitle: [unclosed\n---\nbody\n");
+        assert_eq!(
+            store.picture_pass(
+                &own_pictures(),
+                Utc::now() + chrono::Duration::days(400),
+                Some(chrono::Duration::days(30))
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn a_refresh_keeps_the_counts_of_unchanged_files() {
+        let (mut store, _tmp) = picture_store();
+        store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap();
+        store.create_note("B", linking(OTHER), vec![], "").unwrap();
+        store.save().unwrap();
+        fs::write(
+            store.notes_dir.join("B.md"),
+            "---\nid: b\ntitle: B\n---\nno pictures\n",
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        let fresh = Store::load_from(&store.notes_dir).unwrap();
+        for name in [PICTURE, OTHER] {
+            assert_eq!(
+                store.picture_owners(name),
+                fresh.picture_owners(name),
+                "{name}"
+            );
+        }
+        assert_eq!(store.picture_owners(PICTURE), 1);
+        assert_eq!(store.picture_owners(OTHER), 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_trash_folder_keeps_its_notes_and_stops_picture_deletion() {
+        use std::os::unix::fs::PermissionsExt;
+        let (mut store, _tmp) = picture_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        let id = store
+            .create_note("Deep", linking(PICTURE), vec![], "course")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        assert!(store.trashed_ids().contains(&id));
+        assert!(store.trash_complete());
+        let folder = store.notes_dir.join(".trash/course");
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o000)).unwrap();
+        store.trash_may_have_changed();
+        let ids = store.trashed_ids();
+        let complete = store.trash_complete();
+        let pass = store.picture_pass(
+            &own_pictures(),
+            Utc::now(),
+            Some(chrono::Duration::days(30)),
+        );
+        fs::set_permissions(&folder, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(
+            ids.contains(&id),
+            "a folder leo cannot read keeps its notes in the trash"
+        );
+        assert!(!complete);
+        assert_eq!(pass, None);
+        store.trash_may_have_changed();
+        assert!(store.trashed_ids().contains(&id));
+        assert!(store.trash_complete());
+    }
+
+    #[test]
+    fn a_picture_named_in_front_matter_or_html_or_a_plain_link_is_counted() {
+        let (mut store, _tmp) = picture_store();
+        store
+            .create_note(
+                "Html",
+                format!("<img src=\"attachments/{PICTURE}\">"),
+                vec![],
+                "",
+            )
+            .unwrap();
+        store
+            .create_note("Plain", format!("[see](attachments/{OTHER})"), vec![], "")
+            .unwrap();
+        store.save().unwrap();
+        fs::write(
+            store.notes_dir.join("Front.md"),
+            format!("---\nid: front\ntitle: Front\ncover: attachments/{OTHER}\n---\nbody\n"),
+        )
+        .unwrap();
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert_eq!(reloaded.picture_owners(PICTURE), 1);
+        assert_eq!(reloaded.picture_owners(OTHER), 2);
+    }
+
+    #[test]
+    fn a_clock_that_jumps_forward_does_not_ripen_a_picture() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        let period = Some(chrono::Duration::days(30));
+        store.observe(Utc::now(), None);
+        let jumped = Utc::now() + chrono::Duration::days(400);
+        store.observe(jumped, None);
+        let due = store.picture_pass(&own_pictures(), jumped, period).unwrap();
+        assert!(
+            !due.contains(&PICTURE.to_string()),
+            "only a day was counted"
+        );
+        for _ in 0..30 {
+            let_days_pass(&store, 1);
+        }
+        assert!(store.picture_still_due(PICTURE, period));
+        assert!(
+            !store.picture_still_due(PICTURE, None),
+            "Forever stops timed expiry"
+        );
+    }
+
+    #[test]
+    fn a_link_put_back_outside_leo_takes_the_picture_off_the_trash_at_once() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        assert!(store.released_pictures().contains(&PICTURE.to_string()));
+        let path = store.notes_dir.join("A.md");
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, format!("{text}\n{}", linking(PICTURE))).unwrap();
+        store.refresh().unwrap();
+        assert!(!store.released_pictures().contains(&PICTURE.to_string()));
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert!(!reloaded.released_pictures().contains(&PICTURE.to_string()));
+    }
+
+    #[test]
+    fn a_keeping_file_leo_cannot_read_expires_nothing() {
+        let (mut store, _tmp) = temp_store();
+        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let_days_pass(&store, 400);
+        fs::write(crate::keep::path_for(&store.notes_dir), "{not json").unwrap();
+        store.trash_may_have_changed();
+        assert_eq!(trash_days_now(&store.notes_dir), None);
+        assert!(store.tidy_trash_now().is_empty());
+        assert!(store.trashed_ids().contains(&id));
+        fs::remove_file(crate::keep::path_for(&store.notes_dir)).unwrap();
+        assert_eq!(trash_days_now(&store.notes_dir), Some(Some(30)));
+        assert_eq!(store.tidy_trash_now(), [id]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_note_removed_outside_leo_is_gone_only_while_its_folder_is_still_there() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Lecture", "", vec![], "course")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Kept", "", vec![], "course").unwrap();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        assert!(store.confirmed_gone().is_empty());
+        fs::remove_file(store.notes_dir.join("course/Lecture.md")).unwrap();
+        store.refresh().unwrap();
+        assert!(store.confirmed_gone().contains(&id));
+        let reloaded = Store::load_from(&store.notes_dir).unwrap();
+        assert!(
+            reloaded.confirmed_gone().contains(&id),
+            "remembered across a restart"
+        );
+        fs::rename(
+            store.notes_dir.join("course"),
+            store.notes_dir.join(".away"),
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        assert!(
+            !store.confirmed_gone().contains(&id),
+            "its folder is missing, as when a disk is unplugged"
+        );
+        fs::rename(
+            store.notes_dir.join(".away"),
+            store.notes_dir.join("course"),
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        assert!(store.confirmed_gone().contains(&id));
+        fs::write(
+            store.notes_dir.join("Broken.md"),
+            "---\ntitle: [unclosed\n---\n",
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        assert!(
+            store.confirmed_gone().is_empty(),
+            "nothing is gone while a file cannot be read"
+        );
+        fs::remove_file(store.notes_dir.join("Broken.md")).unwrap();
+        store.refresh().unwrap();
+        store.forget_departed(std::slice::from_ref(&id));
+        assert!(store.confirmed_gone().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_note_that_comes_back_or_was_only_renamed_is_never_gone() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        fs::write(store.notes_dir.join("Plain.md"), "no header here\n").unwrap();
+        store.refresh().unwrap();
+        let plain = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Plain")
+            .unwrap()
+            .id
+            .clone();
+        fs::rename(
+            store.notes_dir.join("Plain.md"),
+            store.notes_dir.join("Renamed.md"),
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        assert!(store.notes.iter().all(|n| n.id != plain));
+        assert!(
+            !store.confirmed_gone().contains(&plain),
+            "a renamed file is the same note"
+        );
+        let id = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Other")
+            .unwrap()
+            .id
+            .clone();
+        let text = fs::read_to_string(store.notes_dir.join("Other.md")).unwrap();
+        fs::remove_file(store.notes_dir.join("Other.md")).unwrap();
+        store.refresh().unwrap();
+        assert!(store.confirmed_gone().contains(&id));
+        fs::write(store.notes_dir.join("Other.md"), text).unwrap();
+        store.refresh().unwrap();
+        assert!(!store.confirmed_gone().contains(&id));
+    }
+
+    fn let_days_pass(store: &Store, days: i64) {
+        store.trash_snapshot();
+        store.observe(Utc::now(), Some(chrono::Duration::days(days)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_departure_keeps_the_device_seen_while_the_note_existed() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Removed", "", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        let current = device_of(&store.notes_dir).unwrap();
+        store.seen.get_mut().get_mut(&id).unwrap().device = Some(current.wrapping_add(1));
+        fs::remove_file(store.notes_dir.join("Removed.md")).unwrap();
+        store.refresh().unwrap();
+        assert!(!store.confirmed_gone().contains(&id));
+        store
+            .pictures
+            .get_mut()
+            .saved
+            .gone
+            .get_mut(&id)
+            .unwrap()
+            .device = Some(0);
+        assert!(!store.confirmed_gone().contains(&id));
+    }
+
+    #[test]
+    fn a_note_enters_trash_at_the_current_observed_time() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Removed", "", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.trash_snapshot();
+        store
+            .clock_sample
+            .set(std::time::Instant::now() - std::time::Duration::from_secs(3_600));
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        store.with_trash(false, |index| {
+            assert!(index.files.values().next().unwrap().entered.unwrap() >= 3_600);
+        });
+        store.observe(
+            Utc::now(),
+            Some(chrono::Duration::days(30) - chrono::Duration::minutes(1)),
+        );
+        assert!(store.tidy_trash_now().is_empty());
+    }
+
+    #[test]
+    fn a_divergent_trash_copy_survives_even_when_its_id_is_live() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Old", "Original", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let path = store.notes_dir.join("Old.md");
+        let original = fs::read_to_string(&path).unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let binned = trash_files(&store).pop().unwrap();
+        fs::write(path, original.replace("Original", "New version")).unwrap();
+        store.refresh().unwrap();
+        let_days_pass(&store, 31);
+        assert!(store.tidy_trash_now().is_empty());
+        assert_eq!(fs::read_to_string(binned).unwrap(), original);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_incomplete_trash_scan_never_expires_known_paths() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Old", "Original", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let path = trash_files(&store).pop().unwrap();
+        let_days_pass(&store, 31);
+        let unreadable = path.parent().unwrap().join("unreadable");
+        fs::create_dir(&unreadable).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&unreadable, fs::Permissions::from_mode(0o000)).unwrap();
+        store.tidy_trash_now();
+        fs::set_permissions(unreadable, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn a_trash_replacement_with_the_indexed_stamp_does_not_expire() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Old", "old body", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let path = trash_files(&store).pop().unwrap();
+        let_days_pass(&store, 31);
+        let text = fs::read_to_string(&path).unwrap();
+        let replacement = text.replace("old body", "new body");
+        fs::write(&path, &replacement).unwrap();
+        store.with_trash(false, |index| {
+            index.files.values_mut().next().unwrap().stamp =
+                stamp_of(&fs::metadata(&path).unwrap());
+        });
+        assert!(store.tidy_trash_now().is_empty());
+        assert_eq!(fs::read_to_string(path).unwrap(), replacement);
+    }
+
+    #[test]
+    fn automatic_expiry_keeps_a_trashed_note_with_an_unreadable_body() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Old", "Original", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let path = trash_files(&store).pop().unwrap();
+        let mut bytes = fs::read(&path).unwrap();
+        bytes.push(0xff);
+        fs::write(&path, bytes).unwrap();
+        let_days_pass(&store, 31);
+        assert!(store.tidy_trash_now().is_empty());
+        assert!(path.exists());
+    }
+
+    #[test]
+    fn a_clock_that_jumps_forward_expires_no_trashed_note() {
+        let (mut store, _tmp) = temp_store();
+        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        for path in trash_files(&store) {
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(
+                    std::time::SystemTime::now() - std::time::Duration::from_secs(400 * 86_400),
+                )
+                .unwrap();
+        }
+        store.trash_may_have_changed();
+        store.observe(Utc::now(), None);
+        store.observe(Utc::now() + chrono::Duration::days(400), None);
+        assert!(
+            store.tidy_trash_now().is_empty(),
+            "one day at most after a jump"
+        );
+        assert!(store.would_expire(30) == 0);
+        for _ in 0..30 {
+            let_days_pass(&store, 1);
+        }
+        assert_eq!(store.would_expire(30), 1);
+        assert_eq!(store.tidy_trash_now(), [id]);
+    }
+
+    #[test]
+    fn a_trash_choice_leo_does_not_offer_expires_nothing() {
+        let (mut store, _tmp) = temp_store();
+        let id = store.create_note("Old", "", vec![], "").unwrap().id.clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let_days_pass(&store, 400);
+        for text in [
+            r#"{"trash_days": 14}"#,
+            r#"{"trash_days": "30"}"#,
+            r#"{"trash_days": -1}"#,
+        ] {
+            fs::write(crate::keep::path_for(&store.notes_dir), text).unwrap();
+            assert_eq!(trash_days_now(&store.notes_dir), None, "{text}");
+            assert!(store.tidy_trash_now().is_empty(), "{text}");
+        }
+        fs::write(
+            crate::keep::path_for(&store.notes_dir),
+            r#"{"trash_days": null}"#,
+        )
+        .unwrap();
+        assert_eq!(trash_days_now(&store.notes_dir), Some(None));
+        assert!(store.tidy_trash_now().is_empty());
+        fs::write(
+            crate::keep::path_for(&store.notes_dir),
+            r#"{"trash_days": 7}"#,
+        )
+        .unwrap();
+        assert_eq!(store.tidy_trash_now(), [id]);
+    }
+
+    #[test]
+    fn an_unlinked_picture_waits_in_the_trash_and_comes_back_when_linked() {
+        let (mut store, _tmp) = picture_store();
+        let id = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        let period = Some(chrono::Duration::days(30));
+        let_days_pass(&store, 31);
+        let due = store
+            .picture_pass(&own_pictures(), Utc::now(), period)
+            .unwrap();
+        assert!(due.contains(&PICTURE.to_string()));
+        assert!(!store.released_by_user(PICTURE));
+        let file = store.notes_dir.join("attachments").join(PICTURE);
+        store.bin_picture(PICTURE, &file).unwrap();
+        let binned = store.notes_dir.join(".trash/attachments").join(PICTURE);
+        assert!(!file.exists() && binned.exists());
+        assert_eq!(
+            store
+                .picture_rows()
+                .iter()
+                .map(|r| r.title.as_str())
+                .collect::<Vec<_>>(),
+            [PICTURE]
+        );
+        assert!(
+            store.ripe_binned(period).is_empty(),
+            "the trash period starts again"
+        );
+        let_days_pass(&store, 31);
+        assert_eq!(store.ripe_binned(period), [PICTURE]);
+        assert!(store.ripe_binned(None).is_empty(), "Forever keeps it");
+        store.find_note_mut(&id).unwrap().body = linking(PICTURE);
+        store.save().unwrap();
+        assert!(file.exists() && !binned.exists(), "a link brings it back");
+        assert!(store.picture_rows().is_empty());
+        store.find_note_mut(&id).unwrap().body = "Words".into();
+        store.save().unwrap();
+        store.bin_picture(PICTURE, &file).unwrap();
+        fs::write(
+            store.notes_dir.join("B.md"),
+            format!("---\nid: b\ntitle: B\n---\n{}", linking(PICTURE)),
+        )
+        .unwrap();
+        store.refresh().unwrap();
+        assert!(
+            file.exists(),
+            "a link written outside leo brings it back on refresh"
+        );
+        store.find_note_mut("b").unwrap().body = "x".into();
+        store.find_note_mut(&id).unwrap().body = "y".into();
+        store.save().unwrap();
+        store.bin_picture(PICTURE, &file).unwrap();
+        assert!(store.keep_picture(PICTURE), "Restore from the Trash page");
+        assert!(file.exists());
+    }
+
+    #[test]
+    fn only_a_deletion_the_person_asked_for_lets_a_picture_go_in_one_step() {
+        let (mut store, _tmp) = picture_store();
+        let a = store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        let b = store
+            .create_note("B", linking(OTHER), vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        store.delete_notes(&[a.clone(), b.clone()]);
+        store.save().unwrap();
+        store.delete_from_trash(std::slice::from_ref(&a));
+        assert!(store.released_by_user(PICTURE));
+        let_days_pass(&store, 31);
+        assert_eq!(store.tidy_trash_now(), [b]);
+        assert!(!store.released_by_user(OTHER));
+        let due = store
+            .picture_pass(
+                &own_pictures(),
+                Utc::now(),
+                Some(chrono::Duration::days(30)),
+            )
+            .unwrap();
+        assert!(
+            due.contains(&OTHER.to_string()),
+            "it goes to the trash first"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_left_empty_as_by_an_unplugged_disk_ages_none_of_its_notes() {
+        let (mut store, _tmp) = temp_store();
+        let a = store
+            .create_note("A", "", vec![], "drive")
+            .unwrap()
+            .id
+            .clone();
+        let b = store
+            .create_note("B", "", vec![], "drive")
+            .unwrap()
+            .id
+            .clone();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        fs::remove_file(store.notes_dir.join("drive/A.md")).unwrap();
+        fs::remove_file(store.notes_dir.join("drive/B.md")).unwrap();
+        store.refresh().unwrap();
+        let gone = store.confirmed_gone();
+        assert!(!gone.contains(&a) && !gone.contains(&b), "{gone:?}");
+        let c = store
+            .create_note("C", "", vec![], "drive")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.refresh().unwrap();
+        assert!(
+            store.confirmed_gone().contains(&a),
+            "the folder holds a note again"
+        );
+        assert!(!store.confirmed_gone().contains(&c));
+    }
+
+    fn replace_while_hashing(path: &Path, text: &'static str) {
+        let replaced = path.to_path_buf();
+        crate::paths::WHILE_HASHING.lock().unwrap().push((
+            path.to_path_buf(),
+            Box::new(move || {
+                let temp = replaced.with_extension("synced");
+                fs::write(&temp, text).unwrap();
+                fs::rename(&temp, &replaced).unwrap();
+            }),
+        ));
+    }
+
+    #[test]
+    fn a_trashed_note_replaced_while_it_is_hashed_is_kept() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Gone soon", "old", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        let trashed = store.notes_dir.join(".trash/Gone soon.md");
+        assert_eq!(store.trashed().len(), 1);
+        replace_while_hashing(&trashed, "synced while leo read the old one");
+        assert_eq!(
+            store.delete_from_trash(std::slice::from_ref(&id)).deleted,
+            0
+        );
+        assert_eq!(
+            fs::read_to_string(&trashed).unwrap(),
+            "synced while leo read the old one"
+        );
+    }
+
+    #[test]
+    fn a_binned_picture_replaced_while_it_is_hashed_is_kept() {
+        let (store, _tmp) = picture_store();
+        let file = store.notes_dir.join("attachments").join(PICTURE);
+        store.bin_picture(PICTURE, &file).unwrap();
+        let binned = store.notes_dir.join(".trash/attachments").join(PICTURE);
+        replace_while_hashing(&binned, "png");
+        assert!(store.delete_binned_picture(PICTURE).is_err());
+        assert!(binned.exists());
+    }
+
+    #[test]
+    fn a_hidden_trash_copy_starts_its_clock_when_its_note_leaves() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Kept", "live text", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        let live = store.notes_dir.join("Kept.md");
+        let trash = store.notes_dir.join(".trash");
+        fs::create_dir_all(&trash).unwrap();
+        let divergent = fs::read_to_string(&live)
+            .unwrap()
+            .replace("live text", "older text");
+        fs::write(trash.join("Kept.md"), divergent).unwrap();
+        store.trash_may_have_changed();
+        store.refresh().unwrap();
+        assert!(store.trashed().is_empty());
+        let_days_pass(&store, 40);
+        assert!(store.tidy_trash_now().is_empty());
+        fs::remove_file(&live).unwrap();
+        store.refresh().unwrap();
+        assert_eq!(store.trashed().len(), 1);
+        assert!(store.tidy_trash_now().is_empty(), "its clock starts now");
+        assert!(trash.join("Kept.md").exists());
+        let_days_pass(&store, 31);
+        assert_eq!(store.tidy_trash_now(), [id]);
+    }
+
+    #[test]
+    fn two_generations_first_seen_in_the_trash_mark_their_id_reused() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Live", "", vec![], "").unwrap();
+        store.save().unwrap();
+        let id = "a1b2c3d4-0000-4000-8000-0000000000aa";
+        let trash = store.notes_dir.join(".trash");
+        fs::create_dir_all(&trash).unwrap();
+        for (file, created) in [
+            ("One.md", "2024-01-01T00:00:00Z"),
+            ("Two.md", "2025-01-01T00:00:00Z"),
+        ] {
+            fs::write(
+                trash.join(file),
+                format!("---\nid: {id}\ntitle: {file}\ncreated_at: {created}\n---\nbody\n"),
+            )
+            .unwrap();
+        }
+        store.trash_may_have_changed();
+        store.refresh().unwrap();
+        assert!(store.reused_id(id));
+        assert!(store.removed_note_generation(id).is_none());
+    }
+
+    #[test]
+    fn an_outside_edit_never_marks_a_note_reused() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Kept", "first", vec![], "").unwrap();
+        store.save().unwrap();
+        let id = store.notes[0].id.clone();
+        let file = store.notes_dir.join("Kept.md");
+        let text = fs::read_to_string(&file)
+            .unwrap()
+            .replace("first", "edited outside");
+        fs::write(&file, text).unwrap();
+        fs::write(store.notes_dir.join("Loose.md"), "one").unwrap();
+        store.refresh().unwrap();
+        let loose = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Loose")
+            .unwrap()
+            .id
+            .clone();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        fs::write(store.notes_dir.join("Loose.md"), "one, edited outside").unwrap();
+        store.refresh().unwrap();
+        assert!(!store.reused_id(&id) && !store.reused_id(&loose));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_edited_headerless_note_moved_to_another_folder_is_unresolved() {
+        let (mut store, _dir) = temp_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        let original = store.notes_dir.join("Loose.md");
+        fs::write(&original, "First version").unwrap();
+        store.refresh().unwrap();
+        let id = store
+            .notes
+            .iter()
+            .find(|note| note.title == "Loose")
+            .unwrap()
+            .id
+            .clone();
+        let folder = store.notes_dir.join("Moved");
+        fs::create_dir(&folder).unwrap();
+        let relocated = folder.join("New name.md");
+        fs::rename(original, &relocated).unwrap();
+        fs::write(relocated, "An edited version").unwrap();
+        store.refresh().unwrap();
+        assert!(!store.confirmed_gone().contains(&id));
+    }
+
+    #[test]
+    fn a_headerless_note_renamed_and_edited_in_one_refresh_is_never_gone() {
+        let (mut store, _tmp) = temp_store();
+        store.create_note("Other", "", vec![], "").unwrap();
+        store.save().unwrap();
+        fs::write(store.notes_dir.join("Plain.md"), "first words\n").unwrap();
+        store.refresh().unwrap();
+        let plain = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Plain")
+            .unwrap()
+            .id
+            .clone();
+        fs::remove_file(store.notes_dir.join("Plain.md")).unwrap();
+        fs::write(store.notes_dir.join("Renamed.md"), "first words, edited\n").unwrap();
+        store.refresh().unwrap();
+        assert!(!store.confirmed_gone().contains(&plain));
+    }
+
+    #[test]
+    fn a_batch_keeps_the_picture_list_once_at_its_end() {
+        let (mut store, _tmp) = picture_store();
+        store
+            .create_note("A", linking(PICTURE), vec![], "")
+            .unwrap();
+        store.save().unwrap();
+        let kept = store.notes_dir.join(".leo/pictures.json");
+        let _ = fs::remove_file(&kept);
+        store.picture_batch(|| {
+            store.picture_gone(PICTURE);
+            store.set_unused(BTreeMap::from([(
+                OTHER.to_string(),
+                crate::attachments::SeenPicture {
+                    stamp: (1, 1),
+                    digest: crate::paths::digest(b"png"),
+                },
+            )]));
+            assert!(!kept.exists(), "nothing written inside the batch");
+        });
+        assert!(kept.exists());
     }
 }

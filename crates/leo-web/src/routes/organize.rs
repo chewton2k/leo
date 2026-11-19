@@ -1887,6 +1887,7 @@ mod trash_tests {
             directory: directory.into(),
             deleted_at: Utc::now(),
             readable,
+            revision: None,
         }
     }
 

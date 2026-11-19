@@ -360,19 +360,43 @@ pub(crate) async fn keep(
             from_title.clone(),
         );
         tokio::task::spawn_blocking(move || {
-            let copied = leo_core::recording::copy_to(&notes_dir, &from, &target, &from_title)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            let (mut created, mut checked) =
+                copy_transcripts(&notes_dir, &from, &target, &from_title)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            #[cfg(test)]
+            after_publishing(&target);
+            let sources: Vec<leo_core::paths::FileDigest> =
+                crate::originals::files(&notes_dir, &from)
+                    .into_iter()
+                    .filter_map(|(name, _)| {
+                        let path = crate::routes::uploads::original_path(&notes_dir, &from, &name)?;
+                        leo_core::paths::digest_stamped(&path, u64::MAX)
+                            .ok()
+                            .map(|(digest, _)| digest)
+                    })
+                    .collect();
             match share_originals(&notes_dir, &from, &target) {
-                Ok(originals) => Ok((copied, originals)),
+                Ok(originals) => {
+                    for name in originals {
+                        if let Some((path, stamp, digest)) =
+                            original_checked(&notes_dir, &target, &name)
+                                .filter(|(_, _, digest)| sources.contains(digest))
+                        {
+                            created.originals.insert(name.clone(), digest);
+                            checked.originals.push((name, path, stamp));
+                        }
+                    }
+                    Ok((created, checked))
+                }
                 Err(_) => {
-                    let _ = leo_core::recording::remove(&notes_dir, &target, &copied);
+                    let _ = remove_checked(&notes_dir, &target, &checked);
                     Err(StatusCode::INTERNAL_SERVER_ERROR)
                 }
             }
         })
         .await
     };
-    let (copied, originals) = match copying {
+    let (created, checked) = match copying {
         Ok(Ok(copies)) => copies,
         Ok(Err(code)) => return error(code, "The combined note could not be saved."),
         Err(_) => {
@@ -382,6 +406,21 @@ pub(crate) async fn keep(
             )
         }
     };
+    let intent = (state.clone(), from.clone(), target.clone());
+    let noting = |wanted: bool| {
+        let (state, from, target) = intent.clone();
+        tokio::task::spawn_blocking(move || {
+            let _audio = audio(&state);
+            note_retarget(&state.chats, &from, &target, wanted)
+        })
+    };
+    if !noting(true).await.unwrap_or(false) {
+        let _ = remove_checked(&state.notes_dir, &target, &checked);
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "leo could not record the combine. Try again.",
+        );
+    }
     #[cfg(test)]
     {
         let hook = {
@@ -395,11 +434,12 @@ pub(crate) async fn keep(
             hook();
         }
     }
+    let chats = state.chats.clone();
+    let saving = state.clone();
     let done = state
         .with_store(move |store| {
             let undo = |store: &leo_core::store::Store| {
-                let _ = leo_core::recording::remove(&store.notes_dir, &target, &copied);
-                let _ = remove_originals(&store.notes_dir, &target, &originals);
+                let _ = remove_checked(&store.notes_dir, &target, &checked);
             };
             let still = store
                 .find_note(&from)
@@ -418,16 +458,27 @@ pub(crate) async fn keep(
             let before = std::mem::replace(&mut note.body, body.body);
             note.updated_at = chrono::Utc::now();
             let response = NoteResponse::from_note(note);
+            let version = version_of(note);
+            let record = Combined {
+                from: from.clone(),
+                at: chrono::Utc::now(),
+                kept: Vec::new(),
+                created: created.clone(),
+            };
+            let _audio = audio(&saving);
+            if !change_retarget(&chats, &from, &target, |entry| {
+                entry.record = Some(record.clone());
+                entry.version = Some(version);
+            }) {
+                undo(store);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
             store.delete_notes(std::slice::from_ref(&from));
             if let Err(code) = save(store) {
                 undo(store);
                 return Err(code);
             }
-            let record = Combined {
-                from: from.clone(),
-                originals,
-                at: chrono::Utc::now(),
-            };
+            change_retarget(&chats, &from, &target, |entry| entry.committed = true);
             Ok((
                 target,
                 record,
@@ -437,13 +488,23 @@ pub(crate) async fn keep(
         .await;
     match done {
         Ok((target, record, value)) => {
-            let chats = state.chats.clone();
-            let _ =
-                tokio::task::spawn_blocking(move || set_combined(&chats, &target, &record)).await;
+            let state = state.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let _audio = audio(&state);
+                change_retarget(&state.chats, &record.from, &target, |r| r.committed = true);
+                move_kept(&state, &record.from, &target);
+            })
+            .await;
             Json(value).into_response()
         }
-        Err(StatusCode::CONFLICT) => changed_while_combining(),
-        Err(code) => error(code, "The combined note could not be saved."),
+        Err(code) => {
+            let _ = noting(false).await;
+            if code == StatusCode::CONFLICT {
+                changed_while_combining()
+            } else {
+                error(code, "The combined note could not be saved.")
+            }
+        }
     }
 }
 
@@ -452,6 +513,21 @@ fn changed_while_combining() -> Response {
         StatusCode::CONFLICT,
         "One of the notes changed while they were being combined. Combine them again.",
     )
+}
+
+#[cfg(test)]
+fn after_publishing(target: &str) {
+    let hook = {
+        let mut hooks = AFTER_COPY.lock().unwrap_or_else(|e| e.into_inner());
+        let key = format!("published:{target}");
+        hooks
+            .iter()
+            .position(|(id, _)| *id == key)
+            .map(|at| hooks.remove(at).1)
+    };
+    if let Some(hook) = hook {
+        hook();
+    }
 }
 
 #[cfg(test)]
@@ -488,14 +564,343 @@ pub(crate) struct Uncombine {
     from: String,
 }
 
-#[derive(serde::Serialize, Deserialize)]
+#[derive(Clone, serde::Serialize, Deserialize)]
 pub(crate) struct Combined {
     from: String,
-    originals: Vec<String>,
     at: chrono::DateTime<chrono::Utc>,
+    #[serde(default)]
+    kept: Vec<crate::record::Moved>,
+    #[serde(default)]
+    created: Created,
+}
+
+#[derive(Clone, Default, serde::Serialize, Deserialize)]
+struct Created {
+    transcripts: std::collections::BTreeMap<String, leo_core::paths::FileDigest>,
+    originals: std::collections::BTreeMap<String, leo_core::paths::FileDigest>,
+}
+
+type Stamped = Vec<(std::path::PathBuf, leo_core::paths::EntryStamp)>;
+
+#[derive(Default)]
+struct Checked {
+    transcripts: Vec<(String, Stamped)>,
+    originals: Vec<(String, std::path::PathBuf, leo_core::paths::EntryStamp)>,
+}
+
+fn stamp_of(path: &std::path::Path) -> Option<leo_core::paths::EntryStamp> {
+    let meta = std::fs::symlink_metadata(path)
+        .ok()
+        .filter(|meta| meta.is_file())?;
+    Some(leo_core::paths::entry_stamp(&meta))
+}
+
+fn transcript_files(
+    notes: &std::path::Path,
+    note: &str,
+    ids: &std::collections::BTreeSet<&str>,
+) -> std::collections::BTreeMap<String, Option<Stamped>> {
+    let mut files: std::collections::BTreeMap<String, Option<Stamped>> = Default::default();
+    let entries = leo_core::recording::folder(notes, note)
+        .ok()
+        .and_then(|folder| std::fs::read_dir(folder).ok());
+    for entry in entries.into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let Some((id, _)) = name.split_once('.').filter(|(id, _)| ids.contains(id)) else {
+            continue;
+        };
+        let path = entry.path();
+        let found = files
+            .entry(id.to_string())
+            .or_insert_with(|| Some(Vec::new()));
+        match (found.as_mut(), stamp_of(&path)) {
+            (Some(list), Some(stamp)) => list.push((path, stamp)),
+            _ => *found = None,
+        }
+    }
+    for list in files.values_mut().flatten() {
+        list.sort();
+    }
+    files
+}
+
+fn transcript_digest(files: &Stamped) -> Option<leo_core::paths::FileDigest> {
+    let mut hashed = Vec::new();
+    for (path, stamp) in files {
+        let digest = leo_core::paths::digest_file(path, stamp.1).ok()?;
+        (stamp_of(path) == Some(*stamp)).then_some(())?;
+        hashed.push((path.file_name()?.to_string_lossy().to_string(), digest));
+    }
+    let bytes = serde_json::to_vec(&hashed).ok()?;
+    (!hashed.is_empty()).then(|| leo_core::paths::digest(&bytes))
+}
+
+fn original_checked(
+    notes: &std::path::Path,
+    note: &str,
+    name: &str,
+) -> Option<(
+    std::path::PathBuf,
+    leo_core::paths::EntryStamp,
+    leo_core::paths::FileDigest,
+)> {
+    let path = crate::routes::uploads::original_path(notes, note, name)?;
+    let stamp = stamp_of(&path)?;
+    let digest = leo_core::paths::digest_file(&path, stamp.1).ok()?;
+    (stamp_of(&path) == Some(stamp)).then_some((path, stamp, digest))
+}
+
+fn copy_transcripts(
+    notes: &std::path::Path,
+    from: &str,
+    target: &str,
+    label: &str,
+) -> anyhow::Result<(Created, Checked)> {
+    let staging_id = format!("combine-{}", uuid::Uuid::new_v4().simple());
+    let staging = leo_core::recording::folder(notes, &staging_id)?;
+    let published = (|| {
+        let copied = leo_core::recording::copy_to(notes, from, &staging_id, label)?;
+        let into = leo_core::recording::folder(notes, target)?;
+        std::fs::create_dir_all(&into)?;
+        let ids = copied.iter().map(String::as_str).collect();
+        let mut created = Created::default();
+        let mut checked = Checked::default();
+        for (id, files) in transcript_files(notes, &staging_id, &ids) {
+            let Some(files) = files else { continue };
+            let Some(digest) = transcript_digest(&files) else {
+                continue;
+            };
+            let head = format!("{id}.json");
+            if std::fs::symlink_metadata(into.join(&head)).is_ok() {
+                continue;
+            }
+            let (heads, lines): (Vec<_>, Vec<_>) = files
+                .iter()
+                .partition(|(path, _)| path.file_name().is_some_and(|name| *name == *head));
+            let moved = lines.iter().chain(&heads).all(|(path, _)| {
+                path.file_name()
+                    .is_some_and(|name| leo_core::paths::move_new(path, &into.join(name)).is_ok())
+            });
+            if !moved {
+                continue;
+            }
+            let one = std::collections::BTreeSet::from([id.as_str()]);
+            if let Some(Some(now)) = transcript_files(notes, target, &one).remove(&id) {
+                if transcript_digest(&now) == Some(digest) {
+                    created.transcripts.insert(id.clone(), digest);
+                    checked.transcripts.push((id, now));
+                }
+            }
+        }
+        Ok((created, checked))
+    })();
+    let _ = std::fs::remove_dir_all(&staging);
+    published
+}
+
+fn check_created(notes: &std::path::Path, target: &str, created: &Created) -> Checked {
+    let ids = created.transcripts.keys().map(String::as_str).collect();
+    let transcripts = transcript_files(notes, target, &ids)
+        .into_iter()
+        .filter_map(|(id, files)| {
+            let files = files?;
+            (transcript_digest(&files).as_ref() == created.transcripts.get(&id))
+                .then_some((id, files))
+        })
+        .collect();
+    let originals = created
+        .originals
+        .iter()
+        .filter_map(|(name, digest)| {
+            let (path, stamp, found) = original_checked(notes, target, name)?;
+            (found == *digest).then(|| (name.clone(), path, stamp))
+        })
+        .collect();
+    Checked {
+        transcripts,
+        originals,
+    }
+}
+
+fn remove_checked(notes: &std::path::Path, target: &str, checked: &Checked) -> anyhow::Result<()> {
+    let ids = checked
+        .transcripts
+        .iter()
+        .map(|(id, _)| id.as_str())
+        .collect();
+    let now = transcript_files(notes, target, &ids);
+    let transcripts: Vec<String> = checked
+        .transcripts
+        .iter()
+        .filter(|(id, files)| {
+            now.get(id)
+                .is_some_and(|found| found.as_ref() == Some(files))
+        })
+        .map(|(id, _)| id.clone())
+        .collect();
+    leo_core::recording::remove(notes, target, &transcripts)?;
+    let originals: Vec<String> = checked
+        .originals
+        .iter()
+        .filter(|(_, path, stamp)| stamp_of(path) == Some(*stamp))
+        .map(|(name, _, _)| name.clone())
+        .collect();
+    remove_originals(notes, target, &originals)?;
+    Ok(())
 }
 
 const COMBINED: &str = "combined:";
+const RETARGET: &str = "retarget";
+
+pub(crate) fn audio(state: &AppState) -> std::sync::MutexGuard<'_, ()> {
+    state.audio_work.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+pub(crate) fn try_audio(state: &AppState) -> Option<std::sync::MutexGuard<'_, ()>> {
+    match state.audio_work.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(std::sync::TryLockError::Poisoned(error)) => Some(error.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
+#[derive(Clone, serde::Serialize, Deserialize)]
+struct Retarget {
+    from: String,
+    target: String,
+    committed: bool,
+    #[serde(default)]
+    moved: Option<Vec<crate::record::Moved>>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    record: Option<Combined>,
+}
+
+fn retargets(chats: &std::path::Path) -> Vec<Retarget> {
+    crate::margin::state_of(chats, RETARGET).unwrap_or_default()
+}
+
+fn note_retarget(chats: &std::path::Path, from: &str, target: &str, wanted: bool) -> bool {
+    let mut all = retargets(chats);
+    all.retain(|r| !(r.from == from && r.target == target));
+    if wanted {
+        all.push(Retarget {
+            from: from.to_string(),
+            target: target.to_string(),
+            committed: false,
+            moved: None,
+            version: None,
+            record: None,
+        });
+    }
+    crate::margin::set_state(chats, RETARGET, &all)
+}
+
+fn change_retarget(
+    chats: &std::path::Path,
+    from: &str,
+    target: &str,
+    change: impl FnOnce(&mut Retarget),
+) -> bool {
+    let mut all = retargets(chats);
+    if let Some(entry) = all
+        .iter_mut()
+        .find(|r| r.from == from && r.target == target)
+    {
+        change(entry);
+        return crate::margin::set_state(chats, RETARGET, &all);
+    }
+    false
+}
+
+pub(crate) fn pending_retargets(
+    chats: &std::path::Path,
+) -> std::collections::BTreeSet<(String, String)> {
+    retargets(chats)
+        .into_iter()
+        .map(|r| (r.from, r.target))
+        .collect()
+}
+
+fn move_kept(state: &AppState, from: &str, target: &str) {
+    let chats = &state.chats;
+    let Some(entry) = retargets(chats)
+        .into_iter()
+        .find(|r| r.from == from && r.target == target && r.committed)
+    else {
+        return;
+    };
+    let Some(mut record) = combined_of(chats, target)
+        .filter(|r| r.from == from)
+        .or(entry.record)
+    else {
+        return;
+    };
+    if !set_combined(chats, target, &record) {
+        return;
+    }
+    if let Some(housekeeper) = &state.housekeeper {
+        let moved = if let Some(moved) = entry.moved {
+            moved
+        } else {
+            let Ok(moved) = housekeeper.plan_retarget(from, target) else {
+                return;
+            };
+            if !change_retarget(chats, from, target, |r| r.moved = Some(moved.clone())) {
+                return;
+            }
+            moved
+        };
+        if housekeeper.apply_retarget(from, target, &moved).is_err() {
+            return;
+        }
+        record.kept = moved;
+        if !set_combined(chats, target, &record) {
+            return;
+        }
+    }
+    note_retarget(chats, from, target, false);
+}
+
+pub(crate) fn retry_retargets(state: &AppState) {
+    reconcile_retargets(state, false);
+}
+
+pub(crate) fn reconcile_retargets(state: &AppState, startup: bool) {
+    let chats = &state.chats;
+    let entries = retargets(chats);
+    for entry in entries {
+        let saved = if entry.committed {
+            Some(true)
+        } else {
+            crate::store_now(state, |store| {
+                if !store.unreadable.is_empty() || !store.trash_complete() {
+                    return Ok(None);
+                }
+                let archived = combined_of(chats, &entry.target)
+                    .is_some_and(|record| record.from == entry.from);
+                if store.find_note(&entry.from).is_some() {
+                    return Ok((entry.record.is_none() && entry.moved.is_none()).then_some(false));
+                }
+                let saved = store.trashed_ids().contains(&entry.from)
+                    && store.find_note(&entry.target).is_some_and(|note| {
+                        archived || entry.version.as_deref() == Some(&version_of(note))
+                    });
+                Ok(saved.then_some(true))
+            })
+            .unwrap_or(None)
+        };
+        let _audio = audio(state);
+        if saved == Some(true)
+            && change_retarget(chats, &entry.from, &entry.target, |r| r.committed = true)
+        {
+            move_kept(state, &entry.from, &entry.target);
+        } else if startup && saved == Some(false) {
+            note_retarget(chats, &entry.from, &entry.target, false);
+        }
+    }
+}
 
 fn set_combined(chats: &std::path::Path, target: &str, record: &Combined) -> bool {
     crate::margin::set_state(chats, &format!("{COMBINED}{target}"), record)
@@ -525,9 +930,28 @@ pub(crate) fn forget_old_combines(chats: &std::path::Path, before: chrono::DateT
     }) else {
         return;
     };
+    #[cfg(test)]
+    {
+        let hook = {
+            let mut hooks = AFTER_COPY.lock().unwrap_or_else(|e| e.into_inner());
+            let key = format!("forget:{}", chats.display());
+            hooks
+                .iter()
+                .position(|(id, _)| *id == key)
+                .map(|at| hooks.remove(at).1)
+        };
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
     for (key, data) in rows {
         if serde_json::from_str::<Combined>(&data).map_or(true, |record| record.at < before) {
-            let _ = db.with(|c| c.execute("DELETE FROM margin_state WHERE key = ?1", [&key]));
+            let _ = db.with(|c| {
+                c.execute(
+                    "DELETE FROM margin_state WHERE key = ?1 AND data = ?2",
+                    [&key, &data],
+                )
+            });
         }
     }
 }
@@ -538,28 +962,58 @@ pub(crate) async fn uncombine(
     Json(body): Json<Uncombine>,
 ) -> Response {
     let chats = state.chats.clone();
+    let housekeeper = state.housekeeper.clone();
+    let undoing = state.clone();
+    let looked = (
+        chats.clone(),
+        state.notes_dir.clone(),
+        into.clone(),
+        body.from.clone(),
+    );
+    let checked = tokio::task::spawn_blocking(move || {
+        let (chats, notes, into, from) = looked;
+        combined_of(&chats, &into)
+            .filter(|record| record.from == from)
+            .map(|record| (check_created(&notes, &into, &record.created), record.at))
+    })
+    .await
+    .unwrap_or(None);
     let done = state
         .with_store(move |store| {
             store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
             let from = body.from;
-            let kept = store.find_note(&from).is_some()
-                || leo_core::store::trashed_ids(&store.notes_dir).contains(&from);
+            let kept = store.find_note(&from).is_some() || store.trashed_ids().contains(&from);
             if !kept {
                 return Err(StatusCode::CONFLICT);
             }
-            let copies: Vec<String> = leo_core::recording::list(&store.notes_dir, &into)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            let record = combined_of(&chats, &into).filter(|r| r.from == from);
+            if let (Some(record), Some((checked, at))) = (&record, &checked) {
+                if record.at == *at {
+                    remove_checked(&store.notes_dir, &into, checked)
+                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                }
+            }
+            let _audio = audio(&undoing);
+            let noted = retargets(&chats)
                 .into_iter()
-                .filter(|h| h.copied_from == from)
-                .map(|h| h.id)
-                .collect();
-            leo_core::recording::remove(&store.notes_dir, &into, &copies)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-            let Some(record) = combined_of(&chats, &into).filter(|r| r.from == from) else {
+                .find(|r| r.from == from && r.target == into);
+            if let (Some(housekeeper), Some(moved)) = (
+                housekeeper.as_ref(),
+                noted.as_ref().and_then(|entry| entry.moved.as_deref()),
+            ) {
+                housekeeper
+                    .restore_kept(moved)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
+            note_retarget(&chats, &from, &into, false);
+            let Some(record) = record else {
                 return Ok(());
             };
-            remove_originals(&store.notes_dir, &into, &record.originals)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if let Some(housekeeper) = housekeeper.as_ref().filter(|_| !record.kept.is_empty()) {
+                housekeeper
+                    .restore_kept(&record.kept)
+                    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            }
             forget_combined(&chats, &into);
             Ok(())
         })

@@ -160,6 +160,18 @@ pub fn write_atomic(path: &std::path::Path, contents: impl AsRef<[u8]>) -> Resul
     write_atomic_with(path, |w| Ok(w.write_all(contents.as_ref())?))
 }
 
+pub fn write_new(path: &std::path::Path, contents: impl AsRef<[u8]>) -> Result<()> {
+    use std::io::Write;
+    let parent = path.parent().context("the file has no parent directory")?;
+    let mut temp = tempfile::NamedTempFile::new_in(parent)?;
+    temp.as_file_mut().write_all(contents.as_ref())?;
+    temp.as_file().sync_all()?;
+    temp.persist_noclobber(path).map_err(|error| error.error)?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)?.sync_all()?;
+    Ok(())
+}
+
 pub fn write_atomic_with(
     path: &std::path::Path,
     fill: impl FnOnce(&mut dyn std::io::Write) -> Result<()>,
@@ -187,11 +199,265 @@ pub fn open_regular(path: &std::path::Path) -> std::io::Result<std::fs::File> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_OPEN_REPARSE_POINT: u32 = 0x0020_0000;
+        options.custom_flags(FILE_FLAG_OPEN_REPARSE_POINT);
+    }
     let file = options.open(path)?;
-    if !file.metadata()?.is_file() {
+    let metadata = file.metadata()?;
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
+        if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(std::io::Error::other("the file is a link"));
+        }
+    }
+    if !metadata.is_file() {
         return Err(std::io::Error::other("not a regular file"));
     }
     Ok(file)
+}
+
+pub type FileDigest = [u8; 32];
+
+pub fn digest(bytes: &[u8]) -> FileDigest {
+    use sha2::Digest;
+    sha2::Sha256::digest(bytes).into()
+}
+
+pub fn digest_file(path: &std::path::Path, most_bytes: u64) -> std::io::Result<FileDigest> {
+    digest_stamped(path, most_bytes).map(|(digest, _)| digest)
+}
+
+#[cfg(test)]
+pub(crate) type WhileHashing = (std::path::PathBuf, Box<dyn FnOnce() + Send>);
+
+#[cfg(test)]
+pub(crate) static WHILE_HASHING: std::sync::Mutex<Vec<WhileHashing>> =
+    std::sync::Mutex::new(Vec::new());
+
+pub fn digest_stamped(
+    path: &std::path::Path,
+    most_bytes: u64,
+) -> std::io::Result<(FileDigest, EntryStamp)> {
+    use sha2::Digest;
+    use std::io::Read;
+    let changed = || std::io::Error::other("the file changed while leo read it");
+    let file = open_regular(path)?;
+    let before = entry_stamp(&file.metadata()?);
+    if before.1 > most_bytes {
+        return Err(std::io::Error::other("the file is too large to verify"));
+    }
+    let mut reading = (&file).take(most_bytes.saturating_add(1));
+    let mut hash = sha2::Sha256::new();
+    let mut chunk = [0; 32 * 1024];
+    loop {
+        let read = reading.read(&mut chunk)?;
+        #[cfg(test)]
+        {
+            let hook = {
+                let mut hooks = WHILE_HASHING.lock().unwrap_or_else(|e| e.into_inner());
+                hooks
+                    .iter()
+                    .position(|(at, _)| at.file_name() == path.file_name())
+                    .map(|at| hooks.remove(at).1)
+            };
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        if read == 0 {
+            break;
+        }
+        hash.update(&chunk[..read]);
+    }
+    if reading.limit() == 0 {
+        return Err(std::io::Error::other("the file is too large to verify"));
+    }
+    if entry_stamp(&file.metadata()?) != before || !same_stamp(path, &before) {
+        return Err(changed());
+    }
+    Ok((hash.finalize().into(), before))
+}
+
+pub fn same_stamp(path: &std::path::Path, stamp: &EntryStamp) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && entry_stamp(&meta) == *stamp)
+}
+
+pub fn digest_text(digest: &FileDigest) -> String {
+    use std::fmt::Write;
+    let mut output = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(output, "{byte:02x}");
+    }
+    output
+}
+
+pub fn parse_digest(text: &str) -> Option<FileDigest> {
+    let mut digest = [0; 32];
+    if text.len() != digest.len() * 2 {
+        return None;
+    }
+    for (index, byte) in digest.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(text.get(index * 2..index * 2 + 2)?, 16).ok()?;
+    }
+    Some(digest)
+}
+
+pub type EntryStamp = (bool, u64, u128, u128, u64, u64);
+
+pub type FolderStamps = Vec<(String, EntryStamp)>;
+
+pub fn entry_stamp(meta: &std::fs::Metadata) -> EntryStamp {
+    let nanos = |time: std::io::Result<std::time::SystemTime>| {
+        time.ok()
+            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+            .map_or(0, |since| since.as_nanos())
+    };
+    #[cfg(unix)]
+    let (changed, dev, ino) = {
+        use std::os::unix::fs::MetadataExt;
+        let changed = u128::try_from(meta.ctime()).unwrap_or(0) * 1_000_000_000
+            + u128::try_from(meta.ctime_nsec()).unwrap_or(0);
+        (changed, meta.dev(), meta.ino())
+    };
+    #[cfg(not(unix))]
+    let (changed, dev, ino) = (nanos(meta.created()), 0, 0);
+    (
+        meta.is_dir(),
+        meta.len(),
+        nanos(meta.modified()),
+        changed,
+        dev,
+        ino,
+    )
+}
+
+pub fn folder_stamps(folder: &std::path::Path, left_out: &[&str]) -> std::io::Result<FolderStamps> {
+    use std::path::Path;
+    let refused = || std::io::Error::other("the folder contents could not be verified");
+    const MOST_ENTRIES: usize = 10_000;
+    const MOST_DEPTH: usize = 32;
+    let mut stack = vec![(folder.to_path_buf(), 0)];
+    let mut stamps = Vec::new();
+    while let Some((dir, depth)) = stack.pop() {
+        if depth > MOST_DEPTH || !std::fs::symlink_metadata(&dir)?.is_dir() {
+            return Err(refused());
+        }
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let key = path
+                .strip_prefix(folder)
+                .ok()
+                .and_then(Path::to_str)
+                .ok_or_else(refused)?;
+            if left_out.contains(&key) {
+                continue;
+            }
+            if stamps.len() >= MOST_ENTRIES {
+                return Err(refused());
+            }
+            let meta = std::fs::symlink_metadata(&path)?;
+            if meta.is_dir() {
+                stack.push((path.clone(), depth + 1));
+            } else if !meta.is_file() {
+                return Err(refused());
+            }
+            stamps.push((key.to_string(), entry_stamp(&meta)));
+        }
+    }
+    stamps.sort();
+    Ok(stamps)
+}
+
+pub fn digest_directory(
+    folder: &std::path::Path,
+    most_bytes: u64,
+    left_out: &[&str],
+) -> std::io::Result<(FileDigest, FolderStamps)> {
+    let stamps = folder_stamps(folder, left_out)?;
+    let digest = digest_listed(folder, &stamps, most_bytes, left_out)?;
+    Ok((digest, stamps))
+}
+
+fn digest_listed(
+    folder: &std::path::Path,
+    stamps: &FolderStamps,
+    most_bytes: u64,
+    left_out: &[&str],
+) -> std::io::Result<FileDigest> {
+    let refused = || std::io::Error::other("the folder contents could not be verified");
+    let total = stamps
+        .iter()
+        .filter(|(_, stamp)| !stamp.0)
+        .try_fold(0u64, |sum, (_, stamp)| sum.checked_add(stamp.1));
+    if total.is_none_or(|total| total > most_bytes) {
+        return Err(refused());
+    }
+    let mut files = std::collections::BTreeMap::new();
+    for (key, stamp) in stamps {
+        let content = if stamp.0 {
+            None
+        } else {
+            Some(digest_file(&folder.join(key), stamp.1)?)
+        };
+        files.insert(key.clone(), content);
+    }
+    if folder_stamps(folder, left_out)? != *stamps {
+        return Err(refused());
+    }
+    let bytes = serde_json::to_vec(&files).map_err(std::io::Error::other)?;
+    Ok(digest(&bytes))
+}
+
+pub fn move_new(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
+    let meta = std::fs::symlink_metadata(from)?;
+    if meta.is_file() {
+        match std::fs::hard_link(from, to) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
+            Err(_) if std::fs::symlink_metadata(to).is_ok() => {
+                return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
+            }
+            Err(_) => return std::fs::rename(from, to),
+        }
+        if let Err(error) = std::fs::remove_file(from) {
+            let _ = std::fs::remove_file(to);
+            return Err(error);
+        }
+        return Ok(());
+    }
+    if !meta.is_dir() {
+        return Err(std::io::Error::other("only files and folders are moved"));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let from = std::ffi::CString::new(from.as_os_str().as_bytes())?;
+        let to = std::ffi::CString::new(to.as_os_str().as_bytes())?;
+        let moved = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_EXCL) };
+        if moved == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
+    }
+    #[cfg(windows)]
+    {
+        if std::fs::symlink_metadata(to).is_ok() {
+            return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
+        }
+        std::fs::rename(from, to)
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = to;
+        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+    }
 }
 
 pub mod own {
@@ -232,6 +498,7 @@ pub mod own {
 
     pub const ORIGINALS: &str = "attachments";
     pub const SOURCES: &str = "recording-sources";
+    pub const HELD: &str = "held";
 
     pub const ALL: &[&str] = &[
         CONFIG,
@@ -271,7 +538,7 @@ pub mod own {
     pub const DATABASE_SIDES: &[&str] = &["-wal", "-shm"];
     pub const DATABASE_REWRITE: &str = "leo.db.rewrite";
     pub const DATABASE_REWRITE_READY: &str = "leo.db.rewrite-ready";
-    pub const KEPT_WITH_NOTES: &[&str] = &[ORIGINALS, SOURCES];
+    pub const KEPT_WITH_NOTES: &[&str] = &[ORIGINALS, SOURCES, HELD];
     pub const LEGACY: &[&str] = &[
         "serve-sessions.json",
         "config.toml.new",
@@ -354,6 +621,63 @@ pub mod own {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_move_never_replaces_what_arrived_at_its_destination() {
+        let temp = tempfile::tempdir().unwrap();
+        let (file, taken) = (temp.path().join("a.png"), temp.path().join("b.png"));
+        std::fs::write(&file, "mine").unwrap();
+        std::fs::write(&taken, "synced").unwrap();
+        assert!(move_new(&file, &taken).is_err());
+        assert_eq!(std::fs::read_to_string(&taken).unwrap(), "synced");
+        assert!(file.exists());
+        let (folder, held) = (temp.path().join("folder"), temp.path().join("held"));
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("x"), "x").unwrap();
+        std::fs::create_dir(&held).unwrap();
+        assert!(move_new(&folder, &held).is_err());
+        assert!(folder.join("x").exists() && held.exists());
+        std::fs::remove_dir(&held).unwrap();
+        move_new(&folder, &held).unwrap();
+        assert!(held.join("x").exists() && !folder.exists());
+        let free = temp.path().join("c.png");
+        move_new(&file, &free).unwrap();
+        assert!(!file.exists() && std::fs::read_to_string(free).unwrap() == "mine");
+    }
+
+    #[test]
+    fn a_folder_changed_while_it_is_hashed_is_refused() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("a"), "one").unwrap();
+        let (_, stamps) = digest_directory(temp.path(), 1 << 20, &[]).unwrap();
+        std::fs::write(temp.path().join("b"), "two").unwrap();
+        assert!(digest_listed(temp.path(), &stamps, 1 << 20, &[]).is_err());
+        assert!(digest_directory(temp.path(), 5, &[]).is_err());
+    }
+
+    #[test]
+    fn a_new_file_never_replaces_one_that_arrived() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("Note.md");
+        std::fs::write(&path, "synced").unwrap();
+        assert!(write_new(&path, "leo").is_err());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "synced");
+        let free = temp.path().join("Other.md");
+        write_new(&free, "leo").unwrap();
+        assert_eq!(std::fs::read_to_string(free).unwrap(), "leo");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn regular_open_rejects_linked_windows_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let target = temp.path().join("target.json");
+        let link = temp.path().join("session.json");
+        std::fs::write(&target, "{}").unwrap();
+        if std::os::windows::fs::symlink_file(&target, &link).is_ok() {
+            assert!(open_regular(&link).is_err());
+        }
+    }
 
     #[test]
     fn the_database_and_its_copies_are_listed_and_nothing_like_them() {

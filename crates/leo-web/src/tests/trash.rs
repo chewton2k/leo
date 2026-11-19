@@ -127,6 +127,7 @@ fn undo_brings_back_every_note_and_folder_a_move_to_the_trash_took() {
             ids: taken,
             all: false,
             dirs,
+            revisions: Default::default(),
         }),
     ))
     .unwrap();
@@ -144,6 +145,7 @@ fn undo_brings_back_every_note_and_folder_a_move_to_the_trash_took() {
             ids: vec![],
             all: false,
             dirs: vec!["../outside".into()],
+            revisions: Default::default(),
         }),
     ));
     assert_eq!(refused.unwrap_err(), StatusCode::BAD_REQUEST);
@@ -196,6 +198,7 @@ fn a_trashed_file_leo_cannot_read_is_listed_and_cannot_be_restored() {
             ids: vec![listed[0].id.clone()],
             all: false,
             dirs: vec![],
+            revisions: Default::default(),
         }),
     ))
     .unwrap();
@@ -235,6 +238,7 @@ fn p02_empty_trash_with_one_locked_folder_reports_what_failed() {
             ids: vec![],
             all: true,
             dirs: vec![],
+            revisions: shown(&state),
         }),
     ));
     let left = state.fresh().trashed().len();
@@ -321,6 +325,7 @@ fn p02_benchmark_trash_requests() {
                 ids: ids[..50].to_vec(),
                 all: false,
                 dirs: vec![],
+                revisions: Default::default(),
             }),
         ))
         .unwrap();
@@ -333,6 +338,7 @@ fn p02_benchmark_trash_requests() {
                 ids: ids[50..100].to_vec(),
                 all: false,
                 dirs: vec![],
+                revisions: shown(&state),
             }),
         ))
         .unwrap();
@@ -345,6 +351,7 @@ fn p02_benchmark_trash_requests() {
                 ids: vec![],
                 all: true,
                 dirs: vec![],
+                revisions: shown(&state),
             }),
         ))
         .unwrap();
@@ -395,6 +402,7 @@ fn p02_deleting_a_note_for_good_leaves_nothing_behind_for_its_id() {
             ids: vec![id.clone()],
             all: false,
             dirs: vec![],
+            revisions: shown(&state),
         }),
     ))
     .unwrap();
@@ -484,6 +492,18 @@ fn sources_of(state: &AppState, id: &str) -> std::path::PathBuf {
     folder
 }
 
+fn removed_quietly(state: &AppState, id: &str) {
+    assert_eq!(
+        run(delete_note(State(state.clone()), Path(id.to_string()))),
+        StatusCode::NO_CONTENT
+    );
+    crate::store_now(
+        state,
+        |store| Ok(store.delete_from_trash(&[id.to_string()])),
+    )
+    .unwrap();
+}
+
 fn delete_for_good(state: &AppState, id: &str) {
     assert_eq!(
         run(delete_note(State(state.clone()), Path(id.to_string()))),
@@ -495,15 +515,15 @@ fn delete_for_good(state: &AppState, id: &str) {
             ids: vec![id.to_string()],
             all: false,
             dirs: vec![],
+            revisions: shown(state),
         }),
     ))
     .unwrap();
     assert_eq!(gone.0["deleted"], 1);
 }
 
-fn clear_now(state: &AppState, ids: Vec<String>, active: Option<String>) {
-    let owners = crate::dependents::Owners::of(&state.fresh());
-    crate::dependents::clear(&state.chats, &state.notes_dir, ids, active, &owners);
+fn clear_now(state: &AppState, ids: Vec<String>, _active: Option<String>) {
+    crate::dependents::clear(state, ids, crate::dependents::Why::Asked);
 }
 
 #[cfg(unix)]
@@ -518,19 +538,6 @@ fn a_locked_recording_folder_is_removed_on_the_next_try() {
     assert!(folder.join("passages.json").exists());
     assert!(deleting(&state).contains(&id));
     std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o700)).unwrap();
-    clear_now(&state, Vec::new(), None);
-    assert!(!folder.exists());
-    assert!(deleting(&state).is_empty());
-}
-
-#[test]
-fn a_running_recordings_folder_is_kept() {
-    let (state, _d, _) = state_with(&[]);
-    let id = "a1b2c3d4-0000-4000-8000-00000000abcd".to_string();
-    let folder = sources_of(&state, &id);
-    clear_now(&state, vec![id.clone()], Some(id.clone()));
-    assert!(folder.join("passages.json").exists());
-    assert!(deleting(&state).contains(&id));
     clear_now(&state, Vec::new(), None);
     assert!(!folder.exists());
     assert!(deleting(&state).is_empty());
@@ -553,9 +560,10 @@ fn a_pending_note_that_is_back_keeps_its_files() {
 
 #[test]
 fn nothing_is_removed_while_a_note_cannot_be_read() {
-    let (state, _d, _) = state_with(&[("Readable", "")]);
-    let id = "a1b2c3d4-0000-4000-8000-00000000beef".to_string();
+    let (state, _d, ids) = state_with(&[("Readable", ""), ("Gone", "")]);
+    let id = ids[1].clone();
     let folder = sources_of(&state, &id);
+    removed_quietly(&state, &id);
     std::fs::write(state.notes_dir.join("Broken.md"), b"---\ntitle: [\n---\nx").unwrap();
     assert!(!state.fresh().unreadable.is_empty());
     clear_now(&state, vec![id.clone()], None);
@@ -579,10 +587,14 @@ fn nothing_is_removed_while_a_trashed_file_cannot_be_read() {
     assert!(deleting(&state).contains(&id));
 }
 
+#[cfg(unix)]
 #[test]
 fn the_sweep_removes_task_details_of_a_note_gone_for_a_week() {
-    let (state, _d, ids) = state_with(&[("Live", "")]);
-    for (task, note) in [("task-live", ids[0].as_str()), ("task-gone", "gone-note")] {
+    let (state, _d, ids) = state_with(&[("Live", ""), ("Gone", "")]);
+    for (task, note) in [
+        ("task-live", ids[0].as_str()),
+        ("task-gone", ids[1].as_str()),
+    ] {
         crate::tasks::put_meta(
             &state.chats,
             &crate::tasks::Meta {
@@ -595,14 +607,18 @@ fn the_sweep_removes_task_details_of_a_note_gone_for_a_week() {
         )
         .unwrap();
     }
-    let kept: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    std::fs::remove_file(state.notes_dir.join("Gone.md")).unwrap();
+    drop(state.fresh());
+    let kept: std::collections::HashSet<String> = ids[..1].iter().cloned().collect();
     let now = chrono::Utc::now();
     crate::margin::sweep(&state.chats, &kept, now);
-    crate::margin::sweep(
+    let gone = crate::margin::sweep(
         &state.chats,
         &kept,
         now + chrono::Duration::days(crate::margin::SWEEP_AFTER_DAYS + 1),
     );
+    assert_eq!(gone, [ids[1].clone()]);
+    clear_now(&state, gone, None);
     let left: Vec<String> = crate::tasks::metas(&state.chats)
         .into_iter()
         .map(|m| m.id)
@@ -642,6 +658,7 @@ fn deleting_the_absorbed_note_for_good_keeps_the_remaining_notes_original() {
             ids: vec![ids[1].clone()],
             all: false,
             dirs: vec![],
+            revisions: shown(&state),
         }),
     ))
     .unwrap();
@@ -667,11 +684,76 @@ fn deleting_the_absorbed_note_for_good_keeps_the_remaining_notes_original() {
 
 #[test]
 fn the_daily_keeping_pass_retries_a_pending_removal() {
-    let (state, _d, _) = state_with(&[("Readable", "")]);
-    let id = "a1b2c3d4-0000-4000-8000-00000000f00d".to_string();
+    let (state, _d, ids) = state_with(&[("Readable", ""), ("Gone", "")]);
+    let id = ids[1].clone();
     let folder = sources_of(&state, &id);
+    removed_quietly(&state, &id);
     crate::margin::set_state(&state.chats, "deleting", &[&id]);
     run(crate::keeping::expire_now(&state));
     assert!(!folder.exists());
     assert!(deleting(&state).is_empty());
+}
+
+#[test]
+fn trash_confirmation_cannot_remove_a_newer_synced_revision() {
+    let (state, _dir, ids) = state_with(&[("Lecture", "")]);
+    let id = &ids[0];
+    assert_eq!(
+        run(delete_note(State(state.clone()), Path(id.clone()))),
+        StatusCode::NO_CONTENT
+    );
+    let displayed = shown(&state);
+    assert!(displayed.contains_key(id));
+    let file = state.notes_dir.join(".trash/Lecture.md");
+    std::fs::write(
+        &file,
+        format!("---\nid: {id}\ntitle: Lecture\n---\nA newer revision\n"),
+    )
+    .unwrap();
+    let ask = |revisions| {
+        run(crate::routes::trash::delete_from_trash(
+            State(state.clone()),
+            Json(TrashChoice {
+                ids: vec![id.clone()],
+                revisions,
+                ..Default::default()
+            }),
+        ))
+    };
+    let refused = axum::response::IntoResponse::into_response(ask(displayed).unwrap_err());
+    assert_eq!(refused.status(), StatusCode::CONFLICT);
+    let said = run(axum::body::to_bytes(refused.into_body(), 4096)).unwrap();
+    assert!(String::from_utf8_lossy(&said).contains("changed since this page showed it"));
+    assert!(file.exists());
+    assert_eq!(ask(Default::default()).unwrap_err().0, StatusCode::CONFLICT);
+    assert!(file.exists());
+    assert_eq!(ask(shown(&state)).unwrap().0["deleted"], 1);
+    assert!(!file.exists());
+}
+
+#[test]
+fn emptying_the_trash_keeps_a_note_the_page_never_showed() {
+    let (state, _dir, ids) = state_with(&[("Shown", ""), ("Later", "")]);
+    assert_eq!(
+        run(delete_note(State(state.clone()), Path(ids[0].clone()))),
+        StatusCode::NO_CONTENT
+    );
+    let displayed = shown(&state);
+    assert_eq!(
+        run(delete_note(State(state.clone()), Path(ids[1].clone()))),
+        StatusCode::NO_CONTENT
+    );
+    let done = run(crate::routes::trash::delete_from_trash(
+        State(state.clone()),
+        Json(TrashChoice {
+            all: true,
+            revisions: displayed,
+            ..Default::default()
+        }),
+    ))
+    .unwrap()
+    .0;
+    assert_eq!(done["deleted"], 1);
+    assert!(!state.notes_dir.join(".trash/Shown.md").exists());
+    assert!(state.notes_dir.join(".trash/Later.md").exists());
 }

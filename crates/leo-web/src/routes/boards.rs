@@ -72,7 +72,7 @@ pub(crate) async fn create_board(
     let name = boards::clean_line(&body.name);
     let request = insert::requested(body.request);
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         if let Some(first) = request
             .as_deref()
             .and_then(|r| insert::remembered_creation("board", r))
@@ -123,7 +123,7 @@ pub(crate) async fn undelete_card(
     Path(id): Path<String>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         match boards::undelete_card(chats, &id, Utc::now()) {
             Ok(Some(card)) => Json(json!(card)).into_response(),
             Ok(None) => error(
@@ -153,7 +153,7 @@ pub(crate) async fn change_board(
     Json(change): Json<BoardChange>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(before) = boards::board(chats, &id) else {
             return no_board();
         };
@@ -218,7 +218,7 @@ pub(crate) async fn delete_board(
     Path(id): Path<String>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(board) = boards::board(chats, &id) else {
             return no_board();
         };
@@ -237,7 +237,7 @@ pub(crate) async fn undelete_board(
     Path(id): Path<String>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         match boards::undelete(chats, &id, Utc::now()) {
             Ok(Some(board)) => Json(json!({ "board": board })).into_response(),
             Ok(None) => error(
@@ -255,7 +255,7 @@ pub(crate) async fn undo_board_change(
     Path((id, undo)): Path<(String, String)>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         match boards::undo_change(chats, &id, &undo, Utc::now()) {
             Ok(Some(board)) => Json(json!({ "board": board })).into_response(),
             Ok(None) => error(
@@ -298,7 +298,7 @@ pub(crate) async fn restore_board(
         Err(message) => return error(StatusCode::BAD_REQUEST, message),
     };
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let now = Utc::now();
         let name = boards::clean_line(&board.name);
         let restored = Board {
@@ -396,7 +396,7 @@ pub(crate) async fn create_card(
     };
     let request = insert::requested(body.request).map(|r| (format!("card:{board_id}"), r));
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(board) = boards::board(chats, &board_id) else {
             return no_board();
         };
@@ -473,7 +473,7 @@ pub(crate) async fn change_card(
     Json(change): Json<CardChange>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(mut card) = boards::card(chats, &id) else {
             return no_card();
         };
@@ -519,7 +519,7 @@ pub(crate) async fn move_card(
     Json(change): Json<MoveCard>,
 ) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(mut card) = boards::card(chats, &id) else {
             return no_card();
         };
@@ -568,7 +568,7 @@ pub(crate) async fn move_card(
 
 pub(crate) async fn delete_card(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     blocking(&state, move |chats| {
-        let _writing = boards::writing();
+        let _writing = boards::writing(chats);
         let Some(card) = boards::card(chats, &id) else {
             return no_card();
         };

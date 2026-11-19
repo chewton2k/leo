@@ -41,6 +41,23 @@ struct Stored {
     pieces: Vec<(usize, String)>,
 }
 
+type Row = (String, i64, String, Vec<u8>, String);
+
+fn add_row(known: &mut BTreeMap<String, Entry>, (note, at, hash, v, mark): Row) {
+    let Some(v) = from_blob(&v) else { return };
+    let at = at.max(0) as usize;
+    let entry = known.entry(note).or_insert_with(|| Entry {
+        hash: hash.clone(),
+        pieces: Vec::new(),
+        marks: BTreeMap::new(),
+        whole: false,
+    });
+    entry.pieces.push((at, v));
+    if !mark.is_empty() {
+        entry.marks.insert(at, mark);
+    }
+}
+
 pub struct Vectors {
     db: Arc<crate::db::Db>,
     known: Mutex<BTreeMap<String, Entry>>,
@@ -199,7 +216,16 @@ impl Vectors {
         Vectors::at(base.join("meaning.json"))
     }
 
+    pub fn for_live(notes_dir: &Path, live: &HashSet<String>) -> Vectors {
+        let base = notes_dir.parent().unwrap_or(notes_dir);
+        Vectors::loaded(base.join("meaning.json"), Some(live))
+    }
+
     pub fn at(path: PathBuf) -> Vectors {
+        Vectors::loaded(path, None)
+    }
+
+    fn loaded(path: PathBuf, live: Option<&HashSet<String>>) -> Vectors {
         let db = crate::db::beside(&path);
         let old: Option<OnDisk> = std::fs::read_to_string(&path)
             .ok()
@@ -223,7 +249,7 @@ impl Vectors {
                 crate::db::put_aside(&path);
             }
         }
-        let rows: Vec<(String, i64, String, Vec<u8>, String)> = db
+        let rows: Vec<Row> = db
             .with(|c| {
                 let mut found =
                     c.prepare("SELECT note, at, hash, v, piece FROM vectors ORDER BY note, at")?;
@@ -234,18 +260,9 @@ impl Vectors {
             })
             .unwrap_or_default();
         let mut known: BTreeMap<String, Entry> = BTreeMap::new();
-        for (note, at, hash, v, mark) in rows {
-            let Some(v) = from_blob(&v) else { continue };
-            let at = at.max(0) as usize;
-            let entry = known.entry(note).or_insert_with(|| Entry {
-                hash: hash.clone(),
-                pieces: Vec::new(),
-                marks: BTreeMap::new(),
-                whole: false,
-            });
-            entry.pieces.push((at, v));
-            if !mark.is_empty() {
-                entry.marks.insert(at, mark);
+        for row in rows {
+            if live.is_none_or(|live| live.contains(&row.0)) {
+                add_row(&mut known, row);
             }
         }
         Vectors {
@@ -413,6 +430,24 @@ impl Vectors {
             .is_empty()
     }
 
+    fn read_back(&self, known: &mut BTreeMap<String, Entry>, id: &str) {
+        let rows: Vec<Row> = self
+            .db
+            .with(|c| {
+                let mut found = c.prepare_cached(
+                    "SELECT note, at, hash, v, piece FROM vectors WHERE note = ?1 ORDER BY at",
+                )?;
+                let rows = found.query_map([id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?;
+                rows.collect()
+            })
+            .unwrap_or_default();
+        for row in rows {
+            add_row(known, row);
+        }
+    }
+
     pub fn stale(&self, store: &Store, most_pieces: usize) -> Vec<Work> {
         self.stale_with(store, most_pieces, &hash_of, HASH_BYTES_PER_TICK)
     }
@@ -440,6 +475,9 @@ impl Vectors {
          -> bool {
             if failed.get(&note.id).is_some_and(|(was, _)| *was == hash) {
                 return false;
+            }
+            if !known.contains_key(&note.id) {
+                self.read_back(known, &note.id);
             }
             if known
                 .get(&note.id)
@@ -600,13 +638,6 @@ impl Vectors {
             known.remove(id);
         }
         drop(known);
-        let _ = self.db.with(|c| {
-            let tx = c.transaction()?;
-            for id in &gone {
-                tx.execute("DELETE FROM vectors WHERE note = ?1", [id])?;
-            }
-            tx.commit()
-        });
         self.changed();
         gone.len()
     }
@@ -978,6 +1009,86 @@ mod tests {
             close_to(Some(&fake()), &again, "plants and light", 5)[0].0,
             id
         );
+    }
+
+    #[test]
+    fn a_trashed_note_keeps_its_rows_and_a_restore_asks_for_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let id = store
+            .create_note("Plants", "Plants turn light into sugar.", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store
+            .create_note("Rocks", "Rocks wear into sand.", vec![], "")
+            .unwrap();
+        store.save().unwrap();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        let work = vectors.stale(&store, 64);
+        read_in(&vectors, &fake(), &work);
+        assert!(vectors.stale(&store, 64).is_empty());
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        vectors.forget_gone(&store);
+        assert!(!vectors.known.lock().unwrap().contains_key(&id));
+        let rows = |vectors: &Vectors| -> i64 {
+            vectors
+                .db
+                .with(|c| {
+                    c.query_row("SELECT count(*) FROM vectors WHERE note = ?1", [&id], |r| {
+                        r.get(0)
+                    })
+                })
+                .unwrap()
+        };
+        assert!(rows(&vectors) > 0, "a trashed note keeps its rows");
+        let live: HashSet<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+        let started = Vectors::for_live(&store.notes_dir, &live);
+        assert!(!started.known.lock().unwrap().contains_key(&id));
+        assert_eq!(started.known.lock().unwrap().len(), 1);
+        store.restore(&id).unwrap();
+        store.save().unwrap();
+        assert!(
+            vectors.stale(&store, 64).is_empty(),
+            "nothing to embed again"
+        );
+        assert!(
+            started.stale(&store, 64).is_empty(),
+            "nothing to embed again"
+        );
+        assert!(vectors.known.lock().unwrap().contains_key(&id));
+    }
+
+    #[test]
+    fn a_note_gone_outside_leo_keeps_its_vectors_until_the_sweep_says_it_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let id = store
+            .create_note("Plants", "Plants turn light into sugar.", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store
+            .create_note("Rocks", "Rocks wear into sand.", vec![], "")
+            .unwrap();
+        store.save().unwrap();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        let work = vectors.stale(&store, 64);
+        read_in(&vectors, &fake(), &work);
+        std::fs::remove_file(store.notes_dir.join("Plants.md")).unwrap();
+        store.refresh().unwrap();
+        vectors.forget_gone(&store);
+        let rows: i64 = vectors
+            .db
+            .with(|c| {
+                c.query_row("SELECT count(*) FROM vectors WHERE note = ?1", [&id], |r| {
+                    r.get(0)
+                })
+            })
+            .unwrap();
+        assert!(rows > 0);
+        assert!(!vectors.known.lock().unwrap().contains_key(&id));
     }
 
     #[test]

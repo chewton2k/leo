@@ -521,6 +521,22 @@ pub fn write_zip<W: Write + Seek>(
             &mut walk,
         )?;
     }
+    if parts.trash && parts.uploads {
+        for kind in [
+            leo_core::paths::own::ORIGINALS,
+            leo_core::paths::own::SOURCES,
+        ] {
+            add_dir(
+                &mut zip,
+                &data,
+                &data.join(leo_core::paths::own::HELD).join(kind),
+                &format!("leo/trash/held/{kind}"),
+                true,
+                0,
+                &mut walk,
+            )?;
+        }
+    }
     if parts.chats {
         each_chat(chats_dir, |id| add_chat(&mut zip, chats_dir, id, &mut walk))?;
     }
@@ -564,6 +580,41 @@ mod tests {
             .collect();
         listed.sort();
         listed
+    }
+
+    #[test]
+    fn held_files_require_both_trash_and_uploads() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let chats = dir.path().join("chats");
+        std::fs::create_dir(&notes).unwrap();
+        for kind in ["attachments", "recording-sources"] {
+            let held = dir.path().join("held").join(kind).join("note");
+            std::fs::create_dir_all(&held).unwrap();
+            std::fs::write(held.join("source.txt"), kind).unwrap();
+        }
+        for (trash, uploads) in [(true, true), (false, true), (true, false)] {
+            let mut out = std::io::Cursor::new(Vec::new());
+            write_zip(
+                &mut out,
+                &notes,
+                &chats,
+                Parts {
+                    trash,
+                    uploads,
+                    chats: false,
+                },
+            )
+            .unwrap();
+            let zip = zip::ZipArchive::new(out).unwrap();
+            assert_eq!(
+                zip.file_names()
+                    .filter_map(Result::ok)
+                    .filter(|name| name.starts_with("leo/trash/held/"))
+                    .count(),
+                if trash && uploads { 2 } else { 0 }
+            );
+        }
     }
 
     fn folder_zipped(folder: &Path) -> Result<Packed> {

@@ -24,10 +24,9 @@ pub const DEFAULT_COLUMNS: [&str; 3] = ["To do", "In progress", "Done"];
 const STEP: f64 = 1024.0;
 
 /// One change at a time: a move reads a column's order and then writes it.
-pub static WRITING: Mutex<()> = Mutex::new(());
-
-pub fn writing() -> std::sync::MutexGuard<'static, ()> {
-    WRITING.lock().unwrap_or_else(|e| e.into_inner())
+pub fn writing(chats: &Path) -> std::sync::MutexGuard<'static, ()> {
+    static WRITING: crate::tasks::FolderLocks = OnceLock::new();
+    crate::tasks::folder_lock(&WRITING, chats)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

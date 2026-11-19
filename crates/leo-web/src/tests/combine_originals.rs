@@ -192,6 +192,7 @@ fn undo_is_refused_once_the_absorbed_note_is_deleted_for_good() {
             ids: vec![ids[1].clone()],
             all: false,
             dirs: vec![],
+            revisions: shown(&state),
         }),
     ));
     assert!(gone.is_ok());
@@ -204,4 +205,139 @@ fn undo_is_refused_once_the_absorbed_note_is_deleted_for_good() {
         .unwrap()
         .join("slides.pdf");
     assert_eq!(std::fs::read_to_string(kept).unwrap(), "%PDF slides");
+}
+
+#[test]
+fn keeping_never_drops_a_combine_record_replaced_while_it_looked() {
+    let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", ""), ("Handout", "")]);
+    original(&state, &ids[1], "slides.pdf", "slides");
+    original(&state, &ids[2], "handout.pdf", "handout");
+    assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
+    let chats = state.chats.clone();
+    let replace = state.clone();
+    let (into, with) = (ids[0].clone(), ids[2].clone());
+    combine::AFTER_COPY.lock().unwrap().push((
+        format!("forget:{}", chats.display()),
+        Box::new(move || {
+            assert_eq!(combined(&replace, &into, &with).status(), StatusCode::OK);
+        }),
+    ));
+    combine::forget_old_combines(&chats, chrono::Utc::now() + chrono::Duration::hours(1));
+    assert_eq!(
+        undo(&state, &ids[0], &ids[2]).status(),
+        StatusCode::NO_CONTENT
+    );
+    assert!(
+        !names(&state, &ids[0]).contains(&"handout.pdf".to_string()),
+        "the replacement record still undoes its combine"
+    );
+}
+
+fn archive(id: &str) -> leo_core::recording::Archive {
+    leo_core::recording::Archive {
+        id: id.into(),
+        started: chrono::Utc::now(),
+        passages: vec![leo_core::recording::Passage {
+            start_secs: 0,
+            end_secs: 5,
+            text: format!("said in {id}"),
+            speaker: String::new(),
+        }],
+        points: vec![],
+        context: String::new(),
+        wants: String::new(),
+        warnings: vec![],
+        trace: vec![],
+        from: String::new(),
+    }
+}
+
+#[test]
+fn undo_keeps_copies_that_changed_since_the_combine() {
+    let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
+    original(&state, &ids[1], "slides.pdf", "%PDF slides");
+    original(&state, &ids[1], "handout.pdf", "%PDF handout");
+    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-one01")).unwrap();
+    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-two02")).unwrap();
+    assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
+    let folder = originals_dir(&state.notes_dir, &ids[0]).unwrap();
+    std::fs::remove_file(folder.join("slides.pdf")).unwrap();
+    std::fs::write(folder.join("slides.pdf"), "%PDF synced replacement").unwrap();
+    let sources = leo_core::recording::folder(&state.notes_dir, &ids[0]).unwrap();
+    let corrected = std::fs::read_dir(&sources)
+        .unwrap()
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.starts_with("session-one01.") && name.ends_with(".jsonl"))
+        })
+        .unwrap();
+    let mut text = std::fs::read_to_string(&corrected).unwrap();
+    text = text.replace("said in session-one01", "corrected by hand");
+    std::fs::write(&corrected, &text).unwrap();
+    assert_eq!(
+        undo(&state, &ids[0], &ids[1]).status(),
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(names(&state, &ids[0]), ["slides.pdf"]);
+    assert_eq!(
+        std::fs::read_to_string(folder.join("slides.pdf")).unwrap(),
+        "%PDF synced replacement"
+    );
+    let left: Vec<String> = leo_core::recording::list(&state.notes_dir, &ids[0])
+        .unwrap()
+        .into_iter()
+        .map(|head| head.id)
+        .collect();
+    assert_eq!(left, ["session-one01"]);
+    assert_eq!(std::fs::read_to_string(corrected).unwrap(), text);
+}
+
+#[test]
+fn undo_keeps_a_copy_corrected_while_the_combine_was_still_copying() {
+    let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
+    original(&state, &ids[1], "slides.pdf", "%PDF slides");
+    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-one01")).unwrap();
+    leo_core::recording::save(&state.notes_dir, &ids[1], &archive("session-two02")).unwrap();
+    let sources = leo_core::recording::folder(&state.notes_dir, &ids[0]).unwrap();
+    let corrected = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let noted = corrected.clone();
+    let folder = sources.clone();
+    combine::AFTER_COPY.lock().unwrap().push((
+        format!("published:{}", ids[0]),
+        Box::new(move || {
+            let path = std::fs::read_dir(&folder)
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.path())
+                .find(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with("session-one01.") && name.ends_with(".jsonl")
+                        })
+                })
+                .unwrap();
+            let text = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("said in session-one01", "corrected meanwhile");
+            std::fs::write(&path, &text).unwrap();
+            *noted.lock().unwrap() = Some((path, text));
+        }),
+    ));
+    assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
+    assert_eq!(
+        undo(&state, &ids[0], &ids[1]).status(),
+        StatusCode::NO_CONTENT
+    );
+    let left: Vec<String> = leo_core::recording::list(&state.notes_dir, &ids[0])
+        .unwrap()
+        .into_iter()
+        .map(|head| head.id)
+        .collect();
+    assert_eq!(left, ["session-one01"]);
+    let (path, text) = corrected.lock().unwrap().clone().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
 }

@@ -110,17 +110,48 @@ pub trait Housekeeper: Send + Sync {
     fn kept_audio_count(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
         0
     }
-    fn expire_kept_audio(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
+    fn expire_kept_audio(
+        &self,
+        _before: chrono::DateTime<chrono::Utc>,
+        _protected: &std::collections::HashSet<String>,
+    ) -> usize {
         0
     }
-    fn discard_kept_for_notes(&self, _notes: &[String]) -> anyhow::Result<Vec<String>> {
+    fn kept_sessions(&self, _note: &str) -> anyhow::Result<Vec<KeptSession>> {
         Ok(Vec::new())
+    }
+    fn kept_sessions_for(
+        &self,
+        notes: &std::collections::HashSet<String>,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<KeptSession>>> {
+        notes
+            .iter()
+            .map(|note| Ok((note.clone(), self.kept_sessions(note)?)))
+            .collect()
+    }
+    fn verify_held_audio(
+        &self,
+        _note: &str,
+        sessions: &[KeptSession],
+    ) -> anyhow::Result<Vec<Option<leo_core::paths::FolderStamps>>> {
+        Ok(vec![None; sessions.len()])
+    }
+    fn discard_held_audio(
+        &self,
+        _note: &str,
+        _sessions: &[KeptSession],
+        _verified: &[Option<leo_core::paths::FolderStamps>],
+    ) -> anyhow::Result<()> {
+        Ok(())
     }
     fn kept_for_notes(&self) -> Vec<String> {
         Vec::new()
     }
-    fn retarget_kept(&self, _from: &str, _target: &str) -> anyhow::Result<Vec<Moved>> {
+    fn plan_retarget(&self, _from: &str, _target: &str) -> anyhow::Result<Vec<Moved>> {
         Ok(Vec::new())
+    }
+    fn apply_retarget(&self, _from: &str, _target: &str, _moved: &[Moved]) -> anyhow::Result<()> {
+        Ok(())
     }
     fn restore_kept(&self, _moved: &[Moved]) -> anyhow::Result<()> {
         Ok(())
@@ -128,8 +159,19 @@ pub trait Housekeeper: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptSession {
+    #[serde(default)]
+    pub digest: Option<leo_core::paths::FileDigest>,
+    pub folder: String,
+    pub session: String,
+    pub started: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Moved {
     pub session: String,
+    #[serde(default)]
+    pub identity: Option<KeptSession>,
     pub previous: Option<String>,
     pub target: String,
 }

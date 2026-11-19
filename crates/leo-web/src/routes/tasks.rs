@@ -29,9 +29,12 @@ const NO_OLD_DATE: &str =
 const NOT_DELETED: &str =
     "leo could not delete that task. Check that the notes folder can be written to, then try again.";
 
-async fn writing(work: impl FnOnce() -> Response + Send + 'static) -> Response {
+async fn writing(
+    chats: std::path::PathBuf,
+    work: impl FnOnce() -> Response + Send + 'static,
+) -> Response {
     super::off(move || {
-        let _writing = tasks::writing();
+        let _writing = tasks::writing(&chats);
         work()
     })
     .await
@@ -146,7 +149,7 @@ pub(crate) async fn create_task(
     };
     let chats = state.chats.clone();
     let request = insert::requested(body.request);
-    writing(move || {
+    writing(chats.clone(), move || {
         if let Some(first) = request
             .as_deref()
             .and_then(|r| insert::remembered_creation("task", r))
@@ -246,7 +249,7 @@ pub(crate) async fn change_task(
     let standalone = {
         let (chats, id, description) = (chats.clone(), id.clone(), description.clone());
         tokio::task::spawn_blocking(move || {
-            let _writing = tasks::writing();
+            let _writing = tasks::writing(&chats);
             let Some(mut task) = tasks::load(&chats, &id) else {
                 return Err(Box::new(change));
             };
@@ -442,7 +445,7 @@ pub(crate) async fn delete_task(State(state): State<AppState>, Path(id): Path<St
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    writing(move || {
+    writing(chats.clone(), move || {
         if let Some(task) = tasks::load(&chats, &id) {
             if !tasks::remove(&chats, &id) {
                 return error(StatusCode::INTERNAL_SERVER_ERROR, NOT_DELETED);
@@ -576,7 +579,7 @@ pub(crate) async fn import_tasks(
         }
         let chats = state.chats.clone();
         let Ok((new, old)) = super::off(move || {
-            let _writing = tasks::writing();
+            let _writing = tasks::writing(&chats);
             restore_piece(&chats, piece)
         })
         .await

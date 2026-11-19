@@ -231,18 +231,29 @@ fn process_alive(pid: u32) -> bool {
 }
 
 pub fn locked(dir: &Path) -> bool {
+    use std::io::Read;
     let path = dir.join("lock");
-    let fresh = std::fs::metadata(&path)
-        .and_then(|m| m.modified())
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(meta) if meta.is_file() => meta,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return false,
+        _ => return true,
+    };
+    if meta.len() > 64 {
+        return true;
+    }
+    if !meta
+        .modified()
         .ok()
         .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .is_some_and(|age| age < LOCK_FRESH);
-    if !fresh {
+        .is_some_and(|age| age < LOCK_FRESH)
+    {
         return false;
     }
-    match std::fs::read_to_string(&path)
+    let mut text = String::new();
+    match leo_core::paths::open_regular(&path)
+        .and_then(|file| file.take(64).read_to_string(&mut text))
         .ok()
-        .and_then(|t| t.trim().parse::<u32>().ok())
+        .and_then(|_| text.trim().parse::<u32>().ok())
     {
         Some(pid) => process_alive(pid),
         None => true,
@@ -385,7 +396,7 @@ pub fn folder_name(name: &str) -> bool {
 fn traced_note(dir: &Path) -> Option<String> {
     use std::io::Read;
     let mut text = String::new();
-    std::fs::File::open(dir.join("trace.jsonl"))
+    leo_core::paths::open_regular(&dir.join("trace.jsonl"))
         .ok()?
         .take(MOST_SESSION_BYTES)
         .read_to_string(&mut text)
@@ -440,7 +451,7 @@ fn started_of(name: &str) -> Option<DateTime<Utc>> {
 fn read_manifest(dir: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read;
     let mut bytes = Vec::new();
-    std::fs::File::open(dir.join("session.json"))?
+    leo_core::paths::open_regular(&dir.join("session.json"))?
         .take(MOST_SESSION_BYTES + 1)
         .read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MOST_SESSION_BYTES {
@@ -1119,6 +1130,28 @@ impl Session {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fifo_manifest_does_not_block_opening_a_session() {
+        let (session, _tmp) = session();
+        let path = session.dir.join("session.json");
+        std::fs::remove_file(&path).unwrap();
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        let (done, result) = std::sync::mpsc::channel();
+        let worker =
+            std::thread::spawn(move || done.send(Session::open(&session.dir).is_err()).unwrap());
+        let received = result.recv_timeout(std::time::Duration::from_secs(2));
+        if received.is_err() {
+            let _ = std::fs::OpenOptions::new().write(true).open(&path);
+        }
+        worker.join().unwrap();
+        assert!(received.unwrap());
+    }
 
     fn session() -> (Session, tempfile::TempDir) {
         let tmp = tempfile::tempdir().unwrap();

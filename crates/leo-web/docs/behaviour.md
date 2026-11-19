@@ -1019,7 +1019,8 @@ target. Check the page sequence after loading preferences.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
   from the trash removes them at once (`forget_notes`) and its task details, recording
-  sources and original uploads; a removal that fails is retried on the next delete and
+  sources and original uploads, reading place, meaning vectors and summary, and so does
+  the end of the trash period; a removal that fails is retried on the next delete and
   daily, a recording in use is skipped, and nothing is removed while a note or a trashed
   file cannot be read. The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a
@@ -1664,6 +1665,17 @@ read this file", with Delete for good and its checkbox but no Restore; the selec
 bar's Restore is disabled when every picked row is such a file. POST
 `/api/trash/restore` answers `{restored, unreadable}`, and the toast then adds
 "M could not be restored: leo cannot read the file."
+A note's row says how many pictures it carries (" · N pictures"); they come back with
+it. A picture nothing links is moved into the trash after the trash period and is then a
+row of its own, named after its file, "Picture · removed from its note": Restore puts the
+file back (and it is not moved again until a note links it and then stops), Delete for good
+removes it, and a link written anywhere brings it back by itself. Older pictures leo did not
+record saving that nothing names are rows "Picture no note uses", with Delete for good only.
+Files of a note that expired or left outside leo are a row "Files of a removed note" with
+Restore (keeps them for good) and Delete for good.
+Empty trash removes every note, the pictures only they carried and every picture row; the
+head and the confirm sheet count notes and pictures. A note leaving the trash by Keeping's
+period takes everything that depends on it, as Delete for good does.
 
 Writing Settings offers Ollama, Codex and Claude Code. Removed AGY/Copilot
 choices and sign-in commands are unavailable; legacy saved profiles stay on disk

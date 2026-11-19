@@ -66,16 +66,13 @@ pub(crate) async fn set_keep(
     let done = state
         .with_store(move |store| {
             Ok(leo_core::keep::save(&store.notes_dir, &keep)
-                .map(|()| {
-                    store.tidy_trash_now();
-                    keep_page(keep)
-                })
+                .map(|()| keep_page(keep))
                 .map_err(|e| format!("{e:#}")))
         })
         .await;
     match done {
         Ok(Ok(page)) => {
-            keeping::expire_now(&state).await;
+            tokio::task::spawn_blocking(move || keeping::apply_choices(&state));
             Json(page).into_response()
         }
         Ok(Err(cause)) => (

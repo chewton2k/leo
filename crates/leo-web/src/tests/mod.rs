@@ -4,6 +4,7 @@ mod boards;
 mod calendar;
 mod combine;
 mod combine_originals;
+mod dependents;
 mod dictation;
 mod errors;
 mod felix;
@@ -54,6 +55,15 @@ use crate::routes::uploads::{
 };
 use crate::*;
 
+fn shown(state: &AppState) -> std::collections::HashMap<String, String> {
+    run(crate::routes::trash::list_trash(State(state.clone())))
+        .unwrap()
+        .0
+        .into_iter()
+        .filter_map(|row| Some((row.id, row.revision?)))
+        .collect()
+}
+
 fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<String>) {
     let dir = tempfile::tempdir().unwrap();
     let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
@@ -97,6 +107,9 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
         import_slots: Default::default(),
         zip_slots: routes::downloads::zip_slots(),
         combines: Default::default(),
+        audio_work: Default::default(),
+        clearing: Default::default(),
+        picture_cleanup: Default::default(),
         recording: Default::default(),
         quitting: Default::default(),
         capture_activity: leo_core::activity::Gate::default(),

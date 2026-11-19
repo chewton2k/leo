@@ -114,8 +114,31 @@ settings and credentials are excluded from note exports.
   load, in every other folder it writes at launch (`paths::sweep_stale_temps`).
 - Trash: `save` moves any note file that vanished (and was not just moved:
   its id is not live) to `<notes>/.trash/<same relative path>`, mtime = when
-  deleted. `tidy_trash` (load, a save that writes a new id, and hourly on save) drops live ids and ones past
-  the Keeping choice (`keep::DEFAULT_TRASH_DAYS`, 30); it also expires trashed files it cannot parse (by mtime) and removes folders left empty; Empty trash and delete for good skip a file they cannot delete and report it; leo keeps an index of the trash (`<notes>/.leo/trash.json`), checked against each file's size and times; the list opens only new or changed files, and every deletion checks the trash first; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
+  deleted. Load and save drop an identical trash copy of a live note. The idle
+  Keeping pass removes readable notes past the Keeping choice
+  (`keep::DEFAULT_TRASH_DAYS`, 30) after a complete scan. Divergent copies stay.
+  Trash records digests at entry and checks them before unlinking. A trashed copy of a
+  live note is hidden, and its trash clock starts only when it can first be shown. Empty trash
+  and Delete for good skip a file they cannot verify and report it; leo keeps an index of the trash (`<notes>/.leo/trash.json`), checked against each file's size and times; the list opens only new or changed files, and every deletion checks the trash first; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
+- Dependents (2026-11-17, the owner's call): what belongs to a note (pictures by
+  link, original files, recording sources, task details, margin rows, reading place,
+  read copies, meaning vectors and summaries) stays while it is in the trash, comes
+  back with it, and goes when it is deleted for good. Nothing leo removes on its own
+  goes in one step (2026-11-18): a picture nothing names (no note, trashed note, card,
+  board, task, chat, recording or other text file, however the name is written) is
+  moved to `<notes>/.trash/attachments/` after the trash period and deleted a trash
+  period later, and a link to it brings it back; a note that expires from the trash or
+  has been gone outside leo for seven days (only a note leo saw leave, while its folder
+  still holds its other notes on the same disk; a renamed headerless file is the same
+  note) has its files moved to `<data>/held/` and its rows marked, deleted a trash
+  period later, and given back if the note returns. Periods count only time leo saw
+  pass after entry (one monotonic clock). An unreadable or unknown Keeping choice
+  stops expiry. Outside removals use the volume seen while the note was present,
+  and unknown volumes never qualify. Delete for good and Empty trash delete at
+  once. A picture is leo's while it matches the
+  SHA-256 digest (with size and time) recorded when leo saved it (`<notes>/.leo/pictures-made`); older ones
+  are listed on the Trash page as "Pictures no note uses", deleted only when asked.
+  When leo is not sure, it keeps the file. Counts and clock: `<notes>/.leo/pictures.json`.
 - Updates: the app's signed updater is the only update path
   (`crates/leo-desktop/src/updates.rs`; `leo update` removed 2026-11-17).
   `LEO_NO_UPDATE_CHECK=1` disables its automatic check (e2e and the browser
@@ -294,13 +317,16 @@ that preserves its caller's code page. Uninstall validates bundle identity, refu
 active apps, removes owned login entries and links, runs every step, removes the
 app last and only when every other step worked, and lists what it could not do;
 it keeps notes, their original
-files and recording transcripts, and unrelated files; in a folder not named `leo`
-it removes only the names in `leo_core::paths::own`: what today's code writes,
+files and recording transcripts, and unrelated files; in every folder, `leo` ones
+included, it removes only the names in `leo_core::paths::own` (a `leo` folder goes
+whole only when it holds nothing else): what today's code writes,
 plus a legacy list of what earlier versions wrote, which only ever shrinks
 (2026-11-17: what a kept note depends on is kept, and a service removes exactly
 what leo manages, including what it managed before; `tests/owned_files.rs` fails
 when code writes a bare name not listed there). Recordings that belong to kept or
-trashed notes, and unfinished ones, stay in `recordings/`. It defers locked
+trashed notes, saved audio awaiting recovery and unfinished recordings all stay
+in `recordings/`. Held originals and
+transcripts stay in both default and custom data folders. Uninstall defers locked
 Windows removal, writing its output to `leo-uninstall.log` in the temp folder. Shell-profile edits are atomic and
 retain permissions. Tests use scratch bundles and ad-hoc signatures, never the
 real signing keychain. Four persistent signing secrets gate release before bump;
