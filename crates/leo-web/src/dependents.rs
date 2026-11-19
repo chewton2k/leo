@@ -950,9 +950,9 @@ impl Scan {
         Scan {
             roots: vec![
                 notes.to_path_buf(),
-                data.join("recordings"),
-                data.join("recording-sources"),
-                data.join("held/recording-sources"),
+                data.join(leo_core::paths::own::RECORDINGS),
+                data.join(leo_core::paths::own::SOURCES),
+                data.join(HELD_DIR).join(SOURCES),
             ],
             leo: notes.join(".leo"),
             stamps: HashMap::new(),

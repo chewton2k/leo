@@ -11,7 +11,7 @@ pub fn expand_tilde(p: &str) -> PathBuf {
 
 pub fn models_dir() -> PathBuf {
     match std::env::var_os("LEO_HOME").filter(|v| !v.is_empty()) {
-        Some(home) => PathBuf::from(home).join("models"),
+        Some(home) => PathBuf::from(home).join(leo_core::paths::own::MODELS),
         None => expand_tilde("~/.leo/models"),
     }
 }

@@ -34,7 +34,7 @@ pub struct Captions {
 impl Captions {
     pub fn for_notes(notes_dir: &Path) -> Captions {
         let base = crate::db::beside_of(notes_dir, None);
-        Captions::at(base.join("captions.json"))
+        Captions::at(base.join(leo_core::paths::own::CAPTIONS))
     }
 
     pub fn at(path: PathBuf) -> Captions {

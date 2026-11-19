@@ -123,7 +123,7 @@ impl Settings {
         let folder = path.parent().context("Dictation settings need a folder.")?;
         let _lock = crate::private_file::lock(
             folder,
-            ".dictation.lock",
+            leo_core::paths::own::DICTATION_LOCK,
             std::time::Duration::from_secs(5),
         )?;
         let original = read_settings(path)?;

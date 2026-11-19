@@ -37,7 +37,10 @@ impl Default for Keep {
 }
 
 pub fn path_for(notes_dir: &Path) -> PathBuf {
-    notes_dir.parent().unwrap_or(notes_dir).join("keep.json")
+    notes_dir
+        .parent()
+        .unwrap_or(notes_dir)
+        .join(crate::paths::own::KEEP)
 }
 
 pub fn load(notes_dir: &Path) -> Keep {

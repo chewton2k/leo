@@ -51,8 +51,10 @@ fn stop_asked() -> bool {
 }
 
 fn each_old_upload(notes_dir: &Path, cutoff: SystemTime, visit: &mut dyn FnMut(&Path)) {
-    let Ok(base) = leo_core::paths::contained_path(&data_dir(notes_dir), Path::new("attachments"))
-    else {
+    let Ok(base) = leo_core::paths::contained_path(
+        &data_dir(notes_dir),
+        Path::new(leo_core::paths::own::ORIGINALS),
+    ) else {
         return;
     };
     let mut met = 0usize;

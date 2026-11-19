@@ -346,7 +346,7 @@ struct Linking {
 }
 
 pub fn settings_path(notes: &Path) -> PathBuf {
-    crate::db::beside_of(notes, None).join("calendars.json")
+    crate::db::beside_of(notes, None).join(leo_core::paths::own::CALENDARS)
 }
 
 fn account(id: &str) -> String {
@@ -1057,7 +1057,7 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let real = dir.path().join("real.json");
         std::fs::write(&real, r#"{"kept":true}"#).unwrap();
-        let link = dir.path().join("calendars.json");
+        let link = dir.path().join(leo_core::paths::own::CALENDARS);
         std::os::unix::fs::symlink(&real, &link).unwrap();
         assert!(read::<serde_json::Value>(&real)["kept"].as_bool().unwrap());
         assert!(read::<serde_json::Value>(&link).is_null());

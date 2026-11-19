@@ -23,7 +23,7 @@ static GRANT_RECORDED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 fn grant_file() -> Option<std::path::PathBuf> {
     leo_core::paths::config_dir()
         .ok()
-        .map(|dir| dir.join("accessibility-version"))
+        .map(|dir| dir.join(leo_core::paths::own::ACCESSIBILITY))
 }
 #[cfg(target_os = "macos")]
 fn record_grant() {

@@ -23,12 +23,11 @@ pub fn tidy_rooms() {
     tidy_rooms_in(&std::env::temp_dir());
 }
 
-pub const ROOM_PREFIXES: &[&str] = &[
-    "leo-writing-",
-    "leo-usage-",
-    "leo-import-",
-    "leo-dictation-",
-];
+pub(crate) const WRITING_ROOM: &str = "leo-writing-";
+pub(crate) const USAGE_ROOM: &str = "leo-usage-";
+pub(crate) const IMPORT_ROOM: &str = "leo-import-";
+pub const DICTATION_ROOM: &str = "leo-dictation-";
+pub const ROOM_PREFIXES: &[&str] = &[WRITING_ROOM, USAGE_ROOM, IMPORT_ROOM, DICTATION_ROOM];
 
 fn tidy_rooms_in(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {

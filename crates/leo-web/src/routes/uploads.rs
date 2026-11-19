@@ -369,7 +369,11 @@ pub(crate) fn originals_dir(notes_dir: &std::path::Path, note: &str) -> Option<s
         return None;
     }
     let data = crate::db::beside_of(notes_dir, None);
-    leo_core::paths::contained_path(data, &std::path::Path::new("attachments").join(note)).ok()
+    leo_core::paths::contained_path(
+        data,
+        &std::path::Path::new(leo_core::paths::own::ORIGINALS).join(note),
+    )
+    .ok()
 }
 
 pub(crate) fn original_path(
@@ -381,7 +385,9 @@ pub(crate) fn original_path(
         return None;
     }
     originals_dir(notes_dir, note)?;
-    let relative = std::path::Path::new("attachments").join(note).join(name);
+    let relative = std::path::Path::new(leo_core::paths::own::ORIGINALS)
+        .join(note)
+        .join(name);
     leo_core::paths::contained_path(crate::db::beside_of(notes_dir, None), &relative).ok()
 }
 

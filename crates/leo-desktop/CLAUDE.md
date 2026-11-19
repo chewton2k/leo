@@ -329,3 +329,5 @@ Leo is not active, its main window is not on the active Space (`isOnActiveSpace`
 when hidden, `needs_flip`); a click within a second of the last flip waits out the gap, so rapid changes never leave extra Dock icons; Leo in front or beside
 you never flips. `setCanHide` was not needed in the spike. Only the gate is tested; the
 real behaviour needs a release and a full-screen Space.
+
+App-owned paths use the shared `leo_core::paths::own` registry used by uninstall.

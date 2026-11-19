@@ -1332,3 +1332,5 @@ keys and downloaded runtimes stay untouched.
   over an in-memory API; flows.spec.js joins the page to the real routes.
 
 The note API preserves the preexisting version hash for ordinary notes after removing the unused tags field.
+
+Config and data file paths use the same `leo_core::paths::own` names as uninstall.

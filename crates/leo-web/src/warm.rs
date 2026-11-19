@@ -43,7 +43,7 @@ pub fn hash_of<T: Hash + ?Sized>(value: &T) -> u64 {
 pub fn config_stamp() -> u64 {
     leo_core::paths::config_dir()
         .ok()
-        .and_then(|dir| std::fs::metadata(dir.join("config.toml")).ok())
+        .and_then(|dir| std::fs::metadata(dir.join(leo_core::paths::own::CONFIG)).ok())
         .map(|m| hash_of(&(m.modified().ok(), m.len())))
         .unwrap_or(0)
 }

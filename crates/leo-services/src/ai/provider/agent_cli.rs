@@ -497,7 +497,7 @@ impl AgentCli {
 
     pub(crate) fn room(&self) -> ProviderResult<tempfile::TempDir> {
         let mut builder = tempfile::Builder::new();
-        builder.prefix("leo-writing-");
+        builder.prefix(crate::ai::WRITING_ROOM);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;

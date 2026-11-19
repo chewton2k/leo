@@ -6,8 +6,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{Connection, ErrorCode};
 
-pub const FILE: &str = "leo.db";
-pub const BEFORE: &str = ".before-database";
+pub const FILE: &str = leo_core::paths::own::DATABASE;
+pub const BEFORE: &str = leo_core::paths::own::BEFORE;
 const VERSION: i64 = 7;
 
 const SCHEMA: &str = "

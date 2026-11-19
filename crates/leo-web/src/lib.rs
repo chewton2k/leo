@@ -836,13 +836,16 @@ pub fn fresh_token() -> String {
 }
 
 pub fn saved_token() -> Result<String> {
-    token::load_or_create(&leo_core::paths::config_dir()?.join("serve-token"), false)
+    token::load_or_create(
+        &leo_core::paths::config_dir()?.join(leo_core::paths::own::SERVE_TOKEN),
+        false,
+    )
 }
 
 pub async fn start(options: StartOptions, powers: Powers) -> Result<Running> {
     let places = Places {
         store: Store::load()?,
-        sessions: leo_core::paths::config_dir()?.join("app-sessions.json"),
+        sessions: leo_core::paths::config_dir()?.join(leo_core::paths::own::APP_SESSIONS),
     };
     start_in(places, options, powers).await
 }

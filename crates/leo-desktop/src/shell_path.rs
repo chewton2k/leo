@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 const MARK: &str = "__LEO_PATH__";
-const SAVED: &str = "login-path";
+const SAVED: &str = leo_core::paths::own::LOGIN_PATH;
 const MOST_SAVED: u64 = 16 * 1024;
 
 pub fn cached(config: &Path) -> Option<String> {

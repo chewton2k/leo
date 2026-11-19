@@ -172,7 +172,7 @@ kind = "parakeet"
     /// `~/.config/leo/config.toml`. Deliberately not beside the notes
     /// directory: this file holds machine-local values (ports, model paths).
     pub fn config_path() -> Result<std::path::PathBuf> {
-        Ok(leo_core::paths::config_dir()?.join("config.toml"))
+        Ok(leo_core::paths::config_dir()?.join(leo_core::paths::own::CONFIG))
     }
 
     /// Load from the standard path. Never fails: a missing or malformed file

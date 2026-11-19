@@ -42,7 +42,7 @@ struct Download {
 }
 
 type Verified = BTreeMap<PathBuf, (u64, SystemTime)>;
-const VERIFIED_FILE: &str = "speech-verified.json";
+const VERIFIED_FILE: &str = leo_core::paths::own::SPEECH_VERIFIED;
 const MOST_VERIFIED_BYTES: u64 = 64 * 1024;
 
 fn remembered(config: &Path) -> Verified {
@@ -140,7 +140,7 @@ impl Library {
 
     fn selection_path(&self) -> Result<PathBuf> {
         safe_root(&self.config)?;
-        leo_core::paths::contained_path(&self.config, Path::new("speech-model.json"))
+        leo_core::paths::contained_path(&self.config, Path::new(leo_core::paths::own::SPEECH_MODEL))
     }
 
     pub fn selection(&self) -> Result<Selection> {
@@ -315,7 +315,8 @@ impl Library {
             "Choose a language supported by this speech model."
         );
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         self.verify(id)?;
         let selection = Selection {
             id: id.into(),
@@ -327,7 +328,8 @@ impl Library {
     pub(crate) fn delete(&self, id: &str) -> Result<()> {
         self.catalog.known(id)?;
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         ensure!(
             !self
                 .jobs
@@ -625,7 +627,8 @@ impl Library {
             }
         })?;
         tmp.as_file().sync_all()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         ensure!(
             !cancel.load(Ordering::Acquire),
             "The model download was cancelled."
@@ -677,7 +680,8 @@ impl Library {
             "Use the model’s Delete button instead."
         );
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         let path = leo_core::paths::contained_path(&self.models, Path::new(name))?;
         let metadata = std::fs::symlink_metadata(&path)?;
         ensure!(

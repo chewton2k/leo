@@ -499,3 +499,5 @@ The model library lists damaged and uncatalogued GGUF files; deletion stays
 contained and never follows links.
 
 Git backup settings and Health checks are retired.
+
+Top-level writer paths use `leo_core::paths::own`. The temp room creators and cleanup share `ai::ROOM_PREFIXES` and its named prefixes.

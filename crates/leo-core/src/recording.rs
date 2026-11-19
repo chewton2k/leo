@@ -299,7 +299,10 @@ pub fn valid_id(id: &str) -> bool {
 }
 
 pub fn root(notes: &Path) -> PathBuf {
-    notes.parent().unwrap_or(notes).join("recording-sources")
+    notes
+        .parent()
+        .unwrap_or(notes)
+        .join(crate::paths::own::SOURCES)
 }
 
 pub fn folder(notes: &Path, note: &str) -> Result<PathBuf> {
@@ -308,7 +311,7 @@ pub fn folder(notes: &Path, note: &str) -> Result<PathBuf> {
     }
     crate::paths::contained_path(
         notes.parent().unwrap_or(notes),
-        &Path::new("recording-sources").join(note),
+        &Path::new(crate::paths::own::SOURCES).join(note),
     )
 }
 

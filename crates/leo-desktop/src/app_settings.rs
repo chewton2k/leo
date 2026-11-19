@@ -199,7 +199,7 @@ pub struct AppSettings {
 }
 impl AppSettings {
     pub fn new(app: AppHandle, dictation: Arc<crate::dictation::Dictation>) -> Result<Arc<Self>> {
-        let path = leo_core::paths::config_dir()?.join("app-settings.json");
+        let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::APP_SETTINGS);
         let native = app.clone();
         let preferences = PreferenceStore::new(
             path.clone(),

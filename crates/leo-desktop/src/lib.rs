@@ -29,7 +29,7 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 
 const MAIN: &str = "main";
 const HIDDEN: &str = "--hidden";
-const LAUNCHED: &str = "app-launched";
+const LAUNCHED: &str = leo_core::paths::own::APP_LAUNCHED;
 
 struct Engine(Mutex<Option<leo_web::Running>>);
 

@@ -2,7 +2,7 @@ use std::path::Path;
 
 pub const DEFAULT_PORT: u16 = 47318;
 
-const FILE: &str = "app-port";
+const FILE: &str = leo_core::paths::own::APP_PORT;
 
 pub fn remembered(config_dir: &Path) -> u16 {
     std::fs::read_to_string(config_dir.join(FILE))

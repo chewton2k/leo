@@ -864,7 +864,7 @@ impl Graphs {
 
     pub fn for_notes(notes_dir: &Path, writer: Option<Writer>) -> Graphs {
         let base = crate::db::beside_of(notes_dir, None);
-        Graphs::new(base.join("graph.json"), writer)
+        Graphs::new(base.join(leo_core::paths::own::GRAPH), writer)
     }
 
     #[cfg(test)]

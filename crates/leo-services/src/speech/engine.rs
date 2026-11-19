@@ -21,7 +21,7 @@ pub const BUSY: &str = "The speech engine is busy.";
 type Timed = Vec<(u64, String)>;
 
 const QUEUED: usize = 8;
-const SHADERS_MARKER: &str = "speech-shaders-ready";
+const SHADERS_MARKER: &str = leo_core::paths::own::SHADERS_READY;
 const IDLE: Duration = Duration::from_secs(5 * 60);
 const POLL: Duration = Duration::from_millis(20);
 const CANCEL_POLL: Duration = Duration::from_millis(50);

@@ -10,7 +10,7 @@ use serde::Deserialize;
 
 use crate::AppState;
 
-const FILE: &str = "ui-prefs.json";
+const FILE: &str = leo_core::paths::own::UI_PREFS;
 const CONTENT: [&str; 1] = ["leo-chat-v1"];
 const MOST_VALUE: usize = 16 * 1024;
 const MOST_TOTAL: usize = 128 * 1024;

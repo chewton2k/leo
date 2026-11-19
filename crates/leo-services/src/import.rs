@@ -53,7 +53,7 @@ impl Scratch {
         if dir.is_none() {
             *dir = Some(
                 tempfile::Builder::new()
-                    .prefix("leo-import-")
+                    .prefix(crate::ai::IMPORT_ROOM)
                     .tempdir()
                     .context("leo could not make a folder to read this file in")?,
             );

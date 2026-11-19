@@ -1288,7 +1288,7 @@ pub(crate) fn sweep_store_at(
         kept.insert(head.id);
     }
     let mut held: BTreeSet<String> = kept_audio.iter().cloned().collect();
-    for folder in ["attachments", "recording-sources"] {
+    for folder in ["attachments", leo_core::paths::own::SOURCES] {
         held.extend(folder_names(&data.join(folder)));
     }
     sweep_with(

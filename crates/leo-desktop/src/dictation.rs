@@ -141,7 +141,7 @@ pub struct Dictation {
 }
 impl Dictation {
     pub fn new(app: AppHandle) -> Result<Arc<Self>> {
-        let path = leo_core::paths::config_dir()?.join("dictation.json");
+        let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::DICTATION);
         let (settings, problem) = Settings::recover(&path);
         let mut in_use = settings.clone();
         in_use.shortcut = crate::shortcut::loaded(settings.shortcut.clone()).0;
@@ -716,7 +716,7 @@ impl Dictation {
 impl Dictation {
     fn pipeline(&self, selected: &Selected, words: &[String]) -> Result<Pipeline> {
         let spool = tempfile::Builder::new()
-            .prefix("leo-dictation-")
+            .prefix(leo_services::ai::DICTATION_ROOM)
             .tempdir()?
             .keep();
         let (selected, words) = (selected.clone(), words.to_vec());

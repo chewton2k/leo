@@ -115,7 +115,7 @@ pub fn label(usage: &Usage, now: DateTime<Utc>) -> String {
 fn file() -> Option<PathBuf> {
     leo_core::paths::config_dir()
         .ok()
-        .map(|dir| dir.join("usage.json"))
+        .map(|dir| dir.join(leo_core::paths::own::USAGE))
 }
 
 pub fn load_from(path: &Path) -> Seen {
@@ -186,7 +186,7 @@ pub fn ask_codex(program: &Path) -> Option<Usage> {
     use crate::ai::provider::agent_cli::codex_disables;
     use crate::ai::provider::process::{self, Process, Watchdog, MOST_OUTPUT, QUEUED_MESSAGES};
     let room = tempfile::Builder::new()
-        .prefix("leo-usage-")
+        .prefix(crate::ai::USAGE_ROOM)
         .tempdir()
         .ok()?;
     #[cfg(unix)]

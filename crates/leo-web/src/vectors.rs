@@ -214,12 +214,12 @@ pub struct Work {
 impl Vectors {
     pub fn for_notes(notes_dir: &Path) -> Vectors {
         let base = crate::db::beside_of(notes_dir, None);
-        Vectors::at(base.join("meaning.json"))
+        Vectors::at(base.join(leo_core::paths::own::MEANING))
     }
 
     pub fn for_live(notes_dir: &Path, live: &HashSet<String>) -> Vectors {
         let base = notes_dir.parent().unwrap_or(notes_dir);
-        Vectors::loaded(base.join("meaning.json"), Some(live))
+        Vectors::loaded(base.join(leo_core::paths::own::MEANING), Some(live))
     }
 
     pub fn at(path: PathBuf) -> Vectors {
