@@ -26,8 +26,12 @@ function words(n, seed) {
 function noteText(bytes) {
   const count = Math.ceil(bytes / 250);
   const blocks = [];
-  for (let i = 0; i < count; i++) blocks.push(`${words(36, i + 1)} Unique passage number ${i}.`.slice(0, 248));
-  return blocks.join('\n\n');
+  for (let i = 0; i < count; i++) {
+    const marker = ` Unique passage number ${i}.`;
+    const room = 248 - marker.length;
+    blocks.push(words(64, i + 1).slice(0, room).padEnd(room, ' the') + marker);
+  }
+  return blocks.join('\n\n').slice(0, bytes);
 }
 const passage = (i) => `Unique passage number ${i}.`;
 
@@ -48,15 +52,15 @@ async function lookAtDisk(page, id) {
 
 const SERVED = [
   ['/doc.js', [
-    ['function changed() {', 'function changed() { return __mark("doc.changed", () => __changed()); }\n    function __changed() {'],
+    ['function changed(edit) {', 'function changed(edit) { return __mark("doc.changed", () => __changed(edit)); }\n    function __changed(edit) {'],
     ['function lineStart(line) {', 'function lineStart(line) { return __mark("lineStart", () => __lineStart(line)); }\n    function __lineStart(line) {'],
     ['function lineOf(at) {', 'function lineOf(at) { return __mark("lineOf", () => __lineOf(at)); }\n    function __lineOf(at) {'],
     ['function outlineDraw(force = false) {', 'function outlineDraw(force = false) { return __mark("outlineDraw", () => __outlineDraw(force)); }\n    function __outlineDraw(force = false) {'],
-    ['ed.listPrefix(editing.prefix + area.value, lines.slice(0, start))', '__mark("listPrefix with the lines above", () => ed.listPrefix(editing.prefix + area.value, lines.slice(0, start)))'],
+    ['ed.listPrefixAt(editing.prefix + area.value, lines, start)', '__mark("listPrefixAt", () => ed.listPrefixAt(editing.prefix + area.value, lines, start))'],
   ]],
   ['/app.js', [
-    ['function snapshot(s) {', 'function snapshot(s) { return __mark("snapshot", () => __snapshot(s)); }\nfunction __snapshot(s) {'],
-    ['function changed(s) { saving.changed(s, snapshot(s)); }', 'function changed(s) { __mark("app changed (snapshot, saving.changed)", () => saving.changed(s, snapshot(s))); }'],
+    ['function snapshot(s, text = () => s.doc.source()) {', 'function snapshot(...args) { return __mark("snapshot", () => __snapshot(...args)); }\nfunction __snapshot(s, text = () => s.doc.source()) {'],
+    ['function changed(s, text) { saving.changed(s, snapshot(s, text)); }', 'function changed(s, text) { __mark("app changed (snapshot, saving.changed)", () => saving.changed(s, snapshot(s, text))); }'],
     ['function marginDraw() {', 'function marginDraw() { return __mark("marginDraw", () => __marginDraw()); }\nfunction __marginDraw() {'],
     ['function readSoon(text) {', 'function readSoon(text) { return __mark("readSoon", () => __readSoon(text)); }\nfunction __readSoon(text) {'],
   ]],
@@ -204,7 +208,7 @@ test('typing cost C4: every step of a keystroke in a large note, then what runs 
   row(browserName, 'long tasks (50 ms or more)', { supported: await page.evaluate(() => PerformanceObserver.supportedEntryTypes.includes('longtask')), count: long.length, in_key: long.filter((l) => l.phase === 'key').length, in_after: long.filter((l) => l.phase === 'after').length, longest_ms: long.length ? +Math.max(...long.map((l) => l.ms)).toFixed(1) : 0 });
   if (cdp) row(browserName, 'browser metrics per keystroke and the 650 ms after it', { script_ms: median(keyRuns.map((x) => x.cost.script_ms)), layout_ms: median(keyRuns.map((x) => x.cost.layout_ms)), layouts: median(keyRuns.map((x) => x.cost.layouts)), styles: median(keyRuns.map((x) => x.cost.styles)) });
   await page.waitForTimeout(3000);
-  row(browserName, 'autosave PATCH round trips (413 until the body limit is removed)', patches);
+  row(browserName, 'autosave PATCH round trips', patches);
 });
 
 test('typing cost heap: whole-copy undo after typing groups separated by pauses', async ({ page, browserName }) => {
@@ -251,7 +255,7 @@ test('typing cost storage: what the browser keeps for a draft', async ({ page, b
     };
     const draftAccepts = (n) => {
       const body = 'x'.repeat(n);
-      try { localStorage.setItem('typing-cost-probe', JSON.stringify({ note: { id: 'a', title: 'T', body, tags: [], directory: '', version: 'v' }, edit: { title: 'T', body, tags: [] } })); return true; } catch (_) { return false; } finally { localStorage.removeItem('typing-cost-probe'); }
+      try { localStorage.setItem('typing-cost-probe', JSON.stringify({ note: { id: 'a', title: 'T', body, directory: '', version: 'v' }, edit: { title: 'T', body } })); return true; } catch (_) { return false; } finally { localStorage.removeItem('typing-cost-probe'); }
     };
     const largest = (ok) => { let lo = 0; let hi = 64 * 1024 * 1024; while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (ok(mid)) lo = mid; else hi = mid - 1; } return lo; };
     const out = { empty_origin_chars: largest(accepts), draft_body_chars_today: largest(draftAccepts) };
@@ -268,7 +272,7 @@ test('typing cost storage: what the browser keeps for a draft', async ({ page, b
         const body = 'x'.repeat(n);
         const tx = db.transaction('drafts', 'readwrite');
         const t0 = performance.now();
-        tx.objectStore('drafts').put({ note: { id: 'a', title: 'T', body: '', tags: [], directory: '', version: 'v' }, edit: { title: 'T', body, tags: [] } }, 'k');
+        tx.objectStore('drafts').put({ note: { id: 'a', title: 'T', body: '', directory: '', version: 'v' }, edit: { title: 'T', body } }, 'k');
         result.put_call_ms = +(performance.now() - t0).toFixed(2);
         await new Promise((ok, no) => { tx.oncomplete = ok; tx.onerror = () => no(tx.error); tx.onabort = () => no(tx.error); });
         result.confirmed_ms = +(performance.now() - t0).toFixed(2);
