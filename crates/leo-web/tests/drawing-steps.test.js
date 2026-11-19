@@ -19,7 +19,7 @@ const written = (el) => `<${el.localName}${Object.entries(el.attrs).map(([k, v])
 function load(parsed) {
   const context = {
     window: { leoTheme: { onChange() {}, dark: () => false } },
-    document: { body: {}, addEventListener() {} },
+    document: { body: {}, addEventListener() {}, querySelectorAll: () => [] },
     MutationObserver: class { observe() {} },
     DOMParser: class { parseFromString(text) { return parsed(text); } },
     XMLSerializer: class { serializeToString(el) { return written(el); } },

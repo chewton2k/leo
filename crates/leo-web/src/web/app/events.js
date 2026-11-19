@@ -141,7 +141,22 @@ document.addEventListener('visibilitychange', () => {
     return;
   }
   if (!['workspace', 'note', 'search', 'trash'].includes(state.view)) return;
-  if (state.view === 'note' && (busy() || !state.session?.note.id)) return;
+  if (state.view === 'note') {
+    if (busy() || !state.session?.note.id) return;
+    const s = state.session;
+    const shown = JSON.stringify(s.note);
+    api(`/api/notes/${enc(s.note.id)}`)
+      .then((note) => {
+        if (state.session !== s || busy()) return;
+        if (JSON.stringify(note) !== shown) return render();
+        loadSideFolders();
+        marginLoad(s, () => state.session === s).catch(fail);
+      }, () => {
+        if (state.session === s) return render();
+      })
+      .catch(fail);
+    return;
+  }
   render().catch(fail);
 });
 
@@ -158,6 +173,9 @@ const tellVisible = () => {
   } catch (e) {}
 };
 document.addEventListener('visibilitychange', tellVisible);
+window.addEventListener('leo-visibility', () => {
+  if (window.__LEO_VISIBLE__ === false) saveWebsiteWork();
+});
 setTimeout(tellVisible, 0);
 
 async function route(arrived = false) {
@@ -182,7 +200,6 @@ function drawActivity() {
     box.id = 'activity';
     box.className = 'activity';
     box.setAttribute('aria-label', 'Working in the background');
-    box.setAttribute('aria-live', 'polite');
     dock().appendChild(box);
   }
   const shown = activity.tasks.filter((t) => !hiddenHere(t));
@@ -202,8 +219,7 @@ function drawActivity() {
       const typical = seen.steps.length ? seen.steps.reduce((a, b) => a + b, 0) / seen.steps.length : 20;
       const creep = 1 - Math.exp(-((now - seen.stepSince) / 1000) / Math.max(3, typical));
       const share = t.total ? Math.max(4, Math.min(99, Math.round(((Math.min(t.done, t.total) + (t.done < t.total ? 0.9 * creep : 0)) / t.total) * 100))) : 0;
-      const took = Math.round((now - seen.since) / 1000);
-      const count = t.ready ? '' : `${t.kind === 'combine' ? ` · ${t.done}%` : t.total ? ` · ${t.done}/${t.total}` : ''} · ${took >= 60 ? `${Math.floor(took / 60)}:${String(took % 60).padStart(2, '0')}` : `${took} s`}`;
+      const count = t.ready ? '' : `${t.kind === 'combine' ? ` · ${t.done}%` : t.total ? ` · ${t.done}/${t.total}` : ''} · ${leoChat.tookFor(now - seen.since)}`;
       return `<button class="activity-row" data-action="activity-open" data-href="${esc(t.href)}">
         <span class="activity-label">${esc(t.label)}</span>
         <span class="activity-step">${esc(t.step)}${count}</span>
@@ -212,7 +228,9 @@ function drawActivity() {
     })
     .join('');
   const settled = shown.every((t) => t.ready);
-  box.innerHTML = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<span class="activity-spin"></span>'}<span class="grow">${settled ? (shown.length === 1 ? 'Ready in the background' : `${shown.length} ready in the background`) : shown.length === 1 ? 'Working in the background' : `${shown.length} things in the background`}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>${activity.folded ? '' : rows}`;
+  const said = settled ? (shown.length === 1 ? 'Ready in the background' : `${shown.length} ready in the background`) : shown.length === 1 ? 'Working in the background' : `${shown.length} things in the background`;
+  const head = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<span class="activity-spin"></span>'}<span class="grow">${said}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>`;
+  refreshPanel(box, `<span class="said" role="status">${esc(said)}</span>${head}${activity.folded ? '' : rows}`);
 }
 
 async function checkActivity() {
@@ -225,7 +243,14 @@ async function checkActivity() {
     if (e instanceof Locked) return;
   }
   drawActivity();
-  for (const t of activity.tasks) if (t.kind === 'combine' && !t.ready) watchCombine(t.href.slice('#combine/'.length));
+  const combining = new Set();
+  for (const t of activity.tasks) {
+    if (t.kind !== 'combine') continue;
+    const id = t.href.slice('#combine/'.length);
+    combining.add(id);
+    if (!t.ready || combinesPaused.delete(id)) watchCombine(id);
+  }
+  for (const id of combinesPaused) if (!combining.has(id)) combinesPaused.delete(id);
   if (appVisible() && activity.tasks.some((t) => !t.ready)) activity.timer = setTimeout(checkActivity, 1000);
 }
 
@@ -373,11 +398,20 @@ async function quitText() {
 }
 async function warnUnsaved() {
   try {
-    const n = ((await api('/api/record')).pending || []).length;
-    if (n && !/^#\/record/.test(location.hash)) toast(n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`, { action: 'Open Record', run: () => go('#/record') });
+    const ov = await api('/api/record');
+    const n = (ov.pending || []).length;
+    if (n && !/^#\/record/.test(location.hash)) toast(window.leoRecording.unsavedLine(n, ov.more), { action: 'Open Record', run: () => go('#/record') });
   } catch (e) {}
 }
+const QUIT_SETTLE_MS = 2800;
 window.leoFromApp = async (what, which) => {
+  if (what === 'quit' && which === 'now') {
+    saveWebsiteWork();
+    try {
+      await Promise.race([saving.settle(QUIT_SETTLE_MS), new Promise((r) => setTimeout(r, QUIT_SETTLE_MS))]);
+    } catch (e) {}
+    return api('/api/app', { method: 'POST', body: { action: 'settled' } }).catch(() => {});
+  }
   if (what === 'quit') {
     saveWebsiteWork();
     return toast(await quitText());

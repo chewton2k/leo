@@ -40,13 +40,13 @@ function covers(project, count) {
 }
 
 test('desktop shards balance individual tests and cover the complete suite exactly once', t => {
-  const { all, shards, counts } = covers('desktop', 4);
+  const { all, shards, counts } = covers('desktop', 3);
   assert.ok(shards.filter(shard => shard.some(spec => spec.file === 'flows.spec.js')).length > 1, 'the large flow file must split across multiple shards');
   t.diagnostic(`${all.length} desktop tests across shards: ${counts.join(' / ')}`);
 });
 
 test('WebKit shards balance individual tests and cover the complete suite exactly once', t => {
-  const { all, counts } = covers('webkit', 3);
+  const { all, counts } = covers('webkit', 2);
   assert.ok(all.length > 0);
   t.diagnostic(`${all.length} WebKit tests across shards: ${counts.join(' / ')}`);
 });

@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -7,8 +9,8 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 
 use crate::routes::notes::{save, NoteResponse};
-use crate::routes::uploads::{safe_file_name, ImportFileBody};
-use crate::{captions, chat, chat_files, chats, review, store_now, tools, AppState, UploadFile};
+use crate::routes::uploads::safe_file_name;
+use crate::{captions, chat, chat_files, chats, read_now, review, store_now, tools, AppState};
 
 fn ndjson(value: serde_json::Value) -> String {
     format!("{value}\n")
@@ -59,10 +61,17 @@ pub(crate) async fn list_chat_files(
     }
 }
 
-pub(crate) async fn add_chat_file(
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct FileKind {
+    #[serde(default, rename = "type")]
+    pub(crate) mime: String,
+}
+
+pub(crate) async fn put_chat_file(
     State(state): State<AppState>,
-    Path(id): Path<String>,
-    Json(body): Json<ImportFileBody>,
+    Path((id, name)): Path<(String, String)>,
+    axum::extract::Query(kind): axum::extract::Query<FileKind>,
+    body: axum::body::Body,
 ) -> Response {
     let refuse = |status: StatusCode, message: String| {
         (status, Json(serde_json::json!({ "error": message }))).into_response()
@@ -70,40 +79,46 @@ pub(crate) async fn add_chat_file(
     if !chats::valid_id(&id) {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let Some(reader) = state.reader.clone() else {
+    let Some(reader) = state.original_reader() else {
         return refuse(
             StatusCode::SERVICE_UNAVAILABLE,
             "This copy of leo cannot read files.".into(),
         );
     };
-    let bytes = {
-        use base64::Engine;
-        match base64::engine::general_purpose::STANDARD.decode(body.data.as_bytes()) {
-            Ok(bytes) => bytes,
-            Err(_) => {
-                return refuse(
-                    StatusCode::BAD_REQUEST,
-                    format!("{} did not arrive intact; try again.", body.name),
-                )
-            }
-        }
-    };
-    let name = safe_file_name(&body.name);
+    let name = safe_file_name(&name);
+    let (upload, item) = (
+        uuid::Uuid::new_v4().simple().to_string(),
+        uuid::Uuid::new_v4().simple().to_string(),
+    );
+    let sent = crate::routes::uploads::put_file(
+        State(state.clone()),
+        Path((upload.clone(), item.clone())),
+        axum::extract::Query(crate::routes::uploads::Named { name: name.clone() }),
+        body,
+    )
+    .await;
+    if !sent.status().is_success() {
+        return sent;
+    }
+    let folder = state
+        .notes_dir
+        .parent()
+        .unwrap_or(&state.notes_dir)
+        .join(leo_core::paths::own::INCOMING)
+        .join(&upload);
     let dir = state.chats.clone();
-    let file = UploadFile {
-        name: name.clone(),
-        mime: body.mime,
-        bytes,
-    };
+    let mime = kind.mime;
+    let (_guard, stop) = crate::stop_when_dropped();
     let done = tokio::task::spawn_blocking(move || -> Result<chat_files::Doc> {
-        if chat_files::list(&dir, &id).len() >= chat_files::MOST_FILES {
-            anyhow::bail!(
-                "a chat holds up to {} documents; remove one first",
-                chat_files::MOST_FILES
-            );
-        }
-        let text = reader(file, &mut |_| {})?;
-        chat_files::add(&dir, &id, &name, &text, chrono::Utc::now())
+        let made = (|| {
+            let mut intake = chat_files::Intake::new(&dir, &id, &name)?;
+            leo_core::children::with_stop(stop, || {
+                reader(&folder.join(&item), &name, &mime, &mut |_| {}, &mut intake)
+            })?;
+            intake.finish(chrono::Utc::now())
+        })();
+        let _ = std::fs::remove_dir_all(&folder);
+        made
     })
     .await;
     match done {
@@ -186,10 +201,23 @@ pub(crate) async fn list_chats(
     }
 }
 
-pub(crate) async fn get_chat(State(state): State<AppState>, Path(id): Path<String>) -> Response {
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct PageQuery {
+    #[serde(default)]
+    pub(crate) before: Option<usize>,
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
+}
+
+pub(crate) async fn get_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<PageQuery>,
+) -> Response {
     let dir = state.chats.clone();
-    match tokio::task::spawn_blocking(move || chats::load(&dir, &id)).await {
-        Ok(Some(chat)) => Json(chat).into_response(),
+    let most = query.limit.unwrap_or(chats::PAGE).min(chats::PAGE);
+    match tokio::task::spawn_blocking(move || chats::page(&dir, &id, query.before, most)).await {
+        Ok(Some(page)) => Json(page).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
         Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
@@ -205,15 +233,24 @@ pub(crate) async fn put_chat(
     }
     let dir = state.chats.clone();
     match tokio::task::spawn_blocking(move || {
-        let mut chat = chats::save(&dir, &id, body, chrono::Utc::now())?;
-        if chat.wants_name() && chats::rename(&dir, &id, &chat.title) {
-            chat.named = true;
+        let mut saved = chats::save_from(&dir, &id, body, chrono::Utc::now())?;
+        if saved.chat.wants_name() && chats::rename(&dir, &id, &saved.chat.title) {
+            saved.chat.named = true;
         }
-        anyhow::Ok(chat)
+        anyhow::Ok(saved)
     })
     .await
     {
-        Ok(Ok(chat)) => Json(chat.summary()).into_response(),
+        Ok(Ok(saved)) => Json(saved.summary()).into_response(),
+        Ok(Err(e)) if e.is::<chats::Gone>() => StatusCode::GONE.into_response(),
+        Ok(Err(e)) if e.is::<chats::Conflict>() => {
+            let count = e.downcast_ref::<chats::Conflict>().map_or(0, |c| c.count);
+            (
+                StatusCode::CONFLICT,
+                Json(serde_json::json!({ "error": "This chat changed in another window.", "count": count })),
+            )
+                .into_response()
+        }
         _ => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     }
 }
@@ -428,7 +465,9 @@ struct Ask {
     sources: Vec<chat::SourceRef>,
     room: usize,
     access: tools::Access,
-    documents: Vec<(String, String)>,
+    documents: Vec<chat_files::Named>,
+    chats: std::path::PathBuf,
+    chat: String,
     steer: crate::steer::Steer,
     marking: Option<String>,
     session: Option<tools::Session>,
@@ -452,13 +491,19 @@ pub(crate) struct MarkBody {
 }
 
 const SURE: [&str; 4] = ["", "sure", "think", "guess"];
-const THINKING_CHARS: usize = 2_000;
+const THINKING_READ_CHARS: usize = 2_000;
 
 fn sealed(said: &str) -> String {
     said.trim().replace("</", "&lt;/")
 }
 
 pub(crate) fn mark_with(writer: &crate::graph::Writer, body: &MarkBody) -> Option<(bool, String)> {
+    let thinking: String = body
+        .thinking
+        .trim()
+        .chars()
+        .take(THINKING_READ_CHARS)
+        .collect();
     let user = format!(
         "<question>\n{}\n</question>\n<model_answer>\n{}\n</model_answer>\n{}<student_answer>\n{}\n</student_answer>{}{}",
         sealed(&body.question),
@@ -471,7 +516,7 @@ pub(crate) fn mark_with(writer: &crate::graph::Writer, body: &MarkBody) -> Optio
             "guess" => "\n<student_confidence>guessing</student_confidence>",
             _ => "",
         },
-        if body.thinking.trim().is_empty() { String::new() } else { format!("\n<student_thinking>\n{}\n</student_thinking>", sealed(&body.thinking)) }
+        if thinking.is_empty() { String::new() } else { format!("\n<student_thinking>\n{}\n</student_thinking>", thinking.replace("</", "&lt;/")) }
     );
     for _ in 0..2 {
         let Ok(reply) = writer(MARK, &user, MARK_TOKENS) else {
@@ -504,7 +549,6 @@ pub(crate) async fn mark_quiz(
         || !fits(&body.answer, 6_000)
         || !fits(&body.given, 6_000)
         || !fits(&body.explain, 3_000)
-        || !fits(&body.thinking, THINKING_CHARS)
         || !SURE.contains(&body.confidence.as_str())
     {
         return StatusCode::BAD_REQUEST.into_response();
@@ -516,7 +560,16 @@ pub(crate) async fn mark_quiz(
         )
             .into_response();
     };
-    match tokio::task::spawn_blocking(move || mark_with(&writer, &body)).await {
+    let Ok(slot) = state.marking.clone().acquire_owned().await else {
+        return crate::reply::error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || mark_with(&writer, &body))
+    })
+    .await
+    {
         Ok(Some((correct, feedback))) => Json(serde_json::json!({"correct": correct, "feedback": feedback})).into_response(),
         _ => (
             StatusCode::BAD_GATEWAY,
@@ -722,7 +775,7 @@ fn lowered(text: &str) -> String {
     })
 }
 
-fn execute_tool(
+pub(crate) fn execute_tool(
     state: &AppState,
     desk: &mut tools::Desk,
     call: &tools::Call,
@@ -829,11 +882,7 @@ fn execute_tool(
             proposal: None,
             found: Vec::new(),
         }
-    } else if matches!(
-        call.name.as_str(),
-        "list_schedule" | "list_trash" | "search_chats" | "list_boards" | "open_board"
-    ) || tools::organizes(&call.name)
-    {
+    } else if tools::answered_by_organize(&call.name) {
         crate::routes::organize::run(state, desk, access, call)
     } else if call.name == "study_rules" {
         let heard = std::mem::replace(&mut desk.reads.study_rules, true);
@@ -864,9 +913,10 @@ fn execute_tool(
     } else if call.name == "read_original" {
         read_original(state, desk, call)?
     } else {
-        let graphs = Arc::clone(&state.graphs);
-        store_now(state, |store| {
-            let cache = graphs.load();
+        desk.ready(call);
+        let cache = state.graphs.load();
+        read_now(state, |store| {
+            desk.titles = Some(state.titles.of(store));
             Ok(desk.run(store, &cache, call))
         })
         .map_err(|_| anyhow::anyhow!("leo could not read the notes"))?
@@ -1010,46 +1060,53 @@ fn read_original(
             ),
         ));
     };
-    let Some(reader) = state.reader.clone() else {
+    let Some(reader) = state.original_reader() else {
         return Ok(fail(step, "this copy of leo cannot read files".into()));
     };
     let Some(path) = crate::originals::path_of(&notes_dir, &note.id, &name) else {
         return Ok(fail(step, format!("{name} is not there any more")));
     };
-    let text = match state.originals.text(&reader, &path, &name) {
-        Ok(text) => text,
+    let read = match state.originals.lines(&reader, &path, &name) {
+        Ok(read) => read,
         Err(e) => return Ok(fail(step, format!("{name} could not be read ({e})"))),
     };
     let tag = desk.file_tag(&note, &name);
     let step = format!("Read {name}");
     let size = desk.part_chars();
-    let lines: Vec<String> = text
-        .lines()
-        .enumerate()
-        .map(|(i, l)| format!("{}| {l}", i + 1))
-        .collect();
+    let unreadable =
+        |step: String, e: anyhow::Error| fail(step, format!("{name} could not be read ({e})"));
     let find = call.text("find");
-    let words: Vec<String> = find
-        .to_lowercase()
-        .split(|c: char| !c.is_alphanumeric())
-        .filter(|w| w.chars().count() >= 3)
-        .map(str::to_string)
-        .collect();
+    let words = tools::search_words(&find);
     let cite = format!("Quote it word for word. Cite a page or slide like [{tag} p4], or lines like [{tag} L120-124].");
     if !words.is_empty() {
+        let lines = match read.iter() {
+            Ok(lines) => lines,
+            Err(e) => return Ok(unreadable(step, e)),
+        };
+        let most = size / 4 + 2;
         let mut place = String::new();
-        let mut hits: Vec<(usize, usize, String)> = Vec::new();
-        for (i, l) in text.lines().enumerate() {
-            if let Some(p) = crate::originals::place_of(l) {
+        let mut best: BinaryHeap<Reverse<(usize, Reverse<usize>, String)>> = BinaryHeap::new();
+        for (i, l) in lines.enumerate() {
+            if let Some(p) = crate::originals::place_of(&l) {
                 place = p;
             }
             let lower = l.to_lowercase();
             let score = words.iter().filter(|w| lower.contains(w.as_str())).count();
-            if score > 0 {
-                hits.push((i, score, place.clone()));
+            if score == 0 {
+                continue;
+            }
+            let worse = best.len() >= most
+                && best
+                    .peek()
+                    .is_some_and(|Reverse(w)| (score, Reverse(i)) <= (w.0, w.1));
+            if !worse {
+                best.push(Reverse((score, Reverse(i), place.clone())));
+                if best.len() > most {
+                    best.pop();
+                }
             }
         }
-        if hits.is_empty() {
+        if best.is_empty() {
             return Ok(tools::Done {
                 step: format!("Looked for “{}” in “{name}”", chat::clip(&find, 40)),
                 result: format!("Nothing in {name} mentions \"{}\".", chat::clip(&find, 80)),
@@ -1057,16 +1114,37 @@ fn read_original(
                 found: Vec::new(),
             });
         }
-        hits.sort_by_key(|(i, score, _)| (std::cmp::Reverse(*score), *i));
+        let mut hits: Vec<(usize, usize, String)> = best
+            .into_iter()
+            .map(|Reverse((score, Reverse(i), place))| (i, score, place))
+            .collect();
+        hits.sort_by_key(|(i, score, _)| (Reverse(*score), *i));
+        let last = hits.iter().map(|(i, _, _)| i + 1).max().unwrap_or(0);
+        let near: std::collections::HashSet<usize> = hits
+            .iter()
+            .flat_map(|(i, _, _)| i.saturating_sub(1)..=i + 1)
+            .collect();
+        let mut text: std::collections::HashMap<usize, String> = std::collections::HashMap::new();
+        match read.iter() {
+            Ok(lines) => {
+                for (n, l) in lines.enumerate().take(last + 1) {
+                    if near.contains(&n) {
+                        text.insert(n, format!("{}| {}", n + 1, chat::clip(&l, size)));
+                    }
+                }
+            }
+            Err(e) => return Ok(unreadable(step, e)),
+        }
         let mut keep = Vec::new();
         let mut used = 0;
         for (i, _, place) in hits {
             if used >= size {
                 break;
             }
-            let from = i.saturating_sub(1);
-            let to = (i + 2).min(lines.len());
-            let piece = lines[from..to].join("\n");
+            let piece = (i.saturating_sub(1)..=i + 1)
+                .filter_map(|n| text.get(&n).cloned())
+                .collect::<Vec<_>>()
+                .join("\n");
             used += piece.chars().count();
             keep.push((i, place, piece));
         }
@@ -1093,26 +1171,12 @@ fn read_original(
             found: vec![name],
         });
     }
-    let mut parts: Vec<String> = vec![String::new()];
-    for line in lines {
-        let last = parts.last_mut().expect("one part");
-        if !last.is_empty() && last.chars().count() + line.chars().count() > size {
-            parts.push(String::new());
-        }
-        let last = parts.last_mut().expect("one part");
-        if !last.is_empty() {
-            last.push('\n');
-        }
-        last.push_str(&chat::clip(&line, size));
-    }
-    let total = parts.len();
-    let part = call
-        .text("part")
-        .trim()
-        .parse::<usize>()
-        .unwrap_or(1)
-        .max(1);
-    if part > total {
+    let wanted = tools::part_of(call, usize::MAX).unwrap_or(1);
+    let (total, text) = match read.part(size, wanted) {
+        Ok(part) => part,
+        Err(e) => return Ok(unreadable(step, e)),
+    };
+    let Ok(part) = tools::part_of(call, total) else {
         return Ok(fail(
             step,
             format!(
@@ -1120,7 +1184,7 @@ fn read_original(
                 if total == 1 { "" } else { "s" }
             ),
         ));
-    }
+    };
     Ok(tools::Done {
         step: if total > 1 {
             format!("Read part {part} of {total} of “{name}”")
@@ -1130,7 +1194,7 @@ fn read_original(
         result: format!(
             "<file id=\"{tag}\" name=\"{}\" part=\"{part}\" of=\"{total}\">\n{}\n</file>\n{cite}",
             chat::attribute(&name),
-            parts[part - 1]
+            text
         ),
         proposal: None,
         found: vec![name],
@@ -1147,29 +1211,25 @@ pub(crate) async fn original_passage(
     Path((id, name)): Path<(String, String)>,
     axum::extract::Query(query): axum::extract::Query<PassageQuery>,
 ) -> Response {
-    let Some(reader) = state.reader.clone() else {
+    let Some(reader) = state.original_reader() else {
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let originals = Arc::clone(&state.originals);
     let found = tokio::task::spawn_blocking(move || -> Result<serde_json::Value, StatusCode> {
         let path =
             crate::originals::path_of(&notes_dir, &id, &name).ok_or(StatusCode::NOT_FOUND)?;
-        let text = originals
-            .text(&reader, &path, &name)
+        let read = originals
+            .lines(&reader, &path, &name)
             .map_err(|_| StatusCode::UNPROCESSABLE_ENTITY)?;
-        let lines: Vec<&str> = text.lines().collect();
+        let lines = || read.iter().map_err(|_| StatusCode::UNPROCESSABLE_ENTITY);
         let (from, to, label) =
-            crate::originals::passage(&text, &query.at).ok_or(StatusCode::NOT_FOUND)?;
-        let shown: Vec<serde_json::Value> = (from..=to.min(lines.len()))
-            .filter_map(|n| {
-                lines
-                    .get(n - 1)
-                    .map(|l| serde_json::json!({ "n": n, "text": l }))
-            })
+            crate::originals::passage(lines()?, &query.at).ok_or(StatusCode::NOT_FOUND)?;
+        let shown: Vec<serde_json::Value> = lines()?
+            .enumerate()
+            .skip(from - 1)
+            .take(to + 1 - from)
+            .map(|(i, l)| serde_json::json!({ "n": i + 1, "text": l }))
             .collect();
         let page = label
             .strip_prefix("page ")
@@ -1286,6 +1346,8 @@ fn answer(
         room,
         access,
         documents,
+        chats,
+        chat,
         steer,
         marking,
         session,
@@ -1374,9 +1436,10 @@ fn answer(
         room,
     )
     .with_access(access)
-    .with_documents(documents)
+    .with_documents(chats, chat, documents)
     .with_captions(Arc::clone(&state.captions))
     .with_meaning(state.meaning.clone(), Arc::clone(&state.vectors))
+    .with_index(Arc::clone(&state.search_index))
     .with_reply(tx.clone())
     .with_steer(steer);
     desk.session = session;
@@ -1614,6 +1677,7 @@ fn native_answer(
         crate::usage::Purpose::Retry
     };
     desk.requests += 1;
+    let most_steps = desk.most_steps();
     let started = std::time::Instant::now();
     let outcome = {
         let mut restart = || gap.set(true);
@@ -1625,7 +1689,7 @@ fn native_answer(
                 return tools::NO_MORE_TOOLS.into();
             }
             calls += 1;
-            if calls > tools::MOST_STEPS {
+            if calls > most_steps {
                 return format!("That did not work: {}", tools::NO_MORE_TOOLS);
             }
             let mut call = tools::Call {
@@ -1657,7 +1721,7 @@ fn native_answer(
                 tail: "",
                 last: false,
                 max_tokens: chat::REPLY_TOKENS,
-                most_calls: tools::MOST_STEPS,
+                most_calls: most_steps,
                 stopped: &stopped,
                 tools_done: &|| exhausted.get(),
                 piece: &mut |t| show(t),
@@ -1709,11 +1773,12 @@ fn text_answer(
         shown.set(true);
         send(serde_json::json!({ "t": t }))
     };
-    for step in 0..=tools::MOST_STEPS {
+    let most_steps = desk.most_steps();
+    for step in 0..=most_steps {
         if desk.reply_closed() {
             return Ok(spent);
         }
-        let last = step == tools::MOST_STEPS || desk.asked > 0 || exhausted;
+        let last = step == most_steps || desk.asked > 0 || exhausted;
         let gate = std::cell::RefCell::new(tools::Gate::default());
         let emit = |t: &str| shown_once(t);
         let purpose = if repairing || (step == 0 && desk.requests > 0) {
@@ -1810,31 +1875,50 @@ pub(crate) struct Applied {
     pub(crate) before: String,
 }
 
+pub(crate) fn change_body<X>(
+    store: &mut leo_core::store::Store,
+    id: &str,
+    base: Option<&str>,
+    change: impl FnOnce(&str) -> Result<(String, X), StatusCode>,
+) -> Result<(Applied, X), StatusCode> {
+    let note = store.find_note_mut(id).ok_or(StatusCode::NOT_FOUND)?;
+    if base.is_some_and(|base| base != crate::routes::notes::version_of(note)) {
+        return Err(StatusCode::CONFLICT);
+    }
+    let (next, extra) = change(&note.body)?;
+    let before = std::mem::replace(&mut note.body, next);
+    note.updated_at = chrono::Utc::now();
+    Ok((
+        Applied {
+            note: NoteResponse::from_note(note),
+            before,
+        },
+        extra,
+    ))
+}
+
 pub(crate) fn change_note(
     store: &mut leo_core::store::Store,
     id: &str,
     find: &str,
     replace: &str,
 ) -> Result<Applied, StatusCode> {
-    let note = store.find_note_mut(id).ok_or(StatusCode::NOT_FOUND)?;
-    let body = if find.is_empty() {
-        let base = note.body.trim_end();
-        if base.is_empty() {
-            replace.to_string()
+    change_body(store, id, None, |body| {
+        let next = if find.is_empty() {
+            let base = body.trim_end();
+            if base.is_empty() {
+                replace.to_string()
+            } else {
+                format!("{base}\n\n{}", replace.trim_start())
+            }
+        } else if body.matches(find).count() == 1 {
+            body.replacen(find, replace, 1)
         } else {
-            format!("{base}\n\n{}", replace.trim_start())
-        }
-    } else if note.body.matches(find).count() == 1 {
-        note.body.replacen(find, replace, 1)
-    } else {
-        return Err(StatusCode::CONFLICT);
-    };
-    let before = std::mem::replace(&mut note.body, body);
-    note.updated_at = chrono::Utc::now();
-    Ok(Applied {
-        note: NoteResponse::from_note(note),
-        before,
+            return Err(StatusCode::CONFLICT);
+        };
+        Ok((next, ()))
     })
+    .map(|(applied, ())| applied)
 }
 
 fn apply_now(state: &AppState, proposal: &tools::Proposal) -> Result<serde_json::Value, String> {
@@ -1947,12 +2031,16 @@ pub(crate) async fn chat_reply(
         .as_ref()
         .map_or(chat::ROOM, |measure| measure())
         .min(chat::MOST_ROOM);
-    let close = {
+    let (close, indexed) = {
         let meaning = state.meaning.clone();
         let vectors = Arc::clone(&state.vectors);
+        let index = Arc::clone(&state.search_index);
         let asked = question.clone();
         tokio::task::spawn_blocking(move || {
-            crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 24)
+            (
+                crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 24),
+                index.for_question(&asked),
+            )
         })
         .await
         .unwrap_or_default()
@@ -1960,18 +2048,26 @@ pub(crate) async fn chat_reply(
     let note_room = chat::notes_room(body.practice, room);
     let margin_chats = state.chats.clone();
     let margin_note = note.clone();
-    let margin_context = tokio::task::spawn_blocking(move || {
-        margin_note.map_or(String::new(), |id| {
-            crate::margin::context(&crate::margin::open_on(&margin_chats, &id), note_room / 8)
-        })
+    let margin_threads = tokio::task::spawn_blocking(move || {
+        margin_note
+            .map(|id| crate::margin::open_on(&margin_chats, &id))
+            .unwrap_or_default()
     })
     .await
     .unwrap_or_default();
-    let margin_block = margin_context.clone();
     let gathered = state
         .read_store(move |store| {
             let cache = graphs.load();
-            Ok(chat::gather_seeing(
+            let body = note
+                .as_deref()
+                .and_then(|id| store.notes.iter().find(|n| n.id == id))
+                .map_or("", |n| n.body.as_str());
+            let shown: Vec<_> = margin_threads
+                .into_iter()
+                .filter(|t| crate::margin::shown(body, t))
+                .collect();
+            let margin_context = crate::margin::context(&shown, note_room / 8);
+            let gathered = chat::gather_indexed(
                 store,
                 &cache,
                 note.as_deref(),
@@ -1981,11 +2077,13 @@ pub(crate) async fn chat_reply(
                 note_room,
                 Some(&seen),
                 &close,
-                &margin_block,
-            ))
+                &margin_context,
+                indexed.as_ref().filter(|c| c.usable(store)),
+            );
+            Ok((gathered, margin_context))
         })
         .await;
-    let (sources, notes) = match gathered {
+    let ((sources, notes), margin_context) = match gathered {
         Ok(found) => found,
         Err(code) => return code.into_response(),
     };
@@ -1994,8 +2092,11 @@ pub(crate) async fn chat_reply(
         let chat = body.chat.clone();
         let files = body.files.clone();
         match tokio::task::spawn_blocking(move || {
+            let (heads, most) = chat::heads_wanted(files.len());
             let documents = match &chat {
-                Some(chat) if !files.is_empty() => chat_files::texts(&chats_dir, chat, &files),
+                Some(chat) if !files.is_empty() => {
+                    chat_files::texts(&chats_dir, chat, &files, most, heads)
+                }
                 _ => Vec::new(),
             };
             let memory = chat
@@ -2010,6 +2111,13 @@ pub(crate) async fn chat_reply(
             Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
         }
     };
+    let (held, documents): (Vec<chat_files::Named>, Vec<(String, String)>) = documents
+        .into_iter()
+        .map(|(doc, head)| {
+            let name = doc.name.clone();
+            (doc, (name, head))
+        })
+        .unzip();
     let start = chat::kept_from(&body.messages, room, memory.as_ref());
     let documents_room = if body.practice { note_room } else { room };
     let (mut system, mut user) = chat::prompt_material(
@@ -2173,7 +2281,9 @@ pub(crate) async fn chat_reply(
             sources,
             room,
             access,
-            documents,
+            documents: held,
+            chats: state.chats.clone(),
+            chat: body.chat.clone().unwrap_or_default(),
             steer,
             marking,
             session: body_session,

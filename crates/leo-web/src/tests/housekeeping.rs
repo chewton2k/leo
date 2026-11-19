@@ -8,6 +8,8 @@ fn keeping_choices_are_saved_and_applied_right_away() {
         &state.chats,
         "chat-old-0001",
         chats::Saving {
+            existed: false,
+            from: None,
             title: String::new(),
             refs: vec![],
             messages: vec![serde_json::json!({"role": "user", "text": "hi"})],
@@ -102,4 +104,187 @@ fn a_shorter_upload_period_deletes_old_uploads_at_once_and_forever_deletes_nothi
     ));
     assert_eq!(json_of(shorter)["upload_days"], 30);
     assert!(!file.exists());
+}
+
+#[test]
+fn the_daily_expiry_removes_an_old_chat_and_its_documents() {
+    let (state, dir, _) = state_with(&[]);
+    let old = chrono::Utc::now() - chrono::Duration::days(45);
+    chats::save(
+        &state.chats,
+        "chat-old-audit1",
+        chats::Saving {
+            existed: false,
+            from: None,
+            title: String::new(),
+            refs: vec![],
+            messages: vec![serde_json::json!({"role": "user", "text": "photosynthesis in leaves"})],
+        },
+        old,
+    )
+    .unwrap();
+    chat_files::add(
+        &state.chats,
+        "chat-old-audit1",
+        "notes.pdf",
+        "chlorophyll",
+        old,
+    )
+    .unwrap();
+    chat_files::add(
+        &state.chats,
+        "chat-never-saved",
+        "orphan.pdf",
+        "an orphan",
+        chrono::Utc::now() - chrono::Duration::days(2),
+    )
+    .unwrap();
+    leo_core::keep::save(
+        &dir.path().join("notes"),
+        &leo_core::keep::Keep {
+            trash_days: Some(30),
+            chat_days: Some(30),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(chats::search(&state.chats, "photosynthesis").len(), 1);
+    assert_eq!(chat_files::list(&state.chats, "chat-old-audit1").len(), 1);
+    run(keeping::expire_now(&state));
+    assert!(
+        chats::load(&state.chats, "chat-old-audit1").is_none(),
+        "the daily expiry left a 45-day-old chat with chat_days = 30"
+    );
+    assert_eq!(chats::search(&state.chats, "photosynthesis").len(), 0);
+    assert_eq!(
+        chat_files::list(&state.chats, "chat-old-audit1").len(),
+        0,
+        "its document was left"
+    );
+    assert_eq!(
+        chat_files::list(&state.chats, "chat-never-saved").len(),
+        0,
+        "the orphan document was left"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_write_failure_reads_as_a_write_failure() {
+    use std::os::unix::fs::PermissionsExt;
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    png.extend_from_slice(&[0u8; 64]);
+    let keep = || leo_core::keep::Keep::default();
+    let picture = |state: &AppState| {
+        run(put_picture(
+            State(state.clone()),
+            Path("board.png".into()),
+            axum::body::Body::from(png.clone()),
+        ))
+    };
+
+    let (control, _control_dir, _) = state_with(&[]);
+    assert_eq!(
+        run(set_keep(State(control.clone()), Json(keep()))).status(),
+        StatusCode::OK
+    );
+    assert_eq!(picture(&control).status(), StatusCode::CREATED);
+
+    let (state, folder, _) = state_with(&[]);
+    let notes = state.fresh().notes_dir.clone();
+    let read_only = |path: &std::path::Path, mode: u32| {
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+    };
+    read_only(folder.path(), 0o555);
+    let kept = run(set_keep(State(state.clone()), Json(keep())));
+    read_only(folder.path(), 0o755);
+    assert_eq!(kept.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(json_of(kept)["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("leo could not save that"));
+
+    read_only(&notes, 0o555);
+    let added = picture(&state);
+    read_only(&notes, 0o755);
+    assert_eq!(added.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(json_of(added)["error"]
+        .as_str()
+        .unwrap()
+        .starts_with("leo could not save the picture"));
+
+    let wrong = run(set_keep(
+        State(state.clone()),
+        Json(leo_core::keep::Keep {
+            trash_days: Some(3),
+            ..keep()
+        }),
+    ));
+    assert_eq!(wrong.status(), StatusCode::BAD_REQUEST);
+    let not_a_picture = run(put_picture(
+        State(state),
+        Path("x.png".into()),
+        axum::body::Body::from("hello"),
+    ));
+    assert_eq!(not_a_picture.status(), StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn old_board_undo_records_expire_with_the_trash_period() {
+    let (state, dir, _) = state_with(&[]);
+    let now = chrono::Utc::now();
+    let board = crate::boards::new_board("Plan", now);
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    let old =
+        crate::boards::remember_change(&state.chats, &board, &[], now - chrono::Duration::days(31))
+            .unwrap();
+    let fresh = crate::boards::remember_change(&state.chats, &board, &[], now).unwrap();
+    let orphan = crate::boards::new_board("Gone", now);
+    let lost = crate::boards::remember_change(&state.chats, &orphan, &[], now).unwrap();
+    leo_core::keep::save(
+        &dir.path().join("notes"),
+        &leo_core::keep::Keep {
+            trash_days: None,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    run(keeping::expire_now(&state));
+    assert!(
+        crate::boards::undo_change(&state.chats, &orphan.id, &lost, now)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        crate::boards::undo_change(&state.chats, &board.id, &old, now)
+            .unwrap()
+            .is_none()
+    );
+    assert!(
+        crate::boards::undo_change(&state.chats, &board.id, &fresh, now)
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn saving_keeping_replies_while_cleanup_is_blocked() {
+    let (state, _dir, _) = state_with(&[]);
+    let (ready, held) = std::sync::mpsc::channel();
+    let (release, wait) = std::sync::mpsc::channel();
+    let chats = state.chats.clone();
+    let worker = std::thread::spawn(move || {
+        let _tasks = crate::tasks::writing(&chats);
+        ready.send(()).unwrap();
+        wait.recv().unwrap();
+    });
+    held.recv().unwrap();
+    let reply = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        set_keep(State(state), Json(Default::default())),
+    )
+    .await;
+    release.send(()).unwrap();
+    worker.join().unwrap();
+    assert_eq!(reply.unwrap().status(), StatusCode::OK);
 }

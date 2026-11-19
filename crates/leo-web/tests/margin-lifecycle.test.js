@@ -259,15 +259,14 @@ test('Undo after Dismiss toasts the server reason when it fails', async () => {
   assert.equal(toasts[1][1].bad, true);
 });
 
-test('an ask over the length limit says it goes to the chat', () => {
+test('a long selection still qualifies for a margin ask', () => {
   const h = harness();
   h.context.chat.isOpen = () => false;
   h.state.layer = {};
-  assert.equal(h.context.marginAsk(h.state.s, { text: 'x'.repeat(1001), from: 1 }), false);
-  assert.equal(h.state.status, 'Long selections go to the chat');
-  h.state.status = '';
-  assert.equal(h.context.marginAsk(h.state.s, { text: 'x', from: 1 }), false);
-  assert.equal(h.state.status, '');
+  const text = '語'.repeat(1001);
+  h.state.s.doc.source = () => `Before ${text} after`;
+  assert.equal(h.context.marginBeside(h.state.s, { text, from: 7 })?.prefix, 'Before ');
+  assert.equal(h.context.marginBeside(h.state.s, { text: 'x', from: 1 }), null);
 });
 
 test('a stale 409 without a reason says the note changed and a retry follows the next edit', async () => {
@@ -404,7 +403,9 @@ function replyHarness() {
   const box = { textContent: '', hidden: true };
   const send = { disabled: false };
   const el = { isConnected: true, dataset: { id: 't1' } };
-  const area = { value: '', style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: () => el, focus() {} };
+  const hint = { hidden: true };
+  const field = { querySelector: (selector) => selector === '[data-read-hint]' ? hint : null };
+  const area = { value: '', dataset: { reads: '1000' }, style: {}, scrollHeight: 20, form: { querySelector: () => send }, closest: (selector) => selector === '.margin-note' ? el : selector === '[data-read-field]' ? field : null, focus() {} };
   let count = 0;
   Object.assign(h.context, { $: (sel) => (sel === 'textarea' ? area : sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}` });
   h.state.threads = [{ id: 't1', messages: [] }];
@@ -413,22 +414,41 @@ function replyHarness() {
     area.value = text;
     await h.context.marginSubmit({ preventDefault() {}, target: { closest: () => el } });
   };
-  return { h, box, send, area, submit };
+  return { h, box, send, area, hint, submit };
 }
 
 test('a failed reply puts the text back, shows the error and keeps Send enabled, and a retry keeps its request', async () => {
-  const { h, box, send, area, submit } = replyHarness();
+  const { h, box, send, area, hint, submit } = replyHarness();
   const bodies = [];
   h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
-  await submit('Why?');
-  assert.equal(area.value, 'Why?');
+  const text = '💬'.repeat(1001);
+  await submit(text);
+  assert.equal(area.value, text);
+  assert.equal(hint.hidden, false);
   assert.equal(box.textContent, 'Felix could not answer.');
   assert.equal(box.hidden, false);
   assert.equal(send.disabled, false);
   assert.equal(h.state.thinking.size, 0);
-  await submit('Why?');
+  await submit(text);
   await submit('Why not?');
   assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
+});
+
+test('a retried ask keeps its request id and a changed question gets a new one', async () => {
+  const h = harness();
+  const box = { textContent: '', hidden: true };
+  let count = 0;
+  const toasts = [];
+  Object.assign(h.context, { $: (sel) => (sel === '.margin-problem' ? box : null), marginDraw() {}, requestId: () => `request-${++count}`, toast: (text) => toasts.push(text) });
+  const bodies = [];
+  h.context.api = async (url, options) => { bodies.push(options.body); throw new Error('Felix could not answer.'); };
+  const t = { id: 'draft', quote: 'just checks if it matches', prefix: 'then login ', suffix: '', messages: [] };
+  h.state.draft = null;
+  await h.context.marginAskOn(h.state.s, t, 'Why?');
+  await h.context.marginAskOn(h.state.s, t, 'Why?');
+  await h.context.marginAskOn(h.state.s, t, 'Why not?');
+  assert.deepEqual(bodies.map((body) => body.request), ['request-1', 'request-1', 'request-2']);
+  assert.deepEqual(toasts, ['Felix could not answer.', 'Felix could not answer.', 'Felix could not answer.']);
 });
 
 test('a reply refused as busy keeps the text and says Felix is still answering', async () => {
@@ -1105,4 +1125,146 @@ test('a read that replaces a note the page still holds open deletes the new note
   gone.resolve(null);
   await pending;
   assert.deepEqual(h.state.threads.map((t) => t.id), ['open']);
+});
+
+test('a kept note found by context is re-anchored once after the pause; an untouched read-along note is not', async () => {
+  const h = harness();
+  const source = 'Lead words here. The reworded passage sits here. Trailing words.';
+  h.state.s.doc.source = () => source;
+  const kept = { id: 'k', source: 'ask', messages: [] };
+  const untouched = { id: 'u', source: 'read', messages: [{ from: 'felix', text: 'Hm.' }] };
+  assert.equal(h.context.marginKept(kept), true);
+  assert.equal(h.context.marginKept(untouched), false);
+  assert.equal(h.context.marginKept({ ...untouched, pinned: true }), true);
+  assert.equal(h.context.marginKept({ ...untouched, messages: [{ from: 'you', text: 'Why?' }] }), true);
+  const from = source.indexOf('The reworded');
+  const to = from + 'The reworded passage sits here.'.length;
+  Object.assign(h.state, { mode: 'ask', loaded: true, threads: [kept, untouched] });
+  h.state.moved = [kept, untouched].filter(h.context.marginKept).map((t) => ({ t, at: { from, to, how: 'context' } }));
+  const calls = [];
+  h.context.api = (path, init) => { calls.push({ path, init }); return Promise.resolve({ ...kept, quote: init.body.quote, reworded: true }); };
+  h.context.marginEdited(h.state.s);
+  h.context.marginEdited(h.state.s);
+  const armed = [...h.timers.values()].filter((fn) => fn.delay === 2000);
+  assert.equal(armed.length, 1, 'each edit re-arms the one timer, in Ask mode too');
+  assert.equal(calls.length, 0);
+  armed[0]();
+  for (let i = 0; i < 5; i++) await new Promise(setImmediate);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].path, '/api/notes/a/margin/threads/k');
+  assert.equal(calls[0].init.method, 'PATCH');
+  assert.deepEqual({ ...calls[0].init.body }, { version: 'abc', quote: source.slice(from, to), ...kit.contextAt(source, from, to) });
+  assert.equal(h.state.threads[0].reworded, true);
+  assert.equal(h.state.threads[1], untouched);
+});
+
+function marginLibrary() {
+  const blocks = Array.from({ length: 1000 }, (_, i) => `Block ${i} carries marker-${i}-end among plenty of other plain words that pad it out to a long paragraph of ordinary note text.`);
+  const source = blocks.join('\n\n');
+  const threads = Array.from({ length: 48 }, (_, n) => {
+    const quote = `marker-${n * 20}-end`;
+    const from = source.indexOf(quote);
+    return { id: `t${n}`, quote, ...kit.contextAt(source, from, from + quote.length), status: 'open', source: 'ask', messages: [] };
+  });
+  return { blocks, source, threads };
+}
+
+function countingFinds(run) {
+  const find = kit.find;
+  const counted = { calls: 0 };
+  kit.find = (...args) => {
+    counted.calls++;
+    return find(...args);
+  };
+  try {
+    run(counted);
+  } finally {
+    kit.find = find;
+  }
+}
+
+test('a keystroke re-finds only the notes beside it', () => {
+  for (const mode of ['along', 'ask']) {
+    const h = harness();
+    const { blocks, source, threads } = marginLibrary();
+    Object.assign(h.state, { mode, threads, loaded: true });
+    countingFinds((counted) => {
+      const first = h.context.marginPlaced(source, threads);
+      assert.equal(first.placed.length, 48);
+      assert.equal(counted.calls, 48);
+      const at = source.indexOf(blocks[400]) + 5;
+      const typed = `${source.slice(0, at)}x${source.slice(at)}`;
+      h.state.s.doc.source = () => typed;
+      h.context.marginEdited(h.state.s);
+      counted.calls = 0;
+      const next = h.context.marginPlaced(typed, threads);
+      assert.ok(counted.calls <= 2, `${mode}: ${counted.calls} finds for one keystroke`);
+      assert.equal(counted.calls, 1, `${mode}: the note beside the edit is found again`);
+      assert.equal(next.placed.length, 48);
+      for (const { t, at: place } of next.placed) assert.equal(typed.slice(place.from, place.to), t.quote);
+      const settle = [...h.timers.values()].find((fn) => fn.delay === 400);
+      assert.ok(settle, `${mode}: the settle pass is armed`);
+      counted.calls = 0;
+      settle();
+      for (let left = h.timers.size; left; left = h.timers.size) {
+        const [id, fn] = [...h.timers].find(([, one]) => one.delay === 0) || [];
+        if (!fn) break;
+        h.timers.delete(id);
+        fn();
+      }
+      assert.equal(counted.calls, 48, `${mode}: the settle pass finds every note again`);
+      counted.calls = 0;
+      h.context.marginPlaced(typed, threads);
+      assert.equal(counted.calls, 0, `${mode}: the draw after the settle pass uses its finds`);
+    });
+  }
+});
+
+test('a re-anchored note is found afresh, never from its old place', () => {
+  const h = harness();
+  const { source, threads } = marginLibrary();
+  countingFinds((counted) => {
+    h.context.marginPlaced(source, threads);
+    counted.calls = 0;
+    h.context.marginPlaced(source, threads);
+    assert.equal(counted.calls, 0);
+    const quote = 'marker-100-end among';
+    const from = source.indexOf(quote);
+    threads[5] = { ...threads[5], quote, ...kit.contextAt(source, from, from + quote.length) };
+    h.context.marginPlaced(source, threads);
+    assert.equal(counted.calls, 1);
+  });
+});
+
+test('a return to the window with unchanged margin notes does not redraw', async () => {
+  const h = harness();
+  const { threads } = marginLibrary();
+  let draws = 0;
+  let status = 'open';
+  const view = () => ({ mode: 'along', persona: 'reader', instructions: '', threads: threads.slice(0, 2).map((t, i) => ({ ...t, status: i ? status : 'open' })), resolved: [] });
+  h.context.api = async (url) => (url === '/api/margin' ? { layout: 'both', pace: 'regular' } : view());
+  h.context.marginDraw = () => draws++;
+  const s = h.state.s;
+  await h.context.marginLoad(s);
+  assert.equal(draws, 1, 'a first load always draws');
+  await h.context.marginLoad(s);
+  assert.equal(draws, 1);
+  status = 'resolved';
+  await h.context.marginLoad(s);
+  assert.equal(draws, 2, 'a changed note draws again');
+  h.state.threads[0].ask = 'typed but not sent';
+  await h.context.marginLoad(s);
+  assert.equal(draws, 3, 'a page-only field draws again');
+});
+
+test('a margin load for another note session is still ignored', async () => {
+  const h = harness();
+  let draws = 0;
+  h.context.api = async (url) => (url === '/api/margin' ? { layout: 'both', pace: 'regular' } : { mode: 'along', threads: [], resolved: [] });
+  h.context.marginDraw = () => draws++;
+  await h.context.marginLoad(h.session());
+  await h.context.marginLoad(h.state.s, () => false);
+  assert.equal(draws, 0);
+  await h.context.marginLoad(h.state.s);
+  assert.equal(draws, 1);
 });

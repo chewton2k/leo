@@ -1167,10 +1167,9 @@ test('a long outline shows its ticks a section at a time, with arrows only where
     const page = await context.newPage();
     await page.setViewportSize({ width: 1600, height: 900 });
     await page.goto(url);
-    const shown = page.locator('.outline-ticks [data-tick]:not([hidden])');
+    const shown = page.locator('.outline-ticks [data-tick]');
     const up = page.getByRole('button', { name: 'Earlier headings' });
     const down = page.getByRole('button', { name: 'Later headings' });
-    await expect(page.locator('.outline-ticks [data-tick]')).toHaveCount(30);
     await expect(shown).toHaveCount(24);
     await expect(up).toBeHidden();
     const rail = (await page.locator('.outline-ticks').boundingBox()).height;
@@ -1181,7 +1180,7 @@ test('a long outline shows its ticks a section at a time, with arrows only where
     expect(await page.evaluate(([x, y]) => Boolean(document.elementFromPoint(x, y)?.closest('.outline-ticks')), at), 'a second press where the arrow was never lands on a tick').toBe(false);
     await expect(shown).toHaveCount(6);
     expect((await page.locator('.outline-ticks').boundingBox()).height, 'a shorter section keeps the rail its height').toBe(rail);
-    await expect(shown.first()).toHaveAttribute('data-tick', await page.locator('.outline-ticks [data-tick]').nth(24).getAttribute('data-tick'));
+    await expect(shown.first()).toHaveAttribute('data-tick', '96');
     await expect(down).toBeHidden();
     const tick = await shown.first().boundingBox();
     await page.mouse.move(tick.x + 3, tick.y + tick.height / 2);
@@ -1202,7 +1201,7 @@ test('a long outline shows its ticks a section at a time, with arrows only where
       const seen = new Set();
       const t0 = performance.now();
       const look = () => {
-        seen.add(document.querySelectorAll('.outline-ticks [data-tick]:not([hidden])').length);
+        seen.add(document.querySelectorAll('.outline-ticks [data-tick]').length);
         if (performance.now() - t0 < 1500) requestAnimationFrame(look);
         else done([...seen]);
       };
@@ -1215,6 +1214,71 @@ test('a long outline shows its ticks a section at a time, with arrows only where
     await expect(up).toBeHidden();
     await expect(down).toBeVisible();
   }, { body: Array.from({ length: 30 }, (_, i) => `## Heading ${i + 1}\n\nText under heading ${i + 1}.`).join('\n\n') });
+});
+
+const manyHeadings = Array.from({ length: 3000 }, (_, i) => `## Heading ${i + 1}`).join('\n');
+
+test('a note with 3,000 headings lists them all and the rail shows 24 at a time', async ({ browser }) => {
+  test.setTimeout(120000);
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(url);
+    await expect(page.locator('.note-outline nav button[data-line]')).toHaveCount(3000);
+    const ticks = page.locator('.outline-ticks [data-tick]');
+    await expect(ticks).toHaveCount(24);
+    await expect(ticks.first()).toHaveAttribute('data-tick', '0');
+    await page.locator('.outline-page[aria-label="Later headings"]').click();
+    await expect(ticks).toHaveCount(24);
+    await expect(ticks.first()).toHaveAttribute('data-tick', '24');
+    await page.locator('.outline-page[aria-label="Earlier headings"]').click();
+    await expect(ticks.first()).toHaveAttribute('data-tick', '0');
+  }, { body: manyHeadings });
+});
+
+test('scrolling a note with 3,000 headings reads a few positions per frame', async ({ browser }) => {
+  test.setTimeout(120000);
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(url);
+    await expect(page.locator('.note-outline nav button[data-line]')).toHaveCount(3000);
+    await page.evaluate(() => {
+      window.blockReads = 0;
+      const read = Element.prototype.getBoundingClientRect;
+      Element.prototype.getBoundingClientRect = function () {
+        if (this.classList && this.classList.contains('blk')) window.blockReads++;
+        return read.call(this);
+      };
+    });
+    const frame = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 50)))));
+    const most = [];
+    for (const share of [0.1, 0.35, 0.6, 0.85]) {
+      await page.evaluate(() => { window.blockReads = 0; });
+      await page.evaluate((share) => window.scrollTo(0, (document.documentElement.scrollHeight - innerHeight) * share), share);
+      await frame();
+      most.push(await page.evaluate(() => window.blockReads));
+    }
+    expect(Math.max(...most), `block positions read per scroll frame: ${most}`).toBeLessThanOrEqual(20);
+    await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveCount(1);
+    await expect(page.locator('.note-outline nav button[aria-current="location"]')).not.toHaveText('Heading 1');
+  }, { body: manyHeadings });
+});
+
+test('the last heading is current at the end of the note', async ({ browser }) => {
+  test.setTimeout(120000);
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await page.goto(url);
+    await expect(page.locator('.note-outline nav button[data-line]')).toHaveCount(3000);
+    await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveText('Heading 1');
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveText('Heading 3000');
+    await expect(page.locator('.note-outline nav button[aria-current="location"]')).toHaveCount(1);
+    await expect(page.locator('.outline-ticks [data-tick].on')).toHaveCount(1);
+    await expect(page.locator('.outline-ticks [data-tick].on')).toHaveAttribute('data-tick', '2999');
+  }, { body: manyHeadings });
 });
 
 test('dragging down through the note never highlights the empty space or the page chrome under it', async ({ browser }) => {
@@ -1283,13 +1347,16 @@ test('heading rail keeps every marker reachable in a short viewport and tracks r
     await page.setViewportSize({ width: 2000, height: 500 });
     await page.goto(url);
     const rail = page.locator('.outline-ticks');
-    await expect(rail.locator('[data-tick]')).toHaveCount(300);
+    await expect(rail.locator('[data-tick]')).toHaveCount(24);
+    await expect(rail.locator('.on')).toHaveAttribute('data-tick', '0');
     const box = await rail.boundingBox();
     expect(box.y + box.height).toBeLessThan(500);
     await rail.focus();
     await rail.press('End');
     await expect(page.getByRole('tooltip')).toContainText('Section 300');
-    await expect(rail.locator('.on')).toHaveAttribute('data-tick', '0');
+    await expect(rail.locator('[data-tick]'), 'the rail turns to the last page of headings').toHaveCount(12);
+    await expect(rail.locator('.on'), 'the reading place is not on this page').toHaveCount(0);
+    await expect(page.locator('.note-outline nav button[aria-current]')).toHaveAttribute('data-line', '0');
     await rail.press('Space');
     await expect(page.locator('#doc .blk:focus')).toContainText('Section 300');
     await expect(rail.locator('.on')).toHaveAttribute('data-tick', '897');

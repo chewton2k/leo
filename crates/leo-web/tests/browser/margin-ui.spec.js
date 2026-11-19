@@ -250,7 +250,7 @@ test('Ask Felix opens a question box beside the passage, keeps a half-typed ques
   await menu.getByRole('button', { name: 'Ask Felix' }).click();
   await expect(draft).toHaveAttribute('data-open', '');
   await expect(question).toBeFocused();
-  await expect(draft.locator('.margin-hint')).toHaveText('Enter to ask · Esc to close');
+  await expect(draft.locator('[data-draft-hint]')).toHaveText('Enter to ask · Esc to close');
   await expect(draft.locator('.margin-reply')).toHaveCSS('border-top-style', 'solid');
   await expect(page.locator('.margin-ink path.solid[data-id="draft"]')).toHaveClass(/on/);
   expect(asked.length).toBe(0);
@@ -685,8 +685,13 @@ test('a changed passage says so', async ({ page }) => {
   await expect(card).toBeVisible();
   await expect(card.locator('.margin-changed')).toBeHidden();
   await page.locator('#doc .blk', { hasText: 'More words' }).click();
+  const moved = page.waitForResponse((r) => r.url().includes(`/api/notes/${note.id}/margin/threads/`) && r.request().method() === 'PATCH');
   await page.locator('#doc textarea.line-edit').fill('The password is stored as clear text. More words after it.');
   await expect(card.locator('.margin-changed')).toHaveText('The passage changed since Felix wrote this.');
+  await expect(card.locator('.margin-changed')).toBeVisible();
+  expect((await moved).status()).toBe(200);
+  await page.reload();
+  await expect(card).toBeVisible();
   await expect(card.locator('.margin-changed')).toBeVisible();
 });
 
@@ -860,10 +865,15 @@ test('dragging the note wider with the margin on the right stops where one margi
   }
 });
 
-test('a selection too long for the margin says so inside the Felix bar', async ({ page }) => {
+test('a long selection stays in the margin and the Felix bar says what he reads', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const long = 'A long sentence about heat moving between two places over time. '.repeat(20);
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long pick', body: `Short line.\n\n${long}` } })).json();
+  const asked = [];
+  await page.route(`**/api/notes/${note.id}/margin/threads`, (route) => {
+    asked.push(route.request().postDataJSON());
+    return route.fulfill({ json: answered(note.id, asked.at(-1), 'Heat flows from hot to cold.') });
+  });
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('#doc')).toBeVisible();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
@@ -871,6 +881,16 @@ test('a selection too long for the margin says so inside the Felix bar', async (
   await expect(menu).toBeVisible();
   await expect(menu.locator('.ask-long')).toBeHidden();
   expect(await pickText(page, long.trim())).toBe(true);
-  await expect(menu.locator('.ask-long')).toHaveText('Select less to ask Felix');
+  await expect(menu.locator('.ask-long')).toBeVisible();
+  await expect(menu.locator('.ask-long')).toHaveText('Felix reads the first 1,000 characters of the selected passage.');
   await expect(menu.getByRole('button')).toHaveText([/Felix this/, 'Ask Felix', 'Visualize']);
+  await menu.getByRole('button', { name: 'Ask Felix' }).click();
+  const draft = page.locator('.margin-note[data-id="draft"]');
+  await expect(draft.locator('[data-passage-hint]')).toBeVisible();
+  const question = draft.getByRole('textbox', { name: 'Ask Felix about this passage' });
+  await question.fill('Which way does heat flow?');
+  await question.press('Enter');
+  await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Heat flows from hot to cold.');
+  expect(asked).toHaveLength(1);
+  expect(asked[0]).toMatchObject({ quote: long.trim(), question: 'Which way does heat flow?' });
 });

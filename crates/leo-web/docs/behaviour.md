@@ -233,7 +233,7 @@ selection drags while keeping file drops and pointer-driven board/resize actions
 
 Page toolbars share one geometry across notes, workspace, calendar, boards, recording
 and Settings: 760 px at most below 1000 px, the page's width less `min(8%, 128px)` each
-side from 1000 px. Every Settings section uses the same Settings / section breadcrumb;
+side from 1000 px. The bar shows no breadcrumbs on any page (its empty row is kept as spacing);
 Keeping and Trash keep their routes and controllers inside that frame.
 Usage opens from Settings (This app → Usage) and shows remaining subscription windows,
 with unknown and expired readings explicit. The combined Quick Leo uses
@@ -275,7 +275,9 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   resumes the same textarea. Other blocks stay rendered. The drag anchor is
   captured before mouse movement, since macOS can report `selectionDirection`
   as `none` for a backwards range. Dragging carries on across the lines (`dragAnchor`), Shift+click selects,
-  copy and cut give the Markdown, and typing, Enter, Delete or paste replace it
+  copy and cut give the Markdown (and, when the selection holds a picture, also HTML in which each picture is a `data:` URL, so it
+  pastes into other apps: `leoMarkdown.selectionCopy`, text and links only, never script, handlers or leo's own addresses, a picture over
+  3 MB or past 8 MB in all left as its alt text; the same in Felix's answers, 2026-11-18, the owner's call), and typing, Enter, Delete or paste replace it
   through the raw lines, then only the caret's line stays open.
   Autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js`
@@ -432,7 +434,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   simulation) a note held on another note's row for `SPRING_MS` arms it (the folder spring's timer slot, keyed
   `{key, kind}`; `.combine-wait` "Hold to combine" with a line growing over the hold, then `.combine-armed` "Combine";
   the parent folder is not lit) and a drop opens the sheet; a quicker drop still moves. The note menu has
-  Combine into… (`explorerCombineMenu`: up to 1000 notes from the brief notes list, " · folder" only on a title clash),
+  Combine into… (`explorerCombineMenu`: the first 50 notes by title, Show more for the next 50, and the find box asks the page's search (`/api/search`) after a 160 ms pause, so any note is reachable; " · folder" only where two loaded titles are equal),
   and a Quick Leo query that is just "merge" or "combine" (optionally followed by this, note, it, into or with) offers Combine “<open note>” into… above the ranked rows
   (a hint row when no note is open). The sheet says which note is merged into which and warns the result may not be fully accurate; the ready toast says "ready to review". It runs in the background
   (2026-10-14, the user's call): POST `combine` starts a job on a thread
@@ -450,17 +452,20 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   Settings pinned below (Trash and Keeping live inside Settings since
   2026-11-02, the user's call; the rail shows Settings for them). The rail has no
   Notes button (2026-11-03, the user's call: notes open from the explorer; the
-  workspace is reached from the breadcrumbs' first crumb or the leo name). Buttons retain accessible names,
+  workspace is reached from the leo name). Buttons retain accessible names,
   tooltips and active states, with space between controls and unboxed shortcut
   hints. The separate explorer shows nested folders and
   individual notes. Folder labels and chevrons toggle their children; note rows
   open notes directly. The selected folder scopes New note, Record and imports;
-  breadcrumbs reveal folders in the explorer. The explorer narrows
+  the bar shows no breadcrumbs. The explorer narrows
   below 1200 px to leave room for notes, originals and Felix. Its right edge is a
   keyboard-accessible resize handle; `leo-side-width` remembers the expanded
   width while the 52 px rail stays fixed. `pane-resize.js` shares bounded sizing,
   32/96 px arrow steps, Home/double-click reset and drag cleanup with Felix's
-  Chats divider (`leo-chat-history-width`); shrinking a window clamps the visible
+  Chats divider (`leo-chat-history-width`), Felix's width grip (`leo-chat-width`) and the
+  original-file grip (`leo-source-width`), both docked right (dragged left or ArrowLeft
+  widens; End goes to the widest; Home and double-click reset); the width is saved on
+  release; shrinking a window clamps the visible
   width without replacing the saved preference. Overlay chat lists have no grip. Crossing the overlay width while resizing swaps modes under `.chat.mode-switch` (no transition), so the list never slides over the chat (2026-11-08).
   There is no Top level row (2026-11-02, the user's call: the tree already lists
   top-level notes); the pinned Folders heading is the top-level drop target, and
@@ -512,6 +517,9 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
 
 - Search (`search.rs`): title words and acronyms, text, graph concepts and
   summaries, then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`.
+  The results page shows a page at a time: it asks for 61 and draws 60, and a
+  Show more button (or scrolling near it) asks for the next page with `offset`;
+  the title counts the notes shown so far ("60 notes so far"), with no cut at 300.
 
 - Reading position (`/api/notes/{id}/reading`): saved 2 s after the user
   scrolls, restored once on open unless something else moved the page.
@@ -612,6 +620,14 @@ Navigation serializes the departing save against the latest destination. A faile
 save retains the editor and address. Only a draft successfully persisted in this
 browser offers an explicit Leave, draft kept action, which rechecks session and
 persistence at activation; an in-memory-only draft cannot bypass the save.
+
+The browser draft is written at most four times a second while typing, and at
+once before a save starts, when the window hides and when leo quits. A draft up
+to 256 KB lives in localStorage; a larger one is one whole IndexedDB record
+(`leo-drafts`); if neither store takes it the page says so and saves the note to
+leo instead. `saving.settle()` makes every unsaved edit safe (stored in this
+browser or saved to leo) or gives up after 5 s with "Not saved · keep this page
+open". Undo keeps only the changed span of each step (2026-11-17).
 
 Text-input and virtual Enter (`beforeinput` newline/paragraph/line-break) share
 list continuation with keydown Enter. Shift+Enter and composition keep their own
@@ -717,7 +733,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   `sureOf` maps it to `SURE`'s sure ≥75, think ≥40, else guess for marking and scoring, and Felix
   hears the percent; set it before answering, since a choice submits at once) and an Add your
   thinking switch (up to `MOST_THINKING`, a separate `think:i:k` draft, sent only while the switch
-  is on; with thinking, a multiple-choice answer also goes to `/api/quiz/mark` for feedback that opens by
+  is on, opened and closed in place by the shared switch (never a redraw, so its knob moves like Settings') and a height reveal of
+  the box (`leoMotion.slide`, none under Reduced Motion) (2026-11-18, the owner's call); with thinking, a multiple-choice answer also goes to `/api/quiz/mark` for feedback that opens by
   answering the thinking, while the page keeps its own verdict) (2026-11-09, the user's call). Both go to `/api/quiz/mark` (`confidence` is
   validated, `thinking` bounded and sealed) and to Felix inside the answer line
   (`aside`), which must stay one line: `send` folds held results by taking their
@@ -816,6 +833,11 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   read_transcript, read_original, look_at_picture, calculate (`calc.rs`, a
   safe evaluator), list_schedule, list_trash, search_chats, list_boards,
   open_board.
+  `read_document` takes several documents (comma-separated) and `count`
+  consecutive parts in one call, up to three parts' worth of text, and ends with
+  what it left for the next call. Asked to learn, study or be tested on attached
+  documents, Felix reads every part the request covers before he plans or asks,
+  and says which he skipped and why (2026-11-18, the owner's call).
 
 - Change tools: edit_note / create_note (cards; Apply POSTs
   `/api/notes/{id}/suggestion`, 409 unless `find` is there exactly once),
@@ -832,7 +854,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   are named by id or exact name ignoring case; the board may be left out when
   there is only one. They validate against the
   store, become `Proposal` cards, run through POST `/api/felix/act` (reusing
-  the normal routes) and return the inverse card as `undo`. The page redraws
+  the normal routes and answering their status) and return the inverse card as `undo`. The page redraws
   an open board after one applies (`BOARD_KINDS`). add_margin_note (`quote` must
   be in the note; Undo is `remove_margin_note`) redraws the open note's margin
   (`MARGIN_KINDS`); it never changes the note. The text manual stays under
@@ -986,11 +1008,21 @@ target. Check the page sequence after loading preferences.
   sent as `gone` with an ask, a Read through part or a reopening, and each of this
   note's open ids in it raises the open limit by one, up to twice `MOST_OPEN`
   (`margin::room`); other ids are ignored.
-  A note whose passage the page finds only by its context (`how: 'context'`) shows one muted
+  A note whose passage the page finds only by its context (`how: 'context'`), or on one of
+  several copies its context cannot tell apart (`how: 'guess'`), shows one muted
   line, "The passage changed since Felix wrote this."; an exact match shows nothing.
+  A note Felix keeps (an ask, a Read through note, a chat-made, pinned or answered note) that
+  is found by context gets its new words and surroundings saved about 2 seconds after typing
+  stops, so a second edit beside it does not lose it; it keeps the muted line
+  (`margin_threads.reworded`). Untouched read-along notes are never re-saved (the server
+  answers 409 `replaceable`), so a new read-along note still replaces them on a reworded sentence.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
-  from the trash removes them at once (`forget_notes`). The hourly `sweep_store` is
+  from the trash removes them at once (`forget_notes`) and its task details, recording
+  sources and original uploads, reading place, meaning vectors and summary, and so does
+  the end of the trash period; a removal that fails is retried on the next delete and
+  daily, a recording in use is skipped, and nothing is removed while a note or a trashed
+  file cannot be read. The hourly `sweep_store` is
   for what vanished another way: it waits `SWEEP_AFTER_DAYS` (7) after first seeing a
   note missing, in case it was a partial sync or a rename, and never runs while no
   notes loaded or a file is unreadable. Export adds `leo/margin.json` with Chats,
@@ -1037,7 +1069,7 @@ target. Check the page sequence after loading preferences.
   A refused read waits for the next edit; a stale-version refusal resets the page's
   retry delay to the normal typing pause, while provider cooldowns stay bounded.
   A read-along also sends up to 1,500 characters of the note before the first changed block as `earlier_text` (`margin::earlier_text`: its last occurrence, cut at a block boundary), context only; the raw quote must lie inside a changed block or the read is silent. Read through sends none.
-  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; resolved and dismissed threads do not count. A reworded passage still holds its sentence (2026-11-16, the user's call): the page sends the current wording of every note it places only by the surrounding words (`changed`), the server counts that wording only where the note's own surrounding words put it, and a read-along note on that sentence replaces the old read-along note quietly when you never answered it, it is not pinned and not open, else (or when the old note came from Read through, Felix this or the chat) the new note is dropped (Read through always drops it); nothing is replaced unless the new note is stored; a replaced note leaves no reopen underline under the new note's text. A note that is still one sentence gives a comment on the whole note no surrounding words to be found by, so once its words are gone the page hides it and the next read-along note there replaces it (only an untouched, unpinned read-along comment, never one you kept open). There is no Reading… status
+  The model's quote must be in the note now, or the note is dropped. Before `crowded`, read-along and Read through grow it to the whole sentence or sentences it touches inside its block (`margin::whole_sentences`, 2026-11-14): a sentence must end on `.`, `!` or `?` (before a space or the end) or `。！？`; a line break or the end of an unpunctuated line is no ending, so such a quote, or a span over `MOST_QUOTE`, stays as the model wrote it. One note per sentence (2026-11-09, the user's call: three notes stacked on one phrase): `margin::crowded` drops a found note whose sentence (ended by `.`, `!` or `?` before a space, a line break, or `。！？`) holds an open thread's quote, or which lies in an open quote's sentence, in read-along and Read through alike; threads Felix resolved himself (quiet tidy, a full margin, a replaced note) do not count, and for read-along a note you dismissed or resolved yourself keeps its sentence too while its words are in the note (`margin::declined_on`, `margin_threads.closed_by`: `you` from the status route, `felix` otherwise and for every note resolved before db `VERSION` 6), never in Read through. A reworded passage still holds its sentence (2026-11-16, the user's call): the page sends the current wording of every note it places only by the surrounding words (`changed`), the server counts that wording only where the note's own surrounding words put it, and a read-along note on that sentence replaces the old read-along note quietly when you never answered it, it is not pinned and not open, else (or when the old note came from Read through, Felix this or the chat) the new note is dropped (Read through always drops it); nothing is replaced unless the new note is stored; a replaced note leaves no reopen underline under the new note's text. A note that is still one sentence gives a comment on the whole note no surrounding words to be found by, so once its words are gone the page hides it and the next read-along note there replaces it (only an untouched, unpinned read-along comment, never one you kept open). There is no Reading… status
   (2026-11-07, the user's call): 200 ms into a read, the leo mark (`#leo-mark` in `.margin-waiting`, never a `.margin-note`, never in
   `threads`; it breathes by opacity only, still under Reduced Motion) sits in the margin beside the last changed block (`doc.blockAt`), placed by `margin.js` `clear` so notes never
   move for it (free spot on the right, else the left in Both, else below what blocks it), or is the gutter mark in Marks only.
@@ -1108,7 +1140,7 @@ target. Check the page sequence after loading preferences.
   `aria-expanded` and the focus target, and takes no clicks while open. Closed notes show their whole text
   (2026-11-15, the user's call, replacing the first-line fold) and dim to .7 until hovered, focused or opened; a text
   text as a whole stops at 12 lines with a bottom fade on the last shown block (`.margin-cut`, set only when it overflows; later text blocks hide), figures and drawings
-  always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`)
+  always show whole. A pin (PATCH `.../threads/{id}` `{pinned}`, `margin_threads.pinned`, exported in `margin.json`; the same PATCH with `{version, quote, prefix, suffix}` re-anchors a kept note; db `VERSION` 6, which an older leo refuses)
   keeps the note open with its reply box in every layout (2026-11-16, the user's call): Escape and a
   click outside leave it, several can stay open, unpinning folds it; a faint tether shows at rest. Open, its messages and the waiting mark sit right of a 1 px
   `--line` rule. A closed thread with more messages says "N more" (marks get a ring either way).
@@ -1118,7 +1150,7 @@ target. Check the page sequence after loading preferences.
   3 or over `MOST_ASKED` (1,000) characters, it goes to the chat as before (2026-11-08; read-along and `add_margin_note` quotes stay at `MOST_QUOTE`, 600). The server anchors on
   prefix + quote + suffix exactly and never falls back to another occurrence. Replies
   POST `.../threads/{id}/reply`, bounded (`MOST_REPLY`, `MOST_MESSAGES`, the last 8
-  messages sent), and never run twice at once for a thread (409 `busy`; the page keeps the text and says "Felix is still answering this."). The page sends `request` (one id per typed message, kept on retry); `insert::remembered` is checked before that guard, so a resent reply gets the first answer and adds one message.
+  messages sent), and never run twice at once for a thread (409 `busy`; the page keeps the text and says "Felix is still answering this."). The page sends `request` (one id per typed message, kept on retry); `insert::remembered` is checked before that guard, so a resent reply gets the first answer and adds one message. An ask (POST `.../threads`) takes `request` the same way (one id per question text, kept on retry, a changed question gets a new one): a resent ask answers the first thread, with one AI call.
 - Word arrival runs over rendered prose too (`inkNodes` walks text nodes, skipping code, maths,
   diagrams and links); an open thread's replies scroll inside a capped area so the reply box and
   buttons stay on screen (2026-11-06). `UNSPOKEN` asks for a direct answer in three sentences and no
@@ -1136,7 +1168,8 @@ target. Check the page sequence after loading preferences.
   passage falls back to `/insert` with one request id per thread (`/insert` and `/weave` dedupe on note
   and request), which re-finds the passage or says it went to the end and skips the
   glow. Other open threads anchored in a rewritten block may lose their place. Ask in chat attaches the quote. `add_margin_note`'s Undo is refused
-  once the user has replied. `chat::gather_seeing` adds open threads of the open note
+  once the user has replied. `chat::gather_seeing` adds the open threads of the open note
+  the page can still place (words found exactly, or between their old surroundings: `margin::shown`)
   after the notes (`margin::context`, at most 3,000 characters and an eighth of the
   note room); the block's fence is keyed per process and stable while its content is,
   so prefix caches still work, and warm sessions get it only when it changes
@@ -1148,7 +1181,7 @@ target. Check the page sequence after loading preferences.
   "Resolved" until the note is left and reopens on click; the note's top corners carry drag marks for its width.
   In Marks the blot takes its own room in the line, so it never covers the next word; the open note is a raised
   card under the paragraph that unfolds and folds away (none under Reduce Motion).
-- Layout (`margin.js`, pure): `find` (exact, then between prefix and suffix of at
+- Layout (`margin.js`, pure): `find` (exact when unique or when 6 units of context pick one copy, a guess otherwise, then between prefix and suffix of at
   least 6 UTF-16 units, as the server's `margin::by_context` counts, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
   free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
@@ -1238,7 +1271,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   pictures still goes in as pictures (`doc.js`); a drop with any other file goes
   to the sheet with every file. Originals are kept in
   `<data>/attachments/<note-id>/` (never synced); figures from pptx/docx/PDF
-  are offered to the AI (`leo_services::figures`). Originals open in
+  are offered to the AI per part (`leo_services::figures`); every figure the AI does not place
+  goes under More figures at the end of the note. Originals open in
   `#source-pane` beside the note on desktop (1000px and wider), with Felix
   always to its right. Both panes share the available width instead of falling
   back to a popup when chat is open. The original divider supports dragging,
@@ -1255,7 +1289,13 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   source. The page starts/stops/pauses and shows levels/transcripts; it never
   opens a browser microphone or screen-audio picker, and the server takes no
   audio from the page. Native jobs have no page heartbeat lifetime.
-  Housekeeper's `pending_recordings` supplies retained native sessions; recovery
+  Housekeeper's `pending_page` supplies retained native sessions, newest first, 50 a page
+  (`/api/record?after=<last folder name>`, any other cursor is refused with 400): the Record
+  page shows the newest 50, then Show older appends the next 50 once each. Typed points and screenshots have no count limit
+  (2026-11-17, principle 1): Your notes lists the newest 50 points, then Show earlier points
+  loads 50 more at a time (`/api/record/{id}/points?before=<index>`); a point is answered once
+  the recorder has saved it, or with 503 after 5 s, when it is kept and the page does not resend
+  it. Recovery
   starts in Writing state and supports Finish available, and anything the
   Housekeeper does not list is not found.
   When no writing AI could write the notes (`long::Structured.writer_failed`, every
@@ -1291,6 +1331,9 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   top). The Tasks card starts folded every time and opens only while the mouse
   is over it or keyboard focus is inside it (`:hover`, `:focus-within`); nothing
   is saved and a click never pins it open.
+- A note's Tasks sheet (the note menu's Tasks) lists every checkbox, 100 rows at a time with
+  Show more (2026-11-17, no limit on data). It learns which checkboxes are tracked from
+  `/api/tasks?note=<id>` read 500 at a time until `total` is covered, into a table by line.
 
 PDF export keeps Windows' native print function (Tauri calls it internally),
 uses the native bridge on macOS, and reports bridge errors without losing the
@@ -1306,10 +1349,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
 - Task dates read Today, Tomorrow, a weekday within a week, or the date; hovering
   shows the full date. Late tasks are grouped as "Earlier", never "Overdue"
   (2026-11-15). In Day and Week, today's hours before now sit under a faint wash.
-- Calendars: up to five secret iCal links (Settings → Calendar), kept through
+- Calendars: any number of secret iCal links (Settings → Calendar), kept through
   `CalendarAccess` (`secret::default_store`, private file or optional keychain),
-  never sent to the page. Feeds are cached in
-  leo.db with ETag / Last-Modified; `ics::read` expands repeats, EXDATE and
+  never sent to the page. Feeds are kept as files under `<data>/calendar/`
+  (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
 
@@ -1444,7 +1487,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   title, subheading, description ≤8,000, priority `""|low|medium|high`). One JSON
   line per save, atomic, nofollow reads, newest `updated_at` wins, deletes are
   tombstones; a file counts only when its name is its id. Each card has its own
-  file. Limits: 100 boards, 5,000 cards.
+  file. No fixed count of boards or cards.
 
 - Order is `rank` (f64). A move writes only the moved card (midpoint of its new
   neighbours, `boards::between`) unless the gap is gone, then `settle` renumbers that
@@ -1499,7 +1542,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   (2026-11-02, the user's call: no modal; `#kanban-panel`, kept across board redraws, a
   full-screen layer under 760 px): title, subheading, status and board (the shared select
   menu), priority (`segmented`, `data-priority`), a borderless description (autosave after
-  600 ms, on blur, and before Escape or × closes it), Delete with Undo. The description is
+  600 ms, on blur, and before Escape or × closes it; a save that cannot reach leo retries every 3 s
+  and says "Not saved, will retry"), Delete with Undo. The description is
   the note editor itself (2026-11-06, the user's call: "render markdown the same as our
   notes"): `leoDoc.mount` on `#kanban-card-description` (rendered blocks, click a line to
   edit, checkboxes toggle), no outline, pictures, margin or note id. `description` stays plain
@@ -1576,8 +1620,8 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   updates wait for recording and dictation, then Leo reopens. About Leo lists the
   notes and speech-model folders as rows whose path is truncated in the middle
   (selectable, full path on hover; the app has no reveal or copy action), the
-  unsigned-copy warning as a compact amber notice, `leo update` and
-  `leo uninstall` as two rows, and Release notes in the card header. The card ends
+  unsigned-copy warning as a compact amber notice, `leo uninstall` as
+  one row (`leo update` removed 2026-11-17), and Release notes in the card header. The card ends
   with a colophon (2026-11-15): "Your notes are Markdown files on this computer.",
   Version, Note text (Instrument Sans), Felix's voice (his current lettering: Newsreader, or Instrument Sans when Felix writes in the notes' letters) and Licences with a
   NOTICE link, all in the system sans.
@@ -1603,14 +1647,35 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   `<data>/attachments/<note-id>/` older than N days by modification time; the
   folder and the note are never touched), transcripts (folders in
   `recording-sources/` by folder time) and unfinished audio
-  (`record::Housekeeper::pending_recordings`, each with `Pending.started`, then
-  `discard_recording`, plus `expire_kept_audio` for saved sessions and old
-  `browser-audio` folders; the session in use, by `RecordJob::session_id`, and
+  (`record::Housekeeper::old_recordings`, each with `Pending.started`, then
+  `discard_recordings` in batches of 256, plus `expire_kept_audio` for saved sessions and recording folders whose metadata is
+  missing or damaged, older than the same age; the preview counts all of them; the session in use, by `RecordJob::session_id`, and
   locked sessions are skipped). DELETE `/api/record/{id}` also deletes a
   waiting recording that has no job; the Record page offers it on each row.
   Every pass is bounded, never follows symlinks, stays in its folder and
-  skips an item it cannot delete. Trash and chats expire as before.
+  skips an item it cannot delete. Trash expires as before; chats expire in the daily pass.
   `Housekeeper` now lives in `record.rs` (pending and discard only).
+
+Trash: Delete for good and Empty trash skip a trashed file they cannot delete
+and remove the rest; POST `/api/trash/delete` answers `{deleted, failed}` and the
+toast then reads "Deleted N notes for good. M could not be deleted: check the
+permissions of leo's notes folder." Folders left empty inside the trash are removed.
+A trashed file leo cannot read shows as a row with its file name and "leo cannot
+read this file", with Delete for good and its checkbox but no Restore; the select
+bar's Restore is disabled when every picked row is such a file. POST
+`/api/trash/restore` answers `{restored, unreadable}`, and the toast then adds
+"M could not be restored: leo cannot read the file."
+A note's row says how many pictures it carries (" · N pictures"); they come back with
+it. A picture nothing links is moved into the trash after the trash period and is then a
+row of its own, named after its file, "Picture · removed from its note": Restore puts the
+file back (and it is not moved again until a note links it and then stops), Delete for good
+removes it, and a link written anywhere brings it back by itself. Older pictures leo did not
+record saving that nothing names are rows "Picture no note uses", with Delete for good only.
+Files of a note that expired or left outside leo are a row "Files of a removed note" with
+Restore (keeps them for good) and Delete for good.
+Empty trash removes every note, the pictures only they carried and every picture row; the
+head and the confirm sheet count notes and pictures. A note leaving the trash by Keeping's
+period takes everything that depends on it, as Delete for good does.
 
 Writing Settings offers Ollama, Codex and Claude Code. Removed AGY/Copilot
 choices and sign-in commands are unavailable; legacy saved profiles stay on disk
@@ -1798,7 +1863,7 @@ stay whole; oversized protected sections pass through verbatim. Parts are joined
 without a growing full-note remerge, and every part uses the existing preservation
 checks. Two combines may run at once, with a 15-minute between-request deadline;
 any failed part leaves both source notes unchanged. Review, version checks,
-transcript copies and Undo still apply. Saving admits bounded Unicode JSON bodies.
+transcript copies and Undo still apply. A note of any size saves (up to `TEXT_BYTES`, 512 MiB, the engine's memory bound for one request).
 
 
 ## Retired interview practice

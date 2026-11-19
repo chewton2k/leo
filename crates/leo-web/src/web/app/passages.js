@@ -3,7 +3,7 @@ const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
 askFloat.setAttribute('role', 'toolbar');
 askFloat.setAttribute('aria-label', 'Felix and this passage');
-askFloat.innerHTML = `<p class="ask-long">Select less to ask Felix</p><button type="button" data-ask="this"><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
+askFloat.innerHTML = `<p class="ask-long"></p><button type="button" data-ask="this"><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
 askFloat.hidden = true;
 askFloat.dataset.keepSelection = '';
 askFloat.addEventListener('mousedown', (e) => e.preventDefault());
@@ -34,7 +34,9 @@ function placeAskFloat(has) {
   const s = state.view === 'note' ? state.session : null;
   if (has) askFloat.querySelector('[data-ask="ask"]').title = `Ask Felix (${shortcutText(shortcutKeys('ask'))})`;
   const box = has && s && s.doc ? s.doc.selectionBox() : null;
-  askFloat.toggleAttribute('data-long', Boolean(box) && [...(s.doc.selection()?.text || '')].length > MOST_ASKED);
+  const long = Boolean(box && marginPage.layer && !chat.isOpen()) && Array.from(s.doc.selection()?.text || '').length > MARGIN_PASSAGE_READS;
+  askFloat.toggleAttribute('data-long', long);
+  if (long) askFloat.querySelector('.ask-long').textContent = `Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.`;
   const columns = $('.note-columns');
   const beside = Boolean(box && columns && ['right', 'both'].includes(columns.dataset.margin) && !marginTaken(s, s.doc.selection()));
   askFloat.classList.toggle('beside', beside);
@@ -115,7 +117,7 @@ function addSheet({ text }) {
     <div class="add-target" id="add-target"></div>
     <div class="add-preview prose">${md.render(text)}</div>
     <div class="add-where" id="add-where"></div>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="add-go">Add</button></div>`);
+    ${sheetButtons(['Add', 'id="add-go"'])}`);
   const targetBox = $('#add-target', box);
   const whereBox = $('#add-where', box);
   const go = $('#add-go', box);
@@ -151,7 +153,7 @@ function addSheet({ text }) {
           let found = [];
           if (query) {
             try {
-              found = await api(`/api/search?q=${enc(query)}&brief=true`);
+              found = await api(`/api/search?q=${enc(query)}&brief=true&limit=8`);
             } catch (e) {
               found = [];
             }

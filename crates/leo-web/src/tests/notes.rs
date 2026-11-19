@@ -65,6 +65,19 @@ fn saving_another_note_preserves_external_creates_and_edits_before_watch_deliver
             Ok(())
         }))
         .unwrap();
+        let outside = if creating {
+            root.join("Added.md")
+        } else {
+            root.join("External.md")
+        };
+        assert!(std::fs::read_to_string(&outside)
+            .unwrap()
+            .contains("Outside edit"));
+        assert_eq!(
+            state.store.lock().unwrap().changed_on_disk(),
+            !cfg!(windows)
+        );
+        state.store.lock().unwrap().changes = None;
         let seen = run(state.read_store(|store| {
             Ok(store
                 .notes
@@ -87,6 +100,7 @@ fn deleting_by_an_ambiguous_prefix_deletes_nothing() {
         let mut store = state.fresh();
         let first = store.notes[0].id.clone();
         store.notes[1].id = format!("{first}x");
+        store.touch_all();
         store.save().unwrap();
         first[..first.len() - 1].to_string()
     };
@@ -101,8 +115,8 @@ fn creating_a_note_in_a_new_directory_registers_it() {
     let body = CreateBody {
         title: "Lecture".to_string(),
         body: None,
-        tags: None,
         directory: Some("cs162".to_string()),
+        request: None,
     };
     run(create_note(State(state.clone()), Json(body)))
         .ok()
@@ -140,7 +154,6 @@ fn a_note_can_be_pinned_from_the_phone() {
     let body = UpdateBody {
         title: None,
         body: None,
-        tags: None,
         pinned: Some(true),
         base: None,
         written: None,
@@ -158,8 +171,8 @@ fn a_note_can_be_pinned_from_the_phone() {
 #[test]
 fn folders_come_with_how_many_notes_they_hold() {
     let (state, _d, _ids) = state_with(&[("A", "cs130"), ("B", "cs130/lec"), ("C", "")]);
-    let Json(dirs) = run(list_dirs(State(state), Query(DirParams { parent: None }))).unwrap();
-    assert_eq!(dirs.len(), 1);
+    let Json(dirs) = run(list_folders(State(state))).unwrap();
+    assert_eq!(dirs.len(), 2);
     assert_eq!(dirs[0].name, "cs130");
     assert_eq!(dirs[0].notes, 2);
 }
@@ -184,7 +197,6 @@ fn edit(
         Json(UpdateBody {
             title: None,
             body: Some(body.to_string()),
-            tags: None,
             pinned: None,
             base,
             written: None,
@@ -260,8 +272,8 @@ fn web_note_creation_directory_creation_and_moves_reject_traversal() {
             Json(CreateBody {
                 title: "Escape".into(),
                 body: None,
-                tags: None,
                 directory: Some(path.into()),
+                request: None,
             }),
         ));
         assert_eq!(created.err(), Some(StatusCode::BAD_REQUEST));
@@ -298,13 +310,11 @@ fn a_reload_failure_is_reported_instead_of_serving_a_stale_store() {
     let result = run(list_notes(
         State(state),
         Query(ListParams {
-            tag: None,
             limit: None,
             dir: None,
             offset: 0,
             brief: false,
             sort: None,
-            recent: None,
             show: None,
         }),
     ));
@@ -316,8 +326,8 @@ fn an_empty_folder_created_by_another_app_is_visible_without_restarting() {
     let (state, dir, _) = state_with(&[]);
     let mut other = Store::load_from(&dir.path().join("notes")).unwrap();
     other.create_dir("new-folder");
-    other.save_files().unwrap();
-    let Json(dirs) = run(list_dirs(State(state), Query(DirParams { parent: None }))).unwrap();
+    other.save().unwrap();
+    let Json(dirs) = run(list_folders(State(state))).unwrap();
     assert_eq!(dirs[0].name, "new-folder");
 }
 #[test]
@@ -348,13 +358,11 @@ fn a_large_folder_comes_in_pages_with_its_total_and_short_cards() {
         let response = run(list_notes(
             State(state.clone()),
             Query(ListParams {
-                tag: None,
                 limit: Some(limit),
                 dir: Some("big".into()),
                 offset,
                 brief: true,
                 sort: None,
-                recent: None,
                 show: None,
             }),
         ))
@@ -511,30 +519,21 @@ fn library_sorting_happens_before_pagination_and_brief_results_include_visuals()
                 .into();
         store.save().unwrap();
     }
-    let page = |sort: &str, offset: usize, recent: Option<String>| {
-        run(list_notes(State(state.clone()), Query(serde_json::from_value(serde_json::json!({ "sort": sort, "offset": offset, "limit": 1, "brief": true, "recent": recent })).unwrap())))
+    let page = |sort: &str, offset: usize| {
+        run(list_notes(State(state.clone()), Query(serde_json::from_value(serde_json::json!({ "sort": sort, "offset": offset, "limit": 1, "brief": true })).unwrap())))
     };
-    for sort in ["title", "folder", "opened", "updated"] {
-        let out = page(sort, 0, Some(ids[0].clone())).unwrap();
+    for sort in ["title", "updated"] {
+        let out = page(sort, 0).unwrap();
         assert_eq!(out.headers()["x-total"], "3");
         assert_eq!(json_of(out)[0]["id"], ids[2]);
     }
-    let alpha = json_of(page("title", 1, None).unwrap());
+    let alpha = json_of(page("title", 1).unwrap());
     assert_eq!(alpha[0]["id"], ids[1]);
     assert_eq!(alpha[0]["summary"], "A useful description of this lecture.");
     assert_eq!(alpha[0]["preview"], "```mermaid\ngraph LR\n A --> B\n```");
-    assert_eq!(
-        json_of(page("opened", 1, Some(ids[0].clone())).unwrap())[0]["id"],
-        ids[0]
-    );
-    assert_eq!(
-        page("unknown", 0, None).err(),
-        Some(StatusCode::BAD_REQUEST)
-    );
-    assert_eq!(
-        page("opened", 0, Some("../escape".into())).err(),
-        Some(StatusCode::BAD_REQUEST)
-    );
+    for unknown in ["unknown", "opened", "folder"] {
+        assert_eq!(page(unknown, 0).err(), Some(StatusCode::BAD_REQUEST));
+    }
 }
 
 #[test]
@@ -563,8 +562,8 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
             Json(CreateBody {
                 title: "Idea".into(),
                 body: None,
-                tags: None,
                 directory: Some(bad.into()),
+                request: None,
             }),
         ));
         assert_eq!(made.err(), Some(StatusCode::BAD_REQUEST), "{bad}");
@@ -576,8 +575,8 @@ fn a_new_folder_that_windows_cannot_hold_is_refused() {
         Json(CreateBody {
             title: "Idea".into(),
             body: None,
-            tags: None,
             directory: Some("Week 1".into()),
+            request: None,
         }),
     ));
     assert!(fine.is_ok());
@@ -611,7 +610,7 @@ fn the_unused_checkbox_toggle_route_is_gone() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Boxes", "- [ ] one", vec![], "")
+            .create_note("Boxes", "- [ ] one", "")
             .unwrap()
             .id
             .clone();
@@ -661,28 +660,20 @@ fn folder_note_counts_include_everything_below_and_ignore_lookalike_names() {
     let store = state.fresh();
     assert!(!all.is_empty());
     for dir in &all {
-        assert_eq!(dir.notes, store.dir_contents(&dir.name).0, "{}", dir.name);
+        let inside = store
+            .notes
+            .iter()
+            .filter(|n| {
+                n.directory == dir.name || n.directory.starts_with(&format!("{}/", dir.name))
+            })
+            .count();
+        assert_eq!(dir.notes, inside, "{}", dir.name);
     }
     let count = |name: &str| all.iter().find(|d| d.name == name).unwrap().notes;
     assert_eq!(
         (count("cs130"), count("cs130/week1"), count("cs13")),
         (3, 2, 1)
     );
-    drop(store);
-    let Json(top) = run(list_dirs(
-        State(state.clone()),
-        Query(DirParams { parent: None }),
-    ))
-    .unwrap();
-    assert_eq!(top.iter().find(|d| d.name == "cs130").unwrap().notes, 3);
-    let Json(nested) = run(list_dirs(
-        State(state),
-        Query(DirParams {
-            parent: Some("cs130".into()),
-        }),
-    ))
-    .unwrap();
-    assert_eq!(nested.iter().find(|d| d.name == "week1").unwrap().notes, 2);
 }
 
 #[test]
@@ -814,4 +805,763 @@ fn moving_a_task_in_felix_keeps_its_end_time_and_the_undo_does_too() {
         .await
         .unwrap();
     });
+}
+
+fn searched(state: &AppState, params: serde_json::Value) -> (usize, Vec<serde_json::Value>) {
+    let response = run(crate::routes::notes::search_notes(
+        State(state.clone()),
+        Query(serde_json::from_value(params).unwrap()),
+    ))
+    .unwrap();
+    let total = response.headers()["x-total"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let found = json_of(response).as_array().unwrap().clone();
+    (total, found)
+}
+
+fn ids_of(found: &[serde_json::Value]) -> Vec<String> {
+    found
+        .iter()
+        .map(|n| n["id"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn a_very_long_search_uses_every_word_and_does_not_hold_the_notes_lock() {
+    let filler: Vec<String> = (0..3000).map(|i| format!("filler{i}")).collect();
+    let body = filler.join(" ");
+    let mut notes: Vec<(String, &str)> = (0..40).map(|i| (format!("Note {i}"), "")).collect();
+    notes.push(("zebra".into(), ""));
+    let shaped: Vec<(&str, &str)> = notes.iter().map(|(t, d)| (t.as_str(), *d)).collect();
+    let (state, _dir, ids) = state_with(&shaped);
+    {
+        let mut store = state.fresh();
+        for id in &ids {
+            store.find_note_mut(id).unwrap().body = body.clone();
+        }
+        store.save().unwrap();
+    }
+    let query = filler
+        .iter()
+        .cycle()
+        .take(9499)
+        .cloned()
+        .chain(["zebra".to_string()])
+        .collect::<Vec<_>>()
+        .join(" ");
+    state.graphs.load();
+    searched(&state, serde_json::json!({ "q": "warm" }));
+    let done = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let searching = {
+        let state = state.clone();
+        let done = Arc::clone(&done);
+        std::thread::spawn(move || {
+            let found = searched(&state, serde_json::json!({ "q": query, "brief": true }));
+            done.store(true, std::sync::atomic::Ordering::SeqCst);
+            found
+        })
+    };
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let started = std::time::Instant::now();
+    run(state.read_store(|s| Ok(s.notes.len()))).unwrap();
+    let waited = started.elapsed();
+    let still_searching = !done.load(std::sync::atomic::Ordering::SeqCst);
+    let (total, found) = searching.join().unwrap();
+    assert!(
+        still_searching,
+        "the search ended before the read: nothing was measured"
+    );
+    assert!(
+        waited < std::time::Duration::from_millis(200),
+        "a read waited {waited:?} behind a long search"
+    );
+    assert_eq!(total, 1);
+    assert_eq!(found[0]["title"], "zebra");
+}
+
+#[test]
+fn search_results_are_read_a_page_at_a_time() {
+    let titles: Vec<String> = (0..350).map(|i| format!("Match {i}")).collect();
+    let notes: Vec<(&str, &str)> = titles.iter().map(|t| (t.as_str(), "")).collect();
+    let (state, _dir, _) = state_with(&notes);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "match", "limit": 61 }));
+    assert_eq!((total, first.len()), (350, 61));
+    let (total, late) = searched(
+        &state,
+        serde_json::json!({ "q": "match", "offset": 300, "limit": 61 }),
+    );
+    assert_eq!((total, late.len()), (350, 50));
+    let (total, all) = searched(&state, serde_json::json!({ "q": "match", "limit": 1000 }));
+    assert_eq!((total, all.len()), (350, 350));
+    let (total, plain) = searched(&state, serde_json::json!({ "q": "match" }));
+    assert_eq!((total, plain.len()), (350, 300));
+    let mut joined = Vec::new();
+    for offset in (0..350).step_by(61) {
+        let (_, page) = searched(
+            &state,
+            serde_json::json!({ "q": "match", "offset": offset, "limit": 61 }),
+        );
+        joined.extend(ids_of(&page));
+    }
+    assert_eq!(joined, ids_of(&all));
+}
+
+#[test]
+fn sixty_notes_with_one_title_are_all_reachable_and_none_repeats() {
+    let folders: Vec<String> = (0..60).map(|i| format!("F{i:02}")).collect();
+    let notes: Vec<(&str, &str)> = folders.iter().map(|f| ("Same", f.as_str())).collect();
+    let (state, _dir, ids) = state_with(&notes);
+    {
+        let mut store = state.fresh();
+        let at = chrono::Utc::now();
+        for id in &ids {
+            let note = store.find_note_mut(id).unwrap();
+            note.body = "the same text".into();
+            note.updated_at = at;
+        }
+        store.save().unwrap();
+    }
+    let pages = |state: &AppState| {
+        let (_, first) = searched(state, serde_json::json!({ "q": "same", "limit": 50 }));
+        let (_, second) = searched(
+            state,
+            serde_json::json!({ "q": "same", "offset": 50, "limit": 50 }),
+        );
+        (first, second)
+    };
+    let (first, second) = pages(&state);
+    assert_eq!((first.len(), second.len()), (50, 10));
+    let order: Vec<String> = ids_of(&first).into_iter().chain(ids_of(&second)).collect();
+    let distinct: std::collections::HashSet<&String> = order.iter().collect();
+    assert_eq!(distinct.len(), 60);
+    let places: std::collections::HashSet<&str> = first
+        .iter()
+        .chain(&second)
+        .map(|n| n["directory"].as_str().unwrap())
+        .collect();
+    assert_eq!(places.len(), 60);
+    state.store.lock().unwrap().reload = true;
+    *state.searched.lock().unwrap() = None;
+    let (first, second) = pages(&state);
+    let again: Vec<String> = ids_of(&first).into_iter().chain(ids_of(&second)).collect();
+    assert_eq!(again, order);
+}
+
+#[test]
+fn a_later_page_does_not_search_again() {
+    let (mut state, _dir, ids) = state_with(&[("Queues one", ""), ("Queues two", "")]);
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[0]).unwrap().body = "Take the oldest item first.".into();
+        store.find_note_mut(&ids[1]).unwrap().body = "A line of people.".into();
+        store.save().unwrap();
+    }
+    let inner = crate::vectors::fake_meaning();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let meaning: crate::vectors::Meaning = {
+        let asked = Arc::clone(&asked);
+        Arc::new(move |texts: &[String], query: bool| {
+            if query {
+                asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            inner(texts, query)
+        })
+    };
+    crate::vectors::catch_up(&state.fresh(), &state.vectors, &meaning, 100);
+    state.meaning = Some(meaning);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "queues", "limit": 1 }));
+    let (_, second) = searched(
+        &state,
+        serde_json::json!({ "q": "queues", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(total, 2);
+    assert_ne!(ids_of(&first), ids_of(&second));
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1);
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[1]).unwrap().body = "A line of people, waiting.".into();
+        store.save().unwrap();
+    }
+    searched(
+        &state,
+        serde_json::json!({ "q": "queues", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 2);
+}
+
+#[test]
+fn a_changed_library_drops_the_kept_ranking() {
+    let (state, _dir, ids) = state_with(&[("Match one", ""), ("Match two", "")]);
+    let (total, first) = searched(&state, serde_json::json!({ "q": "match", "limit": 1 }));
+    assert_eq!((total, first.len()), (2, 1));
+    let leaving = ids
+        .iter()
+        .find(|id| **id != ids_of(&first)[0])
+        .unwrap()
+        .clone();
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&leaving).unwrap().title = "Other".into();
+        store.save().unwrap();
+    }
+    let (total, next) = searched(
+        &state,
+        serde_json::json!({ "q": "match", "offset": 1, "limit": 1 }),
+    );
+    assert_eq!(total, 1);
+    assert!(next.is_empty(), "{next:?}");
+}
+
+#[test]
+fn a_retried_create_makes_one_note_and_one_board() {
+    let (state, _dir, _) = state_with(&[]);
+    let (note_request, board_request) = (uuid::Uuid::new_v4(), uuid::Uuid::new_v4());
+    let mut notes_made = Vec::new();
+    for _ in 0..2 {
+        let made = run(create_note(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "title": "Same",
+                    "body": "typed",
+                    "request": note_request.to_string()
+                }))
+                .unwrap(),
+            ),
+        ))
+        .unwrap();
+        notes_made.push(axum::response::IntoResponse::into_response(made).status());
+    }
+    assert_eq!(notes_made, [StatusCode::CREATED, StatusCode::OK]);
+    let mut boards_made = Vec::new();
+    for _ in 0..2 {
+        let made = run(crate::routes::boards::create_board(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({
+                    "name": "Plan",
+                    "request": board_request.to_string()
+                }))
+                .unwrap(),
+            ),
+        ));
+        boards_made.push(made.status());
+    }
+    assert_eq!(boards_made, [StatusCode::CREATED, StatusCode::OK]);
+    let store = state.fresh();
+    let files = std::fs::read_dir(&store.notes_dir)
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".md"))
+        .count();
+    let notes = store.notes.iter().filter(|n| n.title == "Same").count();
+    drop(store);
+    let boards = crate::boards::boards(&state.chats)
+        .iter()
+        .filter(|b| b.name == "Plan")
+        .count();
+    assert_eq!((notes, files, boards), (1, 1, 1));
+}
+
+const BENCH_WORDS: &[&str] = &[
+    "the", "graph", "search", "queue", "stack", "heap", "tree", "node", "edge", "visit", "order",
+    "breadth", "depth", "first", "lecture", "exam", "proof", "lemma", "theorem", "plant", "light",
+    "sugar", "cell", "energy", "market", "price", "supply", "demand", "history", "empire", "river",
+    "trade", "language", "grammar", "verb", "noun", "memory", "cache", "process", "thread", "lock",
+    "network", "packet", "route", "signal", "matrix", "vector", "integral", "limit", "series",
+    "function", "variable", "loop", "array", "list", "hash", "table", "sort", "merge", "split",
+];
+
+fn bench_body(seed: usize) -> String {
+    let mut at = (seed as u64).wrapping_mul(6_364_136_223_846_793_005) ^ 0x9e37_79b9;
+    let mut body = String::new();
+    while body.len() < 5000 {
+        at = at
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        body.push_str(BENCH_WORDS[(at >> 33) as usize % BENCH_WORDS.len()]);
+        body.push(if body.len() % 480 < 8 { '\n' } else { ' ' });
+    }
+    body
+}
+
+fn bench_state(n: usize) -> (AppState, tempfile::TempDir, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let notes_dir = dir.path().join("notes");
+    let mut store = Store::load_from(&notes_dir).unwrap();
+    for i in 0..n {
+        store
+            .create_note(
+                format!("Lecture {i} {}", BENCH_WORDS[i % BENCH_WORDS.len()]),
+                bench_body(i),
+                &format!("Course {}", i % 20),
+            )
+            .unwrap();
+    }
+    store.save().unwrap();
+    let store = Store::load_from(&notes_dir).unwrap();
+    let (mut state, other, _) = state_with(&[]);
+    state.graphs = Arc::new(graph::Graphs::for_notes(&notes_dir, None));
+    state.notes_dir = notes_dir;
+    state.store = Arc::new(Mutex::new(Storage {
+        changes: Some(store_refresh::Changes::new(&state.notes_dir)),
+        store,
+        reload: false,
+    }));
+    while state.store.lock().unwrap().changes.as_mut().unwrap().due() {}
+    (state, dir, other)
+}
+
+fn bench_ms(started: std::time::Instant) -> f64 {
+    started.elapsed().as_secs_f64() * 1000.0
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn search_and_review_marks_benchmark() {
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
+    let n: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let built = std::time::Instant::now();
+    let (state, _dir, _other) = bench_state(n);
+    println!("P-C06 notes={n} library_built_ms={:.0}", bench_ms(built));
+    let search = |q: &str, extra: serde_json::Value| {
+        let mut params = serde_json::json!({ "q": q, "brief": true });
+        params
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let started = std::time::Instant::now();
+        let found = rt.block_on(crate::routes::notes::search_notes(
+            State(state.clone()),
+            Query(serde_json::from_value(params).unwrap()),
+        ));
+        assert!(found.is_ok());
+        bench_ms(started)
+    };
+    let mut one: Vec<f64> = (0..5)
+        .map(|_| {
+            *state.searched.lock().unwrap() = None;
+            search("queue", serde_json::json!({}))
+        })
+        .collect();
+    one.sort_by(f64::total_cmp);
+    println!(
+        "P-C06 notes={n} search_1_word_ms={:.1} profile={profile}",
+        one[2]
+    );
+    let long = BENCH_WORDS
+        .iter()
+        .cycle()
+        .take(9500)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(" ");
+    let long_ms = search(&long, serde_json::json!({}));
+    let find_ms = {
+        let store = state.store.lock().unwrap();
+        let started = std::time::Instant::now();
+        std::hint::black_box(store.find(&long).len());
+        let long_find = bench_ms(started);
+        let started = std::time::Instant::now();
+        std::hint::black_box(store.find("queue").len());
+        (long_find, bench_ms(started))
+    };
+    println!(
+        "P-C06 notes={n} store_find_9500_words_ms={:.1} store_find_1_word_ms={:.1} profile={profile}",
+        find_ms.0, find_ms.1
+    );
+    println!("P-C06 notes={n} search_9500_words_ms={long_ms:.1} profile={profile}");
+    *state.searched.lock().unwrap() = None;
+    let waiting = {
+        let other = state.clone();
+        let long = long.clone();
+        let searching = std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(crate::routes::notes::search_notes(
+                    State(other),
+                    Query(serde_json::from_value(serde_json::json!({ "q": long })).unwrap()),
+                ))
+                .is_ok()
+        });
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let mut longest = 0f64;
+        while !searching.is_finished() {
+            let started = std::time::Instant::now();
+            rt.block_on(state.read_store(|s| Ok(s.notes.len())))
+                .unwrap();
+            longest = longest.max(bench_ms(started));
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(searching.join().unwrap());
+        longest
+    };
+    search("queue", serde_json::json!({ "limit": 61 }));
+    let later = search("queue", serde_json::json!({ "offset": 61, "limit": 61 }));
+    println!(
+        "P-C06 notes={n} longest_read_behind_long_search_ms={waiting:.1} second_page_ms={later:.3} profile={profile}"
+    );
+    let chat = "chat-00000001";
+    crate::chats::save(
+        &state.chats,
+        chat,
+        crate::chats::Saving {
+            existed: false,
+            from: None,
+            title: String::new(),
+            refs: vec![],
+            messages: vec![serde_json::json!({ "role": "user", "text": "quiz me" })],
+        },
+        chrono::Utc::now(),
+    )
+    .unwrap();
+    for k in [10_000usize, 40_000] {
+        crate::review::reset(&state.chats);
+        let keys: Vec<String> = (0..k).map(|i| format!("{chat}:{i:016x}")).collect();
+        let started = std::time::Instant::now();
+        let added = crate::review::mark_reviewed(&state.chats, &keys).unwrap();
+        println!(
+            "P-C06 mark_reviewed keys={k} added={added} ms={:.1} profile={profile}",
+            bench_ms(started)
+        );
+    }
+}
+
+fn median_ms<R>(runs: usize, mut f: impl FnMut() -> R) -> f64 {
+    let mut times: Vec<f64> = (0..runs)
+        .map(|_| {
+            let started = std::time::Instant::now();
+            std::hint::black_box(f());
+            bench_ms(started)
+        })
+        .collect();
+    times.sort_by(f64::total_cmp);
+    times[times.len() / 2]
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn audit_p14_title_and_matching_work() {
+    let n: usize = std::env::var("LEO_BENCH_NOTES")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5000);
+    let (state, _dir, _other) = bench_state(n);
+    let store = state.store.lock().unwrap();
+    let store = &store.store;
+    let hit = store.notes[n / 2].title.clone();
+    let titles = crate::titles::Titles::default();
+    let lookup = |title: &str| titles.exact(store, title).map(|x| x.id.len());
+    lookup(&hit);
+    let lookup_miss = median_ms(51, || lookup("no such note title"));
+    let lookup_hit = median_ms(51, || lookup(&hit));
+    let sort = median_ms(11, || {
+        let mut notes: Vec<&leo_core::notes::Note> = store.notes.iter().collect();
+        crate::browse::order(&mut notes, Some("title")).unwrap();
+        notes.len()
+    });
+    let page: Vec<&leo_core::notes::Note> = store.notes.iter().take(1000).collect();
+    let excerpts = median_ms(101, || {
+        page.iter()
+            .map(|note| excerpt(&note.body, &[]).len())
+            .sum::<usize>()
+    });
+    println!(
+        "P-C12 notes={n} title_lookup_miss_ms={lookup_miss:.4} title_lookup_hit_ms={lookup_hit:.4} title_sort_ms={sort:.2} excerpt_1000_no_words_ms={excerpts:.3}"
+    );
+}
+
+fn held_back(state: &AppState) {
+    state.store.lock().unwrap().changes = Some(crate::store_refresh::Changes::delayed());
+}
+
+fn loaded(state: &AppState, text: &'static str) -> bool {
+    run(state.read_store(move |store| Ok(store.notes.iter().any(|note| note.body.contains(text)))))
+        .unwrap()
+}
+
+#[test]
+fn a_save_does_not_walk_while_the_watcher_is_quiet() {
+    let walks = |watcher: Option<bool>, forced: bool| {
+        let (state, _dir, ids) = state_with(&[("Local", ""), ("External", "")]);
+        let root = state.fresh().notes_dir.clone();
+        match watcher {
+            Some(_) => held_back(&state),
+            None => state.store.lock().unwrap().changes = None,
+        }
+        let path = root.join("External.md");
+        let mut text = std::fs::read_to_string(&path).unwrap();
+        text.push_str("Outside edit");
+        std::fs::write(&path, text).unwrap();
+        if forced {
+            state
+                .refresh_requested
+                .store(true, std::sync::atomic::Ordering::Release);
+        }
+        let local = ids[0].clone();
+        let read_first = run(state.with_store(move |store| {
+            let read = store.notes.iter().any(|n| n.body.contains("Outside edit"));
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(read)
+        }))
+        .unwrap();
+        usize::from(read_first)
+    };
+    let quiet = if cfg!(windows) { 1 } else { 0 };
+    assert_eq!(walks(Some(true), false), quiet);
+    assert_eq!(walks(None, false), 1);
+    assert_eq!(walks(Some(true), true), 1);
+}
+
+#[cfg(not(windows))]
+#[test]
+fn an_outside_edit_to_the_saved_note_just_before_the_save_becomes_a_conflict_copy() {
+    let (state, _dir, ids) = state_with(&[("Local", "")]);
+    let root = state.fresh().notes_dir.clone();
+    held_back(&state);
+    let path = root.join("Local.md");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\nOutside edit");
+    std::fs::write(&path, &text).unwrap();
+    let local = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
+    let copy = std::fs::read_dir(&root)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .find(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .contains("(conflict from leo)")
+        })
+        .expect("a conflict copy");
+    assert!(std::fs::read_to_string(copy.path())
+        .unwrap()
+        .contains("Saved in Leo"));
+    state.store.lock().unwrap().changes = None;
+    assert!(loaded(&state, "Outside edit"));
+    assert!(loaded(&state, "Saved in Leo"));
+}
+
+fn folders_on_disk(root: &std::path::Path) -> Vec<String> {
+    let text = std::fs::read_to_string(root.join("directories.json")).unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or_default()
+}
+
+fn folder_outside(root: &std::path::Path, change: impl FnOnce(&mut Vec<String>)) {
+    let mut list = folders_on_disk(root);
+    change(&mut list);
+    std::fs::write(
+        root.join("directories.json"),
+        serde_json::to_string_pretty(&list).unwrap(),
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_folder_added_outside_just_before_a_save_is_kept() {
+    for leo_first in [false, true] {
+        let (state, _dir, ids) = state_with(&[("Local", "")]);
+        let root = state.fresh().notes_dir.clone();
+        held_back(&state);
+        let local = ids[0].clone();
+        let outside_root = root.clone();
+        let add_outside = move || {
+            let root = &outside_root;
+            std::fs::create_dir_all(root.join("outside")).unwrap();
+            folder_outside(root, |list| list.push("outside".into()));
+        };
+        if !leo_first {
+            add_outside();
+        }
+        let add_outside = add_outside.clone();
+        run(state.with_store(move |store| {
+            store.create_dir("mine");
+            if leo_first {
+                add_outside();
+            }
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let disk = folders_on_disk(&root);
+        assert!(
+            disk.contains(&"outside".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        assert!(
+            disk.contains(&"mine".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        state.store.lock().unwrap().changes = None;
+        let shown = run(state.read_store(|store| Ok(store.dir_exists("outside")))).unwrap();
+        assert!(shown, "leo first={leo_first}");
+    }
+}
+
+#[test]
+fn a_folder_removed_outside_just_before_a_save_stays_removed() {
+    for leo_first in [false, true] {
+        let (state, _dir, ids) = state_with(&[("Local", "")]);
+        let root = state.fresh().notes_dir.clone();
+        run(state.with_store(|store| {
+            store.create_dir("gone");
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        assert!(folders_on_disk(&root).contains(&"gone".to_string()));
+        held_back(&state);
+        let local = ids[0].clone();
+        let outside_root = root.clone();
+        let remove_outside = move || {
+            let root = &outside_root;
+            let _ = std::fs::remove_dir_all(root.join("gone"));
+            folder_outside(root, |list| list.retain(|f| f != "gone"));
+        };
+        if !leo_first {
+            remove_outside();
+        }
+        let remove_outside = remove_outside.clone();
+        run(state.with_store(move |store| {
+            store.create_dir("mine");
+            if leo_first {
+                remove_outside();
+            }
+            store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let disk = folders_on_disk(&root);
+        assert!(
+            !disk.contains(&"gone".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        assert!(
+            disk.contains(&"mine".to_string()),
+            "leo first={leo_first}: {disk:?}"
+        );
+        state.store.lock().unwrap().changes = None;
+        let shown = run(state.read_store(|store| Ok(store.dir_exists("gone")))).unwrap();
+        assert!(!shown, "leo first={leo_first}");
+    }
+}
+
+#[test]
+#[ignore = "run on the Windows CI runner before the walk is skipped there"]
+fn a_burst_of_outside_edits_is_never_missed_by_the_watcher() {
+    let (state, _dir, ids) = state_with(&[("Local", "")]);
+    let root = state.fresh().notes_dir.clone();
+    state.store.lock().unwrap().changes = Some(crate::store_refresh::Changes::new(&root));
+    run(state.read_store(|_| Ok(()))).unwrap();
+    for i in 0..2_000 {
+        std::fs::write(root.join(format!("Burst {i}.md")), format!("burst {i}")).unwrap();
+    }
+    let local = ids[0].clone();
+    run(state.with_store(move |store| {
+        store.find_note_mut(&local).unwrap().body = "Saved in Leo".into();
+        store.save().unwrap();
+        Ok(())
+    }))
+    .unwrap();
+    let waited = std::time::Instant::now();
+    loop {
+        let count = run(state.read_store(|store| {
+            Ok(store
+                .notes
+                .iter()
+                .filter(|n| n.body.starts_with("burst "))
+                .count())
+        }))
+        .unwrap();
+        if count == 2_000 {
+            break;
+        }
+        assert!(
+            waited.elapsed() < std::time::Duration::from_secs(30),
+            "{count} of 2000 loaded"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn a_note_written_outside_into_a_folder_just_before_it_is_moved_or_trashed_is_not_lost() {
+    for trashing in [false, true] {
+        let (state, _dir, _) = state_with(&[]);
+        run(state.with_store(|store| {
+            store.create_dir("Course");
+            store.create_dir("Later");
+            store.create_note("Lecture", "", "Course").unwrap();
+            store.save().unwrap();
+            Ok(())
+        }))
+        .unwrap();
+        let root = state.fresh().notes_dir.clone();
+        held_back(&state);
+        std::fs::write(root.join("Course").join("Outside.md"), "Written outside").unwrap();
+        if trashing {
+            let body: crate::routes::trash::TrashMove =
+                serde_json::from_value(serde_json::json!({ "dirs": ["Course"] })).unwrap();
+            let _ = run(crate::routes::trash::move_to_trash(
+                State(state.clone()),
+                Json(body),
+            ))
+            .unwrap();
+        } else {
+            let body = crate::routes::notes::MoveDirBody {
+                from: "Course".into(),
+                into: "Later".into(),
+            };
+            let _ = run(crate::routes::notes::move_dir(
+                State(state.clone()),
+                Json(body),
+            ))
+            .unwrap();
+        }
+        state.store.lock().unwrap().changes = None;
+        let found = run(state.read_store(|store| {
+            Ok(store
+                .notes
+                .iter()
+                .find(|n| n.body.contains("Written outside"))
+                .map(|n| n.directory.clone()))
+        }))
+        .unwrap();
+        let trashed = std::fs::read_dir(root.join(".trash").join("Course"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .any(|e| {
+                std::fs::read_to_string(e.path()).is_ok_and(|t| t.contains("Written outside"))
+            });
+        if trashing {
+            assert!(found.is_some() || trashed, "the outside note was lost");
+        } else {
+            assert_eq!(
+                found.as_deref(),
+                Some("Later/Course"),
+                "the outside note moved with its folder"
+            );
+        }
+    }
 }

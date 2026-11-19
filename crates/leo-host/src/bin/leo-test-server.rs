@@ -38,7 +38,8 @@ fn main() -> Result<()> {
             Ok(leo_web::Reply::from(FAKE_ANSWER.to_string()))
         }));
     }
-    tokio::runtime::Runtime::new()?.block_on(async {
+    let runtime = tokio::runtime::Runtime::new()?;
+    let ended = runtime.block_on(async {
         let running = leo_web::start(
             leo_web::StartOptions {
                 port,
@@ -50,7 +51,9 @@ fn main() -> Result<()> {
         tokio::signal::ctrl_c().await?;
         running.stop().await;
         Ok(())
-    })
+    });
+    runtime.shutdown_timeout(std::time::Duration::from_secs(5));
+    ended
 }
 
 #[cfg(test)]

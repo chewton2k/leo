@@ -78,6 +78,51 @@ test('anchor: a short or missing side never attaches to unrelated text', () => {
   assert.equal(M.find('anything at all here', { quote: 'old words', prefix: '', suffix: '' }), null);
 });
 
+test('edited: an insert, a delete, a replace and no change', () => {
+  assert.deepEqual(M.edited('abcdef', 'abcXdef'), { from: 3, to: 3, by: 1 });
+  assert.deepEqual(M.edited('abcdef', 'abef'), { from: 2, to: 4, by: -2 });
+  assert.deepEqual(M.edited('abcdef', 'abXYef'), { from: 2, to: 4, by: 0 });
+  assert.deepEqual(M.edited('abcdef', 'abcdef'), { from: 6, to: 6, by: 0 });
+  assert.deepEqual(M.edited('aaa', 'aaaa'), { from: 3, to: 3, by: 1 });
+});
+
+test('carried: a place before the edit stays, one after it moves by the edit, one touching its context is found again', () => {
+  const t = { quote: 'quote', prefix: 'say ', suffix: ' now' };
+  const before = 'Here we say quote now and then more text follows here.';
+  const at = M.find(before, t);
+  const text = before.slice(at.from, at.to);
+  const late = `${before}!!`;
+  assert.deepEqual(M.carried(late, at, M.edited(before, late), text, t), at);
+  const early = `XX${before}`;
+  assert.deepEqual(M.carried(early, at, M.edited(before, early), text, t), { ...at, from: at.from + 2, to: at.to + 2 });
+  const touching = before.replace('say ', 'said ');
+  assert.equal(M.carried(touching, at, M.edited(before, touching), text, t), null);
+  const inside = before.replace('quote', 'quota');
+  assert.equal(M.carried(inside, at, M.edited(before, inside), text, t), null);
+  assert.deepEqual(M.carried(before, at, null, text, t), at);
+});
+
+test('carried: a surrogate pair typed before a place shifts it by two units', () => {
+  const t = { quote: 'quote', prefix: 'say ', suffix: ' now' };
+  const before = 'Start. Here we say quote now.';
+  const at = M.find(before, t);
+  const after = `\u{1F600}${before}`;
+  const moved = M.carried(after, at, M.edited(before, after), before.slice(at.from, at.to), t);
+  assert.deepEqual(moved, { ...at, from: at.from + 2, to: at.to + 2 });
+  assert.equal(after.slice(moved.from, moved.to), 'quote');
+});
+
+test("carried: a context-found place keeps how 'context' when shifted", () => {
+  const t = { quote, prefix: 'table,\nthen login ', suffix: ', I think?\n\nSessions last' };
+  const edited = source.replace('just checks if it matches', 'only compares the two');
+  const at = M.find(edited, t);
+  assert.equal(at.how, 'context');
+  const after = `New first line.\n${edited}`;
+  const moved = M.carried(after, at, M.edited(edited, after), edited.slice(at.from, at.to), t);
+  assert.equal(moved.how, 'context');
+  assert.equal(after.slice(moved.from, moved.to), 'only compares the two');
+});
+
 test('around gives the words beside a selection on its own line', () => {
   const text = 'same words\n\nsame words';
   assert.deepEqual(M.around(text, 'same words', 3), { prefix: 'same words\n\n', suffix: '' });
@@ -331,6 +376,65 @@ test('a dragged page width stops where the chosen margins still fit', () => {
   assert.equal(M.mostColumn({ width, setting: 'marks' }), Infinity);
   assert.equal(M.mostColumn({ width, setting: 'both', noteWidth: 'full' }), Infinity);
   assert.equal(M.mostColumn({ width, setting: 'right', panel: true }), Infinity);
+});
+
+const copies = 'alpha one. beta gamma. delta two. beta gamma. epsilon three.';
+
+test('anchor: two copies whose context matches neither are a guess on the first', () => {
+  const got = M.find(copies, { quote: 'beta gamma', prefix: 'zzzzzzzz yyyyyy ', suffix: ' qqqqqq wwwww' });
+  assert.equal(got.from, copies.indexOf('beta gamma'));
+  assert.equal(got.how, 'guess');
+});
+
+test('anchor: two copies, the context picks the second', () => {
+  const got = M.find(copies, { quote: 'beta gamma', prefix: 'delta two. ', suffix: '. epsilon three.' });
+  assert.equal(got.from, copies.lastIndexOf('beta gamma'));
+  assert.equal(got.how, 'exact');
+});
+
+test('anchor: one copy is exact whatever its context', () => {
+  const got = M.find('alpha one. beta gamma. delta two.', { quote: 'beta gamma', prefix: 'zzzzzzzz', suffix: 'qqqqqqqq' });
+  assert.deepEqual(got, { from: 11, to: 21, how: 'exact' });
+});
+
+test('anchor: two copies with the same context are a guess', () => {
+  const got = M.find('x beta gamma y. x beta gamma y.', { quote: 'beta gamma', prefix: 'x ', suffix: ' y.' });
+  assert.equal(got.from, 2);
+  assert.equal(got.how, 'guess');
+});
+
+test('anchor: an empty prefix confirms only a copy at the very start', () => {
+  const side = { quote: 'beta gamma', prefix: '', suffix: ' qqqqqq' };
+  assert.equal(M.find('beta gamma one. alpha beta gamma.', side).how, 'exact');
+  assert.equal(M.find('a beta gamma one. alpha beta gamma.', side).how, 'guess');
+});
+
+test('a kept note re-anchored from its found place survives a second edit beside it', () => {
+  const lead = 'The first paragraph is here and it is fairly long indeed.\n\n';
+  const trail = '\n\nThe closing paragraph follows and it is also fairly long.';
+  const passage = 'The quick brown fox jumps over the lazy dog near the river.';
+  const v0 = lead + passage + trail;
+  const anchor = { quote: passage, ...M.around(v0, passage) };
+  const edited = passage.replace('quick brown', 'slow grey');
+  const v1 = lead + edited + trail;
+  const first = M.find(v1, anchor);
+  assert.equal(first.how, 'context');
+  assert.equal(v1.slice(first.from, first.to), edited);
+  const found = v1.slice(first.from, first.to);
+  const v2 = v1.slice(0, first.from - 24) + 'X'.repeat(24) + found + 'Y'.repeat(24) + v1.slice(first.to + 24);
+  const resaved = { quote: found, ...M.contextAt(v1, first.from, first.to) };
+  const again = M.find(v2, resaved);
+  assert.equal(again.how, 'exact');
+  assert.equal(v2.slice(again.from, again.to), found);
+});
+
+test('contextAt takes the context of the copy it is given', () => {
+  const text = 'one before. beta gamma. two between. beta gamma. three after.';
+  const second = text.lastIndexOf('beta gamma');
+  const got = M.contextAt(text, second, second + 'beta gamma'.length);
+  assert.ok(got.prefix.endsWith('two between. '));
+  assert.ok(got.suffix.startsWith('. three after.'));
+  assert.notDeepEqual(got, M.around(text, 'beta gamma'));
 });
 
 for (const [name, fn] of cases) {

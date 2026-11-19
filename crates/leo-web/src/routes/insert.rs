@@ -7,11 +7,10 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde::Deserialize;
 
-use crate::routes::felix::Applied;
-use crate::routes::notes::{save, version_of, NoteResponse};
+use crate::routes::felix::change_body;
+use crate::routes::notes::save;
 use crate::AppState;
 
-pub(crate) const MOST_INSERT: usize = 200_000;
 const REMEMBERED: usize = 32;
 pub(crate) const MOST_REQUEST: usize = 64;
 
@@ -22,7 +21,10 @@ static CREATED: Done = Mutex::new(VecDeque::new());
 
 #[derive(Deserialize)]
 pub(crate) struct InsertBody {
+    #[serde(default)]
     text: String,
+    #[serde(default)]
+    job: Option<String>,
     #[serde(default)]
     line: Option<usize>,
     base: String,
@@ -92,9 +94,26 @@ pub(crate) fn remember_creation(scope: &str, request: &str, value: &serde_json::
 pub(crate) async fn insert_into_note(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<InsertBody>,
+    Json(mut body): Json<InsertBody>,
 ) -> Response {
-    if body.text.trim().is_empty() || body.text.chars().count() > MOST_INSERT {
+    if let Some(job) = body.job.as_deref() {
+        let section = state
+            .imports
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(job)
+            .filter(|job| job.state == "done")
+            .and_then(|job| job.section.clone());
+        let Some(section) = section else {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({ "error": "That upload is not there any more, so leo has nothing to add. Upload the file again." })),
+            )
+                .into_response();
+        };
+        body.text = section;
+    }
+    if body.text.trim().is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let request = requested(body.request);
@@ -105,17 +124,9 @@ pub(crate) async fn insert_into_note(
     let note_id = id.clone();
     let done = state
         .with_store(move |store| {
-            let note = store.find_note_mut(&note_id).ok_or(StatusCode::NOT_FOUND)?;
-            if version_of(note) != body.base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let next = inserted(&note.body, &body.text, body.line);
-            let before = std::mem::replace(&mut note.body, next);
-            note.updated_at = chrono::Utc::now();
-            let applied = Applied {
-                note: NoteResponse::from_note(note),
-                before,
-            };
+            let (applied, ()) = change_body(store, &note_id, Some(&body.base), |text| {
+                Ok((inserted(text, &body.text, body.line), ()))
+            })?;
             save(store)?;
             Ok(applied)
         })

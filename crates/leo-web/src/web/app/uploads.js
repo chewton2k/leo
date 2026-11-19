@@ -1,9 +1,7 @@
 const UPLOAD_ACCEPT = '.pdf,.docx,.pptx,.txt,.md,image/*';
-const UPLOAD_MOST = 90 * 1024 * 1024;
+const UPLOAD_PARALLEL = 2;
 let picked = [];
 let uploadPoll = 0;
-
-const size = (n) => (n > 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
 
 async function shrink(file) {
   if (!/^image\//.test(file.type) || file.type === 'image/gif') return { name: file.name, type: file.type, blob: file };
@@ -52,7 +50,7 @@ async function addPictures(s, files) {
   for (const [i, file] of list.entries()) {
     try {
       const ready = await pictureFor(file);
-      const saved = await api('/api/images', { method: 'POST', body: { name: pastedName(ready, i), data: await base64(ready.blob) } });
+      const saved = await putBody(`/api/pictures/${enc(pastedName(ready, i))}`, ready.blob);
       if (state.session !== s || !s.doc) return;
       s.doc.insert(`![${altFor(file.name)}](${saved.path})`);
       added += 1;
@@ -74,20 +72,26 @@ function choosePictures() {
   input.click();
 }
 
-function noteFields({ id, folders, here, most, before = '' }) {
+const UPLOAD_READS = 2000;
+
+globalThis.document?.addEventListener('input', (e) => {
+  if (typeof updateReadHint === 'function') updateReadHint(e.target.closest?.('[data-reads]'));
+});
+
+function noteFields({ id, folders, here, reads, before = '' }) {
   const options = ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
   return `<div class="note-fields">
     <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>${before}
     <p class="note-fields-optional">Optional</p>
     <label class="field">${ICON.note}<input id="${id}-title" placeholder="Title" aria-label="Title (optional)" autocomplete="off"></label>
-    <label class="field field-area"><textarea id="${id}-wants" rows="2" maxlength="${most}" aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>
+    <label class="field field-area"><textarea id="${id}-wants" rows="2"${reads ? ` data-reads="${reads}"` : ''} aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>${reads ? `\n    <p class="set-desc" id="${id}-wants-hint" hidden>Felix reads the first ${reads.toLocaleString('en')} characters of this.</p>` : ''}
   </div>`;
 }
 
 function dropChoice(files) {
   const list = [...files];
   const box = sheet(`<h3>What should leo do with these?</h3>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn plain" id="drop-make">Make notes from them</button><button class="btn primary" id="drop-ask">Ask Felix about these</button></div>`);
+    ${sheetButtons(['Ask Felix about these', 'id="drop-ask"'], { middle: '<button type="button" class="btn plain" id="drop-make">Make notes from them</button>' })}`);
   $('#drop-make', box).addEventListener('click', () => uploadSheet(list).catch(fail));
   $('#drop-ask', box).addEventListener('click', () => {
     closeSheet();
@@ -104,7 +108,7 @@ function drawPicked() {
   if (!list) return;
   const adding = addingToNote();
   list.innerHTML = picked
-    .map((f, i) => `<div class="upload-file">${/^image\//.test(f.type) ? ICON.image : ICON.note}<span class="grow">${esc(f.name)}<span class="sub">${size(f.size)}</span></span><button class="icon-btn" data-action="upload-drop" data-i="${i}" aria-label="Remove ${esc(f.name)}">${ICON.close}</button></div>`)
+    .map((f, i) => `<div class="upload-file">${/^image\//.test(f.type) ? ICON.image : ICON.note}<span class="grow">${esc(f.name)}<span class="sub">${speechBytes(f.size)}</span></span><button class="icon-btn" data-action="upload-drop" data-i="${i}" aria-label="Remove ${esc(f.name)}">${ICON.close}</button></div>`)
     .join('');
   $('#upload-go').disabled = !picked.length;
   $('#upload-pick-label').textContent = picked.length ? 'Add more files' : 'Choose, drop or paste files';
@@ -141,8 +145,8 @@ async function uploadSheet(files, into, { add = false } = {}) {
     <p class="hint upload-hint" id="upload-vision" hidden>Photos and scans need a writing AI that can see images.</p>
     ${where}
     <label class="source-keep" id="upload-together-row" hidden><span class="grow">Make one note from all of them</span>${settingsSwitch('id="upload-together"', false)}</label>
-    ${noteFields({ id: 'upload', folders: folders.map((d) => d.name), here, most: 2000 })}
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="upload-go" data-action="upload-go" disabled>Make the note</button></div>`);
+    ${noteFields({ id: 'upload', folders: folders.map((d) => d.name), here, reads: UPLOAD_READS })}
+    ${sheetButtons(['Make the note', 'id="upload-go" data-action="upload-go" disabled'])}`);
   $('#upload-together').addEventListener('change', drawPicked);
   $('#upload-where')?.addEventListener('change', drawPicked);
   $('#upload-input').addEventListener('change', (e) => {
@@ -165,6 +169,57 @@ async function uploadSheet(files, into, { add = false } = {}) {
   drawPicked();
 }
 
+async function sendFile(upload, item, ready) {
+  await putBody(`/api/import/files/${enc(upload)}/${enc(item)}?name=${enc(ready.name)}`, ready.blob);
+}
+
+async function putBody(url, blob) {
+  let response;
+  try {
+    response = await fetch(url, { method: 'PUT', credentials: 'same-origin', body: blob });
+  } catch (e) {
+    throw new Offline();
+  }
+  if (response.status === 401) throw new Locked();
+  if (response.status === 204) return null;
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (e) {
+    data = null;
+  }
+  if (response.ok) return data;
+  throw new Error((data && data.error) || `leo answered ${response.status}.`);
+}
+
+// Each file travels in its own request, two at a time, so nothing holds the
+// whole upload; a file that fails is named and the others still go on.
+async function sendFiles(upload, chosen) {
+  const results = new Array(chosen.length);
+  const unsent = [];
+  let next = 0;
+  let done = 0;
+  const lane = async () => {
+    while (next < chosen.length) {
+      const at = next++;
+      const file = chosen[at];
+      uploadProgress(`Sending ${file.name}`, done, chosen.length);
+      try {
+        const ready = await shrink(file);
+        const item = crypto.randomUUID();
+        await sendFile(upload, item, ready);
+        results[at] = { item, name: ready.name, type: ready.type };
+      } catch (e) {
+        if (e instanceof Locked || e instanceof Offline) throw e;
+        unsent.push(file.name);
+      }
+      done += 1;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(UPLOAD_PARALLEL, chosen.length) }, lane));
+  return { files: results.filter(Boolean), unsent };
+}
+
 const uploadClock = { since: 0, step: '', stepSince: 0, steps: [] };
 
 function uploadProgress(text, done, total) {
@@ -178,10 +233,9 @@ function uploadProgress(text, done, total) {
   const typical = uploadClock.steps.length ? uploadClock.steps.reduce((a, b) => a + b, 0) / uploadClock.steps.length : 20;
   const creep = 1 - Math.exp(-((now - uploadClock.stepSince) / 1000) / Math.max(3, typical));
   const bar = total ? Math.round(((Math.min(done, total) + (done < total ? 0.9 * creep : 0)) / total) * 100) : Math.round(60 * creep);
-  const took = Math.round((now - uploadClock.since) / 1000);
   const box = $('#upload-progress');
   if (!box) return;
-  box.innerHTML = `<div class="upload-step">${esc(text)} <span class="hint">· ${took >= 60 ? `${Math.floor(took / 60)}:${String(took % 60).padStart(2, '0')}` : `${took} s`}</span></div><div class="upload-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(6, Math.min(99, bar))}"><i style="width:${Math.max(6, Math.min(99, bar))}%"></i></div>`;
+  box.innerHTML = `<div class="upload-step">${esc(text)} <span class="hint">· ${leoChat.tookFor(now - uploadClock.since)}</span></div><div class="upload-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.max(6, Math.min(99, bar))}"><i style="width:${Math.max(6, Math.min(99, bar))}%"></i></div>`;
 }
 
 async function uploadGo() {
@@ -194,26 +248,26 @@ async function uploadGo() {
   const names = picked.map((f) => f.name);
   sheet(`<div class="upload-working">${felix.felix(72, 'idle think')}<h3>${into ? `Adding to “${esc(into.title)}”` : each ? `Making ${names.length} notes` : 'Making your note'}</h3><p>${esc(names.length === 1 ? names[0] : `${names.length} files`)}</p><div id="upload-progress"></div><p class="hint">This can take a minute for long files. You can close this; the note appears in the folder when it is ready.</p></div>`);
   Object.assign(uploadClock, { since: Date.now(), step: '', stepSince: Date.now(), steps: [] });
-  uploadProgress('Preparing the files', 0, 0);
-  const files = [];
-  let total = 0;
-  for (const file of picked) {
-    const ready = await shrink(file);
-    total += ready.blob.size;
-    if (total > UPLOAD_MOST) {
-      closeSheet();
-      return toast('That is too much to upload at once; send fewer files.', { bad: true });
-    }
-    files.push({ name: ready.name, type: ready.type, data: await base64(ready.blob) });
-  }
-  uploadProgress('Uploading', 0, 0);
-  let started;
+  const upload = crypto.randomUUID();
+  let sent;
   try {
-    started = await api('/api/import', { method: 'POST', body: { directory: dir, title: title || null, wants, files, each, into: into ? into.id : null } });
+    sent = await sendFiles(upload, picked);
   } catch (e) {
     closeSheet();
     throw e;
   }
+  if (!sent.files.length) {
+    closeSheet();
+    return toast(`${sent.unsent.join(', ')} could not be sent. Try again.`, { bad: true });
+  }
+  let started;
+  try {
+    started = await api('/api/import', { method: 'POST', body: { upload, directory: dir, title: title || null, wants, files: sent.files, each, into: into ? into.id : null } });
+  } catch (e) {
+    closeSheet();
+    throw e;
+  }
+  if (sent.unsent.length) toast(`${sent.unsent.join(', ')} could not be sent; leo is making notes from the rest.`, { bad: true });
   picked = [];
   watchUpload(started.id, dir, into);
   checkActivity();
@@ -228,6 +282,10 @@ function watchUpload(id, dir, into = null) {
     } catch (e) {
       return watchUpload(id, dir, into);
     }
+    if (job.state === 'waiting') {
+      uploadProgress('Waiting for another upload to finish…', 0, 0);
+      return watchUpload(id, dir, into);
+    }
     if (job.state === 'working') {
       uploadProgress(job.step, job.done, job.total);
       return watchUpload(id, dir, into);
@@ -235,7 +293,7 @@ function watchUpload(id, dir, into = null) {
     const open = $('.upload-working');
     if (job.state === 'failed') {
       if (open) {
-        open.innerHTML = `${felix.felix(72, 'droop')}<h3>${into ? 'The file could not be added' : 'The note could not be made'}</h3><p class="upload-error">${esc(job.error || 'Something went wrong.')}</p><div class="buttons"><button class="btn plain" data-action="close">Close</button>${noAi(job.error) ? '<a class="btn plain" href="#/settings/writing">Set up writing AI</a>' : ''}<button class="btn primary" data-action="upload"${into ? ' data-add="yes"' : ''}>Try again</button></div>`;
+        open.innerHTML = `${felix.felix(72, 'droop')}<h3>${into ? 'The file could not be added' : 'The note could not be made'}</h3><p class="upload-error">${esc(job.error || 'Something went wrong.')}</p>${sheetButtons(['Try again', `data-action="upload"${into ? ' data-add="yes"' : ''}`], { cancel: 'Close', middle: noAi(job.error) ? '<a class="btn plain" href="#/settings/writing">Set up writing AI</a>' : '' })}`;
       } else {
         toast(job.error || 'The upload failed.', { bad: true });
       }
@@ -244,7 +302,7 @@ function watchUpload(id, dir, into = null) {
     if (into) {
       if (open) closeSheet();
       if (job.error) toast(job.error, { bad: true });
-      await addSection(into, job.section || '').catch(fail);
+      await addSection(into, job.section_chars ? id : '').catch(fail);
       return;
     }
     const many = (job.notes || []).length > 1;
@@ -261,11 +319,12 @@ function watchUpload(id, dir, into = null) {
   }, 900);
 }
 
-// Puts an upload's section at the end of the note through the version-checked
+// Puts an upload's section (named by its job, so it never travels back through
+// the page) at the end of the note through the version-checked
 // insert (as Add to note does), using the open editor's own version after
 // saving its draft, so typing during the upload never makes a conflict copy.
-async function addSection(into, section) {
-  if (!section.trim()) return;
+async function addSection(into, job) {
+  if (!job) return;
   const isHere = () => state.view === 'note' && state.session && state.session.note && state.session.note.id === into.id;
   let done = null;
   try {
@@ -277,7 +336,7 @@ async function addSection(into, section) {
       }
       try {
         if (!base) base = (await api(`/api/notes/${enc(into.id)}`)).version;
-        done = await api(`/api/notes/${enc(into.id)}/insert`, { method: 'POST', body: { text: section, line: null, base } });
+        done = await api(`/api/notes/${enc(into.id)}/insert`, { method: 'POST', body: { job, line: null, base } });
       } catch (e) {
         if (e.status !== 409 || attempt) throw e;
       }

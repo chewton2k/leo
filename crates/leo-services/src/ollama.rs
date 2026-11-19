@@ -127,7 +127,7 @@ pub fn view(cfg: &Config) -> Value {
         .as_deref()
         .is_some_and(|url| crate::ai::loopback(url) && crate::health::port_open(url));
     let pulled = match (&url, running) {
-        (Some(url), true) => crate::config::choice::ollama_models(url),
+        (Some(url), true) => crate::config::choice::tags(url),
         _ => Vec::new(),
     };
     let machine = machine();

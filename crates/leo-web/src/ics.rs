@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use chrono::{
     DateTime, Datelike, Duration, Local, LocalResult, NaiveDate, NaiveDateTime, TimeZone, Utc,
@@ -6,10 +6,9 @@ use chrono::{
 };
 use serde::{Deserialize, Serialize};
 
-const MOST_EVENTS: usize = 20_000;
 const MOST_STEPS: usize = 5_000;
 const MOST_PERIODS: i64 = 1_000_000;
-const MOST_SHOWN: usize = 200;
+const MOST_LINE: usize = 1 << 20;
 const CONTEXT_CHARS: usize = 3_000;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,50 +61,94 @@ enum When {
     Day(NaiveDate),
 }
 
+#[cfg(test)]
 pub fn read(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Calendar {
-    let lines = unfolded(text);
-    let mut name = None;
-    let mut raws = Vec::new();
-    let mut current: Option<Raw> = None;
-    let mut depth = 0usize;
-    for line in &lines {
-        let Some((head, value)) = line.split_once(':') else {
-            continue;
-        };
+    read_from(|| Ok(std::io::Cursor::new(text.as_bytes())), from, to).unwrap_or_default()
+}
+
+pub fn read_from<R: std::io::BufRead>(
+    open: impl Fn() -> std::io::Result<R>,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> std::io::Result<Calendar> {
+    let mut moved = Exceptions::default();
+    let mut keys = Parser::new(true);
+    each_line(open()?, |line| {
+        if let Some(raw) = keys.line(line) {
+            moved.add(&raw);
+        }
+    })?;
+    let mut parser = Parser::new(false);
+    let mut expander = Expander::new(moved, from, to);
+    each_line(open()?, |line| {
+        if let Some(raw) = parser.line(line) {
+            expander.add(&raw);
+        }
+    })?;
+    Ok(Calendar {
+        name: parser.name,
+        events: expander.finish(),
+    })
+}
+
+struct Parser {
+    name: Option<String>,
+    current: Option<Raw>,
+    depth: usize,
+    keys_only: bool,
+}
+
+impl Parser {
+    fn new(keys_only: bool) -> Self {
+        Parser {
+            name: None,
+            current: None,
+            depth: 0,
+            keys_only,
+        }
+    }
+
+    fn line(&mut self, line: &str) -> Option<Raw> {
+        if self.keys_only
+            && !["UID", "RECURRENCE-ID", "BEGIN", "END"].iter().any(|k| {
+                line.as_bytes()
+                    .get(..k.len())
+                    .is_some_and(|start| start.eq_ignore_ascii_case(k.as_bytes()))
+            })
+        {
+            return None;
+        }
+        let (head, value) = line.split_once(':')?;
         let (key, params) = match head.split_once(';') {
             Some((k, p)) => (k.to_ascii_uppercase(), p),
             None => (head.to_ascii_uppercase(), ""),
         };
         match (key.as_str(), value.trim()) {
             ("BEGIN", "VEVENT") => {
-                if raws.len() >= MOST_EVENTS {
-                    break;
-                }
-                current = Some(Raw::default());
-                depth = 0;
-                continue;
+                self.current = Some(Raw::default());
+                self.depth = 0;
+                return None;
             }
-            ("END", "VEVENT") => {
-                if let Some(raw) = current.take() {
-                    raws.push(raw);
-                }
-                continue;
-            }
-            ("BEGIN", _) if current.is_some() => depth += 1,
-            ("END", _) if current.is_some() => depth = depth.saturating_sub(1),
-            ("X-WR-CALNAME", v) if current.is_none() && !v.is_empty() => {
-                name = Some(unescaped(v).chars().take(80).collect())
+            ("END", "VEVENT") => return self.current.take(),
+            ("BEGIN", _) if self.current.is_some() => self.depth += 1,
+            ("END", _) if self.current.is_some() => self.depth = self.depth.saturating_sub(1),
+            ("X-WR-CALNAME", v) if self.current.is_none() && !v.is_empty() => {
+                self.name = Some(unescaped(v).chars().take(80).collect())
             }
             _ => {}
         }
-        let Some(raw) = current.as_mut() else {
-            continue;
-        };
-        if depth > 0 {
-            continue;
+        let raw = self.current.as_mut()?;
+        if self.depth > 0 {
+            return None;
         }
         match key.as_str() {
             "UID" => raw.uid = value.trim().to_string(),
+            "RECURRENCE-ID" => match when(params, value) {
+                Some(When::At(t, _)) => raw.instead_of = Some(t),
+                Some(When::Day(d)) => raw.instead_of_day = Some(d),
+                None => {}
+            },
+            _ if self.keys_only => {}
             "SUMMARY" => raw.summary = unescaped(value),
             "DESCRIPTION" => raw.description = unescaped(value),
             "LOCATION" => raw.location = unescaped(value),
@@ -120,6 +163,9 @@ pub fn read(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Calendar {
             "RRULE" => raw.rule = Some(value.trim().to_string()),
             "EXDATE" => {
                 for v in value.split(',').take(MOST_STEPS) {
+                    if raw.except.len() + raw.except_days.len() >= MOST_PERIODS as usize {
+                        break;
+                    }
                     match when(params, v) {
                         Some(When::At(t, _)) => raw.except.push(t),
                         Some(When::Day(d)) => raw.except_days.push(d),
@@ -127,44 +173,73 @@ pub fn read(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Calendar {
                     }
                 }
             }
-            "RECURRENCE-ID" => match when(params, value) {
-                Some(When::At(t, _)) => raw.instead_of = Some(t),
-                Some(When::Day(d)) => raw.instead_of_day = Some(d),
-                None => {}
-            },
             "ATTENDEE" => {
                 if raw.attendees.len() < 100 {
                     if let Some(who) = person(params, value) {
-                        if declined(params) {
-                            continue;
+                        if !declined(params) {
+                            raw.attendees.push(who);
                         }
-                        raw.attendees.push(who);
                     }
                 }
             }
             "ORGANIZER" => raw.organizer = person(params, value).unwrap_or_default(),
             _ => {}
         }
-    }
-    Calendar {
-        name,
-        events: expand(&raws, from, to),
+        None
     }
 }
 
-fn unfolded(text: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    for line in text.lines() {
+fn each_line<R: std::io::BufRead>(mut input: R, mut each: impl FnMut(&str)) -> std::io::Result<()> {
+    let mut bytes = Vec::new();
+    let mut pending: Option<String> = None;
+    loop {
+        bytes.clear();
+        if !read_line(&mut input, &mut bytes)? {
+            break;
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let line = text.strip_suffix('\n').unwrap_or(&text);
         let line = line.strip_suffix('\r').unwrap_or(line);
         if let Some(rest) = line.strip_prefix(' ').or_else(|| line.strip_prefix('\t')) {
-            if let Some(last) = out.last_mut() {
-                last.push_str(rest);
+            if let Some(last) = pending.as_mut() {
+                let room = MOST_LINE.saturating_sub(last.len());
+                let end = (0..=rest.len().min(room))
+                    .rev()
+                    .find(|n| rest.is_char_boundary(*n))
+                    .unwrap_or(0);
+                last.push_str(&rest[..end]);
                 continue;
             }
         }
-        out.push(line.to_string());
+        if let Some(done) = pending.replace(line.to_string()) {
+            each(&done);
+        }
     }
-    out
+    if let Some(done) = pending {
+        each(&done);
+    }
+    Ok(())
+}
+
+fn read_line<R: std::io::BufRead>(input: &mut R, out: &mut Vec<u8>) -> std::io::Result<bool> {
+    let mut any = false;
+    loop {
+        let chunk = input.fill_buf()?;
+        if chunk.is_empty() {
+            return Ok(any);
+        }
+        any = true;
+        let (take, found) = match chunk.iter().position(|b| *b == b'\n') {
+            Some(at) => (at + 1, true),
+            None => (chunk.len(), false),
+        };
+        let room = MOST_LINE.saturating_sub(out.len());
+        out.extend_from_slice(&chunk[..take.min(room)]);
+        input.consume(take);
+        if found {
+            return Ok(true);
+        }
+    }
 }
 
 fn unescaped(value: &str) -> String {
@@ -261,14 +336,18 @@ fn duration(value: &str) -> Option<Duration> {
             unit => {
                 let n: i64 = number.parse().ok()?;
                 number.clear();
-                total += match (unit, in_time) {
-                    ('W', _) => Duration::weeks(n),
-                    ('D', _) => Duration::days(n),
-                    ('H', true) => Duration::hours(n),
-                    ('M', true) => Duration::minutes(n),
-                    ('S', true) => Duration::seconds(n),
+                let part = match (unit, in_time) {
+                    ('W', _) => Duration::try_weeks(n)?,
+                    ('D', _) => Duration::try_days(n)?,
+                    ('H', true) => Duration::try_hours(n)?,
+                    ('M', true) => Duration::try_minutes(n)?,
+                    ('S', true) => Duration::try_seconds(n)?,
                     _ => return None,
                 };
+                total = total.checked_add(&part)?;
+                if total > Duration::days(366) {
+                    return None;
+                }
             }
         }
     }
@@ -421,33 +500,68 @@ fn occurrences(
     out
 }
 
-fn most_shown(from: DateTime<Utc>, to: DateTime<Utc>) -> usize {
-    (MOST_SHOWN * ((to - from).num_days().max(0) as usize / 7 + 1)).min(MOST_EVENTS)
+#[derive(Default)]
+struct Exceptions {
+    at: HashSet<(String, DateTime<Utc>)>,
+    on: HashSet<(String, NaiveDate)>,
 }
 
-fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
-    let mut moved: HashMap<(String, DateTime<Utc>), &Raw> = HashMap::new();
-    for raw in raws.iter().filter(|r| r.instead_of.is_some()) {
-        moved.insert((raw.uid.clone(), raw.instead_of.unwrap_or(from)), raw);
+impl Exceptions {
+    fn add(&mut self, raw: &Raw) {
+        if let Some(t) = raw.instead_of {
+            self.at.insert((raw.uid.clone(), t));
+        }
+        if let Some(d) = raw.instead_of_day {
+            self.on.insert((raw.uid.clone(), d));
+        }
     }
-    let moved_days: HashSet<(String, NaiveDate)> = raws
-        .iter()
-        .filter_map(|r| r.instead_of_day.map(|d| (r.uid.clone(), d)))
-        .collect();
-    let mut seen_days: HashSet<(String, NaiveDate)> = HashSet::new();
-    let mut out = Vec::new();
-    let mut seen = HashSet::new();
-    let mut emit = |raw: &Raw, start: DateTime<Utc>, length: Duration, out: &mut Vec<Event>| {
-        let end = start + length;
-        if raw.cancelled || end < from || start > to || !seen.insert((raw.uid.clone(), start)) {
+}
+
+struct Expander {
+    moved: Exceptions,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    seen: HashSet<(String, DateTime<Utc>)>,
+    seen_days: HashSet<(String, NaiveDate)>,
+    out: Vec<Event>,
+}
+
+impl Expander {
+    fn new(moved: Exceptions, from: DateTime<Utc>, to: DateTime<Utc>) -> Self {
+        Expander {
+            moved,
+            from,
+            to,
+            seen: HashSet::new(),
+            seen_days: HashSet::new(),
+            out: Vec::new(),
+        }
+    }
+
+    fn finish(mut self) -> Vec<Event> {
+        self.out.sort_by_key(|e| e.start);
+        self.out
+    }
+
+    fn emit(&mut self, raw: &Raw, start: DateTime<Utc>, length: Duration) {
+        let Some(end) = start.checked_add_signed(length) else {
+            return;
+        };
+        if raw.cancelled
+            || end < self.from
+            || start > self.to
+            || !self.seen.insert((raw.uid.clone(), start))
+        {
             return;
         }
-        out.push(event_of(raw, start, end));
-    };
-    for raw in raws {
+        self.out.push(event_of(raw, start, end));
+    }
+
+    fn add(&mut self, raw: &Raw) {
+        let (from, to) = (self.from, self.to);
         if let Some(When::Day(first)) = raw.start {
             if raw.cancelled {
-                continue;
+                return;
             }
             let days = match (raw.end, raw.duration) {
                 (Some(When::Day(last)), _) if last > first => (last - first).num_days(),
@@ -478,7 +592,8 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
             let except_days: HashSet<&NaiveDate> = raw.except_days.iter().collect();
             for day in dates {
                 if raw.instead_of_day.is_none()
-                    && (except_days.contains(&day) || moved_days.contains(&(raw.uid.clone(), day)))
+                    && (except_days.contains(&day)
+                        || self.moved.on.contains(&(raw.uid.clone(), day)))
                 {
                     continue;
                 }
@@ -487,7 +602,7 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
                     continue;
                 };
                 let end = start + Duration::days(days);
-                if end < from || start > to || !seen_days.insert((raw.uid.clone(), day)) {
+                if end < from || start > to || !self.seen_days.insert((raw.uid.clone(), day)) {
                     continue;
                 }
                 let mut event = event_of(raw, start, end);
@@ -495,12 +610,12 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
                 event.all_day = true;
                 event.date = Some(day);
                 event.end_date = Some(day + Duration::days(days));
-                out.push(event);
+                self.out.push(event);
             }
-            continue;
+            return;
         }
         let Some(When::At(start, zone)) = raw.start else {
-            continue;
+            return;
         };
         let length = match (raw.end, raw.duration) {
             (Some(When::At(end, _)), _) if end > start => end - start,
@@ -508,34 +623,37 @@ fn expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
             _ => Duration::hours(1),
         };
         if raw.instead_of.is_some() {
-            emit(raw, start, length, &mut out);
-            continue;
+            self.emit(raw, start, length);
+            return;
         }
         let starts = match raw.rule.as_deref() {
             None => vec![start],
             Some(text) => match rule_of(text) {
-                Some(rule) => occurrences(start, zone, &rule, from - length, to),
+                Some(rule) => occurrences(
+                    start,
+                    zone,
+                    &rule,
+                    from.checked_sub_signed(length).unwrap_or(from),
+                    to,
+                ),
                 None => vec![start],
             },
         };
         let except: HashSet<&DateTime<Utc>> = raw.except.iter().collect();
         for at in starts {
-            if except.contains(&at) || moved.contains_key(&(raw.uid.clone(), at)) {
+            if except.contains(&at) || self.moved.at.contains(&(raw.uid.clone(), at)) {
                 continue;
             }
-            emit(raw, at, length, &mut out);
+            self.emit(raw, at, length);
         }
     }
-    out.sort_by_key(|e| e.start);
-    out.truncate(most_shown(from, to));
-    out
 }
 
 fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
     let title = if raw.summary.trim().is_empty() {
         "Untitled event".to_string()
     } else {
-        raw.summary.trim().chars().take(200).collect()
+        raw.summary.trim().to_owned()
     };
     let mut context = format!("Calendar event: {title}");
     if !raw.location.trim().is_empty() {
@@ -555,7 +673,7 @@ fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
         title,
         start,
         end,
-        location: raw.location.trim().chars().take(200).collect(),
+        location: raw.location.trim().to_owned(),
         context: context.chars().take(CONTEXT_CHARS).collect(),
         all_day: false,
         date: None,
@@ -567,6 +685,7 @@ fn event_of(raw: &Raw, start: DateTime<Utc>, end: DateTime<Utc>) -> Event {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn at(text: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(text)
@@ -666,6 +785,22 @@ END:VCALENDAR\r
     }
 
     #[test]
+    fn event_titles_and_locations_keep_the_whole_feed_values() {
+        let title = format!("{} Title end", "題".repeat(420));
+        let location = format!("{} Place end", "所".repeat(420));
+        let feed = format!(
+            "BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:long\r\nDTSTART:20261101T150000Z\r\nSUMMARY:{title}\r\nLOCATION:{location}\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+        );
+        let calendar = read(
+            &feed,
+            at("2026-11-01T00:00:00Z"),
+            at("2026-11-02T00:00:00Z"),
+        );
+        let event = &calendar.events[0];
+        assert_eq!((&event.title, &event.location), (&title, &location));
+    }
+
+    #[test]
     fn all_day_items_keep_their_dates_with_repeats_exclusions_and_moves() {
         let text = "BEGIN:VEVENT\nUID:final\nSUMMARY:Biology final\nDTSTART;VALUE=DATE:20261216\nDTEND;VALUE=DATE:20261217\nEND:VEVENT\nBEGIN:VEVENT\nUID:trip\nSUMMARY:Field trip\nDTSTART;VALUE=DATE:20261203\nDTEND;VALUE=DATE:20261205\nEND:VEVENT\nBEGIN:VEVENT\nUID:hw\nSUMMARY:Homework due\nDTSTART;VALUE=DATE:20261202\nRRULE:FREQ=WEEKLY;COUNT=3\nEXDATE;VALUE=DATE:20261209\nEND:VEVENT\nBEGIN:VEVENT\nUID:hw\nRECURRENCE-ID;VALUE=DATE:20261216\nSUMMARY:Homework due (moved)\nDTSTART;VALUE=DATE:20261217\nEND:VEVENT\nBEGIN:VEVENT\nUID:zone\nSUMMARY:Somewhere\nDTSTART;TZID=Not/AZone:20261210T090000\nEND:VEVENT\n";
         let cal = read(text, at("2026-12-01T00:00:00Z"), at("2026-12-31T00:00:00Z"));
@@ -732,10 +867,7 @@ END:VCALENDAR\r
             at("2026-10-01T00:00:00Z"),
             at("2026-12-31T00:00:00Z"),
         );
-        assert_eq!(
-            cal.events.len(),
-            most_shown(at("2026-10-01T00:00:00Z"), at("2026-12-31T00:00:00Z"))
-        );
+        assert_eq!(cal.events.len(), 30_000);
         let daily = "BEGIN:VEVENT\nUID:d\nDTSTART:19000101T160000Z\nRRULE:FREQ=DAILY\nEND:VEVENT";
         assert_eq!(
             read(
@@ -830,5 +962,441 @@ END:VCALENDAR\r
         );
         assert!(began.elapsed() < std::time::Duration::from_secs(5));
         assert!(!cal.events.is_empty());
+    }
+
+    fn reads_without_panic(duration: &str) -> Result<usize, String> {
+        let feed = format!("BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:a\nDTSTART:20260101T100000Z\nDURATION:{duration}\nEND:VEVENT\nEND:VCALENDAR");
+        let from = at("2025-12-01T00:00:00Z");
+        let to = at("2026-02-01T00:00:00Z");
+        std::panic::catch_unwind(|| read(&feed, from, to).events.len()).map_err(|e| {
+            e.downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default()
+        })
+    }
+
+    #[test]
+    fn a_huge_week_count_does_not_panic() {
+        let read = reads_without_panic("P99999999999999999W");
+        assert!(read.is_ok(), "the reader panicked: {read:?}");
+    }
+
+    #[test]
+    fn a_huge_day_count_on_a_timed_event_does_not_panic() {
+        let read = reads_without_panic("P300000000D");
+        assert!(read.is_ok(), "the reader panicked: {read:?}");
+    }
+
+    #[test]
+    fn a_huge_duration_gives_the_event_its_default_length() {
+        assert_eq!(reads_without_panic("P300000000D"), Ok(1));
+        assert_eq!(duration("P2D"), Some(Duration::days(2)));
+    }
+
+    fn lines_of(events: std::ops::Range<usize>, day: impl Fn(usize) -> String) -> String {
+        events
+            .map(|i| {
+                format!(
+                    "BEGIN:VEVENT\nUID:e{i}\nSUMMARY:Meeting {i}\nDTSTART:{}\nDTEND:{}\nEND:VEVENT\n",
+                    day(i),
+                    day(i).replace("0000Z", "3000Z")
+                )
+            })
+            .collect()
+    }
+
+    struct Lazy {
+        next: usize,
+        total: usize,
+        pending: Vec<u8>,
+        at: usize,
+        most_asked: std::rc::Rc<std::cell::Cell<usize>>,
+        day: fn(usize) -> String,
+    }
+
+    impl std::io::Read for Lazy {
+        fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+            self.most_asked.set(self.most_asked.get().max(out.len()));
+            if self.at >= self.pending.len() {
+                if self.next >= self.total {
+                    return Ok(0);
+                }
+                self.pending = lines_of(self.next..self.next + 1, self.day).into_bytes();
+                self.next += 1;
+                self.at = 0;
+            }
+            let n = out.len().min(self.pending.len() - self.at).min(4096);
+            out[..n].copy_from_slice(&self.pending[self.at..self.at + n]);
+            self.at += n;
+            Ok(n)
+        }
+    }
+
+    fn scattered(i: usize) -> String {
+        if i % 100 < 3 {
+            format!("202611{:02}T{:02}0000Z", 2 + i % 5, i % 20)
+        } else {
+            format!("2026{:02}{:02}T{:02}0000Z", 1 + i % 9, 1 + i % 27, i % 20)
+        }
+    }
+
+    #[test]
+    fn every_event_in_the_window_is_returned() {
+        let total = 25_000;
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let cal = read_from(
+            || {
+                Ok(std::io::BufReader::new(Lazy {
+                    next: 0,
+                    total,
+                    pending: Vec::new(),
+                    at: 0,
+                    most_asked: asked.clone(),
+                    day: scattered,
+                }))
+            },
+            at("2026-11-02T00:00:00Z"),
+            at("2026-11-08T00:00:00Z"),
+        )
+        .unwrap();
+        assert_eq!(cal.events.len(), 750);
+        assert!(
+            cal.events
+                .iter()
+                .all(|e| e.start >= at("2026-11-02T00:00:00Z")
+                    && e.start < at("2026-11-08T00:00:00Z"))
+        );
+        assert!(
+            asked.get() <= 64 * 1024,
+            "the reader was asked for {} bytes at once",
+            asked.get()
+        );
+    }
+
+    #[test]
+    fn a_week_with_three_hundred_events_returns_three_hundred() {
+        let text = lines_of(0..300, |i| {
+            format!("202611{:02}T{:02}0000Z", 2 + i % 5, i % 20)
+        });
+        let cal = read(
+            &text,
+            at("2026-11-02T00:00:00Z"),
+            at("2026-11-08T00:00:00Z"),
+        );
+        assert_eq!(cal.events.len(), 300);
+    }
+
+    #[test]
+    fn a_feed_is_read_without_holding_it() {
+        let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+        let cal = read_from(
+            || {
+                Ok(std::io::BufReader::with_capacity(
+                    4096,
+                    Lazy {
+                        next: 0,
+                        total: 30_000,
+                        pending: Vec::new(),
+                        at: 0,
+                        most_asked: asked.clone(),
+                        day: |i| {
+                            format!("2026{:02}{:02}T{:02}0000Z", 1 + i % 9, 1 + i % 27, i % 20)
+                        },
+                    },
+                ))
+            },
+            at("2026-01-01T00:00:00Z"),
+            at("2026-01-02T00:00:00Z"),
+        )
+        .unwrap();
+        assert!(!cal.events.is_empty());
+        assert_eq!(asked.get(), 4096);
+    }
+
+    #[test]
+    fn one_enormous_line_is_cut_at_the_bound_and_the_events_around_it_are_kept() {
+        let huge = "x".repeat(3 * MOST_LINE);
+        let text = format!(
+            "BEGIN:VEVENT\nUID:a\nSUMMARY:Before\nDTSTART:20261102T100000Z\nDESCRIPTION:{huge}\n  {huge}\nEND:VEVENT\nBEGIN:VEVENT\nUID:b\nSUMMARY:After\nDTSTART:20261103T100000Z\nEND:VEVENT\n"
+        );
+        let cal = read(
+            &text,
+            at("2026-11-01T00:00:00Z"),
+            at("2026-11-08T00:00:00Z"),
+        );
+        let titles: Vec<&str> = cal.events.iter().map(|e| e.title.as_str()).collect();
+        assert_eq!(titles, ["Before", "After"]);
+    }
+
+    fn raws_of(text: &str) -> Vec<Raw> {
+        let mut parser = Parser::new(false);
+        let mut raws = Vec::new();
+        each_line(std::io::Cursor::new(text.as_bytes()), |line| {
+            raws.extend(parser.line(line));
+        })
+        .unwrap();
+        raws
+    }
+
+    fn ordered(mut events: Vec<Event>) -> Vec<(DateTime<Utc>, String)> {
+        events.sort_by_key(|e| (e.start, e.id.clone()));
+        events.into_iter().map(|e| (e.start, e.title)).collect()
+    }
+
+    fn same_as_whole_feed(text: &str, from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
+        let streamed = read(text, from, to).events;
+        let whole = whole_feed_expand(&raws_of(text), from, to);
+        assert_eq!(ordered(streamed.clone()), ordered(whole));
+        streamed
+    }
+
+    fn whole_feed_expand(raws: &[Raw], from: DateTime<Utc>, to: DateTime<Utc>) -> Vec<Event> {
+        let mut moved: HashMap<(String, DateTime<Utc>), &Raw> = HashMap::new();
+        for raw in raws.iter().filter(|r| r.instead_of.is_some()) {
+            moved.insert((raw.uid.clone(), raw.instead_of.unwrap_or(from)), raw);
+        }
+        let moved_days: HashSet<(String, NaiveDate)> = raws
+            .iter()
+            .filter_map(|r| r.instead_of_day.map(|d| (r.uid.clone(), d)))
+            .collect();
+        let mut seen_days: HashSet<(String, NaiveDate)> = HashSet::new();
+        let mut out = Vec::new();
+        let mut seen = HashSet::new();
+        let mut emit = |raw: &Raw, start: DateTime<Utc>, length: Duration, out: &mut Vec<Event>| {
+            let Some(end) = start.checked_add_signed(length) else {
+                return;
+            };
+            if raw.cancelled || end < from || start > to || !seen.insert((raw.uid.clone(), start)) {
+                return;
+            }
+            out.push(event_of(raw, start, end));
+        };
+        for raw in raws {
+            if let Some(When::Day(first)) = raw.start {
+                if raw.cancelled {
+                    continue;
+                }
+                let days = match (raw.end, raw.duration) {
+                    (Some(When::Day(last)), _) if last > first => (last - first).num_days(),
+                    (_, Some(d)) if d.num_days() > 0 => d.num_days(),
+                    _ => 1,
+                }
+                .min(366);
+                let dates: Vec<NaiveDate> = if raw.instead_of_day.is_some() {
+                    vec![first]
+                } else {
+                    match raw.rule.as_deref().and_then(rule_of) {
+                        Some(rule) => match first.and_hms_opt(12, 0, 0) {
+                            Some(noon) => occurrences(
+                                Utc.from_utc_datetime(&noon),
+                                Some(chrono_tz::UTC),
+                                &rule,
+                                from - Duration::days(days),
+                                to + Duration::days(1),
+                            )
+                            .into_iter()
+                            .map(|t| t.date_naive())
+                            .collect(),
+                            None => vec![first],
+                        },
+                        None => vec![first],
+                    }
+                };
+                let except_days: HashSet<&NaiveDate> = raw.except_days.iter().collect();
+                for day in dates {
+                    if raw.instead_of_day.is_none()
+                        && (except_days.contains(&day)
+                            || moved_days.contains(&(raw.uid.clone(), day)))
+                    {
+                        continue;
+                    }
+                    let Some(start) = day.and_hms_opt(0, 0, 0).and_then(|t| local_to_utc(t, None))
+                    else {
+                        continue;
+                    };
+                    let end = start + Duration::days(days);
+                    if end < from || start > to || !seen_days.insert((raw.uid.clone(), day)) {
+                        continue;
+                    }
+                    let mut event = event_of(raw, start, end);
+                    event.id = format!("{}@{}", raw.uid, day.format("%Y%m%d"));
+                    event.all_day = true;
+                    event.date = Some(day);
+                    event.end_date = Some(day + Duration::days(days));
+                    out.push(event);
+                }
+                continue;
+            }
+            let Some(When::At(start, zone)) = raw.start else {
+                continue;
+            };
+            let length = match (raw.end, raw.duration) {
+                (Some(When::At(end, _)), _) if end > start => end - start,
+                (_, Some(d)) if d > Duration::zero() => d,
+                _ => Duration::hours(1),
+            };
+            if raw.instead_of.is_some() {
+                emit(raw, start, length, &mut out);
+                continue;
+            }
+            let starts = match raw.rule.as_deref() {
+                None => vec![start],
+                Some(text) => match rule_of(text) {
+                    Some(rule) => occurrences(
+                        start,
+                        zone,
+                        &rule,
+                        from.checked_sub_signed(length).unwrap_or(from),
+                        to,
+                    ),
+                    None => vec![start],
+                },
+            };
+            let except: HashSet<&DateTime<Utc>> = raw.except.iter().collect();
+            for at in starts {
+                if except.contains(&at) || moved.contains_key(&(raw.uid.clone(), at)) {
+                    continue;
+                }
+                emit(raw, at, length, &mut out);
+            }
+        }
+        out.sort_by_key(|e| e.start);
+        out
+    }
+
+    fn series(timed: bool) -> String {
+        if timed {
+            "BEGIN:VEVENT\nUID:s\nSUMMARY:Series\nDTSTART:20261102T100000Z\nDTEND:20261102T110000Z\nRRULE:FREQ=DAILY;INTERVAL=2\nEND:VEVENT\n".into()
+        } else {
+            "BEGIN:VEVENT\nUID:s\nSUMMARY:Series\nDTSTART;VALUE=DATE:20261102\nRRULE:FREQ=DAILY;INTERVAL=2\nEND:VEVENT\n".into()
+        }
+    }
+
+    fn exception(timed: bool, original: &str, now: Option<&str>, cancelled: bool) -> String {
+        let (key, start) = if timed {
+            (
+                format!("RECURRENCE-ID:{original}T100000Z"),
+                now.map(|d| format!("DTSTART:{d}T150000Z\nDTEND:{d}T160000Z")),
+            )
+        } else {
+            (
+                format!("RECURRENCE-ID;VALUE=DATE:{original}"),
+                now.map(|d| format!("DTSTART;VALUE=DATE:{d}")),
+            )
+        };
+        let start = start.unwrap_or_else(|| {
+            if timed {
+                format!("DTSTART:{original}T100000Z")
+            } else {
+                format!("DTSTART;VALUE=DATE:{original}")
+            }
+        });
+        let status = if cancelled { "STATUS:CANCELLED\n" } else { "" };
+        format!("BEGIN:VEVENT\nUID:s\nSUMMARY:Moved\n{key}\n{start}\n{status}END:VEVENT\n")
+    }
+
+    #[test]
+    fn exceptions_apply_wherever_they_sit_in_the_feed() {
+        let from = at("2026-11-02T00:00:00Z");
+        let to = at("2026-11-08T00:00:00Z");
+        for timed in [true, false] {
+            let plain = same_as_whole_feed(&series(timed), from, to).len();
+            let day = |n: u32| format!("202611{n:02}");
+            let cases = [
+                ("cancelled", exception(timed, &day(4), None, true), -1),
+                (
+                    "moved inside",
+                    exception(timed, &day(4), Some(&day(5)), false),
+                    0,
+                ),
+                (
+                    "moved out",
+                    exception(timed, &day(4), Some("20261220"), false),
+                    -1,
+                ),
+                (
+                    "moved into",
+                    exception(timed, "20261216", Some(&day(5)), false),
+                    1,
+                ),
+            ];
+            for (name, exception, change) in cases {
+                let before = format!(
+                    "BEGIN:VCALENDAR\n{exception}{}END:VCALENDAR\n",
+                    series(timed)
+                );
+                let after = format!(
+                    "BEGIN:VCALENDAR\n{}{exception}END:VCALENDAR\n",
+                    series(timed)
+                );
+                let a = same_as_whole_feed(&before, from, to);
+                let b = same_as_whole_feed(&after, from, to);
+                assert_eq!(ordered(a.clone()), ordered(b), "{name} timed={timed}");
+                assert_eq!(
+                    a.len() as i64,
+                    plain as i64 + change,
+                    "{name} timed={timed}"
+                );
+            }
+        }
+    }
+
+    fn write_feed(path: &std::path::Path, events: usize) {
+        use std::io::Write;
+        let mut out = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
+        out.write_all(b"BEGIN:VCALENDAR\r\nX-WR-CALNAME:Big\r\n")
+            .unwrap();
+        let first = at("2026-01-01T00:00:00Z");
+        for i in 0..events {
+            let start = first + Duration::minutes(i as i64 * 10);
+            write!(
+                out,
+                "BEGIN:VEVENT\r\nUID:e{i}\r\nSUMMARY:Meeting {i}\r\nDTSTART:{}\r\nDTEND:{}\r\nLOCATION:Room {}\r\nDESCRIPTION:Agenda for meeting {i}: review the notes, assign owners and agree what is due before the next one. Bring questions.\r\nEND:VEVENT\r\n",
+                start.format("%Y%m%dT%H%M%SZ"),
+                (start + Duration::minutes(30)).format("%Y%m%dT%H%M%SZ"),
+                i % 40
+            )
+            .unwrap();
+        }
+        out.write_all(b"END:VCALENDAR\r\n").unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_a_week_of_a_big_feed() {
+        let megabytes: usize = std::env::var("LEO_BENCH_MB")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.ics");
+        let events = megabytes * 4_000;
+        write_feed(&path, events);
+        let size = std::fs::metadata(&path).unwrap().len();
+        let first = at("2026-01-01T00:00:00Z");
+        let last = first + Duration::minutes(events as i64 * 10);
+        for (name, from) in [
+            ("first week", first + Duration::days(7)),
+            ("last week", last - Duration::days(7)),
+        ] {
+            let began = std::time::Instant::now();
+            let shown = read_week(&path, from);
+            println!(
+                "BENCH {megabytes} MB feed ({size} bytes, {events} events), {name}: {shown} shown, {:?}",
+                began.elapsed()
+            );
+        }
+    }
+
+    fn read_week(path: &std::path::Path, from: DateTime<Utc>) -> usize {
+        read_from(
+            || leo_core::paths::open_regular(path).map(std::io::BufReader::new),
+            from,
+            from + Duration::days(7),
+        )
+        .unwrap()
+        .events
+        .len()
     }
 }

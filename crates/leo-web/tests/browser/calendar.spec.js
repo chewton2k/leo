@@ -44,7 +44,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     class Locked extends Error {}
     let seq=0,state={view:null};
     const chrome=()=>{}, stillMotion=()=>true, rel=()=>'just now', noteHash=id=>'#/n/'+id;
-    var tasksWin={revision:0,tasks:null};
+    var tasksWin={revision:0,tasks:null};const TASKS_PAGE=500;
     const drawTasksWindow=()=>{}, loadTasksWindow=async()=>{}, finishTaskInWindow=()=>{};
     window.toasts=[];
     function toast(message,{action,run,bad}={}){window.toasts.push({message,bad:Boolean(bad)});document.querySelector('.toast')?.remove();const el=document.createElement('div');el.className='toast';el.innerHTML='<span>'+esc(message)+'</span>'+(action?'<button>'+esc(action)+'</button>':'');if(action)el.querySelector('button').onclick=()=>{el.remove();run();};document.body.appendChild(el);}
@@ -61,7 +61,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
       if(window.failNext&&method!=='GET'){const e=new Error(window.failNext);window.failNext=null;throw e;}
       let m;
       if(url.startsWith('/api/schedule')&&window.failSchedule){window.failSchedule=false;throw new Error('offline');}
-      if(url.startsWith('/api/schedule'))return {connected:true,calendars:[{id:'c1',name:'School'}],synced:new Date().toISOString(),refreshing:false,events:structuredClone(db.events),tasks:structuredClone(db.tasks)};
+      if(url.startsWith('/api/schedule'))return {connected:true,calendars:[{id:'c1',name:'School'}],synced:new Date().toISOString(),refreshing:false,events:structuredClone(db.events),tasks:structuredClone(db.tasks),window:[],total:db.tasks.length};
       if(url==='/api/calendar/refresh')return null;
       if(url==='/api/tasks'&&method==='POST'){const t={id:'task-made'+(++made),source:'leo',title:body.title,description:'',kind:body.kind||'other',done:false,date:body.date||null,time:hms(body.time),end:body.time?hms(body.end):null,note:null,found:true,promoted:false};db.tasks.push(t);return structuredClone(t);}
       if((m=url.match(/^\\/api\\/tasks\\/([^/]+)$/))){
@@ -272,6 +272,53 @@ test('the calendar status stays quiet while calendars are fine and offers Retry 
     const add = page.locator('.cal-head [data-action="task-new"]');
     await expect(add).not.toHaveClass(/primary/);
     await expect(add).toHaveClass(/cal-new/);
+  });
+});
+
+test('the task sidebar shows fifty earlier tasks and reveals more a page at a time', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(async () => {
+      for (let i = 0; i < 120; i++) window.db.tasks.push({ id: 'old-' + i, source: 'leo', title: 'Old task ' + i, description: '', kind: 'other', done: false, date: '2026-10-' + String(1 + (i % 28)).padStart(2, '0'), time: null, end: null, note: null, found: true, promoted: false });
+      await loadSchedule();
+    });
+    const rows = page.locator('.cal-tray-list').first().locator('.cal-tray-row');
+    await expect(rows).toHaveCount(50);
+    await page.locator('.cal-tray-more').click();
+    await expect(rows).toHaveCount(100);
+    await page.locator('.cal-tray-more').click();
+    await expect(rows).toHaveCount(121);
+    await expect(page.locator('.cal-tray-more')).toHaveCount(0);
+  });
+});
+
+test('the Type row is one markup for the peek, the add sheet and the edit sheet', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const row = (selector) => page.locator(selector).evaluate((box) => ({
+      kinds: box.className,
+      buttons: [...box.querySelectorAll('button')].map((b) => [b.type, b.className.replace(' on', ''), b.dataset.kind, b.textContent].join('|')),
+      on: [...box.querySelectorAll('button.on')].map((b) => b.getAttribute('aria-pressed')),
+      pressed: box.querySelectorAll('[aria-pressed="true"]').length,
+    }));
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    const peek = await row('#cal-peek-kinds');
+    await page.locator('.cal-name').click();
+    await page.keyboard.press('Escape');
+    await page.evaluate(() => newTaskSheet());
+    await expect(page.locator('#task-kinds')).toBeVisible();
+    const add = await row('#task-kinds');
+    await page.evaluate(() => closeSheet());
+    await page.evaluate(() => taskSheet('task-lab'));
+    await expect(page.locator('#task-kinds')).toBeVisible();
+    const edit = await row('#task-kinds');
+    for (const found of [peek, add, edit]) {
+      expect(found.buttons).toHaveLength(6);
+      expect(found.on).toEqual(['true']);
+      expect(found.pressed).toBe(1);
+    }
+    expect(add.buttons).toEqual(peek.buttons);
+    expect(edit.buttons).toEqual(peek.buttons);
+    expect(add.kinds).toBe(peek.kinds);
+    expect(edit.kinds).toBe(peek.kinds);
   });
 });
 
@@ -718,7 +765,9 @@ test('task boxes are drawn marks whose variant follows the task and survives a r
     await page.evaluate(() => drawCalendar());
     expect(await marks()).toEqual(before);
     const box = await page.locator('#cal-side .cal-check').first().boundingBox();
-    expect(Math.max(box.width, box.height)).toBeLessThanOrEqual(14);
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(24);
+    const hit = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.classList.contains('cal-check'), { x: box.x + box.width / 2 + 10, y: box.y + box.height / 2 });
+    expect(hit).toBe(true);
   }, { width: 1360 });
 });
 
@@ -779,6 +828,35 @@ test('larger month tasks keep every preview and the more action inside their day
     await cell.getByRole('button', { name: '3 more' }).click();
     await expect(page.locator('.cal-dayhead')).toHaveCount(1);
     await expect(page.locator('.cal-item[data-kind="task"]')).toHaveCount(5);
+  });
+});
+
+test("month view's more link and task times use the calendar's own styles", async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    await page.evaluate(() => {
+      const task = window.db.tasks.find(task => task.id === 'task-lab');
+      for (let index = 0; index < 4; index++) window.db.tasks.push({ ...task, id: 'month-task-' + index, title: 'Additional homework ' + index });
+    });
+    await page.locator('.cal-views [data-view="month"]').click();
+    await settled(page);
+    const look = await page.evaluate(() => {
+      const size = (el) => getComputedStyle(el).fontSize;
+      const probe = document.createElement('span');
+      probe.style.fontSize = 'var(--fs-xs)';
+      document.body.append(probe);
+      const xs = getComputedStyle(probe).fontSize;
+      probe.remove();
+      return {
+        morePad: getComputedStyle(document.querySelector('.cal-cell .cal-more')).paddingTop,
+        subs: [...document.querySelectorAll('.cal-cell .cal-sub')].map(size),
+        xs,
+        name: getComputedStyle(document.querySelector('.cal-name')).fontWeight,
+      };
+    });
+    expect(look.morePad).toBe('0px');
+    expect(look.subs.length).toBeGreaterThan(0);
+    for (const size of look.subs) expect(size).toBe(look.xs);
+    expect(look.name).toBe('650');
   });
 });
 

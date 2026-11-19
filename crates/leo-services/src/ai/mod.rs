@@ -23,6 +23,12 @@ pub fn tidy_rooms() {
     tidy_rooms_in(&std::env::temp_dir());
 }
 
+pub(crate) const WRITING_ROOM: &str = "leo-writing-";
+pub(crate) const USAGE_ROOM: &str = "leo-usage-";
+pub(crate) const IMPORT_ROOM: &str = "leo-import-";
+pub const DICTATION_ROOM: &str = "leo-dictation-";
+pub const ROOM_PREFIXES: &[&str] = &[WRITING_ROOM, USAGE_ROOM, IMPORT_ROOM, DICTATION_ROOM];
+
 fn tidy_rooms_in(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -30,11 +36,20 @@ fn tidy_rooms_in(dir: &std::path::Path) {
     for entry in entries.flatten() {
         let name = entry.file_name();
         let name = name.to_string_lossy();
-        if (name.starts_with("leo-writing-") || name.starts_with("leo-usage-"))
-            && entry.file_type().is_ok_and(|kind| kind.is_dir())
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        let room = ROOM_PREFIXES.iter().any(|p| name.starts_with(p)) && kind.is_dir();
+        let helper =
+            name.starts_with("leo-sign-in-") && name.ends_with(".command") && kind.is_file();
+        if (room || helper)
             && crate::providers::older_than(&entry, std::time::Duration::from_secs(86_400))
         {
-            let _ = std::fs::remove_dir_all(entry.path());
+            let _ = if room {
+                std::fs::remove_dir_all(entry.path())
+            } else {
+                std::fs::remove_file(entry.path())
+            };
         }
     }
 }
@@ -96,26 +111,27 @@ fn warm(config: &Config, store: &dyn crate::config::secret::SecretStore) {
     }
 }
 
-pub fn parallel_transcriptions() -> usize {
-    let (cfg, store) = context();
-    let chain = provider::build_transcribe_chain(&cfg, store.as_ref());
-    use crate::config::provider::ProviderKind;
-    let local = chain.iter().find(|p| p.available()).is_some_and(|p| {
-        matches!(
-            cfg.provider(p.name()).and_then(|pc| pc.kind),
-            Some(ProviderKind::Parakeet)
-        )
-    });
-    if local {
-        1
-    } else {
-        3
-    }
-}
-
 pub fn transcribe_outcome(audio_path: &Path) -> Result<chain::ChainOutcome<String>> {
     let (cfg, store) = context();
     transcribe::run(&cfg, &store, audio_path)
+}
+
+pub fn transcribe_turns(audio_path: &Path) -> Result<Vec<(u64, String)>> {
+    use provider::TranscribeProvider;
+    let cfg = Config::load();
+    let Some(speech) = cfg.transcribe.chain.iter().find_map(|name| {
+        cfg.provider(name)
+            .filter(|p| p.kind == Some(crate::config::provider::ProviderKind::Parakeet))
+            .map(|p| provider::local_speech::LocalSpeech::new(name.clone(), p))
+    }) else {
+        anyhow::bail!(
+            "no AI for speech is chosen — open Settings in leo and pick one under speech"
+        );
+    };
+    anyhow::ensure!(speech.available(), "{}", speech.unavailable_reason());
+    speech
+        .transcribe_timed(audio_path)
+        .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// One chat completion through the configured chain, without printing.
@@ -307,7 +323,7 @@ fn why(state: crate::health::WritingState, agent: Option<&str>, text: &str) -> S
         NotChosen => "no writing AI is chosen.".to_string(),
         NotRunning => "no writing AI is ready (Ollama isn't running).".to_string(),
         NoModel => "no writing AI is ready (Ollama has no models yet).".to_string(),
-        NotInstalled => format!("{name} isn't installed."),
+        NotInstalled => format!("{name} is not installed on this computer."),
         SignInNeeded => format!("{name} needs you to sign in."),
         Ready => {
             let lower = text.to_lowercase();
@@ -326,12 +342,7 @@ fn why(state: crate::health::WritingState, agent: Option<&str>, text: &str) -> S
 
 pub fn see(prompt: chat::Prompt, images: &[provider::Image], max_tokens: u32) -> Result<String> {
     let (cfg, store) = context();
-    let req = provider::ChatRequest {
-        system: Some(prompt.system),
-        prompt: prompt.user,
-        temperature: 0.2,
-        max_tokens,
-    };
+    let req = prompt.request(0.2, max_tokens);
     let providers = provider::build_chat_chain(&cfg, &store);
     Ok(chain::run_vision_chain(providers, &req, images)?.value)
 }
@@ -463,10 +474,74 @@ mod tests {
             }
             path
         };
-        let stale = [aged("leo-writing-old", true), aged("leo-usage-old", true)];
+        let stale = [
+            aged("leo-writing-old", true),
+            aged("leo-usage-old", true),
+            aged("leo-dictation-old", true),
+        ];
         let kept = [aged("leo-writing-new", false), aged("someone-else", true)];
         super::tidy_rooms_in(temp.path());
         assert!(stale.iter().all(|path| !path.exists()));
+        assert!(kept.iter().all(|path| path.exists()));
+    }
+
+    #[test]
+    fn an_old_import_folder_is_swept() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = |name: &str, old: bool| {
+            let path = temp.path().join(name);
+            std::fs::create_dir_all(path.join("scans")).unwrap();
+            std::fs::write(path.join("scans").join("00000.jpg"), [1]).unwrap();
+            if old {
+                let mut open = std::fs::File::options();
+                #[cfg(windows)]
+                {
+                    use std::os::windows::fs::OpenOptionsExt;
+                    open.write(true).custom_flags(0x0200_0000);
+                }
+                #[cfg(not(windows))]
+                open.read(true);
+                open.open(&path)
+                    .unwrap()
+                    .set_modified(
+                        std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400),
+                    )
+                    .unwrap();
+            }
+            path
+        };
+        let stale = folder("leo-import-old", true);
+        let kept = [folder("leo-import-new", false), folder("import-old", true)];
+        super::tidy_rooms_in(temp.path());
+        assert!(!stale.exists());
+        assert!(kept.iter().all(|path| path.exists()));
+    }
+
+    #[test]
+    fn an_old_sign_in_helper_is_swept_and_a_new_one_kept() {
+        let temp = tempfile::tempdir().unwrap();
+        let helper = |name: &str, old: bool| {
+            let path = temp.path().join(name);
+            std::fs::write(&path, "#!/bin/zsh -l\nrm -f -- \"$0\"\n").unwrap();
+            if old {
+                std::fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_modified(
+                        std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 86_400),
+                    )
+                    .unwrap();
+            }
+            path
+        };
+        let stale = helper("leo-sign-in-x.command", true);
+        let kept = [
+            helper("leo-sign-in-y.command", false),
+            helper("someone-else.command", true),
+        ];
+        super::tidy_rooms_in(temp.path());
+        assert!(!stale.exists());
         assert!(kept.iter().all(|path| path.exists()));
     }
 

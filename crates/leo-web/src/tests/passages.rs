@@ -118,3 +118,85 @@ fn a_reading_position_is_kept_per_note() {
     ));
     assert_eq!(refused.status(), 400);
 }
+
+fn finished_job(state: &AppState, id: &str, state_name: &'static str, section: Option<String>) {
+    state.imports.lock().unwrap().insert(
+        id.to_string(),
+        ImportJob {
+            state: state_name,
+            label: String::new(),
+            dir: String::new(),
+            step: String::new(),
+            done: 1,
+            total: 1,
+            note: None,
+            notes: Vec::new(),
+            error: None,
+            section,
+        },
+    );
+}
+
+#[test]
+fn a_long_section_is_added() {
+    let (state, _d, ids) = state_with(&[("Collect", "")]);
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[0]).unwrap().body = "Start".into();
+        store.save().unwrap();
+    }
+    let (_, base) = body_of(&state, &ids[0]);
+    let typed = "word ".repeat(60_000);
+    let added = insert(
+        &state,
+        &ids[0],
+        serde_json::json!({"text": typed, "base": base}),
+    );
+    assert_eq!(added.status(), 200);
+    let (body, base) = body_of(&state, &ids[0]);
+    assert!(body == format!("Start\n\n{}\n", typed.trim_matches('\n')));
+
+    let section = format!("## Book\n\n{}", "line of the book\n".repeat(180_000));
+    assert!(section.chars().count() > 3_000_000);
+    finished_job(&state, "job-long", "done", Some(section.clone()));
+    let added = insert(
+        &state,
+        &ids[0],
+        serde_json::json!({"job": "job-long", "line": null, "base": base, "request": "req-job"}),
+    );
+    assert_eq!(added.status(), 200);
+    let (body, base) = body_of(&state, &ids[0]);
+    assert!(body.ends_with(&format!("{}\n", section.trim_matches('\n'))));
+    let again = insert(
+        &state,
+        &ids[0],
+        serde_json::json!({"job": "job-long", "base": base, "request": "req-job"}),
+    );
+    assert_eq!(again.status(), 200);
+    assert_eq!(
+        body_of(&state, &ids[0]).0,
+        body,
+        "the same press inserts once"
+    );
+}
+
+#[test]
+fn a_section_of_a_missing_job_is_refused_with_a_sentence() {
+    let (state, _d, ids) = state_with(&[("Collect", "Start")]);
+    let (before, base) = body_of(&state, &ids[0]);
+    finished_job(&state, "job-busy", "working", Some("Not ready".into()));
+    finished_job(&state, "job-none", "done", None);
+    for job in ["job-gone", "job-busy", "job-none"] {
+        let refused = insert(
+            &state,
+            &ids[0],
+            serde_json::json!({"job": job, "base": base}),
+        );
+        assert_eq!(refused.status(), StatusCode::NOT_FOUND, "{job}");
+        assert!(json_of(refused)["error"]
+            .as_str()
+            .unwrap()
+            .contains("not there any more"));
+    }
+    assert_eq!(body_of(&state, &ids[0]).0, before);
+}

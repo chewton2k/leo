@@ -115,7 +115,7 @@ pub fn label(usage: &Usage, now: DateTime<Utc>) -> String {
 fn file() -> Option<PathBuf> {
     leo_core::paths::config_dir()
         .ok()
-        .map(|dir| dir.join("usage.json"))
+        .map(|dir| dir.join(leo_core::paths::own::USAGE))
 }
 
 pub fn load_from(path: &Path) -> Seen {
@@ -126,7 +126,18 @@ pub fn load_from(path: &Path) -> Seen {
 }
 
 pub fn save_to(path: &Path, provider: &str, usage: Usage) {
+    static SAVING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _saving = SAVING
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     let mut all = load_from(path);
+    if all.get(provider).is_some_and(|old| {
+        old.five_hour == usage.five_hour
+            && old.seven_day == usage.seven_day
+            && usage.seen_at - old.seen_at < chrono::Duration::seconds(60)
+    }) {
+        return;
+    }
     all.insert(provider.to_string(), usage);
     let Ok(text) = serde_json::to_string_pretty(&all) else {
         return;
@@ -137,20 +148,36 @@ pub fn save_to(path: &Path, provider: &str, usage: Usage) {
     if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let Ok(mut temp) = tempfile::NamedTempFile::new_in(dir) else {
-        return;
-    };
-    if temp.write_all(text.as_bytes()).is_ok() && temp.as_file().sync_all().is_ok() {
-        let _ = temp.persist(path);
-    }
+    let _ = leo_core::paths::write_atomic(path, text);
 }
 
 pub fn load() -> Seen {
     file().map(|path| load_from(&path)).unwrap_or_default()
 }
 
+static REPORTED: std::sync::Mutex<std::collections::BTreeMap<String, u64>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
+
+fn count_report(provider: &str) {
+    *REPORTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .entry(provider.to_string())
+        .or_default() += 1;
+}
+
+fn reported(provider: &str) -> u64 {
+    REPORTED
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(provider)
+        .copied()
+        .unwrap_or(0)
+}
+
 pub fn save(provider: &str, usage: Usage) {
     if let Some(path) = file() {
+        count_report(provider);
         save_to(&path, provider, usage);
     }
 }
@@ -159,7 +186,7 @@ pub fn ask_codex(program: &Path) -> Option<Usage> {
     use crate::ai::provider::agent_cli::codex_disables;
     use crate::ai::provider::process::{self, Process, Watchdog, MOST_OUTPUT, QUEUED_MESSAGES};
     let room = tempfile::Builder::new()
-        .prefix("leo-usage-")
+        .prefix(crate::ai::USAGE_ROOM)
         .tempdir()
         .ok()?;
     #[cfg(unix)]
@@ -383,7 +410,7 @@ pub fn refresh_claude(cfg: &crate::config::Config) -> Option<String> {
     if !claude_plan(bin) {
         return Some("Claude limits need Claude Code signed in with your Claude plan.".into());
     }
-    let before = load().get("claude_code").map(|u| u.seen_at);
+    let before = reported("claude_code");
     let limit = Duration::from_secs(20);
     let agent = AgentCli::new(
         "claude_code".into(),
@@ -400,8 +427,7 @@ pub fn refresh_claude(cfg: &crate::config::Config) -> Option<String> {
     if read.is_err() {
         return Some("Claude Code could not be reached. Try Refresh again.".into());
     }
-    let after = load().get("claude_code").map(|u| u.seen_at);
-    (after.is_none() || after == before).then(|| "Claude Code reported no limits.".into())
+    (reported("claude_code") == before).then(|| "Claude Code reported no limits.".into())
 }
 
 #[cfg(test)]
@@ -541,6 +567,102 @@ mod tests {
             label(&usage, at(1000 + 3 * 3600)),
             "5h: 0%, 7d: 50%, 3 h ago"
         );
+    }
+
+    #[test]
+    fn a_report_is_counted_even_when_its_save_is_skipped() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("usage.json");
+        let usage = |seen_at| Usage {
+            five_hour: None,
+            seven_day: None,
+            seen_at,
+        };
+        let before = reported("refresh-probe");
+        for seen in [at(1000), at(1010)] {
+            count_report("refresh-probe");
+            save_to(&path, "refresh-probe", usage(seen));
+        }
+        assert_eq!(load_from(&path)["refresh-probe"].seen_at, at(1000));
+        assert_eq!(reported("refresh-probe"), before + 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unchanged_window_is_not_rewritten() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("usage.json");
+        let inode = |path: &Path| std::fs::metadata(path).unwrap().ino();
+        let usage = |seen_at| Usage {
+            five_hour: Some(Window {
+                used: 0.4,
+                resets_at: None,
+            }),
+            seven_day: None,
+            seen_at,
+        };
+        save_to(&path, "claude_code", usage(at(1000)));
+        let first = inode(&path);
+        save_to(&path, "claude_code", usage(at(1030)));
+        assert_eq!(
+            inode(&path),
+            first,
+            "the same windows were written to a new file"
+        );
+        save_to(&path, "claude_code", usage(at(1120)));
+        assert_ne!(inode(&path), first);
+        assert_eq!(load_from(&path)["claude_code"].seen_at, at(1120));
+
+        let path = dir.path().join("answers.json");
+        let mut last = None;
+        let mut written = 0;
+        for answer in 0..100 {
+            save_to(
+                &path,
+                "claude_code",
+                usage(at(2000) + chrono::Duration::milliseconds(500 * answer)),
+            );
+            let now = Some(inode(&path));
+            if now != last {
+                written += 1;
+                last = now;
+            }
+        }
+        println!("files written for 100 unchanged answers: {written}");
+        assert_eq!(written, 1);
+    }
+
+    #[test]
+    fn two_providers_saving_at_once_both_survive() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("usage.json");
+        let saver = |provider: &'static str| {
+            let path = path.clone();
+            std::thread::spawn(move || {
+                for answer in 0..100 {
+                    save_to(
+                        &path,
+                        provider,
+                        Usage {
+                            five_hour: Some(Window {
+                                used: answer as f64 / 100.0,
+                                resets_at: None,
+                            }),
+                            seven_day: None,
+                            seen_at: at(1000 + answer),
+                        },
+                    );
+                }
+            })
+        };
+        let claude = saver("claude_code");
+        let codex = saver("codex");
+        claude.join().unwrap();
+        codex.join().unwrap();
+        let all = load_from(&path);
+        assert_eq!(all["claude_code"].five_hour.unwrap().used, 0.99);
+        assert_eq!(all["codex"].five_hour.unwrap().used, 0.99);
     }
 
     #[test]

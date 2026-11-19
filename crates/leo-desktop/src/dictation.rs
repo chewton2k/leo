@@ -2,12 +2,14 @@ use anyhow::{ensure, Context, Result};
 use leo_services::dictation::{
     activation::{Action, Activation},
     generation::Generation,
+    pieces::{Live, Piece, Pieces, Pipeline},
     settings::{Mode, Popup, Settings, Writing},
     visualizer::Visualizer,
 };
 use leo_services::speech::{
+    chunking::join_transcripts,
     engine::{engine, DictationStream, Priority},
-    library::library,
+    library::{library, Selected},
     supervisor::EngineError,
     vad::{
         CaptureVad, SileroVad, SILERO_VAD_THRESHOLD, VAD_OFFLINE_HANGOVER_MS,
@@ -27,7 +29,6 @@ use tauri::{AppHandle, Emitter};
 
 const CANCELLED: &str = "Dictation cancelled.";
 const STOPPED_UNEXPECTEDLY: &str = "Dictation stopped unexpectedly. Try again.";
-const TOO_LONG: &str = "This dictation is too long. Try shorter dictations or a smaller model.";
 const NOT_TRANSCRIBED: &str =
     "Dictation could not be transcribed. Try again or choose a smaller model in Settings.";
 const MICROPHONE: &str = "Microphone";
@@ -43,8 +44,8 @@ const FINISH_TO_SAVE: &str = "Finish dictating before changing its settings.";
 const UNREADABLE: &str =
     "These dictation settings could not be read. Check the fields and try again.";
 const FINISH_TO_RECORD: &str = "Finish dictating before recording a shortcut.";
+const SHORTCUTS_OFF: &str = "Shortcuts are not running in this session. Reopen leo and try again.";
 const CHOOSE_RECENT: &str = "Choose a recent dictation.";
-const TOO_LONG_TO_COPY: &str = "This dictation is too long to copy.";
 const CHOOSE_THEME: &str = "Choose Light, Dark or Match.";
 const CHOOSE_ACTION: &str = "Choose an action in Dictation settings.";
 
@@ -140,7 +141,7 @@ pub struct Dictation {
 }
 impl Dictation {
     pub fn new(app: AppHandle) -> Result<Arc<Self>> {
-        let path = leo_core::paths::config_dir()?.join("dictation.json");
+        let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::DICTATION);
         let (settings, problem) = Settings::recover(&path);
         let mut in_use = settings.clone();
         in_use.shortcut = crate::shortcut::loaded(settings.shortcut.clone()).0;
@@ -194,6 +195,12 @@ impl Dictation {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+    pub fn shortcut_health(&self) -> (Value, String) {
+        (
+            self.shortcut.get().map(|s| s.view()).unwrap_or(Value::Null),
+            self.preferences().shortcut,
+        )
     }
     pub fn popup(&self) -> Value {
         let mut value = self.state.lock().unwrap_or_else(|e| e.into_inner()).clone();
@@ -452,25 +459,32 @@ impl Dictation {
             let (mic, rx) = leo_services::session::mic::Mic::open_named(named)?;
             (Some(mic), rx)
         };
-        let this = self.clone();
-        let mut stream = if live {
-            engine()
-                .stream(
-                    selected.clone(),
-                    settings.custom_words.clone(),
-                    move |committed, tentative| {
-                        this.change(id, |state| {
-                            state["committed"] = json!(newest(&committed));
-                            state["tentative"] = json!(newest(&tentative));
-                        });
-                    },
-                )
-                .ok()
-        } else {
-            None
+        let open = |this: &Arc<Self>| {
+            let this = this.clone();
+            live.then(|| {
+                engine()
+                    .stream(
+                        selected.clone(),
+                        settings.custom_words.clone(),
+                        move |committed, tentative| {
+                            this.change(id, |state| {
+                                state["committed"] = json!(newest(&committed));
+                                state["tentative"] = json!(newest(&tentative));
+                            });
+                        },
+                    )
+                    .ok()
+            })
+            .flatten()
         };
+        let mut stream = open(self);
         let mut pending = Vec::new();
         let mut kept = Vec::new();
+        let mut raw = Vec::new();
+        let mut pieces = Pieces::default();
+        let mut pipeline: Option<Pipeline> = None;
+        let mut cut = 0;
+        let mut broken = None;
         let hangover = if selected.streaming {
             VAD_STREAMING_HANGOVER_MS
         } else {
@@ -512,7 +526,31 @@ impl Dictation {
                 let heard = speech
                     .as_mut()
                     .map_or_else(|| chunk.to_vec(), |vad| vad.push(chunk));
+                if broken.is_none() && pieces.cut(chunk.len(), !heard.is_empty()) {
+                    if pipeline.is_none() {
+                        match self.pipeline(&selected, &settings.custom_words) {
+                            Ok(made) => pipeline = Some(made),
+                            Err(error) => broken = Some(error),
+                        }
+                    }
+                    if let Some(pipeline) = &pipeline {
+                        let piece = Piece {
+                            index: cut,
+                            live: live_text(stream.take(), std::mem::take(&mut pending)),
+                            kept: std::mem::take(&mut kept),
+                            raw: std::mem::take(&mut raw),
+                        };
+                        cut += 1;
+                        if let Err(error) = pipeline.push(piece) {
+                            broken = Some(error);
+                        }
+                        stream = open(self);
+                    }
+                }
                 kept.extend_from_slice(&heard);
+                if selected.streaming {
+                    raw.extend_from_slice(chunk);
+                }
                 if let Some(live) = stream.as_ref() {
                     pending.extend_from_slice(&heard);
                     if pending.len() >= FEED_SAMPLES {
@@ -536,13 +574,17 @@ impl Dictation {
         let problem = mic
             .as_ref()
             .and_then(|mic| mic.problem.lock().ok().and_then(|p| p.clone()));
+        let released = Instant::now();
         let captured = pcm.map_err(|e| problem.clone().map_or(e, anyhow::Error::msg))?;
+        if let Some(error) = broken {
+            log::warn!("Dictation could not be cut into pieces: {error:#}");
+            anyhow::bail!(NOT_TRANSCRIBED);
+        }
         if let Some(problem) = &problem {
             log::warn!("Dictation's microphone stopped: {problem}");
         }
         let stopped = problem.is_some() || captured.stalled;
         let signal = mic.as_ref().is_none_or(|mic| mic.heard_signal());
-        let raw = captured.pcm;
         ensure!(self.generation.current(id), CANCELLED);
         self.phase(
             id,
@@ -559,30 +601,45 @@ impl Dictation {
         let tail = speech.map(CaptureVad::finish).unwrap_or_default();
         kept.extend_from_slice(&tail);
         pending.extend_from_slice(&tail);
-        let transcript = if let Some(stream) = stream {
-            feed(&stream, &pending);
-            stream.finish().ok().filter(|text| !text.trim().is_empty())
-        } else {
-            None
+        let text = match pipeline {
+            None => {
+                match self.piece_text(
+                    id,
+                    live_text(stream, pending),
+                    kept,
+                    raw,
+                    &selected,
+                    &settings.custom_words,
+                )? {
+                    Some(text) => text,
+                    None => return Ok(Finish::Done),
+                }
+            }
+            Some(pipeline) => {
+                pipeline.push(Piece {
+                    index: cut,
+                    live: live_text(stream, pending),
+                    kept,
+                    raw,
+                })?;
+                cut += 1;
+                match pipeline.finish() {
+                    Ok(texts) => join_transcripts(&texts),
+                    Err(e) if cancelled(&e) => return Ok(Finish::Done),
+                    Err(e) => {
+                        log::warn!("Dictation could not be transcribed: {e:#}");
+                        anyhow::bail!(NOT_TRANSCRIBED);
+                    }
+                }
+            }
         };
-        ensure!(self.generation.current(id), CANCELLED);
-        let text = match transcript {
-            Some(text) => text,
-            None => match engine().transcribe(
-                selected.clone(),
-                batch_audio(kept, raw, selected.streaming),
-                Priority::Dictation,
-                settings.custom_words.clone(),
-            ) {
-                Ok(text) => text,
-                Err(e) if matches!(e.downcast_ref(), Some(EngineError::Cancelled)) => {
-                    return Ok(Finish::Done)
-                }
-                Err(e) => {
-                    log::warn!("Dictation could not be transcribed: {e:#}");
-                    anyhow::bail!(NOT_TRANSCRIBED);
-                }
-            },
+        let pieces = cut.max(1);
+        let timing = move || {
+            eprintln!(
+                "  dictation: {} s, {pieces} piece(s), pasted {} ms after release",
+                captured.samples / 16_000,
+                released.elapsed().as_millis()
+            )
         };
         ensure!(self.generation.current(id), CANCELLED);
         let language = if selected.language != "auto" {
@@ -594,7 +651,6 @@ impl Dictation {
                 .filter(|m| m.languages.len() == 1)
                 .and_then(|m| m.languages.first().map(String::as_str))
         };
-        ensure!(text.len() <= 100_000, TOO_LONG);
         let text = std::panic::catch_unwind(|| {
             leo_services::dictation::text::clean(&text, settings, language)
         })
@@ -644,6 +700,7 @@ impl Dictation {
                     tempfile::NamedTempFile::new_in(path.parent().context(TEST_FOLDER)?)?;
                 file.write_all(output.as_bytes())?;
                 file.persist(path).map_err(|e| e.error)?;
+                timing();
                 return Ok(Finish::Done);
             }
         }
@@ -652,7 +709,50 @@ impl Dictation {
             Arc::new(move || this.generation.current(id))
         })
         .map_err(anyhow::Error::msg)?;
+        timing();
         Ok(outcome(Some(pasted), fallback, stopped, signal))
+    }
+}
+impl Dictation {
+    fn pipeline(&self, selected: &Selected, words: &[String]) -> Result<Pipeline> {
+        let spool = tempfile::Builder::new()
+            .prefix(leo_services::ai::DICTATION_ROOM)
+            .tempdir()?
+            .keep();
+        let (selected, words) = (selected.clone(), words.to_vec());
+        Pipeline::new(spool, move |audio| {
+            engine().transcribe(selected.clone(), audio, Priority::Dictation, words.clone())
+        })
+    }
+    fn piece_text(
+        &self,
+        id: u64,
+        live: Option<Live>,
+        kept: Vec<f32>,
+        raw: Vec<f32>,
+        selected: &Selected,
+        words: &[String],
+    ) -> Result<Option<String>> {
+        let transcript = live
+            .and_then(|live| live())
+            .filter(|text| !text.trim().is_empty());
+        ensure!(self.generation.current(id), CANCELLED);
+        Ok(Some(match transcript {
+            Some(text) => text,
+            None => match engine().transcribe(
+                selected.clone(),
+                batch_audio(kept, raw, selected.streaming),
+                Priority::Dictation,
+                words.to_vec(),
+            ) {
+                Ok(text) => text,
+                Err(e) if cancelled(&e) => return Ok(None),
+                Err(e) => {
+                    log::warn!("Dictation could not be transcribed: {e:#}");
+                    anyhow::bail!(NOT_TRANSCRIBED);
+                }
+            },
+        }))
     }
 }
 impl leo_web::dictation::DictationApi for Dictation {
@@ -703,15 +803,14 @@ impl leo_web::dictation::DictationApi for Dictation {
                 ensure!(!self.capturing.load(Ordering::Acquire), FINISH_TO_RECORD);
                 self.shortcut
                     .get()
-                    .unwrap()
+                    .context(SHORTCUTS_OFF)?
                     .record()
                     .map_err(anyhow::Error::msg)?;
             }
-            Some("resume_shortcut") => self.shortcut.get().unwrap().resume(),
+            Some("resume_shortcut") => self.shortcut.get().context(SHORTCUTS_OFF)?.resume(),
             Some("cancel") => self.cancel(),
             Some("copy") => {
                 let text = value["text"].as_str().context(CHOOSE_RECENT)?;
-                ensure!(text.len() <= 100_000, TOO_LONG_TO_COPY);
                 crate::clipboard::copy(&self.app, text).map_err(anyhow::Error::msg)?;
             }
             Some("theme") => {
@@ -732,7 +831,7 @@ fn chime(enabled: bool, start: bool, current: impl Fn() -> bool + Send + 'static
             static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
             let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
             if current() {
-                crate::audio_feedback::play(true, start);
+                crate::audio_feedback::play(start);
             }
         });
     }
@@ -768,6 +867,17 @@ fn outcome(
         (Some(Pasted::Done), Some(reason)) => Finish::Notice(WITHOUT_AI, reason.into()),
         (Some(Pasted::Done), None) => Finish::Done,
     }
+}
+fn cancelled(error: &anyhow::Error) -> bool {
+    matches!(error.downcast_ref(), Some(EngineError::Cancelled))
+}
+fn live_text(stream: Option<DictationStream>, pending: Vec<f32>) -> Option<Live> {
+    stream.map(|stream| -> Live {
+        Box::new(move || {
+            feed(&stream, &pending);
+            stream.finish().ok()
+        })
+    })
 }
 fn feed(stream: &DictationStream, pcm: &[f32]) -> bool {
     pcm.chunks(16_000).all(|part| stream.feed(part.to_vec()))

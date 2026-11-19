@@ -44,6 +44,17 @@ pub struct Prompt {
     pub user: String,
 }
 
+impl Prompt {
+    pub(crate) fn request(self, temperature: f32, max_tokens: u32) -> ChatRequest {
+        ChatRequest {
+            system: Some(self.system),
+            prompt: self.user,
+            temperature,
+            max_tokens,
+        }
+    }
+}
+
 /// How the speech-recognition text is to be read. Shared by the new-note and
 /// append prompts so they cannot disagree about it.
 const READING_A_TRANSCRIPT: &str = "\
@@ -370,12 +381,7 @@ pub fn complete(
     max_tokens: u32,
 ) -> Result<ChainOutcome<String>> {
     let providers = build_chat_chain(cfg, store);
-    let req = ChatRequest {
-        system: Some(prompt.system),
-        prompt: prompt.user,
-        temperature: TEMPERATURE,
-        max_tokens,
-    };
+    let req = prompt.request(TEMPERATURE, max_tokens);
     run_chat_chain(providers, &req)
 }
 
@@ -387,12 +393,7 @@ pub fn complete_until(
     stopped: &dyn Fn() -> bool,
 ) -> Result<ChainOutcome<String>> {
     let providers = build_chat_chain(cfg, store);
-    let req = ChatRequest {
-        system: Some(prompt.system),
-        prompt: prompt.user,
-        temperature: TEMPERATURE,
-        max_tokens,
-    };
+    let req = prompt.request(TEMPERATURE, max_tokens);
     crate::ai::chain::run_chat_chain_until(providers, &req, stopped)
 }
 
@@ -407,12 +408,7 @@ pub fn complete_streaming(
     stopped: &dyn Fn() -> bool,
 ) -> Result<ChainOutcome<String>> {
     let providers = build_chat_chain(cfg, store);
-    let req = ChatRequest {
-        system: Some(prompt.system),
-        prompt: prompt.user,
-        temperature: TEMPERATURE,
-        max_tokens,
-    };
+    let req = prompt.request(TEMPERATURE, max_tokens);
     crate::ai::chain::run_chat_chain_streaming(providers, &req, on_fragment, on_restart, stopped)
 }
 

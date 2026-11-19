@@ -91,7 +91,8 @@ test('the page is assembled from every stylesheet in order, between the head and
   assert.deepEqual(listed, onDisk);
   const parts = [...assets.matchAll(/include_str!\("\.\.\/web\/([^"]+)"\)/g)].map((m) => m[1]);
   const page = parts.slice(0, parts.indexOf('page-tail.html') + 1);
-  assert.deepEqual(page, ['page-head.html', ...onDisk, 'page-tail.html']);
+  assert.deepEqual(page, [onDisk[0], 'dark-tokens.css', 'dark-tokens.css', 'page-head.html', ...onDisk.slice(1), 'page-tail.html']);
+  assert.match(assets, /include_str!\("\.\.\/web\/page-head\.html"\),\s*theme!\(\),\s*include_str!\("\.\.\/web\/styles\/02-base\.css"\)/);
 });
 
 test('the app container is not a live region, and a separate status line announces the page', () => {

@@ -8,6 +8,7 @@ use leo_core::notes::Note;
 use leo_core::store::Store;
 
 use crate::graph::Cache;
+use crate::search_index::Candidates;
 
 pub type Streamer = Arc<
     dyn Fn(
@@ -310,7 +311,7 @@ fn turn_room(room: usize, at_default: usize) -> usize {
 pub(crate) fn clip(text: &str, most: usize) -> String {
     let mut out: String = text.chars().take(most).collect();
     if text.chars().count() > most {
-        out.push_str("\n[…the rest of this note is left out]");
+        out.push_str(CLIPPED);
     }
     out
 }
@@ -363,9 +364,19 @@ pub(crate) fn flat(text: &str) -> String {
     text.to_lowercase().replace(['-', '_'], " ")
 }
 
-fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String]) -> usize {
+fn match_score(
+    note: &Note,
+    read: Option<&crate::graph::Read>,
+    words: &[String],
+    indexed: Option<&Candidates>,
+) -> usize {
     let title = flat(&note.title);
-    let body = flat(&note.body);
+    let lookup = indexed.filter(|c| c.holds_text_of(&note.id));
+    let body = if lookup.is_some() {
+        String::new()
+    } else {
+        flat(&note.body)
+    };
     let summary = read.map(|r| flat(&r.summary)).unwrap_or_default();
     let concepts: Vec<String> = read
         .map(|r| r.concepts.iter().map(|c| flat(c)).collect())
@@ -386,7 +397,11 @@ fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String])
             if summary.contains(word.as_str()) {
                 score += 2;
             }
-            if body.contains(word.as_str()) {
+            let in_body = match lookup {
+                Some(found) => found.has(&note.id, word),
+                None => body.contains(word.as_str()),
+            };
+            if in_body {
                 score += 1;
             }
             score
@@ -394,8 +409,22 @@ fn match_score(note: &Note, read: Option<&crate::graph::Read>, words: &[String])
         .sum()
 }
 
+pub(crate) fn question_terms(question: &str) -> Vec<String> {
+    leo_core::notes::question_words(&flat(question))
+}
+
 pub fn matches<'a>(store: &'a Store, cache: &Cache, question: &str, limit: usize) -> Vec<&'a Note> {
-    let words: Vec<String> = leo_core::notes::question_words(&flat(question));
+    matches_with(store, cache, question, limit, None)
+}
+
+pub fn matches_with<'a>(
+    store: &'a Store,
+    cache: &Cache,
+    question: &str,
+    limit: usize,
+    indexed: Option<&Candidates>,
+) -> Vec<&'a Note> {
+    let words = question_terms(question);
     if words.is_empty() {
         return Vec::new();
     }
@@ -403,7 +432,7 @@ pub fn matches<'a>(store: &'a Store, cache: &Cache, question: &str, limit: usize
         .notes
         .iter()
         .filter_map(|note| {
-            let score = match_score(note, cache.notes.get(&note.id), &words);
+            let score = match_score(note, cache.notes.get(&note.id), &words, indexed);
             (score > 0).then_some((score, note))
         })
         .collect();
@@ -424,6 +453,7 @@ pub fn question_of(messages: &[Turn]) -> String {
 
 pub const MOST_RECENT: usize = 6;
 
+#[cfg(test)]
 pub fn gather(
     store: &Store,
     cache: &Cache,
@@ -435,6 +465,7 @@ pub fn gather(
     gather_with(store, cache, open, attached, &[], question, room)
 }
 
+#[cfg(test)]
 pub fn gather_with(
     store: &Store,
     cache: &Cache,
@@ -470,6 +501,25 @@ pub fn gather_seeing(
     captions: Option<&crate::captions::Captions>,
     close: &[(String, f32)],
     margin: &str,
+) -> (Vec<SourceRef>, String) {
+    gather_indexed(
+        store, cache, open, attached, recent, question, room, captions, close, margin, None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn gather_indexed(
+    store: &Store,
+    cache: &Cache,
+    open: Option<&str>,
+    attached: &[String],
+    recent: &[String],
+    question: &str,
+    room: usize,
+    captions: Option<&crate::captions::Captions>,
+    close: &[(String, f32)],
+    margin: &str,
+    indexed: Option<&Candidates>,
 ) -> (Vec<SourceRef>, String) {
     let room = room.min(GATHER_ROOM).saturating_sub(margin.chars().count());
     let mut picked: Vec<Picked> = Vec::new();
@@ -514,7 +564,7 @@ pub fn gather_seeing(
         }
     }
     let mut found: Vec<&Note> = Vec::new();
-    for note in matches(store, cache, question, MATCHES + have.len()) {
+    for note in matches_with(store, cache, question, MATCHES + have.len(), indexed) {
         if found.len() >= MATCHES {
             break;
         }
@@ -775,6 +825,7 @@ const BASE: &str = "You are Felix, the friendly study buddy in leo, the user's n
 const HELPING: &str = "\
 Work out what the user wants from each message; there are no modes to choose. Most messages want an answer: a question, a task, a draft, a plan or a conversation. Give it the way a helpful assistant would, using the notes whenever they are relevant and always the attached ones, with no quiz, study plan or practice. A request to understand something properly (teach me, walk me through it, I do not get this, help me learn this) wants a lesson. A request to be tested (quiz me, test me, let me practise, help me revise, start a session, help me study this) wants practice. A quick \"what is\" or \"explain\" is an answer, not a lesson; after it you may offer a lesson or quiz in one short sentence when the material suits one. An open note alone is never a request to study it. Follow a change of mind at once: when they turn to something else during a session, help with that, and call end_session if they have left it.
 - When asked to explain something, give the core idea in plain words, then choose one small worked example or an everyday analogy when useful. Connect it to the precise terms and the misunderstanding most relevant to their question. Do not mechanically include every teaching device in every answer.
+- To learn, study or be tested on attached documents, read every part the request covers (read_document takes several) before you plan or ask. <documents> shows only a start. Say what you skipped and why.
 - When the notes are meeting or work notes and the user asks for a review, give a two-sentence summary, decisions made, action items as a checklist (- [ ]) with the owner and due date only when the notes state them, open questions and risks, and draft a short follow-up message when asked. Never invent names, owners, dates or numbers.";
 
 const STUDY_FIRST: &str = "Before you teach a lesson, run practice, ask a quiz question or mark an answer, call study_rules once in this chat and follow what it returns. Never call it for an ordinary answer.";
@@ -788,10 +839,6 @@ Practice, when they want testing. Call study_plan with the 3 to 8 key ideas or p
 Hints come only when asked and never give the answer. Give one rung at a time, least revealing first: where to look, what kind of problem this is, which group of ideas applies, the idea itself, the outline of the move, the next step. Aim at the first thing they got wrong, which may be earlier than where they feel stuck. Explaining what a question means costs nothing. Asked for the answer outright, give it with its reasoning, then go on with a question on another idea and come back to that one later with a new case, never the solved question. Harder or easier changes the next question, never the plan.
 Sessions: when they say that is enough, want to stop or want something else, call end_session and write the recap. Judge readiness only from answers they reached unaided. Do not reveal answers before the user tries or asks for them. If they ask for a study plan, base it on the notes and spread review over days. Keep each turn short.";
 
-pub fn documents_block(docs: &[(String, String)]) -> String {
-    documents_within(docs, DOCS_CHARS)
-}
-
 pub fn notes_room(practice: bool, room: usize) -> usize {
     if practice {
         room.min(ROOM)
@@ -804,28 +851,93 @@ pub fn scaled(at_default: usize, room: usize) -> usize {
     at_default * room.clamp(LEAST_ROOM, MOST_ROOM) / ROOM
 }
 
+pub const FEW_DOCUMENTS: usize = 10;
+pub const LEAST_SHARE: usize = 200;
+const GOES_ON: &str = "\n[The document goes on. Use read_document to read any part of it.]";
+const CLIPPED: &str = "\n[…the rest of this note is left out]";
+
+pub fn heads_wanted(count: usize) -> (usize, usize) {
+    let most = scaled(DOCS_CHARS, MOST_ROOM);
+    (count.min(most / LEAST_SHARE), most / count.max(1) + 4_096)
+}
+
+fn document_tag(fence: &str, i: usize, name: &str) -> (String, String) {
+    (
+        format!(
+            "<document_{fence} id=\"d{}\" name=\"{}\">\n",
+            i + 1,
+            name.replace('"', "'")
+        ),
+        format!("\n</document_{fence}>\n"),
+    )
+}
+
+fn more_documents(total: usize, listed: usize) -> String {
+    format!(
+        "{} more documents are attached (d{} to d{total}). Use read_document with `document: \"list\"` to see their names, and with their number to read one.\n",
+        total - listed,
+        listed + 1
+    )
+}
+
 fn documents_within(docs: &[(String, String)], budget: usize) -> String {
     if docs.is_empty() {
         return String::new();
     }
-    let share = budget / docs.len();
     let fence = fence();
     let mut out = format!("<documents_{fence}>\n");
-    for (i, (name, text)) in docs.iter().enumerate() {
+    let closing = format!("</documents_{fence}>\n\n");
+    let mut listed = docs.len();
+    let mut share = budget / docs.len();
+    if docs.len() > FEW_DOCUMENTS {
+        let wrap = |i: usize| {
+            let (open, shut) = document_tag(fence, i, &docs[i].0);
+            [&open, &shut, GOES_ON, CLIPPED]
+                .iter()
+                .map(|part| part.chars().count())
+                .sum::<usize>()
+        };
+        let room = budget.saturating_sub(out.chars().count() + closing.chars().count());
+        let mut used = 0;
+        listed = 0;
+        while listed < docs.len() {
+            let next = used + wrap(listed);
+            let rest = if listed + 1 < docs.len() {
+                more_documents(docs.len(), listed + 1).chars().count()
+            } else {
+                0
+            };
+            if next + (listed + 1) * LEAST_SHARE + rest > room {
+                break;
+            }
+            used = next;
+            listed += 1;
+        }
+        if listed == 0 {
+            listed = 1;
+            used = wrap(0);
+        }
+        let rest = if listed < docs.len() {
+            more_documents(docs.len(), listed).chars().count()
+        } else {
+            0
+        };
+        share = room.saturating_sub(used + rest).max(listed * LEAST_SHARE) / listed;
+    }
+    for (i, (name, text)) in docs.iter().enumerate().take(listed) {
         let text = text.trim();
         let more = if text.chars().count() > share {
-            "\n[The document goes on. Use read_document to read any part of it.]"
+            GOES_ON
         } else {
             ""
         };
-        out.push_str(&format!(
-            "<document_{fence} id=\"d{}\" name=\"{}\">\n{}{more}\n</document_{fence}>\n",
-            i + 1,
-            name.replace('"', "'"),
-            clip(text, share)
-        ));
+        let (open, shut) = document_tag(fence, i, name);
+        out.push_str(&format!("{open}{}{more}{shut}", clip(text, share)));
     }
-    out.push_str(&format!("</documents_{fence}>\n\n"));
+    if listed < docs.len() {
+        out.push_str(&more_documents(docs.len(), listed));
+    }
+    out.push_str(&closing);
     out
 }
 
@@ -868,20 +980,14 @@ pub fn kept_from(messages: &[Turn], room: usize, memory: Option<&crate::chats::M
 }
 
 pub fn hash_of(messages: &[Turn]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for turn in messages {
-        for byte in turn
-            .role
+    let bytes = messages.iter().flat_map(|turn| {
+        turn.role
             .bytes()
             .chain([0])
             .chain(turn.text.bytes())
             .chain([0])
-        {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-    }
-    format!("{hash:016x}")
+    });
+    format!("{:016x}", crate::vectors::fnv64(bytes))
 }
 
 pub fn memory_fits(memory: &crate::chats::Memory, messages: &[Turn], start: usize) -> bool {
@@ -893,11 +999,7 @@ pub fn memory_fits(memory: &crate::chats::Memory, messages: &[Turn], start: usiz
 fn line_of(turn: &Turn, most: usize) -> String {
     let who = if turn.role == "user" { "User" } else { "Felix" };
     let flat = turn.text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut text: String = flat.chars().take(most).collect();
-    if flat.chars().count() > most {
-        text.push('…');
-    }
-    format!("{who}: {text}")
+    format!("{who}: {}", crate::chats::clipped(&flat, most))
 }
 
 pub fn earlier_of(
@@ -1171,14 +1273,13 @@ mod tests {
             .create_note(
                 "Neuro-Symbolic Drive",
                 "The method pairs planner traces with trajectories.",
-                vec![],
                 "research",
             )
             .unwrap()
             .id
             .clone();
         let other = store
-            .create_note("Heaps", "Minimum at the root.", vec![], "")
+            .create_note("Heaps", "Minimum at the root.", "")
             .unwrap()
             .id
             .clone();
@@ -1220,13 +1321,7 @@ mod tests {
                 "work",
             ),
         ] {
-            ids.push(
-                store
-                    .create_note(title, body, vec![], folder)
-                    .unwrap()
-                    .id
-                    .clone(),
-            );
+            ids.push(store.create_note(title, body, folder).unwrap().id.clone());
         }
         (store, dir, ids)
     }
@@ -1625,7 +1720,61 @@ mod tests {
             user.chars().count() < DOCS_CHARS + 2_000,
             "two documents share the budget"
         );
-        assert!(documents_block(&[]).is_empty());
+        assert!(documents_within(&[], DOCS_CHARS).is_empty());
+    }
+
+    #[test]
+    fn ten_documents_or_fewer_are_shared_exactly_as_before() {
+        let docs: Vec<(String, String)> = (0..10)
+            .map(|n| (format!("d{n}.txt"), "word ".repeat(30_000)))
+            .collect();
+        let block = documents_within(&docs, DOCS_CHARS);
+        let f = fence();
+        let share = DOCS_CHARS / 10;
+        let mut expected = format!("<documents_{f}>\n");
+        for (i, (name, text)) in docs.iter().enumerate() {
+            expected.push_str(&format!(
+                "<document_{f} id=\"d{}\" name=\"{name}\">\n{}{GOES_ON}\n</document_{f}>\n",
+                i + 1,
+                clip(text.trim(), share)
+            ));
+        }
+        expected.push_str(&format!("</documents_{f}>\n\n"));
+        assert_eq!(block.replace(fence(), "F"), expected.replace(fence(), "F"));
+    }
+
+    #[test]
+    fn five_thousand_documents_stay_inside_the_budget() {
+        let docs: Vec<(String, String)> = (0..5_000)
+            .map(|n| {
+                (
+                    format!("{n:04}{}", "n".repeat(116)),
+                    if n % 2 == 0 {
+                        String::new()
+                    } else {
+                        "short text ".repeat(40)
+                    },
+                )
+            })
+            .collect();
+        for room in [LEAST_ROOM, ROOM, MOST_ROOM] {
+            let budget = scaled(DOCS_CHARS, room);
+            let block = documents_within(&docs, budget);
+            let closing = more_documents(docs.len(), 0).chars().count();
+            let listed = block.matches("<document_").count();
+            assert!(listed > 0 && listed < docs.len());
+            assert!(
+                block.chars().count() <= budget + closing,
+                "{room}: {} over {budget}",
+                block.chars().count()
+            );
+            assert!(block.contains(&format!(
+                "{} more documents are attached (d{} to d5000)",
+                5_000 - listed,
+                listed + 1
+            )));
+            assert!(block.contains("document: \"list\""));
+        }
     }
 
     #[test]
@@ -1680,12 +1829,7 @@ mod tests {
         let mut close = Vec::new();
         for i in 0..40 {
             let id = store
-                .create_note(
-                    format!("Queue drill {i}"),
-                    "queue ".repeat(2_000),
-                    vec![],
-                    "",
-                )
+                .create_note(format!("Queue drill {i}"), "queue ".repeat(2_000), "")
                 .unwrap()
                 .id
                 .clone();

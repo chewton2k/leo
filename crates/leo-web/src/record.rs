@@ -1,10 +1,10 @@
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -15,7 +15,6 @@ use crate::reply::error;
 use crate::routes::notes::{directory as valid_directory, save};
 use crate::{store_now, AppState};
 
-pub const MOST_POINTS: usize = 200;
 pub const MOST_TRANSCRIPT_CHARS: usize = 200_000;
 pub const LEVELS_KEPT: usize = 48;
 const DISCARDS_KEPT: usize = 1000;
@@ -23,6 +22,11 @@ const WAIT_FOR_WRITES: Duration = Duration::from_secs(5);
 const MOST_WARNINGS: usize = 40;
 const WARNING_CHARS: usize = 2_000;
 const SLIDE_TEXT_CHARS: usize = 6500;
+const NOTE_GONE: &str = "The note this recording belongs to is not in your notes; restore it from the trash, then recover again.";
+pub const RECORD_PAGE: usize = 50;
+pub const VIEW_POINTS: usize = 50;
+const STILL_SAVING: &str =
+    "The point is kept in this recording and is still being saved; it shows in the list once it is.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -47,6 +51,8 @@ pub struct Pending {
     pub profile: leo_core::recording::Profile,
     #[serde(default)]
     pub started: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -73,12 +79,101 @@ pub trait Housekeeper: Send + Sync {
     fn pending_recordings(&self) -> anyhow::Result<Vec<Pending>> {
         Ok(Vec::new())
     }
+    fn pending_page(
+        &self,
+        _after: Option<&str>,
+        _limit: usize,
+    ) -> anyhow::Result<(Vec<Pending>, Option<String>)> {
+        Ok((self.pending_recordings()?, None))
+    }
+    fn pending_recording(&self, id: &str) -> anyhow::Result<Option<Pending>> {
+        Ok(self.pending_recordings()?.into_iter().find(|p| p.id == id))
+    }
+    fn old_recordings(
+        &self,
+        before: chrono::DateTime<chrono::Utc>,
+    ) -> anyhow::Result<Vec<Pending>> {
+        Ok(self
+            .pending_recordings()?
+            .into_iter()
+            .filter(|p| p.started.is_some_and(|started| started < before))
+            .collect())
+    }
     fn discard_recording(&self, _id: &str) -> anyhow::Result<()> {
         Ok(())
     }
-    fn expire_kept_audio(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
+    fn discard_recordings(&self, ids: &[String]) -> usize {
+        ids.iter()
+            .filter(|id| self.discard_recording(id).is_ok())
+            .count()
+    }
+    fn kept_audio_count(&self, _before: chrono::DateTime<chrono::Utc>) -> usize {
         0
     }
+    fn expire_kept_audio(
+        &self,
+        _before: chrono::DateTime<chrono::Utc>,
+        _protected: &std::collections::HashSet<String>,
+    ) -> usize {
+        0
+    }
+    fn kept_sessions(&self, _note: &str) -> anyhow::Result<Vec<KeptSession>> {
+        Ok(Vec::new())
+    }
+    fn kept_sessions_for(
+        &self,
+        notes: &std::collections::HashSet<String>,
+    ) -> anyhow::Result<std::collections::HashMap<String, Vec<KeptSession>>> {
+        notes
+            .iter()
+            .map(|note| Ok((note.clone(), self.kept_sessions(note)?)))
+            .collect()
+    }
+    fn verify_held_audio(
+        &self,
+        _note: &str,
+        sessions: &[KeptSession],
+    ) -> anyhow::Result<Vec<Option<leo_core::paths::FolderStamps>>> {
+        Ok(vec![None; sessions.len()])
+    }
+    fn discard_held_audio(
+        &self,
+        _note: &str,
+        _sessions: &[KeptSession],
+        _verified: &[Option<leo_core::paths::FolderStamps>],
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn kept_for_notes(&self) -> Vec<String> {
+        Vec::new()
+    }
+    fn plan_retarget(&self, _from: &str, _target: &str) -> anyhow::Result<Vec<Moved>> {
+        Ok(Vec::new())
+    }
+    fn apply_retarget(&self, _from: &str, _target: &str, _moved: &[Moved]) -> anyhow::Result<()> {
+        Ok(())
+    }
+    fn restore_kept(&self, _moved: &[Moved]) -> anyhow::Result<()> {
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptSession {
+    #[serde(default)]
+    pub digest: Option<leo_core::paths::FileDigest>,
+    pub folder: String,
+    pub session: String,
+    pub started: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Moved {
+    pub session: String,
+    #[serde(default)]
+    pub identity: Option<KeptSession>,
+    pub previous: Option<String>,
+    pub target: String,
 }
 
 pub struct Listening {
@@ -94,6 +189,7 @@ pub struct Listening {
     pub finish_now: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     pub points: Arc<Mutex<Vec<(u64, String)>>>,
+    pub saved_points: Arc<AtomicUsize>,
     pub wants: Arc<Mutex<Option<String>>>,
 }
 
@@ -113,10 +209,7 @@ pub enum Heard {
 
 pub type Commit = Arc<dyn Fn(&std::path::Path, &str) -> Result<()> + Send + Sync>;
 pub type Regenerator = Arc<
-    dyn Fn(
-            Vec<leo_core::recording::Archive>,
-            leo_core::recording::Profile,
-        ) -> Result<(String, String)>
+    dyn Fn(leo_core::recording::Sources, leo_core::recording::Profile) -> Result<(String, String)>
         + Send
         + Sync,
 >;
@@ -128,6 +221,7 @@ pub struct Recorded {
     pub source: Option<leo_core::recording::Archive>,
     pub commit: Option<Commit>,
     pub writer_failed: bool,
+    pub into: Option<String>,
 }
 
 pub type Listener = Arc<dyn Fn(Listening, &mut dyn FnMut(Heard)) -> Result<Recorded> + Send + Sync>;
@@ -144,6 +238,7 @@ pub struct RecordView {
     pub transcript: String,
     pub warnings: Vec<String>,
     pub points: Vec<(u64, String)>,
+    pub points_total: usize,
     pub wants: String,
     pub levels: Vec<f32>,
     pub levels_start: u64,
@@ -180,7 +275,9 @@ pub(crate) struct RecordJob {
     finish_now: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
     points: Arc<Mutex<Vec<(u64, String)>>>,
+    saved_points: Arc<AtomicUsize>,
     wants: Arc<Mutex<Option<String>>>,
+    worker: Option<std::thread::JoinHandle<()>>,
 }
 
 struct Writing(Arc<AtomicBool>);
@@ -231,6 +328,14 @@ impl RecordJob {
 
 pub(crate) type Recordings = Arc<Mutex<Option<RecordJob>>>;
 
+pub(crate) fn stop_for_quit(state: &AppState) -> Option<std::thread::JoinHandle<()>> {
+    let mut held = state.recording.lock().unwrap_or_else(|e| e.into_inner());
+    state.quitting.store(true, Ordering::Release);
+    let job = held.as_mut()?;
+    job.stop.store(true, Ordering::Relaxed);
+    job.worker.take()
+}
+
 pub(crate) fn discard_unless_in_use(
     recordings: &Recordings,
     housekeeper: &dyn Housekeeper,
@@ -241,6 +346,18 @@ pub(crate) fn discard_unless_in_use(
         return None;
     }
     Some(housekeeper.discard_recording(session))
+}
+
+pub(crate) fn discard_all_unless_in_use(
+    recordings: &Recordings,
+    housekeeper: &dyn Housekeeper,
+    mut ids: Vec<String>,
+) -> usize {
+    let held = recordings.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(job) = held.as_ref() {
+        ids.retain(|id| *id != job.view.session);
+    }
+    housekeeper.discard_recordings(&ids)
 }
 
 pub(crate) fn live(recordings: &Recordings) -> bool {
@@ -291,20 +408,68 @@ fn keep_tail(text: String) -> String {
     text.chars().skip(count - MOST_TRANSCRIPT_CHARS).collect()
 }
 
-pub(crate) async fn overview(State(state): State<AppState>) -> Response {
+#[derive(Default, Deserialize)]
+pub(crate) struct Page {
+    pub(crate) after: Option<String>,
+}
+
+fn folder_name(name: &str) -> bool {
+    let (stamp, rest) = name.split_at_checked(15).unwrap_or((name, "x"));
+    chrono::NaiveDateTime::parse_from_str(stamp, "%Y%m%d-%H%M%S").is_ok()
+        && (rest.is_empty()
+            || rest
+                .strip_prefix('-')
+                .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit())))
+}
+
+pub(crate) async fn overview(State(state): State<AppState>, Query(page): Query<Page>) -> Response {
+    if page
+        .after
+        .as_deref()
+        .is_some_and(|after| !folder_name(after))
+    {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "That page of recordings does not exist.",
+        );
+    }
     let mut pending = Vec::new();
+    let mut after = None;
     let mut checks = Checks::default();
     if let Some(housekeeper) = state.housekeeper.clone() {
         if let Ok((saved, ready)) = tokio::task::spawn_blocking(move || {
-            (housekeeper.pending_recordings(), housekeeper.checks())
+            (
+                housekeeper.pending_page(page.after.as_deref(), RECORD_PAGE),
+                housekeeper.checks(),
+            )
         })
         .await
         {
             checks = ready;
+            let (saved, next) = saved.unwrap_or_default();
+            after = next;
+            let owners: Vec<String> = saved.iter().filter_map(|p| p.note.clone()).collect();
+            let live = if owners.is_empty() {
+                None
+            } else {
+                state
+                    .read_store(move |store| {
+                        Ok(owners
+                            .into_iter()
+                            .filter(|id| store.find_note(id).is_some())
+                            .collect::<std::collections::HashSet<_>>())
+                    })
+                    .await
+                    .ok()
+            };
             pending.extend(
                 saved
-                    .unwrap_or_default()
                     .into_iter()
+                    .filter(|p| {
+                        p.note
+                            .as_ref()
+                            .is_none_or(|note| live.as_ref().is_none_or(|live| live.contains(note)))
+                    })
                     .map(|p| serde_json::to_value(p).unwrap_or_default()),
             );
         }
@@ -320,6 +485,8 @@ pub(crate) async fn overview(State(state): State<AppState>) -> Response {
         "local": true,
         "job": job,
         "pending": pending,
+        "more": after.is_some(),
+        "after": after,
         "checks": checks,
     }))
     .into_response()
@@ -355,10 +522,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     if let Err(code) = checked {
         return error(code, "Check the folder before recording.");
     }
-    let mut profile = match body.profile.clone().unwrap_or_default().checked() {
-        Ok(profile) => profile,
-        Err(e) => return error(StatusCode::BAD_REQUEST, e.to_string()),
-    };
+    let mut profile = body.profile.clone().unwrap_or_default().checked();
     profile.speakers &= body.source != Source::Nativecall;
     let title = body
         .title
@@ -373,9 +537,14 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     let pause = Arc::new(AtomicBool::new(false));
     let finish_now = Arc::new(AtomicBool::new(false));
     let points: Arc<Mutex<Vec<(u64, String)>>> = Default::default();
+    let saved_points: Arc<AtomicUsize> = Default::default();
     let wants: Arc<Mutex<Option<String>>> = Default::default();
     {
         let mut held = state.recording.lock().unwrap_or_else(|e| e.into_inner());
+        if state.quitting.load(Ordering::Acquire) {
+            drop(held);
+            return error(StatusCode::SERVICE_UNAVAILABLE, "leo is quitting.");
+        }
         if held
             .as_ref()
             .is_some_and(|j| j.busy() || j.writing.load(Ordering::Acquire))
@@ -408,6 +577,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
                 transcript: String::new(),
                 warnings: Vec::new(),
                 points: Vec::new(),
+                points_total: 0,
                 wants: profile.wants.clone(),
                 levels: Vec::new(),
                 levels_start: 0,
@@ -419,7 +589,9 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
             finish_now: finish_now.clone(),
             pause: Arc::clone(&pause),
             points: Arc::clone(&points),
+            saved_points: Arc::clone(&saved_points),
             wants: Arc::clone(&wants),
+            worker: None,
         });
     }
     let listening = Listening {
@@ -435,14 +607,16 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
         finish_now,
         pause,
         points,
+        saved_points,
         wants,
     };
     let worker = state.clone();
     let job = id.clone();
-    std::thread::spawn(move || {
+    let handle = std::thread::spawn(move || {
         let _activity = activity;
         run(worker, job, listener, listening, directory, title)
     });
+    change(&state.recording, &id, |job| job.worker = Some(handle));
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "id": id }))).into_response()
 }
 
@@ -472,6 +646,7 @@ fn run(
             });
         }
     }
+    let recovering = listening.recover.is_some();
     let recordings = Arc::clone(&state.recording);
     let _guard = RunGuard {
         recordings: Arc::clone(&recordings),
@@ -526,15 +701,34 @@ fn run(
     });
     let title = title.unwrap_or(recorded.title);
     let body = recorded.body;
-    let writer_failed = recorded.writer_failed;
+    let into = recorded.into;
+    let writer_failed = recorded.writer_failed && into.is_none();
     let source = recorded.source;
     let commit = recorded.commit;
+    let gone = || {
+        change(&recordings, &id, |job| {
+            job.view.state = "failed";
+            job.view.error = Some(NOTE_GONE.into());
+        })
+    };
+    if let Some(into) = into.clone() {
+        if !store_now(&state, move |store| Ok(store.find_note(&into).is_some())).unwrap_or(false) {
+            return gone();
+        }
+    }
     if let Some(source) = &source {
-        let archived = store_now(&state, |store| Ok(store.notes_dir.clone())).and_then(|notes| {
-            leo_core::recording::save(&notes, &source.id, source)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        });
-        if archived.is_err() {
+        let save = if recovering {
+            leo_core::recording::merge_into
+        } else {
+            leo_core::recording::save
+        };
+        if save(
+            &state.notes_dir,
+            into.as_deref().unwrap_or(&source.id),
+            source,
+        )
+        .is_err()
+        {
             change(&recordings, &id, |job| {
                 job.view.state = "failed";
                 job.view.error = Some("The recording sources could not be saved. Check free disk space and recover this recording.".into());
@@ -542,7 +736,14 @@ fn run(
             return;
         }
     }
+    let joined = into.clone();
     let made = store_now(&state, move |store| {
+        if let Some(into) = joined {
+            return match store.find_note(&into) {
+                Some(_) => Ok((into, store.notes_dir.clone())),
+                None => Err(StatusCode::NOT_FOUND),
+            };
+        }
         if !directory.is_empty() && !store.dir_exists(&directory) {
             store.create_dir(&directory);
         }
@@ -553,7 +754,7 @@ fn run(
             }
         }
         let mut note = store
-            .create_note(title, body.trim().to_string(), vec![], &directory)
+            .create_note(title, body.trim().to_string(), &directory)
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
             .id
             .clone();
@@ -562,6 +763,7 @@ fn run(
                 created.id = id.clone();
                 note = id;
             }
+            store.find_note_mut(&note);
         }
         save(store)?;
         Ok((note, store.notes_dir.clone()))
@@ -587,6 +789,10 @@ fn run(
             job.view.state = "done";
             job.view.note = Some(note);
             job.view.writer_failed = writer_failed;
+        }
+        Err(StatusCode::NOT_FOUND) if into.is_some() => {
+            job.view.state = "failed";
+            job.view.error = Some(NOTE_GONE.into());
         }
         Err(_) => {
             job.view.state = "failed";
@@ -628,21 +834,19 @@ pub(crate) async fn status(State(state): State<AppState>, Path(id): Path<String>
 
 pub(crate) async fn recover(State(state): State<AppState>, Path(id): Path<String>) -> Response {
     if let Some(housekeeper) = state.housekeeper.clone() {
-        let pending = tokio::task::spawn_blocking(move || housekeeper.pending_recordings()).await;
-        if let Ok(Ok(pending)) = pending {
-            if let Some(saved) = pending.into_iter().find(|p| p.id == id) {
-                return start(
-                    State(state),
-                    Json(StartBody {
-                        recover: Some(saved.id),
-                        directory: saved.directory,
-                        title: saved.title,
-                        source: saved.source,
-                        profile: Some(saved.profile),
-                    }),
-                )
-                .await;
-            }
+        let pending = tokio::task::spawn_blocking(move || housekeeper.pending_recording(&id)).await;
+        if let Ok(Ok(Some(saved))) = pending {
+            return start(
+                State(state),
+                Json(StartBody {
+                    recover: Some(saved.id),
+                    directory: saved.directory,
+                    title: saved.title,
+                    source: saved.source,
+                    profile: Some(saved.profile),
+                }),
+            )
+            .await;
         }
     }
     error(StatusCode::NOT_FOUND, "That recording cannot be recovered.")
@@ -684,9 +888,6 @@ pub(crate) async fn point(
     if text.is_empty() {
         return error(StatusCode::BAD_REQUEST, "Write the point first.");
     }
-    if text.len() > 8000 {
-        return error(StatusCode::BAD_REQUEST, "Keep a point under 8,000 bytes.");
-    }
     append_point(&state, &id, text, None, None).await
 }
 
@@ -699,7 +900,7 @@ async fn append_point(
 ) -> Response {
     writes_done(state, id).await;
     let input = match with_job(state, id, |job| -> anyhow::Result<_> {
-        if !job.live() || job.view.points.len() >= MOST_POINTS {
+        if !job.live() {
             anyhow::bail!("This recording is not taking points.");
         }
         let lease = Writing::take(job)?;
@@ -719,11 +920,51 @@ async fn append_point(
     })
     .await;
     match result {
-        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Ok(kept)) => acknowledged(kept).await,
         _ => error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "The point could not be saved. Check free disk space and retry.",
         ),
+    }
+}
+
+type Kept = (RecordView, usize, Arc<AtomicUsize>);
+
+async fn acknowledged((view, position, saved): Kept) -> Response {
+    let until = Instant::now() + WAIT_FOR_WRITES;
+    while saved.load(Ordering::Acquire) < position {
+        if Instant::now() >= until {
+            return error(StatusCode::SERVICE_UNAVAILABLE, STILL_SAVING);
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    Json(view).into_response()
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Earlier {
+    before: Option<String>,
+}
+
+pub(crate) async fn earlier_points(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(page): Query<Earlier>,
+) -> Response {
+    let Some(before) = page.before.as_deref().and_then(|b| b.parse::<usize>().ok()) else {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "That page of points does not exist.",
+        );
+    };
+    match with_job(&state, &id, |job| {
+        let points = job.points.lock().unwrap_or_else(|e| e.into_inner());
+        let end = before.min(points.len());
+        let from = end.saturating_sub(VIEW_POINTS);
+        serde_json::json!({ "from": from, "points": points.get(from..end).unwrap_or_default() })
+    }) {
+        Ok(page) => Json(page).into_response(),
+        Err((status, message)) => error(status, message),
     }
 }
 
@@ -738,17 +979,21 @@ fn persist_point(
     text: String,
     at: u64,
     warning: Option<String>,
-) -> Result<RecordView> {
+) -> Result<Kept> {
     with_job(state, id, |job| {
-        job.points
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push((at, text.clone()));
+        let position = {
+            let mut points = job.points.lock().unwrap_or_else(|e| e.into_inner());
+            points.push((at, text.clone()));
+            points.len()
+        };
         job.view.points.push((at, text));
+        let extra = job.view.points.len().saturating_sub(VIEW_POINTS);
+        job.view.points.drain(..extra);
+        job.view.points_total = position;
         if let Some(warning) = warning {
             job.view.warn(warning);
         }
-        job.view.clone()
+        (job.view.clone(), position, Arc::clone(&job.saved_points))
     })
     .map_err(|(_, message)| anyhow::anyhow!(message))
 }
@@ -759,12 +1004,6 @@ pub(crate) async fn wants(
     Json(body): Json<WantsBody>,
 ) -> Response {
     let text = body.text.trim().to_string();
-    if text.chars().count() > leo_core::recording::MOST_WANTS_CHARS {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "Keep what you want from the notes under 4,000 characters.",
-        );
-    }
     writes_done(&state, &id).await;
     let lease = match with_job(&state, &id, |job| -> anyhow::Result<_> {
         if !job.live() {
@@ -841,6 +1080,7 @@ mod tests {
             transcript: String::new(),
             warnings: Vec::new(),
             points: Vec::new(),
+            points_total: 0,
             wants: String::new(),
             levels: Vec::new(),
             levels_start: 0,
@@ -877,20 +1117,8 @@ pub(crate) async fn snapshot(
 ) -> Response {
     use base64::Engine;
     writes_done(&state, &id).await;
-    let notes = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(notes) => notes,
-        Err(code) => {
-            return error(
-                code,
-                "The screenshot folder could not be opened. Try again.",
-            )
-        }
-    };
     let input = with_job(&state, &id, |job| -> anyhow::Result<_> {
-        anyhow::ensure!(
-            job.live() && job.view.points.len() < MOST_POINTS,
-            "Start a recording before pasting a screenshot."
-        );
+        anyhow::ensure!(job.live(), "Start a recording before pasting a screenshot.");
         Ok((Writing::take(job)?, body.at.min(job.view.secs)))
     });
     let (lease, at) = match input {
@@ -898,7 +1126,13 @@ pub(crate) async fn snapshot(
         Ok(Err(problem)) => return error(StatusCode::CONFLICT, problem.to_string()),
         Err((status, problem)) => return error(status, problem),
     };
-    let saved = tokio::task::spawn_blocking(move || -> Result<RecordView> {
+    let Ok(notes) = state.read_store(|store| Ok(store.notes_dir.clone())).await else {
+        return error(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "The notes folder could not be checked. Try pasting the screenshot again.",
+        );
+    };
+    let saved = tokio::task::spawn_blocking(move || -> Result<Kept> {
         let _lease = lease;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(&body.data)
@@ -918,6 +1152,7 @@ pub(crate) async fn snapshot(
                         name: format!("slide.{kind}"),
                         mime: mime.into(),
                         bytes,
+                        path: None,
                     },
                     &mut |_| {},
                 )
@@ -934,7 +1169,7 @@ pub(crate) async fn snapshot(
     })
     .await;
     match saved {
-        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Ok(kept)) => acknowledged(kept).await,
         Ok(Err(problem)) => error(StatusCode::BAD_REQUEST, problem.to_string()),
         Err(_) => error(
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -973,7 +1208,7 @@ async fn discard_pending(state: AppState, id: String) -> Response {
     };
     let recordings = state.recording.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<bool>> {
-        if !housekeeper.pending_recordings()?.iter().any(|p| p.id == id) {
+        if housekeeper.pending_recording(&id)?.is_none() {
             return Ok(Some(false));
         }
         discard_unless_in_use(&recordings, &*housekeeper, &id)

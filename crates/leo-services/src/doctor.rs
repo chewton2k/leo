@@ -6,6 +6,7 @@ use std::path::Path;
 use crate::config::secret::SecretStore;
 use crate::config::Config;
 use crate::health::{self, Check, State};
+use leo_core::store::Facts;
 
 /// One group of checks, headed by what it is about.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +21,7 @@ pub fn scan(
     secrets: &dyn SecretStore,
     notes_dir: &Path,
     config_path: &Path,
+    facts: Facts,
 ) -> Vec<Section> {
     vec![
         Section {
@@ -28,7 +30,7 @@ pub fn scan(
         },
         Section {
             title: "notes",
-            checks: notes_checks(notes_dir),
+            checks: with_recent_problems(notes_checks(notes_dir, facts)),
         },
         Section {
             title: "AI",
@@ -48,6 +50,18 @@ fn warn(what: &str, needed_for: &str, note: String) -> Check {
         state: State::Warn { note },
         detail: None,
     }
+}
+
+fn with_recent_problems(mut checks: Vec<Check>) -> Vec<Check> {
+    let recent = leo_core::diag::recent();
+    if !recent.is_empty() {
+        checks.push(warn(
+            "recent problems",
+            "knowing what leo could not do",
+            recent.join("\n"),
+        ));
+    }
+    checks
 }
 
 fn leo_checks(config_path: &Path) -> Vec<Check> {
@@ -109,19 +123,19 @@ fn meaning_check(state: crate::providers::ModelState) -> Check {
             what,
             needed_for,
             format!(
-                "the model ({} MB) downloads the next time leo opens, or with `leo update`; until then search matches words only",
+                "the model ({} MB) downloads the next time leo opens; until then search matches words only",
                 crate::meaning::MODEL_MB
             ),
         ),
         ModelState::Damaged => warn(
             what,
             needed_for,
-            "the model is damaged: `leo update` downloads the damaged parts again".into(),
+            "the model is damaged: leo downloads the damaged parts again the next time it opens".into(),
         ),
     }
 }
 
-fn notes_checks(notes_dir: &Path) -> Vec<Check> {
+fn notes_checks(notes_dir: &Path, facts: Facts) -> Vec<Check> {
     let mut checks = Vec::new();
 
     let writable = std::fs::create_dir_all(notes_dir).is_ok()
@@ -144,32 +158,21 @@ fn notes_checks(notes_dir: &Path) -> Vec<Check> {
     });
     checks.push(meaning_check(crate::meaning::state()));
 
-    let store = match leo_core::store::Store::load_from(notes_dir) {
-        Ok(store) => store,
-        Err(e) => {
-            checks.push(Check::missing(
-                "notes",
-                "everything",
-                &format!("could not be read: {e}"),
-            ));
-            return checks;
-        }
-    };
-    let dirs = store.directories.len();
+    let dirs = facts.directories;
     checks.push(Check::ready(
         "notes",
         "everything",
         Some(format!(
             "{} note{} in {} director{}",
-            store.notes.len(),
-            if store.notes.len() == 1 { "" } else { "s" },
+            facts.notes,
+            if facts.notes == 1 { "" } else { "s" },
             dirs,
             if dirs == 1 { "y" } else { "ies" }
         )),
     ));
 
-    if !store.unreadable.is_empty() {
-        let list: String = store
+    if !facts.unreadable.is_empty() {
+        let list: String = facts
             .unreadable
             .iter()
             .map(|(path, why)| format!("{} — {why}\n", path.display()))
@@ -184,30 +187,13 @@ fn notes_checks(notes_dir: &Path) -> Vec<Check> {
         ));
     }
 
-    let dupes = store.duplicate_ids();
-    if !dupes.is_empty() {
-        checks.push(Check::missing(
-            "duplicate note IDs",
-            "finding and editing notes",
-            &format!(
-                "more than one note file has the id {}; change the id: line in one of them",
-                dupes.join(", ")
-            ),
-        ));
-    }
-    let copies: Vec<&str> = store
-        .notes
-        .iter()
-        .filter(|n| n.title.ends_with(leo_core::store::CONFLICT_SUFFIX))
-        .map(|n| n.title.as_str())
-        .collect();
-    if !copies.is_empty() {
+    if !facts.conflict_copies.is_empty() {
         checks.push(warn(
             "conflict copies",
             "keeping every edit",
             format!(
                 "another program changed a note while leo had it open, so leo kept your edit as a copy. Compare each with its original and delete the one you do not want:\n{}",
-                copies.join("\n")
+                facts.conflict_copies.join("\n")
             ),
         ));
     }
@@ -284,7 +270,13 @@ mod tests {
     #[test]
     fn every_missing_check_carries_a_fix() {
         let (_tmp, notes, config) = setup();
-        for section in scan(&Config::default(), &MemoryStore::default(), &notes, &config) {
+        for section in scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        ) {
             for check in section.checks {
                 if let State::Missing { fix } = &check.state {
                     assert!(
@@ -300,7 +292,13 @@ mod tests {
     #[test]
     fn every_part_of_leo_has_a_section_in_order() {
         let (_tmp, notes, config) = setup();
-        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        );
         let titles: Vec<&str> = sections.iter().map(|s| s.title).collect();
         assert_eq!(titles, ["leo", "notes", "AI", "recording"]);
         let speech = section(&sections, "AI")
@@ -311,8 +309,14 @@ mod tests {
         assert_eq!(speech, 1);
         assert!(matches!(
             meaning_check(crate::providers::ModelState::Missing).state,
-            State::Warn { ref note } if note.contains("leo update")
+            State::Warn { ref note } if note.contains("next time leo opens")
         ));
+        for state in [
+            crate::providers::ModelState::Missing,
+            crate::providers::ModelState::Damaged,
+        ] {
+            assert!(!format!("{:?}", meaning_check(state)).contains("leo update"));
+        }
         assert!(matches!(
             meaning_check(crate::providers::ModelState::Ready).state,
             State::Ready
@@ -323,13 +327,20 @@ mod tests {
     fn the_notes_are_counted_and_an_unreadable_one_is_named() {
         let (_tmp, notes, config) = setup();
         let mut store = leo_core::store::Store::load_from(&notes).unwrap();
-        store.create_note("A", "a", vec![], "").unwrap();
-        store.create_note("B", "b", vec![], "cs130").unwrap();
+        store.create_note("A", "a", "").unwrap();
+        store.create_note("B", "b", "cs130").unwrap();
         store.create_dir("cs130");
         store.save().unwrap();
         std::fs::write(notes.join("broken.md"), "---\ntitle: [unclosed\n---\nx").unwrap();
 
-        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        let facts = leo_core::store::Store::load_from(&notes).unwrap().facts();
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            facts,
+        );
         let notes_section = section(&sections, "notes");
         let count = check(notes_section, "notes");
         assert!(count.state.is_ready());
@@ -349,7 +360,13 @@ mod tests {
     fn a_config_file_that_does_not_parse_is_a_failure() {
         let (_tmp, notes, config) = setup();
         std::fs::write(&config, "[chat\nchain = [").unwrap();
-        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        );
         let c = check(section(&sections, "leo"), "config file");
         assert!(matches!(c.state, State::Missing { .. }), "{c:?}");
     }
@@ -357,7 +374,13 @@ mod tests {
     #[test]
     fn no_config_file_yet_is_fine() {
         let (_tmp, notes, config) = setup();
-        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        );
         assert!(check(section(&sections, "leo"), "config file")
             .state
             .is_ready());
@@ -368,16 +391,139 @@ mod tests {
         let (_tmp, notes, config) = setup();
         let mut store = leo_core::store::Store::load_from(&notes).unwrap();
         store
-            .create_note("Shared (conflict from leo)", "x", vec![], "")
+            .create_note("Shared (conflict from leo)", "x", "")
             .unwrap();
         store.save().unwrap();
 
-        let sections = scan(&Config::default(), &MemoryStore::default(), &notes, &config);
+        let facts = leo_core::store::Store::load_from(&notes).unwrap().facts();
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            facts,
+        );
         match &check(section(&sections, "notes"), "conflict copies").state {
             State::Warn { note } => {
                 assert!(note.contains("Shared (conflict from leo)"), "{note}");
                 assert!(note.contains("delete"), "{note}");
             }
+            other => panic!("expected a note, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_health_scan_does_not_empty_the_trash() {
+        let (_tmp, notes, config) = setup();
+        let trash = notes.join(".trash");
+        std::fs::create_dir_all(&trash).unwrap();
+        let old = trash.join("old.md");
+        std::fs::write(
+            &old,
+            "---\nid: 0f0f0f0f-0f0f-4f0f-8f0f-0f0f0f0f0f0f\ntitle: Old\n---\nx",
+        )
+        .unwrap();
+        let sixty_days = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 86_400);
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(sixty_days)
+            .unwrap();
+        scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        );
+        assert!(old.exists());
+    }
+
+    #[test]
+    fn the_notes_row_is_built_from_the_facts_it_is_given() {
+        let (_tmp, notes, config) = setup();
+        let facts = Facts {
+            notes: 3,
+            directories: 1,
+            ..Facts::default()
+        };
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            facts,
+        );
+        let row = check(section(&sections, "notes"), "notes");
+        assert_eq!(row.detail.as_deref(), Some("3 notes in 1 directory"));
+    }
+
+    #[test]
+    #[ignore]
+    fn health_scan_notes_section_at_scale() {
+        use std::time::Instant;
+        let median = |mut times: Vec<f64>| {
+            times.sort_by(f64::total_cmp);
+            times[times.len() / 2]
+        };
+        for count in [5_000usize, 50_000] {
+            let tmp = TempDir::new().unwrap();
+            let notes = tmp.path().join("notes");
+            std::fs::create_dir_all(&notes).unwrap();
+            for n in 0..count {
+                let id = format!("{n:08x}-0000-4000-8000-000000000000");
+                std::fs::write(
+                    notes.join(format!("Note {n}.md")),
+                    format!("---\nid: {id}\ntitle: Note {n}\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\nOne paragraph of text for note {n}.\n"),
+                )
+                .unwrap();
+            }
+            let big = tmp.path().join("big");
+            std::fs::create_dir_all(&big).unwrap();
+            std::fs::write(
+                big.join("Big.md"),
+                format!(
+                    "---\nid: ffffffff-0000-4000-8000-000000000000\ntitle: Big\n---\n{}",
+                    "word ".repeat(4_000_000)
+                ),
+            )
+            .unwrap();
+            for (label, dir) in [("notes", &notes), ("20 MB note", &big)] {
+                let mut before = Vec::new();
+                let mut after = Vec::new();
+                let facts = leo_core::store::Store::load_from(dir).unwrap().facts();
+                for _ in 0..5 {
+                    let start = Instant::now();
+                    let loaded = leo_core::store::Store::load_from(dir).unwrap().facts();
+                    notes_checks(dir, loaded);
+                    before.push(start.elapsed().as_secs_f64() * 1000.0);
+                    let start = Instant::now();
+                    notes_checks(dir, facts.clone());
+                    after.push(start.elapsed().as_secs_f64() * 1000.0);
+                }
+                println!(
+                    "{label} {count}: before {:.3} ms, after {:.3} ms",
+                    median(before),
+                    median(after)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_recent_warning_is_listed_under_recent_problems() {
+        let (_tmp, notes, config) = setup();
+        leo_core::diag::warn("x test marker");
+        let sections = scan(
+            &Config::default(),
+            &MemoryStore::default(),
+            &notes,
+            &config,
+            Facts::default(),
+        );
+        match &check(section(&sections, "notes"), "recent problems").state {
+            State::Warn { note } => assert!(note.contains("x test marker"), "{note}"),
             other => panic!("expected a note, got {other:?}"),
         }
     }
@@ -390,7 +536,7 @@ mod safe_probe_tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(".leo-doctor-probe");
         std::fs::write(&path, b"keep this file").unwrap();
-        super::notes_checks(dir.path());
+        super::notes_checks(dir.path(), leo_core::store::Facts::default());
         assert_eq!(std::fs::read(path).unwrap(), b"keep this file");
     }
 }

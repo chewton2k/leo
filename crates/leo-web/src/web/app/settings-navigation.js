@@ -92,10 +92,6 @@ function settingsTitle(section) {
   return settingsItems().find(([id]) => id === section)?.[1] || 'General';
 }
 let settingsDrawn = '', settingsPillFrom = null;
-function settingsCrumbs(section) {
-  const [, title] = settingsItems().find(([id]) => id === section) || settingsItems()[0];
-  return `<span class="sep">/</span><button data-action="settings">Settings</button><span class="sep">/</span><button aria-current="page">${esc(title)}</button>`;
-}
 
 const settingsFind = { query: '', active: 0 };
 function settingsMatches(query) {
@@ -332,16 +328,16 @@ document.addEventListener('keydown', (e) => {
 });
 
 let choiceCardsMade = 0;
-function choiceCards({ label, choices, current, field = '', action = '', key = '', className = '' }) {
-  const name = `choice-${++choiceCardsMade}`;
+function choiceCards({ label, choices, current, field = '', action = '', key = '', className = '', name = `choice-${++choiceCardsMade}` }) {
   const index = Math.max(0, choices.findIndex(([value]) => String(value) === String(current)));
-  const cards = choices.map(([value, title, about = '', diagram = '', icon = ''], i) => {
+  const cards = choices.map(([value, title, about = '', diagram = '', icon = '', { disabled = false } = {}], i) => {
     const on = i === index;
+    const off = disabled ? ' disabled aria-disabled="true"' : '';
     const art = (diagram ? `<span class="choice-diagram" aria-hidden="true">${diagram}</span>` : '') + (icon ? `<span class="choice-icon">${icon}</span>` : '');
     const words = `<span class="choice-title">${esc(title)}</span>${about ? `<span class="choice-about">${esc(about)}</span>` : ''}`;
     return action
-      ? `<button type="button" class="choice-pick${on ? ' on' : ''}" data-action="${action}" data-${key}="${esc(value)}" aria-pressed="${on}">${art}${words}</button>`
-      : `<label class="choice-pick${on ? ' on' : ''}">${art}<input type="radio" name="${name}" value="${esc(value)}"${on ? ' checked' : ''}>${words}</label>`;
+      ? `<button type="button" class="choice-pick${on ? ' on' : ''}" data-action="${action}" data-${key}="${esc(value)}" aria-pressed="${on}"${off}>${art}${words}</button>`
+      : `<label class="choice-pick${on ? ' on' : ''}">${art}<input type="radio" name="${name}" value="${esc(value)}"${on ? ' checked' : ''}${off}>${words}</label>`;
   }).join('');
   const hidden = field ? `<input type="hidden" ${field} value="${esc(current ?? '')}">` : '';
   return `<div class="choice-cards${className ? ` ${className}` : ''}" role="${action ? 'group' : 'radiogroup'}" aria-label="${esc(label)}" style="--count:${choices.length};--at:${index}">${hidden}<span class="choice-ring" aria-hidden="true"></span>${cards}</div>`;

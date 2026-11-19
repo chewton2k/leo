@@ -34,16 +34,10 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  models:
-    name: ${{ matrix.model }}
+  build:
+    name: build the check
     runs-on: macos-latest
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        model: ${{ fromJSON(inputs.large && '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3","cohere-transcribe-03-2026","cohere-transcribe-arabic-07-2026","canary-qwen-2.5b","granite-speech-4.1-2b","Voxtral-Mini-4B-Realtime-2602","Voxtral-Mini-3B-2507"]' || '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3"]') }}
-    env:
-      MODEL: ${{ matrix.model }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -51,18 +45,56 @@ jobs:
         with:
           shared-key: speakers
           save-if: ${{ github.event_name == 'schedule' }}
-      - name: Download the model, the speaker model and a meeting
-        run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL" "$RUNNER_TEMP/meeting"
-      - name: Build the speech worker
-        run: cargo test -p leo-host --no-run --locked
+      - name: Build the speech worker and the check
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p leo-host --no-run --locked
+          cargo test -p leo-services --lib --no-run --locked 2>&1 | tee build.log
+          check=$(sed -n 's/.*Executable unittests src\/lib.rs (\(.*\))/\1/p' build.log | tail -1)
+          test -x "$check"
+          mkdir speaker-check
+          cp "$check" speaker-check/check
+          cp target/debug/leo-test-server speaker-check/leo-test-server
+      - name: Prepare the shared meeting fixture
+        run: python3 -I scripts/speaker_check.py --meeting speaker-check/meeting
+      - uses: actions/upload-artifact@v6
+        with:
+          name: speaker-check
+          path: speaker-check
+          retention-days: 1
+
+  models:
+    name: ${{ matrix.model }}
+    needs: build
+    runs-on: macos-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ github.event_name == 'pull_request' && 2 || 3 }}
+      matrix:
+        model: ${{ fromJSON(github.event_name == 'pull_request' && '["parakeet-tdt-0.6b-v3","whisper-small","canary-180m-flash"]' || inputs.large && '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3","cohere-transcribe-03-2026","cohere-transcribe-arabic-07-2026","canary-qwen-2.5b","granite-speech-4.1-2b","Voxtral-Mini-4B-Realtime-2602","Voxtral-Mini-3B-2507"]' || '["parakeet-unified-en-0.6b","nemotron-3.5-asr-streaming-0.6b","canary-180m-flash","whisper-medium","parakeet-ultra","parakeet-tdt-0.6b-v3","parakeet-tdt-0.6b-v2","Qwen3-ASR-0.6B","Fun-ASR-MLT-Nano-2512","canary-1b-v2","Fun-ASR-Nano-2512","granite-speech-5.0-470m-turboctc","medasr","parakeet-tdt_ctc-110m","multitalker-parakeet-streaming-0.6b-v1","Qwen3-ASR-1.7B","SenseVoiceSmall","whisper-small","whisper-large-v3-turbo","Breeze-ASR-25","whisper-large-v3"]') }}
+    env:
+      MODEL: ${{ matrix.model }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v7
+        with:
+          name: speaker-check
+          path: speaker-check
+      - run: chmod +x speaker-check/check speaker-check/leo-test-server
+      - name: Download the model and speaker model
+        run: python3 -I scripts/speaker_check.py crates/leo-services/src/speech/catalog.json "$RUNNER_TEMP/home" "$MODEL"
       - name: Label a seven-minute meeting
         env:
           LEO_HOME: ${{ runner.temp }}/home
-          LEO_SPEAKER_AUDIO: ${{ runner.temp }}/meeting/meeting.wav
-          LEO_SPEAKER_TRUTH: ${{ runner.temp }}/meeting/meeting.rttm
-          LEO_SPEAKER_WORDS: ${{ runner.temp }}/meeting/meeting.txt
+          LEO_SPEAKER_AUDIO: ${{ github.workspace }}/speaker-check/meeting/meeting.wav
+          LEO_SPEAKER_TRUTH: ${{ github.workspace }}/speaker-check/meeting/meeting.rttm
+          LEO_SPEAKER_WORDS: ${{ github.workspace }}/speaker-check/meeting/meeting.txt
         shell: bash
+        working-directory: crates/leo-services
         run: |
-          export LEO_TRANSCRIBE_WORKER_EXE="$PWD/target/debug/leo-test-server"
-          cargo test -p leo-services --lib speakers_across_models --locked -- --ignored --nocapture | tee result.txt
+          set -o pipefail
+          export LEO_TRANSCRIBE_WORKER_EXE="$GITHUB_WORKSPACE/speaker-check/leo-test-server"
+          "$GITHUB_WORKSPACE/speaker-check/check" speakers_across_models --ignored --nocapture | tee result.txt
           grep '^speakers_across_models' result.txt >> "$GITHUB_STEP_SUMMARY"

@@ -29,6 +29,172 @@ pub fn stop_tree(child: &mut std::process::Child) {
     let _ = child.kill();
 }
 
+#[derive(Clone, Default)]
+pub struct Stop {
+    pub flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub deadline: Option<std::time::Instant>,
+}
+
+impl Stop {
+    pub fn asked(&self) -> bool {
+        self.flag.load(std::sync::atomic::Ordering::Relaxed)
+            || self
+                .deadline
+                .is_some_and(|d| std::time::Instant::now() >= d)
+    }
+}
+
+thread_local! {
+    static STOP: std::cell::RefCell<Option<Stop>> = const { std::cell::RefCell::new(None) };
+}
+
+pub fn with_stop<R>(stop: Stop, work: impl FnOnce() -> R) -> R {
+    struct Restore(Option<Stop>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let previous = self.0.take();
+            STOP.with(|s| *s.borrow_mut() = previous);
+        }
+    }
+    let _restore = Restore(STOP.with(|s| s.borrow_mut().replace(stop)));
+    work()
+}
+
+pub fn current_stop() -> Option<Stop> {
+    STOP.with(|s| s.borrow().clone())
+}
+
+pub struct StopOnDrop(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+const READER_GRACE: std::time::Duration = std::time::Duration::from_millis(200);
+
+pub struct Captured {
+    pub status: std::process::ExitStatus,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub truncated: bool,
+    pub timed_out: bool,
+}
+
+type Kept = std::sync::Arc<std::sync::Mutex<Vec<u8>>>;
+
+fn collect<R: std::io::Read + Send + 'static>(
+    pipe: Option<R>,
+    max_bytes: usize,
+    truncated: &std::sync::Arc<std::sync::atomic::AtomicBool>,
+    ended: &std::sync::mpsc::Sender<()>,
+) -> std::io::Result<Kept> {
+    let kept = Kept::default();
+    let (into, truncated, ended) = (kept.clone(), truncated.clone(), ended.clone());
+    std::thread::Builder::new()
+        .name("leo-child-output".into())
+        .spawn(move || {
+            let mut chunk = [0u8; 8192];
+            if let Some(mut pipe) = pipe {
+                loop {
+                    match pipe.read(&mut chunk) {
+                        Ok(0) => break,
+                        Ok(n) => {
+                            let mut kept = into.lock().unwrap_or_else(|e| e.into_inner());
+                            let room = max_bytes.saturating_sub(kept.len());
+                            if n > room {
+                                truncated.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
+                            kept.extend_from_slice(&chunk[..n.min(room)]);
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {}
+                        Err(_) => break,
+                    }
+                }
+            }
+            let _ = ended.send(());
+        })?;
+    Ok(kept)
+}
+
+pub fn run_bounded(
+    mut command: std::process::Command,
+    timeout: std::time::Duration,
+    max_bytes: usize,
+) -> std::io::Result<Captured> {
+    use std::process::Stdio;
+    quiet(&mut command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn()?;
+    let truncated = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (ended, readers_done) = std::sync::mpsc::channel();
+    let started = collect(child.stdout.take(), max_bytes, &truncated, &ended).and_then(|out| {
+        Ok((
+            out,
+            collect(child.stderr.take(), max_bytes, &truncated, &ended)?,
+        ))
+    });
+    drop(ended);
+    let (stdout, stderr) = match started {
+        Ok(kept) => kept,
+        Err(e) => {
+            stop_tree(&mut child);
+            let _ = child.wait();
+            return Err(e);
+        }
+    };
+    let deadline = std::time::Instant::now() + timeout;
+    let mut timed_out = false;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Ok(None) => {
+                stop_tree(&mut child);
+                timed_out = true;
+                break child.wait()?;
+            }
+            Err(e) => {
+                stop_tree(&mut child);
+                let _ = child.wait();
+                return Err(e);
+            }
+        }
+    };
+    let mut open = 2;
+    for round in 0..2 {
+        let until = std::time::Instant::now() + READER_GRACE;
+        while open > 0 {
+            let left = until.saturating_duration_since(std::time::Instant::now());
+            if left.is_zero() || readers_done.recv_timeout(left).is_err() {
+                break;
+            }
+            open -= 1;
+        }
+        if open == 0 {
+            break;
+        }
+        if round == 0 {
+            stop_tree(&mut child);
+        }
+    }
+    let take = |kept: &Kept| std::mem::take(&mut *kept.lock().unwrap_or_else(|e| e.into_inner()));
+    Ok(Captured {
+        status,
+        stdout: take(&stdout),
+        stderr: take(&stderr),
+        truncated: truncated.load(std::sync::atomic::Ordering::Relaxed),
+        timed_out,
+    })
+}
+
 pub const WORKER_FLAG: &str = "--leo-speech-worker";
 
 const MOST_MARKED: usize = 256;
@@ -483,5 +649,116 @@ mod tests {
             .filter(|pid| *pid > 4_000_000)
             .collect();
         assert_eq!(left, vec![4_000_002]);
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: &str) -> bool {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[cfg(unix)]
+    fn shell(script: &str) -> std::process::Command {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_that_writes_a_megabyte_is_truncated_not_timed_out() {
+        let captured = run_bounded(
+            shell("head -c 1048576 /dev/zero"),
+            std::time::Duration::from_secs(10),
+            16 * 1024,
+        )
+        .unwrap();
+        assert!(captured.truncated);
+        assert!(!captured.timed_out);
+        assert!(captured.status.success());
+        assert_eq!(captured.stdout.len(), 16_384);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_child_past_its_deadline_is_stopped_with_its_children() {
+        let captured = run_bounded(
+            shell("sleep 30 & echo $!; wait"),
+            std::time::Duration::from_millis(300),
+            4096,
+        )
+        .unwrap();
+        assert!(captured.timed_out);
+        let grandchild = String::from_utf8(captured.stdout).unwrap();
+        let grandchild = grandchild.trim();
+        assert!(!grandchild.is_empty());
+        let began = std::time::Instant::now();
+        while alive(grandchild) && began.elapsed() < std::time::Duration::from_secs(1) {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!alive(grandchild), "{grandchild} is still running");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_cannot_wait_on_a_descendant_holding_its_output() {
+        let now = std::time::Instant::now();
+        let captured = run_bounded(
+            shell("(sleep 2) & printf done"),
+            std::time::Duration::from_secs(5),
+            4096,
+        )
+        .unwrap();
+        assert_eq!(captured.stdout, b"done");
+        assert!(!captured.timed_out);
+        assert!(now.elapsed() < std::time::Duration::from_millis(500));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_quick_command_returns_its_output() {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/c", "echo done"]);
+        let captured = run_bounded(command, std::time::Duration::from_secs(10), 4096).unwrap();
+        assert!(captured.status.success());
+        assert!(!captured.timed_out);
+        assert_eq!(String::from_utf8_lossy(&captured.stdout).trim(), "done");
+    }
+
+    #[test]
+    fn with_stop_restores_the_outer_stop() {
+        assert!(current_stop().is_none());
+        let outer = Stop::default();
+        let inner = Stop {
+            deadline: Some(std::time::Instant::now()),
+            ..Default::default()
+        };
+        with_stop(outer.clone(), || {
+            with_stop(inner, || {
+                assert!(current_stop().is_some_and(|s| s.asked()));
+            });
+            let now = current_stop().unwrap();
+            assert!(std::sync::Arc::ptr_eq(&now.flag, &outer.flag));
+            assert!(!now.asked());
+            let unwound = std::panic::catch_unwind(|| with_stop(Stop::default(), || panic!("x")));
+            assert!(unwound.is_err());
+            assert!(std::sync::Arc::ptr_eq(
+                &current_stop().unwrap().flag,
+                &outer.flag
+            ));
+        });
+        assert!(current_stop().is_none());
+    }
+
+    #[test]
+    fn stop_on_drop_sets_the_flag() {
+        let stop = Stop::default();
+        let guard = StopOnDrop(stop.flag.clone());
+        assert!(!stop.asked());
+        drop(guard);
+        assert!(stop.asked());
     }
 }

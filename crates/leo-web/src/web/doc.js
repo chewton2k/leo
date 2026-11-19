@@ -16,61 +16,169 @@
     const TYPING_GROUP = 4000;
     const past = [];
     const future = [];
-    let current = lines.join('\n');
+    let wholeText = lines.join('\n');
+    let wholeSince = [];
+    let typingGroup = null;
     let typing = { in: null, last: 0, since: 0 };
+    let docVersion = 0;
+    let joined = wholeText;
+    let joinedAt = 0;
 
-    function changed() {
-      const next = lines.join('\n');
-      if (next !== current) {
-        const now = Date.now();
-        const keystroke = Math.abs(next.length - current.length) <= 1;
-        const same = keystroke && editing && typing.in === editing.area && now - typing.last < TYPING_PAUSE && now - typing.since < TYPING_GROUP;
-        if (!same) {
-          past.push(current);
-          if (past.length > MOST_UNDO) past.shift();
-          typing = { in: keystroke && editing ? editing.area : null, last: now, since: now };
-        } else {
-          typing.last = now;
-        }
-        future.length = 0;
-        current = next;
+    function joinedText() {
+      if (joinedAt !== docVersion) {
+        joined = lines.join('\n');
+        joinedAt = docVersion;
       }
-      container.classList.toggle('doc-empty', !next.trim());
-      onChange(next);
+      return joined;
+    }
+
+    function spanOf(start, before, after) {
+      const most = Math.min(before.length, after.length);
+      let from = 0;
+      while (from < most && before[from] === after[from]) from++;
+      let tail = 0;
+      while (tail < most - from && before[before.length - 1 - tail] === after[after.length - 1 - tail]) tail++;
+      if (from === before.length && from === after.length) return null;
+      return { start: start + from, removed: before.slice(from, before.length - tail), inserted: after.slice(from, after.length - tail) };
+    }
+
+    function spliced(pieces, { start, removed, inserted }) {
+      const end = start + removed.length;
+      const out = [];
+      let at = 0;
+      let placed = false;
+      for (const piece of pieces) {
+        const from = at;
+        at += piece.length;
+        if (at <= start || from >= end) {
+          if (from >= end && !placed) { out.push(inserted); placed = true; }
+          out.push(piece);
+          continue;
+        }
+        if (from < start) out.push(piece.slice(0, start - from));
+        if (!placed) { out.push(inserted); placed = true; }
+        if (at > end) out.push(piece.slice(end - from));
+      }
+      if (!placed) out.push(inserted);
+      return out;
+    }
+
+    const applyAll = () => wholeSince.reduce(spliced, [wholeText]).join('');
+
+    function remember(span) {
+      if (!span) return;
+      past.push(span);
+      if (past.length > MOST_UNDO) past.shift();
+      wholeSince.push(span);
+      if (wholeSince.length > MOST_UNDO) {
+        wholeText = applyAll();
+        wholeSince = [];
+      }
+    }
+
+    function closeGroup() {
+      if (!typingGroup) return;
+      remember(spanOf(typingGroup.offset, typingGroup.before.join('\n'), typingGroup.after.join('\n')));
+      typingGroup = null;
+    }
+
+    function widen(at, removed, added) {
+      const g = typingGroup;
+      const lo = Math.min(g.at, at);
+      const hi = Math.max(g.at + g.after.length, at + removed.length);
+      const before = (k) => (k < at ? lines[k] : k < at + removed.length ? removed[k - at] : lines[k - removed.length + added.length]);
+      const above = [];
+      for (let k = lo; k < g.at; k++) above.push(before(k));
+      const below = [];
+      for (let k = g.at + g.after.length; k < hi; k++) below.push(before(k));
+      g.before = above.concat(g.before, below);
+      if (lo < g.at) g.offset = lineStart(lo);
+      g.at = lo;
+      g.after = lines.slice(lo, hi - removed.length + added.length);
+    }
+
+    function typed({ at, removed, added }) {
+      let delta = 0;
+      for (const line of removed) delta -= line.length + 1;
+      for (const line of added) delta += line.length + 1;
+      let same = removed.length === added.length;
+      for (let k = 0; same && k < added.length; k++) same = removed[k] === added[k];
+      if (same) return;
+      const now = Date.now();
+      const keystroke = Math.abs(delta) <= 1;
+      future.length = 0;
+      if (typingGroup && keystroke && editing && typing.in === editing.area && now - typing.last < TYPING_PAUSE && now - typing.since < TYPING_GROUP) {
+        typing.last = now;
+        widen(at, removed, added);
+        return;
+      }
+      closeGroup();
+      typing = { in: keystroke && editing ? editing.area : null, last: now, since: now };
+      typingGroup = { at, before: removed.slice(), after: added.slice(), offset: lineStart(at) };
+    }
+
+    function rebuilt() {
+      closeGroup();
+      const before = applyAll();
+      const next = lines.join('\n');
+      wholeText = next;
+      wholeSince = [];
+      joined = next;
+      joinedAt = docVersion;
+      typing = { in: null, last: 0, since: 0 };
+      const span = spanOf(0, before, next);
+      if (!span) return;
+      future.length = 0;
+      past.push(span);
+      if (past.length > MOST_UNDO) past.shift();
+    }
+
+    function changed(edit) {
+      docVersion++;
+      startsFrom(edit ? edit.at : 0);
+      if (edit) typed(edit);
+      else rebuilt();
+      container.classList.toggle('doc-empty', !lines.some((line) => line.trim()));
+      onChange(joinedText);
       outlineLater();
     }
 
-    function restore(text) {
-      const before = current;
+    function restore(text, from, to) {
       stop();
+      typingGroup = null;
       typing = { in: null, last: 0, since: 0 };
-      current = text;
       lines = text.split('\n');
-      onChange(text);
+      wholeText = text;
+      wholeSince = [];
+      docVersion++;
+      joined = text;
+      joinedAt = docVersion;
+      onChange(joinedText);
       outlineLater();
       draw();
-      let from = 0;
-      while (from < before.length && from < text.length && before[from] === text[from]) from++;
-      let tail = 0;
-      while (tail < before.length - from && tail < text.length - from && before[before.length - 1 - tail] === text[text.length - 1 - tail]) tail++;
-      const to = Math.max(from, text.length - tail);
       if (lineOf(from) !== lineOf(to)) selectSpan(from, to);
       else editSpan(from, to);
     }
 
     function undo() {
-      if (!past.length) return false;
+      if (!past.length && !typingGroup) return false;
       if (editing) stop();
-      future.push(current);
-      restore(past.pop());
+      closeGroup();
+      if (!past.length) return false;
+      const span = past.pop();
+      const now = joinedText();
+      future.push(span);
+      restore(now.slice(0, span.start) + span.removed + now.slice(span.start + span.inserted.length), span.start, span.start + span.removed.length);
       return true;
     }
 
     function redo() {
       if (!future.length) return false;
       if (editing) stop();
-      past.push(current);
-      restore(future.pop());
+      const span = future.pop();
+      const now = joinedText();
+      past.push(span);
+      restore(now.slice(0, span.start) + span.inserted + now.slice(span.start + span.removed.length), span.start, span.start + span.inserted.length);
       return true;
     }
 
@@ -130,6 +238,7 @@
       const levels = ed.listLevels(lines);
       const starts = listStarts(levels);
       let boxes = 0;
+      const tail = container.querySelector('.doc-tail');
       rendered = blocks.map((block, i) => {
         const text = lines.slice(block.start, block.end).join('\n');
         const level = block.kind === 'line' ? levels[block.start] : 0;
@@ -148,18 +257,18 @@
         if (level > 0) el.style.marginLeft = `${level * 1.5}em`;
         el.innerHTML = renderBlock(block, before, levels, starts);
         if (old && old.el.parentNode === container) old.el.replaceWith(el);
-        else container.insertBefore(el, container.querySelector('.doc-tail'));
+        else container.insertBefore(el, tail);
         return { key, el };
       });
       for (const el of container.querySelectorAll('.blk')) {
         if (Number(el.dataset.i) >= blocks.length) el.remove();
       }
       container.classList.toggle('doc-empty', !lines.join('').trim());
-      if (!container.querySelector('.doc-tail')) {
-        const tail = document.createElement('div');
-        tail.className = 'doc-tail';
-        tail.dataset.tail = '1';
-        container.appendChild(tail);
+      if (!tail) {
+        const end = document.createElement('div');
+        end.className = 'doc-tail';
+        end.dataset.tail = '1';
+        container.appendChild(end);
       }
       outlineScroll();
     }
@@ -178,6 +287,10 @@
     const outlineUpArrow = outlineNav ? document.createElement('button') : null;
     const outlineDownArrow = outlineNav ? document.createElement('button') : null;
     let outlineStart = 0;
+    let outlineAt = -1;
+    const outlinePlaced = { top: null, center: null };
+    let outlineButton = null;
+    let outlineTick = null;
     let outlineFollowed = null;
     let outlineLanding = null;
     let outlineIndex = null;
@@ -305,7 +418,7 @@
       outlineIndex = index;
       for (const [i, tick] of Array.from(outlineTicks.children).entries()) {
         if (index === null) tick.removeAttribute('data-distance');
-        else tick.dataset.distance = String(Math.min(3, Math.abs(i - index)));
+        else tick.dataset.distance = String(Math.min(3, Math.abs(outlineStart + i - index)));
       }
       const row = index === null ? null : outlineRows[index];
       const room = row ? outlineRoom() : null;
@@ -328,7 +441,7 @@
       outlinePreview.style.left = `${room.left}px`;
       outlinePreview.style.width = `${room.width}px`;
       outlinePreview.style.top = '0px';
-      const tick = outlineTicks.children[index].getBoundingClientRect();
+      const tick = outlineTicks.children[index - outlineStart].getBoundingClientRect();
       const rect = outline.getBoundingClientRect();
       const height = outlinePreview.getBoundingClientRect().height;
       const top = Math.max(0, Math.min(tick.top + tick.height / 2 - rect.top - height / 2, root.innerHeight - rect.top - height - 12));
@@ -350,13 +463,24 @@
 
     function outlinePage(start) {
       outlineStart = Math.max(0, Math.min(Math.floor(start / OUTLINE_PAGE) * OUTLINE_PAGE, Math.floor(Math.max(0, outlineRows.length - 1) / OUTLINE_PAGE) * OUTLINE_PAGE));
-      for (const [i, tick] of Array.from(outlineTicks.children).entries()) tick.hidden = i < outlineStart || i >= outlineStart + OUTLINE_PAGE;
+      outlineTicks.innerHTML = outlineRows.slice(outlineStart, outlineStart + OUTLINE_PAGE).map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+      outlineMark();
       outlineTicks.style.setProperty('--outline-count', Math.min(OUTLINE_PAGE, outlineRows.length));
       outlineUpArrow.hidden = outlineDownArrow.hidden = outlineRows.length <= OUTLINE_PAGE;
       outlineUpArrow.disabled = outlineStart === 0;
       outlineDownArrow.disabled = outlineStart + OUTLINE_PAGE >= outlineRows.length;
       for (const [arrow, other] of [[outlineUpArrow, outlineDownArrow], [outlineDownArrow, outlineUpArrow]]) if (arrow.disabled && document.activeElement === arrow) other.focus({ preventScroll: true });
-      if (outlineIndex !== null && !outlineShows(outlineIndex)) outlinePeek(null);
+      if (outlineIndex !== null) outlinePeek(outlineShows(outlineIndex) ? outlineIndex : null);
+    }
+
+    function outlineMark() {
+      outlineTick = outlineShows(outlineAt) ? outlineTicks.children[outlineAt - outlineStart] || null : null;
+      if (outlineTick) outlineTick.classList.add('on');
+    }
+
+    function outlineBlock(row) {
+      const el = rendered[row.block]?.el;
+      return el && el.isConnected && el.dataset.start === String(row.line) ? el : container.querySelector(`.blk[data-start="${row.line}"]`);
     }
 
     function outlineEscape(e) {
@@ -378,7 +502,7 @@
 
     function outlineFocus() {
       if (outlineIndex !== null) return;
-      const current = Math.max(0, outlineRows.findIndex(row => String(row.line) === outlineTicks.querySelector('.on')?.dataset.tick));
+      const current = Math.max(0, outlineAt);
       outlinePeek(outlineShows(current) ? current : outlineStart);
     }
 
@@ -405,26 +529,45 @@
       outlineFrame = 0;
       if (!outline || !outline.isConnected || outline.hidden) return;
       const top = outlineTop();
-      outline.style.setProperty('--outline-top', `${top}px`);
-      outline.style.setProperty('--outline-center', `${Math.max(top, (root.innerHeight - outline.offsetHeight) / 2)}px`);
-      let current = outlineRows[0];
+      if (top !== outlinePlaced.top) {
+        outlinePlaced.top = top;
+        outline.style.setProperty('--outline-top', `${top}px`);
+      }
+      const center = Math.max(top, (root.innerHeight - outline.offsetHeight) / 2);
+      if (center !== outlinePlaced.center) {
+        outlinePlaced.center = center;
+        outline.style.setProperty('--outline-center', `${center}px`);
+      }
       const bottom = root.scrollY > 0 && root.scrollY + root.innerHeight >= document.documentElement.scrollHeight - 2;
-      for (const row of outlineRows) {
-        const block = container.querySelector(`.blk[data-start="${row.line}"]`);
-        if (block && block.getBoundingClientRect().top <= (bottom ? root.innerHeight : top + 24)) current = row;
+      const limit = bottom ? root.innerHeight : top + 24;
+      let low = 0;
+      let high = outlineRows.length - 1;
+      let at = 0;
+      while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const block = outlineBlock(outlineRows[middle]);
+        if (block && block.getBoundingClientRect().top <= limit) {
+          at = middle;
+          low = middle + 1;
+        } else high = middle - 1;
       }
-      let selected = current && outlineNav.querySelector(`button[data-line="${current.line}"]`);
-      let hidden = selected && selected.closest('ul[hidden]');
-      while (hidden) {
-        selected = outlineNav.querySelector(`button[data-line="${hidden.dataset.parent}"]`);
-        hidden = selected && selected.closest('ul[hidden]');
+      const current = outlineRows[at];
+      if (at !== outlineAt) {
+        let selected = current && outlineNav.querySelector(`button[data-line="${current.line}"]`);
+        let hidden = selected && selected.closest('ul[hidden]');
+        while (hidden) {
+          selected = outlineNav.querySelector(`button[data-line="${hidden.dataset.parent}"]`);
+          hidden = selected && selected.closest('ul[hidden]');
+        }
+        if (selected !== outlineButton) {
+          if (outlineButton) outlineButton.removeAttribute('aria-current');
+          if (selected) selected.setAttribute('aria-current', 'location');
+          outlineButton = selected;
+        }
+        if (outlineTick) outlineTick.classList.remove('on');
+        outlineAt = at;
+        outlineMark();
       }
-      for (const button of outlineNav.querySelectorAll('button[data-line]')) {
-        if (button === selected) button.setAttribute('aria-current', 'location');
-        else button.removeAttribute('aria-current');
-      }
-      for (const tick of outlineTicks.children) tick.classList.toggle('on', Boolean(current) && tick.dataset.tick === String(current.line));
-      const at = current ? outlineRows.indexOf(current) : 0;
       if (outlineLanding && (current?.line === outlineLanding.line || bottom || performance.now() > outlineLanding.until)) outlineLanding = null;
       if (!outlineLanding && current?.key !== outlineFollowed) {
         outlineFollowed = current?.key;
@@ -468,7 +611,9 @@
         outlineKey = key;
         outlineNav.innerHTML = outlineList(ed.headingTree(outlineRows));
         outlinePeek(null);
-        outlineTicks.innerHTML = outlineRows.map((row) => `<span aria-hidden="true" data-tick="${row.line}" data-level="${Math.min(row.level, 3)}"></span>`).join('');
+        outlineAt = -1;
+        outlineButton = null;
+        outlineTick = null;
         outlinePage(outlineStart);
         if (focused) {
           const button = outlineNav.querySelector(`[data-${focused.type}="${focused.line}"]`) || outlineNav.querySelector('button[data-line]');
@@ -780,10 +925,29 @@
       selection.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
     }
 
+    let lineStarts = [0];
+    let startsOf = lines;
+    let startsCount = lines.length;
+
+    function startsUpTo(line) {
+      if (startsOf !== lines || startsCount !== lines.length) startsFrom(0, true);
+      while (lineStarts.length <= line) {
+        const k = lineStarts.length - 1;
+        lineStarts.push(lineStarts[k] + lines[k].length + 1);
+      }
+    }
+
+    function startsFrom(line, always = false) {
+      if (!always && startsOf !== lines) return;
+      startsOf = lines;
+      startsCount = lines.length;
+      lineStarts.length = Math.max(1, Math.min(lineStarts.length, line + 1));
+    }
+
     function lineStart(line) {
-      let at = 0;
-      for (let k = 0; k < line && k < lines.length; k++) at += lines[k].length + 1;
-      return at;
+      const upTo = Math.max(0, Math.min(line, lines.length));
+      startsUpTo(upTo);
+      return lineStarts[upTo];
     }
 
     function hitsOf(from, to) {
@@ -794,12 +958,19 @@
     }
 
     function lineOf(at) {
-      let start = 0;
-      for (let k = 0; k < lines.length; k++) {
-        if (at <= start + lines[k].length) return k;
-        start += lines[k].length + 1;
+      if (!lines.length) return -1;
+      startsUpTo(0);
+      while (lineStarts.length <= lines.length && lineStarts[lineStarts.length - 1] <= at) startsUpTo(lineStarts.length);
+      const top = lineStarts.length - 1;
+      if (lineStarts[top] <= at) return lines.length - 1;
+      let lo = 1;
+      let hi = top;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (lineStarts[mid] > at) hi = mid;
+        else lo = mid + 1;
       }
-      return lines.length - 1;
+      return lo - 1;
     }
 
     const docLength = () => lines.join('\n').length;
@@ -935,6 +1106,8 @@
       if (!span || !e.clipboardData) return;
       e.preventDefault();
       e.clipboardData.setData('text/plain', lines.join('\n').slice(span[0], span[1]));
+      const html = md.selectionCopy && md.selectionCopy(root.getSelection().getRangeAt(0));
+      if (html) e.clipboardData.setData('text/html', html);
       if (e.type === 'cut') replaceSelection('');
     }
 
@@ -1068,13 +1241,13 @@
       editing.initialHeight = null;
       area.closest('.blk').style.minHeight = '';
       const next = (editing.prefix + area.value).split('\n');
-      lines.splice(start, editing.end - start, ...next);
+      const removed = lines.splice(start, editing.end - start, ...next);
       editing.end = start + next.length;
       look(area);
       fit(area);
-      changed();
+      changed({ at: start, removed, added: next });
       if (!e?.isComposing) slashSeen();
-      const marker = ed.listPrefix(editing.prefix + area.value, lines.slice(0, start));
+      const marker = ed.listPrefixAt(editing.prefix + area.value, lines, start);
       if (editing.kind === 'line' && !e?.isComposing && marker.length > editing.prefix.length && /[^\S\n]$/.test(marker)) {
         const caret = lineStart(start) + editing.prefix.length + area.selectionStart;
         const line = lineOf(caret);
@@ -1760,7 +1933,7 @@
         container.removeEventListener('drop', onDrop);
       },
       insert,
-      source: () => lines.join('\n'),
+      source: joinedText,
       stop,
       isEditing: () => editing !== null,
       selection() {

@@ -1,4 +1,5 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -17,8 +18,7 @@ use crate::ics::{self, Event};
 use crate::reply::error;
 use crate::AppState;
 
-pub const MOST_BYTES: u64 = 5_000_000;
-const MOST_CALENDARS: usize = 5;
+const MOST_SETTINGS_BYTES: u64 = 20_000_000;
 const STALE_AFTER_MINUTES: i64 = 15;
 const LOOK_BACK_HOURS: i64 = 3;
 const LOOK_AHEAD_DAYS: i64 = 7;
@@ -31,11 +31,9 @@ const OFFER_BEFORE_MINUTES: i64 = 2;
 const OFFER_AFTER_MINUTES: i64 = 10;
 const PROMPTED_KEPT_DAYS: i64 = 2;
 const OFFER_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
-const OLD_FILES: [&str; 3] = [
-    "calendar-google.json",
-    "calendar-status.json",
-    "calendar-events.json",
-];
+const STRAY_TEMP_HOURS: u64 = 1;
+const PROBLEM: &str = "leo could not read this calendar just now. If it keeps happening, remove it and paste its link again.";
+const NOT_A_CALENDAR: &str = "That link does not lead to a calendar. In Google Calendar, copy “Secret address in iCal format”.";
 
 type Expansion = (String, Arc<Vec<Event>>);
 
@@ -56,7 +54,7 @@ struct Feed {
 }
 
 fn db_for(notes: &Path) -> Arc<crate::db::Db> {
-    crate::db::at(&data(notes).join(crate::db::FILE))
+    crate::db::at(&crate::db::beside_of(notes, None).join(crate::db::FILE))
 }
 
 fn time_of(text: Option<String>) -> Option<DateTime<Utc>> {
@@ -74,8 +72,8 @@ fn feed_of(notes: &Path, id: &str) -> Feed {
                     Ok(Feed {
                         fetched_at: time_of(r.get(0)?),
                         tried_at: time_of(r.get(1)?),
-                        etag: r.get(2)?,
-                        modified: r.get(3)?,
+                        etag: kept(r.get(2)?),
+                        modified: kept(r.get(3)?),
                         problem: r.get(4)?,
                     })
                 },
@@ -84,17 +82,179 @@ fn feed_of(notes: &Path, id: &str) -> Feed {
         .unwrap_or_default()
 }
 
-fn body_of(notes: &Path, id: &str) -> Option<(DateTime<Utc>, Vec<u8>)> {
+fn legacy_body(notes: &Path, id: &str) -> Option<Vec<u8>> {
     db_for(notes)
         .with(|c| {
             c.query_row(
-                "SELECT fetched_at, body FROM calendar_feeds WHERE feed = ?1 AND body IS NOT NULL",
+                "SELECT body FROM calendar_feeds WHERE feed = ?1 AND body IS NOT NULL",
                 [id],
-                |r| Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Vec<u8>>(1)?)),
+                |r| r.get::<_, Vec<u8>>(0),
             )
         })
         .ok()
-        .and_then(|(at, body)| time_of(at).map(|at| (at, body)))
+}
+
+fn safe(id: &str) -> bool {
+    !id.is_empty()
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn feeds_dir(notes: &Path) -> PathBuf {
+    crate::db::beside_of(notes, None).join(leo_core::paths::own::CALENDAR)
+}
+
+const KEPT_IN_A_FILE: &str = "leo-file:";
+
+fn kept(stored: Option<String>) -> Option<String> {
+    stored?.strip_prefix(KEPT_IN_A_FILE).map(str::to_string)
+}
+
+fn keep(sent: &Option<String>) -> Option<String> {
+    sent.as_ref()
+        .map(|value| format!("{KEPT_IN_A_FILE}{value}"))
+}
+
+fn feed_name(name: &str) -> Option<(&str, u64)> {
+    let (id, hash) = name.strip_suffix(".ics")?.rsplit_once('.')?;
+    (safe(id) && hash.len() == 16)
+        .then(|| u64::from_str_radix(hash, 16).ok())
+        .flatten()
+        .map(|hash| (id, hash))
+}
+
+fn feed_files(notes: &Path) -> HashMap<String, (u64, PathBuf)> {
+    let mut newest: HashMap<String, (std::time::SystemTime, u64, PathBuf)> = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(feeds_dir(notes)) else {
+        return HashMap::new();
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some((id, hash)) = name.to_str().and_then(feed_name) else {
+            continue;
+        };
+        let Ok(meta) = entry.metadata() else { continue };
+        if !meta.is_file() {
+            continue;
+        }
+        let modified = meta.modified().unwrap_or(std::time::UNIX_EPOCH);
+        if newest.get(id).is_none_or(|(at, _, _)| modified > *at) {
+            newest.insert(id.to_string(), (modified, hash, entry.path()));
+        }
+    }
+    newest
+        .into_iter()
+        .map(|(id, (_, hash, path))| (id, (hash, path)))
+        .collect()
+}
+
+struct Sink {
+    file: tempfile::NamedTempFile,
+    hash: u64,
+    length: u64,
+    tail: Vec<u8>,
+    calendar: bool,
+    tripped: bool,
+    most: u64,
+}
+
+impl Sink {
+    fn new(notes: &Path, most: u64) -> std::io::Result<Sink> {
+        let dir = feeds_dir(notes);
+        std::fs::create_dir_all(&dir)?;
+        Ok(Sink {
+            file: tempfile::NamedTempFile::new_in(dir)?,
+            hash: 0xcbf2_9ce4_8422_2325,
+            length: 0,
+            tail: Vec::new(),
+            calendar: false,
+            tripped: false,
+            most,
+        })
+    }
+
+    fn keep(mut self, notes: &Path, id: &str) -> std::io::Result<u64> {
+        self.file.flush()?;
+        self.file.as_file().sync_all()?;
+        let dir = feeds_dir(notes);
+        let target = dir.join(format!("{id}.{:016x}.ics", self.hash));
+        if !target.exists() {
+            self.file.persist(&target).map_err(|e| e.error)?;
+        }
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let other = entry.path();
+                let same = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(feed_name)
+                    .is_some_and(|(other_id, _)| other_id == id);
+                if same && other != target {
+                    let _ = std::fs::remove_file(other);
+                }
+            }
+        }
+        Ok(self.hash)
+    }
+}
+
+impl Write for Sink {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if self.length + bytes.len() as u64 > self.most {
+            self.tripped = true;
+            return Err(std::io::Error::other(crate::TooBig));
+        }
+        if !self.calendar {
+            let mut seen = std::mem::take(&mut self.tail);
+            seen.extend_from_slice(bytes);
+            self.calendar = seen.windows(15).any(|w| w == b"BEGIN:VCALENDAR");
+            self.tail = seen[seen.len().saturating_sub(14)..].to_vec();
+        }
+        self.hash = bytes.iter().fold(self.hash, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x0100_0000_01b3)
+        });
+        self.length += bytes.len() as u64;
+        self.file.write_all(bytes)?;
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn keep_bytes(notes: &Path, id: &str, bytes: &[u8]) -> std::io::Result<(u64, PathBuf)> {
+    let mut sink = Sink::new(notes, u64::MAX)?;
+    sink.write_all(bytes)?;
+    let hash = sink.keep(notes, id)?;
+    Ok((hash, feeds_dir(notes).join(format!("{id}.{hash:016x}.ics"))))
+}
+
+fn forget_files(notes: &Path, keep: &[String]) {
+    let Ok(entries) = std::fs::read_dir(feeds_dir(notes)) else {
+        return;
+    };
+    let stray = std::time::Duration::from_secs(STRAY_TEMP_HOURS * 3600);
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let gone = match feed_name(name) {
+            Some((id, _)) => !keep.iter().any(|k| k == id),
+            None => {
+                name.starts_with(".tmp")
+                    && entry
+                        .metadata()
+                        .and_then(|m| m.modified())
+                        .ok()
+                        .and_then(|at| at.elapsed().ok())
+                        .is_some_and(|age| age > stray)
+            }
+        };
+        if gone {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
 impl Calendar {
@@ -105,15 +265,29 @@ impl Calendar {
         to: DateTime<Utc>,
     ) -> Vec<(String, String, Event)> {
         let linking: Linking = read(&settings_path(notes));
+        let files = feed_files(notes);
+        let kept_most = KEPT_EXPANSIONS.max(linking.calendars.len() * 3);
         let mut out = Vec::new();
         for linked in &linking.calendars {
-            let Some((fetched, body)) = body_of(notes, &linked.id) else {
+            if !safe(&linked.id) {
+                continue;
+            }
+            let Some((hash, path)) = files.get(&linked.id).cloned().or_else(|| {
+                let (hash, path) =
+                    keep_bytes(notes, &linked.id, &legacy_body(notes, &linked.id)?).ok()?;
+                let _ = db_for(notes).with(|c| {
+                    c.execute(
+                        "UPDATE calendar_feeds SET body = NULL WHERE feed = ?1",
+                        [&linked.id],
+                    )
+                });
+                Some((hash, path))
+            }) else {
                 continue;
             };
             let key = format!(
-                "{}|{}|{}|{}",
+                "{}|{hash:016x}|{}|{}",
                 linked.id,
-                fetched.timestamp(),
                 from.timestamp(),
                 to.timestamp()
             );
@@ -124,15 +298,28 @@ impl Calendar {
                 .iter()
                 .find(|(k, _)| *k == key)
                 .map(|(_, e)| Arc::clone(e));
-            let events = kept.unwrap_or_else(|| {
-                let events = Arc::new(ics::read(&String::from_utf8_lossy(&body), from, to).events);
-                let mut kept = self.expanded.lock().unwrap_or_else(|e| e.into_inner());
-                kept.push_back((key, Arc::clone(&events)));
-                while kept.len() > KEPT_EXPANSIONS {
-                    kept.pop_front();
+            let events = match kept {
+                Some(events) => events,
+                None => {
+                    let Ok(read) = ics::read_from(
+                        || {
+                            leo_core::paths::open_regular(&path)
+                                .map(|f| std::io::BufReader::with_capacity(64 * 1024, f))
+                        },
+                        from,
+                        to,
+                    ) else {
+                        continue;
+                    };
+                    let events = Arc::new(read.events);
+                    let mut kept = self.expanded.lock().unwrap_or_else(|e| e.into_inner());
+                    kept.push_back((key, Arc::clone(&events)));
+                    while kept.len() > kept_most {
+                        kept.pop_front();
+                    }
+                    events
                 }
-                events
-            });
+            };
             out.extend(
                 events
                     .iter()
@@ -158,16 +345,8 @@ struct Linking {
     offer: Option<bool>,
 }
 
-fn data(notes: &Path) -> PathBuf {
-    notes.parent().unwrap_or(notes).to_path_buf()
-}
-
 pub fn settings_path(notes: &Path) -> PathBuf {
-    data(notes).join("calendars.json")
-}
-
-pub fn cache_path(notes: &Path) -> PathBuf {
-    data(notes).join("calendar-cache.json")
+    crate::db::beside_of(notes, None).join(leo_core::paths::own::CALENDARS)
 }
 
 fn account(id: &str) -> String {
@@ -175,16 +354,20 @@ fn account(id: &str) -> String {
 }
 
 fn read<T: Default + serde::de::DeserializeOwned>(path: &Path) -> T {
-    let Ok(meta) = std::fs::symlink_metadata(path) else {
+    use std::io::Read;
+    let Ok(file) = leo_core::paths::open_regular(path) else {
         return T::default();
     };
-    if !meta.is_file() || meta.len() > MOST_BYTES * 4 {
+    let mut bytes = Vec::new();
+    if file
+        .take(MOST_SETTINGS_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() as u64 > MOST_SETTINGS_BYTES
+    {
         return T::default();
     }
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .unwrap_or_default()
+    serde_json::from_slice(&bytes).unwrap_or_default()
 }
 
 pub fn link_of(text: &str) -> Result<String> {
@@ -209,52 +392,125 @@ pub fn link_of(text: &str) -> Result<String> {
     Ok(text)
 }
 
-fn parsed(bytes: &[u8], now: DateTime<Utc>) -> Result<ics::Calendar> {
-    let text = String::from_utf8_lossy(bytes);
-    if !text.contains("BEGIN:VCALENDAR") {
-        bail!("That link does not lead to a calendar. In Google Calendar, copy “Secret address in iCal format”.");
+enum Failure {
+    TooBig,
+    NotACalendar,
+    Other,
+}
+
+struct Got {
+    streamed: crate::Streamed,
+    hash: Option<u64>,
+}
+
+fn fetch_one(
+    notes: &Path,
+    access: &dyn crate::CalendarAccess,
+    id: &str,
+    link: &str,
+    etag: Option<&str>,
+    modified: Option<&str>,
+    most: u64,
+) -> std::result::Result<Got, Failure> {
+    let mut sink = Sink::new(notes, most).map_err(|_| Failure::Other)?;
+    let streamed = match access.fetch_into(link, etag, modified, &mut sink) {
+        Ok(streamed) => streamed,
+        Err(e) if sink.tripped || e.downcast_ref::<crate::TooBig>().is_some() => {
+            return Err(Failure::TooBig)
+        }
+        Err(_) => return Err(Failure::Other),
+    };
+    if !streamed.written {
+        return Ok(Got {
+            streamed,
+            hash: None,
+        });
     }
-    Ok(ics::read(
-        &text,
-        now - Duration::days(1),
-        now + Duration::days(KEPT_DAYS),
-    ))
+    if !sink.calendar {
+        return Err(Failure::NotACalendar);
+    }
+    let hash = sink.keep(notes, id).map_err(|_| Failure::Other)?;
+    Ok(Got {
+        streamed,
+        hash: Some(hash),
+    })
+}
+
+fn record(notes: &Path, id: &str, stamp: &str, got: &std::result::Result<Got, Failure>) {
+    let _ = db_for(notes).with(|c| match got {
+        Ok(Got { hash: None, .. }) => c.execute(
+            "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, problem) VALUES (?1, ?2, ?2, NULL) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, problem = NULL",
+            rusqlite::params![id, stamp],
+        ),
+        Ok(Got {
+            streamed,
+            hash: Some(_),
+        }) => c.execute(
+            "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, etag, modified, problem, body) VALUES (?1, ?2, ?2, ?3, ?4, NULL, NULL) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, etag = excluded.etag, modified = excluded.modified, problem = NULL, body = NULL",
+            rusqlite::params![id, stamp, keep(&streamed.etag), keep(&streamed.modified)],
+        ),
+        Err(failure) => {
+            let problem = match failure {
+                Failure::TooBig => crate::TooBig.to_string(),
+                Failure::NotACalendar => NOT_A_CALENDAR.to_string(),
+                Failure::Other => PROBLEM.to_string(),
+            };
+            c.execute(
+                "INSERT INTO calendar_feeds (feed, tried_at, problem) VALUES (?1, ?2, ?3) ON CONFLICT(feed) DO UPDATE SET tried_at = excluded.tried_at, problem = excluded.problem",
+                rusqlite::params![id, stamp, problem],
+            )
+        }
+    });
 }
 
 fn refresh(notes: &Path, access: &dyn crate::CalendarAccess, now: DateTime<Utc>) {
+    refresh_due(notes, access, now, None)
+}
+
+fn refresh_due(
+    notes: &Path,
+    access: &dyn crate::CalendarAccess,
+    now: DateTime<Utc>,
+    wait: Option<i64>,
+) {
     let linking: Linking = read(&settings_path(notes));
-    let db = db_for(notes);
     let stamp = now.to_rfc3339();
+    let files = feed_files(notes);
     for linked in &linking.calendars {
         let before = feed_of(notes, &linked.id);
-        let fetched = access
-            .get(&account(&linked.id))
-            .and_then(|link| link.ok_or_else(|| anyhow::anyhow!("the link is missing")))
-            .and_then(|link| {
-                access.fetch_since(&link, before.etag.as_deref(), before.modified.as_deref())
-            });
-        let problem = "leo could not read this calendar just now. If it keeps happening, remove it and paste its link again.";
-        let _ = db.with(|c| match &fetched {
-            Ok(crate::Fetched { body: None, .. }) => c.execute(
-                "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, problem) VALUES (?1, ?2, ?2, NULL) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, problem = NULL",
-                rusqlite::params![linked.id, stamp],
-            ),
-            Ok(crate::Fetched { body: Some(bytes), etag, modified })
-                if bytes.len() as u64 <= MOST_BYTES && String::from_utf8_lossy(bytes).contains("BEGIN:VCALENDAR") =>
-            {
-                c.execute(
-                    "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, etag, modified, problem, body) VALUES (?1, ?2, ?2, ?3, ?4, NULL, ?5) ON CONFLICT(feed) DO UPDATE SET fetched_at = excluded.fetched_at, tried_at = excluded.tried_at, etag = excluded.etag, modified = excluded.modified, problem = NULL, body = excluded.body",
-                    rusqlite::params![linked.id, stamp, etag, modified, bytes],
-                )
-            }
-            _ => c.execute(
-                "INSERT INTO calendar_feeds (feed, tried_at, problem) VALUES (?1, ?2, ?3) ON CONFLICT(feed) DO UPDATE SET tried_at = excluded.tried_at, problem = excluded.problem",
-                rusqlite::params![linked.id, stamp, problem],
-            ),
+        let due = wait.is_none_or(|minutes| {
+            before
+                .tried_at
+                .is_none_or(|t| now - t > Duration::minutes(minutes))
         });
+        if !due || !safe(&linked.id) {
+            continue;
+        }
+        let have = files.contains_key(&linked.id);
+        let (etag, modified) = match have {
+            true => (before.etag.as_deref(), before.modified.as_deref()),
+            false => (None, None),
+        };
+        let got = access
+            .get(&account(&linked.id))
+            .ok()
+            .flatten()
+            .ok_or(Failure::Other)
+            .and_then(|link| {
+                fetch_one(
+                    notes,
+                    access,
+                    &linked.id,
+                    &link,
+                    etag,
+                    modified,
+                    crate::CALENDAR_BYTES,
+                )
+            });
+        record(notes, &linked.id, &stamp, &got);
     }
     let known: Vec<String> = linking.calendars.iter().map(|c| c.id.clone()).collect();
-    let _ = db.with(|c| {
+    let _ = db_for(notes).with(|c| {
         let mut statement = c.prepare("SELECT feed FROM calendar_feeds")?;
         let all: Vec<String> = statement.query_map([], |r| r.get(0))?.flatten().collect();
         for gone in all.iter().filter(|f| !known.contains(f)) {
@@ -262,7 +518,7 @@ fn refresh(notes: &Path, access: &dyn crate::CalendarAccess, now: DateTime<Utc>)
         }
         Ok(())
     });
-    let _ = std::fs::remove_file(cache_path(notes));
+    forget_files(notes, &known);
 }
 
 fn synced(notes: &Path, linking: &Linking) -> Option<DateTime<Utc>> {
@@ -373,7 +629,7 @@ fn catch_up(
 ) {
     if stale(notes, now, STALE_AFTER_MINUTES) {
         if let Some(_busy) = Busy::take(&calendar.busy) {
-            refresh(notes, access, now);
+            refresh_due(notes, access, now, Some(STALE_AFTER_MINUTES));
         }
     }
 }
@@ -386,9 +642,7 @@ pub(crate) async fn offer_to_record(state: AppState) {
     every.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         every.tick().await;
-        let Ok(notes) = notes_of(&state).await else {
-            continue;
-        };
+        let notes = state.notes_dir.clone();
         let live = crate::record::live(&state.recording);
         let calendar = Arc::clone(&state.calendar);
         let access = state.calendar_access.clone();
@@ -413,25 +667,6 @@ fn stale(notes: &Path, now: DateTime<Utc>, minutes: i64) -> bool {
     })
 }
 
-fn forget_old_google(notes: &Path, access: &dyn crate::CalendarAccess) {
-    let old = data(notes).join(OLD_FILES[0]);
-    if let Some(value) = std::fs::read(&old)
-        .ok()
-        .and_then(|b| serde_json::from_slice::<serde_json::Value>(&b).ok())
-    {
-        if let Some(id) = value["secret_id"].as_str() {
-            let _ = access.delete(id);
-        }
-    }
-    for name in OLD_FILES {
-        let _ = std::fs::remove_file(data(notes).join(name));
-    }
-}
-
-async fn notes_of(state: &AppState) -> Result<PathBuf, StatusCode> {
-    state.read_store(|s| Ok(s.notes_dir.clone())).await
-}
-
 struct Busy(Arc<AtomicBool>);
 
 impl Busy {
@@ -447,15 +682,8 @@ impl Drop for Busy {
 }
 
 pub(crate) async fn get(State(state): State<AppState>) -> Response {
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let now = Utc::now();
-    if let Some(access) = state.calendar_access.clone() {
-        let old = notes.clone();
-        let _ = tokio::task::spawn_blocking(move || forget_old_google(&old, access.as_ref())).await;
-    }
     let access = state.calendar_access.clone();
     let calendar = Arc::clone(&state.calendar);
     let shown = tokio::task::spawn_blocking(move || {
@@ -464,7 +692,12 @@ pub(crate) async fn get(State(state): State<AppState>) -> Response {
                 let notes = notes.clone();
                 std::thread::spawn(move || {
                     let _busy = busy;
-                    refresh(&notes, access.as_ref(), Utc::now());
+                    refresh_due(
+                        &notes,
+                        access.as_ref(),
+                        Utc::now(),
+                        Some(STALE_AFTER_MINUTES),
+                    );
                 });
             }
         }
@@ -499,10 +732,7 @@ pub(crate) async fn add(State(state): State<AppState>, Json(body): Json<Add>) ->
         Ok(link) => link,
         Err(e) => return error(StatusCode::BAD_REQUEST, e),
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return error(
             StatusCode::CONFLICT,
@@ -514,34 +744,65 @@ pub(crate) async fn add(State(state): State<AppState>, Json(body): Json<Add>) ->
     let done = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
         let _busy = busy;
         let mut linking: Linking = read(&settings_path(&notes));
-        if linking.calendars.len() >= MOST_CALENDARS {
-            bail!("leo can follow up to five calendars. Remove one first.");
-        }
         let now = Utc::now();
-        let bytes = access.fetch(&link).map_err(|_| {
-            anyhow::anyhow!("leo could not open that link. Check that it is the calendar's secret address and that this computer is online.")
-        })?;
-        let calendar = parsed(&bytes, now)?;
         let id = uuid::Uuid::new_v4().simple().to_string();
-        access.set(&account(&id), &link)?;
-        linking.calendars.push(Linked {
-            id: id.clone(),
-            name: if name.is_empty() {
-                calendar.name.unwrap_or_else(|| "Calendar".into())
-            } else {
-                name
-            },
-            added_at: now,
-        });
-        {
+        let got = fetch_one(
+            &notes,
+            access.as_ref(),
+            &id,
+            &link,
+            None,
+            None,
+            crate::CALENDAR_BYTES,
+        );
+        let named = match &got {
+            Ok(Got { hash: Some(_), .. }) => {
+                let path = feed_files(&notes).remove(&id).map(|(_, path)| path);
+                path.and_then(|path| {
+                    ics::read_from(
+                        || leo_core::paths::open_regular(&path).map(std::io::BufReader::new),
+                        now - Duration::days(1),
+                        now + Duration::days(KEPT_DAYS),
+                    )
+                    .ok()
+                })
+            }
+            _ => None,
+        };
+        let Some(calendar) = named else {
+            forget_files(&notes, &linking.calendars.iter().map(|c| c.id.clone()).collect::<Vec<_>>());
+            return Err(match got {
+                Err(Failure::TooBig) => crate::TooBig.into(),
+                Err(Failure::NotACalendar) => anyhow::anyhow!(NOT_A_CALENDAR),
+                _ => anyhow::anyhow!("leo could not open that link. Check that it is the calendar's secret address and that this computer is online."),
+            });
+        };
+        let saved = access.set(&account(&id), &link).and_then(|()| {
+            linking.calendars.push(Linked {
+                id: id.clone(),
+                name: if name.is_empty() {
+                    calendar.name.unwrap_or_else(|| "Calendar".into())
+                } else {
+                    name
+                },
+                added_at: now,
+            });
             let _saving = shared.settings.lock().unwrap_or_else(|e| e.into_inner());
             linking.offer = read::<Linking>(&settings_path(&notes)).offer;
-            if let Err(e) = leo_core::recording::write_json(&settings_path(&notes), &linking) {
-                let _ = access.delete(&account(&id));
-                return Err(e);
-            }
+            leo_core::recording::write_json(&settings_path(&notes), &linking)
+        });
+        if let Err(e) = saved {
+            let _ = access.delete(&account(&id));
+            let others: Vec<String> = read::<Linking>(&settings_path(&notes))
+                .calendars
+                .into_iter()
+                .map(|c| c.id)
+                .collect();
+            forget_files(&notes, &others);
+            return Err(e);
         }
-        refresh(&notes, access.as_ref(), now);
+        record(&notes, &id, &now.to_rfc3339(), &got);
+        refresh_due(&notes, access.as_ref(), now, Some(STALE_AFTER_MINUTES));
         Ok(status(&notes, &shared, false, now))
     })
     .await;
@@ -565,10 +826,7 @@ pub(crate) async fn remove(
             "Calendars are not available in this copy of leo.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return error(
             StatusCode::CONFLICT,
@@ -590,7 +848,12 @@ pub(crate) async fn remove(
             linking.offer = read::<Linking>(&settings_path(&notes)).offer;
             leo_core::recording::write_json(&settings_path(&notes), &linking)?;
         }
-        refresh(&notes, access.as_ref(), Utc::now());
+        refresh_due(
+            &notes,
+            access.as_ref(),
+            Utc::now(),
+            Some(STALE_AFTER_MINUTES),
+        );
         Ok(status(&notes, &calendar, false, Utc::now()))
     })
     .await;
@@ -611,10 +874,7 @@ pub(crate) async fn refresh_now(State(state): State<AppState>) -> Response {
             "Calendars are not available in this copy of leo.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
     let Some(busy) = Busy::take(&state.calendar.busy) else {
         return match tokio::task::spawn_blocking(move || {
@@ -650,10 +910,7 @@ pub(crate) struct Change {
 }
 
 pub(crate) async fn change(State(state): State<AppState>, Json(body): Json<Change>) -> Response {
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let calendar = Arc::clone(&state.calendar);
     let busy = state.calendar.busy.load(Ordering::Acquire);
     let done = tokio::task::spawn_blocking(move || -> Result<serde_json::Value> {
@@ -679,6 +936,8 @@ pub(crate) struct Window {
     to: String,
     #[serde(default)]
     live: Option<String>,
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 fn window_of(w: &Window, now: DateTime<Utc>) -> Option<(DateTime<Utc>, DateTime<Utc>)> {
@@ -716,10 +975,7 @@ pub(crate) async fn schedule(
             "Ask for at most six weeks, within a year of today.",
         );
     };
-    let notes = match notes_of(&state).await {
-        Ok(n) => n,
-        Err(code) => return code.into_response(),
-    };
+    let notes = state.notes_dir.clone();
     let live = matches!(window.live.as_deref(), Some("1" | "true"));
     let wait = if live {
         LIVE_MINUTES
@@ -731,14 +987,19 @@ pub(crate) async fn schedule(
             let notes = notes.clone();
             std::thread::spawn(move || {
                 let _busy = busy;
-                refresh(&notes, access.as_ref(), Utc::now());
+                refresh_due(&notes, access.as_ref(), Utc::now(), Some(wait));
             });
         }
     }
-    let tasks = match crate::routes::tasks::all_listed(&state).await {
-        Ok(all) => all,
+    let listed = match crate::routes::tasks::listed_index(&state).await {
+        Ok(index) => index,
         Err(code) => return code.into_response(),
     };
+    let limit = window.limit.unwrap_or(crate::tasks::LISTED_PAGE);
+    let (first, last) = (
+        from.date_naive() - Duration::days(1),
+        to.date_naive() + Duration::days(1),
+    );
     let calendar = Arc::clone(&state.calendar);
     let busy = state.calendar.busy.load(Ordering::Acquire);
     let shown = tokio::task::spawn_blocking(move || {
@@ -748,7 +1009,7 @@ pub(crate) async fn schedule(
             .into_iter()
             .map(|(feed, name, event)| {
                 let task = marker_of(&event.context).and_then(|m| {
-                    tasks
+                    listed
                         .iter()
                         .find(|t| t.id.starts_with(m))
                         .map(|t| t.id.clone())
@@ -761,13 +1022,20 @@ pub(crate) async fn schedule(
                 value
             })
             .collect();
+        let page = listed.len().min(limit);
+        let window: Vec<&crate::tasks::Listed> = listed[page..]
+            .iter()
+            .filter(|t| !t.repeat.is_empty() || t.date.is_some_and(|d| d >= first && d <= last))
+            .collect();
         serde_json::json!({
             "connected": !linking.calendars.is_empty(),
             "calendars": calendars_json(&notes, &linking),
             "synced": synced(&notes, &linking),
             "refreshing": busy,
             "events": events,
-            "tasks": tasks,
+            "tasks": &listed[..page],
+            "window": window,
+            "total": listed.len(),
         })
     })
     .await;
@@ -782,6 +1050,18 @@ pub(crate) mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::Mutex;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_calendar_file_reads_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real.json");
+        std::fs::write(&real, r#"{"kept":true}"#).unwrap();
+        let link = dir.path().join(leo_core::paths::own::CALENDARS);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert!(read::<serde_json::Value>(&real)["kept"].as_bool().unwrap());
+        assert!(read::<serde_json::Value>(&link).is_null());
+    }
 
     #[derive(Default)]
     pub(crate) struct Fake {
@@ -826,7 +1106,12 @@ pub(crate) mod tests {
         fn change(&self, _: serde_json::Value) -> Result<serde_json::Value> {
             self.view()
         }
-        fn health(&self, _: &Path) -> Result<serde_json::Value> {
+        fn health(
+            &self,
+            _: &Path,
+            _: leo_core::store::Facts,
+            _: bool,
+        ) -> Result<serde_json::Value> {
             self.view()
         }
         fn event_starting(&self, e: crate::app_settings::EventStarting) {
@@ -856,11 +1141,12 @@ pub(crate) mod tests {
         db_for(&notes)
             .with(|c| {
                 c.execute(
-                    "INSERT INTO calendar_feeds (feed, fetched_at, tried_at, body) VALUES ('work', ?1, ?1, ?2)",
-                    rusqlite::params![Utc::now().to_rfc3339(), MEETINGS.as_bytes()],
+                    "INSERT INTO calendar_feeds (feed, fetched_at, tried_at) VALUES ('work', ?1, ?1)",
+                    rusqlite::params![Utc::now().to_rfc3339()],
                 )
             })
             .unwrap();
+        keep_bytes(&notes, "work", MEETINGS.as_bytes()).unwrap();
         (dir, notes)
     }
 
@@ -881,6 +1167,78 @@ pub(crate) mod tests {
         fn delete(&self, _: &str) -> Result<()> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn refreshing_with_the_same_bytes_keeps_the_expansion() {
+        let (_dir, notes) = linked(None);
+        let file = feed_files(&notes).remove("work").unwrap().1;
+        let written = std::fs::metadata(&file).unwrap().modified().unwrap();
+        let calendar = Calendar::default();
+        let from = at("2026-10-30T00:00:00Z");
+        let to = at("2026-11-06T00:00:00Z");
+        let before = calendar.events(&notes, from, to);
+        std::thread::sleep(std::time::Duration::from_millis(30));
+        let access = Counting::default();
+        refresh(&notes, &access, Utc::now() + Duration::seconds(5));
+        let after = calendar.events(&notes, from, to);
+        refresh(&notes, &access, Utc::now() + Duration::seconds(10));
+        calendar.events(&notes, from, to);
+        assert_eq!(access.0.load(Ordering::SeqCst), 2);
+        assert_eq!(before.len(), after.len());
+        assert_eq!(
+            calendar.expanded.lock().unwrap().len(),
+            1,
+            "the same bytes were parsed again after each refresh"
+        );
+        assert_eq!(feed_files(&notes).remove("work").unwrap().1, file);
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            written,
+            "the same bytes were written again"
+        );
+        assert_eq!(std::fs::read_dir(feeds_dir(&notes)).unwrap().count(), 1);
+    }
+
+    struct Serving(&'static str);
+
+    impl crate::CalendarAccess for Serving {
+        fn fetch(&self, _: &str) -> Result<Vec<u8>> {
+            Ok(self.0.as_bytes().to_vec())
+        }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(Some("https://example.com/a.ics".into()))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_changed_feed_is_expanded_again() {
+        let (_dir, notes) = linked(None);
+        let calendar = Calendar::default();
+        let from = at("2026-10-30T00:00:00Z");
+        let to = at("2026-11-06T00:00:00Z");
+        let before = calendar.events(&notes, from, to);
+        assert!(before.iter().any(|(_, _, e)| e.title == "Holiday"));
+        let fewer = MEETINGS.replace(
+            "BEGIN:VEVENT\nUID:holiday\nSUMMARY:Holiday\nDTSTART;VALUE=DATE:20261105\nDTEND;VALUE=DATE:20261106\nEND:VEVENT\n",
+            "",
+        );
+        assert_ne!(fewer, MEETINGS);
+        refresh(
+            &notes,
+            &Serving(fewer.leak()),
+            Utc::now() + Duration::seconds(5),
+        );
+        let after = calendar.events(&notes, from, to);
+        assert!(!after.iter().any(|(_, _, e)| e.title == "Holiday"));
+        assert_eq!(after.len(), before.len() - 1);
+        assert_eq!(calendar.expanded.lock().unwrap().len(), 2);
     }
 
     #[test]
@@ -916,11 +1274,9 @@ pub(crate) mod tests {
         let seen = |text: &str| {
             let calendar = Calendar::default();
             db_for(&notes)
-                .with(|c| {
-                    c.execute("DELETE FROM calendar_prompted", [])?;
-                    c.execute("UPDATE calendar_feeds SET body = ?1", [text.as_bytes()])
-                })
+                .with(|c| c.execute("DELETE FROM calendar_prompted", []))
                 .unwrap();
+            keep_bytes(&notes, "work", text.as_bytes()).unwrap();
             starting(&notes, &calendar, false, now)
                 .into_iter()
                 .map(|e| e.online)
@@ -1053,23 +1409,276 @@ pub(crate) mod tests {
         }
     }
 
-    #[test]
-    fn an_old_google_sign_in_is_forgotten_with_its_stored_secret() {
-        let dir = tempfile::tempdir().unwrap();
-        let notes = dir.path().join("notes");
-        std::fs::write(
-            dir.path().join("calendar-google.json"),
-            r#"{"client_id":"x","secret_id":"google-calendar-1","calendar_id":"primary"}"#,
-        )
-        .unwrap();
-        std::fs::write(dir.path().join("calendar-events.json"), "{}").unwrap();
-        let fake = Fake::default();
-        crate::CalendarAccess::set(&fake, "google-calendar-1", "{\"refresh_token\":\"t\"}")
-            .unwrap();
-        forget_old_google(&notes, &fake);
-        assert!(fake.secrets.lock().unwrap().is_empty());
-        for name in OLD_FILES {
-            assert!(!dir.path().join(name).exists(), "{name}");
+    struct Sized(Vec<u8>);
+
+    impl crate::CalendarAccess for Sized {
+        fn fetch(&self, _: &str) -> Result<Vec<u8>> {
+            Ok(self.0.clone())
         }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(Some("https://example.com/a.ics".into()))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_large_feed_is_kept_in_a_file_and_its_link_removal_deletes_it() {
+        let (_dir, notes) = linked(None);
+        let mut feed = MEETINGS.replace("END:VCALENDAR\n", "").into_bytes();
+        feed.extend(std::iter::repeat_n(b'x', 6_000_000));
+        feed.extend_from_slice(b"\nEND:VCALENDAR\n");
+        refresh(
+            &notes,
+            &Sized(feed.clone()),
+            Utc::now() + Duration::seconds(5),
+        );
+        assert_eq!(feed_of(&notes, "work").problem, None);
+        let (hash, path) = feed_files(&notes).remove("work").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), feed);
+        assert_eq!(hash, crate::vectors::fnv64(feed.iter().copied()));
+        let stored: Option<Vec<u8>> = db_for(&notes)
+            .with(|c| {
+                c.query_row(
+                    "SELECT body FROM calendar_feeds WHERE feed = 'work'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .unwrap();
+        assert!(stored.is_none(), "the feed is not kept in the database");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        let mut linking: Linking = read(&settings_path(&notes));
+        linking.calendars.clear();
+        leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
+        refresh(
+            &notes,
+            &Sized(Vec::new()),
+            Utc::now() + Duration::seconds(10),
+        );
+        assert!(!path.exists());
+        assert!(feed_files(&notes).is_empty());
+    }
+
+    #[test]
+    fn an_endless_feed_stops_at_its_bound_with_a_message() {
+        let (_dir, notes) = linked(None);
+        let endless = Sized(vec![b'x'; 5_000]);
+        let got = fetch_one(
+            &notes,
+            &endless,
+            "work",
+            "https://example.com/a.ics",
+            None,
+            None,
+            1_000,
+        );
+        assert!(matches!(got, Err(Failure::TooBig)));
+        record(&notes, "work", &Utc::now().to_rfc3339(), &got);
+        assert_eq!(
+            feed_of(&notes, "work").problem.as_deref(),
+            Some("This calendar is larger than 1 GB, so leo did not read it.")
+        );
+        let (_, path) = feed_files(&notes).remove("work").unwrap();
+        assert_eq!(
+            std::fs::read(path).unwrap(),
+            MEETINGS.as_bytes(),
+            "the kept copy stays"
+        );
+        assert_eq!(
+            std::fs::read_dir(feeds_dir(&notes)).unwrap().count(),
+            1,
+            "the partial file was removed"
+        );
+    }
+
+    #[test]
+    fn the_running_hash_is_the_one_hash() {
+        let bytes: Vec<u8> = (0..=255u8).cycle().take(100_000).collect();
+        let (_dir, notes) = linked(None);
+        let (hash, _) = keep_bytes(&notes, "work", &bytes).unwrap();
+        assert_eq!(hash, crate::vectors::fnv64(bytes.iter().copied()));
+    }
+
+    struct Hanging {
+        slow: &'static str,
+        running: std::sync::atomic::AtomicUsize,
+        most: std::sync::atomic::AtomicUsize,
+        total: std::sync::atomic::AtomicUsize,
+    }
+
+    impl crate::CalendarAccess for Hanging {
+        fn fetch(&self, url: &str) -> Result<Vec<u8>> {
+            self.total.fetch_add(1, Ordering::SeqCst);
+            let now = self.running.fetch_add(1, Ordering::SeqCst) + 1;
+            self.most.fetch_max(now, Ordering::SeqCst);
+            let slow = url.ends_with(self.slow);
+            if slow {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            self.running.fetch_sub(1, Ordering::SeqCst);
+            if slow {
+                bail!("timed out");
+            }
+            Ok(MEETINGS.as_bytes().to_vec())
+        }
+        fn get(&self, account: &str) -> Result<Option<String>> {
+            Ok(Some(format!("https://example.com/{account}")))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn eight_calendars_are_followed_and_a_dead_one_holds_up_only_itself() {
+        let (_dir, notes) = linked(None);
+        let linking = Linking {
+            calendars: (0..8)
+                .map(|n| Linked {
+                    id: format!("c{n}"),
+                    name: format!("Calendar {n}"),
+                    added_at: Utc::now(),
+                })
+                .collect(),
+            offer: None,
+        };
+        leo_core::recording::write_json(&settings_path(&notes), &linking).unwrap();
+        let access = Hanging {
+            slow: "calendar-link-c3",
+            running: Default::default(),
+            most: Default::default(),
+            total: Default::default(),
+        };
+        let began = std::time::Instant::now();
+        refresh(&notes, &access, Utc::now());
+        assert!(began.elapsed() < std::time::Duration::from_secs(3));
+        let files = feed_files(&notes);
+        assert_eq!(files.len(), 7);
+        assert!(!files.contains_key("c3"));
+        assert!(feed_of(&notes, "c3").problem.is_some());
+        assert!(feed_of(&notes, "c4").problem.is_none());
+        assert_eq!(
+            access.most.load(Ordering::SeqCst),
+            1,
+            "two fetches ran at once"
+        );
+        assert_eq!(access.total.load(Ordering::SeqCst), 8);
+        refresh_due(
+            &notes,
+            &access,
+            Utc::now() + Duration::minutes(1),
+            Some(STALE_AFTER_MINUTES),
+        );
+        assert_eq!(
+            access.total.load(Ordering::SeqCst),
+            8,
+            "a link tried a minute ago was tried again"
+        );
+    }
+
+    struct Matching(Mutex<Vec<(Option<String>, Option<String>)>>);
+
+    impl crate::CalendarAccess for Matching {
+        fn fetch(&self, _: &str) -> Result<Vec<u8>> {
+            Ok(MEETINGS.as_bytes().to_vec())
+        }
+        fn fetch_since(
+            &self,
+            _: &str,
+            etag: Option<&str>,
+            modified: Option<&str>,
+        ) -> Result<crate::Fetched> {
+            self.0
+                .lock()
+                .unwrap()
+                .push((etag.map(str::to_string), modified.map(str::to_string)));
+            Ok(match etag {
+                Some(_) => crate::Fetched {
+                    body: None,
+                    etag: etag.map(str::to_string),
+                    modified: None,
+                },
+                None => crate::Fetched {
+                    body: Some(MEETINGS.as_bytes().to_vec()),
+                    etag: Some("v1".into()),
+                    modified: None,
+                },
+            })
+        }
+        fn get(&self, _: &str) -> Result<Option<String>> {
+            Ok(Some("https://example.com/a.ics".into()))
+        }
+        fn set(&self, _: &str, _: &str) -> Result<()> {
+            Ok(())
+        }
+        fn delete(&self, _: &str) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_feed_stored_by_an_older_leo_is_kept_in_a_file_and_never_answered_not_modified_without_one()
+    {
+        let (_dir, notes) = linked(None);
+        let _ = std::fs::remove_dir_all(feeds_dir(&notes));
+        db_for(&notes)
+            .with(|c| {
+                c.execute(
+                    "UPDATE calendar_feeds SET etag = 'v1', body = ?1 WHERE feed = 'work'",
+                    [MEETINGS.as_bytes()],
+                )
+            })
+            .unwrap();
+        let calendar = Calendar::default();
+        let events = calendar.events(
+            &notes,
+            at("2026-10-30T00:00:00Z"),
+            at("2026-11-06T00:00:00Z"),
+        );
+        assert!(!events.is_empty());
+        assert_eq!(feed_files(&notes).len(), 1);
+        assert!(legacy_body(&notes, "work").is_none());
+
+        let (_dir, notes) = linked(None);
+        let _ = std::fs::remove_dir_all(feeds_dir(&notes));
+        db_for(&notes)
+            .with(|c| {
+                c.execute(
+                    "UPDATE calendar_feeds SET etag = 'v1' WHERE feed = 'work'",
+                    [],
+                )
+            })
+            .unwrap();
+        let access = Matching(Default::default());
+        refresh(&notes, &access, Utc::now() + Duration::seconds(5));
+        assert_eq!(access.0.lock().unwrap()[0], (None, None));
+        assert_eq!(feed_files(&notes).len(), 1);
+        refresh(&notes, &access, Utc::now() + Duration::seconds(10));
+        assert_eq!(access.0.lock().unwrap()[1].0.as_deref(), Some("v1"));
+        assert_eq!(feed_files(&notes).len(), 1);
+    }
+
+    #[test]
+    fn stored_fetch_stamps_are_marked_so_an_older_leo_asks_afresh() {
+        let sent = Some("\"v1\"".to_string());
+        assert_eq!(keep(&sent).as_deref(), Some("leo-file:\"v1\""));
+        assert_eq!(kept(keep(&sent)), sent);
+        assert_eq!(kept(Some("\"v1\"".into())), None);
+        assert_eq!(kept(None), None);
     }
 }

@@ -1,23 +1,29 @@
 use std::collections::HashMap;
-use std::io::{Cursor, Read};
+use std::io::{BufRead, BufReader, Cursor, Read};
 
 use anyhow::{bail, Context, Result};
+use quick_xml::events::Event;
 use roxmltree::{Document, Node, ParsingOptions};
 
-const MOST_FILES: usize = 4_096;
+use super::Spill;
+
 const MOST_PART_BYTES: usize = 16 * 1024 * 1024;
-const MOST_READ_BYTES: usize = 64 * 1024 * 1024;
+const MOST_PART_SIZE: u64 = 4 * 1024 * 1024 * 1024;
 const MOST_NODES: u32 = 300_000;
 const MOST_DEPTH: usize = 32;
-const MOST_COLUMNS: usize = 256;
+const MOST_COLUMNS: usize = 16_384;
 const MOST_LEVEL: usize = 8;
 const MOST_STYLE_HOPS: usize = 16;
-const MOST_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
-const MOST_TABLE_CELLS: usize = 300_000;
+const KEEP_AT: usize = 64 * 1024;
+const TOO_BIG: &str = "this Office file expands to more text than any document; export it again";
+const TOO_MUCH_AT_ONCE: &str =
+    "this Office file has too much text in one paragraph, table row or slide; export it again";
+const DAMAGED: &str = "this Office file has damaged or unsupported XML; export it again";
+const UNREADABLE: &str =
+    "this Office file has unreadable text; export it again as a new Office file";
 
 struct Package<'a> {
     zip: zip::ZipArchive<Cursor<&'a [u8]>>,
-    read: usize,
 }
 
 impl<'a> Package<'a> {
@@ -25,41 +31,52 @@ impl<'a> Package<'a> {
         let zip = zip::ZipArchive::new(Cursor::new(bytes)).context(
             "this Office file could not be opened; export it again and upload the new file",
         )?;
-        if zip.len() > MOST_FILES {
-            bail!("this Office file has too many parts; split it into smaller documents");
+        Ok(Self { zip })
+    }
+
+    fn part(&mut self, name: &str) -> Result<Option<zip::read::ZipFile<'_, Cursor<&'a [u8]>>>> {
+        match self.zip.by_name(name) {
+            Ok(file) => Ok(Some(file)),
+            Err(zip::result::ZipError::FileNotFound) => Ok(None),
+            Err(_) => bail!("a part of this Office file could not be read; export it again"),
         }
-        Ok(Self { zip, read: 0 })
     }
 
     fn text(&mut self, name: &str) -> Result<Option<String>> {
-        let mut file = match self.zip.by_name(name) {
-            Ok(file) => file,
-            Err(zip::result::ZipError::FileNotFound) => return Ok(None),
-            Err(_) => bail!("a part of this Office file could not be read; export it again"),
+        let Some(mut file) = self.part(name)? else {
+            return Ok(None);
         };
-        if file.size() > MOST_PART_BYTES as u64 || self.read >= MOST_READ_BYTES {
+        if file.size() > MOST_PART_BYTES as u64 {
             bail!("this Office file expands to too much text; split it into smaller documents");
         }
-        let limit = MOST_PART_BYTES.min(MOST_READ_BYTES - self.read);
         let mut bytes = Vec::new();
         (&mut file)
-            .take(limit as u64 + 1)
+            .take(MOST_PART_BYTES as u64 + 1)
             .read_to_end(&mut bytes)
             .context("a part of this Office file is damaged; export it again")?;
-        if bytes.len() > limit {
+        if bytes.len() > MOST_PART_BYTES {
             bail!("this Office file expands to too much text; split it into smaller documents");
         }
-        self.read += bytes.len();
-        String::from_utf8(bytes)
-            .map(Some)
-            .context("this Office file has unreadable text; export it again as a new Office file")
+        String::from_utf8(bytes).map(Some).context(UNREADABLE)
+    }
+
+    fn stream(
+        &mut self,
+        name: &str,
+    ) -> Result<BufReader<zip::read::ZipFile<'_, Cursor<&'a [u8]>>>> {
+        let file = self
+            .part(name)?
+            .context("this Office file is missing a required part; export it again")?;
+        if file.size() > MOST_PART_SIZE {
+            bail!(TOO_BIG);
+        }
+        Ok(BufReader::new(file))
     }
 
     fn required(&mut self, name: &str) -> Result<String> {
         self.text(name)?
             .context("this Office file is missing a required part; export it again")
     }
-
     fn relationships(&mut self, name: &str) -> Result<HashMap<String, Link>> {
         let parent = name.rsplit_once('/').map_or("", |(p, _)| p);
         let file = name.rsplit('/').next().unwrap_or(name);
@@ -307,38 +324,419 @@ fn inline(node: Node<'_, '_>, links: &HashMap<String, Link>, depth: usize) -> St
     }
 }
 
+fn row_line(row: &[String], columns: usize) -> String {
+    let mut out = String::from("|");
+    for col in 0..columns {
+        let cell = row.get(col).map(String::as_str).unwrap_or_default();
+        let cell = cell
+            .trim()
+            .replace('|', "\\|")
+            .replace(['\n', '\r'], "<br>");
+        out.push_str(&format!(" {cell} |"));
+    }
+    out
+}
+
+fn rule(columns: usize) -> String {
+    format!("|{}", " --- |".repeat(columns))
+}
+
 fn table(rows: Vec<Vec<String>>) -> Result<String> {
     let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
     if columns == 0 {
         return Ok(String::new());
     }
-    if columns > MOST_COLUMNS || columns.saturating_mul(rows.len()) > MOST_TABLE_CELLS {
-        bail!("this document has a table with too many columns; split the table before uploading");
+    if columns.saturating_mul(rows.len()) > MOST_NODES as usize {
+        bail!("this document has a table inside a table that is too large; export it again");
     }
     let mut out = String::new();
     for (i, row) in rows.iter().enumerate() {
-        out.push('|');
-        for col in 0..columns {
-            let cell = row.get(col).map(String::as_str).unwrap_or_default();
-            let cell = cell
-                .trim()
-                .replace('|', "\\|")
-                .replace(['\n', '\r'], "<br>");
-            out.push_str(&format!(" {cell} |"));
-        }
+        out.push_str(&row_line(row, columns));
         out.push('\n');
         if i == 0 {
-            out.push('|');
-            for _ in 0..columns {
-                out.push_str(" --- |");
-            }
+            out.push_str(&rule(columns));
             out.push('\n');
-        }
-        if out.len() > MOST_OUTPUT_BYTES {
-            bail!("this table has too much text; split it before uploading");
         }
     }
     Ok(out.trim_end().to_string())
+}
+
+struct Text<'a> {
+    spill: &'a mut Spill,
+    kept: String,
+    held: String,
+    fresh: bool,
+    first: bool,
+    blank: bool,
+    pending: Vec<(usize, String)>,
+    frames: Vec<bool>,
+}
+
+impl<'a> Text<'a> {
+    fn new(spill: &'a mut Spill) -> Self {
+        Text {
+            spill,
+            kept: String::new(),
+            held: String::new(),
+            fresh: true,
+            first: true,
+            blank: false,
+            pending: Vec::new(),
+            frames: Vec::new(),
+        }
+    }
+
+    fn push(&mut self, text: &str) -> Result<()> {
+        let text = if self.fresh { text.trim_start() } else { text };
+        let body = text.trim_end();
+        if body.is_empty() {
+            if !self.fresh {
+                self.held.push_str(text);
+            }
+            return Ok(());
+        }
+        self.kept.push_str(&self.held);
+        self.kept.push_str(body);
+        self.held.clear();
+        self.held
+            .push_str(text.get(body.len()..).unwrap_or_default());
+        self.fresh = false;
+        if self.kept.len() >= KEEP_AT {
+            self.spill.push_str(&self.kept)?;
+            self.kept.clear();
+        }
+        Ok(())
+    }
+
+    fn trim_from_here(&mut self) {
+        self.fresh = true;
+    }
+
+    fn trim_to_here(&mut self) {
+        if !self.fresh {
+            self.held.clear();
+        }
+        self.fresh = false;
+    }
+
+    fn item(&mut self, first: &mut bool, text: &str) -> Result<()> {
+        if text.is_empty() {
+            return Ok(());
+        }
+        if !std::mem::take(first) {
+            self.push("\n")?;
+        }
+        self.push(text)
+    }
+
+    fn line(&mut self, line: &str) -> Result<()> {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        let empty = line.trim().is_empty();
+        if empty && self.blank {
+            return Ok(());
+        }
+        self.blank = empty;
+        if !std::mem::take(&mut self.first) {
+            self.push("\n")?;
+        }
+        self.push(line)
+    }
+
+    fn segment(&mut self, line: &str) -> Result<()> {
+        if line.trim().is_empty() {
+            self.hold(self.frames.len(), line.to_string());
+            return Ok(());
+        }
+        for (_, blank) in std::mem::take(&mut self.pending) {
+            self.line(&blank)?;
+        }
+        if let Some(top) = self.frames.last_mut() {
+            *top = true;
+        }
+        self.line(line)
+    }
+
+    fn segments(&mut self, text: &str) -> Result<()> {
+        text.split('\n').try_for_each(|line| self.segment(line))
+    }
+
+    fn hold(&mut self, depth: usize, line: String) {
+        if let [.., (before, _), (at, last)] = &mut self.pending[..] {
+            if *before == depth && *at == depth {
+                *last = line;
+                return;
+            }
+        }
+        self.pending.push((depth, line));
+    }
+
+    fn open(&mut self) {
+        self.frames.push(false);
+    }
+
+    fn close(&mut self) {
+        let depth = self.frames.len();
+        let had = self.frames.pop().unwrap_or(true);
+        if self
+            .pending
+            .last()
+            .is_some_and(|(at, line)| *at == depth && line.is_empty())
+        {
+            self.pending.pop();
+        }
+        let kept = match self.pending.iter().position(|(at, _)| *at == depth) {
+            Some(at) => {
+                self.pending.truncate(at + 1);
+                self.pending.pop().map(|(_, line)| line)
+            }
+            None => None,
+        };
+        match kept {
+            Some(line) => self.hold(depth.saturating_sub(1), line),
+            None if !had => self.hold(depth.saturating_sub(1), String::new()),
+            None => {}
+        }
+        if had {
+            if let Some(top) = self.frames.last_mut() {
+                *top = true;
+            }
+        }
+    }
+
+    fn finish(self) -> Result<()> {
+        self.spill.push_str(&self.kept)
+    }
+}
+
+struct Counted<R> {
+    inner: R,
+    since: usize,
+    total: u64,
+    refused: Option<&'static str>,
+}
+
+impl<R: BufRead> Read for Counted<R> {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let got = self.fill_buf()?;
+        let n = got.len().min(out.len());
+        if let (Some(to), Some(from)) = (out.get_mut(..n), got.get(..n)) {
+            to.copy_from_slice(from);
+        }
+        self.consume(n);
+        Ok(n)
+    }
+}
+
+impl<R: BufRead> BufRead for Counted<R> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        if self.since > MOST_PART_BYTES {
+            self.refused = Some(TOO_MUCH_AT_ONCE);
+        } else if self.total > MOST_PART_SIZE {
+            self.refused = Some(TOO_BIG);
+        }
+        if let Some(said) = self.refused {
+            return Err(std::io::Error::other(said));
+        }
+        self.inner.fill_buf()
+    }
+
+    fn consume(&mut self, n: usize) {
+        self.since = self.since.saturating_add(n);
+        self.total = self.total.saturating_add(n as u64);
+        self.inner.consume(n);
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Role {
+    Outside,
+    Body,
+    Holder,
+    Table,
+    Skip,
+}
+
+struct Open {
+    tag: String,
+    name: String,
+    role: Role,
+}
+
+enum Piece<'a> {
+    Block {
+        xml: &'a str,
+        levels: usize,
+        depth: usize,
+    },
+    Open,
+    Close,
+    Table,
+    Row {
+        xml: &'a str,
+        levels: usize,
+        depth: usize,
+    },
+    TableEnd,
+}
+
+fn wrapped(stack: &[Open], piece: &[u8]) -> Result<String> {
+    let mut xml = String::new();
+    for open in stack {
+        xml.push('<');
+        xml.push_str(&open.tag);
+        xml.push('>');
+    }
+    xml.push_str(std::str::from_utf8(piece).context(UNREADABLE)?);
+    for open in stack.iter().rev() {
+        xml.push_str("</");
+        xml.push_str(&open.name);
+        xml.push('>');
+    }
+    Ok(xml)
+}
+
+fn pieces(
+    part: impl BufRead,
+    rows_only: bool,
+    mut each: impl FnMut(Piece<'_>) -> Result<()>,
+) -> Result<bool> {
+    let mut reader = quick_xml::Reader::from_reader(Counted {
+        inner: part,
+        since: 0,
+        total: 0,
+        refused: None,
+    });
+    let mut stack: Vec<Open> = Vec::new();
+    let mut found = false;
+    let mut buf = Vec::new();
+    let mut piece = Vec::new();
+    let mut inside = 0usize;
+    let mut row = false;
+    loop {
+        if inside == 0 {
+            reader.get_mut().since = 0;
+        }
+        buf.clear();
+        let event = match reader.read_event_into(&mut buf) {
+            Ok(event) => event,
+            Err(quick_xml::Error::Io(_)) => match reader.get_ref().refused {
+                Some(said) => bail!(said),
+                None => bail!("a part of this Office file is damaged; export it again"),
+            },
+            Err(quick_xml::Error::Encoding(_)) => bail!(UNREADABLE),
+            Err(_) => bail!(DAMAGED),
+        };
+        let ended = if inside > 0 {
+            match &event {
+                Event::Start(_) => inside += 1,
+                Event::End(_) => inside -= 1,
+                Event::Eof => bail!(DAMAGED),
+                _ => {}
+            }
+            quick_xml::Writer::new(&mut piece).write_event(event)?;
+            inside == 0
+        } else {
+            let (tag, empty) = match &event {
+                Event::Eof => break,
+                Event::DocType(_) => bail!(DAMAGED),
+                Event::End(_) => {
+                    let open = stack.pop().context(DAMAGED)?;
+                    match open.role {
+                        Role::Holder => each(Piece::Close)?,
+                        Role::Table => each(Piece::TableEnd)?,
+                        _ => {}
+                    }
+                    continue;
+                }
+                Event::Start(tag) => (tag, false),
+                Event::Empty(tag) => (tag, true),
+                _ => continue,
+            };
+            let local = tag.local_name();
+            let parent = stack.last().map_or(Role::Outside, |open| open.role);
+            let role = match (parent, local.as_ref()) {
+                (Role::Outside, "body") if !found => {
+                    found = true;
+                    Some(Role::Body)
+                }
+                (Role::Outside, _) => Some(Role::Outside),
+                (Role::Body | Role::Holder, "sdt" | "sdtContent" | "ins" | "customXml") => {
+                    Some(Role::Holder)
+                }
+                (Role::Body | Role::Holder, "tbl") => Some(Role::Table),
+                (Role::Body | Role::Holder, _) if rows_only => Some(Role::Skip),
+                (Role::Body | Role::Holder, _) => None,
+                (Role::Table, "tr") => None,
+                (Role::Table | Role::Skip, _) => Some(Role::Skip),
+            };
+            match role {
+                Some(role) => {
+                    match role {
+                        Role::Holder => each(Piece::Open)?,
+                        Role::Table => each(Piece::Table)?,
+                        _ => {}
+                    }
+                    if empty {
+                        match role {
+                            Role::Holder => each(Piece::Close)?,
+                            Role::Table => each(Piece::TableEnd)?,
+                            _ => {}
+                        }
+                    } else {
+                        if stack.len() >= MOST_DEPTH {
+                            bail!(
+                                "this Office file is nested too deeply; export a simpler document"
+                            );
+                        }
+                        stack.push(Open {
+                            tag: tag.as_ref().to_string(),
+                            name: tag.name().as_ref().to_string(),
+                            role,
+                        });
+                    }
+                    continue;
+                }
+                None => {
+                    row = parent == Role::Table;
+                    piece.clear();
+                    inside = usize::from(!empty);
+                    quick_xml::Writer::new(&mut piece).write_event(event)?;
+                    empty
+                }
+            }
+        };
+        if ended {
+            let xml = wrapped(&stack, &piece)?;
+            let levels = stack.len();
+            let depth = stack.iter().filter(|o| o.role == Role::Holder).count();
+            let piece = if row {
+                Piece::Row {
+                    xml: &xml,
+                    levels,
+                    depth,
+                }
+            } else {
+                Piece::Block {
+                    xml: &xml,
+                    levels,
+                    depth,
+                }
+            };
+            each(piece)?;
+        }
+    }
+    if !stack.is_empty() {
+        bail!(DAMAGED);
+    }
+    Ok(found)
+}
+
+fn node_at<'a, 'input>(doc: &'a Document<'input>, levels: usize) -> Result<Node<'a, 'input>> {
+    let mut node = doc.root_element();
+    for _ in 0..levels {
+        node = node.first_element_child().context(DAMAGED)?;
+    }
+    Ok(node)
 }
 
 #[derive(Default)]
@@ -441,6 +839,25 @@ struct Word {
     counts: HashMap<(String, usize), usize>,
 }
 
+fn span(cell: Node<'_, '_>) -> usize {
+    child(cell, "tcPr")
+        .and_then(|p| value(p, "gridSpan"))
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(1)
+}
+
+fn width(row: Node<'_, '_>) -> Result<usize> {
+    let mut width = 0usize;
+    for cell in row.children().filter(|n| is(*n, "tc")) {
+        let span = span(cell);
+        width = width.saturating_add(span.max(1));
+        if span > MOST_COLUMNS || width > MOST_COLUMNS {
+            bail!("this Word table has too many columns; split it before uploading");
+        }
+    }
+    Ok(width)
+}
+
 impl Word {
     fn paragraph(&mut self, node: Node<'_, '_>) -> String {
         let text = inline(node, &self.links, 0);
@@ -495,44 +912,46 @@ impl Word {
         text
     }
 
+    fn row(&mut self, row: Node<'_, '_>, depth: usize) -> Result<Vec<String>> {
+        width(row)?;
+        let mut cells = Vec::new();
+        for cell in row.children().filter(|n| is(*n, "tc")) {
+            cells.push(self.blocks(cell, depth)?);
+            cells.extend((1..span(cell)).map(|_| String::new()));
+        }
+        Ok(cells)
+    }
+
+    fn block(&mut self, n: Node<'_, '_>, depth: usize) -> Result<Option<String>> {
+        Ok(Some(match n.tag_name().name() {
+            "p" => self.paragraph(n),
+            "tbl" => {
+                let mut rows = Vec::new();
+                let mut cells = 0usize;
+                for row in n.children().filter(|n| is(*n, "tr")) {
+                    let row = self.row(row, depth + 1)?;
+                    cells = cells.saturating_add(row.len());
+                    if cells > MOST_NODES as usize {
+                        bail!("this document has a table inside a table that is too large; export it again");
+                    }
+                    rows.push(row);
+                }
+                format!("\n{}\n", table(rows)?)
+            }
+            "oMathPara" => format!("\n$$\n{}\n$$\n", math(n, 0)),
+            "sdt" | "sdtContent" | "ins" | "customXml" => self.blocks(n, depth + 1)?,
+            _ => return Ok(None),
+        }))
+    }
+
     fn blocks(&mut self, node: Node<'_, '_>, depth: usize) -> Result<String> {
         if depth >= MOST_DEPTH {
             bail!("this Word file is nested too deeply; export a simpler document");
         }
         let mut out = Vec::new();
-        let mut size = 0usize;
         for n in node.children().filter(Node::is_element) {
-            let before = out.len();
-            match n.tag_name().name() {
-                "p" => out.push(self.paragraph(n)),
-                "tbl" => {
-                    let mut rows = Vec::new();
-                    for row in n.children().filter(|n| is(*n, "tr")) {
-                        let mut cells = Vec::new();
-                        for cell in row.children().filter(|n| is(*n, "tc")) {
-                            cells.push(self.blocks(cell, depth + 1)?);
-                            let span = child(cell, "tcPr")
-                                .and_then(|p| value(p, "gridSpan"))
-                                .and_then(|v| v.parse::<usize>().ok())
-                                .unwrap_or(1);
-                            if span > MOST_COLUMNS
-                                || cells.len().saturating_add(span.saturating_sub(1)) > MOST_COLUMNS
-                            {
-                                bail!("this Word table has too many columns; split it before uploading");
-                            }
-                            cells.extend((1..span).map(|_| String::new()));
-                        }
-                        rows.push(cells);
-                    }
-                    out.push(format!("\n{}\n", table(rows)?));
-                }
-                "oMathPara" => out.push(format!("\n$$\n{}\n$$\n", math(n, 0))),
-                "sdt" | "sdtContent" | "ins" | "customXml" => out.push(self.blocks(n, depth + 1)?),
-                _ => {}
-            }
-            size = size.saturating_add(out.iter().skip(before).map(String::len).sum::<usize>());
-            if size > MOST_OUTPUT_BYTES {
-                bail!("this Word file has too much text; split it into smaller documents");
+            if let Some(text) = self.block(n, depth)? {
+                out.push(text);
             }
         }
         let mut blank = false;
@@ -550,21 +969,69 @@ impl Word {
     }
 }
 
-pub(super) fn docx(bytes: &[u8]) -> Result<String> {
+pub(super) fn docx(bytes: &[u8], spill: &mut Spill) -> Result<()> {
     let mut package = Package::open(bytes)?;
-    let xml = package.required("word/document.xml")?;
-    let doc = parse(&xml)?;
-    let body = doc
-        .descendants()
-        .find(|n| is(*n, "body"))
-        .context("this Word file has no document body; export it again")?;
     let mut word = Word {
         links: package.relationships("word/document.xml")?,
         styles: styles(package.text("word/styles.xml")?.as_deref())?,
         levels: numbering(package.text("word/numbering.xml")?.as_deref())?,
         counts: HashMap::new(),
     };
-    Ok(word.blocks(body, 0)?.trim().to_string())
+    let mut widths = Spill::new(&spill.scratch);
+    let mut widest = 0;
+    let found = pieces(package.stream("word/document.xml")?, true, |piece| {
+        match piece {
+            Piece::Table => widest = 0,
+            Piece::Row { xml, levels, .. } => {
+                widest = widest.max(width(node_at(&parse(xml)?, levels)?)?);
+            }
+            Piece::TableEnd => widths.push_str(&format!("{widest:05}"))?,
+            Piece::Block { .. } | Piece::Open | Piece::Close => {}
+        }
+        Ok(())
+    })?;
+    if !found {
+        bail!("this Word file has no document body; export it again");
+    }
+    let mut text = Text::new(spill);
+    let mut stored = widths.reader()?;
+    let mut columns = 0;
+    let mut rows = 0usize;
+    pieces(package.stream("word/document.xml")?, false, |piece| {
+        match piece {
+            Piece::Block { xml, levels, depth } => {
+                let doc = parse(xml)?;
+                if let Some(block) = word.block(node_at(&doc, levels)?, depth)? {
+                    text.segments(&block)?;
+                }
+            }
+            Piece::Open => text.open(),
+            Piece::Close => text.close(),
+            Piece::TableEnd => text.segment("")?,
+            Piece::Table => {
+                let mut record = [0u8; 5];
+                stored
+                    .read_exact(&mut record)
+                    .context("leo could not read back the tables it measured")?;
+                columns = std::str::from_utf8(&record)?.parse()?;
+                rows = 0;
+                text.segment("")?;
+            }
+            Piece::Row { xml, levels, depth } => {
+                let doc = parse(xml)?;
+                let cells = word.row(node_at(&doc, levels)?, depth + 1)?;
+                if columns > 0 {
+                    text.segment(&row_line(&cells, columns))?;
+                    if rows == 0 {
+                        text.segment(&rule(columns))?;
+                    }
+                }
+                rows += 1;
+            }
+        }
+        Ok(())
+    })?;
+    text.finish()
 }
 
 fn slides(package: &mut Package<'_>) -> Result<Vec<String>> {
@@ -627,27 +1094,54 @@ fn slide_paragraph(node: Node<'_, '_>, links: &HashMap<String, Link>) -> String 
     }
 }
 
-fn slide_table(node: Node<'_, '_>, links: &HashMap<String, Link>) -> Result<String> {
-    let rows = node
-        .children()
-        .filter(|n| is(*n, "tr"))
-        .map(|row| {
-            row.children()
-                .filter(|n| is(*n, "tc"))
-                .map(|cell| {
-                    cell.descendants()
-                        .filter(|n| is(*n, "p"))
-                        .map(|p| slide_paragraph(p, links))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                })
-                .collect()
-        })
-        .collect();
-    table(rows)
+fn slide_table(
+    node: Node<'_, '_>,
+    links: &HashMap<String, Link>,
+    text: &mut Text<'_>,
+    first: &mut bool,
+) -> Result<()> {
+    let rows = || node.children().filter(|n| is(*n, "tr"));
+    let columns = rows()
+        .map(|row| row.children().filter(|n| is(*n, "tc")).count())
+        .max()
+        .unwrap_or(0);
+    if columns > MOST_COLUMNS {
+        bail!("this slide has a table with too many columns; split it before uploading");
+    }
+    text.item(first, "\n")?;
+    for (i, row) in rows().enumerate() {
+        if columns == 0 {
+            break;
+        }
+        let cells: Vec<String> = row
+            .children()
+            .filter(|n| is(*n, "tc"))
+            .map(|cell| {
+                cell.descendants()
+                    .filter(|n| is(*n, "p"))
+                    .map(|p| slide_paragraph(p, links))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })
+            .collect();
+        if i > 0 {
+            text.push("\n")?;
+        }
+        text.push(&row_line(&cells, columns))?;
+        if i == 0 {
+            text.push("\n")?;
+            text.push(&rule(columns))?;
+        }
+    }
+    text.push("\n")
 }
 
-fn chart(package: &mut Package<'_>, path: &str) -> Result<String> {
+fn chart(
+    package: &mut Package<'_>,
+    path: &str,
+    text: &mut Text<'_>,
+    first: &mut bool,
+) -> Result<()> {
     let xml = package.required(path)?;
     let doc = parse(&xml)?;
     let mut series = Vec::new();
@@ -670,8 +1164,9 @@ fn chart(package: &mut Package<'_>, path: &str) -> Result<String> {
         };
         series.push((escape(name), points("cat"), points("val")));
     }
+    text.item(first, "\n")?;
     if series.is_empty() {
-        return Ok(String::new());
+        return text.push("\n");
     }
     if series.len() >= MOST_COLUMNS {
         bail!("this chart has too many series; split it before uploading");
@@ -682,34 +1177,31 @@ fn chart(package: &mut Package<'_>, path: &str) -> Result<String> {
         .collect();
     indices.sort_unstable();
     indices.dedup();
-    if indices
-        .len()
-        .saturating_add(1)
-        .saturating_mul(series.len() + 1)
-        > MOST_TABLE_CELLS
-    {
-        bail!("this chart has too much data; split it before uploading");
-    }
-    let mut rows = vec![std::iter::once("Category".to_string())
+    let columns = series.len() + 1;
+    let header: Vec<String> = std::iter::once("Category".to_string())
         .chain(series.iter().map(|s| s.0.clone()))
-        .collect()];
+        .collect();
+    text.push("### Chart\n\n")?;
+    text.push(&row_line(&header, columns))?;
+    text.push("\n")?;
+    text.push(&rule(columns))?;
     for i in indices {
         let label = series
             .iter()
             .find_map(|s| s.1.get(&i))
             .cloned()
             .unwrap_or_else(|| (i.saturating_add(1)).to_string());
-        rows.push(
-            std::iter::once(label)
-                .chain(
-                    series
-                        .iter()
-                        .map(|s| s.2.get(&i).cloned().unwrap_or_default()),
-                )
-                .collect(),
-        );
+        let row: Vec<String> = std::iter::once(label)
+            .chain(
+                series
+                    .iter()
+                    .map(|s| s.2.get(&i).cloned().unwrap_or_default()),
+            )
+            .collect();
+        text.push("\n")?;
+        text.push(&row_line(&row, columns))?;
     }
-    Ok(format!("### Chart\n\n{}", table(rows)?))
+    text.push("\n")
 }
 
 fn slide_blocks(
@@ -717,11 +1209,12 @@ fn slide_blocks(
     links: &HashMap<String, Link>,
     package: &mut Package<'_>,
     depth: usize,
-) -> Result<String> {
+    text: &mut Text<'_>,
+    first: &mut bool,
+) -> Result<()> {
     if depth >= MOST_DEPTH {
         bail!("this slide is nested too deeply; export a simpler presentation");
     }
-    let mut out = Vec::new();
     let mut nodes: Vec<Node<'_, '_>> = node.children().filter(Node::is_element).collect();
     if is(node, "spTree") || is(node, "grpSp") {
         nodes.sort_by_key(|n| {
@@ -742,48 +1235,39 @@ fn slide_blocks(
                     .any(|n| is(n, "ph") && matches!(attr(n, "type"), Some("title" | "ctrTitle")));
                 if let Some(body) = child(n, "txBody") {
                     for p in body.children().filter(|n| is(*n, "p")) {
-                        let text = slide_paragraph(p, links);
-                        out.push(
-                            if title
-                                && !text.trim().is_empty()
+                        let said = slide_paragraph(p, links);
+                        text.item(
+                            first,
+                            &if title
+                                && !said.trim().is_empty()
                                 && child(p, "pPr").is_none_or(|pr| {
                                     child(pr, "buChar").is_none()
                                         && child(pr, "buAutoNum").is_none()
                                 })
                             {
-                                format!("### {}", text.trim())
+                                format!("### {}", said.trim())
                             } else {
-                                text
+                                said
                             },
-                        );
+                        )?;
                     }
                 }
             }
-            "p" => out.push(slide_paragraph(n, links)),
-            "tbl" => out.push(format!("\n{}\n", slide_table(n, links)?)),
+            "p" => text.item(first, &slide_paragraph(n, links))?,
+            "tbl" => slide_table(n, links, text, first)?,
             "chart" => {
                 if let Some(link) = attr(n, "id")
                     .and_then(|id| links.get(id))
                     .filter(|l| !l.external && l.kind == "chart")
                 {
-                    out.push(format!("\n{}\n", chart(package, &link.target)?));
+                    chart(package, &link.target, text, first)?;
                 }
             }
             "pic" | "nvSpPr" | "nvGrpSpPr" | "spPr" | "grpSpPr" => {}
-            _ => out.push(slide_blocks(n, links, package, depth + 1)?),
-        }
-        if out.last().is_some_and(|s| s.len() > MOST_OUTPUT_BYTES) {
-            bail!("this slide has too much text; split it before uploading");
+            _ => slide_blocks(n, links, package, depth + 1, text, first)?,
         }
     }
-    if out.iter().map(String::len).sum::<usize>() > MOST_OUTPUT_BYTES {
-        bail!("this slide has too much text; split it before uploading");
-    }
-    Ok(out
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n"))
+    Ok(())
 }
 
 fn speaker_notes(xml: &str) -> Result<String> {
@@ -812,7 +1296,7 @@ fn speaker_notes(xml: &str) -> Result<String> {
         .join("\n"))
 }
 
-pub(super) fn pptx(bytes: &[u8]) -> Result<String> {
+pub(super) fn pptx(bytes: &[u8], spill: &mut Spill) -> Result<()> {
     let mut package = Package::open(bytes)?;
     let slides = slides(&mut package)?;
     if slides.is_empty() {
@@ -822,7 +1306,7 @@ pub(super) fn pptx(bytes: &[u8]) -> Result<String> {
         .zip
         .file_names()
         .any(|name| name.is_ok_and(|name| name == "ppt/presentation.xml"));
-    let mut out = String::new();
+    let mut text = Text::new(spill);
     for (index, path) in slides.iter().enumerate() {
         let number = if legacy {
             path.strip_prefix("ppt/slides/slide")
@@ -835,8 +1319,18 @@ pub(super) fn pptx(bytes: &[u8]) -> Result<String> {
         let xml = package.required(path)?;
         let doc = parse(&xml)?;
         let links = package.relationships(path)?;
-        let text = slide_blocks(doc.root_element(), &links, &mut package, 0)?;
-        out.push_str(&format!("## Slide {number}\n{}\n", text.trim()));
+        text.push(&format!("## Slide {number}\n"))?;
+        text.trim_from_here();
+        slide_blocks(
+            doc.root_element(),
+            &links,
+            &mut package,
+            0,
+            &mut text,
+            &mut true,
+        )?;
+        text.trim_to_here();
+        text.push("\n")?;
         let notes = links
             .values()
             .find(|l| !l.external && l.kind == "notesSlide")
@@ -846,21 +1340,19 @@ pub(super) fn pptx(bytes: &[u8]) -> Result<String> {
             if let Some(xml) = package.text(&path)? {
                 let said = speaker_notes(&xml)?;
                 if !said.is_empty() {
-                    out.push_str(&format!("Speaker notes: {said}\n"));
+                    text.push(&format!("Speaker notes: {said}\n"))?;
                 }
             }
         }
-        out.push('\n');
-        if out.len() > MOST_READ_BYTES {
-            bail!("this presentation has too much text; split it into smaller files");
-        }
+        text.push("\n")?;
     }
-    Ok(out.trim().to_string())
+    text.finish()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::import::Scratch;
     use std::io::Write;
 
     fn package(files: &[(&str, &[u8])]) -> Vec<u8> {
@@ -870,7 +1362,8 @@ mod tests {
                 .start_file(
                     *name,
                     zip::write::SimpleFileOptions::default()
-                        .compression_method(zip::CompressionMethod::Deflated),
+                        .compression_method(zip::CompressionMethod::Deflated)
+                        .compression_level(Some(9)),
                 )
                 .unwrap();
             writer.write_all(bytes).unwrap();
@@ -894,12 +1387,12 @@ mod tests {
         );
         assert!(parse(&xml).unwrap_err().to_string().contains("deeply"));
         let bytes = package(&[("word/document.xml", b"\xff")]);
-        assert!(docx(&bytes)
+        assert!(read_docx(&bytes)
             .unwrap_err()
             .to_string()
             .contains("unreadable text"));
-        assert!(docx(&package(&[])).is_err());
-        assert!(pptx(&package(&[])).is_err());
+        assert!(read_docx(&package(&[])).is_err());
+        assert!(read_pptx(&package(&[])).is_err());
     }
 
     #[test]
@@ -943,23 +1436,18 @@ mod tests {
     }
 
     #[test]
-    fn compressed_parts_and_sparse_tables_have_limits() {
+    fn one_piece_has_limits_and_tables_keep_their_markdown() {
         let large = vec![b'x'; MOST_PART_BYTES + 1];
         let bytes = package(&[("word/document.xml", &large)]);
         assert!(bytes.len() < MOST_PART_BYTES);
-        assert!(docx(&bytes)
+        assert!(read_docx(&bytes)
             .unwrap_err()
             .to_string()
             .contains("too much text"));
-        let bytes = package(&[("word/document.xml", b"<document/>")]);
-        let mut read = Package::open(&bytes).unwrap();
-        read.read = MOST_READ_BYTES;
-        assert!(read.text("word/document.xml").is_err());
-        assert!(table(vec![vec![String::new(); MOST_COLUMNS + 1]]).is_err());
-        assert!(table(vec![
-            vec![String::new(); MOST_COLUMNS];
-            MOST_TABLE_CELLS / MOST_COLUMNS + 1
-        ])
+        assert!(read_docx(&word(&format!(
+            "<w:tbl><w:tr><w:tc><w:tcPr><w:gridSpan w:val=\"{}\"/></w:tcPr></w:tc></w:tr></w:tbl>",
+            MOST_COLUMNS + 1
+        )))
         .is_err());
         assert_eq!(
             table(vec![vec!["A | B".into(), "C\nD".into()], vec!["é".into()]]).unwrap(),
@@ -971,7 +1459,7 @@ mod tests {
     fn namespace_prefixes_and_literal_markdown_do_not_change_the_source() {
         let xml = r#"<x:document xmlns:x="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><x:body><x:p><x:pPr><x:pStyle x:val="Heading2"/></x:pPr><x:r><x:t>Café *[literal]* &lt;tag&gt;</x:t></x:r></x:p></x:body></x:document>"#;
         assert_eq!(
-            docx(&package(&[("word/document.xml", xml.as_bytes())])).unwrap(),
+            read_docx(&package(&[("word/document.xml", xml.as_bytes())])).unwrap(),
             "## Café \\*\\[literal\\]\\* \\<tag\\>"
         );
     }
@@ -980,8 +1468,289 @@ mod tests {
     fn positioned_slide_shapes_are_read_top_to_bottom_then_left_to_right() {
         let xml = r#"<p:sld xmlns:p="p" xmlns:a="a"><p:spTree><p:sp><p:spPr><a:xfrm><a:off x="100" y="200"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:t>Bottom</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:spPr><a:xfrm><a:off x="200" y="100"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:t>Right</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:spPr><a:xfrm><a:off x="100" y="100"/></a:xfrm></p:spPr><p:txBody><a:p><a:r><a:t>Left</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:sld>"#;
         assert_eq!(
-            pptx(&package(&[("ppt/slides/slide1.xml", xml.as_bytes())])).unwrap(),
+            read_pptx(&package(&[("ppt/slides/slide1.xml", xml.as_bytes())])).unwrap(),
             "## Slide 1\nLeft\nRight\nBottom"
         );
+    }
+
+    fn read_with(bytes: &[u8], read: fn(&[u8], &mut Spill) -> Result<()>) -> Result<String> {
+        let mut spill = Spill::new(&Scratch::default());
+        read(bytes, &mut spill)?;
+        spill.read(0..spill.len())
+    }
+
+    fn read_docx(bytes: &[u8]) -> Result<String> {
+        read_with(bytes, docx)
+    }
+
+    fn read_pptx(bytes: &[u8]) -> Result<String> {
+        read_with(bytes, pptx)
+    }
+
+    fn declared(xml: &str, size: u64) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        writer
+            .start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default().large_file(true),
+            )
+            .unwrap();
+        writer.write_all(xml.as_bytes()).unwrap();
+        let mut bytes = writer.finish().unwrap().into_inner();
+        let at = bytes.windows(4).position(|w| w == b"PK\x01\x02").unwrap();
+        let name = usize::from(u16::from_le_bytes([bytes[at + 28], bytes[at + 29]]));
+        let extra = at + 46 + name;
+        assert_eq!(bytes[extra..extra + 2], [1, 0]);
+        bytes[extra + 4..extra + 12].copy_from_slice(&size.to_le_bytes());
+        bytes
+    }
+
+    fn word(body: &str) -> Vec<u8> {
+        package(&[(
+            "word/document.xml",
+            format!("{WORD}{body}</w:body></w:document>").as_bytes(),
+        )])
+    }
+
+    #[test]
+    fn a_word_file_past_sixteen_megabytes_of_text_is_read() {
+        let mut body = String::new();
+        let mut i = 0;
+        while body.len() < 20 * 1024 * 1024 {
+            i += 1;
+            body.push_str(&paragraph(i));
+        }
+        body.push_str("<w:p><w:r><w:t>The last page ends here.</w:t></w:r></w:p>");
+        let text = read_docx(&word(&body)).unwrap();
+        assert!(text.starts_with("Paragraph 1 explains"));
+        assert!(text.contains(&format!("\nParagraph {i} explains")));
+        assert!(text.ends_with("\nThe last page ends here."));
+    }
+
+    #[test]
+    fn a_table_of_a_million_cells_is_read_row_by_row() {
+        let row = format!(
+            "<w:tr>{}</w:tr>",
+            "<w:tc><w:p><w:r><w:t>x</w:t></w:r></w:p></w:tc>".repeat(300)
+        );
+        let text = read_docx(&word(&format!("<w:tbl>{}</w:tbl>", row.repeat(4_000)))).unwrap();
+        let rows: Vec<&str> = text.lines().collect();
+        assert_eq!(rows.len(), 4_001);
+        assert_eq!(rows[1], format!("|{}", " --- |".repeat(300)));
+        let line = format!("|{}", " x |".repeat(300));
+        assert!(rows
+            .iter()
+            .enumerate()
+            .all(|(i, row)| i == 1 || *row == line));
+    }
+
+    #[test]
+    fn a_deck_of_five_thousand_slides_is_read() {
+        let slides: Vec<(String, String)> = (1..=5_000)
+            .map(|i| (format!("ppt/slides/slide{i}.xml"), slide(i)))
+            .collect();
+        let files: Vec<(&str, &[u8])> = slides
+            .iter()
+            .map(|(name, xml)| (name.as_str(), xml.as_bytes()))
+            .collect();
+        let text = read_pptx(&package(&files)).unwrap();
+        assert!(text.starts_with("## Slide 1\n### Slide 1\nHeaps keep"));
+        assert!(text.ends_with(
+            "\n\n## Slide 5000\n### Slide 5000\nHeaps keep the smallest key at the root.\nInsert sifts up, extract sifts down."
+        ));
+    }
+
+    #[test]
+    fn a_highly_compressible_valid_document_is_read() {
+        let row = format!("<w:tr>{}</w:tr>", "<w:tc><w:p/></w:tc>".repeat(40));
+        let xml = format!(
+            "{WORD}{}<w:tbl>{}</w:tbl></w:body></w:document>",
+            "<w:p><w:r><w:t>Same line.</w:t></w:r></w:p>".repeat(200_000),
+            row.repeat(5_000)
+        );
+        let bytes = package(&[("word/document.xml", xml.as_bytes())]);
+        assert!(xml.len() / bytes.len() > 300, "{}", xml.len() / bytes.len());
+        let text = read_docx(&bytes).unwrap();
+        assert_eq!(text.lines().filter(|l| *l == "Same line.").count(), 200_000);
+        let empty = format!("|{}", "  |".repeat(40));
+        assert_eq!(text.lines().filter(|l| *l == empty).count(), 5_000);
+    }
+
+    #[test]
+    fn a_part_past_four_gigabytes_is_refused() {
+        let xml = format!("{WORD}<w:p/></w:body></w:document>");
+        let err = read_docx(&declared(&xml, MOST_PART_SIZE + 1))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("more text than any document"), "{err}");
+        let mut counted = Counted {
+            inner: &b"<w:p/>"[..],
+            since: 0,
+            total: MOST_PART_SIZE + 1,
+            refused: None,
+        };
+        assert_eq!(counted.fill_buf().unwrap_err().to_string(), TOO_BIG);
+    }
+
+    #[test]
+    fn the_spill_stops_before_the_disk_fills() {
+        let bytes = word(&(1..=100_000).map(paragraph).collect::<String>());
+        let mut spill = Spill::new(&Scratch::default());
+        spill.free = Some(512 * 1024 * 1024);
+        assert_eq!(
+            docx(&bytes, &mut spill).unwrap_err().to_string(),
+            "There is not enough free disk space to read this file."
+        );
+        let mut spill = Spill::new(&Scratch::default());
+        spill.free = Some(4 * 1024 * 1024 * 1024);
+        docx(&bytes, &mut spill).unwrap();
+        assert!(spill.len() > 8 * 1024 * 1024);
+    }
+
+    #[test]
+    fn empty_paragraphs_controls_and_tables_hold_no_memory() {
+        let mut spill = Spill::new(&Scratch::default());
+        let mut text = Text::new(&mut spill);
+        text.segment("a").unwrap();
+        for _ in 0..300_000 {
+            text.segment("").unwrap();
+            text.open();
+            text.close();
+        }
+        assert!(text.pending.len() <= 2);
+        text.open();
+        for _ in 0..1_000 {
+            text.segment(" ").unwrap();
+        }
+        assert!(text.pending.len() <= 4);
+        text.close();
+        assert!(text.pending.len() <= 2);
+        text.segment("b").unwrap();
+        text.finish().unwrap();
+        assert_eq!(spill.read(0..spill.len()).unwrap(), "a\n\nb");
+        let body = format!(
+            "{}<w:p><w:r><w:t>end</w:t></w:r></w:p>",
+            "<w:p/><w:sdt/><w:tbl/>".repeat(100_000)
+        );
+        assert_eq!(read_docx(&word(&body)).unwrap(), "end");
+    }
+
+    #[test]
+    fn deep_nesting_is_still_refused() {
+        let body = format!(
+            "<w:p>{}<w:t>deep</w:t>{}</w:p>",
+            "<w:r>".repeat(33),
+            "</w:r>".repeat(33)
+        );
+        let err = read_docx(&word(&body)).unwrap_err().to_string();
+        assert!(err.contains("deeply"), "{err}");
+    }
+
+    const WORD: &str = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>"#;
+
+    fn paragraph(i: usize) -> String {
+        format!("<w:p><w:r><w:t>Paragraph {i} explains how a heap keeps its smallest key at the root and sifts down after every extraction.</w:t></w:r></w:p>")
+    }
+
+    fn write_docx(path: &std::path::Path, megabytes: usize) {
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        writer
+            .start_file(
+                "word/document.xml",
+                zip::write::SimpleFileOptions::default()
+                    .compression_method(zip::CompressionMethod::Deflated)
+                    .large_file(true),
+            )
+            .unwrap();
+        writer.write_all(WORD.as_bytes()).unwrap();
+        let mut written = 0;
+        let mut i = 0;
+        while written < megabytes * 1024 * 1024 {
+            let mut chunk = String::new();
+            for _ in 0..1_000 {
+                i += 1;
+                chunk.push_str(&paragraph(i));
+                if i % 500 == 0 {
+                    chunk.push_str("<w:tbl>");
+                    for row in 0..4 {
+                        chunk.push_str("<w:tr>");
+                        for col in 0..3 {
+                            chunk.push_str(&format!(
+                                "<w:tc><w:p><w:r><w:t>{row}:{col}</w:t></w:r></w:p></w:tc>"
+                            ));
+                        }
+                        chunk.push_str("</w:tr>");
+                    }
+                    chunk.push_str("</w:tbl>");
+                }
+            }
+            writer.write_all(chunk.as_bytes()).unwrap();
+            written += chunk.len();
+        }
+        writer.write_all(b"</w:body></w:document>").unwrap();
+        writer.finish().unwrap();
+    }
+
+    fn slide(i: usize) -> String {
+        format!(
+            r#"<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody><a:p><a:r><a:t>Slide {i}</a:t></a:r></a:p></p:txBody></p:sp><p:sp><p:txBody><a:p><a:r><a:t>Heaps keep the smallest key at the root.</a:t></a:r></a:p><a:p><a:r><a:t>Insert sifts up, extract sifts down.</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#
+        )
+    }
+
+    fn write_pptx(path: &std::path::Path, slides: usize) {
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(path).unwrap());
+        for i in 1..=slides {
+            writer
+                .start_file(
+                    format!("ppt/slides/slide{i}.xml"),
+                    zip::write::SimpleFileOptions::default()
+                        .compression_method(zip::CompressionMethod::Deflated),
+                )
+                .unwrap();
+            writer.write_all(slide(i).as_bytes()).unwrap();
+        }
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    #[ignore]
+    fn benchmark_large_office_files() {
+        if let Ok(file) = std::env::var("LEO_BENCH_OFFICE_FILE") {
+            let name = std::env::var("LEO_BENCH_OFFICE_NAME").unwrap();
+            crate::import::tests::measured_read(&file, &name);
+            return;
+        }
+        let cases = std::env::var("LEO_BENCH_CASES")
+            .unwrap_or_else(|_| "docx:5,docx:15,docx:200,docx:1000,pptx:300,pptx:5000".into());
+        let dir = tempfile::tempdir().unwrap();
+        for case in cases.split(',') {
+            let (kind, size) = case.split_once(':').unwrap();
+            let size: usize = size.parse().unwrap();
+            let name = format!("large.{kind}");
+            let file = dir.path().join(&name);
+            if kind == "docx" {
+                write_docx(&file, size);
+            } else {
+                write_pptx(&file, size);
+            }
+            let out = leo_core::children::quiet_command(std::env::current_exe().unwrap())
+                .args([
+                    "--ignored",
+                    "--exact",
+                    "--nocapture",
+                    "import::office::tests::benchmark_large_office_files",
+                ])
+                .env("LEO_BENCH_OFFICE_FILE", &file)
+                .env("LEO_BENCH_OFFICE_NAME", &name)
+                .output()
+                .unwrap();
+            let text = String::from_utf8_lossy(&out.stdout);
+            println!(
+                "{case}: {}",
+                text.lines()
+                    .find(|l| l.starts_with("RESULT"))
+                    .unwrap_or("no result")
+            );
+        }
     }
 }

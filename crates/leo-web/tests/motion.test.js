@@ -28,9 +28,9 @@ test('note deletion preserves failures and never redirects another open note', a
 
 const motionSource = fs.readFileSync(path.resolve(__dirname, '../src/web/app/motion.js'), 'utf8');
 function motion(extra = {}) {
-  const context = { overlapOut() {}, unfold() {}, fold() {}, cascade() {}, pulse() {}, rubber() {}, iconSwap() {}, stillMotion: () => false, EASE_OUT: 'ease-out', EASE_MOVE: 'ease-in-out', EASE_EXIT: 'ease-in', MOTION_MS: 180, OPEN_MS: 200, DRAWER_MS: 240, EXIT_SHARE: .8, document: { addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], documentElement: { classList: { add() {}, remove() {} } } }, window: { scrollTo() {} }, innerHeight: 800, innerWidth: 1200, performance: { now: () => 0 }, Date, ...extra };
+  const context = { overlapOut() {}, unfold() {}, fold() {}, slideHeight() {}, cascade() {}, pulse() {}, rubber() {}, iconSwap() {}, stillMotion: () => false, EASE_OUT: 'ease-out', EASE_MOVE: 'ease-in-out', EASE_EXIT: 'ease-in', MOTION_MS: 180, OPEN_MS: 200, DRAWER_MS: 240, EXIT_SHARE: .8, document: { addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], documentElement: { classList: { add() {}, remove() {} } } }, window: { scrollTo() {} }, innerHeight: 800, innerWidth: 1200, performance: { now: () => 0 }, Date, ...extra };
   vm.createContext(context);
-  vm.runInContext(`${motionSource}\nglobalThis.api = { flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, liftedRect, lift, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
+  vm.runInContext(`${motionSource}\nglobalThis.api = { leoMotion: window.leoMotion, flipOffset, flipMoves, flipSkip, flipList, transitionSkip, swap, settleNow, settleLater, settleOffset, pillGlide, drawn, handoff, liftedRect, lift, FLIP_TRAVEL, FLIP_ROWS, SETTLE_MS };`, context);
   return context.api;
 }
 
@@ -239,4 +239,16 @@ test('a lift starts flat and arrives at the lifted look', () => {
   const m = motion();
   m.lift({ animate: (frames, timing) => { runs.push({ frames, timing }); return {}; } });
   assert.deepEqual(JSON.parse(JSON.stringify(runs[0].frames)), [{ offset: 0, scale: '1', boxShadow: 'none', '--tilt': '0deg' }]);
+});
+
+test('the thinking box opens with the height reveal and the shared switch is not redrawn', () => {
+  const m = motion();
+  assert.equal(typeof m.leoMotion.slide, 'function');
+  const chat = fs.readFileSync(path.resolve(__dirname, '../src/web/chat.js'), 'utf8');
+  const toggle = chat.slice(chat.indexOf("} else if (what === 'quiz-think') {"), chat.indexOf("} else if (what === 'quiz-hint') {"));
+  assert.match(chat, /class="switch" role="switch" data-chat="quiz-think"/);
+  assert.match(chat, /if \(el\.dataset\.chat !== 'quiz-think'\) e\.preventDefault\(\);/);
+  assert.match(toggle, /insertAdjacentHTML/);
+  assert.match(toggle, /root\.leoMotion\?\.slide/);
+  assert.doesNotMatch(toggle, /thinkingOpen\.(add|delete)\(q\);\s*draw\(/);
 });

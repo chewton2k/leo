@@ -551,7 +551,7 @@ function chatSendFixture(id = 'practice', access = 'ask', before = async () => t
     state, input, AbortController, TextDecoder, Date: class extends Date { static now() { return stream.clock ? stream.clock() : Date.now(); } }, working: new Map(), timed: new Set(), MOST_REFS: C.MOST_REFS,
     historyText: C.historyText, modelHistory: C.modelHistory, historyRequest: C.historyRequest, threadRefs: C.threadRefs, recentNotes: C.recentNotes, sessionBody: C.sessionBody, splitLines: C.splitLines, grade: C.grade, scoreSession: C.scoreSession,
     cardOf: doc => doc, currentSession: () => stream.session || null, closePick: noop, drawRefs: noop, fit: noop, awake: noop, mood: noop, thinking: noop, draw: noop, drawChats: noop, remember: noop, compactLater: noop, stopCompacting: noop, react: noop, talking: noop,
-    pose: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
+    pose: noop, freshIfGone: noop, onSaved: noop, onChanged: noop, onOrganized: noop, queueMicrotask, organize: async card => { card.state = 'applied'; },
     $: () => contextBox, escape: esc,
     onBeforeSend: async args => { prepared.push(args); return before(args); }, notify: message => notices.push(message),
     request: async (_url, options) => {
@@ -1026,7 +1026,7 @@ function answers(messages, { busy = null, send = () => {}, clipboard = null, fet
   const calls = [];
   const input = { value: '', focus() { calls.push('focus'); } };
   const context = {
-    ...C, state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
+    ...C, marks: new Map(), state: { messages, busy, preparingSend: false, id: 'chat-12345678', refs: [], sent: [], files: [], selection: null }, drawRefs() {}, drawings: {}, escape: esc, render: (t) => `<p>${esc(t)}</p>`, input,
     root: { navigator: { clipboard } }, upload: Promise.resolve(), openTraces: new Set(), working: new Map(), timed: new Set(), tick() {}, workingFor: () => '', tookFor: () => '', writer: () => '', writerOf: () => '',
     stepChevron: '', MOST_REPLY_STEPS: 64, clipped: (t) => t, stored: () => messages.filter((m) => !m.pending), fit() {}, persist() {}, draw() {}, send,
     notify: (text) => calls.push(`notify:${text}`), setTimeout: () => 0,
@@ -1081,7 +1081,7 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   const told = [];
   const messages = Array.from({ length: 450 }, (_, i) => ({ role: 'user', text: `m${i}` }));
   const context = {
-    MOST_SAVED: 400, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
     NAME_CHECKS: [], notify: (t) => told.push(t),
     request: async (url, init) => { sent.push(JSON.parse(init.body)); return { ok: false }; },
   };
@@ -1090,9 +1090,39 @@ test('a chat save that fails is reported once and sends only the messages leo ke
   await context.__remember();
   await context.__remember();
   assert.equal(sent.length, 2);
-  assert.equal(sent[0].messages.length, 400);
-  assert.equal(sent[0].messages[0].text, 'm50');
+  assert.equal(sent[0].messages.length, 450);
+  assert.equal(sent[0].messages[0].text, 'm0');
   assert.equal(told.length, 1);
+});
+
+test('a history save that cannot reach leo warns once', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const from = source.indexOf('    let upload = Promise.resolve();');
+  const code = source.slice(from, source.indexOf('    async function loadChats()', from));
+  const told = [];
+  let reachable = false;
+  const messages = [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'hello' }];
+  const context = {
+    marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, state: { id: 'chat-1', refs: [], messages, chats: null }, stored: () => messages, persist() {}, known: new Set(), gone: new Set(), drawChats() {}, loadChats() {}, setTimeout: () => 0,
+    NAME_CHECKS: [], notify: (t) => told.push(t),
+    request: async () => {
+      if (!reachable) throw new TypeError('Failed to fetch');
+      return { ok: true, json: async () => ({ id: 'chat-1', named: true, count: 2, updated_at: '2026-11-17T00:00:00Z' }) };
+    },
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.__remember = remember;`, context);
+  await context.__remember();
+  await context.__remember();
+  assert.equal(told.length, 1);
+  reachable = true;
+  await context.__remember();
+  reachable = false;
+  await context.__remember();
+  assert.equal(told.length, 2);
 });
 
 const pair = () => [{ role: 'user', text: 'What is a heap?' }, { role: 'assistant', text: '[n1] A heap keeps the minimum on top.', sources: [{ n: 1, id: 'a', title: 'Heaps' }] }];
@@ -1150,6 +1180,9 @@ test('a failed upload shows the writer sentence with the setup link, and other e
       $: (sel) => (sel === '.upload-working' ? open : null), setTimeout: (fn) => { fn(); return 1; }, clearTimeout() {},
     };
     vm.createContext(context);
+    const sheets = fs.readFileSync(path.join(__dirname, '../src/web/app/sheets.js'), 'utf8').replace(/\r\n/g, '\n');
+    const footer = sheets.indexOf('function sheetButtons(');
+    vm.runInContext(sheets.slice(footer, sheets.indexOf('\n}\n', footer) + 3), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/uploads.js'), 'utf8'), context);
     context.watchUpload('job', '');
     await new Promise(setImmediate);
@@ -1276,4 +1309,432 @@ test('an edit card shows proof marks, falls back to both texts when marks would 
   assert.match(added, /<div class="proposal-note">Added at the end:<\/div><div class="proposal-marked"><ins><svg class="proposal-caret"/);
   const same = { kind: 'edit', title: 'Heaps', find: 'a b', replace: 'a c', state: 'new' };
   assert.equal(context.card(same, 0, 0), context.card(same, 0, 0), 'a redraw reuses the marks');
+});
+
+test('a quiz keeps the full thinking draft and tells the user how much Felix reads', async () => {
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  const slice = (from, to) => source.slice(source.indexOf(from), source.indexOf(to));
+  const start = '💭'.repeat(2000);
+  const thinking = start + 'THINKING_TAIL';
+  const q = { kind: 'free_response', question: 'Why?', answer: 'Order' };
+  const sent = [];
+  const context = require('node:vm').createContext({
+    ...C, MOST_THINKING: 2000, SURE: {}, escape: esc,
+    state: { messages: [{ quizzes: [q] }], drafts: { 'think:0:0': thinking }, streak: 0 },
+    draw() {}, remember() {}, mood() {}, currentSession: () => null, scoreSession() {},
+    request: async (_, { body }) => {
+      sent.push(JSON.parse(body));
+      return { ok: true, json: async () => ({ correct: true }) };
+    },
+  });
+  require('node:vm').runInContext(
+    slice('    function thinkingBox(', '    function quizCard(') +
+    slice('    const checking = new WeakSet()', '    function continueQuiz(') +
+    '\nthis.box = thinkingBox; this.answer = answerQuiz; thinkingOpen.add(state.messages[0].quizzes[0]);',
+    context);
+  await context.answer(0, 0, 'Order');
+  assert.equal(sent[0].thinking, thinking);
+  assert.equal(q.thinking, thinking);
+  const box = context.box('data-i="0" data-k="0"', thinking);
+  assert.doesNotMatch(box, /maxlength/);
+  assert.match(box, /Felix reads the first 2,000 characters/);
+  const prompt = C.quizSay(q, q.given, true);
+  assert.ok(prompt.includes(start));
+  assert.ok(!prompt.includes('THINKING_TAIL'));
+});
+
+test('quiz answer fields and the note picker have accessible names', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8');
+  assert.match(source, /id="chat-pick-search" placeholder="Find a note…" aria-label="Find a note"/);
+  const code = source.slice(source.indexOf('    function quizCard('), source.indexOf('    const checking = new WeakSet()'));
+  const context = { ...C, escape: esc, state: { drafts: {} }, checking: new WeakSet(), thinkingOpen: new WeakSet(), markedAt: new WeakMap(), inline: (t) => esc(t), render: (t) => esc(t), cite: (t) => t, hintsOf: () => [] };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  for (let tries = 0; tries < 40; tries++) {
+    try { vm.runInContext(`${code}\n;globalThis.__card = quizCard;`, context); break; }
+    catch (e) { if (!(e instanceof ReferenceError)) throw e; context[e.message.split(' ')[0]] = () => ''; }
+  }
+  for (const [kind, name] of [['fill_blank', 'The missing words'], ['free_response', 'Your answer, in your own words']]) {
+    let html;
+    for (let tries = 0; tries < 40 && html === undefined; tries++) {
+      try { html = context.__card({ kind, question: 'Why?', answer: 'x' }, 0, 0, false, []); }
+      catch (e) { if (e.name !== 'ReferenceError') throw e; context[e.message.split(' ')[0]] = ''; }
+    }
+    assert.match(html, new RegExp(`<(input|textarea) class="quiz-input"[^>]* aria-label="${name}"`));
+  }
+});
+
+test("a refused reply's sentence is read one way at the three sites", async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const line = source.split('\n').find((l) => l.trim().startsWith('const sentenceOf = async'));
+  const context = vm.createContext({});
+  vm.runInContext(`${line}\nthis.sentenceOf = sentenceOf;`, context);
+  assert.equal(await context.sentenceOf({ json: async () => ({ error: 'That note is gone.' }) }), 'That note is gone.');
+  assert.equal(await context.sentenceOf({ json: async () => { throw new SyntaxError('not JSON'); } }), '');
+  assert.equal(await context.sentenceOf({ json: async () => ({}) }), '');
+  assert.equal(source.includes('said = (await'), false);
+  assert.equal((source.match(/const said = await sentenceOf\(/g) || []).length, 3);
+});
+
+function goneFixture({ id = 'chat-1', synced = true, reply = async () => ({ ok: true, status: 200 }), messages = [{ role: 'user', text: 'Explain heaps' }, { role: 'assistant', text: 'A heap is a tree.' }], typed = '' } = {}) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const from = source.indexOf('    let upload = Promise.resolve();');
+  const saving = source.slice(from, source.indexOf('    async function loadChats()', from));
+  const at = source.indexOf('    async function checkStored() {');
+  const checking = source.slice(at, source.indexOf('    async function resume(', at));
+  const calls = [], told = [], begun = [];
+  const state = { id, refs: [], messages: messages.slice(), chats: null, busy: null, preparingSend: false };
+  const input = { value: typed };
+  const context = vm.createContext({
+    state, input, marks: new Map(), markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs, NAME_CHECKS: [], setTimeout: () => 0,
+    known: new Set(synced ? [id] : []), gone: new Set(),
+    stored: () => state.messages, persist() {}, drawChats() {}, loadChats() {}, fit() {},
+    notify: (t) => told.push(t),
+    begin: () => { begun.push(state.id); state.id = `fresh-${begun.length}`; state.messages = []; },
+    request: async (url, init = {}) => { calls.push([init.method || 'GET', url, init.body ? JSON.parse(init.body) : null]); return reply(url, init, calls.length); },
+  });
+  vm.runInContext(`${saving}\n${checking}\nthis.remember = remember; this.checkStored = checkStored; this.freshIfGone = freshIfGone;`, context);
+  return { context, state, input, calls, told, begun, known: context.known, gone: context.gone };
+}
+
+test('a stored chat leo no longer has starts a new chat', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 404 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, ['chat-1']);
+  assert.equal(f.known.has('chat-1'), false);
+  assert.equal(f.gone.has('chat-1'), true);
+  assert.deepEqual(f.calls.map((c) => c.slice(0, 2)), [['GET', '/api/chats/chat-1']]);
+});
+
+test('a stored chat leo still has is kept', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: true, status: 200 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  assert.equal(f.state.id, 'chat-1');
+});
+
+test('an unreachable leo, a 401 and a 500 keep the stored chat', async () => {
+  for (const reply of [async () => { throw new TypeError('Failed to fetch'); }, async () => ({ ok: false, status: 401 }), async () => ({ ok: false, status: 500 })]) {
+    const f = goneFixture({ reply });
+    await f.context.checkStored();
+    assert.deepEqual(f.begun, []);
+    assert.equal(f.state.messages.length, 2);
+  }
+});
+
+test('a stored chat that never reached leo is kept without asking', async () => {
+  const f = goneFixture({ synced: false, reply: async () => ({ ok: false, status: 404 }) });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  assert.equal(f.calls.length, 0);
+});
+
+test('a chat that changed while the check ran is kept', async () => {
+  let f;
+  f = goneFixture({ reply: async () => { f.state.messages.push({ role: 'user', text: 'and again' }); return { ok: false, status: 404 }; } });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+  f = goneFixture({ reply: async () => { f.state.busy = {}; return { ok: false, status: 404 }; } });
+  await f.context.checkStored();
+  assert.deepEqual(f.begun, []);
+});
+
+test('a save answered gone starts a new chat and puts the last message back in the box', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  await f.context.remember();
+  assert.equal(f.calls[0][2].existed, true);
+  assert.deepEqual(f.begun, ['chat-1']);
+  assert.equal(f.input.value, 'Explain heaps');
+  assert.equal(f.told.length, 1);
+  assert.match(f.told[0], /Your last message is in the box/);
+  assert.equal(f.known.has('chat-1'), false);
+});
+
+test('a save queued before a gone answer is not sent after it', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  f.state.busy = {};
+  const first = f.context.remember();
+  const second = f.context.remember();
+  await first;
+  await second;
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.begun, []);
+});
+
+test('a chat found gone while a reply runs starts fresh when the reply ends and the final save of the old id is not sent', async () => {
+  const f = goneFixture({ reply: async () => ({ ok: false, status: 410 }) });
+  f.state.busy = {};
+  const old = { id: 'chat-1', refs: [], messages: f.state.messages.slice() };
+  await f.context.remember(old);
+  assert.deepEqual(f.begun, []);
+  f.state.busy = null;
+  f.context.freshIfGone();
+  assert.deepEqual(f.begun, ['chat-1']);
+  await f.context.remember({ ...old, messages: [...old.messages, { role: 'assistant', text: 'more' }] });
+  assert.equal(f.calls.length, 1);
+  assert.notEqual(f.state.id, 'chat-1');
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  assert.match(source, /state\.busy = null;\n\s+freshIfGone\(\);/);
+});
+
+test('a first save says leo did not have the chat, and a later one says it did', async () => {
+  const f = goneFixture({ synced: false, reply: async () => ({ ok: true, status: 200, json: async () => ({ id: 'chat-1', named: true, count: 2 }) }) });
+  await f.context.remember();
+  await f.context.remember();
+  assert.deepEqual(f.calls.map((c) => c[2].existed), [false, true]);
+});
+
+test('the saved flag round-trips', () => {
+  const store = new Map();
+  const storage = { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v) };
+  C.save(storage, [{ role: 'user', text: 'hi' }], [], 'id', true);
+  assert.equal(C.load(storage).synced, true);
+  C.save(storage, [{ role: 'user', text: 'hi' }], [], 'id');
+  assert.equal('synced' in C.load(storage), false);
+  assert.equal(JSON.parse(store.get([...store.keys()][0])).synced, undefined);
+});
+
+test('the note picker asks for 20 results', async () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('    async function findNotes(query) {');
+  const code = source.slice(start, source.indexOf('\n    }\n', start) + 6);
+  const asked = [];
+  const context = { state: { refs: [{ id: 'b' }] }, request: async (url) => { asked.push(url); return { ok: true, json: async () => [{ id: 'a' }, { id: 'b' }] }; } };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.find = findNotes;`, context);
+  const found = await context.find(' heaps ');
+  assert.deepEqual(asked, ['/api/search?q=heaps&limit=20']);
+  assert.deepEqual(found.map((n) => n.id), ['a']);
+});
+
+test('an eleventh document is queued and no limit on documents is left in the page', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  assert.ok(!source.includes('MOST_FILES') && !source.includes('holds up to'));
+  const start = source.indexOf('    function addFiles(list) {');
+  const code = source.slice(start, source.indexOf('\n    }\n', start) + 6);
+  const queued = [];
+  const notices = [];
+  const context = { state: { files: Array.from({ length: 10 }, (_, i) => ({ id: `f${i}` })), sent: [] }, addFile: (f) => queued.push(f), notify: (m) => notices.push(m) };
+  const vm = require('node:vm');
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.add = addFiles;`, context);
+  context.add(['eleventh.txt', 'twelfth.txt']);
+  assert.deepEqual(queued, ['eleventh.txt', 'twelfth.txt']);
+  assert.deepEqual(notices, []);
+});
+
+test('elapsed time is worded 42 s below a minute and 1:05 from a minute up', () => {
+  assert.equal(C.tookFor(42000), '42 s');
+  assert.equal(C.tookFor(65000), '1:05');
+  assert.equal(C.tookFor(0), '0 s');
+  assert.equal(C.tookFor(-3000), '0 s');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  for (const name of ['app/events.js', 'app/uploads.js']) {
+    assert.ok(!fs.readFileSync(path.join(__dirname, '../src/web', name), 'utf8').includes("padStart(2, '0')"), `${name} words elapsed time itself`);
+  }
+});
+
+function fakeChat(count) {
+  let rows = Array.from({ length: count }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', text: `m${i}` }));
+  const puts = [];
+  return {
+    puts,
+    rows: () => rows,
+    set: (next) => { rows = next; },
+    put(body) {
+      puts.push(body);
+      if (body.from === undefined) {
+        if (body.messages.length < rows.length) return { status: 409, count: rows.length };
+        rows = body.messages.slice();
+      } else {
+        if (body.from > rows.length) return { status: 409, count: rows.length };
+        rows = [...rows.slice(0, body.from), ...body.messages];
+      }
+      return { status: 200, count: rows.length };
+    },
+    page(before) {
+      const to = Math.min(before ?? rows.length, rows.length);
+      const from = Math.max(0, to - 200);
+      return JSON.parse(JSON.stringify({ messages: rows.slice(from, to), from, count: rows.length }));
+    },
+  };
+}
+
+test('a save sends only the messages added since the last save', () => {
+  const first = [{ role: 'user', text: 'q1' }, { role: 'assistant', text: 'a1' }];
+  const mark = C.savedAs({ first: 0 }, first, 2);
+  assert.deepEqual(C.toSave(mark, [...first, { role: 'user', text: 'q2' }]), { from: 2, messages: [{ role: 'user', text: 'q2' }] });
+  assert.deepEqual(C.toSave({ first: 0, saved: 0, held: [] }, first), { from: 0, messages: first });
+});
+
+test('a long chat opened at its newest page keeps a new message', () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const mark = C.markOf(page);
+  assert.deepEqual([mark.first, mark.saved], [800, 1000]);
+  const plan = C.toSave(mark, [...page.messages, { role: 'user', text: 'one more' }]);
+  assert.equal(plan.from, 1000);
+  assert.equal(plan.messages.length, 1);
+  assert.equal(server.put(plan).status, 200);
+  const back = server.rows();
+  assert.equal(back.length, 1001);
+  assert.equal(back[1000].text, 'one more');
+  assert.deepEqual(back.slice(0, 1000).map((m) => m.text), Array.from({ length: 1000 }, (_, i) => `m${i}`));
+});
+
+test('a message appended after loading an earlier page is saved at the right index', () => {
+  const server = fakeChat(1000);
+  const newest = server.page();
+  let mark = C.markOf(newest);
+  const older = server.page(mark.first);
+  mark = { first: older.from, saved: mark.saved, held: [...older.messages.map((m) => JSON.stringify(m)), ...mark.held] };
+  const local = [...older.messages, ...newest.messages, { role: 'user', text: 'after scrolling up' }];
+  const plan = C.toSave(mark, local);
+  assert.equal(plan.from, 1000);
+  assert.deepEqual(plan.messages, [{ role: 'user', text: 'after scrolling up' }]);
+  server.put(plan);
+  assert.equal(server.rows()[1000].text, 'after scrolling up');
+  assert.equal(server.rows().length, 1001);
+});
+
+test('an earlier message changed with the count and the last message unchanged is saved', () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const mark = C.markOf(page);
+  const local = JSON.parse(JSON.stringify(page.messages));
+  local[150].quiz = { given: 'a stack', correct: false };
+  const plan = C.toSave(mark, local);
+  assert.equal(plan.from, 950);
+  assert.equal(plan.messages.length, 50);
+  server.put(plan);
+  assert.equal(server.rows().length, 1000);
+  assert.equal(server.rows()[950].quiz.given, 'a stack');
+  assert.equal(server.rows()[999].text, 'm999');
+});
+
+function savingSlice(server, state, noted) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('    let upload = Promise.resolve();');
+  const code = source.slice(start, source.indexOf('\n    function freshIfGone() {', start));
+  const body = { scrollTop: 0, scrollHeight: 0 };
+  const request = async (url, init = {}) => {
+    const before = /before=(\d+)/.exec(url);
+    if (init.method === 'PUT') {
+      const answer = server.put(JSON.parse(init.body));
+      return { ok: answer.status === 200, status: answer.status, json: async () => ({ id: state.id, named: true, count: answer.count, updated_at: '2026-11-18T00:00:00Z' }) };
+    }
+    return { ok: true, status: 200, json: async () => server.page(before ? Number(before[1]) : undefined) };
+  };
+  const context = vm.createContext({
+    state, body, request, encodeURIComponent, JSON, Number, Math, Array, Boolean, Promise, setTimeout,
+    marks: new Map(), known: new Set([state.id]), gone: new Set(), unsaved: new Set(), naming: new Set(), NAME_CHECKS: [],
+    markOf: C.markOf, toSave: C.toSave, savedAs: C.savedAs,
+    stored: () => state.messages.filter((m) => !m.pending), persist() {}, drawChats() {}, loadChats() {}, freshIfGone() {}, notify: (m) => noted.push(m),
+    draw() { body.scrollHeight = state.messages.length * 10; },
+  });
+  vm.runInContext(`${code}\nthis.remember = remember; this.earlier = earlier; this.marks = marks; this.upload = () => upload;`, context);
+  return { context, body };
+}
+
+test('a refused save reloads and resends only the unsent messages, never a whole list', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const state = { id: 'chat-long-0001', messages: page.messages, refs: [], busy: null };
+  const noted = [];
+  const { context } = savingSlice(server, state, noted);
+  context.marks.set(state.id, C.markOf(page));
+  server.set(server.rows().slice(0, 998));
+  state.messages = [...state.messages, { role: 'user', text: 'mine' }];
+  await context.remember();
+  assert.ok(server.puts.every((p) => Number.isInteger(p.from)), 'no whole list is ever sent');
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1], [998, 1]]);
+  assert.equal(server.rows().length, 999);
+  assert.equal(server.rows()[998].text, 'mine');
+  assert.equal(state.messages.at(-1).text, 'mine');
+  assert.equal(state.messages.length, 201);
+  assert.deepEqual([context.marks.get(state.id).first, context.marks.get(state.id).saved], [798, 999]);
+  assert.deepEqual(noted, []);
+});
+
+test('scrolling to the top loads the page before', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const state = { id: 'chat-long-0002', messages: page.messages, refs: [], busy: null };
+  const { context, body } = savingSlice(server, state, []);
+  context.marks.set(state.id, C.markOf(page));
+  body.scrollHeight = 2000;
+  body.scrollTop = 30;
+  await context.earlier();
+  assert.equal(state.messages.length, 400);
+  assert.equal(state.messages[0].text, 'm600');
+  assert.equal(state.messages[399].text, 'm999');
+  assert.equal(context.marks.get(state.id).first, 600);
+  assert.equal(body.scrollTop, 30 + 2000, 'what was on screen stays put');
+  state.messages.push({ role: 'user', text: 'new' });
+  await context.remember();
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1]]);
+});
+
+test('a refused save while Felix is answering waits for the reply instead of redrawing the chat', async () => {
+  const server = fakeChat(1000);
+  const page = server.page();
+  const streaming = { role: 'assistant', text: 'Thinking', pending: true };
+  const state = { id: 'chat-long-0003', messages: [...page.messages, { role: 'user', text: 'mine' }, streaming], refs: [], busy: {} };
+  const { context } = savingSlice(server, state, []);
+  context.marks.set(state.id, C.markOf(page));
+  server.set(server.rows().slice(0, 998));
+  await context.remember();
+  assert.ok(state.messages.includes(streaming), 'the answer being written stays on screen');
+  assert.deepEqual(server.puts.map((p) => [p.from, p.messages.length]), [[1000, 1]]);
+  state.busy = null;
+  streaming.pending = false;
+  await context.remember();
+  assert.deepEqual(server.puts.slice(1).map((p) => [p.from, p.messages.length]), [[1000, 2], [998, 2]]);
+  assert.equal(server.rows().length, 1000);
+  assert.deepEqual(server.rows().slice(-2).map((m) => m.text), ['mine', 'Thinking']);
+  assert.equal(state.messages.at(-1), streaming, 'the same message object stays on screen');
+});
+
+test('an attached file of any size is sent as one streamed PUT of its blob and never refused for its size', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8');
+  const from = source.indexOf('    async function readFile(');
+  const code = source.slice(from, source.indexOf('    function cardOf(', from));
+  const requests = [];
+  const notices = [];
+  const big = { name: 'book.pdf', type: 'application/pdf', size: 3 * 1024 * 1024 * 1024 };
+  const context = {
+    encodeURIComponent,
+    JSON,
+    state: { id: 'chat-12345678', files: [{ key: 'k', name: 'book.pdf', status: 'reading' }] },
+    drawRefs() {},
+    thumbOf: async () => null,
+    prepare: async (file) => ({ name: file.name, type: file.type, blob: file }),
+    request: async (url, init) => {
+      requests.push({ url, init });
+      return { ok: true, status: 201, json: async () => ({ id: 'doc-1', name: 'book.pdf', chars: 9 }) };
+    },
+    sentenceOf: async () => '',
+    notify: (text) => notices.push(text),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\nthis.readFile = readFile;`, context);
+  const doc = await context.readFile(big, 'k', 'chat-12345678');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, '/api/chats/chat-12345678/files/book.pdf?type=application%2Fpdf');
+  assert.equal(requests[0].init.method, 'PUT');
+  assert.equal(requests[0].init.body, big);
+  assert.equal('headers' in requests[0].init, false);
+  assert.deepEqual(notices, []);
+  assert.equal(doc.id, 'doc-1');
 });

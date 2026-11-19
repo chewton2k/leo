@@ -64,7 +64,7 @@ fn writer() -> Result<&'static mpsc::SyncSender<Change>> {
                                 .context("The credentials file needs a private folder")?;
                             let _lock = crate::private_file::lock(
                                 parent,
-                                ".credentials.lock",
+                                leo_core::paths::own::CREDENTIALS_LOCK,
                                 std::time::Duration::from_secs(5),
                             )?;
                             let mut bundle = store.read()?;
@@ -99,7 +99,7 @@ pub struct FileStore {
 impl FileStore {
     /// The default location, beside `config.toml`.
     pub fn new() -> Result<Self> {
-        let path = super::Config::config_path()?.with_file_name("credentials.json");
+        let path = super::Config::config_path()?.with_file_name(leo_core::paths::own::CREDENTIALS);
         Ok(Self { path })
     }
 

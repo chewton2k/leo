@@ -23,13 +23,14 @@ test('a slash command becomes Markdown in place of what was typed', () => {
 
 test('the outline finds headings at every level but excludes code, maths, quotes and tables', () => {
   const lines = ['# Intro', '## **Sounds**', '```md', '# Not a heading', '```', '> ## Quoted', '$$', '# Formula', '$$', '| Name |', '|---|', '# Table row |', '### Phrase [structure](https://example.com)', '###### Deep 😀', '## Again', '## Again', '####### Too deep', 'no # heading'];
-  assert.deepEqual(ed.headings(lines), [
+  const found = ed.headings(lines);
+  assert.deepEqual(found.map(({ block, ...row }) => row), [
     { line: 0, level: 1, text: 'Intro' }, { line: 1, level: 2, text: '**Sounds**' },
     { line: 12, level: 3, text: 'Phrase [structure](https://example.com)' },
     { line: 13, level: 6, text: 'Deep 😀' }, { line: 14, level: 2, text: 'Again' }, { line: 15, level: 2, text: 'Again' },
   ]);
-  assert.deepEqual(ed.headings(['##', '###    ', '  ## Indented ###']), [{ line: 2, level: 2, text: 'Indented' }]);
-  assert.equal(ed.headings(Array(500).fill('# Section')).length, 300);
+  assert.deepEqual(ed.headings(['##', '###    ', '  ## Indented ###']).map(({ block, ...row }) => row), [{ line: 2, level: 2, text: 'Indented' }]);
+  assert.equal(ed.headings(Array(3000).fill('# Section')).length, 3000);
 });
 
 test('outline groups follow heading levels, including skipped levels and repeated titles', () => {
@@ -41,6 +42,20 @@ test('outline groups follow heading levels, including skipped levels and repeate
   assert.equal(tree[1].children[0].line, 5);
   assert.deepEqual(tree[2].children, []);
   assert.deepEqual(ed.headingTree([]), []);
+});
+
+test('the heading tree keeps every row and each heading row names its block', () => {
+  const lines = [];
+  for (let i = 0; i < 3000; i++) lines.push(i % 3 === 0 ? `# Part ${i}` : `## Part ${i}`, 'text');
+  const rows = ed.headings(lines);
+  assert.equal(rows.length, 3000);
+  const tree = ed.headingTree(rows);
+  assert.equal(tree.length, 1000);
+  assert.equal(tree.reduce((count, node) => count + 1 + node.children.length, 0), 3000);
+  assert.deepEqual(tree[999].children.map((row) => row.text), ['Part 2998', 'Part 2999']);
+  const blocks = ed.splitBlocks(lines);
+  for (const row of rows) assert.equal(blocks[row.block].start, row.line);
+  assert.deepEqual(ed.headings(['text', '```', '# no', '```', '# yes']).map((row) => row.block), [2]);
 });
 
 test('resizing counts only the pictures the page draws, so outside images and code never take the size', () => {
@@ -554,4 +569,21 @@ test('Tab and Shift+Tab leave prose and chosen numbers alone', () => {
   assert.deepEqual(press(['1. a', '   1. b'], 1, true), ['1. a', '2. b'], 'a sub-list item joins the outer numbering');
   assert.deepEqual(press(['1. a', '   2005. b'], 1, true), ['1. a', '2005. b'], 'a chosen number survives the move out');
   assert.deepEqual(press(['1. a', '2. b'], 1, false), ['1. a', '   1. b']);
+});
+
+test('the list marker above a line is the same when only the run of list lines is passed', () => {
+  const docs = [
+    ['- one', '  - two', '    - three', '  - four', ''],
+    ['A paragraph', 'that runs on', '', '1. first', '2. second', '   - inner', ''],
+    ['Plain text', 'more plain text', 'and more', ''],
+    ['- [ ] a box', '- [x] done', 'not a list', '- again', '  1. nested'],
+    [''],
+  ];
+  for (const lines of docs) {
+    for (let at = 0; at < lines.length; at++) {
+      for (const line of [lines[at], '- typed', '  - typed', '3. typed', 'typed']) {
+        assert.equal(ed.listPrefixAt(line, lines, at), ed.listPrefix(line, lines.slice(0, at)), `${JSON.stringify(lines)} at ${at}: ${line}`);
+      }
+    }
+  }
 });

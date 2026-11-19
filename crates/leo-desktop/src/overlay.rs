@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
+
 use leo_services::dictation::settings::{Popup, Settings};
 use tauri::{AppHandle, Manager};
 
@@ -5,9 +8,91 @@ use tauri::{AppHandle, Manager};
 use tauri_nspanel::{tauri_panel, CollectionBehavior, PanelBuilder, PanelLevel, StyleMask};
 #[cfg(target_os = "macos")]
 tauri_panel! { panel!(DictationPanel { config: { can_become_key_window: false, is_floating_panel: true } }) }
+#[cfg(target_os = "macos")]
+static PLUGIN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static CREATING: Mutex<()> = Mutex::new(());
+static FAILED: AtomicBool = AtomicBool::new(false);
+const AFTER_PAGE_LOAD: &str = "after page load";
+const ON_DEMAND: &str = "on demand";
 const WIDTH: f64 = 400.0;
 const HEIGHT: f64 = 132.0;
-pub fn create(app: &AppHandle) -> tauri::Result<()> {
+#[cfg(target_os = "macos")]
+pub fn plugin_registered(ok: bool) {
+    PLUGIN.store(ok, std::sync::atomic::Ordering::Relaxed);
+}
+fn available() -> bool {
+    #[cfg(target_os = "macos")]
+    return PLUGIN.load(std::sync::atomic::Ordering::Relaxed);
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+fn guarded<T>(work: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+        .unwrap_or_else(|_| Err("the popup could not be built".into()))
+}
+pub fn create_guarded(app: &AppHandle) -> Result<(), String> {
+    if !available() {
+        return Err("its plugin did not start".into());
+    }
+    let made = guarded(|| create(app).map_err(|e| e.to_string()));
+    if made.is_err() {
+        if let Some(window) = app.get_webview_window("dictation") {
+            let _ = window.destroy();
+        }
+    }
+    made
+}
+pub fn popup(app: &AppHandle, when: &str) -> Option<tauri::WebviewWindow> {
+    if FAILED.load(Ordering::Acquire) {
+        return None;
+    }
+    let _creating = CREATING.lock().unwrap_or_else(|e| e.into_inner());
+    if FAILED.load(Ordering::Acquire) {
+        return None;
+    }
+    if let Some(window) = app.get_webview_window("dictation") {
+        return Some(window);
+    }
+    let began = std::time::Instant::now();
+    match create_guarded(app) {
+        Ok(()) => {
+            eprintln!(
+                "  dictation popup built in {} ms ({when})",
+                began.elapsed().as_millis()
+            );
+            app.get_webview_window("dictation")
+        }
+        Err(why) => {
+            FAILED.store(true, Ordering::Release);
+            let sentence =
+                crate::startup_problem(&[("dictation popup", Some(why))]).unwrap_or_default();
+            eprintln!("  {sentence}");
+            if let Some(settings) =
+                app.try_state::<std::sync::Arc<crate::app_settings::AppSettings>>()
+            {
+                settings.note(sentence);
+            }
+            None
+        }
+    }
+}
+pub fn prepare(app: &AppHandle) {
+    let app = app.clone();
+    let _ = std::thread::Builder::new()
+        .name("leo-popup".into())
+        .spawn(move || {
+            #[cfg(target_os = "macos")]
+            {
+                let handle = app.clone();
+                let _ = app.run_on_main_thread(move || {
+                    popup(&handle, AFTER_PAGE_LOAD);
+                });
+            }
+            #[cfg(not(target_os = "macos"))]
+            popup(&app, AFTER_PAGE_LOAD);
+        });
+}
+fn create(app: &AppHandle) -> tauri::Result<()> {
     #[cfg(target_os = "macos")]
     {
         let panel = PanelBuilder::<_, DictationPanel>::new(app, "dictation")
@@ -57,19 +142,26 @@ pub fn show(
     settings: &Settings,
     current: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 ) {
-    if settings.popup == Popup::Off {
+    if settings.popup == Popup::Off || !available() {
         return;
     }
     let app = app.clone();
     let top = settings.top;
+    #[cfg(not(target_os = "macos"))]
+    let Some(built) = popup(&app, ON_DEMAND) else {
+        return;
+    };
     let caller = app.clone();
     let _ = caller.run_on_main_thread(move || {
         if !current() {
             return;
         }
-        let Some(window) = app.get_webview_window("dictation") else {
+        #[cfg(target_os = "macos")]
+        let Some(window) = popup(&app, ON_DEMAND) else {
             return;
         };
+        #[cfg(not(target_os = "macos"))]
+        let window = built;
         let point = crate::permissions::focused_point();
         let monitor = app
             .available_monitors()
@@ -204,6 +296,9 @@ fn place(window: &tauri::WebviewWindow, monitor: &tauri::Monitor, top: bool) {
     }
 }
 pub fn hide(app: &AppHandle) {
+    if !available() {
+        return;
+    }
     let app = app.clone();
     let caller = app.clone();
     let _ = caller.run_on_main_thread(move || {
@@ -221,15 +316,46 @@ pub fn hide(app: &AppHandle) {
     });
 }
 pub fn tokens() -> &'static str {
-    concat!(
-        "\n",
-        include_str!("../../leo-web/src/web/styles/01-tokens.css")
-    )
+    leo_web::THEME
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_popup_theme_carries_the_dark_colours() {
+        let css = tokens();
+        let (_, after) = css
+            .split_once("@media (prefers-color-scheme: dark)")
+            .unwrap();
+        let (media, theme) = after.split_once(":root[data-theme=\"dark\"] {").unwrap();
+        assert!(media.contains(":root:not([data-theme=\"light\"])"));
+        for value in [
+            "--bg: #181715;",
+            "--text: #e9e7e2;",
+            "--felix: #b4cfe7;",
+            "--hue-slate: #a3a29c;",
+        ] {
+            assert!(
+                media.contains(value),
+                "{value} missing for the system dark theme"
+            );
+            assert!(
+                theme.contains(value),
+                "{value} missing for the chosen dark theme"
+            );
+        }
+        assert!(theme.contains("color-scheme: dark;"));
+        assert!(css.contains(":root[data-theme=\"light\"] { color-scheme: light; }"));
+    }
+
+    #[test]
+    fn a_panic_while_building_the_popup_becomes_an_error() {
+        let failed: Result<(), String> = guarded(|| panic!("no plugin"));
+        assert_eq!(failed, Err("the popup could not be built".to_string()));
+        assert_eq!(guarded(|| Ok(7)), Ok(7));
+    }
 
     #[test]
     fn windows_bounds_use_the_destination_monitor_in_physical_pixels() {

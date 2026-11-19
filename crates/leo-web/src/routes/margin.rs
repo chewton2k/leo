@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use axum::extract::{Path, State};
@@ -8,9 +10,9 @@ use chrono::{DateTime, Utc};
 use serde::Deserialize;
 
 use crate::margin::{self, Prefs, Refused, Thread};
-use crate::routes::felix::Applied;
+use crate::routes::felix::change_body;
 use crate::routes::insert;
-use crate::routes::notes::{save, version_of, NoteResponse};
+use crate::routes::notes::{save, version_of};
 use crate::usage::Purpose;
 use crate::AppState;
 
@@ -59,6 +61,8 @@ pub(crate) struct AskBody {
     question: String,
     #[serde(default)]
     gone: Vec<String>,
+    #[serde(default)]
+    request: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -83,8 +87,17 @@ pub(crate) struct StatusBody {
 }
 
 #[derive(Deserialize)]
-pub(crate) struct PinBody {
-    pinned: bool,
+pub(crate) struct ThreadPatch {
+    #[serde(default)]
+    pinned: Option<bool>,
+    #[serde(default)]
+    version: Option<String>,
+    #[serde(default)]
+    quote: Option<String>,
+    #[serde(default)]
+    prefix: String,
+    #[serde(default)]
+    suffix: String,
 }
 
 #[derive(Deserialize)]
@@ -113,6 +126,7 @@ struct ReadFacts {
     cap: u32,
     gap: u32,
     quotes: Vec<String>,
+    declined: Vec<String>,
     open: Vec<Thread>,
     limit: usize,
     free: bool,
@@ -177,9 +191,9 @@ async fn open_note(state: &AppState, id: &str) -> Result<Open, Box<Response>> {
 async fn blocking<T: Send + 'static>(
     work: impl FnOnce() -> T + Send + 'static,
 ) -> Result<T, Box<Response>> {
-    tokio::task::spawn_blocking(work)
+    super::off(work)
         .await
-        .map_err(|_| Box::new(StatusCode::INTERNAL_SERVER_ERROR.into_response()))
+        .map_err(|code| Box::new(code.into_response()))
 }
 
 pub(crate) async fn note_margin(State(state): State<AppState>, Path(id): Path<String>) -> Response {
@@ -471,6 +485,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
                 cap: prefs.cap,
                 gap: prefs.gap,
                 quotes: open.iter().map(|thread| thread.quote.clone()).collect(),
+                declined: margin::declined_on(&held, &id),
                 open,
             }
         })
@@ -584,7 +599,7 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
     };
     let user = margin::read_prompt(&note.title, &blocks, tag, &earlier);
     let answer = tokio::time::timeout(
-        margin::READ_LIMIT,
+        margin::READ_LIMIT + Duration::from_secs(5),
         tokio::task::spawn_blocking(move || {
             let _reading = reading;
             writer(&system, &user, tokens)
@@ -650,12 +665,10 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         .iter()
         .filter(|t| {
             !through
-                && t.source == "read"
+                && margin::replaceable(t)
                 && t.prefix.is_empty()
                 && t.suffix.is_empty()
-                && !t.pinned
                 && !body.keep.contains(&t.id)
-                && t.messages.iter().all(|m| m.from == "felix")
                 && !now.body.contains(t.quote.as_str())
                 && margin::one_sentence(&now.body)
         })
@@ -672,8 +685,17 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         {
             continue;
         }
+        if !blocks
+            .iter()
+            .any(|b| b.contains(found.quote.as_str()) && now.body.contains(b.as_str()))
+            && now.body.matches(found.quote.as_str()).count() != 1
+        {
+            continue;
+        }
         let quote = margin::whole_sentences(&now.body, &found.quote, &blocks);
-        if margin::crowded(&now.body, &quote, &blocks, &quotes) {
+        if margin::crowded(&now.body, &quote, &blocks, &quotes)
+            || !through && margin::crowded(&now.body, &quote, &blocks, &facts.declined)
+        {
             continue;
         }
         let Some(place) = margin::placed(&now.body, &quote, &blocks) else {
@@ -842,6 +864,8 @@ async fn written(
     let chats = state.chats.clone();
     let started = Instant::now();
     let usage = std::sync::Arc::clone(&state.usage);
+    let stop = Arc::new(AtomicBool::new(false));
+    let _stop = leo_core::children::StopOnDrop(Arc::clone(&stop));
     let reply = blocking(move || {
         let _foreground = foreground;
         let reply = streamer(
@@ -850,7 +874,7 @@ async fn written(
             tokens,
             &mut |_| {},
             &mut || {},
-            &|| false,
+            &|| stop.load(Ordering::Relaxed),
         );
         let spent = reply.as_ref().ok().and_then(|r| r.spent.clone());
         usage.record(
@@ -886,8 +910,7 @@ async fn answered(
         margin::REPLY_TOKENS,
     )
     .await?;
-    let text: String = text.trim().chars().take(margin::MOST_REPLY).collect();
-    let text = margin::without_open_fence(&text);
+    let text = margin::without_open_fence(text.trim());
     if text.is_empty() {
         return Err(Box::new(said(
             StatusCode::BAD_GATEWAY,
@@ -907,9 +930,7 @@ pub(crate) async fn ask(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let question = body.question.trim().to_string();
-    if question.chars().count() > margin::MOST_ASK
-        || body.quote.chars().count() > margin::MOST_ASKED
-        || body.prefix.chars().count() > margin::MOST_QUOTE
+    if body.prefix.chars().count() > margin::MOST_QUOTE
         || body.suffix.chars().count() > margin::MOST_QUOTE
     {
         return StatusCode::PAYLOAD_TOO_LARGE.into_response();
@@ -920,6 +941,10 @@ pub(crate) async fn ask(
             "short",
             "Select a few more words, then ask.",
         );
+    }
+    let request = insert::requested(body.request.clone());
+    if let Some(found) = request.as_deref().and_then(|r| insert::remembered(&id, r)) {
+        return Json(found).into_response();
     }
     let note = match open_note(&state, &id).await {
         Ok(note) => note,
@@ -967,7 +992,12 @@ pub(crate) async fn ask(
     let chats = state.chats.clone();
     let saved = thread.clone();
     match blocking(move || margin::put(&chats, &saved, limit)).await {
-        Ok(true) => Json(thread).into_response(),
+        Ok(true) => {
+            if let Some(request) = request.as_deref() {
+                insert::remember(&id, request, &serde_json::json!(thread));
+            }
+            Json(thread).into_response()
+        }
         Ok(false) => said(
             StatusCode::CONFLICT,
             "full",
@@ -986,9 +1016,6 @@ pub(crate) async fn reply(
         return StatusCode::BAD_REQUEST.into_response();
     }
     let text = body.text.trim().to_string();
-    if text.chars().count() > margin::MOST_ASK {
-        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
-    }
     if text.is_empty() {
         return StatusCode::BAD_REQUEST.into_response();
     }
@@ -1137,20 +1164,13 @@ pub(crate) async fn weave(
     let (base, note_id) = (body.base, id.clone());
     let done = state
         .with_store(move |store| {
-            let note = store.find_note_mut(&note_id).ok_or(StatusCode::NOT_FOUND)?;
-            if version_of(note) != base {
-                return Err(StatusCode::CONFLICT);
-            }
-            let line = note.body[..from].matches('\n').count() + 1;
-            let next = format!("{}{text}{}", &note.body[..from], &note.body[to..]);
-            let before = std::mem::replace(&mut note.body, next);
-            note.updated_at = Utc::now();
-            let applied = Applied {
-                note: NoteResponse::from_note(note),
-                before,
-            };
+            let (applied, (first, last)) = change_body(store, &note_id, Some(&base), |body| {
+                let line = body[..from].matches('\n').count() + 1;
+                let next = format!("{}{text}{}", &body[..from], &body[to..]);
+                Ok((next, (line, line + text.matches('\n').count())))
+            })?;
             save(store)?;
-            Ok((applied, line, line + text.matches('\n').count()))
+            Ok((applied, first, last))
         })
         .await;
     match done {
@@ -1172,18 +1192,56 @@ pub(crate) async fn weave(
     }
 }
 
-pub(crate) async fn pin(
+pub(crate) async fn change_thread(
     State(state): State<AppState>,
     Path((id, thread)): Path<(String, String)>,
-    Json(body): Json<PinBody>,
+    Json(body): Json<ThreadPatch>,
 ) -> Response {
     if !margin::valid_note(&id) || !margin::valid_note(&thread) {
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    match blocking(move || margin::set_pinned(&chats, &id, &thread, body.pinned)).await {
-        Ok(Some(found)) => Json(found).into_response(),
-        Ok(None) => StatusCode::NOT_FOUND.into_response(),
+    if let Some(pinned) = body.pinned {
+        return match blocking(move || margin::set_pinned(&chats, &id, &thread, pinned)).await {
+            Ok(Some(found)) => Json(found).into_response(),
+            Ok(None) => StatusCode::NOT_FOUND.into_response(),
+            Err(refused) => *refused,
+        };
+    }
+    let Some(quote) = body.quote else {
+        return StatusCode::BAD_REQUEST.into_response();
+    };
+    if body.prefix.chars().count() > margin::MOST_QUOTE
+        || body.suffix.chars().count() > margin::MOST_QUOTE
+    {
+        return StatusCode::PAYLOAD_TOO_LARGE.into_response();
+    }
+    let version = body.version.unwrap_or_default();
+    if !margin::valid_version(&version) {
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+    let note = match open_note(&state, &id).await {
+        Ok(note) => note,
+        Err(refused) => return *refused,
+    };
+    if note.version != version {
+        return StatusCode::CONFLICT.into_response();
+    }
+    let Some(place) = margin::placed_exact(&note.body, &body.prefix, &quote, &body.suffix) else {
+        return said(
+            StatusCode::CONFLICT,
+            "lost",
+            "Those words are not in the note any more.",
+        );
+    };
+    match blocking(move || margin::re_anchor(&chats, &id, &thread, &quote, place)).await {
+        Ok(margin::Moved::Done(found)) => Json(found).into_response(),
+        Ok(margin::Moved::Missing) => StatusCode::NOT_FOUND.into_response(),
+        Ok(margin::Moved::Replaceable) => said(
+            StatusCode::CONFLICT,
+            "replaceable",
+            "Felix may replace this note, so its place is not saved.",
+        ),
         Err(refused) => *refused,
     }
 }

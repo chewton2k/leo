@@ -2,7 +2,6 @@ use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
-    io::Write,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, OnceLock},
 };
@@ -60,11 +59,7 @@ impl Preferences {
     pub fn save(&self, path: &Path) -> Result<()> {
         let parent = path.parent().context("App settings need a folder.")?;
         std::fs::create_dir_all(parent)?;
-        let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        file.write_all(&serde_json::to_vec_pretty(self)?)?;
-        file.as_file().sync_all()?;
-        file.persist(path).map_err(|e| e.error)?;
-        Ok(())
+        leo_core::paths::write_atomic(path, serde_json::to_vec_pretty(self)?)
     }
 }
 pub trait UpdateApi: Send + Sync {
@@ -74,6 +69,12 @@ pub trait UpdateApi: Send + Sync {
 enum PreferenceChange {
     Set(String, bool),
     Finish(usize),
+}
+fn joined(existing: Option<String>, text: String) -> String {
+    match existing {
+        Some(existing) => format!("{existing} {text}"),
+        None => text,
+    }
 }
 type NativePreferences = Arc<dyn Fn(&Preferences, &Preferences) -> Result<()> + Send + Sync>;
 struct PreferenceStore {
@@ -131,10 +132,7 @@ impl PreferenceStore {
                     next.save(&path)?;
                     if let Err(error) = native(&preferences, &next) {
                         if let Some(bytes) = original {
-                            let mut file = tempfile::NamedTempFile::new_in(path.parent().unwrap())?;
-                            file.write_all(&bytes)?;
-                            file.as_file().sync_all()?;
-                            file.persist(&path).map_err(|e| e.error)?;
+                            leo_core::paths::write_atomic(&path, bytes)?;
                         } else {
                             std::fs::remove_file(&path)?;
                         }
@@ -177,6 +175,10 @@ impl PreferenceStore {
                 .get_or_insert_with(|| format!("Leo could not apply a startup setting: {error:#}"));
         }
     }
+    fn note(&self, text: String) {
+        let mut problem = self.problem.lock().unwrap_or_else(|e| e.into_inner());
+        *problem = Some(joined(problem.take(), text));
+    }
     fn change(&self, change: PreferenceChange) -> Result<()> {
         let (done, answer) = std::sync::mpsc::sync_channel(1);
         self.tx
@@ -197,7 +199,7 @@ pub struct AppSettings {
 }
 impl AppSettings {
     pub fn new(app: AppHandle, dictation: Arc<crate::dictation::Dictation>) -> Result<Arc<Self>> {
-        let path = leo_core::paths::config_dir()?.join("app-settings.json");
+        let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::APP_SETTINGS);
         let native = app.clone();
         let preferences = PreferenceStore::new(
             path.clone(),
@@ -228,6 +230,16 @@ impl AppSettings {
     pub fn preferences(&self) -> Preferences {
         self.preferences.view()
     }
+    pub fn note(&self, text: String) {
+        self.preferences.note(text);
+    }
+    pub fn record(&self, what: &str, apply: impl FnOnce() -> Result<()>) {
+        if let Err(error) = apply() {
+            let text = format!("leo could not {what}: {error:#}");
+            eprintln!("  {text}");
+            self.note(text);
+        }
+    }
     pub fn apply_startup(&self) {
         let preferences = self.preferences();
         self.preferences.record(|| {
@@ -247,8 +259,13 @@ impl AppSettings {
             });
         }
     }
-    fn permission_view(&self) -> Value {
-        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility(),"notifications":crate::permissions::notifications()})
+    fn permission_view(&self, fresh: bool) -> Value {
+        let notifications = if fresh {
+            crate::permissions::notifications()
+        } else {
+            crate::permissions::notifications_soon()
+        };
+        json!({"microphone":crate::permissions::microphone(),"accessibility":crate::permissions::accessibility(),"notifications":notifications})
     }
 }
 impl leo_web::app_settings::AppApi for AppSettings {
@@ -256,7 +273,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
         let preferences = self.preferences();
         let mut preferences_view = serde_json::to_value(&preferences)?;
         preferences_view["writing_done"] = preferences.writing_done().into();
-        let permissions = self.permission_view();
+        let permissions = self.permission_view(false);
         let updates = self
             .updates
             .get()
@@ -288,6 +305,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
             Some("accessibility") => crate::permissions::request_accessibility(&self.app)?,
             Some("notifications") => crate::permissions::request_notifications(&self.app)?,
             Some("quit") => self.app.exit(0),
+            Some("settled") => crate::quit_settled(),
             Some("sign_in") => crate::sign_in::start(
                 value["provider"]
                     .as_str()
@@ -296,7 +314,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
             Some(action @ ("check_updates" | "download_update" | "restart_update")) => {
                 self.updates
                     .get()
-                    .context("Updates are unavailable. Reopen Leo and try again.")?
+                    .context("Updates are unavailable. Reopen leo and try again.")?
                     .change(action)?;
             }
             _ => anyhow::bail!("Choose an action in Settings."),
@@ -306,13 +324,11 @@ impl leo_web::app_settings::AppApi for AppSettings {
     fn event_starting(&self, event: leo_web::app_settings::EventStarting) {
         crate::notify::starting(&self.app, event);
     }
-    fn health(&self, notes: &Path) -> Result<Value> {
-        use leo_web::dictation::DictationApi;
-        let mut view = leo_host::health::scan(notes)?;
-        let permissions = self.permission_view();
+    fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value> {
+        let mut view = leo_host::health::scan(notes, facts, fresh)?;
+        let permissions = self.permission_view(true);
         let model = leo_services::speech::library::library()?.selected().is_ok();
-        let dictation = self.dictation.view()?;
-        let shortcut = dictation["shortcut"].clone();
+        let (shortcut, keys) = self.dictation.shortcut_health();
         let mut checks = vec![
             json!({"name":"Microphone permission","state":if permissions["microphone"]=="allowed" {"ready"} else {"missing"},"fix":"Allow Leo to use the microphone in your system privacy settings.","action":"microphone"}),
             json!({"name":"Accessibility permission","state":if permissions["accessibility"]==true {"ready"} else {"missing"},"fix":"Allow Leo in System Settings → Privacy & Security → Accessibility to paste into other apps.","action":"accessibility"}),
@@ -325,11 +341,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
         if let Some(problem) = self.preferences.problem() {
             checks.push(json!({"name":"App preferences","state":"missing","fix":problem,"section":"general"}));
         }
-        if crate::permissions::shortcut_clash(
-            dictation["settings"]["shortcut"]
-                .as_str()
-                .unwrap_or_default(),
-        ) {
+        if crate::permissions::shortcut_clash(&keys) {
             checks.push(json!({"name":"Shortcut clash","state":"warn","fix":if cfg!(target_os="macos") { "Alfred may also use Option+Space. Change its shortcut, or record another one in Dictation." } else { "Ctrl+Space may switch the current input method. Choose another shortcut in Dictation if it clashes." },"section":"dictation"}));
         }
         view["sections"]
@@ -391,6 +403,19 @@ mod tests {
         assert!(store.problem().unwrap().contains("login item blocked"));
         store.record(|| anyhow::bail!("tray blocked"));
         assert!(store.problem().unwrap().contains("login item blocked"));
+    }
+    #[test]
+    fn a_startup_problem_is_added_to_an_existing_one() {
+        assert_eq!(joined(None, "a".into()), "a");
+        assert_eq!(joined(Some("a".into()), "b".into()), "a b");
+        let dir = tempfile::tempdir().unwrap();
+        let store = PreferenceStore::new(
+            dir.path().join("app-settings.json"),
+            std::sync::Arc::new(|_, _| Ok(())),
+        );
+        store.note("first.".into());
+        store.note("second.".into());
+        assert_eq!(store.problem().unwrap(), "first. second.");
     }
     #[test]
     fn app_preferences_default_to_safe_updates_and_independent_onboarding_steps() {

@@ -1,5 +1,6 @@
 const S = window.leoSchedule;
 const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, peek: null, scrolled: '', suppressClick: false };
+const CAL_TRAY_ROWS = 50;
 const CAL_DONE_KEY = 'leo-calendar-hide-done';
 const CAL_VIEW_KEY = 'leo-calendar-view';
 const CAL_VIEWS = [['day', 'Day'], ['week', 'Week'], ['month', 'Month']];
@@ -11,6 +12,7 @@ try {
   cal.showDone = true;
 }
 const CAL_POLL_MS = 150000;
+const CAL_TASKS_GRACE_MS = 5000;
 const CAL_TILE_PX = 64;
 const CAL_MORE_PX = 30;
 const CAL_HOUR_PX = 48;
@@ -20,6 +22,9 @@ const CAL_HOLD_MS = 300;
 const CAL_MONTH_CHIPS = 3;
 const KIND_LABEL = { assignment: 'Assignment', exam: 'Exam', meeting: 'Meeting', 'follow-up': 'Follow-up', deadline: 'Deadline', other: 'Other' };
 const KIND_ORDER = ['assignment', 'exam', 'meeting', 'follow-up', 'deadline', 'other'];
+function kindChips(id, selected) {
+  return `<div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="${id}">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${selected === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${selected === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>`;
+}
 
 function calLocale() {
   return navigator.language || 'en-US';
@@ -51,7 +56,6 @@ async function showCalendar() {
   const mine = ++seq;
   state = { view: 'calendar', dir: '' };
   chrome();
-  $('#crumbs').innerHTML = '<span class="sep">/</span><button>Calendar</button>';
   document.title = 'Calendar · leo';
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   cal.peek = null;
@@ -72,7 +76,7 @@ async function loadSchedule(mine = seq) {
   const taskRevision = tasksWin.revision;
   let data;
   try {
-    data = await api(`/api/schedule?from=${enc(from)}&to=${enc(to)}&live=1`);
+    data = await api(`/api/schedule?from=${enc(from)}&to=${enc(to)}&live=1&limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`);
   } catch (e) {
     if (e instanceof Locked) throw e;
     if (mine === seq && state.view === 'calendar') {
@@ -101,6 +105,10 @@ async function loadSchedule(mine = seq) {
   cal.failed = false;
   cal.data = data;
   tasksWin.tasks = data.tasks || tasksWin.tasks;
+  tasksWin.window = data.window || [];
+  tasksWin.total = data.total ?? (tasksWin.tasks || []).length;
+  tasksWin.at = Date.now();
+  tasksWin.stale = false;
   cal.loadedAt = Date.now();
   drawCalendar();
   drawTasksWindow();
@@ -119,7 +127,12 @@ function calendarShown() {
     cal.loadedAt = Date.now();
     loadSchedule(seq);
   }
-  if (tasksWin.stale) loadTasksWindow().catch(() => {});
+  if (tasksWin.stale) {
+    if (state.view === 'calendar') {
+      tasksWin.stale = false;
+      tasksWin.timer = setTimeout(tasksTick, CAL_POLL_MS);
+    } else loadTasksWindow().catch(() => {});
+  }
 }
 document.addEventListener('visibilitychange', calendarShown);
 window.addEventListener('leo-visibility', calendarShown);
@@ -204,7 +217,14 @@ function calRange(start, end) {
 }
 
 function calFind(id) {
-  return ((cal.data && cal.data.tasks) || []).find((t) => t.id === id) || null;
+  return ((cal.data && cal.data.tasks) || []).find((t) => t.id === id) || (tasksWin.window || []).find((t) => t.id === id) || null;
+}
+
+function withWindow(page) {
+  const extra = tasksWin.window || [];
+  if (!extra.length) return page;
+  const held = new Set(page.map((t) => t.id));
+  return page.concat(extra.filter((t) => !held.has(t.id)));
 }
 
 function calMovable(task) {
@@ -217,7 +237,7 @@ function calShown(item) {
 
 function calPlan(days) {
   const today = S.dayKey(new Date());
-  return S.plan((cal.data && cal.data.tasks) || [], (cal.data && cal.data.events) || [], today, { from: days[0], to: days[days.length - 1] });
+  return S.plan(withWindow((cal.data && cal.data.tasks) || []), (cal.data && cal.data.events) || [], today, { from: days[0], to: days[days.length - 1] });
 }
 
 function calLabel(item) {
@@ -429,11 +449,20 @@ function calTrayRow(task) {
 function calTray(plan, today) {
   const d = cal.data;
   const connect = d && !d.connected ? '<p class="set-note cal-connect">Show your Google Calendar here · <a href="#/settings/calendar">Connect it in Settings</a></p>' : '';
-  const list = (title, tasks, late) => tasks.length ? `<section class="cal-tray-list"><h2${late ? ' class="late"' : ''}>${title} <span class="cal-count">${tasks.length}</span></h2>${tasks.slice(0, 50).map(calTrayRow).join('')}</section>` : '';
+  const list = (title, tasks, late) => tasks.length ? `<section class="cal-tray-list"><h2${late ? ' class="late"' : ''}>${title} <span class="cal-count">${tasks.length}</span></h2>${tasks.slice(0, cal.trayRows || CAL_TRAY_ROWS).map(calTrayRow).join('')}</section>` : '';
   const undated = list('No date', plan.undated, false);
   const tasks = (d && d.tasks) || [];
+  const rows = cal.trayRows || CAL_TRAY_ROWS;
+  const more = Math.max(plan.overdue.length, plan.undated.length) > rows || (tasksWin.tasks || []).length < tasksWin.total ? '<button type="button" class="btn plain cal-tray-more" data-action="cal-tray-more">Show more</button>' : '';
   const toggle = tasks.some((t) => t.done || (t.done_on || []).length) ? `<button type="button" class="link-btn cal-done-toggle" data-action="cal-done">${cal.showDone ? 'Hide completed' : 'Show completed'}</button>` : '';
-  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${toggle}${connect}`;
+  return `${calMini(today)}<div class="cal-tasks-head"><h2>Tasks</h2><button type="button" class="icon-btn" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button></div>${list('Earlier', plan.overdue, true)}${undated}${!plan.overdue.length && !plan.undated.length ? `${DRAWN.tasks}<p class="hint cal-empty">Nothing from earlier. Tasks without a date land here, ready to drag onto the calendar.</p>` : ''}${plan.undated.length ? '<p class="hint cal-hint">Drag a task onto the calendar to give it a time</p>' : ''}${more}${toggle}${connect}`;
+}
+
+async function calTrayMore() {
+  cal.trayRows = (cal.trayRows || CAL_TRAY_ROWS) + CAL_TRAY_ROWS;
+  const plan = calPlan(calDays());
+  if (Math.max(plan.overdue.length, plan.undated.length) < cal.trayRows && (tasksWin.tasks || []).length < tasksWin.total) await tasksMore();
+  drawCalendar();
 }
 
 function drawCalendar() {
@@ -726,7 +755,7 @@ async function calMove(task, next, scope = null) {
 
 function calAskScope(task, next) {
   const box = sheet(`<h3>Move “${esc(task.title)}”</h3><p class="hint">It repeats ${esc(S.repeatLabel(task.repeat, calLocale()).toLowerCase())}.</p>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn" id="cal-move-all">Every time</button><button type="button" class="btn primary" id="cal-move-one">Only this one</button></div>`);
+    ${sheetButtons(['Only this one', 'id="cal-move-one"'], { middle: '<button type="button" class="btn" id="cal-move-all">Every time</button>' })}`);
   $('#cal-move-one', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'one').catch(fail); });
   $('#cal-move-all', box).addEventListener('click', () => { closeSheet(); calMove(task, next, 'all').catch(fail); });
   $('#cal-move-one', box).focus();
@@ -804,7 +833,7 @@ function calCompose(day, start, end) {
     box.style.top = `${(start / 60) * CAL_HOUR_PX}px`;
     box.style.height = `${Math.max(34, ((end - start) / 60) * CAL_HOUR_PX - 2)}px`;
   }
-  box.innerHTML = `<input class="cal-compose-input" maxlength="300" placeholder="New task" aria-label="New task${timed ? `, ${esc(calRange(start, end))}` : ''}" autocomplete="off">${timed ? `<span class="cal-sub">${esc(calRange(start, end))}</span>` : ''}`;
+  box.innerHTML = `<input class="cal-compose-input" placeholder="New task" aria-label="New task${timed ? `, ${esc(calRange(start, end))}` : ''}" autocomplete="off">${timed ? `<span class="cal-sub">${esc(calRange(start, end))}</span>` : ''}`;
   host.appendChild(box);
   const input = box.querySelector('input');
   cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false };
@@ -1012,7 +1041,7 @@ function calPeekTask(side, id, on) {
   const scope = (cal.peek && cal.peek.scope) || 'one';
   side.style.setProperty('--tone', `var(${toneOfTask(task)})`);
   side.innerHTML = `${calPeekBar(task.note ? task.note.title || 'Untitled' : 'Task')}
-    <textarea class="kanban-sheet-title cal-peek-title" id="cal-peek-title" rows="1" maxlength="300" aria-label="Title"${leo ? '' : ' readonly'}>${esc(task.title)}</textarea>
+    <textarea class="kanban-sheet-title cal-peek-title" id="cal-peek-title" rows="1" aria-label="Title"${leo ? '' : ' readonly'}>${esc(task.title)}</textarea>
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
     <label class="set-row cal-peek-done"><span class="set-label">${day ? `Done on ${esc(dayName)}` : 'Done'}</span><input type="checkbox" class="cal-check" data-action="task-done" data-id="${esc(task.id)}"${day ? ` data-on="${esc(day)}"` : ''}${doneNow ? ' checked' : ''}></label>
     ${repeating ? `<div class="set-row"><span class="set-label">Change</span>${segmented({ label: 'Which days change', action: 'cal-scope', key: 'cal-scope', current: scope, choices: [['one', 'This one'], ['all', 'Every time']] })}</div>` : ''}
@@ -1022,8 +1051,8 @@ function calPeekTask(side, id, on) {
       ${leo ? `<span class="hint">to</span><input class="set-input" type="time" id="cal-peek-end" aria-label="Ends" value="${esc(calHM(slot.end) || '')}"${slot.time ? '' : ' disabled'}>` : ''}
     </span></div>
     ${leo ? `<div class="set-row column task-repeat" id="cal-peek-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
-    <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="cal-peek-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
-    <textarea class="cal-peek-about" id="cal-peek-about" rows="4" maxlength="4000" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
+    ${kindChips('cal-peek-kinds', task.kind)}
+    <textarea class="cal-peek-about" id="cal-peek-about" rows="4" placeholder="Add a description…" aria-label="Description">${esc(task.description || '')}</textarea>
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value" id="cal-peek-google">${esc(calPeekGoogle(task))}</span></div>
     ${repeating && Object.keys(task.moved || {}).length ? '<p class="hint">Google gets the weekly days; days you moved here stay in leo and the .ics file.</p>' : ''}
@@ -1150,7 +1179,9 @@ function tickWrite(id, on) {
 }
 
 async function setTaskDone(id, done, on = null) {
-  if (done) tickedAt.set(tickKey(id, on), performance.now());
+  const nowAt = performance.now();
+  for (const [key, at] of tickedAt) if (nowAt - at >= TICK_MS) tickedAt.delete(key);
+  if (done) tickedAt.set(tickKey(id, on), nowAt);
   const before = calFind(id);
   const was = before && (on ? before.done_on : before.done);
   markTaskDone(id, done, on);
@@ -1226,7 +1257,7 @@ function dateSheet(id) {
   const task = calFind(id);
   if (!task) return;
   const box = sheet(`<h3>${task.date ? 'Change the date' : 'Set a date'}</h3><p class="hint">${esc(task.title)}</p><div class="picker-box" id="pick-box"></div>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="pick-save">Save</button></div>`);
+    ${sheetButtons(['Save', 'id="pick-save"'])}`);
   const pick = pickerBody($('#pick-box', box), task, { meeting: task.kind === 'meeting' });
   $('#pick-save', box).addEventListener('click', () => saveDate(task, pick, false));
 }
@@ -1243,7 +1274,7 @@ async function saveDate(task, pick, confirm) {
       if (preview) {
         const box = sheet(`<h3>Check the change</h3><p>leo could not find the old date in this task, so it adds the new one after it.</p>
           <div class="sched-preview"><span class="set-label">Before</span><p>${esc(preview.before)}</p><span class="set-label">After</span><p>${esc(preview.after)}</p></div>
-          <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="pick-confirm">Change it</button></div>`);
+          ${sheetButtons(['Change it', 'id="pick-confirm"'])}`);
         $('#pick-confirm', box).addEventListener('click', () => saveDate(task, pick, true));
         return;
       }
@@ -1266,14 +1297,14 @@ function newTaskSheet(day = null) {
   const box = sheet(`<h3>New task</h3>
     <div class="task-new">
       <div class="task-left">
-        <input class="set-input task-title" id="task-title" maxlength="300" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
-        <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" maxlength="4000" placeholder="Add a description…"></textarea></label>
-        <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${k === 'other' ? ' on' : ''}" data-kind="${k}" aria-pressed="${k === 'other'}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
+        <input class="set-input task-title" id="task-title" placeholder="What needs doing?" autocomplete="off" aria-label="Title">
+        <label class="set-row column task-about"><span class="set-label">Description <span class="hint">optional</span></span><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…"></textarea></label>
+        ${kindChips('task-kinds', 'other')}
         <div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles([])}<span class="hint repeat-hint">${esc(repeatHint([]))}</span></div>
       </div>
       <div class="picker-box" id="pick-box"></div>
     </div>
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Cancel</button><button type="button" class="btn primary" id="task-add">Add task</button></div>`);
+    ${sheetButtons(['Add task', 'id="task-add"'])}`);
   let kind = 'other';
   let repeat = [];
   const pick = pickerBody($('#pick-box', box), { date: day }, { meeting: false });
@@ -1389,10 +1420,10 @@ function taskSheet(id, on = null) {
   const moved = onGoogle && task.date && !onGoogle.all_day && S.dayKey(new Date(onGoogle.start)) !== task.date && task.time;
   const box = sheet(`<h3 class="task-sheet-title">${esc(task.title)}</h3>
     ${task.found === false ? '<p class="set-note warn">leo could not find this checkbox in the note any more. Open the note to check it.</p>' : ''}
-    <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" maxlength="4000" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
+    <div class="set-row column"><label class="set-label" for="task-description">Description <span class="hint">optional</span><span class="hint task-saved" id="task-description-state" role="status"></span></label><textarea class="set-input" id="task-description" rows="3" placeholder="Add a description…">${esc(task.description || '')}</textarea></div>
     <div class="set-row"><span class="set-label">${repeating ? 'Starts' : 'Date'}</span><span class="set-value">${esc(when)}<button type="button" class="btn plain sm" data-action="task-date" data-id="${esc(task.id)}">${task.date ? 'Change' : 'Set date'}</button></span></div>
     ${task.source === 'leo' ? `<div class="set-row column task-repeat" id="task-repeat"><span class="set-label">Repeat</span>${repeatBubbles(task.repeat || [])}<span class="hint repeat-hint">${esc(repeatHint(task.repeat || []))}</span></div>` : ''}
-    <div class="set-row column"><span class="set-label">Type</span><div class="chips task-kinds" id="task-kinds">${KIND_ORDER.map((k) => `<button type="button" class="chip pick-chip${task.kind === k ? ' on' : ''}" data-kind="${k}" aria-pressed="${task.kind === k}">${esc(KIND_LABEL[k])}</button>`).join('')}</div></div>
+    ${kindChips('task-kinds', task.kind)}
     <div class="set-row"><span class="set-label">Note</span><span class="set-value">${task.note ? `<a href="${noteHash(task.note.id)}">${esc(task.note.title || 'Untitled')}</a>` : 'Added in leo'}</span></div>
     <div class="set-row"><span class="set-label">Google</span><span class="set-value">${esc(google)}</span></div>
     ${moved ? `<p class="set-note">The Google event is on another day. <a href="${esc(S.googleDay(S.dayKey(new Date(onGoogle.start))))}" target="_blank" rel="noopener">Open that day in Google Calendar</a></p>` : ''}
@@ -1525,14 +1556,24 @@ async function deleteTask(id) {
   }
 }
 
-async function noteTasksSheet() {
+const NOTE_TASKS_PAGE = 100;
+var noteTasks = null;
+
+async function noteTasksSheet(keep = false) {
   const s = state.view === 'note' ? state.session : null;
   if (!s || !s.note.id) return;
   const ready = await ready_();
   if (!ready) return;
-  let listed = [];
+  const tracked = new Map();
   try {
-    listed = (await api('/api/tasks')).tasks.filter((t) => t.note && t.note.id === s.note.id);
+    let offset = 0;
+    for (;;) {
+      const answer = await api(`/api/tasks?note=${enc(s.note.id)}&offset=${offset}&limit=500`);
+      const tasks = answer.tasks || [];
+      for (const t of tasks) if (t.note && t.note.id === s.note.id && !tracked.has(t.line)) tracked.set(t.line, t);
+      offset += tasks.length;
+      if (!tasks.length || offset >= (answer.total ?? 0)) break;
+    }
   } catch (e) {
     if (e instanceof Locked) throw e;
   }
@@ -1542,14 +1583,35 @@ async function noteTasksSheet() {
   const boxes = lines
     .map((line, n) => ({ n, m: line.match(task)?.groups }))
     .filter((b) => b.m && b.m.text.trim());
-  const rows = boxes.slice(0, 200).map((b) => {
-    const tracked = listed.find((t) => t.line === b.n);
-    return `<div class="set-row"><span class="grow">${b.m.mark !== ' ' ? '<s>' : ''}${esc(b.m.text.trim())}${b.m.mark !== ' ' ? '</s>' : ''}</span>${tracked ? `<button type="button" class="btn plain sm" data-action="task-open-here" data-id="${esc(tracked.id)}">In your tasks</button>` : `<button type="button" class="btn sm" data-action="task-promote" data-line="${b.n}">Add to tasks</button>`}</div>`;
-  }).join('');
+  const held = keep && noteTasks && noteTasks.note === s.note.id ? noteTasks.shown : 0;
+  noteTasks = { note: s.note.id, boxes, tracked, shown: Math.min(boxes.length, Math.max(NOTE_TASKS_PAGE, held)) };
   sheet(`<h3>Tasks in this note</h3>
     <p class="hint">Checkboxes under an Action items heading are tasks already. Add any other checkbox to show it on the Calendar.</p>
-    ${rows || '<p class="hint">This note has no checkboxes yet.</p>'}
-    <div class="buttons"><button type="button" class="btn plain" data-action="close">Close</button><button type="button" class="btn primary" data-action="calendar">Open the Calendar</button></div>`);
+    ${boxes.length ? `<div id="note-task-rows">${noteTaskRows(0, noteTasks.shown)}</div>${noteTaskFoot()}` : '<p class="hint">This note has no checkboxes yet.</p>'}
+    ${sheetButtons(['Open the Calendar', 'data-action="calendar"'], { cancel: 'Close' })}`);
+}
+
+function noteTaskRows(from, to) {
+  return noteTasks.boxes.slice(from, to).map((b) => {
+    const tracked = noteTasks.tracked.get(b.n);
+    return `<div class="set-row"><span class="grow">${b.m.mark !== ' ' ? '<s>' : ''}${esc(b.m.text.trim())}${b.m.mark !== ' ' ? '</s>' : ''}</span>${tracked ? `<button type="button" class="btn plain sm" data-action="task-open-here" data-id="${esc(tracked.id)}">In your tasks</button>` : `<button type="button" class="btn sm" data-action="task-promote" data-line="${b.n}">Add to tasks</button>`}</div>`;
+  }).join('');
+}
+
+function noteTaskFoot() {
+  const left = noteTasks.boxes.length - noteTasks.shown;
+  return left > 0 ? `<div id="note-task-foot"><button type="button" class="btn plain" id="note-task-more" data-action="note-tasks-more">Show more</button> <span class="hint">${left} more</span></div>` : '';
+}
+
+function noteTasksMore() {
+  const rows = $('#note-task-rows');
+  const foot = $('#note-task-foot');
+  if (!noteTasks || !rows || !foot) return;
+  const from = noteTasks.shown;
+  noteTasks.shown = Math.min(noteTasks.boxes.length, from + NOTE_TASKS_PAGE);
+  rows.insertAdjacentHTML('beforeend', noteTaskRows(from, noteTasks.shown));
+  if (noteTasks.shown >= noteTasks.boxes.length) foot.remove();
+  else foot.innerHTML = noteTaskFoot().replace(/^<div[^>]*>|<\/div>$/g, '');
 }
 
 async function ready_() {
@@ -1568,7 +1630,7 @@ async function promoteTask(line) {
   try {
     const task = await api('/api/tasks/promote', { method: 'POST', body: { note: s.note.id, line: Number(line) } });
     toast(`Added “${task?.title || 'Untitled'}” to your tasks`, { action: 'Calendar', run: () => go('#/calendar') });
-    await noteTasksSheet();
+    await noteTasksSheet(true);
   } catch (e) {
     if (e instanceof Locked) throw e;
     toast(e.status === 400 ? 'That line is not a checkbox any more.' : e.message, { bad: true });
@@ -1578,7 +1640,9 @@ async function promoteTask(line) {
 async function openTaskAnywhere(id, on = null) {
   if (!cal.data || !calFind(id)) {
     try {
-      cal.data = { ...(cal.data || {}), tasks: (await api('/api/tasks')).tasks, events: (cal.data && cal.data.events) || [] };
+      const listed = (await api('/api/tasks')).tasks;
+      const own = noteTasks && [...noteTasks.tracked.values()].find((t) => t.id === id);
+      cal.data = { ...(cal.data || {}), tasks: own && !listed.some((t) => t.id === id) ? [...listed, own] : listed, events: (cal.data && cal.data.events) || [] };
     } catch (e) {
       if (e instanceof Locked) throw e;
       return;
@@ -1587,7 +1651,8 @@ async function openTaskAnywhere(id, on = null) {
   taskSheet(id, on);
 }
 
-var tasksWin = { timer: 0, tasks: null, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
+var tasksWin = { timer: 0, at: 0, tasks: null, total: 0, events: null, eventsAt: 0, finished: new Map(), revision: 0, load: 0 };
+const TASKS_PAGE = 500;
 const TASKS_AHEAD_DAYS = 7;
 const TASK_GROUP_NAMES = { Overdue: 'Earlier' };
 const TASK_DONE_MS = 1200;
@@ -1676,7 +1741,7 @@ function finishTaskInWindow(id, done, on) {
 }
 
 function tasksDue() {
-  const tasks = tasksWin.tasks || (cal.data && cal.data.tasks) || [];
+  const tasks = withWindow(tasksWin.tasks || (cal.data && cal.data.tasks) || []);
   const groups = new Map(tasksGroups(tasks));
   const late = (groups.get('Overdue') || []).length;
   return { late, due: late + (groups.get('Today') || []).length };
@@ -1725,7 +1790,7 @@ function drawHomeToday() {
   if (!box) return;
   const now = new Date();
   const known = tasksWin.tasks || (cal.data && cal.data.tasks);
-  const tasks = known || [];
+  const tasks = known ? withWindow(known) : [];
   const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
   const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
   const day = today.slice(0, HOME_ROWS - early.length);
@@ -1785,7 +1850,7 @@ function drawHomeWeek() {
   const today = S.dayKey(new Date());
   const days = S.daysOf('week', today, S.weekStart(calLocale()));
   if (homeWeek.from && homeWeek.from !== days[0]) loadHomeWeek();
-  const plan = S.plan(tasksWin.tasks || (cal.data && cal.data.tasks) || [], homeWeek.events || [], today, { from: days[0], to: days[6] });
+  const plan = S.plan(withWindow(tasksWin.tasks || (cal.data && cal.data.tasks) || []), homeWeek.events || [], today, { from: days[0], to: days[6] });
   const focus = tasksFocus(box);
   const held = focus && days.includes(focus.id) ? focus.id : today;
   const html = days.map((key) => {
@@ -1869,7 +1934,7 @@ function drawTasksWindow() {
       <button type="button" class="icon-btn tasks-new" data-action="task-new" aria-label="New task" title="New task">${ICON.plus}</button>
     </div>
     <div class="tasks-body">${tasksRows(groups)}</div>
-    <div class="tasks-foot"><button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
+    <div class="tasks-foot">${tasks.length < tasksWin.total ? '<button type="button" class="btn plain" data-action="tasks-more">Show more</button> ' : ''}<button type="button" class="link-btn" data-action="calendar">Open calendar</button></div>`;
   inkSettle(tasksInked);
   refocusTasks(tasksBox, focus);
   fitTasksWindow();
@@ -1910,29 +1975,57 @@ async function loadTasksWindow() {
     const home = tasksAtHome();
     const now = new Date();
     const data = home
-      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
-      : await api('/api/tasks');
+      ? await api(`/api/schedule?from=${enc(S.fromKey(S.dayKey(now)).toISOString())}&to=${enc(S.addDays(now, 8).toISOString())}&limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`).catch((e) => { if (e instanceof Locked) throw e; return api('/api/tasks'); })
+      : await api(`/api/tasks?limit=${Math.max(TASKS_PAGE, (tasksWin.tasks || []).length)}`);
     const tasks = data.tasks;
     if (mine !== tasksWin.load) return;
     if (data.events) {
       if (home && ((tasksWin.events && JSON.stringify(data.events) !== JSON.stringify(tasksWin.events)) || Date.now() - homeWeek.at > HOME_WEEK_FRESH)) loadHomeWeek();
       tasksWin.events = data.events;
       tasksWin.eventsAt = Date.now();
+      tasksWin.window = data.window || [];
     }
     if (revision === tasksWin.revision) {
       tasksWin.tasks = tasks;
+      tasksWin.total = data.total ?? tasks.length;
       if (cal.data) cal.data = { ...cal.data, tasks };
       else cal.data = { events: [], tasks };
+      tasksWin.at = Date.now();
     }
   } catch (e) {
     if (e instanceof Locked) return;
   }
   if (mine !== tasksWin.load) return;
   drawTasksWindow();
-  tasksWin.timer = setTimeout(() => {
-    if (appVisible()) loadTasksWindow().catch(() => {});
-    else tasksWin.stale = true;
-  }, CAL_POLL_MS);
+  tasksWin.timer = setTimeout(tasksTick, CAL_POLL_MS);
+}
+
+async function tasksMore() {
+  const held = tasksWin.tasks || [];
+  const revision = tasksWin.revision;
+  try {
+    const data = await api(`/api/tasks?offset=${held.length}`);
+    if (revision !== tasksWin.revision || tasksWin.tasks !== held) return;
+    tasksWin.tasks = held.concat(data.tasks || []);
+    tasksWin.total = data.total ?? tasksWin.tasks.length;
+    if (cal.data) cal.data = { ...cal.data, tasks: tasksWin.tasks };
+    drawTasksWindow();
+  } catch (e) {
+    if (!(e instanceof Locked)) fail(e);
+  }
+}
+
+function tasksTick() {
+  if (!appVisible()) {
+    tasksWin.stale = true;
+    return;
+  }
+  const left = CAL_POLL_MS + CAL_TASKS_GRACE_MS - (Date.now() - tasksWin.at);
+  if (state.view === 'calendar' && left > 0) {
+    tasksWin.timer = setTimeout(tasksTick, left);
+    return;
+  }
+  loadTasksWindow().catch(() => {});
 }
 
 setTimeout(() => loadTasksWindow().catch(() => {}), 0);
@@ -1941,9 +2034,8 @@ const homeShown = () => { if (tasksAtHome()) drawTasksWindow(); };
 window.addEventListener('focus', homeShown);
 window.addEventListener('leo-visibility', homeShown);
 
-const source = { note: null, name: null, seq: 0, returnTo: null, stopResize: null };
+const source = { note: null, name: null, seq: 0, returnTo: null };
 const SOURCE_MIN = 260;
-const SOURCE_STEP = 32;
 const SOURCE_KEY = 'leo-source-width';
 
 const sourcePane = document.createElement('aside');
@@ -1953,15 +2045,8 @@ sourcePane.hidden = true;
 sourcePane.setAttribute('aria-label', 'Original file');
 document.body.appendChild(sourcePane);
 
-function sourceWidth() {
-  let kept = 0;
-  try {
-    kept = Number(localStorage.getItem(SOURCE_KEY)) || 0;
-  } catch (e) {
-    kept = 0;
-  }
-  return Number.isFinite(kept) && kept >= SOURCE_MIN && kept <= 4000
-    ? kept : Math.round(Math.min(640, Math.max(420, window.innerWidth * 0.38)));
+function sourceDefault() {
+  return Math.round(Math.min(640, Math.max(420, window.innerWidth * 0.38)));
 }
 
 function sourceFits() {
@@ -1974,28 +2059,27 @@ function sourceLimit() {
   return Math.max(SOURCE_MIN, Math.floor((window.innerWidth - side - chat) * 0.52));
 }
 
-function sourceSizeLabel() {
-  const grip = sourcePane.querySelector('.source-grip');
-  if (!grip || !sourceFits()) return;
-  grip.setAttribute('aria-valuemin', String(SOURCE_MIN));
-  grip.setAttribute('aria-valuemax', String(sourceLimit()));
-  grip.setAttribute('aria-valuenow', String(Math.round(sourcePane.getBoundingClientRect().width)));
-}
-
-function setSourceWidth(width) {
-  const bounded = Math.round(Math.min(sourceLimit(), Math.max(SOURCE_MIN, width)));
-  document.body.style.setProperty('--source-w', `${bounded}px`);
-  try {
-    localStorage.setItem(SOURCE_KEY, String(bounded));
-  } catch (e) {}
-  sourceSizeLabel();
-}
+const sourceGrip = document.createElement('div');
+sourceGrip.className = 'source-grip';
+sourceGrip.tabIndex = 0;
+sourceGrip.setAttribute('role', 'separator');
+sourceGrip.setAttribute('aria-orientation', 'vertical');
+sourceGrip.setAttribute('aria-label', 'Drag to resize the original');
+const sourceResize = window.leoPaneResize.create({
+  handle: sourceGrip,
+  key: SOURCE_KEY,
+  docked: 'right',
+  measure: () => sourcePane.getBoundingClientRect().width,
+  limits: () => [SOURCE_MIN, sourceLimit()],
+  apply: (width) => document.body.style.setProperty('--source-w', `${width ?? sourceDefault()}px`),
+  enabled: () => sourceFits() && !sourcePane.hidden,
+});
 
 function closeSource(control = null) {
   if (!source.note) return;
   if (control) control.focus({ preventScroll: true });
   const restore = sourcePane.contains(document.activeElement) ? source.returnTo : null;
-  source.stopResize?.();
+  sourceResize.stop();
   source.seq++;
   source.note = null;
   source.name = null;
@@ -2013,7 +2097,6 @@ async function openSource(id, name, page = null) {
   if (!source.note) source.returnTo = document.activeElement;
   source.note = id;
   source.name = name;
-  document.body.style.setProperty('--source-w', `${sourceWidth()}px`);
   document.body.classList.add('with-source');
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
   let files = [];
@@ -2032,50 +2115,12 @@ async function openSource(id, name, page = null) {
       ? `<div class="source-scroll"><img class="source-img" src="${url}?view=1" alt="${esc(name)}"></div>`
       : '<div class="source-scroll prose source-text">Loading…</div>';
   sourcePane.hidden = false;
-  sourcePane.innerHTML = `<div class="source-grip" role="separator" aria-orientation="vertical" aria-label="Drag to resize the original" tabindex="0"></div>
-    <header class="source-head">${picker}<span class="source-tools"><a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a><button type="button" class="icon-btn" data-action="source-close" aria-label="Close the original">${ICON.close}</button></span></header>
+  sourcePane.innerHTML = `<header class="source-head">${picker}<span class="source-tools"><a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a><button type="button" class="icon-btn" data-action="source-close" aria-label="Close the original">${ICON.close}</button></span></header>
     <div class="source-body">${body}</div>`;
-  sourceSizeLabel();
+  sourcePane.prepend(sourceGrip);
+  sourceResize.fit();
   if (kind === 'text') {
     await fillTextFile(sourcePane.querySelector('.source-text'), url, name);
   }
 }
 
-sourcePane.addEventListener('keydown', (e) => {
-  if (!e.target.matches('.source-grip') || !sourceFits()) return;
-  const width = sourcePane.getBoundingClientRect().width;
-  const next = { ArrowLeft: width + SOURCE_STEP, ArrowRight: width - SOURCE_STEP, Home: SOURCE_MIN, End: sourceLimit() }[e.key];
-  if (next === undefined) return;
-  e.preventDefault();
-  setSourceWidth(next);
-});
-
-sourcePane.addEventListener('pointerdown', (e) => {
-  const grip = e.target.closest('.source-grip');
-  if (!grip || e.button !== 0 || !sourceFits()) return;
-  e.preventDefault();
-  source.stopResize?.();
-  const startX = e.clientX;
-  const start = sourcePane.getBoundingClientRect().width;
-  document.body.classList.add('source-resizing');
-  const move = (ev) => {
-    if (!sourceFits() || !(ev.buttons & 1)) return up();
-    setSourceWidth(start + startX - ev.clientX);
-  };
-  const up = () => {
-    document.body.classList.remove('source-resizing');
-    window.removeEventListener('pointermove', move);
-    window.removeEventListener('pointerup', up);
-    window.removeEventListener('pointercancel', up);
-    window.removeEventListener('blur', up);
-    source.stopResize = null;
-  };
-  source.stopResize = up;
-  window.addEventListener('pointermove', move);
-  window.addEventListener('pointerup', up);
-  window.addEventListener('pointercancel', up);
-  window.addEventListener('blur', up);
-});
-
-const sourceSizer = new ResizeObserver(sourceSizeLabel);
-sourceSizer.observe(sourcePane);

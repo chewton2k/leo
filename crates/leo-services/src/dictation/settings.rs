@@ -1,5 +1,6 @@
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
+use std::io::{ErrorKind, Read};
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +27,7 @@ pub enum Writing {
     Quick,
     Selected,
 }
+const SETTINGS_BYTES: usize = 64 * 1024 * 1024;
 const RETIRED: &[&str] = &["closed_microphone", "trailing_space", "enter"];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -60,6 +62,26 @@ impl Default for Settings {
         }
     }
 }
+fn read_settings(path: &Path) -> Result<Option<Vec<u8>>> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(err) => return Err(err.into()),
+    };
+    let message = "Dictation settings could not be opened. Restore dictation.json from a backup.";
+    ensure!(
+        meta.is_file() && meta.len() <= SETTINGS_BYTES as u64,
+        message
+    );
+    let file = leo_core::paths::open_regular(path).context(message)?;
+    let mut bytes = Vec::new();
+    file.take(SETTINGS_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .context(message)?;
+    ensure!(bytes.len() <= SETTINGS_BYTES, message);
+    Ok(Some(bytes))
+}
+
 impl Settings {
     pub fn recover(path: &Path) -> (Self, Option<String>) {
         match Self::load(path) { Ok(settings)=>(settings,None), Err(_)=>(Self::default(),Some("Dictation settings could not be read. Review and save the defaults here to repair them.".into())) }
@@ -70,12 +92,8 @@ impl Settings {
             "Record a shortcut in Dictation settings."
         );
         ensure!(
-            self.custom_words.len() <= 200
-                && self
-                    .custom_words
-                    .iter()
-                    .all(|w| !w.trim().is_empty() && w.chars().count() <= 200),
-            "Use at most 200 custom words, each up to 200 characters."
+            self.custom_words.iter().all(|w| !w.trim().is_empty()),
+            "Enter one nonempty name or term per line in Custom words."
         );
         ensure!(
             self.microphone.as_ref().is_none_or(|n| n.len() <= 1024),
@@ -84,14 +102,10 @@ impl Settings {
         Ok(())
     }
     pub fn load(path: &Path) -> Result<Self> {
-        if !path.exists() {
+        let Some(bytes) = read_settings(path)? else {
             return Ok(Self::default());
-        }
-        ensure!(
-            std::fs::symlink_metadata(path)?.is_file() && std::fs::metadata(path)?.len() <= 200_000,
-            "Dictation settings could not be opened. Restore dictation.json from a backup."
-        );
-        let mut value: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?).context(
+        };
+        let mut value: serde_json::Value = serde_json::from_slice(&bytes).context(
             "Dictation settings could not be read. Restore dictation.json from a backup.",
         )?;
         if let Some(fields) = value.as_object_mut() {
@@ -109,17 +123,10 @@ impl Settings {
         let folder = path.parent().context("Dictation settings need a folder.")?;
         let _lock = crate::private_file::lock(
             folder,
-            ".dictation.lock",
+            leo_core::paths::own::DICTATION_LOCK,
             std::time::Duration::from_secs(5),
         )?;
-        if let Ok(meta) = std::fs::symlink_metadata(path) {
-            ensure!(meta.is_file() && meta.len()<=200_000,"Dictation settings cannot be saved over this file. Restore dictation.json from a backup.");
-        }
-        let original = match std::fs::read(path) {
-            Ok(bytes) => Some(bytes),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e.into()),
-        };
+        let original = read_settings(path)?;
         self.save(path)?;
         if let Err(error) = apply() {
             if let Some(bytes) = original {
@@ -135,7 +142,12 @@ impl Settings {
         self.validate()?;
         let folder = path.parent().context("Dictation settings need a folder.")?;
         std::fs::create_dir_all(folder)?;
-        leo_core::paths::write_atomic(path, serde_json::to_vec_pretty(self)?)
+        let bytes = serde_json::to_vec_pretty(self)?;
+        ensure!(
+            bytes.len() <= SETTINGS_BYTES,
+            "Dictation settings are too large to save. Shorten the custom words list."
+        );
+        leo_core::paths::write_atomic(path, bytes)
     }
 }
 

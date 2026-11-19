@@ -76,6 +76,7 @@ order. `recover_parts` seals a crash's `.part.wav` and clears `.err` for retry.
 `ai::long::structure_recording` groups parts by a `words_per_group` limit (`long::groups`), one
 request per group plus a title/summary request; every failure falls back to
 the raw transcript, so it cannot fail.
+Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
 Drafting while recording (2026-11-11, for every writing provider; off when the recording
 labels speakers, since the labelled transcript only exists after Finish): the time after Stop was
@@ -109,8 +110,8 @@ sessions are resumed by the app (`recorder::resume`).
 `session/stress.rs` simulates 3 h and (ignored) 24 h with a flaky provider and
 a crash copy.
 
-The live transcript, for catalog models marked fast enough, shows finished segment texts plus a live tail: every `ROLL_INTERVAL` (3 s local, `CLOUD_ROLL_INTERVAL`
-8 s cloud) it re-transcribes from `settled_at`, at most `LIVE_MOST_SECS` (20 s),
+The live transcript, for catalog models marked fast enough, shows finished segment texts plus a live tail: every `ROLL_INTERVAL` (3 s)
+it re-transcribes from `settled_at`, at most `LIVE_MOST_SECS` (20 s),
 and once that is `SETTLE_AFTER_SECS` (12) long it settles at `live::quietest`
 between 6 s and end − 2 s, so the unsettled end is rewritten rather than glued.
 Only while no segment is waiting for transcription. Typed points go to
@@ -428,11 +429,11 @@ candle (`candle-transformers` BERT, `tokenizers` without onig): CLS pooling,
 unit length, queries prefixed with `QUERY`. Files pinned to a Hugging Face
 commit with SHA-256s (`MODEL_MANIFEST`), kept in
 `models_dir()/bge-small-en-v1.5`, loaded on demand (`model()`) and unloaded
-after 60 seconds idle once callers release their model handles. `leo update`
-fetches it (`ensure_meaning_model`), and the app fetches it quietly in
-the background when missing (`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL`
-or `LEO_NO_MEANING_MODEL` turns that off (e2e and Playwright set them);
-`LEO_MEANING_URL` / `LEO_MEANING_MANIFEST` point tests at file:// stand-ins.
+after 60 seconds idle once callers release their model handles. The app
+fetches it in the background at launch when it is missing or damaged
+(`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL` or `LEO_NO_MEANING_MODEL`
+turns that off (e2e and Playwright set them); tests call `fetch_from` with a
+file:// source.
 Doctor's notes section says whether it is ready. The real-model test is
 `#[ignore]`d.
 
@@ -598,10 +599,8 @@ resume transcription. Native recording holds a core activity lease until finishe
 The model library lists damaged catalog files and uncatalogued regular GGUF files
 with disk totals; deletion stays contained and never follows links.
 
-The terminal update command fetches the published release installer with HTTPS,
-time/size limits and explicit failure handling before executing it. It never
-pipes a failed curl into an empty successful shell. Model checking still goes
-through the shared catalog library; legacy ONNX installer fixtures are retired.
+Model checks go through the shared catalog library; legacy ONNX installer
+fixtures are retired.
 
 ### Recording energy
 

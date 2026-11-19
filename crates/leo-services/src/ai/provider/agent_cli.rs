@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use super::process::{self, Process, Watchdog, MOST_OUTPUT, QUEUED_MESSAGES};
 use crate::ai::error::{ProviderError, ProviderResult};
-use crate::ai::provider::{ChatProvider, ChatRequest, Image, Sink, Spent};
+use crate::ai::provider::{tokens_of, ChatProvider, ChatRequest, Image, Sink, Spent};
 use crate::config::provider::{ProviderConfig, ProviderKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,6 +51,10 @@ impl Agent {
             Agent::ClaudeCode => "install Claude Code: https://claude.com/claude-code",
             Agent::Codex => "install Codex: npm install -g @openai/codex",
         }
+    }
+
+    pub fn missing(self, provider: &str, bin: &str) -> String {
+        format!("{provider}: `{bin}` is not installed; {}", self.install())
     }
 
     pub fn sign_in(self) -> &'static str {
@@ -493,7 +497,7 @@ impl AgentCli {
 
     pub(crate) fn room(&self) -> ProviderResult<tempfile::TempDir> {
         let mut builder = tempfile::Builder::new();
-        builder.prefix("leo-writing-");
+        builder.prefix(crate::ai::WRITING_ROOM);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -688,6 +692,7 @@ impl ClaudeSession {
         self.native
     }
 
+    #[cfg(test)]
     pub fn say(&mut self, text: &str, sink: Sink<'_>) -> ProviderResult<(String, Spent)> {
         self.say_with(
             text,
@@ -697,6 +702,7 @@ impl ClaudeSession {
         )
     }
 
+    #[cfg(test)]
     pub fn say_with(
         &mut self,
         text: &str,
@@ -704,13 +710,14 @@ impl ClaudeSession {
         call: &mut dyn FnMut(&str, &serde_json::Value) -> String,
         gap: &mut dyn FnMut(),
     ) -> ProviderResult<(String, Spent)> {
+        let stop = leo_core::children::current_stop();
         self.say_controlled(
             text,
             sink,
             call,
             gap,
             Control {
-                stopped: &|| false,
+                stopped: &|| stop.as_ref().is_some_and(leo_core::children::Stop::asked),
                 tools_done: &|| false,
                 most_calls: 12,
             },
@@ -784,7 +791,7 @@ impl ClaudeSession {
                     }
                     let result = if calls >= control.most_calls || (control.tools_done)() {
                         limited = true;
-                        "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.".to_string()
+                        super::NO_MORE_TOOLS.to_string()
                     } else {
                         calls += 1;
                         call(&name, &args)
@@ -839,8 +846,8 @@ impl ClaudeSession {
         let (input, output, estimated) = match heard.tokens {
             Some((input, output)) => (input, output, false),
             None => (
-                text.chars().count().div_ceil(4) as u64,
-                answer.chars().count().div_ceil(4) as u64,
+                tokens_of(text.chars().count()),
+                tokens_of(answer.chars().count()),
                 true,
             ),
         };
@@ -958,9 +965,8 @@ impl AgentCli {
         system: &str,
         tools: Vec<super::mcp::Tool>,
     ) -> ProviderResult<ClaudeSession> {
-        let program = locate(&self.bin).ok_or_else(|| {
-            ProviderError::Retryable(format!("{}: {} is not installed", self.name, self.bin))
-        })?;
+        let program =
+            locate(&self.bin).ok_or_else(|| ProviderError::Retryable(self.unavailable_reason()))?;
         let room = self.room()?;
         let system_file = instructions_file(room.path(), system, ".md")?
             .keep()
@@ -1026,7 +1032,10 @@ impl AgentCli {
     }
 
     fn run(&self, req: &ChatRequest, images: &[Image], sink: Sink<'_>) -> ProviderResult<String> {
-        self.run_controlled(req, images, sink, &|| false)
+        let stop = leo_core::children::current_stop();
+        self.run_controlled(req, images, sink, &|| {
+            stop.as_ref().is_some_and(leo_core::children::Stop::asked)
+        })
     }
 
     pub(crate) fn controlled(
@@ -1035,7 +1044,10 @@ impl AgentCli {
         sink: Sink<'_>,
         stopped: &dyn Fn() -> bool,
     ) -> ProviderResult<String> {
-        self.run_controlled(req, &[], sink, stopped)
+        let stop = leo_core::children::current_stop();
+        self.run_controlled(req, &[], sink, &|| {
+            stopped() || stop.as_ref().is_some_and(leo_core::children::Stop::asked)
+        })
     }
 
     fn run_controlled(
@@ -1123,8 +1135,8 @@ impl AgentCli {
                 .or(banner_model)
                 .or_else(|| self.model.clone()),
             effort: self.effort.clone().or(banner_effort),
-            input: asked.div_ceil(4) as u64,
-            output: answer.chars().count().div_ceil(4) as u64,
+            input: tokens_of(asked),
+            output: tokens_of(answer.chars().count()),
             estimated: true,
             ..Spent::default()
         };
@@ -1397,12 +1409,7 @@ impl ChatProvider for AgentCli {
     }
 
     fn unavailable_reason(&self) -> String {
-        format!(
-            "{}: `{}` is not installed; {}",
-            self.name,
-            self.bin,
-            self.agent.install()
-        )
+        self.agent.missing(&self.name, &self.bin)
     }
 }
 
@@ -1527,6 +1534,53 @@ mod tests {
             model: model.map(str::to_string),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn a_missing_program_is_worded_one_way() {
+        let gone = "/nonexistent/leo-test/claude";
+        let claude = AgentCli::new(
+            "claude_code".into(),
+            Agent::ClaudeCode,
+            &config(ProviderKind::ClaudeCode, gone, None),
+        );
+        let codex = AgentCli::new(
+            "codex".into(),
+            Agent::Codex,
+            &config(ProviderKind::Codex, gone, None),
+        );
+        let text_run = claude.complete(&request()).unwrap_err().to_string();
+        let session = claude.claude_session("x").err().unwrap().to_string();
+        let thread = super::super::codex_app::CodexThread::start(&codex, "x", &[])
+            .err()
+            .unwrap()
+            .to_string();
+        assert_eq!(text_run, session);
+        assert_eq!(text_run, Agent::ClaudeCode.missing("claude_code", gone));
+        assert_eq!(thread, Agent::Codex.missing("codex", gone));
+        assert_eq!(
+            text_run
+                .replace("claude_code", "codex")
+                .replace(Agent::ClaudeCode.install(), ""),
+            thread.replace(Agent::Codex.install(), "")
+        );
+        let mut cfg = crate::config::Config::default();
+        cfg.chat.chain = vec!["claude_code".into()];
+        cfg.providers.insert(
+            "claude_code".into(),
+            config(ProviderKind::ClaudeCode, gone, None),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let health = crate::health::writing(&cfg, &store, None);
+        let page = crate::ai::why(health.state, Some(Agent::ClaudeCode.kind()), &text_run);
+        assert_eq!(
+            page,
+            "leo can't write yet: Claude Code is not installed on this computer."
+        );
+        assert_eq!(
+            health.fix.unwrap().split(". ").next().unwrap(),
+            "Claude Code is not installed on this computer"
+        );
     }
 
     #[test]
@@ -1823,7 +1877,7 @@ mod tests {
         .unwrap();
         let schema = std::fs::read_to_string(out.join("ClientRequest.json")).unwrap();
         assert!(schema.contains("dynamicTools"));
-        let mut child = std::process::Command::new(&codex)
+        let mut child = leo_core::children::quiet_command(&codex)
             .arg("app-server")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -1862,6 +1916,154 @@ mod tests {
         std::fs::write(&path, format!("#!/bin/sh\ntest -z \"${{CI+x}}${{ANTHROPIC_API_KEY+x}}${{OPENAI_API_KEY+x}}${{CODEX_API_KEY+x}}${{NODE_OPTIONS+x}}${{BASH_ENV+x}}\" || exit 17\nif [ \"$1\" = features ]; then echo 'shell_tool stable true'; exit 0; fi\nif [ \"$2\" = --help ]; then echo '--ignore-user-config --ignore-rules'; exit 0; fi\n{body}\n")).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
         path.to_string_lossy().to_string()
+    }
+
+    #[cfg(unix)]
+    fn probe_child(dir: &Path, sleep: u32) -> (String, PathBuf, PathBuf) {
+        let marker = dir.join("started");
+        let stop = dir.join("stop");
+        let bin = script(
+            dir,
+            &format!(
+                "[ -e '{}' ] && exit 1\necho $$ >> '{}'\ncat >/dev/null\nexec sleep {sleep}",
+                stop.display(),
+                marker.display()
+            ),
+        );
+        (bin, marker, stop)
+    }
+
+    #[cfg(unix)]
+    fn probe_pid(marker: &Path) -> String {
+        let began = Instant::now();
+        while !marker.exists() && began.elapsed() < Duration::from_secs(10) {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert!(marker.exists(), "the fake CLI must start");
+        std::fs::read_to_string(marker)
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: &str) -> bool {
+        leo_core::children::quiet_command("/bin/kill")
+            .args(["-0", pid])
+            .stderr(Stdio::null())
+            .status()
+            .expect("the CLI process check must run")
+            .success()
+    }
+
+    #[cfg(unix)]
+    fn gone_by(pid: &str, until: Instant) -> bool {
+        while alive(pid) && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        !alive(pid)
+    }
+
+    #[cfg(unix)]
+    fn release(pid: &str, stop: &Path) {
+        std::fs::write(stop, "").unwrap();
+        let _ = leo_core::children::quiet_command("/bin/kill")
+            .args(["-9", pid])
+            .stderr(Stdio::null())
+            .status();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_toolless_call_past_its_deadline_kills_the_program() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let (bin, marker, stop) = probe_child(dir.path(), 20);
+        let mut cfg = crate::config::Config::default();
+        cfg.chat.chain = vec!["codex".into()];
+        cfg.providers
+            .insert("codex".into(), config(ProviderKind::Codex, &bin, None));
+        let read = crate::ai::toolless_config(&cfg);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let call = std::thread::spawn(move || {
+            let store = crate::config::secret::MemoryStore::default();
+            let prompt = crate::ai::chat::Prompt {
+                system: "Read.".into(),
+                user: "<note>x</note>".into(),
+            };
+            let stop = leo_core::children::Stop {
+                deadline: Some(deadline),
+                ..Default::default()
+            };
+            leo_core::children::with_stop(stop, || {
+                crate::ai::chat::complete(&read, &store, prompt, 100).is_ok()
+            })
+        });
+        let pid = probe_pid(&marker);
+        let gone = gone_by(&pid, deadline + Duration::from_secs(1));
+        let late = Instant::now().saturating_duration_since(deadline);
+        release(&pid, &stop);
+        assert!(!call.join().unwrap());
+        assert!(
+            gone,
+            "the CLI child {pid} is still running {late:?} after its deadline"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_cancelled_vision_call_kills_its_program() {
+        use std::sync::atomic::AtomicBool;
+        let image = || {
+            vec![Image {
+                mime: "image/png".into(),
+                bytes: vec![0x89, b'P', b'N', b'G'],
+            }]
+        };
+        for stoppable in [false, true] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let (bin, marker, stop) = probe_child(dir.path(), 23);
+            let mut cfg = crate::config::Config::default();
+            cfg.chat.chain = vec!["codex".into()];
+            cfg.providers
+                .insert("codex".into(), config(ProviderKind::Codex, &bin, None));
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let flag = Arc::clone(&cancelled);
+            let call = std::thread::spawn(move || {
+                let store = crate::config::secret::MemoryStore::default();
+                let providers = crate::ai::provider::build_chat_chain(&cfg, &store);
+                let req = request();
+                if stoppable {
+                    let _ = crate::ai::chain::run_chat_chain_until(providers, &req, &|| {
+                        flag.load(Ordering::SeqCst)
+                    });
+                } else {
+                    let stop = leo_core::children::Stop {
+                        flag,
+                        deadline: None,
+                    };
+                    let _ = leo_core::children::with_stop(stop, || {
+                        crate::ai::chain::run_vision_chain(providers, &req, &image())
+                    });
+                }
+            });
+            let pid = probe_pid(&marker);
+            cancelled.store(true, Ordering::SeqCst);
+            let gone = gone_by(&pid, Instant::now() + Duration::from_secs(5));
+            release(&pid, &stop);
+            call.join().unwrap();
+            let route = if stoppable {
+                "run_chat_chain_until"
+            } else {
+                "run_vision_chain"
+            };
+            assert!(
+                gone,
+                "{route}: the CLI child {pid} outlived its caller's stop by 5 s"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -2189,47 +2391,49 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":100,"cached_inpu
     #[cfg(unix)]
     #[test]
     fn stopping_a_stateless_codex_request_does_not_retry_and_reaps_its_child() {
-        for startup in ["", "sleep 0.2\n"] {
+        for before_pid in ["", "sleep 0.2\n"] {
             let dir = tempfile::TempDir::new().unwrap();
             let marker = dir.path().join("started");
             let bin = script(
                 dir.path(),
                 &format!(
-                    "{startup}echo $$ >> '{}'\ncat >/dev/null\nsleep 30",
+                    "{{\n{before_pid}echo $$\n}} >> '{}'\nexec sleep 30",
                     marker.display()
                 ),
             );
             let cfg = config(ProviderKind::Codex, &bin, None);
             let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg)
                 .with_limits(Duration::from_secs(30), Duration::from_secs(30));
-            let began = Instant::now();
-            let stopped = std::cell::Cell::new(None);
+            let start_by = Instant::now() + Duration::from_secs(20);
+            let finish_by = std::cell::Cell::new(None);
             let result = agent.controlled(&request(), &mut |_| {}, &|| {
-                if marker.exists() {
-                    if stopped.get().is_none() {
-                        stopped.set(Some(Instant::now()));
-                    }
-                    true
-                } else {
-                    began.elapsed() >= Duration::from_secs(5)
+                if finish_by.get().is_some() {
+                    return true;
                 }
+                if std::fs::read_to_string(&marker).ok().is_some_and(|pids| {
+                    pids.split_once('\n')
+                        .is_some_and(|(pid, _)| pid.parse::<u32>().is_ok())
+                }) {
+                    finish_by.set(Some(Instant::now() + Duration::from_secs(15)));
+                    return true;
+                }
+                Instant::now() >= start_by
             });
-            assert!(result.unwrap_err().to_string().contains("stopped"));
+            let finish_by = finish_by
+                .get()
+                .expect("the fake CLI must publish its PID before cancellation");
             assert!(
-                stopped
-                    .get()
-                    .expect("the fake CLI must start before cancellation")
-                    .elapsed()
-                    < Duration::from_secs(6)
+                matches!(result, Err(ProviderError::Fatal(ref message)) if message.contains("stopped")),
+                "{result:?}"
+            );
+            assert!(
+                Instant::now() < finish_by,
+                "the request did not stop in time"
             );
             let started = std::fs::read_to_string(marker).unwrap();
             assert_eq!(started.lines().count(), 1);
-            let pid: libc::pid_t = started.trim().parse().unwrap();
-            assert_eq!(unsafe { libc::kill(pid, 0) }, -1);
-            assert_eq!(
-                std::io::Error::last_os_error().raw_os_error(),
-                Some(libc::ESRCH)
-            );
+            let pid = started.trim();
+            assert!(gone_by(pid, finish_by), "the CLI child {pid} still exists");
         }
     }
 

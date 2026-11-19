@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::{Read, Seek, Write};
 use std::path::Path;
 
@@ -42,69 +43,62 @@ Settings and API keys are never included.
 ";
 
 const MOST_DEPTH: usize = 64;
-const MOST_ENTRIES: usize = 100_000;
-const MOST_BYTES: u64 = 10 * 1024 * 1024 * 1024;
-const LIMIT_MESSAGE: &str = "This export is too large. Export fewer parts or use shallower folders; Leo exports up to 100,000 items, 64 folder levels and 10 GiB at a time.";
+const PIECE: usize = 64 * 1024;
+const LARGE_FROM: u64 = 1 << 30;
+const IDS_AT_A_TIME: i64 = 500;
+const DOCUMENT_CHARS: usize = 1 << 20;
 
-#[derive(Clone, Copy)]
-struct Limits {
-    depth: usize,
-    entries: usize,
-    bytes: u64,
+#[cfg(unix)]
+type Identity = (u64, u64);
+#[cfg(not(unix))]
+type Identity = std::path::PathBuf;
+
+#[cfg(unix)]
+fn identity(_: &Path, meta: &std::fs::Metadata) -> Option<Identity> {
+    use std::os::unix::fs::MetadataExt;
+    Some((meta.dev(), meta.ino()))
 }
 
-const LIMITS: Limits = Limits {
-    depth: MOST_DEPTH,
-    entries: MOST_ENTRIES,
-    bytes: MOST_BYTES,
-};
+#[cfg(not(unix))]
+fn identity(path: &Path, _: &std::fs::Metadata) -> Option<Identity> {
+    std::fs::canonicalize(path).ok()
+}
 
-struct Budget {
-    limits: Limits,
-    entries: usize,
-    bytes: u64,
+#[derive(Default)]
+struct Walk {
     skipped: usize,
+    entered: HashSet<Identity>,
+    packed: Packed,
 }
 
-impl Budget {
-    fn new(limits: Limits) -> Self {
-        Self {
-            limits,
-            entries: 0,
-            bytes: 0,
-            skipped: 0,
-        }
-    }
+fn stopped() -> Result<()> {
+    ensure!(
+        !leo_core::children::current_stop().is_some_and(|stop| stop.asked()),
+        "The export was stopped."
+    );
+    Ok(())
+}
 
-    fn entry(&mut self) -> Result<()> {
-        ensure!(self.entries < self.limits.entries, LIMIT_MESSAGE);
-        self.entries += 1;
-        Ok(())
-    }
-
-    fn remaining_bytes(&self) -> u64 {
-        self.limits.bytes.saturating_sub(self.bytes)
+fn copy_through(from: &mut impl Read, to: &mut impl Write) -> Result<u64> {
+    let mut piece = vec![0u8; PIECE];
+    let mut total = 0u64;
+    loop {
+        stopped()?;
+        let read = match from.read(&mut piece) {
+            Ok(0) => return Ok(total),
+            Ok(read) => read,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        };
+        to.write_all(&piece[..read])?;
+        total += read as u64;
     }
 }
 
-struct BudgetWriter<'a, W> {
-    out: &'a mut W,
-    budget: &'a mut Budget,
-}
-
-impl<W: Write> Write for BudgetWriter<'_, W> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        if bytes.len() as u64 > self.budget.remaining_bytes() {
-            return Err(std::io::Error::other(LIMIT_MESSAGE));
-        }
-        let written = self.out.write(bytes)?;
-        self.budget.bytes += written as u64;
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        self.out.flush()
-    }
+fn plain() -> SimpleFileOptions {
+    SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(true)
 }
 
 fn checked_path(root: &Path, path: &Path) -> Result<std::path::PathBuf> {
@@ -123,7 +117,6 @@ fn checked_path(root: &Path, path: &Path) -> Result<std::path::PathBuf> {
         .context("Export folders cannot use symbolic links; replace the link with a real folder and try again")
 }
 
-#[allow(clippy::too_many_arguments)]
 fn add_dir<W: Write + Seek>(
     zip: &mut zip::ZipWriter<W>,
     root: &Path,
@@ -131,10 +124,16 @@ fn add_dir<W: Write + Seek>(
     under: &str,
     skip_hidden: bool,
     depth: usize,
-    budget: &mut Budget,
-    packed: &mut Packed,
+    walk: &mut Walk,
 ) -> Result<()> {
-    ensure!(depth <= budget.limits.depth, LIMIT_MESSAGE);
+    stopped()?;
+    if depth > MOST_DEPTH {
+        leo_core::diag::warn(format!(
+            "An export skipped {}: it lies deeper than leo reads.",
+            from.display()
+        ));
+        return Ok(());
+    }
     let from = checked_path(root, from)?;
     let entries = match std::fs::read_dir(&from) {
         Ok(entries) => entries,
@@ -145,24 +144,28 @@ fn add_dir<W: Write + Seek>(
             )
         }
     };
-    let mut sorted = Vec::new();
-    for entry in entries {
-        budget.entry()?;
-        sorted.push(
-            entry.context(
-                "An export item could not be read; check folder permissions and try again",
-            )?,
-        );
+    if let Some(known) = std::fs::metadata(&from)
+        .ok()
+        .and_then(|meta| identity(&from, &meta))
+    {
+        if !walk.entered.insert(known) {
+            leo_core::diag::warn(format!(
+                "An export skipped {}: it had already been entered.",
+                from.display()
+            ));
+            return Ok(());
+        }
     }
-    sorted.sort_by_key(|entry| entry.file_name());
-    let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for entry in sorted {
+    for entry in entries {
+        stopped()?;
+        let entry = entry
+            .context("An export item could not be read; check folder permissions and try again")?;
         let name = entry.file_name().to_string_lossy().to_string();
         if skip_hidden && name.starts_with('.') {
             continue;
         }
         if name.contains(['/', '\\']) || name.chars().any(char::is_control) {
-            budget.skipped += 1;
+            walk.skipped += 1;
             continue;
         }
         let kind = entry
@@ -177,12 +180,11 @@ fn add_dir<W: Write + Seek>(
                 &inside,
                 skip_hidden,
                 depth + 1,
-                budget,
-                packed,
+                walk,
             )?;
         } else if kind.is_file() {
             let path = checked_path(root, &entry.path())?;
-            let file = match leo_core::paths::open_regular(&path) {
+            let mut file = match leo_core::paths::open_regular(&path) {
                 Err(error) if error.kind() == std::io::ErrorKind::Other => bail!(
                     "Only regular files can be exported; remove the special file and try again"
                 ),
@@ -190,71 +192,231 @@ fn add_dir<W: Write + Seek>(
                     "An export file could not be opened safely; check its permissions and try again",
                 )?,
             };
-            let meta = file.metadata()?;
-            ensure!(meta.len() <= budget.remaining_bytes(), LIMIT_MESSAGE);
-            zip.start_file(&inside, options)?;
-            let mut input = file.take(budget.remaining_bytes() + 1);
-            let before = budget.bytes;
-            std::io::copy(
-                &mut input,
-                &mut BudgetWriter {
-                    out: &mut *zip,
-                    budget: &mut *budget,
-                },
-            )?;
-            packed.bytes += budget.bytes - before;
-            packed.files += 1;
+            let large = file.metadata()?.len() >= LARGE_FROM;
+            zip.start_file(&inside, plain().large_file(large))?;
+            walk.packed.bytes += copy_through(&mut file, zip)?;
+            walk.packed.files += 1;
         }
     }
     Ok(())
+}
+
+struct Counted<'a, W> {
+    out: &'a mut W,
+    bytes: u64,
+}
+
+impl<W: Write> Write for Counted<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        stopped().map_err(std::io::Error::other)?;
+        let written = self.out.write(bytes)?;
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.out.flush()
+    }
 }
 
 fn add_json<W: Write + Seek>(
     zip: &mut zip::ZipWriter<W>,
     inside: &str,
     value: &impl Serialize,
-    budget: &mut Budget,
-    packed: &mut Packed,
+    walk: &mut Walk,
 ) -> Result<()> {
-    budget.entry()?;
-    zip.start_file(inside, SimpleFileOptions::default())?;
-    let before = budget.bytes;
-    serde_json::to_writer_pretty(
-        BudgetWriter {
-            out: &mut *zip,
-            budget: &mut *budget,
-        },
-        value,
-    )?;
-    packed.bytes += budget.bytes - before;
-    packed.files += 1;
+    stopped()?;
+    zip.start_file(inside, plain())?;
+    let mut counted = Counted {
+        out: &mut *zip,
+        bytes: 0,
+    };
+    serde_json::to_writer_pretty(&mut counted, value)?;
+    walk.packed.bytes += counted.bytes;
+    walk.packed.files += 1;
     Ok(())
 }
 
-fn chat_ids(chats: &Path, budget: &Budget) -> Result<Vec<String>> {
-    let remaining = budget.limits.entries.saturating_sub(budget.entries);
-    let ids: Vec<String> = crate::chats::db_of(chats).with(|connection| {
-        let mut query =
-            connection.prepare("SELECT id FROM chats ORDER BY updated_at DESC, id LIMIT ?1")?;
-        let rows = query.query_map([(remaining + 1) as i64], |row| row.get(0))?;
-        rows.collect()
-    })?;
-    ensure!(ids.len() <= remaining, LIMIT_MESSAGE);
-    Ok(ids)
+struct Cards<'a> {
+    chats: &'a Path,
+    boards: &'a [crate::boards::Board],
 }
 
-fn documents(chats: &Path, chat: &str, budget: &Budget) -> Result<Vec<String>> {
-    let remaining = budget.limits.entries.saturating_sub(budget.entries);
-    let ids: Vec<String> = crate::chats::db_of(chats).with(|connection| {
-        let mut query = connection
-            .prepare("SELECT id FROM chat_docs WHERE chat = ?1 ORDER BY added_at, id LIMIT ?2")?;
-        let rows = query.query_map(rusqlite::params![chat, (remaining + 1) as i64], |row| {
-            row.get(0)
+impl Serialize for Cards<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use crate::boards::Seat;
+        use serde::ser::{Error, SerializeSeq};
+        let mut seq = serializer.serialize_seq(None)?;
+        for board in self.boards {
+            for place in crate::boards::places_of(self.chats, board) {
+                stopped().map_err(S::Error::custom)?;
+                let Some(mut card) = crate::boards::card(self.chats, &place.id) else {
+                    continue;
+                };
+                card.seat_move(place.seat_column().to_string());
+                seq.serialize_element(&card)?;
+            }
+        }
+        seq.end()
+    }
+}
+
+struct Messages<'a> {
+    chats: &'a Path,
+    id: &'a str,
+    count: usize,
+}
+
+impl Serialize for Messages<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::{Error, SerializeSeq};
+        let mut seq = serializer.serialize_seq(Some(self.count))?;
+        let mut from = 0;
+        while from < self.count {
+            stopped().map_err(S::Error::custom)?;
+            let to = (from + crate::chats::PAGE).min(self.count);
+            let Some(page) = crate::chats::page(self.chats, self.id, Some(to), to - from) else {
+                return Err(S::Error::custom("A chat changed while it was exported"));
+            };
+            for message in &page.chat.messages {
+                seq.serialize_element(message)?;
+            }
+            from = to;
+        }
+        seq.end()
+    }
+}
+
+struct WholeChat<'a> {
+    rest: serde_json::Map<String, serde_json::Value>,
+    messages: Messages<'a>,
+}
+
+impl Serialize for WholeChat<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(None)?;
+        for (key, value) in &self.rest {
+            map.serialize_entry(key, value)?;
+        }
+        map.serialize_entry("messages", &self.messages)?;
+        map.end()
+    }
+}
+
+fn each_chat(chats: &Path, mut visit: impl FnMut(&str) -> Result<()>) -> Result<()> {
+    let mut after: Option<(String, String)> = None;
+    loop {
+        let (stamp, id) = after.clone().unwrap_or_default();
+        let page: Vec<(String, String)> = crate::chats::db_of(chats).with(|connection| {
+            let mut query = connection.prepare(
+                "SELECT id, updated_at FROM chats
+                 WHERE ?1 = '' OR updated_at < ?1 OR (updated_at = ?1 AND id > ?2)
+                 ORDER BY updated_at DESC, id LIMIT ?3",
+            )?;
+            let rows = query.query_map(rusqlite::params![stamp, id, IDS_AT_A_TIME], |row| {
+                Ok((row.get(0)?, row.get(1)?))
+            })?;
+            rows.collect()
         })?;
-        rows.collect()
-    })?;
-    ensure!(ids.len() <= remaining, LIMIT_MESSAGE);
-    Ok(ids)
+        for (id, _) in &page {
+            visit(id)?;
+        }
+        match page.last() {
+            Some((id, stamp)) if page.len() as i64 == IDS_AT_A_TIME => {
+                after = Some((stamp.clone(), id.clone()));
+            }
+            _ => return Ok(()),
+        }
+    }
+}
+
+fn each_document(
+    chats: &Path,
+    chat: &str,
+    mut visit: impl FnMut(&str) -> Result<()>,
+) -> Result<()> {
+    let mut after: Option<(String, String)> = None;
+    loop {
+        let (stamp, id) = after.clone().unwrap_or_default();
+        let page: Vec<(String, String)> = crate::chats::db_of(chats).with(|connection| {
+            let mut query = connection.prepare(
+                "SELECT id, added_at FROM chat_docs
+                 WHERE chat = ?1 AND (?2 = '' OR added_at > ?2 OR (added_at = ?2 AND id > ?3))
+                 ORDER BY added_at, id LIMIT ?4",
+            )?;
+            let rows = query
+                .query_map(rusqlite::params![chat, stamp, id, IDS_AT_A_TIME], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
+            rows.collect()
+        })?;
+        for (id, _) in &page {
+            visit(id)?;
+        }
+        match page.last() {
+            Some((id, stamp)) if page.len() as i64 == IDS_AT_A_TIME => {
+                after = Some((stamp.clone(), id.clone()));
+            }
+            _ => return Ok(()),
+        }
+    }
+}
+
+fn add_chat<W: Write + Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    chats: &Path,
+    id: &str,
+    walk: &mut Walk,
+) -> Result<()> {
+    let Some(head) = crate::chats::page(chats, id, Some(0), 1) else {
+        return Ok(());
+    };
+    let serde_json::Value::Object(rest) = serde_json::to_value(&head.chat)? else {
+        bail!("A chat could not be written; try the export again");
+    };
+    let rest = rest
+        .into_iter()
+        .filter(|(key, _)| key != "messages")
+        .collect();
+    let chat = WholeChat {
+        rest,
+        messages: Messages {
+            chats,
+            id: &head.chat.id,
+            count: head.count,
+        },
+    };
+    add_json(
+        zip,
+        &format!("leo/chats/{}.json", head.chat.id),
+        &chat,
+        walk,
+    )?;
+    each_document(chats, &head.chat.id, |doc| {
+        ensure!(
+            doc.len() == 32 && doc.chars().all(|c| c.is_ascii_hexdigit()),
+            "A saved document has an invalid id; remove it from the chat and try again"
+        );
+        zip.start_file(
+            format!("leo/chats/{}.files/{doc}.txt", head.chat.id),
+            plain(),
+        )?;
+        let mut from = 1;
+        loop {
+            stopped()?;
+            let piece = crate::chat_files::part(chats, &head.chat.id, doc, from, DOCUMENT_CHARS)
+                .context("A saved document could not be read; try the export again")?;
+            if piece.is_empty() {
+                break;
+            }
+            zip.write_all(piece.as_bytes())?;
+            walk.packed.bytes += piece.len() as u64;
+            from += piece.chars().count();
+        }
+        walk.packed.files += 1;
+        Ok(())
+    })
 }
 
 pub fn write_zip<W: Write + Seek>(
@@ -263,37 +425,12 @@ pub fn write_zip<W: Write + Seek>(
     chats_dir: &Path,
     parts: Parts,
 ) -> Result<Packed> {
-    write_zip_with_limits(out, notes_dir, chats_dir, parts, LIMITS)
-}
-
-fn write_zip_with_limits<W: Write + Seek>(
-    out: W,
-    notes_dir: &Path,
-    chats_dir: &Path,
-    parts: Parts,
-    limits: Limits,
-) -> Result<Packed> {
     let mut zip = zip::ZipWriter::new(out);
-    let mut packed = Packed::default();
-    let mut budget = Budget::new(limits);
-    budget.entry()?;
+    let mut walk = Walk::default();
     zip.start_file("leo/README.txt", SimpleFileOptions::default())?;
-    BudgetWriter {
-        out: &mut zip,
-        budget: &mut budget,
-    }
-    .write_all(README.as_bytes())?;
+    zip.write_all(README.as_bytes())?;
     let data = crate::keeping::data_dir(notes_dir);
-    add_dir(
-        &mut zip,
-        &data,
-        notes_dir,
-        "leo/notes",
-        true,
-        0,
-        &mut budget,
-        &mut packed,
-    )?;
+    add_dir(&mut zip, &data, notes_dir, "leo/notes", true, 0, &mut walk)?;
     #[derive(Serialize)]
     struct TaskExport<'a> {
         version: u8,
@@ -308,33 +445,30 @@ fn write_zip_with_limits<W: Write + Seek>(
                 version: 1,
                 tasks: &tasks,
             },
-            &mut budget,
-            &mut packed,
+            &mut walk,
         )?;
     }
+    drop(tasks);
     #[derive(Serialize)]
     struct BoardExport<'a> {
         version: u8,
         boards: &'a [crate::boards::Board],
-        cards: &'a [crate::boards::Card],
+        cards: Cards<'a>,
     }
     let boards = crate::boards::boards(chats_dir);
     if !boards.is_empty() {
-        let all = crate::boards::all_cards(chats_dir);
-        let cards: Vec<crate::boards::Card> = boards
-            .iter()
-            .flat_map(|board| crate::boards::cards_in(board, &all))
-            .collect();
         add_json(
             &mut zip,
             "leo/boards.json",
             &BoardExport {
                 version: 1,
                 boards: &boards,
-                cards: &cards,
+                cards: Cards {
+                    chats: chats_dir,
+                    boards: &boards,
+                },
             },
-            &mut budget,
-            &mut packed,
+            &mut walk,
         )?;
     }
     #[derive(Serialize)]
@@ -359,10 +493,10 @@ fn write_zip_with_limits<W: Write + Seek>(
                 version: 1,
                 threads: &threads,
             },
-            &mut budget,
-            &mut packed,
+            &mut walk,
         )?;
     }
+    drop(threads);
     if parts.trash {
         add_dir(
             &mut zip,
@@ -371,22 +505,12 @@ fn write_zip_with_limits<W: Write + Seek>(
             "leo/trash",
             false,
             0,
-            &mut budget,
-            &mut packed,
+            &mut walk,
         )?;
     }
     if parts.uploads {
         let uploads = data.join("attachments");
-        add_dir(
-            &mut zip,
-            &data,
-            &uploads,
-            "leo/uploads",
-            true,
-            0,
-            &mut budget,
-            &mut packed,
-        )?;
+        add_dir(&mut zip, &data, &uploads, "leo/uploads", true, 0, &mut walk)?;
         add_dir(
             &mut zip,
             &data,
@@ -394,64 +518,38 @@ fn write_zip_with_limits<W: Write + Seek>(
             "leo/recording-sources",
             true,
             0,
-            &mut budget,
-            &mut packed,
+            &mut walk,
         )?;
     }
-    if parts.chats {
-        for id in chat_ids(chats_dir, &budget)? {
-            let Some(chat) = crate::chats::load(chats_dir, &id) else {
-                continue;
-            };
-            add_json(
+    if parts.trash && parts.uploads {
+        for kind in [
+            leo_core::paths::own::ORIGINALS,
+            leo_core::paths::own::SOURCES,
+        ] {
+            add_dir(
                 &mut zip,
-                &format!("leo/chats/{}.json", chat.id),
-                &chat,
-                &mut budget,
-                &mut packed,
+                &data,
+                &data.join(leo_core::paths::own::HELD).join(kind),
+                &format!("leo/trash/held/{kind}"),
+                true,
+                0,
+                &mut walk,
             )?;
-            for doc in documents(chats_dir, &chat.id, &budget)? {
-                ensure!(
-                    doc.len() == 32 && doc.chars().all(|c| c.is_ascii_hexdigit()),
-                    "A saved document has an invalid id; remove it from the chat and try again"
-                );
-                let body: String = crate::chats::db_of(chats_dir).with(|connection| {
-                    connection.query_row(
-                        "SELECT text FROM chat_docs WHERE chat = ?1 AND id = ?2",
-                        rusqlite::params![chat.id, doc],
-                        |row| row.get(0),
-                    )
-                })?;
-                budget.entry()?;
-                zip.start_file(
-                    format!("leo/chats/{}.files/{doc}.txt", chat.id),
-                    SimpleFileOptions::default(),
-                )?;
-                BudgetWriter {
-                    out: &mut zip,
-                    budget: &mut budget,
-                }
-                .write_all(body.as_bytes())?;
-                packed.files += 1;
-                packed.bytes += body.len() as u64;
-            }
         }
     }
-    if budget.skipped > 0 {
+    if parts.chats {
+        each_chat(chats_dir, |id| add_chat(&mut zip, chats_dir, id, &mut walk))?;
+    }
+    if walk.skipped > 0 {
         let note = format!(
             "{} file or folder name(s) with control characters could not be exported and were skipped.\n",
-            budget.skipped
+            walk.skipped
         );
-        budget.entry()?;
         zip.start_file("leo/SKIPPED.txt", SimpleFileOptions::default())?;
-        BudgetWriter {
-            out: &mut zip,
-            budget: &mut budget,
-        }
-        .write_all(note.as_bytes())?;
+        zip.write_all(note.as_bytes())?;
     }
     zip.finish()?;
-    Ok(packed)
+    Ok(walk.packed)
 }
 
 pub fn write_folder<W: Write + Seek>(out: W, folder: &Path, under: &str) -> Result<Packed> {
@@ -465,19 +563,10 @@ pub(crate) fn write_folder_from<W: Write + Seek>(
     under: &str,
 ) -> Result<Packed> {
     let mut zip = zip::ZipWriter::new(out);
-    let mut packed = Packed::default();
-    add_dir(
-        &mut zip,
-        root,
-        folder,
-        under,
-        true,
-        0,
-        &mut Budget::new(LIMITS),
-        &mut packed,
-    )?;
+    let mut walk = Walk::default();
+    add_dir(&mut zip, root, folder, under, true, 0, &mut walk)?;
     zip.finish()?;
-    Ok(packed)
+    Ok(walk.packed)
 }
 
 #[cfg(test)]
@@ -486,60 +575,50 @@ mod tests {
 
     fn names(bytes: Vec<u8>) -> Vec<String> {
         let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-        (0..archive.len())
+        let mut listed: Vec<String> = (0..archive.len())
             .map(|i| archive.by_index(i).unwrap().name().unwrap().into_owned())
-            .collect()
-    }
-
-    fn folder_with_limits(folder: &Path, limits: Limits) -> Result<Packed> {
-        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
-        let mut packed = Packed::default();
-        add_dir(
-            &mut zip,
-            folder,
-            folder,
-            "files",
-            true,
-            0,
-            &mut Budget::new(limits),
-            &mut packed,
-        )?;
-        zip.finish()?;
-        Ok(packed)
+            .collect();
+        listed.sort();
+        listed
     }
 
     #[test]
-    fn export_limits_bound_depth_entries_and_total_file_bytes() {
-        let deep = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(deep.path().join("a/b/c")).unwrap();
-        std::fs::write(deep.path().join("a/b/c/example.md"), "example").unwrap();
-        assert!(
-            folder_with_limits(deep.path(), Limits { depth: 1, ..LIMITS })
-                .unwrap_err()
-                .to_string()
-                .contains("too large")
-        );
-        let wide = tempfile::tempdir().unwrap();
-        for name in [".a", ".b", ".c"] {
-            std::fs::write(wide.path().join(name), "").unwrap();
+    fn held_files_require_both_trash_and_uploads() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let chats = dir.path().join("chats");
+        std::fs::create_dir(&notes).unwrap();
+        for kind in ["attachments", "recording-sources"] {
+            let held = dir.path().join("held").join(kind).join("note");
+            std::fs::create_dir_all(&held).unwrap();
+            std::fs::write(held.join("source.txt"), kind).unwrap();
         }
-        assert!(folder_with_limits(
-            wide.path(),
-            Limits {
-                entries: 2,
-                ..LIMITS
-            }
-        )
-        .is_err());
-        let bytes = tempfile::tempdir().unwrap();
-        for name in ["a", "b"] {
-            std::fs::write(bytes.path().join(name), "ab").unwrap();
+        for (trash, uploads) in [(true, true), (false, true), (true, false)] {
+            let mut out = std::io::Cursor::new(Vec::new());
+            write_zip(
+                &mut out,
+                &notes,
+                &chats,
+                Parts {
+                    trash,
+                    uploads,
+                    chats: false,
+                },
+            )
+            .unwrap();
+            let zip = zip::ZipArchive::new(out).unwrap();
+            assert_eq!(
+                zip.file_names()
+                    .filter_map(Result::ok)
+                    .filter(|name| name.starts_with("leo/trash/held/"))
+                    .count(),
+                if trash && uploads { 2 } else { 0 }
+            );
         }
-        assert!(folder_with_limits(bytes.path(), Limits { bytes: 3, ..LIMITS }).is_err());
-        assert_eq!(
-            folder_with_limits(bytes.path(), Limits { bytes: 4, ..LIMITS }).unwrap(),
-            Packed { files: 2, bytes: 4 }
-        );
+    }
+
+    fn folder_zipped(folder: &Path) -> Result<Packed> {
+        write_folder_from(std::io::Cursor::new(Vec::new()), folder, folder, "files")
     }
 
     #[cfg(unix)]
@@ -549,61 +628,9 @@ mod tests {
         std::fs::write(folder.path().join("Icon\r"), "").unwrap();
         std::fs::write(folder.path().join("Notes.md"), "ab").unwrap();
         assert_eq!(
-            folder_with_limits(folder.path(), LIMITS).unwrap(),
+            folder_zipped(folder.path()).unwrap(),
             Packed { files: 1, bytes: 2 }
         );
-    }
-
-    #[test]
-    fn serialized_tasks_chats_and_documents_share_the_export_budget() {
-        for kind in ["tasks", "chat", "document"] {
-            let home = tempfile::tempdir().unwrap();
-            let notes = home.path().join("notes");
-            let chats = home.path().join("chats");
-            std::fs::create_dir_all(&notes).unwrap();
-            let now = chrono::Utc::now();
-            match kind {
-                "tasks" => {
-                    let task = serde_json::from_value(serde_json::json!({"id":"texport-1234", "title":"Example task", "created_at":now, "updated_at":now})).unwrap();
-                    crate::tasks::put(&chats, &task).unwrap();
-                }
-                _ => {
-                    crate::chats::save(&chats, "chat-export-1234", serde_json::from_value(serde_json::json!({"mode":"chat", "messages":[{"role":"user", "text":"Example question"}]})).unwrap(), now).unwrap();
-                    if kind == "document" {
-                        crate::chat_files::add(
-                            &chats,
-                            "chat-export-1234",
-                            "example.txt",
-                            "Example document",
-                            now,
-                        )
-                        .unwrap();
-                    }
-                }
-            }
-            let parts = Parts {
-                chats: true,
-                ..Parts::default()
-            };
-            let packed =
-                write_zip(std::io::Cursor::new(Vec::new()), &notes, &chats, parts).unwrap();
-            assert!(packed.files > 0, "{kind}");
-            let limits = Limits {
-                bytes: README.len() as u64 + packed.bytes - 1,
-                ..LIMITS
-            };
-            assert!(
-                write_zip_with_limits(
-                    std::io::Cursor::new(Vec::new()),
-                    &notes,
-                    &chats,
-                    parts,
-                    limits
-                )
-                .is_err(),
-                "{kind}"
-            );
-        }
     }
 
     #[cfg(unix)]
@@ -768,5 +795,261 @@ mod tests {
             names(out.into_inner()),
             ["Lecture 4/board.jpg", "Lecture 4/slides.pdf"]
         );
+    }
+
+    fn library_of(count: usize) -> (tempfile::TempDir, std::path::PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = tmp.path().join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        for n in 0..count {
+            std::fs::write(notes.join(format!("n{n}.md")), "").unwrap();
+        }
+        (tmp, notes)
+    }
+
+    #[test]
+    fn an_export_has_no_item_or_size_limit() {
+        let (tmp, notes) = library_of(300);
+        let packed = write_zip(
+            std::io::Cursor::new(Vec::new()),
+            &notes,
+            &tmp.path().join("chats"),
+            Parts::default(),
+        )
+        .unwrap();
+        assert_eq!(packed.files, 300);
+    }
+
+    #[test]
+    #[ignore]
+    fn an_export_of_a_very_large_library_completes() {
+        let count: usize = std::env::var("LEO_EXPORT_NOTES")
+            .ok()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(100_500);
+        let (tmp, notes) = library_of(count);
+        if let Some(gib) = std::env::var("LEO_EXPORT_SPARSE_GIB")
+            .ok()
+            .and_then(|n| n.parse::<u64>().ok())
+        {
+            let dir = tmp.path().join("attachments/abc");
+            std::fs::create_dir_all(&dir).unwrap();
+            let file = std::fs::File::create(dir.join("big.bin")).unwrap();
+            file.set_len(gib << 30).unwrap();
+        }
+        let out = tempfile::tempfile().unwrap();
+        let started = std::time::Instant::now();
+        let packed = write_zip(
+            out,
+            &notes,
+            &tmp.path().join("chats"),
+            Parts {
+                uploads: true,
+                ..Parts::default()
+            },
+        )
+        .unwrap();
+        eprintln!("exported {} files in {:?}", packed.files, started.elapsed());
+        assert!(packed.files >= count);
+    }
+
+    #[test]
+    #[ignore]
+    fn a_file_over_four_gigabytes_is_written_whole() {
+        let tmp = tempfile::tempdir().unwrap();
+        let length: u64 = (4 << 30) + 12345;
+        let file = std::fs::File::create(tmp.path().join("big.bin")).unwrap();
+        file.set_len(length).unwrap();
+        let mut out = tempfile::tempfile().unwrap();
+        let packed = write_folder_from(&mut out, tmp.path(), tmp.path(), "files").unwrap();
+        assert_eq!(
+            packed,
+            Packed {
+                files: 1,
+                bytes: length
+            }
+        );
+        let mut archive = zip::ZipArchive::new(out).unwrap();
+        assert_eq!(archive.by_name("files/big.bin").unwrap().size(), length);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_folder_loop_is_skipped_not_followed() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/Note.md"), "ab").unwrap();
+        std::os::unix::fs::symlink(tmp.path(), tmp.path().join("a/up")).unwrap();
+        assert_eq!(
+            folder_zipped(tmp.path()).unwrap(),
+            Packed { files: 1, bytes: 2 }
+        );
+    }
+
+    #[test]
+    fn a_folder_met_twice_is_skipped_and_the_rest_goes_on() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("a")).unwrap();
+        std::fs::write(tmp.path().join("a/Note.md"), "ab").unwrap();
+        std::fs::write(tmp.path().join("Top.md"), "c").unwrap();
+        let mut walk = Walk::default();
+        let seen = std::fs::metadata(tmp.path().join("a")).unwrap();
+        walk.entered
+            .insert(identity(&tmp.path().join("a"), &seen).unwrap());
+        let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        add_dir(
+            &mut zip,
+            tmp.path(),
+            tmp.path(),
+            "files",
+            true,
+            0,
+            &mut walk,
+        )
+        .unwrap();
+        assert_eq!(walk.packed, Packed { files: 1, bytes: 1 });
+    }
+
+    #[test]
+    fn folders_deeper_than_leo_reads_are_left_out_without_failing_the_export() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut deep = tmp.path().to_path_buf();
+        for level in 0..=MOST_DEPTH + 1 {
+            deep.push(format!("d{level}"));
+        }
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::write(deep.join("Lost.md"), "x").unwrap();
+        std::fs::write(tmp.path().join("d0/Kept.md"), "y").unwrap();
+        assert_eq!(
+            folder_zipped(tmp.path()).unwrap(),
+            Packed { files: 1, bytes: 1 }
+        );
+    }
+
+    #[test]
+    fn a_long_chat_and_a_long_document_are_written_whole_and_in_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let notes = tmp.path().join("notes");
+        std::fs::create_dir_all(&notes).unwrap();
+        let chats = tmp.path().join("chats");
+        let now = chrono::Utc::now();
+        let messages: Vec<_> = (0..450)
+            .map(|n| serde_json::json!({ "role": "user", "text": format!("message {n}") }))
+            .collect();
+        crate::chats::save(
+            &chats,
+            "chat-long-1234",
+            serde_json::from_value(serde_json::json!({ "mode": "chat", "messages": messages }))
+                .unwrap(),
+            now,
+        )
+        .unwrap();
+        let text = "é".repeat(DOCUMENT_CHARS * 2 + 7);
+        let doc = crate::chat_files::add(&chats, "chat-long-1234", "long.txt", &text, now).unwrap();
+        let mut out = std::io::Cursor::new(Vec::new());
+        write_zip(
+            &mut out,
+            &notes,
+            &chats,
+            Parts {
+                chats: true,
+                ..Parts::default()
+            },
+        )
+        .unwrap();
+        out.set_position(0);
+        let mut archive = zip::ZipArchive::new(out).unwrap();
+        let chat: serde_json::Value =
+            serde_json::from_reader(archive.by_name("leo/chats/chat-long-1234.json").unwrap())
+                .unwrap();
+        let said: Vec<&str> = chat["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["text"].as_str().unwrap())
+            .collect();
+        assert_eq!(said.len(), 450);
+        assert!(said
+            .iter()
+            .enumerate()
+            .all(|(n, t)| *t == format!("message {n}")));
+        let mut body = String::new();
+        archive
+            .by_name(&format!("leo/chats/chat-long-1234.files/{}.txt", doc.id))
+            .unwrap()
+            .read_to_string(&mut body)
+            .unwrap();
+        assert!(body == text);
+    }
+
+    #[test]
+    fn the_zip_holds_exactly_what_it_held_before_and_what_later_lanes_added() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path();
+        let notes = data.join("notes");
+        let write = |path: &str, text: &str| {
+            let path = data.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, text).unwrap();
+        };
+        write("notes/Top.md", "top");
+        write("notes/cs/Graphs.md", "graphs");
+        write("notes/.hidden/Secret.md", "no");
+        write("notes/.trash/Old.md", "old");
+        write("attachments/abc/slides.pdf", "pdf");
+        write("attachments/abc/.read/slides.pdf.txt", "text copy");
+        write("recording-sources/abc/r1.json", "{}");
+        write("recording-sources/abc/r1.passages", "p");
+        write("recording-sources/abc/r1.points", "q");
+        write("calendar/feed.1234.ics", "BEGIN:VCALENDAR");
+        write("incoming/up/item", "half");
+        write("ui-prefs.json", "{}");
+        write("keep.json", "{}");
+        write("calendars.json", "{}");
+        write("graph.json.before-database", "{}");
+        let chats = data.join("chats");
+        let now = chrono::Utc::now();
+        crate::chats::save(
+            &chats,
+            "chat-1234",
+            serde_json::from_value(serde_json::json!({ "mode": "chat", "messages": [{ "role": "user", "text": "hi" }] })).unwrap(),
+            now,
+        )
+        .unwrap();
+        let doc = crate::chat_files::add(&chats, "chat-1234", "w.pdf", "week 3", now).unwrap();
+        let task = serde_json::from_value(serde_json::json!({"id":"texport-1234", "title":"Example task", "created_at":now, "updated_at":now})).unwrap();
+        crate::tasks::put(&chats, &task).unwrap();
+        let board = crate::boards::new_board("Plan", now);
+        crate::boards::put_board(&chats, &board).unwrap();
+        let card = serde_json::from_value(serde_json::json!({"id":"c1234567", "board": board.id, "column": board.columns[0].id, "title": "Card", "created_at":now, "updated_at":now})).unwrap();
+        crate::boards::put_card(&chats, &card).unwrap();
+        let mut out = std::io::Cursor::new(Vec::new());
+        write_zip(
+            &mut out,
+            &notes,
+            &chats,
+            Parts {
+                uploads: true,
+                chats: true,
+                trash: true,
+            },
+        )
+        .unwrap();
+        let mut want = vec![
+            "leo/README.txt".to_string(),
+            "leo/notes/Top.md".into(),
+            "leo/notes/cs/Graphs.md".into(),
+            "leo/trash/Old.md".into(),
+            "leo/uploads/abc/slides.pdf".into(),
+            "leo/recording-sources/abc/r1.json".into(),
+            "leo/recording-sources/abc/r1.passages".into(),
+            "leo/recording-sources/abc/r1.points".into(),
+            "leo/tasks.json".into(),
+            "leo/boards.json".into(),
+            "leo/chats/chat-1234.json".into(),
+            format!("leo/chats/chat-1234.files/{}.txt", doc.id),
+        ];
+        want.sort();
+        assert_eq!(names(out.into_inner()), want);
     }
 }

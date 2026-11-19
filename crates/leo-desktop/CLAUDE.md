@@ -9,7 +9,9 @@ a test, or leave it unset to see the user's own data.
 ## Startup (`lib.rs`)
 
 1. macOS: `PATH` = the login shell's PATH (`shell_path::login_path`, markers,
-   3 s timeout, process group killed on timeout) merged with the current PATH and
+   3 s timeout, process group killed on timeout; the last good answer is kept in
+   `<config>/login-path` and used at launch, refreshed in the background after the
+   window opens; with no saved answer the first launch waits for the shell) merged with the current PATH and
    `usual_folders` (Homebrew, `/usr/local/bin`, `~/.local/bin`, `~/.cargo/bin`),
    so Codex, Claude Code and Ollama are found when Finder starts leo.
 2. `leo_web::start` on `port::remembered` (`<config>/app-port`, default 47318,
@@ -29,12 +31,20 @@ a test, or leave it unset to see the user's own data.
    header row: to the right of the window controls when windowed, flush left in
    full screen (`lib.rs` tells the page on load and on every resize). Folded on
    a windowed Mac, the toggle drops into the rail below the window controls.
+5. A part that cannot start (the menu bar icon, the Quit menu, the dictation popup)
+   is named in Health under App preferences and the window still opens; a failure
+   of dictation, app settings or the main window opens `index.html?problem=…`.
 
 ## Behaviour
 
 - Close hides the window; in macOS full screen it first leaves full screen (`set_fullscreen(false)`) and hides on the first `Resized` that reports windowed, or after 1 s if none arrives, because hiding a full-screen window left a black Space (`LEAVING_FULLSCREEN`, `show` clears it); Dock click and "Open leo" show
   it; on macOS, Leo's Quit menu items or ⌘Q need a second attempt within three seconds
   (the first shows a prompt). Update restarts and error exits bypass this guard.
+  Every quit leo sees (menu, ⌘Q, menu bar, Dock, the page's Quit, an update restart;
+  on Windows the menu bar and the page's Quit) first asks the page to settle its saves
+  (`leoFromApp('quit', 'now')`, answered by `POST /api/app {action: 'settled'}`) and
+  waits up to 3 s (`QuitGate`, `QUIT_WAIT`), before an update on quit installs and
+  before the engine stops (2026-11-17).
   `RunEvent::Exit` stops the engine (6 s cap), without committing or pushing notes.
   The macOS app menu replaces the predefined native Quit item with a regular
   ⌘Q item routed through `app.exit(0)`, so it reaches the guard and update actor.
@@ -46,8 +56,8 @@ a test, or leave it unset to see the user's own data.
 - Menu bar icon (`tray.rs`, 2026-11-02, the user's request): Open Leo, Record a
   lecture / Record a call (shows the window and calls the page's
   `window.leoFromApp('record', kind)`, which presses Start for that kind; a
-  running recording is just shown), Copy last dictation (newest row of
-  `leo_web::dictation::recent`, native clipboard), status rows (speech model
+  running recording is just shown), Copy last dictation (`leo_web::dictation::newest`,
+  whole, native clipboard), status rows (speech model
   `Library::selected_name`, writing AI and model plus 5h/7d plan use from
   `web_settings::writing_status`, AI use since launch `Running::usage_line`),
   Settings…, Check for updates… (queues a check, opens Updates & about), the
@@ -76,7 +86,7 @@ a test, or leave it unset to see the user's own data.
   start+10 min, closes the banner then, and a click opens Record. Never asked during
   onboarding; an unbundled run has no bundle id and posts nothing; only one
   reminder waits on the question at a time. `permissions::notifications` reads the
-  setting with a 500 ms bound; Health shows a Notifications row (warn) only once
+  setting with a 500 ms bound; the status poll reuses the last answer for 10 s and never waits on it; Health shows a Notifications row (warn) only once
   it is denied, whose button opens System Settings → Notifications. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
   characters with an ellipsis) under Record a call until start+10 min, hidden while a recording is live
   (`Running::recording_live`), so a denied or missed notification still has a way in.
@@ -87,7 +97,7 @@ a test, or leave it unset to see the user's own data.
 - Sign in (2026-11-09, `sign_in.rs`, AppApi `{action:"sign_in",provider}`, only
   `claude_code`/`codex`): Codex runs `codex login` quietly (it opens the browser; one at
   a time, reaped, stopped after 10 min); Claude Code opens a terminal running the resolved
-  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself) opened with
+  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
   `open` on macOS, and on Windows `cmd /c start "" cmd /k claude`, the one intentional
   visible console. The command lines are pure functions with unit tests.
 - Downloads save to `~/Downloads` under a free name (`links::download_path`)
@@ -180,7 +190,7 @@ Enigo is taken out of its state slot for native I/O; layout-aware Cmd+V resolves
 on the main thread. Without Accessibility or with an elevated Windows target,
 text remains on the clipboard with a manual-paste instruction.
 
-`overlay.rs` creates a bundled `dist/dictation.html` popup: a nonactivating NSPanel
+`overlay.rs` creates the bundled `dist/dictation.html` popup just after the main page has loaded (or at the first dictation, if that comes sooner): a nonactivating NSPanel
 on macOS, nonfocusable always-on-top window on Windows. It uses the focused
 window's monitor, with cursor/primary fallbacks, and supports top/bottom and
 Live/Minimal/Off. Its CSS token block comes directly from the web page's theme;
@@ -205,7 +215,9 @@ models too slow for live text (`Selected.live`) skip the live pass (Voxtral: abo
 103 s for 60 s of speech, estimated); if Silero cannot load, dictation runs
 unfiltered; and when a streaming model's filter kept nothing, the batch run gets
 the raw audio, so quiet speech is not lost whole. Text stays
-visible while the final pass runs. With AI writing on, Escape stays registered through the
+visible while the final pass runs. A dictation of any length is captured: past 4
+minutes it is transcribed in pieces cut at pauses (`dictation::pieces`) and joined;
+under 4 minutes it runs in one piece, unchanged. With AI writing on, Escape stays registered through the
 polishing step (its own `escape` flag, separate from `capturing`), and a
 fallback shows a four-second "Pasted without AI writing" notice with the
 reason. Settings warns when no writing AI is set up (`writing_ready`, which is
@@ -229,7 +241,7 @@ Permission status checks never open the microphone; requests are explicit.
 A microphone request after a macOS denial opens the Microphone privacy pane,
 since the system shows its dialog only once.
 Health combines host doctor checks with native permission, model and shortcut
-checks. macOS helper output is bounded, nonblocking and timed out by process group.
+checks. The one `leo_core::children::run_bounded` runner bounds and times out helper output, killing the process tree.
 
 `updates.rs` owns updater checks, verified downloads and installation on one actor.
 Automatic checks and install-on-quit default on; debug startup checks stay off.
@@ -255,7 +267,7 @@ and scripts/set-version.sh remain authoritative.
 
 Release assets are macOS arm64/x64 app archives and DMGs plus Windows x64 NSIS.
 CI uses one stable self-signed identity and verifies both bundle and CLI signatures;
-updater signatures cover the same app archive or NSIS used by terminal installation.
+updater signatures cover the same app archive or NSIS used by the install scripts.
 Windows builds set `TRANSCRIBE_CMAKE_ARGS` to an AVX2 floor (2026-11-04): transcribe.cpp
 otherwise tunes to the build machine, which crashed with an illegal instruction when CI
 reused a cache from another runner and would on users' processors too. Handy picks
@@ -317,3 +329,5 @@ Leo is not active, its main window is not on the active Space (`isOnActiveSpace`
 when hidden, `needs_flip`); a click within a second of the last flip waits out the gap, so rapid changes never leave extra Dock icons; Leo in front or beside
 you never flips. `setCanHide` was not needed in the spike. Only the gate is tested; the
 real behaviour needs a release and a full-screen Space.
+
+App-owned paths use the shared `leo_core::paths::own` registry used by uninstall.

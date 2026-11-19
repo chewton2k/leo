@@ -54,12 +54,6 @@ const MIN_MULTI_WORD_CHARS: usize = 5;
 /// one on that basis loses speech, so a lone word must be distinctive.
 const MIN_SINGLE_WORD_CHARS: usize = 8;
 
-/// The interval to wait after a failure, doubling up to [`MAX_ROLL_INTERVAL`].
-///
-/// A three-second cadence is only affordable while requests succeed. Against a
-/// rate-limited provider, retrying at the same pace makes the limit permanent,
-/// so each failure halves the request rate until it recovers.
-pub const CLOUD_ROLL_INTERVAL: Duration = Duration::from_secs(8);
 pub const SETTLE_AFTER_SECS: u64 = 12;
 pub const SETTLE_EARLIEST_SECS: u64 = 6;
 pub const SETTLE_KEEP_SECS: u64 = 2;
@@ -81,6 +75,11 @@ pub fn quietest(samples: &[i16], from: usize, to: usize, frame: usize) -> usize 
         .unwrap_or(to)
 }
 
+/// The interval to wait after a failure, doubling up to [`MAX_ROLL_INTERVAL`].
+///
+/// A three-second cadence is only affordable while requests succeed. Against a
+/// rate-limited provider, retrying at the same pace makes the limit permanent,
+/// so each failure halves the request rate until it recovers.
 pub fn backoff(current: Duration) -> Duration {
     let doubled = current.saturating_mul(2);
     if doubled > MAX_ROLL_INTERVAL {

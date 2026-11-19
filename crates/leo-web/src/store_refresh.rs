@@ -4,6 +4,7 @@ use std::time::{Duration, Instant};
 use leo_core::watch::Watch;
 
 const RECONCILE: Duration = Duration::from_secs(60);
+const BROKEN_RECHECK: Duration = Duration::from_secs(2);
 
 pub struct Changes {
     watch: Option<Watch>,
@@ -14,8 +15,12 @@ pub struct Changes {
 
 impl Changes {
     pub fn new(notes: &Path) -> Self {
+        let watch = Watch::start(notes);
+        if let Some(watch) = &watch {
+            crate::jsonline::watched(notes, watch.leo());
+        }
         Self {
-            watch: Watch::start(notes),
+            watch,
             checked: None,
             #[cfg(test)]
             delayed: false,
@@ -31,13 +36,19 @@ impl Changes {
         let (touched, healthy) = self
             .watch
             .as_ref()
-            .map(|watch| (watch.take(), !watch.broken()))
+            .map(|watch| signals(self.checked, now, watch.take(), watch.broken()))
             .unwrap_or((false, false));
         let due = needed(self.checked, now, touched, healthy);
         if due {
             self.checked = Some(now);
         }
         due
+    }
+
+    pub fn trash_changed(&self) -> bool {
+        self.watch
+            .as_ref()
+            .is_none_or(|watch| watch.take_trash() | watch.broken() | cfg!(windows))
     }
 
     #[cfg(test)]
@@ -48,6 +59,11 @@ impl Changes {
             delayed: true,
         }
     }
+}
+
+fn signals(checked: Option<Instant>, now: Instant, touched: bool, broken: bool) -> (bool, bool) {
+    let stale = checked.is_none_or(|last| now.saturating_duration_since(last) >= BROKEN_RECHECK);
+    (touched || (broken && stale), true)
 }
 
 fn needed(checked: Option<Instant>, now: Instant, touched: bool, healthy: bool) -> bool {
@@ -115,6 +131,28 @@ mod tests {
         for touched in [false, true] {
             assert!(needed(checked, now, touched, false));
         }
+    }
+
+    #[test]
+    fn a_broken_watcher_is_rechecked_at_most_every_two_seconds() {
+        let now = Instant::now();
+        let mut checked = None;
+        let mut scans = 0;
+        for _ in 0..100 {
+            let (touched, healthy) = signals(checked, now, false, true);
+            if needed(checked, now, touched, healthy) {
+                scans += 1;
+                checked = Some(now);
+            }
+        }
+        assert_eq!(scans, 1);
+        let later = now + BROKEN_RECHECK;
+        let (touched, healthy) = signals(checked, later, false, true);
+        assert!(needed(checked, later, touched, healthy));
+        let (touched, healthy) = signals(checked, now, true, true);
+        assert!(needed(checked, now, touched, healthy));
+        let (touched, healthy) = signals(checked, now, false, false);
+        assert!(!needed(checked, now, touched, healthy));
     }
 
     #[test]

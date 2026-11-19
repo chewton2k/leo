@@ -38,6 +38,7 @@ struct Counts {
 #[derive(Default)]
 pub struct Usage {
     rows: Mutex<BTreeMap<Purpose, Counts>>,
+    #[cfg(test)]
     tools: Mutex<Tools>,
     saved_in: OnceLock<PathBuf>,
 }
@@ -381,11 +382,13 @@ impl Usage {
     }
 
     pub(crate) fn tool(&self, failed: bool, reused: bool) {
-        let mut held = self.tools.lock().unwrap_or_else(|e| e.into_inner());
-        held.calls = held.calls.saturating_add(1);
-        held.failures = held.failures.saturating_add(u64::from(failed));
-        held.reused = held.reused.saturating_add(u64::from(reused));
-        drop(held);
+        #[cfg(test)]
+        {
+            let mut held = self.tools.lock().unwrap_or_else(|e| e.into_inner());
+            held.calls = held.calls.saturating_add(1);
+            held.failures = held.failures.saturating_add(u64::from(failed));
+            held.reused = held.reused.saturating_add(u64::from(reused));
+        }
         let Some(chats) = self.saved_in.get() else {
             return;
         };
@@ -405,6 +408,7 @@ impl Usage {
         }
     }
 
+    #[cfg(test)]
     pub fn tools(&self) -> Tools {
         self.tools.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
@@ -441,6 +445,7 @@ impl Usage {
         format!("{calls} AI {kind} · {} tokens{cache}", short(tokens))
     }
 
+    #[cfg(test)]
     pub fn snapshot(&self) -> Vec<Row> {
         rows_of(&self.rows.lock().unwrap_or_else(|e| e.into_inner()))
     }

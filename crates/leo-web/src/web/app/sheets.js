@@ -78,9 +78,14 @@ function trapSheetFocus(scrim) {
   });
 }
 
+function sheetButtons(primary, { cancel = 'Cancel', action = 'close', middle = '', kind = 'primary' } = {}) {
+  const [label, attrs] = primary || [];
+  return `<div class="buttons"><button type="button" class="btn plain" data-action="${action}">${cancel}</button>${middle}${primary ? `<button type="button" class="btn ${kind}" ${attrs}>${label}</button>` : ''}</div>`;
+}
+
 function confirmSheet({ title, text, yes, action, data = '', danger = true, cancel = 'close' }) {
   const lines = (Array.isArray(text) ? text : [text]).filter(Boolean).map((line) => `<p>${line}</p>`).join('');
-  return sheet(`<h3>${title}</h3>${lines}<div class="buttons"><button class="btn plain" data-action="${cancel}">Cancel</button><button class="btn ${danger ? 'danger' : 'primary'}" data-action="${action}"${data}>${yes}</button></div>`);
+  return sheet(`<h3>${title}</h3>${lines}${sheetButtons([yes, `data-action="${action}"${data}`], { action: cancel, kind: danger ? 'danger' : 'primary' })}`);
 }
 
 const SWIPE_CLOSE = 90;
@@ -300,10 +305,26 @@ function drawQuick() {
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
 }
 
+const QUICK_DUE_ROWS = 6;
+const QUICK_DUE_PAGE = 50;
+
+function quickDueRows(tasks) {
+  return tasksGroups(tasks).filter(([name]) => name === 'Overdue' || name === 'Today').flatMap(([name, list]) => list.map((t) => ({ ...t, late: name === 'Overdue' }))).slice(0, QUICK_DUE_ROWS);
+}
+
 async function loadQuickDue() {
-  const tasks = (await api('/api/tasks')).tasks || [];
-  const groups = tasksGroups(tasks);
-  quick.due = groups.filter(([name]) => name === 'Overdue' || name === 'Today').flatMap(([name, list]) => list.map((t) => ({ ...t, late: name === 'Overdue' }))).slice(0, 6);
+  const today = S.dayKey(new Date());
+  const tasks = [];
+  for (;;) {
+    const answer = await api(`/api/tasks?offset=${tasks.length}&limit=${QUICK_DUE_PAGE}`);
+    const page = answer.tasks || [];
+    tasks.push(...page);
+    const last = page[page.length - 1];
+    if (!last || tasks.length >= (answer.total ?? 0) || last.done || !last.date || last.date > today) break;
+    const due = quickDueRows(tasks);
+    if (due.length >= QUICK_DUE_ROWS && (due[QUICK_DUE_ROWS - 1].late ? true : last.date >= today)) break;
+  }
+  quick.due = quickDueRows(tasks);
   drawQuickDue();
 }
 
@@ -343,7 +364,7 @@ async function quickGo(at) {
   }
   if (row.kind === 'ask') {
     closeSheet();
-    if (!chat.askNew(row.text)) toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+    if (!chat.askNew(row.text)) toast('Felix is still answering. Try again in a moment.', { bad: true });
     return;
   }
   if (row.kind === 'open' || row.kind === 'place' || row.kind === 'folder' || row.kind === 'search') {
@@ -354,7 +375,7 @@ async function quickGo(at) {
   }
   if (row.kind === 'chat') {
     if (chat.isBusy()) {
-      toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+      toast('Felix is still answering. Try again in a moment.', { bad: true });
       return;
     }
     closeSheet();
@@ -365,7 +386,7 @@ async function quickGo(at) {
   try {
     if (row.kind === 'task') {
       row.request = row.request || requestId();
-      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title.slice(0, 200), date: row.date, time: row.time, request: row.request } });
+      const made = await api('/api/tasks', { method: 'POST', body: { title: row.title, date: row.date, time: row.time, request: row.request } });
       closeSheet();
       loadTasksWindow().catch(() => {});
       toast(`Added “${made.title}” · ${quickWhen(row.date, row.time)}`, {
@@ -378,7 +399,7 @@ async function quickGo(at) {
       return;
     }
     const [first, ...rest] = row.title.split('\n');
-    const note = await api('/api/notes', { method: 'POST', body: { title: first.trim().slice(0, 120) || 'Quick note', body: rest.join('\n').trim() } });
+    const note = await api('/api/notes', { method: 'POST', body: { title: first.trim() || 'Quick note', body: rest.join('\n').trim() } });
     closeSheet();
     toast(`Saved “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
     if (state.view === 'workspace') showLatest().catch(() => {});
@@ -419,7 +440,7 @@ function newFolder(el) {
   }
   const scrim = sheet(`<h3>New folder${parent ? ` in ${esc(folderLabel(parent))}` : ''}</h3>
     <label class="field">${ICON.folder}<input id="folder-name" data-parent="${esc(parent)}" placeholder="${parent ? 'Name, e.g. week 3' : 'Name, e.g. cs130'}" maxlength="120" autocomplete="off"></label>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" data-action="create-folder">Create</button></div>`);
+    ${sheetButtons(['Create', 'data-action="create-folder"'])}`);
   const input = $('#folder-name', scrim);
   input.focus();
   input.addEventListener('keydown', (e) => {
@@ -481,7 +502,7 @@ async function saveFolder(name, parent) {
     await loadSideFolders();
     return { kind: 'folder', dir: path };
   } catch (e) {
-    if (e.status === 409) toast('That folder already exists. Choose another name.', { bad: true });
+    if (e.status === 409) toast('That folder name is already in use. Choose another name.', { bad: true });
     else fail(e);
     return false;
   }
@@ -704,8 +725,12 @@ function printNotes(s) {
 async function openTitle(title) {
   const want = title.trim().toLowerCase();
   if (!want) return;
-  const hits = await api(`/api/search?q=${enc(title)}&brief=true`);
-  const hit = hits.find((n) => n.title.trim().toLowerCase() === want);
+  let hit = null;
+  for (let offset = 0; !hit; offset += SEARCH_STEP) {
+    const hits = await api(`/api/search?q=${enc(title)}&brief=true&limit=${SEARCH_STEP}&offset=${offset}`);
+    hit = hits.find((n) => n.title.trim().toLowerCase() === want);
+    if (hits.length < SEARCH_STEP) break;
+  }
   go(hit ? noteHash(hit.id) : `#/search/${enc(title)}`);
 }
 

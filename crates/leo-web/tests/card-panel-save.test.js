@@ -35,3 +35,45 @@ test('card panel saves of one field run one after another, so the newest text la
   await second;
   assert.equal(card.description, 'second');
 });
+
+test('a card title save that cannot reach leo retries after 3 s and says so', async () => {
+  class Offline extends Error {}
+  const card = { id: 'c1', title: 'old' };
+  const saved = { isConnected: true, textContent: '' };
+  const toasts = [];
+  const pending = [];
+  const timers = {};
+  let attempts = 0;
+  const context = {
+    card, clearTimeout: () => {}, timers, saved, problem: { isConnected: false }, title: {}, fit() {}, tellOver: () => false, tell() {}, enc: (s) => s,
+    toast: (message) => toasts.push(message),
+    Offline,
+    Locked: class extends Error {},
+    fail() {},
+    KANBAN_RETRY_MS: 3000,
+    setTimeout: (run, ms) => { pending.push({ run, ms }); return pending.length; },
+    valueOf: () => 'new',
+    kanbanWrite: async (url, { body }) => {
+      if (++attempts < 3) throw new Offline('Cannot reach leo');
+      return body;
+    },
+    kanbanUpdate: (c, done) => Object.assign(c, done),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${source.slice(start, end)}\n;globalThis.__save = save;`, context);
+  assert.equal(await context.__save('title'), false);
+  assert.equal(saved.textContent, 'Not saved, will retry');
+  assert.deepEqual(pending.map((p) => p.ms), [3000]);
+  assert.equal(toasts.length, 1);
+  pending.shift().run();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(attempts, 2);
+  assert.equal(toasts.length, 1, 'the error is told once, not on every try');
+  assert.deepEqual(pending.map((p) => p.ms), [3000]);
+  pending.shift().run();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(attempts, 3);
+  assert.equal(card.title, 'new');
+  assert.equal(saved.textContent, 'Saved');
+  assert.equal(pending.length, 0);
+});

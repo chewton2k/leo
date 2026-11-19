@@ -1,6 +1,6 @@
 const actions = {
   'app-command': (el) => appChange({action:el.dataset.appAction}),
-  'health-refresh': loadHealth,
+  'health-refresh': () => loadHealth(true),
   'onboarding-next': finishOnboarding,
   'onboarding-model': onboardingModel,
   'onboarding-skip': skipOnboarding,
@@ -15,6 +15,7 @@ const actions = {
   'shortcut-reset': (el) => shortcutReset(el.dataset.name),
   'dictation-record': () => dictationChange({action:'record_shortcut'}),
   'dictation-original': toggleDictationOriginal,
+  'dictation-full': showDictationFull,
   'dictation-clear': clearDictationsAsk, 'dictation-clear-now': clearDictationsNow,
   'dictation-copy': (el) => dictationChange({action:'copy',id:Number(el.dataset.id)}).then(() => pulse(el)),
   'dictation-edit': startDictationEdit,
@@ -70,6 +71,7 @@ const actions = {
     cal.polls = 0;
     return api('/api/calendar/refresh', { method: 'POST' }).catch(() => null).then(() => loadSchedule(seq));
   },
+  'cal-tray-more': () => calTrayMore(),
   'cal-done': () => {
     cal.showDone = !cal.showDone;
     try {
@@ -80,6 +82,7 @@ const actions = {
     drawCalendar();
   },
   'task-new': (el) => newTaskSheet(el.dataset.day || null),
+  'tasks-more': () => tasksMore(),
   'task-open': (el) => taskSheet(el.dataset.id, el.dataset.on || null),
   'task-open-here': (el) => openTaskAnywhere(el.dataset.id, el.dataset.on || null),
   'task-done': (el) => {
@@ -95,6 +98,7 @@ const actions = {
   'task-delete': (el) => deleteTask(el.dataset.id),
   'task-promote': (el) => promoteTask(el.dataset.line),
   'note-tasks': () => noteTasksSheet(),
+  'note-tasks-more': () => noteTasksMore(),
   'source-close': closeSource,
   'source-file': (el) => openSource(el.dataset.id, el.dataset.name),
   'set-model': (el) => changeSetting({ set: 'model', task: el.dataset.task, value: el.dataset.model }),
@@ -121,9 +125,14 @@ const actions = {
   'source-save': () => saveSource().catch(fail),
   'source-regenerate': () => regenerateSource().catch(fail),
   'source-back': () => drawRecordingSources(),
+  'source-earlier': () => sourceEarlier().catch(fail),
+  'source-later': () => sourceLater().catch(fail),
+  'source-match': (el) => sourceMatch(el.dataset.source, el.dataset.at).catch(fail),
   'source-apply': () => applyGenerated().catch(fail),
   'rec-finish': () => recorder.finishAvailable().catch(fail),
   'rec-recover': (el) => recorder.recover(el.dataset.id).catch(fail),
+  'rec-older': () => recorder.older().catch(fail),
+  'rec-earlier': () => recorder.earlier().catch(fail),
   close: () => closeSheet(),
   'open-folder': openFolder,
   'open-note': openExplorerNote,
@@ -147,7 +156,7 @@ const actions = {
     go(dir ? `#/new/${enc(dir)}` : '#/new');
   },
   'search-ask': (el) => {
-    if (!chat.askNew(el.dataset.query)) toast('Felix is finishing another answer. Try again in a moment.', { bad: true });
+    if (!chat.askNew(el.dataset.query)) toast('Felix is still answering. Try again in a moment.', { bad: true });
   },
   'search-new': async (el) => {
     el.disabled = true;
@@ -159,6 +168,7 @@ const actions = {
     }
   },
   'search-retry': (el) => showSearch(el.dataset.query),
+  'search-more': showMore,
   'new-folder': newFolder,
   'create-folder': createFolder,
   settings: () => {

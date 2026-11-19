@@ -477,10 +477,90 @@ test('an edit whose marks would hide a change of line breaks or indentation give
   assert.deepEqual(md.wordDiff('a b', 'a b\n'), [{ kind: 'same', text: 'a b' }, { kind: 'ins', text: '\n' }]);
 });
 
-test('a long run of unmatched ![[ openers stays fast', () => {
-  const started = Date.now();
-  render('![['.repeat(7000));
-  assert.ok(Date.now() - started < 1000);
+test('a long run of unmatched openers grows linearly', () => {
+  const brackets = ['![[', '[', '![a|', '[a](', '![a]('].map((opener) => [opener, ['', ']', ')', '])']]);
+  for (const [opener, tails, prefix = ''] of [
+    ...brackets,
+    ['\\[', ['', '\\]']],
+    ['\\(', ['', '\\)']],
+    ['\\[', [''], 'Before \\[x\\] '],
+    ['\\(', [''], 'Before \\(x\\) '],
+    ['[a](<', [' )']],
+    ['![a](<', [' )']],
+    ['![a](< ', ['', ')']],
+    ['![a](< )', ['', '>', '>)']],
+  ]) {
+    for (const tail of tails) {
+      const time = (n) => {
+        const input = prefix + opener.repeat(n) + tail;
+        const started = process.cpuUsage();
+        render(input);
+        md.plain(input);
+        const { user, system } = process.cpuUsage(started);
+        return (user + system) / 1000;
+      };
+      const small = Math.min(time(20000), time(20000), time(20000));
+      const large = Math.min(time(40000), time(40000), time(40000));
+      assert.ok(large < 1000 && large <= Math.max(small * 3, 50), `${prefix}${opener} ${tail} ${small} ${large}`);
+    }
+  }
+});
+
+test('math keeps the same delimiters and escaping beside unclosed openers', () => {
+  assert.equal(render('Before \\[x < y\\] and \\[unfinished'), '<p>Before <span class="math math-block" data-tex="x &lt; y">x &lt; y</span> and \\[unfinished</p>');
+  assert.equal(render('Before \\(x_i\\) and \\(unfinished'), '<p>Before <span class="math" data-tex="x_i">x_i</span> and \\(unfinished</p>');
+  assert.equal(render('Before \\[\\] \\(\\) \\[unfinished'), '<p>Before \\[\\] \\(\\) \\[unfinished</p>');
+  assert.equal(render('Before \\[unclosed and \\(x_i\\) and $$y$$'), '<p>Before \\[unclosed and <span class="math" data-tex="x_i">x_i</span> and <span class="math math-block" data-tex="y">y</span></p>');
+});
+
+test('links, pictures and embeds read the same beside unclosed brackets', () => {
+  assert.equal(render('[a [b](https://a.b)'), '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">a [b</a></p>');
+  assert.equal(render('[a] [b](https://a.b) [c'), '<p>[a] <a href="https://a.b" target="_blank" rel="noopener noreferrer">b</a> [c</p>');
+  assert.equal(render('![x](javascript:1)'), '<p>![x](javascript:1)</p>');
+  assert.equal(render('![a](<>) ![b](<c>)'), '<p>![a](&lt;&gt;) <img class="note-img" src="/api/image?path=c&amp;from=" alt="b" loading="lazy"></p>');
+  assert.equal(render('![a](<first) then > broken)'), '<p><img class="note-img" src="/api/image?path=%3Cfirst&amp;from=" alt="a" loading="lazy"> then &gt; broken)</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> "title") ![tail](<'), '<p><img class="note-img" src="/api/image?path=%20)%20then%20!%5Ba%5D(%3Cpath%20with%20spaces.png&amp;from=" alt="bad" loading="lazy"> ![tail](&lt;</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> nope) ![b](fallback.png)'), '<p>![bad](&lt; ) then ![a](&lt;path with spaces.png&gt; nope) <img class="note-img" src="/api/image?path=fallback.png&amp;from=" alt="b" loading="lazy"></p>');
+  assert.equal(md.plain('[a] ![[b]] ![c](d) [e](f) [g'), '[a] e [g');
+});
+
+test('a copied selection keeps its pictures as data urls and nothing else that is live', () => {
+  const dot = 'data:image/png;base64,iVBORw0KGgo=';
+  const html = `<p>Before <strong>bold</strong> <a href="https://a.b/c?x=1&amp;y=2" class="x" onclick="evil()">link</a></p><p><img class="note-img" src="${dot}" alt="a dot" onerror="evil()"></p>`;
+  assert.equal(md.copyHtml(html), `<p>Before <strong>bold</strong> <a href="https://a.b/c?x=1&amp;y=2">link</a></p><p><img src="${dot}" alt="a dot"></p>`);
+});
+
+test('a picture that cannot be embedded is left as its alt text and local addresses never leave', () => {
+  const html = '<p><img src="/api/image?path=a.png&amp;from=" alt="the &quot;queue&quot; &gt; stack"></p><p><img src="http://127.0.0.1:1234/x.png" alt=""></p><p><a href="#/n/abc123">a note</a> <a href="/api/image?path=a.png">file</a> <a href="http://localhost:5000/x">local</a> <a href="javascript:evil()">js</a></p>';
+  const out = md.copyHtml(html);
+  assert.equal(out, '<p>the &quot;queue&quot; &gt; stack</p><p></p><p>a note file local js</p>');
+  assert.ok(!/127\.0\.0\.1|\/api\/|localhost|javascript|href/.test(out), out);
+});
+
+test('a copied selection never carries script, handlers, styles or inline drawings', () => {
+  const dot = 'data:image/png;base64,AAAA';
+  const html = `<div onclick="x()" style="color:red"><script>alert(1)</script><style>p{}</style><span class="m" data-x="1">kept <em>text</em></span><svg><script>1</script><text>drawn</text></svg><iframe src="/x">hi</iframe><button>go</button><!-- hidden --><img src='${dot}' alt='ok' onload=evil()><textarea>typed</textarea>after</div>`;
+  const out = md.copyHtml(html);
+  assert.equal(out, `<div>kept <em>text</em><img src="${dot}" alt="ok">after</div>`);
+  assert.ok(!/script|onclick|onload|style|svg|iframe|button|alert|typed|hidden/.test(out), out);
+});
+
+test('an attribute holding a > does not end its tag early and bare text stays escaped', () => {
+  const out = md.copyHtml('<p title="a>b"><img alt="x>y" src="/api/image?path=q"> 1 &lt; 2 &amp; 3</p>');
+  assert.equal(out, '<p>x&gt;y 1 &lt; 2 &amp; 3</p>');
+});
+
+test('pictures are bounded one by one and together, the rest left as alt text', () => {
+  const big = (n) => `data:image/png;base64,${'A'.repeat(n)}`;
+  const html = `<img src="${big(50)}" alt="one"><img src="${big(200)}" alt="two"><img src="${big(50)}" alt="three"><img src="${big(50)}" alt="four">`;
+  const out = md.copyHtml(html, { each: 100, all: 150 });
+  assert.equal(out, `<img src="${big(50)}" alt="one">two<img src="${big(50)}" alt="three">four`);
+  assert.equal(md.copyHtml('<img src="data:text/html;base64,AAAA" alt="no"><img src="data:image/png;base64,A&quot;B" alt="no2">'), 'nono2');
+});
+
+test('unbalanced and nested tags come out balanced', () => {
+  assert.equal(md.copyHtml('</b><ul><li>a<li>b</ul><p><em>open'), '<ul><li>a<li>b</li></li></ul><p><em>open</em></p>');
+  assert.equal(md.copyHtml('<ol start="3"><li>x</li></ol>'), '<ol start="3"><li>x</li></ol>');
 });
 
 setImmediate(() => {

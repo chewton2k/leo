@@ -3,7 +3,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::boards::{self, Board, Card};
-use crate::tools::{Call, Done, Param, Proposal, Spec};
+use crate::tools::{Call, Done, Kind, Param, Proposal, Spec};
 
 const MOST_SHOWN: usize = 12_000;
 const DESCRIPTION_SHOWN: usize = 300;
@@ -29,6 +29,8 @@ const PRIORITY: Param = Param {
 pub const SPECS: [Spec; 9] = [
     Spec {
         name: "list_boards",
+        kind: Kind::ReadsLists,
+        step: "",
         purpose: "List Kanban boards (not calendar tasks).",
         params: &[],
         returns: "Board ids, names, columns and card counts.",
@@ -36,6 +38,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "open_board",
+        kind: Kind::ReadsLists,
+        step: "",
         purpose: "Read a board's cards by column, or one card in full.",
         params: &[
             BOARD,
@@ -50,6 +54,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "add_card",
+        kind: Kind::Organizes,
+        step: "Tried to add a card",
         purpose: "Add a requested card.",
         params: &[
             Param {
@@ -85,6 +91,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "update_card",
+        kind: Kind::Organizes,
+        step: "Tried to change a card",
         purpose: "Change card fields; omitted stay, empty clears.",
         params: &[
             CARD,
@@ -111,6 +119,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "move_card",
+        kind: Kind::Organizes,
+        step: "Tried to move a card",
         purpose: "Move a card to a column (status) or board, or reorder it.",
         params: &[
             CARD,
@@ -135,6 +145,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "delete_card",
+        kind: Kind::Organizes,
+        step: "Tried to delete a card",
         purpose: "Delete a requested card.",
         params: &[CARD, BOARD],
         returns: "Suggested, or done with Undo in Auto.",
@@ -142,6 +154,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "add_board",
+        kind: Kind::Organizes,
+        step: "Tried to make a board",
         purpose: "Make a requested board.",
         params: &[
             Param {
@@ -160,6 +174,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "change_board",
+        kind: Kind::Organizes,
+        step: "Tried to change a board",
         purpose: "Rename a board or set its columns; same-named columns keep their cards.",
         params: &[
             BOARD,
@@ -184,6 +200,8 @@ pub const SPECS: [Spec; 9] = [
     },
     Spec {
         name: "delete_board",
+        kind: Kind::Organizes,
+        step: "Tried to delete a board",
         purpose: "Delete only the requested board and its cards. Always asks the user.",
         params: &[BOARD],
         returns: "Suggested; the user decides.",
@@ -192,16 +210,9 @@ pub const SPECS: [Spec; 9] = [
 ];
 
 pub fn changes(name: &str) -> bool {
-    matches!(
-        name,
-        "add_card"
-            | "update_card"
-            | "move_card"
-            | "delete_card"
-            | "add_board"
-            | "change_board"
-            | "delete_board"
-    )
+    SPECS
+        .iter()
+        .any(|spec| spec.name == name && spec.kind == Kind::Organizes)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -405,7 +416,7 @@ pub fn column_names(text: &str) -> Result<Vec<String>, String> {
     };
     let listed: Vec<String> = listed
         .into_iter()
-        .map(|n| boards::clean_line(&n, boards::MOST_NAME))
+        .map(|n| boards::clean_line(&n))
         .filter(|n| !n.is_empty())
         .collect();
     if listed.is_empty() {
@@ -425,14 +436,6 @@ pub fn column_names(text: &str) -> Result<Vec<String>, String> {
     Ok(listed)
 }
 
-fn clip(text: &str, most: usize) -> String {
-    if text.chars().count() <= most {
-        return text.to_string();
-    }
-    let cut: String = text.chars().take(most).collect();
-    format!("{cut}…")
-}
-
 fn card_line(card: &Card, full: bool) -> String {
     let mut line = format!("- [{}] {}", card.id, quoted(&card.title));
     if !card.priority.is_empty() {
@@ -445,7 +448,7 @@ fn card_line(card: &Card, full: bool) -> String {
         let shown = if full {
             card.description.clone()
         } else {
-            clip(&card.description, DESCRIPTION_SHOWN)
+            crate::chats::clipped(&card.description, DESCRIPTION_SHOWN)
         };
         line.push_str(&format!("\n  description: {}", quoted(&shown)));
     }
@@ -494,7 +497,10 @@ pub fn read(chats: &Path, call: &Call) -> Done {
     if !wanted_card.trim().is_empty() {
         return match find_card(chats, &wanted_card, &call.text("board")) {
             Ok((card, board)) => read_done(
-                format!("Opened the card {}", quoted(&clip(&card.title, 60))),
+                format!(
+                    "Opened the card {}",
+                    quoted(&crate::chats::clipped(&card.title, 60))
+                ),
                 format!(
                     "Card on {} [{}], column {} [{}]:\n{}",
                     quoted(&board.name),
@@ -543,7 +549,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
     match call.name.as_str() {
         "add_card" => {
             let board = find_board(chats, &call.text("board"))?;
-            let title = boards::clean_line(&call.text("title"), boards::MOST_TITLE);
+            let title = boards::clean_line(&call.text("title"));
             if title.is_empty() {
                 return Err("give the card a title".into());
             }
@@ -555,8 +561,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
                     .ok_or_else(|| format!("{} has no columns", quoted(&board.name)))?,
                 wanted => find_column(&board, wanted)?,
             };
-            let description = boards::description_of(&call.text("description"))
-                .map_err(|e| e.trim_end_matches('.').to_lowercase())?;
+            let description = call.text("description").trim().to_string();
             Ok(Proposal::AddCard {
                 summary: format!(
                     "Add the card {} to {} on {}",
@@ -567,7 +572,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
                 board: board.id,
                 column,
                 title,
-                subheading: boards::clean_line(&call.text("subheading"), boards::MOST_SUBHEADING),
+                subheading: boards::clean_line(&call.text("subheading")),
                 description,
                 priority: priority_of(&call.text("priority"))?,
                 top: yes(&call.text("top")),
@@ -577,18 +582,11 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             let (card, _) = find_card(chats, &call.text("card"), &call.text("board"))?;
             let title = match given(call, "title") {
                 Some(t) if t.trim().is_empty() => return Err("a card needs a title".into()),
-                Some(t) => Some(boards::clean_line(&t, boards::MOST_TITLE)),
+                Some(t) => Some(boards::clean_line(&t)),
                 None => None,
             };
-            let subheading =
-                given(call, "subheading").map(|s| boards::clean_line(&s, boards::MOST_SUBHEADING));
-            let description = match given(call, "description") {
-                Some(d) => Some(
-                    boards::description_of(&d)
-                        .map_err(|e| e.trim_end_matches('.').to_lowercase())?,
-                ),
-                None => None,
-            };
+            let subheading = given(call, "subheading").map(|s| boards::clean_line(&s));
+            let description = given(call, "description").map(|d| d.trim().to_string());
             let priority = match given(call, "priority") {
                 Some(p) => Some(priority_of(&p)?),
                 None => None,
@@ -697,16 +695,9 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             })
         }
         "add_board" => {
-            let name = boards::clean_line(&call.text("title"), boards::MOST_NAME);
+            let name = boards::clean_line(&call.text("title"));
             if name.is_empty() {
                 return Err("give the board a name".into());
-            }
-            let all = boards::boards(chats);
-            if all.len() >= boards::MOST_BOARDS {
-                return Err(format!(
-                    "leo keeps up to {} boards; one must be deleted first",
-                    boards::MOST_BOARDS
-                ));
             }
             let columns = match call.text("columns").trim() {
                 "" => Vec::new(),
@@ -730,7 +721,7 @@ pub fn propose(chats: &Path, call: &Call) -> Result<Proposal, String> {
             let board = find_board(chats, &call.text("board"))?;
             let name = match given(call, "new_name") {
                 Some(n) if n.trim().is_empty() => None,
-                Some(n) => Some(boards::clean_line(&n, boards::MOST_NAME)),
+                Some(n) => Some(boards::clean_line(&n)),
                 None => None,
             };
             let columns = match call.text("columns").trim() {

@@ -8,18 +8,6 @@ use axum::{
 };
 use leo_core::recording;
 use serde::Deserialize;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
-struct Editing(Arc<AtomicBool>);
-impl Drop for Editing {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
-}
-
 async fn outside<R: Send + 'static>(
     state: &AppState,
     id: Option<String>,
@@ -28,7 +16,7 @@ async fn outside<R: Send + 'static>(
         + 'static,
 ) -> Result<R, StatusCode> {
     let (notes, note) = state
-        .with_store(move |store| {
+        .read_store(move |store| {
             let note = match id {
                 Some(id) => Some(store.find_note(&id).ok_or(StatusCode::NOT_FOUND)?.clone()),
                 None => None,
@@ -36,15 +24,35 @@ async fn outside<R: Send + 'static>(
             Ok((store.notes_dir.clone(), note))
         })
         .await?;
-    tokio::task::spawn_blocking(move || work(notes, note))
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+    super::off(move || work(notes, note)).await?
 }
 
 #[derive(Default, Deserialize)]
 pub(crate) struct SourceQuery {
     #[serde(default)]
     q: String,
+    #[serde(default)]
+    at: Option<String>,
+    #[serde(default)]
+    passages: Option<String>,
+    #[serde(default)]
+    points: Option<String>,
+}
+
+fn cursor(value: Option<&str>) -> Result<Option<u64>, StatusCode> {
+    match value {
+        None => Ok(Some(0)),
+        Some("end") => Ok(None),
+        Some(n) => n.parse().map(Some).map_err(|_| StatusCode::BAD_REQUEST),
+    }
+}
+
+fn joined<'a>(parts: impl Iterator<Item = &'a str>) -> String {
+    parts
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub(crate) async fn sources(
@@ -53,20 +61,65 @@ pub(crate) async fn sources(
     Query(query): Query<SourceQuery>,
 ) -> Response {
     match outside(&state, Some(id.clone()), move |notes, _| {
-        let sources = recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let failed = |_| StatusCode::INTERNAL_SERVER_ERROR;
+        let heads = recording::list(&notes, &id).map_err(failed)?;
         let words = leo_core::notes::question_words(&query.q);
         let mut matches = Vec::new();
-        for source in &sources {
-            for (index, p) in source.passages.iter().enumerate() {
-                let lower = p.text.to_lowercase();
-                let score: usize = words.iter().map(|w| lower.matches(w.as_str()).count()).sum();
-                if score > 0 { matches.push(serde_json::json!({"source": source.id, "index": index, "score": score, "passage": p})); }
+        let best = |matches: &mut Vec<(usize, serde_json::Value)>| {
+            matches.sort_by_key(|m| std::cmp::Reverse(m.0));
+            matches.truncate(10);
+        };
+        if !words.is_empty() {
+            for head in &heads {
+                recording::rows(
+                    &notes,
+                    &id,
+                    head,
+                    |seq, p| {
+                        let lower = p.text.to_lowercase();
+                        let score: usize =
+                            words.iter().map(|w| lower.matches(w.as_str()).count()).sum();
+                        if score > 0 {
+                            matches.push((
+                                score,
+                                serde_json::json!({"source": head.id, "seq": seq, "score": score, "passage": p}),
+                            ));
+                            if matches.len() > 100 {
+                                best(&mut matches);
+                            }
+                        }
+                        Ok(true)
+                    },
+                    |_, _| Ok(false),
+                )
+                .map_err(failed)?;
             }
         }
-        matches.sort_by_key(|m| std::cmp::Reverse(m["score"].as_u64().unwrap_or(0)));
-        matches.truncate(10);
-        let versions = sources.iter().map(|s| (s.id.clone(), source_version(s))).collect::<std::collections::BTreeMap<_,_>>();
-        Ok(serde_json::json!({"sources": sources, "matches": matches, "versions":versions}))
+        best(&mut matches);
+        let page = match query.at.clone().or_else(|| heads.first().map(|h| h.id.clone())) {
+            Some(at) => Some(
+                recording::page(
+                    &notes,
+                    &id,
+                    &at,
+                    recording::Cursor {
+                        passages: cursor(query.passages.as_deref())?,
+                        points: cursor(query.points.as_deref())?,
+                    },
+                )
+                .map_err(|_| StatusCode::NOT_FOUND)?,
+            ),
+            None => None,
+        };
+        let wants = joined(heads.iter().map(|h| h.wants.as_str()));
+        let mut list = serde_json::to_value(&heads).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        for head in list.as_array_mut().into_iter().flatten() {
+            if let Some(head) = head.as_object_mut() {
+                head.remove("trace");
+            }
+        }
+        let matches: Vec<_> = matches.into_iter().map(|m| m.1).collect();
+        Ok(serde_json::json!({"list": list, "wants": wants, "page": page, "matches": matches}))
     }).await {
         Ok(value) => Json(value).into_response(), Err(code) => error(code, "Could not read this recording"),
     }
@@ -92,39 +145,35 @@ pub(crate) async fn regenerate(
     let input = outside(&state, Some(id.clone()), move |notes, note| {
         let note = note.as_ref().ok_or(StatusCode::NOT_FOUND)?;
         let sources =
-            recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if sources.is_empty() {
+            recording::Sources::of(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        if sources.heads.is_empty() {
             return Err(StatusCode::NOT_FOUND);
         }
-        let joined = |part: fn(&recording::Archive) -> &str| {
-            sources
-                .iter()
-                .map(part)
-                .map(str::trim)
-                .filter(|t| !t.is_empty())
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
         let profile = recording::Profile {
-            context: joined(|s| s.context.as_str()),
-            wants: body.wants.unwrap_or_else(|| joined(|s| s.wants.as_str())),
+            context: joined(sources.heads.iter().map(|h| h.context.as_str())),
+            wants: body
+                .wants
+                .unwrap_or_else(|| joined(sources.heads.iter().map(|h| h.wants.as_str()))),
             ..Default::default()
         }
-        .checked()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+        .checked();
         Ok((sources, profile, super::notes::version_of(note)))
     })
     .await;
     let (sources, profile, base) = match input {
         Ok(v) => v,
-        Err(code) => {
-            return error(
-                code,
-                "This note needs a kept recording transcript, and what you want must be under 4,000 characters",
-            )
-        }
+        Err(code) => return error(code, "This note needs a kept recording transcript"),
     };
-    match tokio::task::spawn_blocking(move || regenerate(sources, profile)).await {
+    let Ok(slot) = state.regenerating.clone().acquire_owned().await else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || regenerate(sources, profile))
+    })
+    .await
+    {
         Ok(Ok((title, body))) => {
             Json(serde_json::json!({"title": title, "body": body, "base": base})).into_response()
         }
@@ -140,74 +189,44 @@ pub(crate) async fn regenerate(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RawSource {
-    base: String,
+pub(crate) struct Fix {
     source: String,
-    points: Vec<recording::Point>,
-    passages: Vec<recording::Passage>,
+    base: u64,
+    changes: Vec<recording::Change>,
 }
 
 pub(crate) async fn edit_sources(
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(body): Json<RawSource>,
+    Json(body): Json<Fix>,
 ) -> Response {
-    if body.passages.len() > 2000
-        || body.points.len() > 500
-        || body
-            .passages
-            .iter()
-            .any(|p| p.text.len() > 100_000 || p.start_secs > p.end_secs)
-        || body.points.iter().any(|p| p.text.len() > 8000)
-    {
-        return error(
-            StatusCode::BAD_REQUEST,
-            "Recording source is too large or has invalid times",
-        );
-    }
-    if state.source_writing.swap(true, Ordering::AcqRel) {
+    let Ok(editing) = state.source_writing.clone().try_lock_owned() else {
         return error(
             StatusCode::CONFLICT,
             "Another transcript correction is being saved. Try again in a moment.",
         );
-    }
-    let _editing = Editing(state.source_writing.clone());
+    };
     match outside(&state, Some(id.clone()), move |notes, _| {
-        let mut sources =
-            recording::load(&notes, &id).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        let source = sources
-            .iter_mut()
-            .find(|s| s.id == body.source)
-            .ok_or(StatusCode::NOT_FOUND)?;
-        if source_version(source) != body.base {
-            return Err(StatusCode::CONFLICT);
-        }
-        let backup = leo_core::paths::contained_path(
-            &recording::root(&notes),
-            &std::path::Path::new(&id).join(format!("{}.original", source.id)),
-        )
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
-        if !backup.exists() {
-            recording::write_json(&backup, source)
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        }
-        source.points = body.points;
-        source.passages = body.passages;
-        recording::save(&notes, &id, source).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        let _editing = editing;
+        recording::edit(&notes, &id, &body.source, body.base, &body.changes).map_err(|e| {
+            match e.downcast_ref::<recording::Refused>() {
+                Some(recording::Refused::Stale) => StatusCode::CONFLICT,
+                Some(recording::Refused::NoRow) => StatusCode::BAD_REQUEST,
+                None if e
+                    .downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
+                {
+                    StatusCode::NOT_FOUND
+                }
+                None => StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        })
     })
     .await
     {
-        Ok(()) => Json(serde_json::json!({"saved": true})).into_response(),
+        Ok(head) => {
+            Json(serde_json::json!({"saved": true, "revision": head.revision})).into_response()
+        }
         Err(code) => error(code, "Could not save original notes"),
     }
-}
-
-fn source_version(source: &recording::Archive) -> String {
-    let text = serde_json::to_vec(source).unwrap_or_default();
-    let mut hash = 0xcbf2_9ce4_8422_2325u64;
-    for b in text {
-        hash ^= u64::from(b);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
 }

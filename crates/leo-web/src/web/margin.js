@@ -45,6 +45,22 @@
     return n;
   }
 
+  function edited(before, after) {
+    const from = sharedStart(before, after);
+    const to = before.length - sharedEnd(before.slice(from), after.slice(from));
+    return { from, to, by: after.length - before.length };
+  }
+
+  function carried(source, at, edit, text, t) {
+    if (!edit) return at;
+    const reach = [at.from - (t.prefix || '').length, at.to + (t.suffix || '').length];
+    if (reach[0] <= edit.to && edit.from <= reach[1]) return null;
+    const by = at.from >= edit.to ? edit.by : 0;
+    const from = at.from + by;
+    const to = at.to + by;
+    return source.slice(from, to) === text ? { ...at, from, to } : null;
+  }
+
   function byContext(source, quote, prefix, suffix) {
     const before = prefix.slice(-TAIL);
     const after = suffix.slice(0, TAIL);
@@ -65,9 +81,16 @@
     const hits = occurrences(source, quote);
     if (hits.length === 1) return { from: hits[0], to: hits[0] + quote.length, how: 'exact' };
     if (hits.length) {
-      const score = (at) => sharedEnd(source.slice(Math.max(0, at - prefix.length), at), prefix) + sharedStart(source.slice(at + quote.length, at + quote.length + suffix.length), suffix);
-      const best = hits.reduce((a, b) => (score(b) > score(a) ? b : a));
-      return { from: best, to: best + quote.length, how: 'exact' };
+      const read = (at) => {
+        const before = sharedEnd(source.slice(Math.max(0, at - prefix.length), at), prefix);
+        const after = sharedStart(source.slice(at + quote.length, at + quote.length + suffix.length), suffix);
+        const sure = (prefix ? before >= Math.min(LEAST_TAIL, prefix.length) : at === 0) || (suffix ? after >= Math.min(LEAST_TAIL, suffix.length) : at + quote.length === source.length);
+        return { at, score: before + after, sure };
+      };
+      const reads = hits.map(read);
+      const best = reads.reduce((a, b) => (b.score > a.score ? b : a));
+      const alone = reads.every((one) => one === best || one.score < best.score);
+      return { from: best.at, to: best.at + quote.length, how: best.sure && alone ? 'exact' : 'guess' };
     }
     return byContext(source, quote, prefix, suffix);
   }
@@ -77,13 +100,17 @@
     const first = source.indexOf(quote, line > 1 ? start : 0);
     const at = first >= 0 ? first : source.indexOf(quote);
     if (at < 0) return null;
+    return contextAt(source, at, at + quote.length);
+  }
+
+  function contextAt(source, start, end) {
     const low = (code) => code >= 0xdc00 && code <= 0xdfff;
     const high = (code) => code >= 0xd800 && code <= 0xdbff;
-    let from = Math.max(0, at - AROUND);
-    let to = Math.min(source.length, at + quote.length + AROUND);
+    let from = Math.max(0, start - AROUND);
+    let to = Math.min(source.length, end + AROUND);
     if (from > 0 && low(source.charCodeAt(from))) from++;
     if (to < source.length && high(source.charCodeAt(to - 1))) to--;
-    return { prefix: source.slice(from, at), suffix: source.slice(at + quote.length, to) };
+    return { prefix: source.slice(from, start), suffix: source.slice(end, to) };
   }
 
   function lineAfter(source, at) {
@@ -238,7 +265,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, around, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, edited, carried, around, contextAt, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);

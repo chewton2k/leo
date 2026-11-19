@@ -9,7 +9,7 @@ entry point dispatches `--leo-speech-worker` before normal startup.
 
 `health::scan` converts the local doctor checks (`leo_services::doctor::scan`;
 there are no probes: no network or AI requests, and the microphone is never
-opened) to the native Health view. Writing CLI sign-in status is bounded and parsed to a boolean; its
+opened) to the native Health view; the notes rows come from the engine's loaded store (`Facts`), never from a fresh parse. Writing CLI sign-in status is bounded and parsed to a boolean, and a signed-in answer is reused for 20 s unless the request says `fresh`; its
 raw output never reaches the page. The host exposes no backup setup or push
 capability; existing user repositories are never changed by app lifecycle events.
 The browser-test engine has a real startup/session-gate integration test, so
@@ -25,9 +25,21 @@ Lecture listeners pass the engine's shared preview-visibility flag into recorder
 controls, including both call tracks. This flag never pauses capture or final
 transcription, and recovery continues while the main window is hidden.
 
-`housekeeping.rs` holds `Housekeeping`, leo-web's `record::Housekeeper`: `pending_recordings`
-(unfinished native sessions, unlocked ones only, each with its manifest's `started`) and
+`housekeeping.rs` holds `Housekeeping`, leo-web's `record::Housekeeper`: `pending_page`
+(unfinished native sessions, unlocked ones only, each with its manifest's `started`, newest first a
+page at a time, every folder reachable; metadata is remembered until its file changes),
+`pending_recording` (one by id), `old_recordings` (older than the Keeping cutoff) and
 `discard_recording` (validated id, contained paths, refuses a locked session). Settings →
 Keeping's audio expiry calls it, so a recording that is running or being recovered (its
-session is locked) is never discarded. The Storage page, its areas and actions were removed
+session is locked) is never discarded. `discard_recordings` deletes a batch, finding each recording by id and rereading its metadata before removing it (expiry uses it). A saved session that kept audio names its note (`Manifest.note`);
+the hold records its folder, session ID, start time and a digest of the session
+folder (its `lock` left out, at most 1 GiB). `verify_held_audio` hashes it again outside
+the notes lock and returns the files' stamps; `discard_held_audio`, under the lock,
+rereads the fields, the saved status and note owner and deletes only when the stamps
+are unchanged. Purge checks each file again as it unlinks it and removes only empty
+directories, so an arrival during deletion remains on disk. Combine persists the
+audio plan and previous manifest owners before applying it so startup can
+replay a saved combine and Undo can restore the same sessions. Ambiguous combine
+intents protect affected audio from automatic expiry. Held cleanup inventories
+recordings outside the notes lock. The Storage page, its areas and actions were removed
 on 2026-11-05; files they managed stay on disk.

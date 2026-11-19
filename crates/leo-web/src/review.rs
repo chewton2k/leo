@@ -9,14 +9,15 @@ use crate::chats::{self, Chat, Ref};
 
 pub const DUE_AFTER_HOURS: i64 = 20;
 pub const MOST_MISSED: usize = 20;
-const MOST_REMEMBERED: usize = 2000;
 
+#[cfg(test)]
 pub fn count(dir: &Path) -> usize {
     chats::db_of(dir)
         .with(|c| c.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get::<_, i64>(0)))
         .map_or(0, |n| n.max(0) as usize)
 }
 
+#[cfg(test)]
 pub fn reset(dir: &Path) -> bool {
     chats::db_of(dir)
         .with(|c| c.execute("DELETE FROM reviewed", []))
@@ -24,11 +25,10 @@ pub fn reset(dir: &Path) -> bool {
 }
 
 pub(crate) fn insert_all(c: &rusqlite::Connection, keys: &[String]) -> rusqlite::Result<()> {
-    for key in keys.iter().filter(|k| valid_key(k)) {
-        c.execute(
-            "INSERT OR IGNORE INTO reviewed (key, n) VALUES (?1, (SELECT coalesce(MAX(n), 0) + 1 FROM reviewed))",
-            [key],
-        )?;
+    let base: i64 = c.query_row("SELECT coalesce(MAX(n), 0) FROM reviewed", [], |r| r.get(0))?;
+    let mut insert = c.prepare("INSERT OR IGNORE INTO reviewed (key, n) VALUES (?1, ?2)")?;
+    for (i, key) in keys.iter().filter(|k| valid_key(k)).enumerate() {
+        insert.execute(rusqlite::params![key, base + 1 + i as i64])?;
     }
     Ok(())
 }
@@ -45,9 +45,7 @@ pub struct Missed {
 }
 
 fn fnv(text: &str) -> u64 {
-    text.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
-        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
-    })
+    crate::vectors::fnv64(text.bytes())
 }
 
 pub fn key_of(chat: &str, reply: &str) -> String {
@@ -109,14 +107,6 @@ fn plain(text: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn clip(text: &str, most: usize) -> String {
-    let mut out: String = text.chars().take(most).collect();
-    if text.chars().count() > most {
-        out.push('…');
-    }
-    out
-}
-
 fn question_in(text: &str) -> String {
     let text = verdict_off(text).map_or(text, |(_, rest)| rest);
     let paragraphs: Vec<&str> = text
@@ -131,7 +121,7 @@ fn question_in(text: &str) -> String {
         .or(paragraphs.last())
         .copied()
         .unwrap_or("");
-    clip(&plain(asked), 300)
+    chats::clipped(&plain(asked), 300)
 }
 
 fn cited_in(message: &serde_json::Value) -> Vec<Ref> {
@@ -193,13 +183,13 @@ fn missed_cards(chat: &Chat, message: &serde_json::Value, now: DateTime<Utc>) ->
                 .is_some_and(|t| matches!(verdict_off(&t), Some(("incorrect", _)))),
         })
         .map(|q| {
-            let question = clip(&plain(&text(q, "question")), 200);
+            let question = chats::clipped(&plain(&text(q, "question")), 200);
             let given = text(q, "given");
             Missed {
                 key: key_of(&chat.id, &format!("{question}\n{given}")),
                 chat: chat.id.clone(),
                 question,
-                answer: clip(&plain(&given), 200),
+                answer: chats::clipped(&plain(&given), 200),
                 notes: cited_in(message),
                 due: at <= now - Duration::hours(DUE_AFTER_HOURS),
                 at,
@@ -227,10 +217,10 @@ fn missed_in(chat: &Chat, now: DateTime<Utc>) -> Vec<Missed> {
         let field = |key: &str| {
             quiz.and_then(|q| q.get(key))
                 .and_then(|v| v.as_str())
-                .map(|v| clip(&plain(v), 200))
+                .map(|v| chats::clipped(&plain(v), 200))
         };
         let answer = field("given")
-            .or_else(|| said.map(|m| clip(&plain(text_of(m)), 200)))
+            .or_else(|| said.map(|m| chats::clipped(&plain(text_of(m)), 200)))
             .unwrap_or_default();
         let asked = i
             .checked_sub(2)
@@ -273,10 +263,9 @@ fn reviewed(dir: &Path) -> BTreeSet<String> {
 
 pub fn missed(dir: &Path, now: DateTime<Utc>) -> Vec<Missed> {
     let done = reviewed(dir);
-    let mut out: Vec<Missed> = chats::list(dir)
+    let mut out: Vec<Missed> = chats::with_misses(dir)
         .iter()
-        .filter_map(|summary| chats::load(dir, &summary.id))
-        .flat_map(|chat| missed_in(&chat, now))
+        .flat_map(|chat| missed_in(chat, now))
         .filter(|m| !done.contains(&m.key) && !m.question.is_empty())
         .collect();
     out.sort_by(|a, b| a.at.cmp(&b.at).then(a.key.cmp(&b.key)));
@@ -291,7 +280,15 @@ pub fn mark_reviewed(dir: &Path, keys: &[String]) -> Result<usize> {
     chats::db_of(dir).with(|c| {
         let tx = c.transaction()?;
         let before: i64 = tx.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get(0))?;
-        insert_all(&tx, keys)?;
+        let alive: Vec<String> = keys
+            .iter()
+            .filter(|key| {
+                key.rsplit_once(':')
+                    .is_some_and(|(chat, _)| live.contains(chat))
+            })
+            .cloned()
+            .collect();
+        insert_all(&tx, &alive)?;
         let after: i64 = tx.query_row("SELECT COUNT(*) FROM reviewed", [], |r| r.get(0))?;
         let held: Vec<String> = {
             let mut found = tx.prepare("SELECT key FROM reviewed")?;
@@ -306,10 +303,6 @@ pub fn mark_reviewed(dir: &Path, keys: &[String]) -> Result<usize> {
                 tx.execute("DELETE FROM reviewed WHERE key = ?1", [&key])?;
             }
         }
-        tx.execute(
-            "DELETE FROM reviewed WHERE n <= (SELECT MAX(n) FROM reviewed) - ?1",
-            [MOST_REMEMBERED as i64],
-        )?;
         tx.commit()?;
         Ok((after - before).max(0) as usize)
     })
@@ -333,6 +326,8 @@ mod tests {
             dir,
             id,
             chats::Saving {
+                existed: false,
+                from: None,
                 title: String::new(),
                 refs: vec![],
                 messages,
@@ -512,5 +507,136 @@ mod tests {
         assert!(!missed(dir.path(), at(7, 9))[0].due);
         assert!(!valid_key("chat-00000002:xyz"));
         assert_eq!(key_of("chat-00000002", "a"), key_of("chat-00000002", "a"));
+    }
+
+    #[test]
+    fn review_finds_every_kind_of_miss_and_skips_plain_chats() {
+        finds_every_kind_of_miss(false);
+    }
+
+    #[test]
+    fn review_finds_every_kind_of_miss_in_chats_saved_before_message_rows() {
+        finds_every_kind_of_miss(true);
+    }
+
+    fn finds_every_kind_of_miss(column: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut shouted = quiz();
+        shouted[3]["text"] = serde_json::json!("[[Incorrect]] Not quite: BFS uses a queue.");
+        study(dir.path(), "chat-reply-0001", shouted, at(1, 9));
+        study(
+            dir.path(),
+            "chat-card-00001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "Try this.",
+                    "quizzes": [
+                        { "question": "What does DFS use?", "answer": "a stack", "given": "a queue", "correct": false }
+                    ]
+                }),
+            ],
+            at(1, 10),
+        );
+        study(
+            dir.path(),
+            "chat-graded-001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "Try this.",
+                    "quizzes": [
+                        { "question": "Why a queue?", "answer": "oldest first", "given": "dunno", "correct": null, "reply": { "text": "[[INCORRECT]] It takes the oldest first." } }
+                    ]
+                }),
+            ],
+            at(1, 11),
+        );
+        study(
+            dir.path(),
+            "chat-plain-0001",
+            vec![
+                said("user", "hello"),
+                said("assistant", "Hi, what are we reading?"),
+            ],
+            at(1, 12),
+        );
+        study(
+            dir.path(),
+            "chat-right-0001",
+            vec![
+                said("user", "quiz me"),
+                serde_json::json!({
+                    "role": "assistant",
+                    "text": "[[correct]] Yes.",
+                    "quizzes": [
+                        { "question": "Right one?", "answer": "a", "given": "a", "correct": true }
+                    ]
+                }),
+            ],
+            at(1, 13),
+        );
+        if column {
+            for id in [
+                "chat-reply-0001",
+                "chat-card-00001",
+                "chat-graded-001",
+                "chat-plain-0001",
+                "chat-right-0001",
+            ] {
+                chats::as_column(dir.path(), id);
+            }
+        }
+        let found = missed(dir.path(), at(3, 9));
+        let seen: Vec<(&str, &str, &str)> = found
+            .iter()
+            .map(|m| (m.chat.as_str(), m.question.as_str(), m.answer.as_str()))
+            .collect();
+        assert_eq!(
+            seen,
+            [
+                ("chat-card-00001", "What does DFS use?", "a queue"),
+                ("chat-graded-001", "Why a queue?", "dunno"),
+                (
+                    "chat-reply-0001",
+                    "Which data structure does BFS use to pick the next vertex?",
+                    "a stack"
+                ),
+            ]
+        );
+    }
+
+    fn marks_of(chat: &str, count: usize) -> Vec<String> {
+        (0..count).map(|i| format!("{chat}:{i:016x}")).collect()
+    }
+
+    #[test]
+    fn every_mark_is_kept_and_marks_of_a_deleted_chat_are_not() {
+        let dir = tempfile::tempdir().unwrap();
+        study(dir.path(), "chat-00000001", quiz(), at(5, 9));
+        let keys = marks_of("chat-00000001", 2500);
+        assert_eq!(mark_reviewed(dir.path(), &keys).unwrap(), 2500);
+        assert_eq!(count(dir.path()), 2500);
+        let unknown = marks_of("chat-00000002", 10);
+        assert_eq!(mark_reviewed(dir.path(), &unknown).unwrap(), 0);
+        assert_eq!(count(dir.path()), 2500);
+    }
+
+    #[test]
+    #[ignore = "benchmark"]
+    fn marking_costs_in_step_with_the_count() {
+        let dir = tempfile::tempdir().unwrap();
+        study(dir.path(), "chat-00000001", quiz(), at(5, 9));
+        let mut took = Vec::new();
+        for size in [10_000, 40_000] {
+            reset(dir.path());
+            let keys = marks_of("chat-00000001", size);
+            let started = std::time::Instant::now();
+            assert_eq!(mark_reviewed(dir.path(), &keys).unwrap(), size);
+            took.push(started.elapsed());
+        }
+        assert!(took[1] < took[0] * 6, "{took:?}");
     }
 }

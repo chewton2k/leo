@@ -16,22 +16,11 @@ const FOLDER = '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 
 const ICON = {
   back: svg('<path d="M15 18l-6-6 6-6"/>'),
   book: svg('<path d="M3 5.5A1.5 1.5 0 0 1 4.5 4H9a3 3 0 0 1 3 3v13a2.5 2.5 0 0 0-2.5-2.5h-5A1.5 1.5 0 0 1 3 16z"/><path d="M21 5.5A1.5 1.5 0 0 0 19.5 4H15a3 3 0 0 0-3 3v13a2.5 2.5 0 0 1 2.5-2.5h5A1.5 1.5 0 0 0 21 16z"/>'),
-  pointer: svg('<path d="M6 3l12 9-5.5 1.2L15 20l-2.4 1-2.6-6.6L6 18z"/>'),
   pen: svg('<path d="M4 20l1.2-4.6L16.6 4a2 2 0 012.8 2.8L8 18.4z"/><path d="M14.5 6.1l3.4 3.4"/>'),
-  box: svg('<rect x="4" y="6" width="16" height="12" rx="2"/>'),
-  circle: svg('<circle cx="12" cy="12" r="7.5"/>'),
-  arrow: svg('<path d="M5 19L19 5"/><path d="M10 5h9v9"/>'),
-  line: svg('<path d="M5 19L19 5"/>'),
-  text: svg('<path d="M5 7V5h14v2"/><path d="M12 5v14"/><path d="M9 19h6"/>'),
-  undo: svg('<path d="M9 14L4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 010 11H11"/>'),
-  redo: svg('<path d="M15 14l5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 000 11H13"/>'),
   search: svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>'),
-  grid: svg('<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>'),
   list: svg('<path d="M9 6h11M9 12h11M9 18h11M4 6h.1M4 12h.1M4 18h.1"/>'),
   readThrough: svg('<path d="M4 7h9M4 12h9M4 17h6"/><circle class="dot" cx="18.5" cy="12" r="2.6"/>'),
   sort: svg('<path d="M4 6h16M4 12h11M4 18h6"/>'),
-  bolt: svg('<path d="M13.5 2.5L5 13.5h6l-1.5 8 8.5-11h-6z"/>'),
-  filter: svg('<path d="M4 5h16l-6.2 7.6V18l-3.6 2v-7.4z"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
   more: svg('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>'),
   folder: svg(FOLDER),
@@ -41,7 +30,6 @@ const ICON = {
   trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),
   share: svg('<path d="M12 3v12M8 7l4-4 4 4"/><path d="M5 12v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
-  minus: svg('<path d="M5 12h14"/>'),
   download: svg('<path d="M12 4v12M7 11l5 5 5-5M4 18v3h16v-3"/>'),
   upload: svg('<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>'),
   image: svg('<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 16l-5-5-9 9"/>'),
@@ -49,18 +37,12 @@ const ICON = {
   gear: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-1.8-.3 1.6 1.6 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.6 1.6 0 0 0-1-1.5 1.6 1.6 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.6 1.6 0 0 0 .3-1.8 1.6 1.6 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.6 1.6 0 0 0 1.5-1 1.6 1.6 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9a1.6 1.6 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 1 1.5 1.6 1.6 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8V9a1.6 1.6 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1z"/>'),
   board: svg('<rect x="3.5" y="4" width="4.6" height="15" rx="1.3"/><rect x="9.7" y="4" width="4.6" height="9.5" rx="1.3"/><rect x="15.9" y="4" width="4.6" height="12" rx="1.3"/>'),
   calendar: svg('<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>'),
-  call: svg('<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>'),
-  tidy: svg('<circle cx="6" cy="6" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M8 6h8M6 8v8M18 8v8M8 18h8"/>'),
-  fit: svg('<path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/>'),
   expand: svg('<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>'),
   restore: svg('<path d="M4 12a8 8 0 1 0 2.3-5.6L4 8.5"/><path d="M4 4v4.5h4.5"/>'),
   filePlus: svg('<path d="M11.5 21H8a4 4 0 0 1-4-4V7a4 4 0 0 1 4-4h5.8a3 3 0 0 1 2.1.9l1.9 1.9a3 3 0 0 1 .9 2.1v3.6"/><path d="M8 9h5M8 13h3"/><circle cx="17.5" cy="17.5" r="4.6"/><path d="M17.5 15.2v4.6M15.2 17.5h4.6"/>'),
   note: svg('<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/>'),
   refresh: svg('<path d="M20 12a8 8 0 1 1-2.3-5.6L20 8.5"/><path d="M20 4v4.5h-4.5"/>'),
   check: svg('<path d="M5 12l4.5 4.5L19 7"/>'),
-  sun: svg('<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/>'),
-  moon: svg('<path d="M20 14.5A8 8 0 019.5 4a8 8 0 1010.5 10.5z"/>'),
-  device: svg('<rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M1.5 18h16"/><rect x="17.5" y="9" width="5" height="11" rx="1.2"/>'),
   chevron: svg('<path d="M9 6l6 6-6 6"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>'),
   map: svg('<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="6" r="2.2"/><circle cx="12" cy="17.5" r="2.2"/><path d="M7.4 8.9l3.5 6.7M16.9 7.9l-3.8 7.8M8.2 6.8l7.6-.6"/>'),
@@ -88,7 +70,7 @@ const DRAWN = {
   broken: lineDrawing('broken', '0 0 120 92', '<g transform="rotate(-24 66 44)"><path d="M50 37.4 Q71 36.8 90.6 37.6 M50.2 52.2 Q71 52.6 90.4 51.8"/><path d="M90.6 37.6 Q97.4 37.8 97.8 44.8 Q97.4 51.6 90.4 51.8"/><path d="M50 37.4 Q44.6 40.4 40.8 42.2 Q42.4 43.6 40.6 45.2 Q42.4 46.4 40.6 47.8 Q44.8 49.6 50.2 52.2"/><path d="M85.4 37.8 Q85.8 44.8 85.4 51.8 M81.2 37.8 Q81.6 44.8 81.2 51.8 M52.6 44.8 Q66 45.1 78.6 44.8" stroke-width="1.1" opacity=".55"/></g><path d="M27.6 72.4 Q32.6 67.6 37.6 66 Q37.4 70.6 36 74.4 Q31.6 73.8 27.6 72.4" stroke-width="1.3"/><path d="M42.4 74.6 Q42.7 74.4 43 74.6 M46 71.4 Q46.3 71.2 46.6 71.4" stroke-width="1.1" opacity=".55"/>'),
 };
 
-const recorder = window.leoRecording.create({ encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, noteFields: (options) => noteFields(options), settingsSwitch: (attrs, on, label) => settingsSwitch(attrs, on, label), desktop: () => desktopApp, noteReady: () => showLatest().catch(() => {}) });
+const recorder = window.leoRecording.create({ bytes: speechBytes, encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, noteFields: (options) => noteFields(options), choiceCards: (options) => choiceCards(options), syncChoiceCards: (box) => syncChoiceCards(box), settingsSwitch: (attrs, on, label) => settingsSwitch(attrs, on, label), desktop: () => desktopApp, noteReady: () => showLatest().catch(() => {}) });
 const chat = felix.create({
   render: (text, options) => md.render(text, options),
   escape: md.escape,
@@ -106,7 +88,7 @@ const chat = felix.create({
   onOriginal: (note, name, at) => showPassage(note, name, at).catch(fail),
   prepare: async (file) => {
     const ready = await shrink(file);
-    return { name: ready.name, type: ready.type, data: await base64(ready.blob) };
+    return { name: ready.name, type: ready.type, blob: ready.blob };
   },
   notify: (message) => toast(message, { bad: true }),
   onLocked: () => showLocked(),
@@ -599,7 +581,7 @@ window.addEventListener('hashchange', () => {
 function showSaveFailure(s, error, retry, current) {
   history.replaceState(history.state, '', s.note.id ? noteHash(s.note.id) : s.note.directory ? `#/new/${enc(s.note.directory)}` : '#/new');
   if (!s.persisted || error instanceof Locked) return fail(error);
-  toast(error instanceof Offline ? "Can't reach leo. Your draft is kept in this browser." : error.message || 'Leo could not save this note. Your draft is kept in this browser.', {
+  toast(error instanceof Offline ? "Can't reach leo. Your draft is kept in this browser." : error.message || 'leo could not save this note. Your draft is kept in this browser.', {
     bad: true,
     action: 'Leave, draft kept',
     run: () => { if (current() && s.persisted) return retry(s); },
@@ -742,9 +724,14 @@ function pressed(e, name) {
 function shortcutAria(keys) {
   return keys.split('+').map((key) => ({ cmd: 'Meta', ctrl: 'Control', alt: 'Alt', shift: 'Shift' })[key] || key.toUpperCase()).join('+');
 }
+let dictateKeys = null;
+function dictateKeysSeen(view) {
+  dictateKeys = view?.settings?.shortcut || null;
+}
 async function dictateHint(el) {
   try {
-    const keys = (await api('/api/dictation'))?.settings?.shortcut;
+    if (dictateKeys === null) dictateKeysSeen(await api('/api/dictation'));
+    const keys = dictateKeys;
     if (keys && el?.isConnected) { el.textContent = `Press ${shortcutText(keys)} anywhere to dictate.`; el.hidden = false; }
   } catch (e) {}
 }
@@ -819,13 +806,16 @@ const saving = window.leoSaving.create({
   retryable: (error) => error instanceof Offline || error.status >= 500,
 });
 
-function snapshot(s) {
-  const body = s.doc.source();
-  const title = cleanTitle(s.title.textContent) || (s.note.id ? s.note.title : md.plain(body).slice(0, 60));
-  return { title, body, tags: [...s.tags] };
+function snapshot(s, text = () => s.doc.source()) {
+  const typed = cleanTitle(s.title.textContent);
+  const { id, title } = s.note;
+  return {
+    get title() { return typed || (id ? title : md.plain(text()).slice(0, 60)); },
+    get body() { return text(); },
+  };
 }
 
-function changed(s) { saving.changed(s, snapshot(s)); }
+function changed(s, text) { saving.changed(s, snapshot(s, text)); }
 function flush(s = state.session) { return saving.flush(s); }
 
 let citedLines = null;
@@ -845,7 +835,7 @@ async function showPassage(note, name, at) {
   const box = sheet(`<h3>${esc(name)}</h3>
     <p>${esc(found.label[0].toUpperCase() + found.label.slice(1))}, word for word from the file you uploaded.</p>
     <div class="source-list passage-list">${lines || '<p class="hint">That part of the file is empty.</p>'}</div>
-    <div class="buttons"><button class="btn plain" data-action="close">Close</button>${viewKind(name) ? '<button class="btn primary" id="passage-open">Open the file</button>' : ''}</div>`);
+    ${sheetButtons(viewKind(name) ? ['Open the file', 'id="passage-open"'] : null, { cancel: 'Close' })}`);
   const open = $('#passage-open', box);
   if (open) open.addEventListener('click', () => { closeSheet(true); viewOriginal(note, name, found.page).catch(fail); });
 }
@@ -855,13 +845,17 @@ function readLine(text) {
   return time ? ` · ${time}` : '';
 }
 
+const MARGIN_INSTRUCTIONS_READS = 500;
+
 let readTimer = 0;
+let readWanted = 0;
 function readSoon(text) {
   const line = $('#note-read');
+  const mine = ++readWanted;
   clearTimeout(readTimer);
-  readTimer = setTimeout(() => {
-    if (line) line.textContent = readLine(text);
-  }, 300);
+  readTimer = setTimeout(() => marginIdle(() => {
+    if (line && mine === readWanted) line.textContent = readLine(text());
+  }), 300);
 }
 
 async function showNote(id, { fresh = null, draft = null } = {}) {
@@ -871,6 +865,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
   const mine = ++seq;
   const note = fresh || (await api(`/api/notes/${enc(id)}`));
   await marginLoadPrefs();
+  await saving.ready;
   if (mine !== seq) return;
   let s;
   const opened = swap(`n:${note.id || 'new'}`, () => {
@@ -879,7 +874,6 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     if (source.note && source.note !== note.id) closeSource();
     if (state.session && state.session.doc) state.session.doc.destroy();
     s = draft || saving.open(note);
-    s.tags = [...s.edit.tags];
     if (side.openedNote !== note.id) side.target = null;
     side.openedNote = note.id;
     state = { view: 'note', dir: note.directory, session: s };
@@ -889,14 +883,14 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     const when = note.id ? `Edited ${rel(note.updated_at)}` : 'New note';
     app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
     <header class="note-head"><div class="note-meta" data-tauri-drag-region><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
-    <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state"></span><span id="note-edited">${when}</span><span id="note-read">${esc(readLine(s.edit.body))}</span></p><div class="note-originals"></div><label id="margin-instructions" class="field margin-instructions" hidden>${ICON.pen}<input maxlength="500" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
+    <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state"></span><span id="note-edited">${when}</span><span id="note-read">${esc(readLine(s.edit.body))}</span></p><div class="note-originals"></div><div id="margin-instructions" class="margin-instructions" data-read-field hidden><label class="field">${ICON.pen}<input data-reads="${MARGIN_INSTRUCTIONS_READS}" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label><p class="hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_INSTRUCTIONS_READS} characters of this.</p></div>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
     <div class="prose doc" id="doc"></div>
     <section class="related" id="related" hidden aria-label="Related notes"></section>
   </article></div></div>`;
     s.title = $('#title');
     drawOriginals(note);
     hideAskFloat();
-    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s); marginEdited(s); readSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
+    s.doc = leoDoc.mount($('#doc'), { source: s.edit.body, outline: $('.note-outline'), onChange: (text) => { changed(s, text); marginEdited(s); readSoon(text); }, placeholder: 'Write, or paste anything', dir: note.directory || '', onPictures: (files) => addPictures(s, files), onSelection: (has) => placeAskFloat(has), noteTools: true });
     marginMount(s, mine).catch(fail);
     if (citedLines && citedLines.id === note.id) showCitedLines();
     else if (passage && highlightSearch(app.querySelector('article.note'), passage.query)) {
@@ -941,7 +935,7 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
 
 
 function newNote(dir) {
-  return showNote(null, { fresh: { id: null, title: '', body: '', tags: [], directory: dir || '', pinned: false, version: null } });
+  return showNote(null, { fresh: { id: null, title: '', body: '', directory: dir || '', pinned: false, version: null } });
 }
 
 async function ready() {
@@ -964,7 +958,7 @@ async function showSearch(query) {
   app.innerHTML = `<div class="section-title">Searching…</div><div class="cards">${skeleton(3, 'search')}</div>`;
   let results;
   try {
-    results = await api(`/api/search?q=${enc(query)}&brief=true`);
+    results = await api(`/api/search?q=${enc(query)}&brief=true&limit=${SEARCH_STEP + 1}&offset=0`);
   } catch (e) {
     if (mine === seq) app.innerHTML = empty(ICON.search, 'Search did not finish', e.message || 'Something went wrong.', `<button class="btn primary" data-action="search-retry" data-query="${esc(query)}">Try again</button>`);
     return;
@@ -972,29 +966,56 @@ async function showSearch(query) {
   if (mine !== seq) return;
   const words = query.split(/\s+/).map((w) => w.replace(/^#/, '')).filter(Boolean);
   const draw = (list) => list.map((n) => card(n, { words, showFolder: true, why: n.why })).join('');
-  const count = results.length >= SEARCH_MOST ? `The first ${SEARCH_MOST} notes` : plural(results.length, 'note');
-  app.innerHTML = results.length
-    ? `<div class="section-title">${count}</div><div class="cards">${draw(results.slice(0, SEARCH_STEP))}</div>${results.length > SEARCH_STEP ? '<div class="more-notes" id="more-notes" aria-hidden="true">Loading more notes…</div>' : ''}`
+  const more = results.length > SEARCH_STEP, shown = results.slice(0, SEARCH_STEP);
+  app.innerHTML = shown.length
+    ? `<div class="section-title" id="search-count">${searchCount(shown.length, more)}</div><div class="cards">${draw(shown)}</div>${more ? '<button type="button" class="btn plain more-notes" id="more-notes" data-action="search-more">Show more</button>' : ''}`
     : empty(DRAWN.search, `No notes match “${query}”`, 'Try fewer words, or ask Felix to look for the idea.', `<button class="btn primary" data-action="search-ask" data-query="${esc(query)}">${ICON.chat}Ask Felix</button><button class="btn plain" data-action="search-new" data-query="${esc(query)}">${ICON.filePlus}New note “${esc(query)}”</button>`);
   cascade($('.cards'));
-  let shown = SEARCH_STEP;
   if (moreWatch) moreWatch.disconnect();
-  const sentinel = $('#more-notes');
-  if (!sentinel || typeof IntersectionObserver !== 'function') return;
+  searchPaging = { mine, query, loaded: shown.length, loading: false, draw };
+  const button = $('#more-notes');
+  if (!button || typeof IntersectionObserver !== 'function') return;
   moreWatch = new IntersectionObserver((seen) => {
-    if (mine !== seq || !seen.some((x) => x.isIntersecting)) return;
-    $('.cards').insertAdjacentHTML('beforeend', draw(results.slice(shown, shown + SEARCH_STEP)));
-    shown += SEARCH_STEP;
-    if (shown >= results.length) {
-      moreWatch.disconnect();
-      sentinel.remove();
-    }
+    if (seen.some((x) => x.isIntersecting)) showMore();
   }, { rootMargin: '600px 0px' });
-  moreWatch.observe(sentinel);
+  moreWatch.observe(button);
 }
 
-const SEARCH_MOST = 300;
 const SEARCH_STEP = 60;
+let searchPaging = null;
+function searchCount(loaded, more) {
+  return plural(loaded, 'note') + (more ? ' so far' : '');
+}
+async function showMore() {
+  const page = searchPaging, button = $('#more-notes');
+  if (!page || page.mine !== seq || page.loading || !button) return;
+  page.loading = true;
+  button.disabled = true;
+  button.textContent = 'Loading…';
+  let answer;
+  try {
+    answer = await api(`/api/search?q=${enc(page.query)}&brief=true&limit=${SEARCH_STEP + 1}&offset=${page.loaded}`);
+  } catch (e) {
+    if (page.mine !== seq) return;
+    page.loading = false;
+    button.disabled = false;
+    button.textContent = 'Try again';
+    return;
+  }
+  if (page.mine !== seq) return;
+  page.loading = false;
+  const more = answer.length > SEARCH_STEP, shown = answer.slice(0, SEARCH_STEP);
+  $('.cards').insertAdjacentHTML('beforeend', page.draw(shown));
+  page.loaded += shown.length;
+  $('#search-count').textContent = searchCount(page.loaded, more);
+  if (more) {
+    button.disabled = false;
+    button.textContent = 'Show more';
+  } else {
+    if (moreWatch) moreWatch.disconnect();
+    button.remove();
+  }
+}
 
 async function showRecord(arg) {
   const [dir] = arg.split('?');
@@ -1002,7 +1023,6 @@ async function showRecord(arg) {
   const mine = ++seq;
   state = { view: 'record', dir: '' };
   chrome();
-  $('#crumbs').innerHTML = '<span class="sep">/</span><button>Record</button>';
   document.title = 'Record · leo';
   app.innerHTML = '<div id="rec-box"></div>';
   let folders = [];

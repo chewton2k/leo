@@ -2,7 +2,6 @@ use super::*;
 
 #[test]
 fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
-    use base64::Engine;
     let (mut state, _d, _ids) = state_with(&[]);
     state.reader = Some(Arc::new(|file: UploadFile, _: &mut dyn FnMut(&str)| {
         assert_eq!(file.bytes, b"%PDF fake");
@@ -23,14 +22,13 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
         },
     ));
     let upload = |name: &str, data: &[u8]| {
-        run(add_chat_file(
+        run(crate::routes::felix::put_chat_file(
             State(state.clone()),
-            Path("chat-docs-0001".into()),
-            Json(ImportFileBody {
-                name: name.into(),
+            Path(("chat-docs-0001".into(), name.into())),
+            Query(crate::routes::felix::FileKind {
                 mime: "application/pdf".into(),
-                data: base64::engine::general_purpose::STANDARD.encode(data),
             }),
+            axum::body::Body::from(data.to_vec()),
         ))
     };
     let added = upload("../../slides.pdf", b"%PDF fake");
@@ -41,6 +39,8 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
         &state.chats,
         "chat-docs-0001",
         &[doc["id"].as_str().unwrap().to_string()],
+        7_000,
+        1,
     )
     .into_iter()
     .map(|(_, text)| text)
@@ -98,14 +98,13 @@ fn a_document_given_to_felix_is_kept_as_text_and_read_with_the_question() {
     state.reader = Some(Arc::new(|_: UploadFile, _: &mut dyn FnMut(&str)| {
         anyhow::bail!("leo cannot read song.mp3 yet")
     }));
-    let unreadable = run(add_chat_file(
+    let unreadable = run(crate::routes::felix::put_chat_file(
         State(state.clone()),
-        Path("chat-docs-0001".into()),
-        Json(ImportFileBody {
-            name: "song.mp3".into(),
+        Path(("chat-docs-0001".into(), "song.mp3".into())),
+        Query(crate::routes::felix::FileKind {
             mime: "audio/mpeg".into(),
-            data: "AAAA".into(),
         }),
+        axum::body::Body::from("AAAA"),
     ));
     assert_eq!(unreadable.status(), StatusCode::UNPROCESSABLE_ENTITY);
     assert!(json_of(unreadable)["error"]
@@ -373,6 +372,61 @@ fn gathered_notes_respect_the_provider_budget_in_every_chat_style() {
 }
 
 #[test]
+fn chat_context_leaves_out_margin_notes_whose_passage_is_gone() {
+    let (mut state, _dir, ids) = state_with(&[("Logins", "")]);
+    let body = "Save the password in the users table,\nthen login only compares the two, I think?\n\nKEPT words stay here.\n";
+    {
+        let mut store = state.fresh();
+        store.find_note_mut(&ids[0]).unwrap().body = body.into();
+        store.save().unwrap();
+    }
+    let place = |prefix: &str, suffix: &str| crate::margin::Place {
+        prefix: prefix.into(),
+        suffix: suffix.into(),
+    };
+    for (quote, around, says) in [
+        ("KEPT words", place("", ""), "KEPT-NOTE-TEXT"),
+        ("words long gone", place("", ""), "GONE-NOTE-TEXT"),
+        (
+            "just checks if it matches",
+            place("table,\nthen login ", ", I think?\n\nKEPT"),
+            "CONTEXT-NOTE-TEXT",
+        ),
+    ] {
+        let thread = crate::margin::new_thread(
+            &ids[0],
+            "ask",
+            around,
+            quote,
+            vec![crate::margin::felix_says(says)],
+        );
+        assert!(crate::margin::put(
+            &state.chats,
+            &thread,
+            crate::margin::MOST_OPEN
+        ));
+    }
+    let (streamer, prompts) = scripted(vec!["Noted."]);
+    state.chat = Some(streamer);
+    let request = serde_json::from_value(serde_json::json!({
+        "note": ids[0],
+        "messages": [{"role":"user", "text":"What did you say about logins?"}]
+    }))
+    .unwrap();
+    run(async {
+        let response = chat_reply(State(state), Json(request)).await;
+        assert_eq!(response.status(), StatusCode::OK);
+        axum::body::to_bytes(response.into_body(), 1_000_000)
+            .await
+            .unwrap();
+    });
+    let prompts = prompts.lock().unwrap();
+    assert!(prompts[0].contains("KEPT-NOTE-TEXT"));
+    assert!(prompts[0].contains("CONTEXT-NOTE-TEXT"));
+    assert!(!prompts[0].contains("GONE-NOTE-TEXT"));
+}
+
+#[test]
 fn the_steps_say_which_note_was_read_when_it_was_read_again_and_what_a_retried_call_got_wrong() {
     let (mut state, _d, ids) = state_with(&[("Pipelining", "cs152")]);
     {
@@ -464,6 +518,109 @@ fn felix_searches_opens_and_suggests_a_change_with_tools_then_answers() {
 }
 
 #[test]
+fn teaching_from_ten_documents_reads_every_part_of_each_before_the_first_question() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.room = Some(Arc::new(|| 36_000));
+    let mut files = Vec::new();
+    for n in 1..=10 {
+        files.push(
+            crate::chat_files::add(
+                &state.chats,
+                "chat-teach-0001",
+                &format!("lecture{n}.pdf"),
+                &format!("L{n:02} ").repeat(5_250),
+                chrono::Utc::now(),
+            )
+            .unwrap()
+            .id,
+        );
+    }
+    let prompts = Arc::new(Mutex::new(Vec::<String>::new()));
+    let seen = Arc::clone(&prompts);
+    let pass = Arc::new(Mutex::new(1));
+    let streamer: chat::Streamer = Arc::new(
+        move |system: &str,
+              user: &str,
+              _: u32,
+              piece: &mut dyn FnMut(&str),
+              _: &mut dyn FnMut(),
+              _: &dyn Fn() -> bool| {
+            seen.lock().unwrap().push(format!("{system}\n{user}"));
+            let mut at = pass.lock().unwrap();
+            let result = user.rsplit("<tool_result").next().unwrap();
+            let left = result
+                .split("read_document them next: ")
+                .nth(1)
+                .map(|rest| {
+                    rest.split(".]")
+                        .next()
+                        .unwrap()
+                        .split(", ")
+                        .map(|entry| entry.split(' ').next().unwrap().to_string())
+                        .collect::<Vec<_>>()
+                });
+            let reply = match left {
+                Some(ids) => read_of(&ids.join(","), *at),
+                None if *at == 1 && result.contains("document name=") => {
+                    *at = 2;
+                    read_of("d1,d2,d3,d4,d5,d6,d7,d8,d9,d10", 2)
+                }
+                None if *at == 1 => read_of("d1,d2,d3,d4,d5,d6,d7,d8,d9,d10", 1),
+                None => "Ready to teach.".to_string(),
+            };
+            piece(&reply);
+            Ok(reply.into())
+        },
+    );
+    fn read_of(ids: &str, part: usize) -> String {
+        format!("<tool>{{\"name\": \"read_document\", \"document\": \"{ids}\", \"part\": \"{part}\"}}</tool>")
+    }
+    state.chat = Some(streamer);
+    let body = chat::ChatBody {
+        messages: vec![chat::Turn {
+            role: "user".into(),
+            text: "teach me these for my midterm".into(),
+        }],
+        note: None,
+        refs: vec![],
+        chat: Some("chat-teach-0001".into()),
+        files,
+        access: None,
+        recent: vec![],
+        practice: false,
+        mark: false,
+        selection: None,
+        session: None,
+    };
+    let text = run(async {
+        let response = chat_reply(State(state.clone()), Json(body)).await;
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        String::from_utf8(bytes.to_vec()).unwrap()
+    });
+    let lines: Vec<serde_json::Value> = text
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert!(lines.iter().all(|l| l.get("error").is_none()));
+    let prompts = prompts.lock().unwrap();
+    let heard = prompts[1..].join("\n");
+    for n in 1..=10 {
+        for part in 1..=2 {
+            assert!(
+                heard.contains(&format!("name=\"lecture{n}.pdf\" part=\"{part}\" of=\"2\"")),
+                "lecture{n} part {part} was not read"
+            );
+        }
+    }
+    assert!(
+        prompts[0].contains("read every part the request covers"),
+        "the instructions must tell Felix to read them all first"
+    );
+}
+
+#[test]
 fn felix_stops_using_tools_after_the_most_steps_and_answers() {
     let (mut state, _d, _ids) = state_with(&[("Heaps", "")]);
     let (streamer, prompts) = scripted(vec![
@@ -532,7 +689,6 @@ fn a_suggested_change_is_applied_only_while_the_text_is_still_there() {
             Json(UpdateBody {
                 title: None,
                 body: Some("BFS takes the newest vertex.".into()),
-                tags: None,
                 pinned: None,
                 base: Some(base.into()),
                 written: None,
@@ -2288,10 +2444,31 @@ fn felix_organizes_tasks_folders_and_notes_through_cards_that_undo() {
                 .unwrap(),
             ),
         ));
-        assert_eq!(refused.status(), 409, "{bad:?} is refused");
+        assert_eq!(refused.status(), 400, "{bad:?} is refused");
     }
     assert!(state.fresh().dir_exists("archive"));
     assert!(state.fresh().find_note(&ids[0]).is_some());
+}
+
+#[test]
+fn apply_answers_the_routes_own_status() {
+    let (state, _dir, _) = state_with(&[]);
+    let missing = run(crate::routes::organize::act_route(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({"kind": "delete_task", "summary": "x", "id": "t0123456789abcdef"}),
+            )
+            .unwrap(),
+        ),
+    ));
+    let direct = run(crate::routes::tasks::delete_task(
+        State(state.clone()),
+        Path("t0123456789abcdef".into()),
+    ));
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    assert_eq!(direct.status(), missing.status());
+    assert_eq!(json_of(missing)["error"], "That is not there any more.");
 }
 
 #[test]
@@ -2333,6 +2510,22 @@ fn felix_in_auto_does_it_at_once_and_read_only_can_only_look() {
     assert!(prompts[1].contains("read only"));
     assert!(prompts[2].contains("Tasks and events from"));
     assert!(state.fresh().find_note(&ids[0]).is_some());
+}
+
+#[test]
+fn felix_renames_a_note_to_a_title_of_any_length() {
+    let (mut state, _d, ids) = state_with(&[("Heaps", "")]);
+    let title = "Heaps ".repeat(100).trim().to_string();
+    let call: &'static str = Box::leak(
+        format!(
+            "<tool>{{\"name\": \"rename_note\", \"note\": \"Heaps\", \"title\": \"{title}\"}}</tool>"
+        )
+        .into_boxed_str(),
+    );
+    let (streamer, _prompts) = scripted(vec![call, "Done."]);
+    state.chat = Some(streamer);
+    chat_lines_with(&state, "rename it", Some("auto"));
+    assert_eq!(state.fresh().find_note(&ids[0]).unwrap().title, title);
 }
 
 #[test]
@@ -2727,6 +2920,47 @@ fn felix_task_descriptions_use_the_same_cards_permissions_and_undo_in_both_proto
             );
         }
     }
+}
+
+#[test]
+fn felix_finds_a_task_past_the_first_page() {
+    let (state, _dir, _) = state_with(&[]);
+    let now = chrono::Utc::now();
+    for i in 0..620 {
+        crate::tasks::put(
+            &state.chats,
+            &crate::tasks::Task {
+                id: format!("t{i:08}"),
+                title: format!("Chore {i:04}"),
+                description: String::new(),
+                kind: "other".into(),
+                done: false,
+                date: None,
+                time: None,
+                end: None,
+                note: None,
+                sent_at: None,
+                created_at: now,
+                updated_at: now,
+                repeat: Vec::new(),
+                done_on: Vec::new(),
+                moved: Default::default(),
+                deleted: false,
+            },
+        )
+        .unwrap();
+    }
+    let mut desk = tools::Desk::new(vec![], 8000);
+    let done = crate::routes::organize::run(
+        &state,
+        &mut desk,
+        tools::Access::Ask,
+        &tools::Call {
+            name: "update_task".into(),
+            args: serde_json::json!({"task": "Chore 0619", "done": "yes"}),
+        },
+    );
+    assert!(done.proposal.is_some(), "{}", done.result);
 }
 
 #[test]
@@ -3200,6 +3434,175 @@ fn a_free_answer_is_marked_by_the_quick_model_without_a_full_felix_reply() {
     assert_eq!(mark(&state, "a stack").status(), StatusCode::BAD_GATEWAY);
 }
 
+fn a_mark() -> Json<crate::routes::felix::MarkBody> {
+    Json(
+        serde_json::from_value(
+            serde_json::json!({"question": "Why a queue?", "answer": "Order", "given": "Order"}),
+        )
+        .unwrap(),
+    )
+}
+
+#[test]
+fn marking_runs_two_at_a_time() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let (mut state, _dir, _) = state_with(&[]);
+    let running = Arc::new(AtomicUsize::new(0));
+    let most = Arc::new(AtomicUsize::new(0));
+    let (now, top) = (Arc::clone(&running), Arc::clone(&most));
+    state.quick = Some(Arc::new(move |_: &str, _: &str, _| {
+        let at = now.fetch_add(1, Ordering::AcqRel) + 1;
+        top.fetch_max(at, Ordering::AcqRel);
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        now.fetch_sub(1, Ordering::AcqRel);
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    }));
+    let statuses: Vec<StatusCode> = run(async {
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let state = state.clone();
+                tokio::spawn(async move {
+                    crate::routes::felix::mark_quiz(State(state), a_mark())
+                        .await
+                        .status()
+                })
+            })
+            .collect();
+        let mut out = Vec::new();
+        for handle in handles {
+            out.push(handle.await.unwrap());
+        }
+        out
+    });
+    assert!(
+        statuses.iter().all(|s| *s == StatusCode::OK),
+        "{statuses:?}"
+    );
+    assert_eq!(most.load(Ordering::Acquire), 2);
+}
+
+#[test]
+fn an_abandoned_quiz_mark_stops_its_work() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let (mut state, _dir, _) = state_with(&[]);
+    let started = Arc::new(AtomicBool::new(false));
+    let returned = Arc::new(Mutex::new(None::<std::time::Instant>));
+    let (begun, ended) = (Arc::clone(&started), Arc::clone(&returned));
+    state.quick = Some(Arc::new(move |_: &str, _: &str, _| {
+        begun.store(true, Ordering::Release);
+        let since = std::time::Instant::now();
+        while !leo_core::children::current_stop().is_some_and(|s| s.asked())
+            && since.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        *ended.lock().unwrap() = Some(std::time::Instant::now());
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    }));
+    let dropped = run(async {
+        let _ = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            crate::routes::felix::mark_quiz(State(state.clone()), a_mark()),
+        )
+        .await;
+        std::time::Instant::now()
+    });
+    assert!(started.load(Ordering::Acquire));
+    let waited = std::time::Instant::now();
+    while returned.lock().unwrap().is_none() && waited.elapsed() < std::time::Duration::from_secs(5)
+    {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    let at = returned.lock().unwrap().expect("the writer never returned");
+    assert!(at.duration_since(dropped) < std::time::Duration::from_secs(1));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_quiz_mark_whose_connection_closes_stops_its_work() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    const TOKEN: &str = "0123456789abcdef0123456789abcdef";
+    let started = Arc::new(AtomicBool::new(false));
+    let returned = Arc::new(Mutex::new(None::<std::time::Instant>));
+    let (begun, ended) = (Arc::clone(&started), Arc::clone(&returned));
+    let quick: crate::graph::Writer = Arc::new(move |_: &str, _: &str, _| {
+        begun.store(true, Ordering::Release);
+        let since = std::time::Instant::now();
+        while !leo_core::children::current_stop().is_some_and(|s| s.asked())
+            && since.elapsed() < std::time::Duration::from_secs(10)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        *ended.lock().unwrap() = Some(std::time::Instant::now());
+        Ok(serde_json::json!({"correct": true, "feedback": "Right."}).to_string())
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let places = crate::Places {
+        store: Store::load_from(&dir.path().join("notes")).unwrap(),
+        sessions: dir.path().join("sessions.json"),
+    };
+    let options = crate::StartOptions {
+        port: 0,
+        token: TOKEN.into(),
+    };
+    let powers = Powers {
+        quick: Some(quick),
+        ..Default::default()
+    };
+    let running = crate::start_in(places, options, powers).await.unwrap();
+    let port = running.port();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!("GET /?token={TOKEN} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let mut signed_in = Vec::new();
+    stream.read_to_end(&mut signed_in).await.unwrap();
+    let cookie = String::from_utf8_lossy(&signed_in)
+        .lines()
+        .find_map(|line| {
+            line.strip_prefix("set-cookie: ")
+                .or_else(|| line.strip_prefix("Set-Cookie: "))
+                .and_then(|value| value.split(';').next())
+                .map(str::to_string)
+        })
+        .unwrap();
+    let body = serde_json::json!({"question": "Why a queue?", "answer": "Order", "given": "Order"})
+        .to_string();
+    let mut stream = tokio::net::TcpStream::connect(("127.0.0.1", port))
+        .await
+        .unwrap();
+    stream
+        .write_all(
+            format!(
+                "POST /api/quiz/mark HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nCookie: {cookie}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .await
+        .unwrap();
+    let waited = std::time::Instant::now();
+    while !started.load(Ordering::Acquire) && waited.elapsed() < std::time::Duration::from_secs(5) {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    assert!(started.load(Ordering::Acquire), "the mark never started");
+    drop(stream);
+    let closed = std::time::Instant::now();
+    while returned.lock().unwrap().is_none() && closed.elapsed() < std::time::Duration::from_secs(5)
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let at = returned.lock().unwrap().expect("the writer never returned");
+    assert!(at.duration_since(closed) < std::time::Duration::from_secs(1));
+    running.stop().await;
+}
+
 #[test]
 fn an_idle_chat_is_compacted_so_the_next_message_sends_a_summary_and_the_last_turns() {
     let (mut state, _dir, _) = state_with(&[]);
@@ -3618,6 +4021,8 @@ fn taking_back_the_last_reply_removes_it_and_refuses_a_stale_count() {
         &state.chats,
         "chat-take-0001",
         chats::Saving {
+            existed: false,
+            from: None,
             title: String::new(),
             refs: vec![],
             messages: vec![said("user"), said("assistant")],
@@ -3785,4 +4190,403 @@ fn chat_database_reads_wait_off_the_async_worker() {
         longest < std::time::Duration::from_millis(300),
         "{longest:?}"
     );
+}
+
+#[test]
+fn the_search_tool_embeds_outside_the_notes_lock() {
+    use crate::routes::felix::execute_tool;
+    let (state, _d, ids) = state_with(&[("Queues", "")]);
+    let note = state.store.lock().unwrap().store.notes[0].clone();
+    state.vectors.put(
+        &[vectors::Work {
+            id: ids[0].clone(),
+            hash: vectors::hash_of(&note),
+            pieces: vec![(0, "x".into())],
+            kept: Vec::new(),
+        }],
+        vec![vec![1.0; 8]],
+    );
+    let free = Arc::new(Mutex::new(None));
+    let probe = Arc::clone(&state.store);
+    let seen = Arc::clone(&free);
+    let meaning: vectors::Meaning = Arc::new(move |texts: &[String], _| {
+        *seen.lock().unwrap() = Some(probe.try_lock().is_ok());
+        Ok(texts.iter().map(|_| vec![1.0; 8]).collect())
+    });
+    let mut desk = tools::Desk::new(Vec::new(), 40_000)
+        .with_meaning(Some(meaning), Arc::clone(&state.vectors));
+    let call = tools::Call {
+        name: "search_notes".into(),
+        args: serde_json::json!({"query": "queue order"}),
+    };
+    execute_tool(&state, &mut desk, &call, &|_| {}).unwrap();
+    assert_eq!(*free.lock().unwrap(), Some(true));
+}
+
+pub(super) fn big_board(state: &AppState, columns: usize) -> crate::boards::Board {
+    let mut board = crate::boards::new_board("Huge", chrono::Utc::now());
+    board.columns.truncate(columns.max(1));
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    for i in 0..300 {
+        let now = chrono::Utc::now();
+        crate::boards::put_card(
+            &state.chats,
+            &crate::boards::Card {
+                id: format!("card-{i:04}"),
+                board: board.id.clone(),
+                column: board.columns[i % board.columns.len()].id.clone(),
+                rank: i as f64,
+                title: format!("Card {i}"),
+                subheading: String::new(),
+                description: "d".repeat(8_000),
+                priority: String::new(),
+                created_at: now,
+                updated_at: now,
+                deleted: false,
+            },
+        )
+        .unwrap();
+    }
+    board
+}
+
+#[test]
+fn a_very_large_board_deletes_and_comes_back() {
+    let (state, _d, _) = state_with(&[]);
+    let board = big_board(&state, 3);
+    let gone = run(crate::routes::organize::act_route(
+        State(state.clone()),
+        Json(
+            serde_json::from_value(
+                serde_json::json!({ "kind": "delete_board", "summary": "x", "board": board.id }),
+            )
+            .unwrap(),
+        ),
+    ));
+    assert_eq!(gone.status(), StatusCode::OK);
+    let gone = json_of(gone);
+    assert!(crate::boards::board(&state.chats, &board.id).is_none());
+    assert_eq!(gone["undo"]["kind"], "undelete_board");
+    assert!(gone["undo"].to_string().len() < 1024);
+    let back = act(&state, &gone["undo"]);
+    assert_eq!(back["undo"]["kind"], "delete_board");
+    let back = crate::boards::board(&state.chats, &board.id).unwrap();
+    let cards = crate::boards::cards_of(&state.chats, &back);
+    assert_eq!(cards.len(), 300);
+    assert!(cards.iter().all(|c| c.description.len() == 8_000));
+}
+
+#[test]
+fn a_column_change_on_a_very_large_board_can_be_undone() {
+    let (state, _d, _) = state_with(&[]);
+    let board = big_board(&state, 3);
+    let places = |state: &AppState| -> Vec<(String, String, f64)> {
+        let mut all: Vec<_> = crate::boards::all_cards(&state.chats)
+            .into_iter()
+            .map(|c| (c.id, c.column, c.rank))
+            .collect();
+        all.sort_by(|a, b| a.0.cmp(&b.0));
+        all
+    };
+    let before = places(&state);
+    let kept: Vec<serde_json::Value> = board.columns[..2]
+        .iter()
+        .map(|c| serde_json::json!({ "id": c.id, "name": c.name }))
+        .collect();
+    let changed = act(
+        &state,
+        &serde_json::json!({
+            "kind": "change_board", "summary": "x", "board": board.id,
+            "columns": kept, "move_to": board.columns[0].id,
+        }),
+    );
+    assert_eq!(changed["undo"]["kind"], "undo_board_change");
+    assert!(changed["undo"].to_string().len() < 1024);
+    assert_eq!(
+        crate::boards::board(&state.chats, &board.id)
+            .unwrap()
+            .columns
+            .len(),
+        2
+    );
+    let undone = act(&state, &changed["undo"]);
+    let back = crate::boards::board(&state.chats, &board.id).unwrap();
+    assert_eq!(back.columns, board.columns);
+    assert_eq!(places(&state), before);
+    act(&state, &undone["undo"]);
+    assert_eq!(
+        crate::boards::board(&state.chats, &board.id)
+            .unwrap()
+            .columns
+            .len(),
+        2
+    );
+    assert!(crate::boards::all_cards(&state.chats)
+        .iter()
+        .all(|c| c.column != board.columns[2].id));
+}
+
+#[test]
+fn a_saved_restore_board_card_still_applies() {
+    let (state, _d, _) = state_with(&[]);
+    let board = sprint(&state);
+    let card = board_card(&state, "Login").unwrap();
+    crate::boards::remove_board(&state.chats, &board, chrono::Utc::now()).unwrap();
+    let restored = act(
+        &state,
+        &serde_json::json!({
+            "kind": "restore_board", "summary": "Bring it back", "board": board, "cards": [card],
+        }),
+    );
+    assert_eq!(restored["undo"]["kind"], "delete_board");
+    assert!(crate::boards::board(&state.chats, &board.id).is_some());
+    assert!(board_card(&state, "Login").is_some());
+}
+
+fn put_saved(
+    state: &AppState,
+    id: &str,
+    existed: bool,
+) -> (axum::http::StatusCode, serde_json::Value) {
+    let body: crate::chats::Saving = serde_json::from_value(serde_json::json!({
+        "messages": [{ "role": "user", "text": "hello" }],
+        "existed": existed,
+    }))
+    .unwrap();
+    let response = run(crate::routes::felix::put_chat(
+        State(state.clone()),
+        Path(id.into()),
+        Json(body),
+    ));
+    (response.status(), json_of(response))
+}
+
+#[test]
+fn a_save_that_says_the_chat_existed_creates_nothing_when_leo_no_longer_has_it() {
+    let (state, _d, _) = state_with(&[]);
+    let (status, _) = put_saved(&state, "chat-gone-0001", true);
+    assert_eq!(status, axum::http::StatusCode::GONE);
+    assert!(crate::chats::load(&state.chats, "chat-gone-0001").is_none());
+}
+
+#[test]
+fn a_save_that_says_the_chat_existed_still_saves_when_leo_has_it() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-kept-0001", false).0,
+        axum::http::StatusCode::OK
+    );
+    let (status, summary) = put_saved(&state, "chat-kept-0001", true);
+    assert_eq!(status, axum::http::StatusCode::OK);
+    assert_eq!(summary["id"], "chat-kept-0001");
+    assert!(crate::chats::load(&state.chats, "chat-kept-0001").is_some());
+}
+
+#[test]
+fn a_first_save_without_the_flag_still_creates_the_chat() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-new-00001", false).0,
+        axum::http::StatusCode::OK
+    );
+    assert!(crate::chats::load(&state.chats, "chat-new-00001").is_some());
+}
+
+#[test]
+fn a_chat_expired_by_tidy_is_not_recreated_by_a_later_save_that_carries_the_flag() {
+    let (state, _d, _) = state_with(&[]);
+    assert_eq!(
+        put_saved(&state, "chat-aged-0001", false).0,
+        axum::http::StatusCode::OK
+    );
+    let later = chrono::Utc::now() + chrono::Duration::days(40);
+    assert_eq!(crate::chats::tidy(&state.chats, Some(30), later), 1);
+    assert_eq!(
+        put_saved(&state, "chat-aged-0001", true).0,
+        axum::http::StatusCode::GONE
+    );
+    assert!(crate::chats::load(&state.chats, "chat-aged-0001").is_none());
+}
+
+#[test]
+#[ignore = "benchmark"]
+fn benchmark_a_chats_documents_are_listed_and_added() {
+    for size in [200_000usize, 20_000_000] {
+        let (mut state, _dir, _) = state_with(&[]);
+        let text: String = "Dijkstra keeps a heap of the nearest nodes. ".repeat(size / 44);
+        let given = text.clone();
+        state.reader = Some(Arc::new(move |_: UploadFile, _: &mut dyn FnMut(&str)| {
+            Ok(given.clone())
+        }));
+        let chat = "chat-docs-0009";
+        for i in 0..9 {
+            chat_files::add(
+                &state.chats,
+                chat,
+                &format!("doc{i}.pdf"),
+                &text,
+                chrono::Utc::now(),
+            )
+            .unwrap();
+        }
+        let mut list_ms = Vec::new();
+        for _ in 0..5 {
+            let started = std::time::Instant::now();
+            let listed = json_of(run(list_chat_files(
+                State(state.clone()),
+                Path(chat.into()),
+            )));
+            list_ms.push(started.elapsed().as_secs_f64() * 1e3);
+            assert_eq!(listed.as_array().unwrap().len(), 9);
+        }
+        let started = std::time::Instant::now();
+        let added = run(crate::routes::felix::put_chat_file(
+            State(state.clone()),
+            Path((chat.into(), "new.pdf".into())),
+            Query(crate::routes::felix::FileKind {
+                mime: "application/pdf".into(),
+            }),
+            axum::body::Body::from("%PDF"),
+        ));
+        let add_ms = started.elapsed().as_secs_f64() * 1e3;
+        assert_eq!(added.status(), StatusCode::CREATED);
+        list_ms.sort_by(f64::total_cmp);
+        eprintln!(
+            "documents of {} bytes, 9 listed: median {:.2} ms; the tenth added in {add_ms:.2} ms",
+            text.len(),
+            list_ms[2]
+        );
+    }
+}
+
+#[test]
+fn every_tool_that_organizes_or_lists_is_carried_out_by_the_engine() {
+    let (state, _dir, _) = state_with(&[]);
+    let specs = tools::SPECS.iter().chain(crate::board_tools::SPECS.iter());
+    for spec in specs.filter(|s| tools::answered_by_organize(s.name)) {
+        let mut desk = tools::Desk::new(vec![], 8000);
+        let done = crate::routes::organize::run(
+            &state,
+            &mut desk,
+            tools::Access::Ask,
+            &tools::Call {
+                name: spec.name.into(),
+                args: serde_json::json!({}),
+            },
+        );
+        assert!(
+            !done.result.contains("there is no tool called"),
+            "{}: {}",
+            spec.name,
+            done.result
+        );
+    }
+}
+
+fn text_stream(megabytes: usize) -> impl futures_util::Stream<Item = std::io::Result<Vec<u8>>> {
+    futures_util::stream::iter((0..megabytes * 16).map(|n| {
+        let mut piece = String::new();
+        for line in 0..1024 {
+            piece.push_str(&format!("line {} of the long document\n", n * 1024 + line));
+        }
+        piece.truncate(64 * 1024);
+        piece.extend(std::iter::repeat_n('.', 64 * 1024 - piece.len()));
+        Ok(piece.into_bytes())
+    }))
+}
+
+fn copying_reader() -> crate::ReaderTo {
+    Arc::new(
+        |path: &std::path::Path,
+         _: &str,
+         _: &str,
+         _: &mut dyn FnMut(&str),
+         out: &mut dyn std::io::Write| {
+            std::io::copy(&mut std::fs::File::open(path)?, out)?;
+            Ok(())
+        },
+    )
+}
+
+fn put_document(state: &AppState, chat: &str, name: &str, megabytes: usize) -> Response {
+    run(crate::routes::felix::put_chat_file(
+        State(state.clone()),
+        Path((chat.into(), name.into())),
+        Query(crate::routes::felix::FileKind::default()),
+        axum::body::Body::from_stream(text_stream(megabytes)),
+    ))
+}
+
+#[test]
+fn a_document_of_any_size_is_attached_by_a_streamed_put_and_read_to_its_end() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(copying_reader());
+    let added = put_document(&state, "chat-docs-0003", "../book.txt", 5);
+    assert_eq!(added.status(), StatusCode::CREATED);
+    let doc = json_of(added);
+    assert_eq!(doc["name"], "book.txt");
+    let id = doc["id"].as_str().unwrap();
+    let chars = doc["chars"].as_u64().unwrap() as usize;
+    assert_eq!(chars, 5 * 1024 * 1024);
+    let last =
+        crate::chat_files::part(&state.chats, "chat-docs-0003", id, chars - 99, 500).unwrap();
+    assert_eq!(last.chars().count(), 100);
+    assert!(last.ends_with('.'));
+    let incoming = state.notes_dir.parent().unwrap().join("incoming");
+    assert!(
+        std::fs::read_dir(&incoming).map_or(true, |mut d| d.next().is_none()),
+        "the file that arrived is removed once it is read"
+    );
+    assert_eq!(
+        json_of(run(list_chat_files(
+            State(state.clone()),
+            Path("chat-docs-0003".into())
+        )))[0]["chars"],
+        doc["chars"]
+    );
+}
+
+#[test]
+fn a_document_leo_cannot_read_is_refused_with_its_name_and_leaves_nothing() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(Arc::new(
+        |_: &std::path::Path,
+         name: &str,
+         _: &str,
+         _: &mut dyn FnMut(&str),
+         _: &mut dyn std::io::Write| { anyhow::bail!("leo cannot read {name} yet") },
+    ));
+    let refused = put_document(&state, "chat-docs-0004", "song.mp3", 1);
+    assert_eq!(refused.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(json_of(refused)["error"]
+        .as_str()
+        .unwrap()
+        .contains("song.mp3"));
+    assert!(crate::chat_files::list(&state.chats, "chat-docs-0004").is_empty());
+    let incoming = state.notes_dir.parent().unwrap().join("incoming");
+    assert!(std::fs::read_dir(&incoming).map_or(true, |mut d| d.next().is_none()));
+}
+
+#[test]
+#[ignore]
+fn a_big_document_is_attached_in_constant_memory() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.reader_to = Some(copying_reader());
+    let megabytes: usize = std::env::var("DOCUMENT_MB").unwrap().parse().unwrap();
+    let started = std::time::Instant::now();
+    let added = put_document(&state, "chat-docs-0005", "book.txt", megabytes);
+    assert_eq!(added.status(), StatusCode::CREATED);
+    println!("attached {megabytes} MB in {:?}", started.elapsed());
+    let doc = json_of(added);
+    let chars = doc["chars"].as_u64().unwrap() as usize;
+    let started = std::time::Instant::now();
+    crate::chat_files::part(
+        &state.chats,
+        "chat-docs-0005",
+        doc["id"].as_str().unwrap(),
+        chars - 999,
+        1_000,
+    )
+    .unwrap();
+    println!("last part in {:?}", started.elapsed());
 }

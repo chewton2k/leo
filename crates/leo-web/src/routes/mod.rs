@@ -25,38 +25,56 @@ use axum::{
 };
 
 use crate::routes::activity::{activity, page_visible};
-use crate::routes::assets::{
-    app_js, chat_js, doc_js, editing_js, favicon, index, markdown_js, recording_js, saving_js,
-};
+use crate::routes::assets::{favicon, index, script};
 use crate::routes::auth::{auth_middleware, note_peer, security_headers};
 use crate::routes::downloads::{export_zip, originals_zip};
 use crate::routes::felix::{
-    add_chat_file, apply_suggestion, change_answer_access, chat_reply, delete_chat,
-    drop_last_messages, get_chat, get_review, list_chat_files, list_chats, mark_reviewed, put_chat,
+    apply_suggestion, change_answer_access, chat_reply, delete_chat, drop_last_messages, get_chat,
+    get_review, list_chat_files, list_chats, mark_reviewed, put_chat, put_chat_file,
     remove_chat_file, steer_answer,
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
-    create_dir, create_note, delete_note, get_note, list_dirs, list_folders, list_notes, move_dir,
+    create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes, move_dir,
     move_note, rename_dir, search_notes, update_note,
 };
-use crate::routes::pictures::{add_picture, get_picture, PICTURE_BYTES};
+use crate::routes::pictures::{get_picture, put_picture};
 use crate::routes::settings::{change_setting, get_settings, test_setting};
 use crate::routes::trash::{
     delete_from_trash, list_trash, move_to_trash, restore_many, restore_note,
 };
 use crate::routes::uploads::{
-    get_original, import_status, list_originals, start_import, IMPORT_BYTES,
+    get_original, import_status, list_originals, put_file, start_import, IMPORT_JSON_BYTES,
 };
 use crate::AppState;
+
+pub(crate) async fn off<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> Result<T, axum::http::StatusCode> {
+    tokio::task::spawn_blocking(work)
+        .await
+        .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+pub(crate) const TEXT_BYTES: usize = 512 * 1024 * 1024;
+
+fn text_limit() -> axum::extract::DefaultBodyLimit {
+    axum::extract::DefaultBodyLimit::max(TEXT_BYTES)
+}
 
 pub(crate) fn router(state: AppState) -> Router {
     Router::new()
         .route("/", get(index))
-        .route("/api/notes", get(list_notes).post(create_note))
+        .route(
+            "/api/notes",
+            get(list_notes).post(create_note).layer(text_limit()),
+        )
         .route(
             "/api/notes/{id}",
-            get(get_note).patch(update_note).delete(delete_note),
+            get(get_note)
+                .patch(update_note)
+                .delete(delete_note)
+                .layer(text_limit()),
         )
         .route(
             "/api/calendar",
@@ -78,18 +96,25 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/notes/{id}/combine", post(combine::start))
         .route(
             "/api/notes/{id}/combined",
-            post(combine::keep).layer(axum::extract::DefaultBodyLimit::max(
-                crate::combine::MOST_CHARS * 8 + 65_536,
-            )),
+            post(combine::keep).layer(text_limit()),
         )
         .route("/api/notes/{id}/uncombine", post(combine::uncombine))
         .route(
             "/api/combines/{job}",
             get(combine::job).delete(combine::forget),
         )
-        .route("/api/notes/{id}/suggestion", post(apply_suggestion))
-        .route("/api/felix/act", post(organize::act_route))
-        .route("/api/notes/{id}/insert", post(insert::insert_into_note))
+        .route(
+            "/api/notes/{id}/suggestion",
+            post(apply_suggestion).layer(text_limit()),
+        )
+        .route(
+            "/api/felix/act",
+            post(organize::act_route).layer(text_limit()),
+        )
+        .route(
+            "/api/notes/{id}/insert",
+            post(insert::insert_into_note).layer(text_limit()),
+        )
         .route(
             "/api/notes/{id}/margin",
             get(margin::note_margin).post(margin::set_note_mode),
@@ -106,23 +131,16 @@ pub(crate) fn router(state: AppState) -> Router {
                 crate::margin::BODY_BYTES,
             )),
         )
-        .route(
-            "/api/notes/{id}/margin/threads",
-            post(margin::ask).layer(axum::extract::DefaultBodyLimit::max(
-                crate::margin::BODY_BYTES,
-            )),
-        )
+        .route("/api/notes/{id}/margin/threads", post(margin::ask))
         .route(
             "/api/notes/{id}/margin/threads/{thread}",
             post(margin::set_status)
-                .patch(margin::pin)
+                .patch(margin::change_thread)
                 .delete(margin::forget),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/reply",
-            post(margin::reply).layer(axum::extract::DefaultBodyLimit::max(
-                crate::margin::BODY_BYTES,
-            )),
+            post(margin::reply),
         )
         .route(
             "/api/notes/{id}/margin/threads/{thread}/weave",
@@ -144,7 +162,10 @@ pub(crate) fn router(state: AppState) -> Router {
             get(tasks::list_tasks).post(tasks::create_task),
         )
         .route("/api/tasks/promote", post(tasks::promote_task))
-        .route("/api/tasks/import", post(tasks::import_tasks))
+        .route(
+            "/api/tasks/import",
+            post(tasks::import_tasks).layer(text_limit()),
+        )
         .route(
             "/api/tasks/{id}",
             axum::routing::patch(tasks::change_task).delete(tasks::delete_task),
@@ -155,6 +176,11 @@ pub(crate) fn router(state: AppState) -> Router {
             get(boards::list_boards).post(boards::create_board),
         )
         .route("/api/boards/restore", post(boards::restore_board))
+        .route("/api/boards/{id}/undelete", post(boards::undelete_board))
+        .route(
+            "/api/boards/{id}/undo/{undo}",
+            post(boards::undo_board_change),
+        )
         .route(
             "/api/boards/{id}",
             get(boards::get_board)
@@ -164,41 +190,58 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/boards/{id}/cards", post(boards::create_card))
         .route(
             "/api/cards/{id}",
-            axum::routing::patch(boards::change_card).delete(boards::delete_card),
+            get(boards::get_card)
+                .patch(boards::change_card)
+                .delete(boards::delete_card),
         )
         .route("/api/cards/{id}/move", post(boards::move_card))
+        .route("/api/cards/{id}/undelete", post(boards::undelete_card))
         .route("/api/schedule", get(crate::calendar::schedule))
         .route("/api/search", get(search_notes))
-        .route("/api/dirs", get(list_dirs).post(create_dir))
-        .route("/api/dirs/move", post(move_dir))
-        .route("/api/dirs/rename", post(rename_dir))
+        .route(
+            "/api/dirs",
+            post(|state, body| async {
+                crate::reply::folder_worded(create_dir(state, body).await)
+            }),
+        )
+        .route(
+            "/api/dirs/move",
+            post(|state, body| async { crate::reply::folder_worded(move_dir(state, body).await) }),
+        )
+        .route(
+            "/api/dirs/rename",
+            post(|state, body| async {
+                crate::reply::folder_worded(rename_dir(state, body).await)
+            }),
+        )
         .route("/api/folders", get(list_folders))
+        .route("/api/rev", get(get_rev))
         .route("/api/trash", get(list_trash))
         .route("/api/trash/{id}/restore", post(restore_note))
         .route("/api/trash/delete", post(delete_from_trash))
         .route("/api/trash/move", post(move_to_trash))
         .route("/api/trash/restore", post(restore_many))
-        .route("/app.js", get(app_js))
-        .route("/markdown.js", get(markdown_js))
+        .route("/app.js", script(assets::APP_JS))
+        .route("/markdown.js", script(assets::MARKDOWN_JS))
         .route(assets::MERMAID_PATH, get(assets::mermaid_js))
         .route("/vendor/katex-0.16.11/{*path}", get(assets::katex_file))
         .route("/vendor/fonts-5.3.0/{*path}", get(assets::font_file))
-        .route("/editing.js", get(editing_js))
-        .route("/doc.js", get(doc_js))
-        .route("/saving.js", get(saving_js))
-        .route("/schedule.js", get(assets::schedule_js))
-        .route("/margin.js", get(assets::margin_js))
+        .route("/editing.js", script(assets::EDITING_JS))
+        .route("/doc.js", script(assets::DOC_JS))
+        .route("/saving.js", script(assets::SAVING_JS))
+        .route("/schedule.js", script(assets::SCHEDULE_JS))
+        .route("/margin.js", script(assets::MARGIN_JS))
         .route("/prefs.js", get(crate::prefs::script))
-        .route("/theme.js", get(assets::theme_js))
+        .route("/theme.js", script(assets::THEME_JS))
         .route(
             "/api/ui-prefs",
             axum::routing::put(crate::prefs::change).layer(axum::extract::DefaultBodyLimit::max(
                 crate::prefs::BODY_BYTES,
             )),
         )
-        .route("/chat.js", get(chat_js))
-        .route("/pane-resize.js", get(assets::pane_resize_js))
-        .route("/api/chat", post(chat_reply))
+        .route("/chat.js", script(assets::CHAT_JS))
+        .route("/pane-resize.js", script(assets::PANE_RESIZE_JS))
+        .route("/api/chat", post(chat_reply).layer(text_limit()))
         .route("/api/quiz/mark", post(felix::mark_quiz))
         .route(
             "/api/chat/compact",
@@ -210,17 +253,12 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/chat/{answer}/access", post(change_answer_access))
         .route("/api/chats", get(list_chats))
         .route("/api/review", get(get_review).post(mark_reviewed))
-        .route(
-            "/api/chats/{id}/files",
-            get(list_chat_files)
-                .post(add_chat_file)
-                .layer(axum::extract::DefaultBodyLimit::max(
-                    crate::chat_files::UPLOAD_BYTES,
-                )),
-        )
+        .route("/api/chats/{id}/files", get(list_chat_files))
         .route(
             "/api/chats/{id}/files/{doc}",
-            axum::routing::delete(remove_chat_file),
+            axum::routing::delete(remove_chat_file)
+                .put(put_chat_file)
+                .layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route("/api/keep", get(get_keep).post(set_keep))
         .route("/api/keep/preview", post(housekeeping::preview_keep))
@@ -239,20 +277,19 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/processes", get(processes::list))
         .route(
             "/api/import",
-            post(start_import)
-                .layer(axum::extract::DefaultBodyLimit::max(IMPORT_BYTES))
-                .layer(axum::middleware::from_fn_with_state(
-                    state.clone(),
-                    uploads::import_limit,
-                )),
+            post(start_import).layer(axum::extract::DefaultBodyLimit::max(IMPORT_JSON_BYTES)),
+        )
+        .route(
+            "/api/import/files/{upload}/{item}",
+            axum::routing::put(put_file).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route("/api/import/{id}", get(import_status))
         .route("/api/activity", get(activity))
         .route("/api/visible", post(page_visible))
         .route("/api/image", get(get_picture))
         .route(
-            "/api/images",
-            post(add_picture).layer(axum::extract::DefaultBodyLimit::max(PICTURE_BYTES)),
+            "/api/pictures/{name}",
+            axum::routing::put(put_picture).layer(axum::extract::DefaultBodyLimit::disable()),
         )
         .route(
             "/api/app",
@@ -265,7 +302,9 @@ pub(crate) fn router(state: AppState) -> Router {
             "/api/dictation",
             get(crate::dictation::get)
                 .post(crate::dictation::change)
-                .layer(axum::extract::DefaultBodyLimit::max(200_000)),
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::dictation::MOST_BODY,
+                )),
         )
         .route(
             "/api/speech",
@@ -289,12 +328,14 @@ pub(crate) fn router(state: AppState) -> Router {
         )
         .route("/api/record/{id}/pause", post(crate::record::pause))
         .route("/api/record/{id}/point", post(crate::record::point))
+        .route(
+            "/api/record/{id}/points",
+            get(crate::record::earlier_points),
+        )
         .route("/api/record/{id}/wants", post(crate::record::wants))
         .route(
             "/api/record/{id}/snapshot",
-            post(crate::record::snapshot).layer(axum::extract::DefaultBodyLimit::max(
-                pictures::PICTURE_BYTES,
-            )),
+            post(crate::record::snapshot).layer(text_limit()),
         )
         .route("/api/record/{id}/stop", post(crate::record::stop))
         .route(
@@ -302,7 +343,7 @@ pub(crate) fn router(state: AppState) -> Router {
             post(crate::record::finish_available),
         )
         .route("/api/record/{id}/recover", post(crate::record::recover))
-        .route("/recording.js", get(recording_js))
+        .route("/recording.js", script(assets::RECORDING_JS))
         .route("/api/notes/{id}/originals", get(list_originals))
         .route(
             "/api/notes/{id}/originals/{name}/passage",
@@ -319,6 +360,7 @@ pub(crate) fn router(state: AppState) -> Router {
             crate::note_activity,
         ))
         .route("/favicon.svg", get(favicon))
+        .layer(axum::middleware::from_fn(crate::reply::worded))
         .layer(axum::middleware::from_fn(security_headers))
         .layer(axum::middleware::from_fn(note_peer))
         .with_state(state)

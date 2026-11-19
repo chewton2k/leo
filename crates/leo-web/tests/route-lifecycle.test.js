@@ -67,3 +67,94 @@ test('arriving on a page keeps a sheet opened there and closes one left from bef
   await context.route(true);
   assert.deepEqual(closed, [true, true]);
 });
+
+function returning(answer) {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
+  const start = source.indexOf("document.addEventListener('visibilitychange'");
+  const end = source.indexOf("window.addEventListener(\n  'scroll'", start);
+  const note = { id: 'n1', title: 'T', body: 'text', tags: [], directory: '', pinned: false, version: 3 };
+  const seen = { renders: 0, sideLoads: 0, margins: [], failures: 0 };
+  let listener;
+  const state = { view: 'note', session: { note } };
+  const context = {
+    document: { visibilityState: 'visible', addEventListener: (type, fn) => { listener = fn; } },
+    state, enc: String, busy: () => false, rememberPlace() {}, saveWebsiteWork() {},
+    fail: () => { seen.failures++; },
+    render: async () => { seen.renders++; },
+    loadSideFolders: () => { seen.sideLoads++; },
+    marginLoad: (s, current) => { seen.margins.push({ s, current }); return Promise.resolve(); },
+    api: async () => answer(note),
+  };
+  vm.createContext(context);
+  vm.runInContext(source.slice(start, end), context);
+  const settle = async () => { for (let i = 0; i < 3; i++) await new Promise((resolve) => setImmediate(resolve)); };
+  return { listener: () => listener(), seen, state, settle };
+}
+
+test('returning to an unchanged open note does not rebuild it', async () => {
+  const e = returning((note) => ({ ...note }));
+  e.listener();
+  await e.settle();
+  assert.equal(e.seen.renders, 0);
+  assert.equal(e.seen.sideLoads, 1);
+  assert.equal(e.seen.margins.length, 1);
+  assert.equal(e.seen.margins[0].s, e.state.session);
+});
+
+test('returning to an unchanged note fetches the margin notes written while the window was hidden', async () => {
+  const e = returning((note) => ({ ...note }));
+  e.listener();
+  await e.settle();
+  const { current } = e.seen.margins[0];
+  assert.equal(current(), true);
+  e.state.session = { note: e.state.session.note };
+  assert.equal(current(), false);
+});
+
+test('returning to a note edited elsewhere rebuilds it', async () => {
+  const e = returning((note) => ({ ...note, body: 'edited elsewhere' }));
+  e.listener();
+  await e.settle();
+  assert.equal(e.seen.renders, 1);
+  assert.equal(e.seen.margins.length, 0);
+});
+
+test('returning to a note moved to another folder with the same text rebuilds it', async () => {
+  const e = returning((note) => ({ ...note, directory: 'Other' }));
+  e.listener();
+  await e.settle();
+  assert.equal(e.seen.renders, 1);
+});
+
+test('returning to a note that is gone rebuilds it so the missing-note path runs', async () => {
+  const e = returning(() => { throw Object.assign(new Error('missing'), { status: 404 }); });
+  e.listener();
+  await e.settle();
+  assert.equal(e.seen.renders, 1);
+  assert.equal(e.seen.margins.length, 0);
+});
+
+test('the background panel updates in place and announces only its state', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
+  const code = source.slice(source.indexOf('function drawActivity()'), source.indexOf('async function checkActivity()'));
+  const painted = [];
+  const attrs = {};
+  const box = {
+    hidden: false, classList: { toggle() {} }, setAttribute: (k, v) => { attrs[k] = v; },
+    set innerHTML(value) { throw new Error(`innerHTML rewritten: ${value}`); },
+  };
+  let now = 1000;
+  const context = {
+    $: () => box, activity: { tasks: [{ kind: 'combine', label: 'Combining a', step: 'Felix is writing one note', done: 10, total: 100, href: '#combine/1', ready: false }], folded: false, route: '', seen: new Map() },
+    hiddenHere: () => false, esc: String, Math, Date: { now: () => now }, refreshPanel: (_, html) => painted.push(html),
+    leoChat: (require('../src/web/chat.js'), globalThis.leoChat),
+  };
+  vm.createContext(context);
+  vm.runInContext(`${code}\n;globalThis.drawActivity = drawActivity;`, context);
+  for (let i = 0; i < 3; i++) { context.drawActivity(); now += 1000; }
+  assert.equal(painted.length, 3);
+  assert.equal(attrs['aria-live'], undefined);
+  const said = painted.map((html) => html.match(/<span class="said" role="status">([^<]*)<\/span>/)?.[1]);
+  assert.deepEqual(said, ['Working in the background', 'Working in the background', 'Working in the background']);
+  assert.deepEqual(painted.map((html) => html.match(/· (\d+ s)/)?.[1]), ['0 s', '1 s', '2 s']);
+});

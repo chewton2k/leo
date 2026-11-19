@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Mutex;
 
 use axum::extract::State;
@@ -10,8 +10,8 @@ use serde::Deserialize;
 
 use crate::AppState;
 
-const FILE: &str = "ui-prefs.json";
-const CONTENT: [&str; 2] = ["leo-chat-v1", "leo-search"];
+const FILE: &str = leo_core::paths::own::UI_PREFS;
+const CONTENT: [&str; 1] = ["leo-chat-v1"];
 const MOST_VALUE: usize = 16 * 1024;
 const MOST_TOTAL: usize = 128 * 1024;
 pub(crate) const BODY_BYTES: usize = MOST_TOTAL + 64 * 1024;
@@ -95,10 +95,6 @@ fn apply(dir: &Path, change: Change) -> Result<(), StatusCode> {
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
 }
 
-fn dir_of(state: &AppState) -> PathBuf {
-    state.chats.parent().unwrap_or(&state.chats).to_path_buf()
-}
-
 fn off() -> bool {
     std::env::var_os("LEO_NO_UI_PREFS").is_some()
 }
@@ -111,7 +107,7 @@ pub(crate) async fn script(State(state): State<AppState>) -> Response {
         )
             .into_response();
     }
-    let dir = dir_of(&state);
+    let dir = crate::db::beside_of(&state.chats, None).to_path_buf();
     let Ok(prefs) = tokio::task::spawn_blocking(move || load(&dir)).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
@@ -130,7 +126,7 @@ pub(crate) async fn change(State(state): State<AppState>, Json(change): Json<Cha
     if off() {
         return StatusCode::NOT_FOUND.into_response();
     }
-    let dir = dir_of(&state);
+    let dir = crate::db::beside_of(&state.chats, None).to_path_buf();
     match tokio::task::spawn_blocking(move || apply(&dir, change)).await {
         Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
         Ok(Err(code)) => code.into_response(),
@@ -165,7 +161,6 @@ mod tests {
             "leo-draft-v1",
             "leo-draft",
             "leo-chat-v1",
-            "leo-search",
             &format!("leo-{}", "a".repeat(49)),
         ] {
             assert!(!key_ok(bad), "{bad}");

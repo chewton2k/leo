@@ -41,6 +41,7 @@ function chooser() {
   const calls = [];
   const context = {
     sheet: () => 'box',
+    sheetButtons: () => '',
     $: (sel) => ({addEventListener: (_t, fn) => { buttons[sel] = fn; }}),
     uploadSheet: async (...args) => { calls.push(['upload', ...args]); },
     closeSheet: () => calls.push(['close']),

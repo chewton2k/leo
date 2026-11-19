@@ -1,21 +1,24 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
 use base64::Engine;
 use leo_core::notes::Note;
-use leo_core::store::Store;
+use leo_core::store::{Changed, Store};
 use serde::{Deserialize, Serialize};
 
 pub type Meaning = Arc<dyn Fn(&[String], bool) -> Result<Vec<Vec<f32>>> + Send + Sync>;
 
 pub const PIECE_CHARS: usize = 1200;
+#[cfg(test)]
 pub const MOST_PIECES: usize = 12;
 pub const PIECES_PER_TICK: usize = 256;
 pub const CLOSE_ENOUGH: f32 = 0.62;
 pub const NEIGHBOURS: usize = 24;
-const MOST_FOR_NEIGHBOURS: usize = 6000;
+pub const NEAR_SLICE: usize = 256;
+pub const HASH_BYTES_PER_TICK: usize = 16 * 1024 * 1024;
+const FINISHED_AT_ONCE: usize = 6000;
 
 pub type Near = BTreeMap<String, std::collections::BTreeSet<String>>;
 
@@ -24,6 +27,7 @@ pub struct Entry {
     pub hash: String,
     pub pieces: Vec<(usize, Vec<f32>)>,
     pub marks: BTreeMap<usize, String>,
+    pub whole: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -38,17 +42,49 @@ struct Stored {
     pieces: Vec<(usize, String)>,
 }
 
+type Row = (String, i64, String, Vec<u8>, String);
+
+fn add_row(known: &mut BTreeMap<String, Entry>, (note, at, hash, v, mark): Row) {
+    let Some(v) = from_blob(&v) else { return };
+    let at = at.max(0) as usize;
+    let entry = known.entry(note).or_insert_with(|| Entry {
+        hash: hash.clone(),
+        pieces: Vec::new(),
+        marks: BTreeMap::new(),
+        whole: false,
+    });
+    entry.pieces.push((at, v));
+    if !mark.is_empty() {
+        entry.marks.insert(at, mark);
+    }
+}
+
 pub struct Vectors {
     db: Arc<crate::db::Db>,
     known: Mutex<BTreeMap<String, Entry>>,
     version: std::sync::atomic::AtomicU64,
     held: Mutex<Option<Held>>,
+    looking: Mutex<Looking>,
+    forgot: Mutex<u64>,
+    progress: std::sync::atomic::AtomicU64,
+    failed: Mutex<HashMap<String, (String, std::time::Instant)>>,
+}
+
+#[derive(Default)]
+struct Looking {
+    looked: u64,
+    pass_from: u64,
+    left: Vec<String>,
+    open: BTreeMap<String, Option<String>>,
 }
 
 struct Held {
     most: usize,
+    stamps: BTreeMap<String, (String, usize)>,
     means: BTreeMap<String, Vec<f32>>,
-    near: Near,
+    near: Arc<Near>,
+    worst: BTreeMap<String, f32>,
+    pending: BTreeSet<String>,
 }
 
 fn nearest_to(
@@ -56,18 +92,34 @@ fn nearest_to(
     v: &[f32],
     means: &BTreeMap<String, Vec<f32>>,
     most: usize,
-) -> std::collections::BTreeSet<String> {
+) -> (BTreeSet<String>, f32) {
     let mut scored: Vec<(f32, &String)> = means
         .iter()
         .filter(|(other, _)| other.as_str() != id)
         .map(|(other, w)| (cosine(v, w), other))
         .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(b.1)));
-    scored
-        .into_iter()
-        .take(most)
-        .map(|(_, other)| other.clone())
-        .collect()
+    let first = |a: &(f32, &String), b: &(f32, &String)| b.0.total_cmp(&a.0).then(a.1.cmp(b.1));
+    if most > 0 && scored.len() > most {
+        scored.select_nth_unstable_by(most - 1, first);
+        scored.truncate(most);
+    }
+    scored.sort_by(first);
+    scored.truncate(most);
+    let worst = scored.last().map_or(f32::INFINITY, |(score, _)| *score);
+    (
+        scored.into_iter().map(|(_, other)| other.clone()).collect(),
+        worst,
+    )
+}
+
+fn mean_of(entry: &Entry) -> Option<Vec<f32>> {
+    let width = entry.pieces.first()?.1.len();
+    let mut sum = vec![0f32; width];
+    for (_, v) in &entry.pieces {
+        sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
+    }
+    let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
+    (norm > 0.0).then(|| sum.into_iter().map(|x| x / norm).collect())
 }
 
 fn to_blob(vector: &[f32]) -> Vec<u8> {
@@ -93,13 +145,14 @@ fn decode(text: &str) -> Option<Vec<f32>> {
     )
 }
 
+pub(crate) fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
+    bytes.into_iter().fold(0xcbf2_9ce4_8422_2325, |hash, byte| {
+        (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+    })
+}
+
 fn fnv(bytes: impl Iterator<Item = u8>) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in bytes {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    format!("{:016x}", fnv64(bytes))
 }
 
 pub fn hash_of(note: &Note) -> String {
@@ -160,11 +213,20 @@ pub struct Work {
 
 impl Vectors {
     pub fn for_notes(notes_dir: &Path) -> Vectors {
+        let base = crate::db::beside_of(notes_dir, None);
+        Vectors::at(base.join(leo_core::paths::own::MEANING))
+    }
+
+    pub fn for_live(notes_dir: &Path, live: &HashSet<String>) -> Vectors {
         let base = notes_dir.parent().unwrap_or(notes_dir);
-        Vectors::at(base.join("meaning.json"))
+        Vectors::loaded(base.join(leo_core::paths::own::MEANING), Some(live))
     }
 
     pub fn at(path: PathBuf) -> Vectors {
+        Vectors::loaded(path, None)
+    }
+
+    fn loaded(path: PathBuf, live: Option<&HashSet<String>>) -> Vectors {
         let db = crate::db::beside(&path);
         let old: Option<OnDisk> = std::fs::read_to_string(&path)
             .ok()
@@ -188,7 +250,7 @@ impl Vectors {
                 crate::db::put_aside(&path);
             }
         }
-        let rows: Vec<(String, i64, String, Vec<u8>, String)> = db
+        let rows: Vec<Row> = db
             .with(|c| {
                 let mut found =
                     c.prepare("SELECT note, at, hash, v, piece FROM vectors ORDER BY note, at")?;
@@ -199,17 +261,9 @@ impl Vectors {
             })
             .unwrap_or_default();
         let mut known: BTreeMap<String, Entry> = BTreeMap::new();
-        for (note, at, hash, v, mark) in rows {
-            let Some(v) = from_blob(&v) else { continue };
-            let at = at.max(0) as usize;
-            let entry = known.entry(note).or_insert_with(|| Entry {
-                hash: hash.clone(),
-                pieces: Vec::new(),
-                marks: BTreeMap::new(),
-            });
-            entry.pieces.push((at, v));
-            if !mark.is_empty() {
-                entry.marks.insert(at, mark);
+        for row in rows {
+            if live.is_none_or(|live| live.contains(&row.0)) {
+                add_row(&mut known, row);
             }
         }
         Vectors {
@@ -217,6 +271,10 @@ impl Vectors {
             known: Mutex::new(known),
             version: std::sync::atomic::AtomicU64::new(0),
             held: Mutex::new(None),
+            looking: Mutex::new(Looking::default()),
+            forgot: Mutex::new(0),
+            progress: std::sync::atomic::AtomicU64::new(0),
+            failed: Mutex::new(HashMap::new()),
         }
     }
 
@@ -229,70 +287,131 @@ impl Vectors {
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
-    pub fn neighbours(&self, most: usize) -> Near {
-        let means: BTreeMap<String, Vec<f32>> = {
-            let Ok(known) = self.known.lock() else {
-                return Near::new();
-            };
-            if known.len() > MOST_FOR_NEIGHBOURS {
-                return Near::new();
-            }
-            known
-                .iter()
-                .filter_map(|(id, entry)| {
-                    let width = entry.pieces.first()?.1.len();
-                    let mut sum = vec![0f32; width];
-                    for (_, v) in &entry.pieces {
-                        sum.iter_mut().zip(v).for_each(|(s, x)| *s += x);
-                    }
-                    let norm = sum.iter().map(|x| x * x).sum::<f32>().sqrt();
-                    (norm > 0.0).then(|| (id.clone(), sum.into_iter().map(|x| x / norm).collect()))
-                })
-                .collect()
+    pub fn near_progress(&self) -> u64 {
+        self.progress.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn near_pending(&self) -> bool {
+        self.held
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .is_some_and(|held| !held.pending.is_empty())
+    }
+
+    pub fn neighbours(&self, most: usize, budget: usize) -> Arc<Near> {
+        let Ok(known) = self.known.lock() else {
+            return Arc::new(Near::new());
         };
         let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
-        let old = held.take().filter(|old| old.most == most);
-        let near: Near = {
-            let moved = |id: &String| {
-                old.as_ref()
-                    .is_none_or(|old| old.means.get(id) != means.get(id))
-            };
-            let changed: Vec<&Vec<f32>> = means
-                .iter()
-                .filter(|(id, _)| moved(id))
-                .map(|(_, v)| v)
+        let mut now = held
+            .take()
+            .filter(|old| old.most == most)
+            .unwrap_or_else(|| Held {
+                most,
+                stamps: BTreeMap::new(),
+                means: BTreeMap::new(),
+                near: Arc::new(Near::new()),
+                worst: BTreeMap::new(),
+                pending: BTreeSet::new(),
+            });
+        let mut moved: HashSet<String> = HashSet::new();
+        let mut present = 0;
+        for (id, entry) in known.iter() {
+            let stamp = now.stamps.get(id);
+            present += usize::from(stamp.is_some());
+            if stamp
+                .is_some_and(|(hash, pieces)| *hash == entry.hash && *pieces == entry.pieces.len())
+            {
+                continue;
+            }
+            now.stamps
+                .insert(id.clone(), (entry.hash.clone(), entry.pieces.len()));
+            let mean = mean_of(entry);
+            if now.means.get(id) != mean.as_ref() {
+                match mean {
+                    Some(mean) => now.means.insert(id.clone(), mean),
+                    None => now.means.remove(id),
+                };
+                moved.insert(id.clone());
+            }
+        }
+        if present < now.stamps.len() {
+            let gone: Vec<String> = now
+                .stamps
+                .keys()
+                .filter(|id| !known.contains_key(*id))
+                .cloned()
                 .collect();
-            means
-                .iter()
-                .map(|(id, v)| {
-                    let kept = old
-                        .as_ref()
-                        .and_then(|old| old.near.get(id))
-                        .filter(|list| {
-                            list.len() == most
-                                && !moved(id)
-                                && list.iter().all(|other| !moved(other))
-                                && {
-                                    let worst = list
-                                        .iter()
-                                        .map(|other| cosine(v, &means[other]))
-                                        .fold(f32::INFINITY, f32::min);
-                                    changed.iter().all(|c| cosine(v, c) < worst)
-                                }
-                        });
-                    let list = kept
-                        .cloned()
-                        .unwrap_or_else(|| nearest_to(id, v, &means, most));
-                    (id.clone(), list)
-                })
-                .collect()
-        };
-        *held = Some(Held {
-            most,
+            for id in gone {
+                now.stamps.remove(&id);
+                now.means.remove(&id);
+                moved.insert(id);
+            }
+        }
+        drop(known);
+        let Held {
             means,
-            near: near.clone(),
-        });
-        near
+            near,
+            worst,
+            pending,
+            ..
+        } = &mut now;
+        if moved.is_empty() && pending.is_empty() {
+            let out = Arc::clone(near);
+            *held = Some(now);
+            return out;
+        }
+        let near = Arc::make_mut(near);
+        if !moved.is_empty() {
+            let changed: Vec<&Vec<f32>> = moved.iter().filter_map(|id| means.get(id)).collect();
+            let invalid: Vec<String> = near
+                .iter()
+                .filter(|(id, list)| {
+                    moved.contains(*id)
+                        || !means.contains_key(*id)
+                        || list.len() != most
+                        || list.iter().any(|other| moved.contains(other))
+                        || !worst.get(*id).is_some_and(|worst| {
+                            changed.iter().all(|c| cosine(&means[*id], c) < *worst)
+                        })
+                })
+                .map(|(id, _)| id.clone())
+                .collect();
+            for id in invalid {
+                near.remove(&id);
+                worst.remove(&id);
+                pending.insert(id);
+            }
+            for id in &moved {
+                near.remove(id);
+                worst.remove(id);
+                if means.contains_key(id) {
+                    pending.insert(id.clone());
+                } else {
+                    pending.remove(id);
+                }
+            }
+        }
+        let take = if means.len() <= FINISHED_AT_ONCE {
+            usize::MAX
+        } else {
+            budget
+        };
+        let slice: Vec<String> = pending.iter().take(take).cloned().collect();
+        for id in &slice {
+            pending.remove(id);
+            let (list, least) = nearest_to(id, &means[id], means, most);
+            near.insert(id.clone(), list);
+            worst.insert(id.clone(), least);
+        }
+        if !slice.is_empty() {
+            self.progress
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        let out = Arc::clone(&now.near);
+        *held = Some(now);
+        out
     }
 
     pub fn len(&self) -> usize {
@@ -303,14 +422,70 @@ impl Vectors {
         self.len() == 0
     }
 
+    pub fn looking(&self) -> bool {
+        !self
+            .looking
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .left
+            .is_empty()
+    }
+
+    fn read_back(&self, known: &mut BTreeMap<String, Entry>, id: &str) {
+        let rows: Vec<Row> = self
+            .db
+            .with(|c| {
+                let mut found = c.prepare_cached(
+                    "SELECT note, at, hash, v, piece FROM vectors WHERE note = ?1 ORDER BY at",
+                )?;
+                let rows = found.query_map([id], |r| {
+                    Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+                })?;
+                rows.collect()
+            })
+            .unwrap_or_default();
+        for row in rows {
+            add_row(known, row);
+        }
+    }
+
     pub fn stale(&self, store: &Store, most_pieces: usize) -> Vec<Work> {
-        let Ok(known) = self.known.lock() else {
+        self.stale_with(store, most_pieces, &hash_of, HASH_BYTES_PER_TICK)
+    }
+
+    fn stale_with(
+        &self,
+        store: &Store,
+        most_pieces: usize,
+        hasher: &dyn Fn(&Note) -> String,
+        budget: usize,
+    ) -> Vec<Work> {
+        let Ok(mut known) = self.known.lock() else {
             return Vec::new();
         };
+        let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
+        failed.retain(|_, (_, at)| at.elapsed() < crate::graph::RETRY_AUTO_AFTER);
+        let mut looking = self.looking.lock().unwrap_or_else(|e| e.into_inner());
         let mut out = Vec::new();
         let mut pieces = 0;
-        for note in &store.notes {
-            let hash = hash_of(note);
+        let examine = |known: &mut BTreeMap<String, Entry>,
+                       note: &Note,
+                       hash: &str,
+                       pieces: &mut usize,
+                       out: &mut Vec<Work>|
+         -> bool {
+            if failed.get(&note.id).is_some_and(|(was, _)| *was == hash) {
+                return false;
+            }
+            if !known.contains_key(&note.id) {
+                self.read_back(known, &note.id);
+            }
+            if known
+                .get(&note.id)
+                .is_some_and(|e| e.whole && e.hash == hash)
+            {
+                return true;
+            }
             let entry = known.get(&note.id);
             let current = entry.is_some_and(|e| e.hash == hash);
             let mut found = pieces_of(note);
@@ -335,17 +510,91 @@ impl Vectors {
                     });
                 }
             }
-            found.truncate(most_pieces.saturating_sub(pieces));
-            if found.is_empty() && kept.is_empty() {
-                continue;
+            if current && found.is_empty() {
+                if let Some(entry) = known.get_mut(&note.id) {
+                    entry.whole = true;
+                }
+                return true;
             }
-            pieces += found.len();
+            found.truncate(most_pieces.saturating_sub(*pieces));
+            if found.is_empty() && kept.is_empty() {
+                return false;
+            }
+            *pieces += found.len();
             out.push(Work {
                 id: note.id.clone(),
-                hash,
+                hash: hash.to_string(),
                 pieces: found,
                 kept,
             });
+            false
+        };
+        if looking.left.is_empty() {
+            let (now, changed) = store.changes_since(looking.looked);
+            match changed {
+                Changed::Everything => {
+                    looking.left = store.notes.iter().rev().map(|n| n.id.clone()).collect();
+                    looking.pass_from = now;
+                    looking.open.clear();
+                }
+                Changed::Ids(ids) => {
+                    for id in ids {
+                        looking.open.insert(id, None);
+                    }
+                    looking.looked = now;
+                }
+            }
+        }
+        if looking.left.is_empty() {
+            let wanted: Vec<String> = looking.open.keys().cloned().collect();
+            let by_id: HashMap<&str, &Note> = if wanted.len() > 16 {
+                store.notes.iter().map(|n| (n.id.as_str(), n)).collect()
+            } else {
+                wanted
+                    .iter()
+                    .filter_map(|id| store.notes.iter().find(|n| n.id == *id))
+                    .map(|n| (n.id.as_str(), n))
+                    .collect()
+            };
+            for id in wanted {
+                if pieces >= most_pieces {
+                    break;
+                }
+                let Some(note) = by_id.get(id.as_str()) else {
+                    looking.open.remove(&id);
+                    continue;
+                };
+                let hash = match looking.open.get(&id) {
+                    Some(Some(hash)) => hash.clone(),
+                    _ => hasher(note),
+                };
+                if examine(&mut known, note, &hash, &mut pieces, &mut out) {
+                    looking.open.remove(&id);
+                } else {
+                    looking.open.insert(id, Some(hash));
+                }
+            }
+        } else {
+            let by_id: HashMap<&str, &Note> =
+                store.notes.iter().map(|n| (n.id.as_str(), n)).collect();
+            let mut spent = 0usize;
+            while let Some(id) = looking.left.pop() {
+                if pieces >= most_pieces || spent >= budget {
+                    looking.left.push(id);
+                    break;
+                }
+                let Some(note) = by_id.get(id.as_str()) else {
+                    continue;
+                };
+                spent += note.title.len() + note.body.len();
+                let hash = hasher(note);
+                if !examine(&mut known, note, &hash, &mut pieces, &mut out) {
+                    looking.open.insert(id, Some(hash));
+                }
+            }
+            if looking.left.is_empty() {
+                looking.looked = looking.pass_from;
+            }
         }
         out
     }
@@ -354,13 +603,35 @@ impl Vectors {
         let Ok(mut known) = self.known.lock() else {
             return 0;
         };
-        let live: std::collections::HashSet<&str> =
-            store.notes.iter().map(|n| n.id.as_str()).collect();
-        let gone: Vec<String> = known
-            .keys()
-            .filter(|id| !live.contains(id.as_str()))
-            .cloned()
-            .collect();
+        let mut forgot = self.forgot.lock().unwrap_or_else(|e| e.into_inner());
+        let (now, changed) = store.changes_since(*forgot);
+        let gone: Vec<String> = match changed {
+            Changed::Everything => {
+                let live: HashSet<&str> = store.notes.iter().map(|n| n.id.as_str()).collect();
+                known
+                    .keys()
+                    .filter(|id| !live.contains(id.as_str()))
+                    .cloned()
+                    .collect()
+            }
+            Changed::Ids(ids) => {
+                let held: Vec<String> = ids
+                    .into_iter()
+                    .filter(|id| known.contains_key(id))
+                    .collect();
+                if held.len() > 16 {
+                    let live: HashSet<&str> = store.notes.iter().map(|n| n.id.as_str()).collect();
+                    held.into_iter()
+                        .filter(|id| !live.contains(id.as_str()))
+                        .collect()
+                } else {
+                    held.into_iter()
+                        .filter(|id| !store.notes.iter().any(|n| n.id == *id))
+                        .collect()
+                }
+            }
+        };
+        *forgot = now;
         if gone.is_empty() {
             return 0;
         }
@@ -368,13 +639,6 @@ impl Vectors {
             known.remove(id);
         }
         drop(known);
-        let _ = self.db.with(|c| {
-            let tx = c.transaction()?;
-            for id in &gone {
-                tx.execute("DELETE FROM vectors WHERE note = ?1", [id])?;
-            }
-            tx.commit()
-        });
         self.changed();
         gone.len()
     }
@@ -418,7 +682,9 @@ impl Vectors {
                     hash: item.hash.clone(),
                     pieces: Vec::new(),
                     marks: BTreeMap::new(),
+                    whole: false,
                 });
+            entry.whole = false;
             for (at, mark, v) in fresh {
                 entry.marks.insert(at, mark);
                 entry.pieces.push((at, v));
@@ -473,6 +739,7 @@ pub fn close_to(
         .unwrap_or_default()
 }
 
+#[cfg(test)]
 pub fn catch_up(store: &Store, vectors: &Vectors, meaning: &Meaning, most_pieces: usize) -> usize {
     let work = vectors.stale(store, most_pieces);
     vectors.forget_gone(store);
@@ -495,9 +762,27 @@ pub fn read_in(vectors: &Vectors, meaning: &Meaning, work: &[Work]) -> usize {
     match found {
         Ok(found) if found.len() == texts.len() => {
             vectors.put(work, found);
+            let mut failed = vectors.failed.lock().unwrap_or_else(|e| e.into_inner());
+            work.iter().for_each(|w| {
+                failed.remove(&w.id);
+            });
             work.len()
         }
-        _ => 0,
+        _ if work.len() > 1 => work
+            .iter()
+            .map(|one| read_in(vectors, meaning, std::slice::from_ref(one)))
+            .sum(),
+        _ => {
+            vectors
+                .failed
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(
+                    work[0].id.clone(),
+                    (work[0].hash.clone(), std::time::Instant::now()),
+                );
+            0
+        }
     }
 }
 
@@ -534,7 +819,42 @@ mod tests {
     fn note(title: &str, body: &str) -> Note {
         let mut store =
             Store::load_from(&tempfile::tempdir().unwrap().keep().join("notes")).unwrap();
-        store.create_note(title, body, vec![], "").unwrap().clone()
+        store.create_note(title, body, "").unwrap().clone()
+    }
+
+    #[test]
+    fn stored_hashes_do_not_change() {
+        let mut tagged = Note::new("Héaps", "sift down\nand up", "cs");
+        tagged.extra.insert("tags".into(), "exam".into());
+        let turns = [
+            crate::chat::Turn {
+                role: "user".into(),
+                text: "Why a heap?".into(),
+            },
+            crate::chat::Turn {
+                role: "assistant".into(),
+                text: "Order in O(log n).".into(),
+            },
+        ];
+        let got = [
+            hash_of(&tagged),
+            mark_of("sift down"),
+            crate::review::key_of("chat-1", "A reply."),
+            crate::tasks::note_task_id("note-1", " Read chapter 3 "),
+            crate::chat::hash_of(&turns),
+            crate::routes::notes::version_of(&tagged),
+        ];
+        assert_eq!(
+            got,
+            [
+                "e46db3786d46da0b",
+                "90353766bf8d4059",
+                "chat-1:e1477ec64d3700ca",
+                "n0ddeeeee2af88de5",
+                "c5d3e84b0dec08b3",
+                "0ba7c3bd07c6acc3",
+            ]
+        );
     }
 
     #[test]
@@ -544,7 +864,7 @@ mod tests {
         let part = |c: &str| c.repeat(PIECE_CHARS - 100);
         let body = |last: &str| format!("{}\n\n{}\n\n{}", part("a"), part("b"), last);
         let id = store
-            .create_note("Three", body(&part("c")), vec![], "")
+            .create_note("Three", body(&part("c")), "")
             .unwrap()
             .id
             .clone();
@@ -595,6 +915,76 @@ mod tests {
     }
 
     #[test]
+    fn a_note_that_cannot_be_embedded_does_not_stop_the_others() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        for n in 0..100 {
+            let body = if n == 0 {
+                "POISON".to_string()
+            } else {
+                format!("note {n}")
+            };
+            store.create_note(format!("Note {n}"), body, "").unwrap();
+        }
+        let tries = Arc::new(Mutex::new(0usize));
+        let seen = Arc::clone(&tries);
+        let failing: Meaning = Arc::new(move |texts: &[String], query: bool| {
+            if texts.iter().any(|t| t.contains("POISON")) {
+                *seen.lock().unwrap() += 1;
+                anyhow::bail!("this text cannot be read");
+            }
+            fake()(texts, query)
+        });
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        for _ in 0..3 {
+            let work = vectors.stale(&store, PIECES_PER_TICK);
+            read_in(&vectors, &failing, &work);
+        }
+        assert_eq!(vectors.len(), 99);
+        assert!(*tries.lock().unwrap() <= 2);
+        assert!(vectors.stale(&store, PIECES_PER_TICK).is_empty());
+
+        let bad = store
+            .notes
+            .iter()
+            .find(|n| n.body == "POISON")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&bad).unwrap().body = "fixed".into();
+        let work = vectors.stale(&store, PIECES_PER_TICK);
+        assert_eq!(work.len(), 1, "an edited note is tried again at once");
+        read_in(&vectors, &failing, &work);
+        assert_eq!(vectors.len(), 100);
+    }
+
+    #[test]
+    fn a_fully_indexed_library_is_not_split_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let ids: Vec<String> = ["One", "Two", "Three"]
+            .iter()
+            .map(|title| {
+                store
+                    .create_note(*title, format!("{title} text"), "")
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        catch_up(&store, &vectors, &fake(), 100);
+        assert!(vectors.stale(&store, 100).is_empty());
+        assert!(vectors.stale(&store, 100).is_empty());
+        assert!(vectors.known.lock().unwrap().values().all(|e| e.whole));
+
+        store.find_note_mut(&ids[1]).unwrap().body = "changed".into();
+        let work = vectors.stale(&store, 100);
+        assert_eq!(work.len(), 1);
+        assert_eq!(work[0].id, ids[1]);
+    }
+
+    #[test]
     fn long_notes_are_indexed_to_the_end_in_bounded_batches_across_restarts() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
@@ -602,11 +992,7 @@ mod tests {
             "{}\n\nPlants turn light into sugar.",
             "x".repeat(PIECE_CHARS * 30)
         );
-        let id = store
-            .create_note("Long", body, vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let id = store.create_note("Long", body, "").unwrap().id.clone();
         let vectors = Vectors::for_notes(&store.notes_dir);
         for _ in 0..4 {
             let work = vectors.stale(&store, 8);
@@ -619,6 +1005,86 @@ mod tests {
             close_to(Some(&fake()), &again, "plants and light", 5)[0].0,
             id
         );
+    }
+
+    #[test]
+    fn a_trashed_note_keeps_its_rows_and_a_restore_asks_for_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let id = store
+            .create_note("Plants", "Plants turn light into sugar.", "")
+            .unwrap()
+            .id
+            .clone();
+        store
+            .create_note("Rocks", "Rocks wear into sand.", "")
+            .unwrap();
+        store.save().unwrap();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        let work = vectors.stale(&store, 64);
+        read_in(&vectors, &fake(), &work);
+        assert!(vectors.stale(&store, 64).is_empty());
+        store.delete_notes(std::slice::from_ref(&id));
+        store.save().unwrap();
+        vectors.forget_gone(&store);
+        assert!(!vectors.known.lock().unwrap().contains_key(&id));
+        let rows = |vectors: &Vectors| -> i64 {
+            vectors
+                .db
+                .with(|c| {
+                    c.query_row("SELECT count(*) FROM vectors WHERE note = ?1", [&id], |r| {
+                        r.get(0)
+                    })
+                })
+                .unwrap()
+        };
+        assert!(rows(&vectors) > 0, "a trashed note keeps its rows");
+        let live: HashSet<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+        let started = Vectors::for_live(&store.notes_dir, &live);
+        assert!(!started.known.lock().unwrap().contains_key(&id));
+        assert_eq!(started.known.lock().unwrap().len(), 1);
+        store.restore(&id).unwrap();
+        store.save().unwrap();
+        assert!(
+            vectors.stale(&store, 64).is_empty(),
+            "nothing to embed again"
+        );
+        assert!(
+            started.stale(&store, 64).is_empty(),
+            "nothing to embed again"
+        );
+        assert!(vectors.known.lock().unwrap().contains_key(&id));
+    }
+
+    #[test]
+    fn a_note_gone_outside_leo_keeps_its_vectors_until_the_sweep_says_it_is_gone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let id = store
+            .create_note("Plants", "Plants turn light into sugar.", "")
+            .unwrap()
+            .id
+            .clone();
+        store
+            .create_note("Rocks", "Rocks wear into sand.", "")
+            .unwrap();
+        store.save().unwrap();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        let work = vectors.stale(&store, 64);
+        read_in(&vectors, &fake(), &work);
+        std::fs::remove_file(store.notes_dir.join("Plants.md")).unwrap();
+        store.refresh().unwrap();
+        vectors.forget_gone(&store);
+        let rows: i64 = vectors
+            .db
+            .with(|c| {
+                c.query_row("SELECT count(*) FROM vectors WHERE note = ?1", [&id], |r| {
+                    r.get(0)
+                })
+            })
+            .unwrap();
+        assert!(rows > 0);
+        assert!(!vectors.known.lock().unwrap().contains_key(&id));
     }
 
     #[test]
@@ -651,9 +1117,9 @@ mod tests {
         }
         let full = |vectors: &Vectors| {
             *vectors.held.lock().unwrap() = None;
-            vectors.neighbours(5)
+            vectors.neighbours(5, usize::MAX)
         };
-        assert_eq!(vectors.neighbours(5), full(&vectors));
+        assert_eq!(vectors.neighbours(5, usize::MAX), full(&vectors));
         for round in 0..6 {
             for n in [3 + round, 20 + round * 2, 59 - round] {
                 place(format!("note-{n:02}"), &format!("round-{round}"));
@@ -664,7 +1130,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .remove(&format!("note-{:02}", 40 + round));
-            let updated = vectors.neighbours(5);
+            let updated = vectors.neighbours(5, usize::MAX);
             assert_eq!(updated, full(&vectors), "round {round}");
             assert_eq!(updated.len(), 60);
         }
@@ -674,26 +1140,18 @@ mod tests {
     fn every_note_knows_its_nearest_notes_and_the_list_is_rebuilt_only_after_changes() {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
-        let a = store
-            .create_note("BFS", "queue", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let a = store.create_note("BFS", "queue", "").unwrap().id.clone();
         let b = store
-            .create_note("Breadth first", "queue order", vec![], "")
+            .create_note("Breadth first", "queue order", "")
             .unwrap()
             .id
             .clone();
-        let c = store
-            .create_note("Plants", "light", vec![], "")
-            .unwrap()
-            .id
-            .clone();
+        let c = store.create_note("Plants", "light", "").unwrap().id.clone();
         let vectors = Vectors::for_notes(&store.notes_dir);
         let before = vectors.version();
         catch_up(&store, &vectors, &fake(), 100);
         assert!(vectors.version() > before);
-        let near = vectors.neighbours(1);
+        let near = vectors.neighbours(1, usize::MAX);
         assert_eq!(near[&a].iter().next(), Some(&b));
         assert_eq!(near[&c].len(), 1);
         let graphs = crate::graph::Graphs::new(dir.path().join("graph.json"), None)
@@ -741,14 +1199,13 @@ mod tests {
             .create_note(
                 "Graph search",
                 "Breadth first takes the oldest from a queue.",
-                vec![],
                 "",
             )
             .unwrap()
             .id
             .clone();
         store
-            .create_note("Biology", "Plants turn light into sugar.", vec![], "")
+            .create_note("Biology", "Plants turn light into sugar.", "")
             .unwrap();
         let vectors = Vectors::for_notes(&store.notes_dir);
         let meaning = fake();
@@ -776,5 +1233,385 @@ mod tests {
             close_to(None, &again, "bfs", 5).is_empty(),
             "no model, no meaning search"
         );
+    }
+
+    fn random_unit(seed: &mut u32, width: usize) -> Vec<f32> {
+        let mut v: Vec<f32> = (0..width)
+            .map(|_| {
+                *seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                (*seed >> 8) as f32 / (1u32 << 24) as f32 - 0.5
+            })
+            .collect();
+        let norm = v.iter().map(|x| x * x).sum::<f32>().sqrt();
+        v.iter_mut().for_each(|x| *x /= norm);
+        v
+    }
+
+    fn library_of(count: usize, width: usize, pieces: usize) -> Vectors {
+        let dir = tempfile::tempdir().unwrap();
+        let vectors = Vectors::at(dir.keep().join("meaning.json"));
+        let mut seed = 11u32;
+        {
+            let mut known = vectors.known.lock().unwrap();
+            for n in 0..count {
+                known.insert(
+                    format!("note-{n:06}"),
+                    Entry {
+                        hash: "first".into(),
+                        pieces: (0..pieces)
+                            .map(|at| (at, random_unit(&mut seed, width)))
+                            .collect(),
+                        marks: BTreeMap::new(),
+                        whole: true,
+                    },
+                );
+            }
+        }
+        vectors.changed();
+        vectors
+    }
+
+    #[test]
+    fn lists_are_built_a_slice_at_a_time_and_end_equal_to_a_full_build() {
+        let vectors = Arc::new(library_of(6400, 8, 1));
+        let graphs =
+            crate::graph::Graphs::new(tempfile::tempdir().unwrap().keep().join("graph.json"), None)
+                .with_vectors(Arc::clone(&vectors));
+        let mut sizes = Vec::new();
+        while sizes.is_empty() || vectors.near_pending() {
+            sizes.push(graphs.near().unwrap().len());
+            assert!(sizes.len() <= 25, "a slice is built on every call");
+        }
+        assert_eq!(sizes.len(), 25);
+        assert_eq!(sizes[0], NEAR_SLICE);
+        assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
+        assert_eq!(*sizes.last().unwrap(), 6400);
+        let fresh = library_of(6400, 8, 1);
+        assert_eq!(
+            graphs.near().unwrap(),
+            fresh.neighbours(NEIGHBOURS, usize::MAX)
+        );
+    }
+
+    #[test]
+    fn a_note_without_a_list_yet_is_left_out() {
+        let vectors = library_of(6100, 8, 1);
+        let near = vectors.neighbours(5, 10);
+        assert_eq!(near.len(), 10);
+        assert!(vectors.near_pending());
+        assert!(near.contains_key("note-000000"));
+        assert!(!near.contains_key("note-000010"));
+    }
+
+    #[test]
+    fn a_small_library_gets_its_full_list_in_one_call() {
+        let vectors = library_of(5000, 8, 1);
+        let near = vectors.neighbours(NEIGHBOURS, NEAR_SLICE);
+        assert_eq!(near.len(), 5000);
+        assert!(near.values().all(|list| list.len() == NEIGHBOURS));
+        assert!(!vectors.near_pending());
+    }
+
+    #[test]
+    fn a_library_over_six_thousand_notes_gets_lists() {
+        let vectors = library_of(6100, 8, 1);
+        let near = vectors.neighbours(NEIGHBOURS, usize::MAX);
+        assert_eq!(near.len(), 6100);
+        assert!(near.values().all(|list| list.len() == NEIGHBOURS));
+    }
+
+    #[test]
+    fn an_edit_removal_and_addition_leave_the_lists_equal_to_a_full_build() {
+        let vectors = library_of(300, 8, 3);
+        let first = vectors.neighbours(5, usize::MAX);
+        let mut seed = 5u32;
+        for round in 0..5 {
+            {
+                let mut known = vectors.known.lock().unwrap();
+                let id = format!("note-{:06}", 10 + round * 7);
+                let entry = known.get_mut(&id).unwrap();
+                entry.hash = format!("round-{round}");
+                entry.pieces.push((9, random_unit(&mut seed, 8)));
+                known.remove(&format!("note-{:06}", 100 + round));
+                known.insert(
+                    format!("new-{round}"),
+                    Entry {
+                        hash: "first".into(),
+                        pieces: vec![(0, random_unit(&mut seed, 8))],
+                        marks: BTreeMap::new(),
+                        whole: true,
+                    },
+                );
+            }
+            let updated = vectors.neighbours(5, usize::MAX);
+            *vectors.held.lock().unwrap() = None;
+            assert_eq!(updated, vectors.neighbours(5, usize::MAX), "round {round}");
+        }
+        assert_eq!(first.len(), 300);
+    }
+
+    #[test]
+    fn an_unchanged_note_is_not_hashed_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let ids: Vec<String> = ["One", "Two", "Three"]
+            .iter()
+            .map(|title| {
+                store
+                    .create_note(*title, format!("{title} text"), "")
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        let hashed = std::cell::Cell::new(0usize);
+        let counting = |note: &Note| {
+            hashed.set(hashed.get() + 1);
+            hash_of(note)
+        };
+        let round = |vectors: &Vectors, store: &Store| {
+            hashed.set(0);
+            let work = vectors.stale_with(store, 100, &counting, HASH_BYTES_PER_TICK);
+            read_in(vectors, &fake(), &work);
+            hashed.get()
+        };
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        assert_eq!(round(&vectors, &store), 3);
+        assert_eq!(round(&vectors, &store), 0);
+        assert_eq!(round(&vectors, &store), 0);
+        store.find_note_mut(&ids[1]).unwrap().body = "changed".into();
+        assert_eq!(round(&vectors, &store), 1);
+        assert_eq!(round(&vectors, &store), 0);
+        store.forget_changes();
+        assert_eq!(round(&vectors, &store), 3);
+        assert_eq!(round(&vectors, &store), 0);
+    }
+
+    #[test]
+    fn the_first_pass_is_spread_over_rounds() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        for n in 0..40 {
+            store
+                .create_note(format!("Big {n}"), "x".repeat(1 << 20), "")
+                .unwrap();
+        }
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        let bytes = std::cell::Cell::new(0usize);
+        let counting = |note: &Note| {
+            bytes.set(bytes.get() + note.title.len() + note.body.len());
+            hash_of(note)
+        };
+        let mut rounds = Vec::new();
+        for _ in 0..3 {
+            bytes.set(0);
+            vectors.stale_with(&store, usize::MAX, &counting, HASH_BYTES_PER_TICK);
+            rounds.push(bytes.get());
+        }
+        assert!(rounds
+            .iter()
+            .all(|b| *b > 0 && *b <= HASH_BYTES_PER_TICK + (1 << 20) + 16));
+        assert!(!vectors.looking(), "three rounds read all 40 MB");
+        bytes.set(0);
+        vectors.stale_with(&store, usize::MAX, &counting, HASH_BYTES_PER_TICK);
+        assert_eq!(bytes.get(), 0, "nothing is left to read");
+    }
+
+    #[test]
+    fn a_deleted_note_is_forgotten_without_listing_every_id() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        let ids: Vec<String> = ["One", "Two", "Three"]
+            .iter()
+            .map(|title| {
+                store
+                    .create_note(*title, format!("{title} text"), "")
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        let vectors = Vectors::for_notes(&store.notes_dir);
+        catch_up(&store, &vectors, &fake(), 100);
+        assert_eq!(vectors.len(), 3);
+        assert_eq!(vectors.forget_gone(&store), 0);
+        store.delete_notes(&[ids[1].clone()]);
+        assert_eq!(vectors.forget_gone(&store), 1);
+        assert_eq!(vectors.forget_gone(&store), 0);
+        assert_eq!(vectors.len(), 2);
+        assert!(!vectors.known.lock().unwrap().contains_key(&ids[1]));
+        assert_eq!(*vectors.forgot.lock().unwrap(), store.changes_since(0).0);
+    }
+
+    #[test]
+    fn catching_up_from_the_feed_ends_equal_to_a_full_pass() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+        for n in 0..12 {
+            store
+                .create_note(format!("Note {n}"), format!("queue {n}"), "")
+                .unwrap();
+        }
+        let meaning = fake();
+        let settle = |vectors: &Vectors, store: &Store| {
+            for _ in 0..30 {
+                let read = catch_up(store, vectors, &meaning, 100);
+                if read == 0 && !vectors.looking() {
+                    break;
+                }
+            }
+        };
+        type Kept = BTreeMap<String, (String, Vec<(usize, Vec<f32>)>)>;
+        let held = |vectors: &Vectors| -> Kept {
+            vectors
+                .known
+                .lock()
+                .unwrap()
+                .iter()
+                .map(|(id, e)| (id.clone(), (e.hash.clone(), e.pieces.clone())))
+                .collect()
+        };
+        let kept = Vectors::at(dir.path().join("kept").join("meaning.json"));
+        let mut seed = 3u32;
+        for step in 0..40 {
+            seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            let live: Vec<String> = store.notes.iter().map(|n| n.id.clone()).collect();
+            let pick = live[(seed >> 16) as usize % live.len()].clone();
+            match (seed >> 8) % 6 {
+                0 | 1 => store.find_note_mut(&pick).unwrap().body = format!("plants light {step}"),
+                2 => {
+                    store.delete_notes(&[pick]);
+                }
+                3 => {
+                    store
+                        .create_note(format!("New {step}"), format!("breadth {step}"), "")
+                        .unwrap();
+                }
+                4 => store.forget_changes(),
+                _ => {}
+            }
+            settle(&kept, &store);
+            let fresh = Vectors::at(
+                dir.path()
+                    .join(format!("fresh-{step}"))
+                    .join("meaning.json"),
+            );
+            settle(&fresh, &store);
+            assert_eq!(held(&kept), held(&fresh), "step {step}");
+        }
+    }
+
+    #[test]
+    #[ignore = "audit benchmark"]
+    fn audit_bench_neighbours() {
+        let sizes: Vec<usize> = std::env::var("BENCH_NOTES")
+            .map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect())
+            .unwrap_or_else(|_| vec![5000]);
+        for count in sizes {
+            let vectors = library_of(count, 384, 6);
+            let time = |label: &str, run: &dyn Fn() -> usize| {
+                let start = std::time::Instant::now();
+                let lists = run();
+                println!(
+                    "P-C49 notes={count} {label}: {:.2} ms, {lists} lists",
+                    start.elapsed().as_secs_f64() * 1000.0
+                );
+            };
+            time("first call", &|| {
+                vectors.neighbours(NEIGHBOURS, NEAR_SLICE).len()
+            });
+            let sync_only = if count > FINISHED_AT_ONCE {
+                0
+            } else {
+                NEAR_SLICE
+            };
+            if count > FINISHED_AT_ONCE {
+                time("39 more slices", &|| {
+                    (0..39)
+                        .map(|_| vectors.neighbours(NEIGHBOURS, NEAR_SLICE).len())
+                        .last()
+                        .unwrap()
+                });
+            }
+            time("nothing changed", &|| {
+                vectors.neighbours(NEIGHBOURS, sync_only).len()
+            });
+            {
+                let mut known = vectors.known.lock().unwrap();
+                let mut seed = 99u32;
+                let entry = known.get_mut("note-000010").unwrap();
+                entry.hash = "second".into();
+                entry.pieces[0].1 = random_unit(&mut seed, 384);
+            }
+            time("one note changed", &|| {
+                vectors.neighbours(NEIGHBOURS, sync_only).len()
+            });
+        }
+    }
+
+    #[test]
+    #[ignore = "audit benchmark"]
+    fn audit_bench_stale() {
+        let sizes: Vec<usize> = std::env::var("BENCH_NOTES")
+            .map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect())
+            .unwrap_or_else(|_| vec![5000]);
+        for count in sizes {
+            let dir = tempfile::tempdir().unwrap();
+            let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
+            let started = std::time::Instant::now();
+            for n in 0..count {
+                let body: String = (0..40)
+                    .map(|line| {
+                        format!("note {n} line {line} about queues and plants and light\n\n")
+                    })
+                    .collect();
+                store.create_note(format!("Note {n}"), body, "").unwrap();
+            }
+            println!(
+                "P-C55 notes={count} fixture built in {:.1} s",
+                started.elapsed().as_secs_f64()
+            );
+            let vectors = Vectors::for_notes(&store.notes_dir);
+            let meaning = fake();
+            let started = std::time::Instant::now();
+            loop {
+                let work = vectors.stale(&store, usize::MAX);
+                vectors.forget_gone(&store);
+                if work.is_empty() && !vectors.looking() {
+                    break;
+                }
+                read_in(&vectors, &meaning, &work);
+            }
+            println!(
+                "P-C55 notes={count} indexed in {:.1} s",
+                started.elapsed().as_secs_f64()
+            );
+            let median = |run: &mut dyn FnMut()| {
+                let mut times: Vec<f64> = (0..5)
+                    .map(|_| {
+                        let start = std::time::Instant::now();
+                        run();
+                        start.elapsed().as_secs_f64() * 1000.0
+                    })
+                    .collect();
+                times.sort_by(f64::total_cmp);
+                times[2]
+            };
+            let nothing = median(&mut || assert!(vectors.stale(&store, usize::MAX).is_empty()));
+            let forgetting = median(&mut || assert_eq!(vectors.forget_gone(&store), 0));
+            let id = store.notes[count / 2].id.clone();
+            store
+                .find_note_mut(&id)
+                .unwrap()
+                .body
+                .push_str("\n\nmore about plants");
+            let start = std::time::Instant::now();
+            let work = vectors.stale(&store, usize::MAX);
+            let one = start.elapsed().as_secs_f64() * 1000.0;
+            assert_eq!(work.len(), 1);
+            println!(
+                "P-C55 notes={count} stale nothing changed {nothing:.3} ms, stale one note changed {one:.3} ms, forget_gone nothing gone {forgetting:.4} ms"
+            );
+        }
     }
 }

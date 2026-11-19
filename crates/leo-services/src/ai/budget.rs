@@ -37,20 +37,20 @@ impl Budget {
     }
 }
 
-fn local(url: &str) -> bool {
-    let url = url.to_ascii_lowercase();
-    ["localhost", "127.0.0.1", "[::1]", "0.0.0.0"]
-        .iter()
-        .any(|host| url.contains(host))
-}
-
 const AGENT_OUTPUT_TOKENS: u32 = 32_000;
 
 fn kind_of(name: &str, provider: &ProviderConfig) -> Budget {
     let model = provider.model.as_deref().unwrap_or("").to_ascii_lowercase();
     match provider.kind {
         Some(ProviderKind::ClaudeCode | ProviderKind::Codex) => Budget::AGENT,
-        _ if name == "ollama" || provider.base_url.as_deref().is_some_and(local) => Budget::LOCAL,
+        _ if name == "ollama"
+            || provider
+                .base_url
+                .as_deref()
+                .is_some_and(crate::ai::loopback) =>
+        {
+            Budget::LOCAL
+        }
         _ if model.ends_with(":free") || model == "openrouter/free" => Budget::FREE,
         _ => Budget::CLOUD,
     }
@@ -86,15 +86,11 @@ pub struct Window {
 
 pub fn window_of(name: &str, provider: &ProviderConfig) -> Window {
     let model = provider.model.as_deref().unwrap_or("").to_ascii_lowercase();
-    let url = provider
-        .base_url
-        .as_deref()
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    let url = provider.base_url.as_deref().unwrap_or("");
     let (tokens, paid) = match provider.kind {
         Some(ProviderKind::ClaudeCode) => (200_000, false),
         Some(ProviderKind::Codex) => (256_000, false),
-        _ if name == "ollama" || local(&url) => (8_192, false),
+        _ if name == "ollama" || crate::ai::loopback(url) => (8_192, false),
         _ if model.ends_with(":free") || model == "openrouter/free" => (32_000, false),
         _ if model.contains("gemini") => (1_000_000, true),
         _ if model.contains("claude") => (200_000, true),
@@ -436,5 +432,24 @@ mod tests {
         assert_eq!(writing_budget(&config), Budget::FREE);
         config.chat.chain = vec![];
         assert_eq!(writing_budget(&config), Budget::FREE);
+    }
+
+    #[test]
+    fn a_remote_host_named_like_localhost_is_not_local() {
+        for url in [
+            "https://localhost-gpu.example.com/v1",
+            "https://example.com/localhost/v1",
+            "https://example.com/v1?host=127.0.0.1",
+        ] {
+            let remote = provider(ProviderKind::Openai, Some(url), Some("some-model"));
+            assert_eq!(window_of("custom", &remote).tokens, 128_000, "{url}");
+            assert_ne!(kind_of("custom", &remote), Budget::LOCAL, "{url}");
+        }
+        let local = provider(
+            ProviderKind::Openai,
+            Some("http://localhost:1234/v1"),
+            Some("some-model"),
+        );
+        assert_eq!(window_of("custom", &local).tokens, 8_192);
     }
 }

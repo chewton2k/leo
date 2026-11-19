@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0 };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -17,6 +17,7 @@ const SIDE_NOTES_AUTOMATIC = 32;
 const SIDE_NOTES_READS = 4;
 const SIDE_NOTES_TIMEOUT = 10000;
 const SIDE_NEW_MS = 60000;
+const SIDE_REV_MS = 60000;
 const SIDE_FRESH_MS = 30 * 60000;
 const SIDE_FRESH_GROUP = 1000;
 
@@ -304,9 +305,18 @@ async function loadSideFolders() {
   if (tasksAtHome()) loadHomeRecent();
   if ((!sideWide() && !sideActive()) || state.view === 'locked') return drawSide();
   const mine = seq, generation = ++side.generation;
+  const rev = await api('/api/rev').then((answer) => (typeof answer?.rev === 'string' ? answer.rev : null), () => null);
+  if (mine !== seq || generation !== side.generation) return;
+  if (rev && rev === side.rev && Date.now() - side.revAt < SIDE_REV_MS) {
+    const order = sideReadOrder();
+    for (const entry of side.notes.values()) if (entry.loaded && !entry.error && !entry.loading && entry.order === order) entry.seq = seq;
+    return drawSide();
+  }
   try {
     const folders = await api('/api/folders');
     if (mine !== seq || generation !== side.generation) return;
+    side.rev = rev;
+    side.revAt = Date.now();
     side.folders = folders;
     if (side.target && !folders.some((folder) => folder.name === side.target)) side.target = null;
     side.loaded = true;
@@ -316,6 +326,7 @@ async function loadSideFolders() {
     }
   } catch (e) {
     if (mine !== seq || generation !== side.generation) return;
+    side.rev = null;
     if (!side.loaded) side.folders = [];
   }
   drawSide();
@@ -424,6 +435,7 @@ function sideNoteRows(path, depth) {
 }
 
 async function refreshSideTree() {
+  side.rev = null;
   await loadSideFolders();
   for (const [path, entry] of [...side.notes]) loadSideNotes(path, entry.offset || 0, true);
 }
@@ -432,7 +444,7 @@ function loadSideNotes(path, offset = 0, force = false) {
   if (path !== '' && !side.folders.some((folder) => folder.name === path)) return;
   if (!Number.isSafeInteger(offset) || offset < 0) return;
   const previous = side.notes.get(path);
-  const order = `${SIDE_SORTS[side.sort].orders[side.flip ? 1 : 0]} ${side.tasks ? 'tasks' : 'all'}`;
+  const order = sideReadOrder();
   if (previous?.seq === seq && previous.order === order && (!force || (previous.loading && previous.offset === offset))) return;
   if (!previous && side.notes.size >= SIDE_NOTES_FOLDERS) {
     const oldest = [...side.notes.keys()].find((key) => !side.automatic.has(key));
@@ -446,6 +458,10 @@ function loadSideNotes(path, offset = 0, force = false) {
   if (force) drawSide();
 }
 
+function sideReadOrder() {
+  return `${SIDE_SORTS[side.sort].orders[side.flip ? 1 : 0]} ${side.tasks ? 'tasks' : 'all'}`;
+}
+
 function pumpSideNotes() {
   while (side.reading < SIDE_NOTES_READS && side.pending.length) {
     const read = side.pending.shift();
@@ -453,6 +469,10 @@ function pumpSideNotes() {
     side.reading++;
     readSideNotes(read.path, read.entry).finally(() => { side.reading--; pumpSideNotes(); });
   }
+}
+
+function sideDrawSoon() {
+  if (!side.frame) side.frame = requestAnimationFrame(() => { side.frame = 0; drawSide(); });
 }
 
 async function readSideNotes(path, entry) {
@@ -465,8 +485,10 @@ async function readSideNotes(path, entry) {
     if (side.notes.get(path) !== entry || entry.seq !== seq) return;
     if (!Array.isArray(page.items)) throw new Error('Notes could not be opened.');
     const had = entry.refreshing && new Set(entry.items.map((note) => note.id));
+    const before = entry.refreshing ? JSON.stringify([entry.items, entry.total]) : null;
     entry.items = page.items.slice(0, SIDE_NOTES_PAGE).filter((note) => typeof note.id === 'string' && typeof note.title === 'string');
     entry.total = Number.isSafeInteger(page.total) && page.total >= 0 ? page.total : entry.items.length;
+    entry.quiet = before !== null && before === JSON.stringify([entry.items, entry.total]);
     entry.loaded = true;
     if (had) for (const note of entry.items) if (!had.has(note.id) && Date.now() - Date.parse(note.created_at) < SIDE_NEW_MS) inkLand(note.id);
     if (!entry.items.length && entry.offset && entry.total) setTimeout(() => loadSideNotes(path, Math.floor((entry.total - 1) / SIDE_NOTES_PAGE) * SIDE_NOTES_PAGE, true));
@@ -479,7 +501,7 @@ async function readSideNotes(path, entry) {
     clearTimeout(timeout);
     entry.loading = false;
     if (side.notes.get(path) === entry && entry.seq === seq) {
-      drawSide();
+      if (!entry.quiet || entry.error) sideDrawSoon();
       if (!path && tasksAtHome()) drawHomeToday();
     }
   }
@@ -774,23 +796,32 @@ async function explorerMoveMenu(target, note, owner) {
   });
 }
 
+const COMBINE_PAGE = 50;
+
 async function explorerCombineMenu(note, owner) {
   const mine = seq;
-  const notes = await api(`/api/notes?${new URLSearchParams({ limit: '1000', brief: 'true', sort: 'title' })}`);
-  if (mine !== seq) return;
-  const others = notes.filter((n) => n.id !== note.id);
-  if (!others.length) return toast('There is no other note to combine it with.');
-  const titles = others.map((n) => n.title);
-  const twice = new Set(titles.filter((title, i) => titles.indexOf(title) !== i));
-  popupMenu(owner, {
-    label: `Combine “${note.title || 'Untitled'}” into`,
-    find: 'Find a note',
-    rows: others.map((n) => ({
-      text: `${n.title || 'Untitled'}${twice.has(n.title) ? ` · ${n.directory || 'Top level'}` : ''}`,
+  const seen = new Map();
+  const rowsOf = (loaded) => {
+    const titles = new Map();
+    for (const n of loaded) titles.set(n.title, (titles.get(n.title) || 0) + 1);
+    return loaded.filter((n) => n.id !== note.id).map((n) => ({
+      text: `${n.title || 'Untitled'}${titles.get(n.title) > 1 ? ` · ${n.directory || 'Top level'}` : ''}`,
       icon: ICON.note,
       run: () => combineSheet({ id: note.id, title: note.title || 'Untitled' }, { id: n.id, title: n.title || 'Untitled' }),
-    })),
-  });
+    }));
+  };
+  const page = async (query, offset) => {
+    const got = await api(query
+      ? `/api/search?q=${enc(query)}&brief=true&limit=${COMBINE_PAGE + 1}&offset=${offset}`
+      : `/api/notes?${new URLSearchParams({ limit: String(COMBINE_PAGE + 1), offset: String(offset), brief: 'true', sort: 'title' })}`);
+    const loaded = [...(offset ? seen.get(query) : []), ...got.slice(0, COMBINE_PAGE)];
+    seen.set(query, loaded);
+    return { rows: rowsOf(loaded), more: got.length > COMBINE_PAGE, loaded: loaded.length };
+  };
+  const first = await page('', 0);
+  if (mine !== seq) return;
+  if (!first.rows.length) return toast('There is no other note to combine it with.');
+  popupMenu(owner, { label: `Combine “${note.title || 'Untitled'}” into`, find: 'Find a note', rows: first.rows, more: first.more, loaded: first.loaded, page });
 }
 
 async function afterExplorerNote(id) {

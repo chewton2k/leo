@@ -1,32 +1,38 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::{DateTime, NaiveDate, NaiveTime, Utc};
-use leo_core::notes::checkbox_line;
+use leo_core::notes::{checkbox_line, Note};
 use leo_core::store::Store;
 use leo_core::tasks::{self as core, Located};
 use serde::{Deserialize, Serialize};
 
 use crate::jsonline;
 
-pub const MOST_TASKS: usize = 10_000;
-pub const MOST_TITLE: usize = 300;
-pub const MOST_DESCRIPTION: usize = 4_000;
+pub(crate) type FolderLocks = OnceLock<Mutex<HashMap<std::path::PathBuf, &'static Mutex<()>>>>;
 
-static WRITING: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-pub fn writing() -> std::sync::MutexGuard<'static, ()> {
-    WRITING.lock().unwrap_or_else(|e| e.into_inner())
+pub(crate) fn folder_lock(
+    locks: &'static FolderLocks,
+    chats: &Path,
+) -> std::sync::MutexGuard<'static, ()> {
+    let key = chats.parent().unwrap_or(chats).to_path_buf();
+    let lock: &'static Mutex<()> = locks
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .entry(key)
+        .or_insert_with(|| Box::leak(Box::default()));
+    lock.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-pub fn description_of(text: &str) -> Result<String, &'static str> {
-    let text = text.trim();
-    if text.chars().count() > MOST_DESCRIPTION {
-        return Err("Keep the task description within 4,000 characters.");
-    }
-    Ok(text.to_string())
+pub fn writing(chats: &Path) -> std::sync::MutexGuard<'static, ()> {
+    static WRITING: FolderLocks = OnceLock::new();
+    folder_lock(&WRITING, chats)
 }
-pub const MOST_LISTED: usize = 500;
+
+pub const LISTED_PAGE: usize = 500;
 pub const KINDS: [&str; 6] = [
     "assignment",
     "exam",
@@ -77,9 +83,6 @@ pub struct Slot {
     pub end: Option<NaiveTime>,
 }
 
-pub const MOST_DONE_DAYS: usize = 400;
-pub const MOST_MOVED: usize = 400;
-
 pub fn clean_repeat(days: &[u8]) -> Vec<u8> {
     let mut out: Vec<u8> = days.iter().copied().filter(|d| *d < 7).collect();
     out.sort_unstable();
@@ -115,9 +118,6 @@ pub fn move_occurrence(task: &mut Task, on: NaiveDate, slot: Slot) {
     } else {
         task.moved.insert(on, slot);
     }
-    while task.moved.len() > MOST_MOVED {
-        task.moved.pop_first();
-    }
 }
 
 const WEEKDAYS: [&str; 7] = ["MO", "TU", "WE", "TH", "FR", "SA", "SU"];
@@ -134,7 +134,7 @@ fn other() -> String {
     "other".into()
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Meta {
     pub id: String,
     pub note: String,
@@ -189,12 +189,7 @@ pub fn clean_kind(kind: &str) -> String {
 }
 
 fn fnv(text: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    hash
+    crate::vectors::fnv64(text.bytes())
 }
 
 pub fn note_task_id(note: &str, text: &str) -> String {
@@ -234,83 +229,105 @@ pub struct NoteRef {
     pub folder: String,
 }
 
+pub fn tasks_in(note: &Note, metas: &[&Meta]) -> Vec<Listed> {
+    let mut out: Vec<Listed> = Vec::new();
+    let lines: Vec<&str> = note.body.lines().collect();
+    let note_ref = NoteRef {
+        id: note.id.clone(),
+        title: note.title.clone(),
+        folder: note.directory.clone(),
+    };
+    let mut claimed: HashSet<usize> = HashSet::new();
+    for meta in metas {
+        let at = match core::locate(&note.body, &meta.text, &meta.before, &meta.after) {
+            Located::At(n) => Some(n),
+            _ => None,
+        };
+        if let Some(n) = at {
+            claimed.insert(n);
+        }
+        let text = at
+            .and_then(|n| checkbox_line(lines[n]).map(|c| c.text.to_string()))
+            .unwrap_or_else(|| meta.text.clone());
+        let done = at
+            .and_then(|n| checkbox_line(lines[n]))
+            .is_some_and(|c| c.ticked);
+        let mut task = listed(
+            &meta.id,
+            &text,
+            done,
+            meta.kind.clone(),
+            &note_ref,
+            at,
+            at.is_some(),
+            meta.promoted,
+            meta.sent_at,
+        );
+        task.description = meta.description.clone();
+        out.push(task);
+    }
+    for n in core::action_items(&note.body) {
+        if claimed.contains(&n) {
+            continue;
+        }
+        let Some(found) = checkbox_line(lines[n]) else {
+            continue;
+        };
+        if found.text.trim().is_empty() {
+            continue;
+        }
+        let id = note_task_id(&note.id, found.text);
+        if out.iter().any(|t| t.id == id) {
+            continue;
+        }
+        out.push(listed(
+            &id,
+            found.text,
+            found.ticked,
+            None,
+            &note_ref,
+            Some(n),
+            true,
+            false,
+            None,
+        ));
+    }
+    out
+}
+
 pub fn note_tasks(store: &Store, metas: &[Meta]) -> Vec<Listed> {
-    let mut out = Vec::new();
     let mut by_note: BTreeMap<&str, Vec<&Meta>> = BTreeMap::new();
     for meta in metas {
         by_note.entry(meta.note.as_str()).or_default().push(meta);
     }
-    for note in &store.notes {
-        let lines: Vec<&str> = note.body.lines().collect();
-        let note_ref = NoteRef {
-            id: note.id.clone(),
-            title: note.title.clone(),
-            folder: note.directory.clone(),
-        };
-        let mut claimed: HashSet<usize> = HashSet::new();
-        for meta in by_note
-            .get(note.id.as_str())
-            .map(Vec::as_slice)
-            .unwrap_or(&[])
-        {
-            let at = match core::locate(&note.body, &meta.text, &meta.before, &meta.after) {
-                Located::At(n) => Some(n),
-                _ => None,
-            };
-            if let Some(n) = at {
-                claimed.insert(n);
-            }
-            let text = at
-                .and_then(|n| checkbox_line(lines[n]).map(|c| c.text.to_string()))
-                .unwrap_or_else(|| meta.text.clone());
-            let done = at
-                .and_then(|n| checkbox_line(lines[n]))
-                .is_some_and(|c| c.ticked);
-            let mut task = listed(
-                &meta.id,
-                &text,
-                done,
-                meta.kind.clone(),
-                &note_ref,
-                at,
-                at.is_some(),
-                meta.promoted,
-                meta.sent_at,
-            );
-            task.description = meta.description.clone();
-            out.push(task);
-        }
-        for n in core::action_items(&note.body) {
-            if claimed.contains(&n) {
-                continue;
-            }
-            let Some(found) = checkbox_line(lines[n]) else {
-                continue;
-            };
-            if found.text.trim().is_empty() {
-                continue;
-            }
-            let id = note_task_id(&note.id, found.text);
-            if out.iter().any(|t: &Listed| t.id == id) {
-                continue;
-            }
-            out.push(listed(
-                &id,
-                found.text,
-                found.ticked,
-                None,
-                &note_ref,
-                Some(n),
-                true,
-                false,
-                None,
-            ));
-        }
-        if out.len() > MOST_LISTED * 4 {
-            break;
-        }
-    }
-    out
+    store
+        .notes
+        .iter()
+        .flat_map(|note| {
+            let own = by_note.get(note.id.as_str()).map_or(&[][..], Vec::as_slice);
+            tasks_in(note, own)
+        })
+        .collect()
+}
+
+pub fn note_task(store: &Store, metas: &[Meta], note: &str, id: &str) -> Option<Listed> {
+    let note = store.notes.iter().find(|n| n.id == note)?;
+    let own: Vec<&Meta> = metas.iter().filter(|m| m.note == note.id).collect();
+    tasks_in(note, &own).into_iter().find(|t| t.id == id)
+}
+
+pub fn find_listed(
+    listed: &ListedCache,
+    generation: &AtomicU64,
+    store: &Store,
+    metas: &[Meta],
+    stored: &Arc<Vec<Task>>,
+    id: &str,
+) -> Option<Listed> {
+    let kept = listed
+        .find(generation, store, metas, stored, id)
+        .filter(|t| t.source == "note")?;
+    note_task(store, metas, &kept.note.as_ref()?.id, id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -330,7 +347,7 @@ fn listed(
         id: id.to_string(),
         source: "note",
         description: String::new(),
-        title: text.trim().chars().take(MOST_TITLE).collect(),
+        title: text.trim().to_string(),
         kind: kind.unwrap_or_else(|| kind_of(text)),
         done,
         date: due.map(|d| d.date),
@@ -378,7 +395,7 @@ pub fn standalone(task: &Task, store: Option<&Store>) -> Listed {
     }
 }
 
-pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
+pub(crate) fn in_order(all: &mut [Listed]) {
     all.sort_by(|a, b| {
         a.done
             .cmp(&b.done)
@@ -388,8 +405,89 @@ pub fn sorted(mut all: Vec<Listed>) -> Vec<Listed> {
             .then(a.time.cmp(&b.time))
             .then(a.title.cmp(&b.title))
     });
-    all.truncate(MOST_LISTED);
-    all
+}
+
+pub struct ListedIndex {
+    pub all: Vec<Listed>,
+    by_id: HashMap<String, usize>,
+}
+
+impl std::ops::Deref for ListedIndex {
+    type Target = [Listed];
+
+    fn deref(&self) -> &[Listed] {
+        &self.all
+    }
+}
+
+type Kept = (u64, Vec<Meta>, Arc<Vec<Task>>, Arc<ListedIndex>);
+
+#[derive(Default)]
+pub struct ListedCache {
+    kept: Mutex<Option<Kept>>,
+    #[cfg(test)]
+    builds: std::sync::atomic::AtomicUsize,
+    #[cfg(test)]
+    cloned: std::sync::atomic::AtomicUsize,
+}
+
+impl ListedCache {
+    pub fn index(
+        &self,
+        generation: &AtomicU64,
+        store: &Store,
+        metas: &[Meta],
+        stored: &Arc<Vec<Task>>,
+    ) -> Arc<ListedIndex> {
+        let at = generation.load(Ordering::Acquire);
+        if let Some((kept_at, kept_metas, kept_stored, index)) =
+            self.kept.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        {
+            if *kept_at == at && kept_metas == metas && Arc::ptr_eq(kept_stored, stored) {
+                return Arc::clone(index);
+            }
+        }
+        #[cfg(test)]
+        self.builds.fetch_add(1, Ordering::Relaxed);
+        let mut all = note_tasks(store, metas);
+        all.extend(stored.iter().map(|t| standalone(t, Some(store))));
+        in_order(&mut all);
+        let by_id = all
+            .iter()
+            .enumerate()
+            .rev()
+            .map(|(at, task)| (task.id.clone(), at))
+            .collect();
+        let index = Arc::new(ListedIndex { all, by_id });
+        *self.kept.lock().unwrap_or_else(|e| e.into_inner()) =
+            Some((at, metas.to_vec(), Arc::clone(stored), Arc::clone(&index)));
+        index
+    }
+
+    pub fn find(
+        &self,
+        generation: &AtomicU64,
+        store: &Store,
+        metas: &[Meta],
+        stored: &Arc<Vec<Task>>,
+        id: &str,
+    ) -> Option<Listed> {
+        let index = self.index(generation, store, metas, stored);
+        let at = *index.by_id.get(id)?;
+        #[cfg(test)]
+        self.cloned.fetch_add(1, Ordering::Relaxed);
+        Some(index.all[at].clone())
+    }
+
+    #[cfg(test)]
+    pub fn builds(&self) -> usize {
+        self.builds.load(Ordering::Relaxed)
+    }
+
+    #[cfg(test)]
+    pub fn cloned(&self) -> usize {
+        self.cloned.load(Ordering::Relaxed)
+    }
 }
 
 pub fn ics_of(task: &Listed, stamp: DateTime<Utc>) -> String {
@@ -510,20 +608,60 @@ impl jsonline::Line for Task {
     fn stamp(&self) -> DateTime<Utc> {
         self.updated_at
     }
+    fn deleted_at(&mut self, now: DateTime<Utc>) {
+        self.deleted = true;
+        self.updated_at = now;
+    }
 }
 
-fn read_all(chats: &Path) -> Vec<Task> {
-    let mut out: Vec<Task> = jsonline::read_all(chats, None);
-    out.sort_by_key(|t| std::cmp::Reverse(t.updated_at));
-    out
+#[derive(Default)]
+struct Table {
+    index: jsonline::Index<Task>,
+    live: Mutex<Option<(u64, Arc<Vec<Task>>)>>,
+}
+
+fn table(chats: &Path) -> Arc<Table> {
+    static TABLES: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<Table>>>> = OnceLock::new();
+    let key = crate::db::beside_of(chats, None).to_path_buf();
+    let mut all = TABLES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(all.entry(key).or_default())
+}
+
+pub fn generation(chats: &Path) -> u64 {
+    table(chats).index.generation(chats)
+}
+
+pub fn snapshot(chats: &Path) -> Arc<Vec<Task>> {
+    let held = table(chats);
+    let at = held.index.generation(chats);
+    let mut live = held.live.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((kept_at, tasks)) = live.as_ref() {
+        if *kept_at == at {
+            return Arc::clone(tasks);
+        }
+    }
+    let mut tasks: Vec<Task> = held.index.view(chats, |items| {
+        items
+            .values()
+            .filter(|(_, task)| !task.deleted)
+            .map(|(_, task)| task.clone())
+            .collect()
+    });
+    tasks.sort_by(|a, b| {
+        b.updated_at
+            .cmp(&a.updated_at)
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    let tasks = Arc::new(tasks);
+    *live = Some((at, Arc::clone(&tasks)));
+    tasks
 }
 
 pub fn load_all(chats: &Path) -> Vec<Task> {
-    read_all(chats)
-        .into_iter()
-        .filter(|t| !t.deleted)
-        .take(MOST_TASKS)
-        .collect()
+    snapshot(chats).to_vec()
 }
 
 pub fn load(chats: &Path, id: &str) -> Option<Task> {
@@ -533,8 +671,11 @@ pub fn load(chats: &Path, id: &str) -> Option<Task> {
     jsonline::load::<Task>(chats, id).filter(|t| !t.deleted)
 }
 
+#[cfg(test)]
 pub fn count(chats: &Path) -> usize {
-    load_all(chats).len()
+    table(chats).index.view(chats, |items| {
+        items.values().filter(|(_, t)| !t.deleted).count()
+    })
 }
 
 pub fn put(chats: &Path, task: &Task) -> anyhow::Result<()> {
@@ -542,12 +683,10 @@ pub fn put(chats: &Path, task: &Task) -> anyhow::Result<()> {
 }
 
 pub fn remove(chats: &Path, id: &str) -> bool {
-    let Some(mut task) = load(chats, id) else {
+    let Some(task) = load(chats, id) else {
         return false;
     };
-    task.deleted = true;
-    task.updated_at = Utc::now();
-    jsonline::write_file(chats, &task).is_ok()
+    jsonline::write_gone(chats, &task, Utc::now()).is_ok()
 }
 
 pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
@@ -562,8 +701,8 @@ pub fn forget_deleted(chats: &Path, days: Option<u32>, now: DateTime<Utc>) -> us
 pub fn metas(chats: &Path) -> Vec<Meta> {
     db_of(chats)
         .and_then(|db| db.with(|c| {
-            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks LIMIT ?1")?;
-            let rows = statement.query_map([MOST_TASKS as i64], |r| {
+            let mut statement = c.prepare("SELECT id, note, text, before, after, kind, promoted, sent_at, description FROM note_tasks ORDER BY rowid DESC")?;
+            let rows = statement.query_map([], |r| {
                 Ok(Meta {
                     id: r.get(0)?,
                     note: r.get(1)?,
@@ -609,7 +748,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut store = Store::load_from(&dir.path().join("notes")).unwrap();
         let id = store
-            .create_note("Lecture 5", body, vec![], "bio")
+            .create_note("Lecture 5", body, "bio")
             .unwrap()
             .id
             .clone();
@@ -693,12 +832,13 @@ mod tests {
                 None,
             )
         };
-        let all = sorted(vec![
+        let mut all = vec![
             task("undated", false, None),
             task("done", true, NaiveDate::from_ymd_opt(2026, 1, 1)),
             task("later", false, NaiveDate::from_ymd_opt(2026, 12, 1)),
             task("sooner", false, NaiveDate::from_ymd_opt(2026, 11, 1)),
-        ]);
+        ];
+        in_order(&mut all);
         let order: Vec<&str> = all.iter().map(|t| t.id.as_str()).collect();
         assert_eq!(order, ["sooner", "later", "undated", "done"]);
         let ics = ics_of(&all[0], now);
@@ -737,7 +877,7 @@ mod tests {
         let now = Utc::now();
         let folder = dir.path().join("notes/.leo/tasks");
         std::fs::create_dir_all(&folder).unwrap();
-        for n in 0..MOST_TASKS * 3 {
+        for n in 0..30_000 {
             let id = format!("gone-{n:06}");
             let mut gone = plain(&id, "Gone", now);
             gone.deleted = true;
@@ -888,7 +1028,7 @@ mod tests {
             },
         );
         assert!(task.moved.is_empty(), "moving it back forgets the move");
-        for week in 0..(MOST_MOVED as i64 + 5) {
+        for week in 0..1_200i64 {
             let on = monday + chrono::Duration::weeks(week);
             move_occurrence(
                 &mut task,
@@ -900,11 +1040,8 @@ mod tests {
                 },
             );
         }
-        assert_eq!(task.moved.len(), MOST_MOVED);
-        assert!(
-            !task.moved.contains_key(&monday),
-            "the oldest moves go first"
-        );
+        assert_eq!(task.moved.len(), 1_200);
+        assert!(task.moved.contains_key(&monday), "no move is forgotten");
     }
 
     #[test]

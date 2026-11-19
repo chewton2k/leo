@@ -1,4 +1,6 @@
-use axum::extract::{Path, State};
+use std::sync::Arc;
+
+use axum::extract::{Path, Query, State};
 use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
@@ -13,7 +15,7 @@ use crate::routes::notes::save;
 use crate::tasks::{self, Meta, Task};
 use crate::AppState;
 
-fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
+pub(super) fn present<'de, D, T>(d: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: Deserializer<'de>,
     T: Deserialize<'de>,
@@ -27,13 +29,16 @@ const NO_OLD_DATE: &str =
 const NOT_DELETED: &str =
     "leo could not delete that task. Check that the notes folder can be written to, then try again.";
 
-async fn writing(work: impl FnOnce() -> Response + Send + 'static) -> Response {
-    tokio::task::spawn_blocking(move || {
-        let _writing = tasks::writing();
+async fn writing(
+    chats: std::path::PathBuf,
+    work: impl FnOnce() -> Response + Send + 'static,
+) -> Response {
+    super::off(move || {
+        let _writing = tasks::writing(&chats);
         work()
     })
     .await
-    .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+    .unwrap_or_else(IntoResponse::into_response)
 }
 
 fn time_of(text: Option<&str>) -> Result<Option<NaiveTime>, ()> {
@@ -45,25 +50,58 @@ fn time_of(text: Option<&str>) -> Result<Option<NaiveTime>, ()> {
     }
 }
 
-pub(crate) async fn list_tasks(State(state): State<AppState>) -> Response {
-    match all_listed(&state).await {
-        Ok(all) => Json(serde_json::json!({ "tasks": all })).into_response(),
-        Err(code) => code.into_response(),
-    }
+#[derive(Deserialize, Default)]
+pub(crate) struct Page {
+    #[serde(default)]
+    offset: usize,
+    limit: Option<usize>,
+    q: Option<String>,
+    note: Option<String>,
 }
 
-pub(crate) async fn all_listed(state: &AppState) -> Result<Vec<tasks::Listed>, StatusCode> {
+pub(crate) async fn list_tasks(
+    State(state): State<AppState>,
+    Query(page): Query<Page>,
+) -> Response {
+    let index = match listed_index(&state).await {
+        Ok(index) => index,
+        Err(code) => return code.into_response(),
+    };
+    let word = page
+        .q
+        .as_deref()
+        .map(str::to_lowercase)
+        .filter(|q| !q.is_empty());
+    let note = page.note.as_deref().filter(|n| !n.is_empty());
+    let matching = index
+        .iter()
+        .filter(|t| note.is_none_or(|n| t.note.as_ref().is_some_and(|r| r.id == n)))
+        .filter(|t| {
+            word.as_ref()
+                .is_none_or(|w| t.title.to_lowercase().contains(w))
+        });
+    let mut total = 0;
+    let mut tasks = Vec::new();
+    let limit = page.limit.unwrap_or(tasks::LISTED_PAGE);
+    for task in matching {
+        if total >= page.offset && tasks.len() < limit {
+            tasks.push(task);
+        }
+        total += 1;
+    }
+    Json(serde_json::json!({ "tasks": tasks, "total": total })).into_response()
+}
+
+pub(crate) async fn listed_index(state: &AppState) -> Result<Arc<tasks::ListedIndex>, StatusCode> {
     let chats = state.chats.clone();
     let (metas, stored) =
-        tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::load_all(&chats)))
+        tokio::task::spawn_blocking(move || (tasks::metas(&chats), tasks::snapshot(&chats)))
             .await
             .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let generation = state.generation.clone();
+    let listed = state.listed.clone();
     state
-        .read_store(move |store| {
-            let mut all = tasks::note_tasks(store, &metas);
-            all.extend(stored.iter().map(|t| tasks::standalone(t, Some(store))));
-            Ok(tasks::sorted(all))
-        })
+        .read_store(move |store| Ok(listed.index(&generation, store, &metas, &stored)))
         .await
 }
 
@@ -96,11 +134,8 @@ pub(crate) async fn create_task(
     State(state): State<AppState>,
     Json(body): Json<NewTask>,
 ) -> Response {
-    let description = match tasks::description_of(&body.description) {
-        Ok(text) => text,
-        Err(message) => return error(StatusCode::BAD_REQUEST, message),
-    };
-    let title: String = body.title.trim().chars().take(tasks::MOST_TITLE).collect();
+    let description = body.description.trim().to_string();
+    let title = body.title.trim().to_string();
     if title.is_empty() {
         return error(StatusCode::BAD_REQUEST, "Give the task a title.");
     }
@@ -114,7 +149,7 @@ pub(crate) async fn create_task(
     };
     let chats = state.chats.clone();
     let request = insert::requested(body.request);
-    writing(move || {
+    writing(chats.clone(), move || {
         if let Some(first) = request
             .as_deref()
             .and_then(|r| insert::remembered_creation("task", r))
@@ -123,12 +158,6 @@ pub(crate) async fn create_task(
         }
         if let Some(existing) = tasks::load(&chats, &id) {
             return Json(serde_json::json!(tasks::standalone(&existing, None))).into_response();
-        }
-        if tasks::count(&chats) >= tasks::MOST_TASKS {
-            return error(
-                StatusCode::CONFLICT,
-                "leo keeps up to 10,000 tasks. Delete finished ones first.",
-            );
         }
         let now = Utc::now();
         let repeat = tasks::clean_repeat(&body.repeat);
@@ -212,25 +241,20 @@ pub(crate) async fn change_task(
     ) else {
         return error(StatusCode::BAD_REQUEST, "Write times like 14:30.");
     };
-    let description = match change
+    let description = change
         .description
         .as_deref()
-        .map(tasks::description_of)
-        .transpose()
-    {
-        Ok(text) => text,
-        Err(message) => return error(StatusCode::BAD_REQUEST, message),
-    };
+        .map(|text| text.trim().to_string());
     let chats = state.chats.clone();
     let standalone = {
         let (chats, id, description) = (chats.clone(), id.clone(), description.clone());
         tokio::task::spawn_blocking(move || {
-            let _writing = tasks::writing();
+            let _writing = tasks::writing(&chats);
             let Some(mut task) = tasks::load(&chats, &id) else {
                 return Err(Box::new(change));
             };
             if let Some(title) = change.title {
-                let title: String = title.trim().chars().take(tasks::MOST_TITLE).collect();
+                let title = title.trim().to_string();
                 if title.is_empty() {
                     return Ok(error(StatusCode::BAD_REQUEST, "Give the task a title."));
                 }
@@ -262,8 +286,6 @@ pub(crate) async fn change_task(
                     if done {
                         task.done_on.push(day);
                         task.done_on.sort_unstable();
-                        let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
-                        task.done_on.drain(..extra);
                     }
                 }
             }
@@ -310,6 +332,16 @@ pub(crate) async fn change_task(
         Ok(Err(change)) => *change,
         Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
     };
+    let stored = {
+        let chats = chats.clone();
+        tokio::task::spawn_blocking(move || tasks::snapshot(&chats))
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+    };
+    let Ok(stored) = stored else {
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    };
+    let (listed, generation) = (state.listed.clone(), state.generation.clone());
     let found = state
         .with_store(move |store| {
             if change.occurrence.is_some() {
@@ -319,8 +351,8 @@ pub(crate) async fn change_task(
                 ));
             }
             let metas = tasks::metas(&chats);
-            let listed = tasks::note_tasks(store, &metas);
-            let Some(task) = listed.into_iter().find(|t| t.id == id) else {
+            let Some(task) = tasks::find_listed(&listed, &generation, store, &metas, &stored, &id)
+            else {
                 return Err(StatusCode::NOT_FOUND);
             };
             let note_id = task.note.as_ref().map(|n| n.id.clone()).unwrap_or_default();
@@ -392,15 +424,10 @@ pub(crate) async fn change_task(
                 tasks::put_meta(&chats, &meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             }
             let metas = tasks::metas(&chats);
-            Ok(
-                match tasks::note_tasks(store, &metas)
-                    .into_iter()
-                    .find(|t| t.id == id)
-                {
-                    Some(task) => Json(serde_json::json!(task)).into_response(),
-                    None => StatusCode::NO_CONTENT.into_response(),
-                },
-            )
+            Ok(match tasks::note_task(store, &metas, &note_id, &id) {
+                Some(task) => Json(serde_json::json!(task)).into_response(),
+                None => StatusCode::NO_CONTENT.into_response(),
+            })
         })
         .await;
     match found {
@@ -418,7 +445,7 @@ pub(crate) async fn delete_task(State(state): State<AppState>, Path(id): Path<St
         return StatusCode::BAD_REQUEST.into_response();
     }
     let chats = state.chats.clone();
-    writing(move || {
+    writing(chats.clone(), move || {
         if let Some(task) = tasks::load(&chats, &id) {
             if !tasks::remove(&chats, &id) {
                 return error(StatusCode::INTERNAL_SERVER_ERROR, NOT_DELETED);
@@ -483,9 +510,7 @@ pub(crate) async fn promote_task(
             };
             tasks::put_meta(&chats, &meta).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
             let metas = tasks::metas(&chats);
-            tasks::note_tasks(store, &metas)
-                .into_iter()
-                .find(|t| t.id == meta.id)
+            tasks::note_task(store, &metas, &meta.note, &meta.id)
                 .ok_or(StatusCode::INTERNAL_SERVER_ERROR)
         })
         .await;
@@ -496,7 +521,7 @@ pub(crate) async fn promote_task(
 }
 
 pub(crate) async fn task_ics(State(state): State<AppState>, Path(id): Path<String>) -> Response {
-    let Ok(all) = all_listed(&state).await else {
+    let Ok(all) = listed_index(&state).await else {
         return StatusCode::INTERNAL_SERVER_ERROR.into_response();
     };
     let Some(task) = all.iter().find(|t| t.id == id) else {
@@ -539,48 +564,55 @@ pub(crate) struct Import {
     tasks: Vec<Task>,
 }
 
+const RESTORE_PIECE: usize = 500;
+
 pub(crate) async fn import_tasks(
     State(state): State<AppState>,
     Json(body): Json<Import>,
 ) -> Response {
-    let chats = state.chats.clone();
-    writing(move || {
-        let mut added = 0;
-        let mut kept = 0;
-        let mut count = tasks::count(&chats);
-        for mut task in body.tasks.into_iter().take(tasks::MOST_TASKS) {
-            if !tasks::valid_id(&task.id)
-                || task.id.starts_with('n')
-                || task.title.trim().is_empty()
-            {
-                continue;
-            }
-            let Ok(description) = tasks::description_of(&task.description) else {
-                continue;
-            };
-            task.description = description;
-            task.title = task.title.trim().chars().take(tasks::MOST_TITLE).collect();
-            task.kind = tasks::clean_kind(&task.kind);
-            task.repeat = tasks::clean_repeat(&task.repeat);
-            task.done_on.sort_unstable();
-            task.done_on.dedup();
-            let extra = task.done_on.len().saturating_sub(tasks::MOST_DONE_DAYS);
-            task.done_on.drain(..extra);
-            task.deleted = false;
-            match tasks::load(&chats, &task.id) {
-                Some(mine) if mine.updated_at >= task.updated_at => kept += 1,
-                mine => {
-                    if count >= tasks::MOST_TASKS {
-                        break;
-                    }
-                    if tasks::put(&chats, &task).is_ok() {
-                        added += 1;
-                        count += usize::from(mine.is_none());
-                    }
+    let (mut added, mut kept) = (0, 0);
+    let mut tasks = body.tasks.into_iter();
+    loop {
+        let piece: Vec<Task> = tasks.by_ref().take(RESTORE_PIECE).collect();
+        if piece.is_empty() {
+            break;
+        }
+        let chats = state.chats.clone();
+        let Ok((new, old)) = super::off(move || {
+            let _writing = tasks::writing(&chats);
+            restore_piece(&chats, piece)
+        })
+        .await
+        else {
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        };
+        added += new;
+        kept += old;
+    }
+    Json(serde_json::json!({ "added": added, "kept": kept })).into_response()
+}
+
+fn restore_piece(chats: &std::path::Path, piece: Vec<Task>) -> (usize, usize) {
+    let (mut added, mut kept) = (0, 0);
+    for mut task in piece {
+        if !tasks::valid_id(&task.id) || task.id.starts_with('n') || task.title.trim().is_empty() {
+            continue;
+        }
+        task.description = task.description.trim().to_string();
+        task.title = task.title.trim().to_string();
+        task.kind = tasks::clean_kind(&task.kind);
+        task.repeat = tasks::clean_repeat(&task.repeat);
+        task.done_on.sort_unstable();
+        task.done_on.dedup();
+        task.deleted = false;
+        match tasks::load(chats, &task.id) {
+            Some(mine) if mine.updated_at >= task.updated_at => kept += 1,
+            _ => {
+                if tasks::put(chats, &task).is_ok() {
+                    added += 1;
                 }
             }
         }
-        Json(serde_json::json!({ "added": added, "kept": kept })).into_response()
-    })
-    .await
+    }
+    (added, kept)
 }

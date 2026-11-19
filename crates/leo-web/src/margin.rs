@@ -14,9 +14,8 @@ pub const MOST_QUOTE: usize = 600;
 pub const LEAST_QUOTE: usize = 3;
 const LEAST_TAIL: usize = 6;
 pub const MOST_TEXT: usize = 500;
-pub const MOST_REPLY: usize = 4_000;
-pub const MOST_ASK: usize = 1_000;
-pub const MOST_ASKED: usize = 1_000;
+const MESSAGE_READ_CHARS: usize = 1_000;
+const PASSAGE_READ_CHARS: usize = 1_000;
 pub const MOST_MESSAGES: usize = 24;
 pub const MOST_OPEN: usize = 24;
 pub const MOST_CLOSED: usize = 48;
@@ -73,6 +72,8 @@ pub struct Thread {
     pub updated_at: DateTime<Utc>,
     #[serde(default)]
     pub pinned: bool,
+    #[serde(default)]
+    pub reworded: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -92,7 +93,7 @@ pub struct PersonaBody {
 }
 
 pub const MOST_PERSONAS: usize = 8;
-pub const MOST_INSTRUCTIONS: usize = 500;
+const INSTRUCTIONS_READ_CHARS: usize = 500;
 pub const PERSONA_ICONS: [&str; 12] = [
     "flask", "globe", "bulb", "cap", "leaf", "compass", "code", "heart", "star", "pen", "target",
     "thumb",
@@ -205,6 +206,7 @@ pub fn new_thread(
         created_at: now,
         updated_at: now,
         pinned: false,
+        reworded: false,
     }
 }
 
@@ -228,11 +230,12 @@ fn thread_of(row: &rusqlite::Row<'_>) -> rusqlite::Result<Thread> {
         created_at: time(8)?,
         updated_at: time(9)?,
         pinned: row.get(10)?,
+        reworded: row.get(11)?,
     })
 }
 
 const COLUMNS: &str =
-    "id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned";
+    "id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned, reworded";
 
 pub fn open_on(chats: &Path, note: &str) -> Vec<Thread> {
     db_of(chats)
@@ -268,6 +271,18 @@ pub fn resolved_on(chats: &Path, note: &str) -> Vec<Passage> {
                     suffix: row.get(3)?,
                 })
             })?;
+            rows.collect()
+        })
+        .unwrap_or_default()
+}
+
+pub fn declined_on(chats: &Path, note: &str) -> Vec<String> {
+    db_of(chats)
+        .with(|c| {
+            let mut query = c.prepare_cached(
+                "SELECT quote FROM margin_threads WHERE note = ?1 AND (status = 'dismissed' OR (status = 'resolved' AND closed_by = 'you'))",
+            )?;
+            let rows = query.query_map([note], |row| row.get(0))?;
             rows.collect()
         })
         .unwrap_or_default()
@@ -324,8 +339,8 @@ pub fn room(open: &[Thread], gone: &[String]) -> usize {
 fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::Result<usize> {
     let messages = serde_json::to_string(&thread.messages).unwrap_or_else(|_| "[]".into());
     c.execute(
-        "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12
+        "INSERT OR IGNORE INTO margin_threads (id, note, quote, prefix, suffix, status, source, messages, created_at, updated_at, pinned, reworded)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?12, ?13
          WHERE ?6 != 'open'
             OR (SELECT count(*) FROM margin_threads WHERE note = ?2 AND status = 'open') < ?11",
         params![
@@ -341,6 +356,7 @@ fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::
             thread.updated_at.to_rfc3339(),
             limit as i64,
             thread.pinned,
+            thread.reworded,
         ],
     )
 }
@@ -348,14 +364,58 @@ fn insert(c: &rusqlite::Connection, thread: &Thread, limit: usize) -> rusqlite::
 pub fn put(chats: &Path, thread: &Thread, limit: usize) -> bool {
     db_of(chats)
         .with(|c| {
-            let added = insert(c, thread, limit)?;
-            prune_closed(c, &thread.note)?;
+            let tx = c.transaction()?;
+            let added = insert(&tx, thread, limit)?;
+            prune_closed(&tx, &thread.note)?;
+            tx.commit()?;
             Ok(added)
         })
         .is_ok_and(|added| added > 0)
 }
 
 pub const FULL: &str = "Felix's margin is full. Resolve a note and he'll read again.";
+
+pub fn replaceable(thread: &Thread) -> bool {
+    thread.source == "read" && !thread.pinned && thread.messages.iter().all(|m| m.from == "felix")
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Moved {
+    Done(Box<Thread>),
+    Missing,
+    Replaceable,
+}
+
+pub fn re_anchor(chats: &Path, note: &str, id: &str, quote: &str, place: Place) -> Moved {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let found = tx
+                .query_row(
+                    &format!("SELECT {COLUMNS} FROM margin_threads WHERE id = ?1 AND note = ?2 AND status = 'open'"),
+                    [id, note],
+                    thread_of,
+                )
+                .optional()?;
+            let Some(mut thread) = found else {
+                return Ok(Moved::Missing);
+            };
+            if replaceable(&thread) {
+                return Ok(Moved::Replaceable);
+            }
+            tx.execute(
+                "UPDATE margin_threads SET quote = ?1, prefix = ?2, suffix = ?3, reworded = 1 WHERE id = ?4 AND note = ?5 AND status = 'open'",
+                params![quote, place.prefix, place.suffix, id, note],
+            )?;
+            tx.commit()?;
+            thread.quote = quote.into();
+            thread.prefix = place.prefix;
+            thread.suffix = place.suffix;
+            thread.reworded = true;
+            Ok(Moved::Done(Box::new(thread)))
+        })
+        .unwrap_or(Moved::Missing)
+}
 
 pub fn evictable(thread: &Thread, keep: &[String]) -> bool {
     !thread.pinned && !keep.contains(&thread.id)
@@ -386,7 +446,7 @@ fn resolve_in(
         return Ok(Some(false));
     }
     c.execute(
-        "UPDATE margin_threads SET status = 'resolved', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
+        "UPDATE margin_threads SET status = 'resolved', closed_by = 'felix', updated_at = ?1 WHERE id = ?2 AND status = 'open'",
         params![Utc::now().to_rfc3339(), thread.id],
     )?;
     Ok(Some(true))
@@ -498,12 +558,7 @@ pub fn resolve_untouched(
     let open = open_on(chats, note);
     let mut untouched: Vec<&Thread> = open
         .iter()
-        .filter(|t| {
-            t.source == "read"
-                && t.id != fresh
-                && evictable(t, keep)
-                && t.messages.iter().all(|m| m.from == "felix")
-        })
+        .filter(|t| replaceable(t) && t.id != fresh && evictable(t, keep))
         .collect();
     untouched.sort_by_key(|t| t.updated_at);
     let excess = open.len().saturating_sub(TIDY_TO);
@@ -551,7 +606,7 @@ pub fn set_status(chats: &Path, note: &str, id: &str, status: &str, limit: usize
             return Ok(Status::Full);
         }
         tx.execute(
-            "UPDATE margin_threads SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            "UPDATE margin_threads SET status = ?1, closed_by = 'you', updated_at = ?2 WHERE id = ?3",
             params![status, Utc::now().to_rfc3339(), id],
         )?;
         prune_closed(&tx, note)?;
@@ -602,11 +657,11 @@ fn state_row(chats: &Path, key: &str) -> anyhow::Result<Option<String>> {
     })
 }
 
-fn state_of<T: serde::de::DeserializeOwned>(chats: &Path, key: &str) -> Option<T> {
+pub(crate) fn state_of<T: serde::de::DeserializeOwned>(chats: &Path, key: &str) -> Option<T> {
     serde_json::from_str(&state_row(chats, key).ok().flatten()?).ok()
 }
 
-fn set_state(chats: &Path, key: &str, value: &impl Serialize) -> bool {
+pub(crate) fn set_state(chats: &Path, key: &str, value: &impl Serialize) -> bool {
     let Ok(text) = serde_json::to_string(value) else {
         return false;
     };
@@ -795,8 +850,7 @@ pub fn instructions_of(chats: &Path, note: &str) -> String {
 }
 
 pub fn set_instructions(chats: &Path, note: &str, text: &str) -> Option<String> {
-    let text: String = text.trim().chars().take(MOST_INSTRUCTIONS).collect();
-    let text = text.trim_end();
+    let text = text.trim();
     db_of(chats)
         .with(|c| {
             if text.is_empty() {
@@ -841,9 +895,9 @@ pub fn valid_personas(list: Vec<PersonaBody>) -> Option<Vec<Persona>> {
     for body in list {
         let name = body.name.trim().to_string();
         let says = body.says.trim().to_string();
-        if !(1..=32).contains(&name.chars().count())
+        if name.is_empty()
             || name.chars().any(char::is_control)
-            || !(1..=500).contains(&says.chars().count())
+            || says.is_empty()
             || says.chars().any(|c| c.is_control() && c != '\n')
             || !(body.icon == "book" || PERSONA_ICONS.contains(&body.icon.as_str()))
         {
@@ -871,7 +925,14 @@ pub fn valid_personas(list: Vec<PersonaBody>) -> Option<Vec<Persona>> {
     Some(made)
 }
 
+fn read_start(text: &str, most: usize) -> &str {
+    text.char_indices()
+        .nth(most)
+        .map_or(text, |(at, _)| &text[..at])
+}
+
 pub fn voiced(system: &str, voice: &str, asked: bool) -> String {
+    let voice = read_start(voice, INSTRUCTIONS_READ_CHARS);
     if voice.is_empty() {
         return system.to_string();
     }
@@ -887,6 +948,7 @@ pub fn voiced(system: &str, voice: &str, asked: bool) -> String {
 }
 
 pub fn instructed(system: &str, said: &str) -> String {
+    let said = read_start(said, INSTRUCTIONS_READ_CHARS);
     if said.is_empty() {
         return system.to_string();
     }
@@ -911,59 +973,332 @@ pub fn sweep_due(last: Option<Instant>) -> bool {
     last.is_none_or(|at| at.elapsed() >= SWEEP_EVERY)
 }
 
-pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
-    let mut removed = 0;
-    for note in notes {
-        removed += db_of(chats)
-            .with(|c| {
-                let threads = c.execute("DELETE FROM margin_threads WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_modes WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_personas WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM margin_instructions WHERE note = ?1", [note])?;
-                c.execute("DELETE FROM writeup_pending WHERE note = ?1", [note])?;
-                Ok(threads)
-            })
-            .unwrap_or(0);
-    }
-    removed
+const DEPENDENT_ROWS: &[(&str, &str, &[&str])] = &[
+    ("margin_threads", "note = ?1", &["id"]),
+    ("margin_modes", "note = ?1", &["note"]),
+    ("margin_personas", "note = ?1", &["note"]),
+    ("margin_instructions", "note = ?1", &["note"]),
+    ("writeup_pending", "note = ?1", &["note"]),
+    ("note_tasks", "note = ?1", &["id"]),
+    ("reading", "note = ?1", &["note"]),
+    ("vectors", "note = ?1", &["note", "at"]),
+    ("graph_notes", "id = ?1", &["id"]),
+    ("margin_state", "key = 'combined:' || ?1", &["key"]),
+];
+
+fn row_key(columns: &[&str], prefix: &str) -> String {
+    let arguments = columns
+        .iter()
+        .map(|column| format!("{prefix}{column}"))
+        .collect::<Vec<_>>();
+    format!("json_array({})", arguments.join(","))
 }
 
-pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
-    let held: BTreeSet<String> = db_of(chats)
-        .with(|c| {
-            let mut query = c.prepare(
-                "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending",
+pub(crate) fn set_up_held_rows(tx: &rusqlite::Connection) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS held_note_rows (
+             kind TEXT NOT NULL, row_key TEXT NOT NULL, ticket TEXT NOT NULL,
+             PRIMARY KEY(kind, row_key)
+         );
+         CREATE INDEX IF NOT EXISTS held_note_rows_by_ticket ON held_note_rows(ticket);",
+    )?;
+    for (table, _, key) in DEPENDENT_ROWS {
+        let old = row_key(key, "OLD.");
+        let new = row_key(key, "NEW.");
+        for (event, ids) in [
+            ("INSERT", new.clone()),
+            ("UPDATE", format!("{old}, {new}")),
+            ("DELETE", old),
+        ] {
+            tx.execute_batch(&format!(
+                "CREATE TRIGGER IF NOT EXISTS held_{table}_{event} AFTER {event} ON {table}
+                 BEGIN DELETE FROM held_note_rows WHERE kind = '{table}' AND row_key IN ({ids}); END;"
+            ))?;
+        }
+    }
+    Ok(())
+}
+
+fn row_digests(
+    tx: &rusqlite::Connection,
+    table: &str,
+    owner: &str,
+    key: &str,
+    note: &str,
+) -> rusqlite::Result<Vec<(String, String)>> {
+    use rusqlite::types::ValueRef;
+    let mut rows = tx.prepare(&format!("SELECT {key}, * FROM {table} WHERE {owner}"))?;
+    let columns = rows.column_count();
+    let found = rows.query_map([note], |row| {
+        let mut bytes = Vec::new();
+        for at in 1..columns {
+            let (kind, value): (u8, Vec<u8>) = match row.get_ref(at)? {
+                ValueRef::Null => (0, Vec::new()),
+                ValueRef::Integer(n) => (1, n.to_le_bytes().to_vec()),
+                ValueRef::Real(n) => (2, n.to_bits().to_le_bytes().to_vec()),
+                ValueRef::Text(text) => (3, text.to_vec()),
+                ValueRef::Blob(blob) => (4, blob.to_vec()),
+            };
+            bytes.push(kind);
+            bytes.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            bytes.extend_from_slice(&value);
+        }
+        let digest = leo_core::paths::digest_text(&leo_core::paths::digest(&bytes));
+        Ok((row.get::<_, String>(0)?, digest))
+    })?;
+    found.collect()
+}
+
+fn dependent_revisions(
+    connection: &rusqlite::Connection,
+    note: &str,
+) -> rusqlite::Result<Vec<(&'static str, String, String)>> {
+    let mut revisions = Vec::new();
+    for (table, owner, key) in DEPENDENT_ROWS {
+        revisions.extend(
+            row_digests(connection, table, owner, &row_key(key, ""), note)?
+                .into_iter()
+                .map(|(row, digest)| (*table, row, digest)),
+        );
+    }
+    revisions.sort_unstable();
+    Ok(revisions)
+}
+
+fn revisions_digest(revisions: &[(&str, String, String)]) -> leo_core::paths::FileDigest {
+    leo_core::paths::digest(&serde_json::to_vec(revisions).expect("row revisions serialize"))
+}
+
+pub(crate) fn dependent_revision(
+    chats: &Path,
+    note: &str,
+) -> anyhow::Result<leo_core::paths::FileDigest> {
+    db_of(chats).with(|c| {
+        let tx = c.transaction()?;
+        Ok(revisions_digest(&dependent_revisions(&tx, note)?))
+    })
+}
+
+pub(crate) fn record_held_rows(
+    chats: &Path,
+    note: &str,
+) -> anyhow::Result<(String, leo_core::paths::FileDigest)> {
+    let ticket = uuid::Uuid::new_v4().to_string();
+    db_of(chats).with(|c| {
+        let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let rows = dependent_revisions(&tx, note)?;
+        for (table, row, digest) in &rows {
+            tx.execute(
+                "INSERT OR REPLACE INTO held_note_rows (kind, row_key, ticket, digest)
+                 VALUES (?1, ?2, ?3, ?4)",
+                [table, &row.as_str(), &ticket.as_str(), &digest.as_str()],
             )?;
-            let rows = query.query_map([], |r| r.get(0))?;
-            rows.collect()
+        }
+        tx.commit()?;
+        Ok((ticket, revisions_digest(&rows)))
+    })
+}
+
+pub(crate) fn finish_held_rows(chats: &Path, note: &str, ticket: &str, delete: bool) -> bool {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            if delete {
+                for (table, owner, key) in DEPENDENT_ROWS {
+                    let key = row_key(key, "");
+                    for (row, digest) in row_digests(&tx, table, owner, &key, note)? {
+                        tx.execute(
+                            &format!(
+                                "DELETE FROM {table} WHERE {owner} AND {key} = ?2 AND EXISTS
+                             (SELECT 1 FROM held_note_rows WHERE ticket = ?3 AND kind = '{table}'
+                              AND row_key = ?2 AND digest = ?4)"
+                            ),
+                            [note, &row, ticket, &digest],
+                        )?;
+                    }
+                }
+            }
+            tx.execute("DELETE FROM held_note_rows WHERE ticket = ?1", [ticket])?;
+            tx.commit()
         })
-        .unwrap_or_default();
-    let mut missing: BTreeMap<String, DateTime<Utc>> =
-        state_of(chats, "missing").unwrap_or_default();
-    missing.retain(|note, _| held.contains(note) && !kept.contains(note));
+        .is_ok()
+}
+
+pub fn forget_notes(chats: &Path, notes: &[String]) -> usize {
+    db_of(chats)
+        .with(|c| {
+            let tx = c.transaction()?;
+            let mut removed = 0;
+            for note in notes {
+                for (table, owner, _) in DEPENDENT_ROWS {
+                    let count =
+                        tx.execute(&format!("DELETE FROM {table} WHERE {owner}"), [note])?;
+                    if *table == "margin_threads" {
+                        removed += count;
+                    }
+                }
+            }
+            tx.commit()?;
+            Ok(removed)
+        })
+        .unwrap_or(0)
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub(crate) struct Missing {
+    pub(crate) since: DateTime<Utc>,
+    pub(crate) observed: i64,
+    pub(crate) last: DateTime<Utc>,
+}
+
+#[cfg(test)]
+impl Missing {
+    pub(crate) fn for_days(days: i64) -> Missing {
+        let now = Utc::now();
+        Missing {
+            since: now - chrono::Duration::days(days),
+            observed: chrono::Duration::days(days).num_seconds(),
+            last: now,
+        }
+    }
+}
+
+pub(crate) fn sweep_credit(last: &mut Option<Instant>, now: Instant) -> chrono::Duration {
+    let day = chrono::Duration::days(1);
+    last.replace(now)
+        .and_then(|at| chrono::Duration::from_std(now.saturating_duration_since(at)).ok())
+        .map_or_else(chrono::Duration::zero, |seen| seen.min(day))
+}
+
+#[test]
+fn the_first_sweep_does_not_credit_downtime() {
+    let mut last = None;
+    let now = Instant::now();
+    assert_eq!(sweep_credit(&mut last, now), chrono::Duration::zero());
+    assert_eq!(
+        sweep_credit(&mut last, now + std::time::Duration::from_secs(42)),
+        chrono::Duration::seconds(42)
+    );
+    assert_eq!(
+        sweep_credit(&mut None, now + std::time::Duration::from_secs(86_400)),
+        chrono::Duration::zero()
+    );
+}
+
+pub fn reset_missing(chats: &Path) {
+    set_state(chats, "missing", &BTreeMap::<String, Missing>::new());
+}
+
+pub fn sweep(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> Vec<String> {
+    sweep_with(chats, kept, None, BTreeSet::new(), now, None)
+}
+
+fn sweep_with(
+    chats: &Path,
+    kept: &HashSet<String>,
+    only: Option<&HashSet<String>>,
+    mut held: BTreeSet<String>,
+    now: DateTime<Utc>,
+    cap: Option<chrono::Duration>,
+) -> Vec<String> {
+    let Ok(rows) = db_of(chats).with(|c| {
+        let mut query = c.prepare(
+            "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks UNION SELECT note FROM reading UNION SELECT note FROM vectors UNION SELECT id FROM graph_notes",
+        )?;
+        let rows = query.query_map([], |r| r.get::<_, String>(0))?;
+        rows.collect::<rusqlite::Result<Vec<String>>>()
+    }) else {
+        return Vec::new();
+    };
+    held.extend(rows);
+    held.retain(|note| !kept.contains(note) && only.is_none_or(|only| only.contains(note)));
+    let mut missing: BTreeMap<String, Missing> = state_of(chats, "missing").unwrap_or_default();
+    missing.retain(|note, _| held.contains(note));
     let mut gone = Vec::new();
-    for note in held.iter().filter(|note| !kept.contains(*note)) {
-        let since = *missing.entry(note.clone()).or_insert(now);
-        if now - since >= chrono::Duration::days(SWEEP_AFTER_DAYS) {
+    for note in &held {
+        let clock = missing.entry(note.clone()).or_insert(Missing {
+            since: now,
+            observed: 0,
+            last: now,
+        });
+        let passed = (now - clock.last).max(chrono::Duration::zero());
+        let credit = cap.map_or(passed, |cap| passed.min(cap));
+        clock.observed = clock.observed.saturating_add(credit.num_seconds());
+        clock.last = clock.last.max(now);
+        if clock.observed >= chrono::Duration::days(SWEEP_AFTER_DAYS).num_seconds() {
             gone.push(note.clone());
         }
     }
     missing.retain(|note, _| !gone.contains(note));
     set_state(chats, "missing", &missing);
-    forget_notes(chats, &gone)
+    gone
 }
 
-pub fn sweep_store(chats: &Path, store: &leo_core::store::Store) -> usize {
+fn folder_names(folder: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str().map(str::to_string))
+        .filter(|name| {
+            !name.is_empty()
+                && !name.starts_with('.')
+                && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+        })
+        .collect()
+}
+
+pub type Kept = (
+    HashSet<String>,
+    Vec<leo_core::store::TrashEntry>,
+    HashSet<String>,
+);
+
+pub fn sweep_kept(store: &leo_core::store::Store) -> Option<Kept> {
     if store.notes.is_empty() || !store.unreadable.is_empty() {
-        return 0;
+        return None;
     }
-    let kept: HashSet<String> = store
-        .notes
-        .iter()
-        .map(|n| n.id.clone())
-        .chain(store.trashed().into_iter().map(|t| t.id))
-        .collect();
-    sweep(chats, &kept, Utc::now())
+    let trash = store.trash_snapshot();
+    if !store.trash_complete() {
+        return None;
+    }
+    let kept = store.notes.iter().map(|n| n.id.clone()).collect();
+    Some((kept, trash, store.confirmed_gone()))
+}
+
+#[cfg(test)]
+pub fn sweep_store(chats: &Path, kept: Kept, kept_audio: &[String], data: &Path) -> Vec<String> {
+    sweep_store_at(chats, kept, kept_audio, data, chrono::Duration::zero())
+}
+
+pub(crate) fn sweep_store_at(
+    chats: &Path,
+    (mut kept, trash, confirmed): Kept,
+    kept_audio: &[String],
+    data: &Path,
+    observed: chrono::Duration,
+) -> Vec<String> {
+    for entry in trash {
+        let Some(head) = entry.head else {
+            reset_missing(chats);
+            return Vec::new();
+        };
+        kept.insert(head.id);
+    }
+    let mut held: BTreeSet<String> = kept_audio.iter().cloned().collect();
+    for folder in ["attachments", leo_core::paths::own::SOURCES] {
+        held.extend(folder_names(&data.join(folder)));
+    }
+    sweep_with(
+        chats,
+        &kept,
+        Some(&confirmed),
+        held,
+        Utc::now(),
+        Some(observed),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -991,7 +1326,7 @@ fn quotable(quote: &str, most: usize) -> bool {
 }
 
 pub fn placed_exact(body: &str, prefix: &str, quote: &str, suffix: &str) -> Option<Place> {
-    if !quotable(quote, MOST_ASKED) {
+    if quote.chars().take(LEAST_QUOTE).count() < LEAST_QUOTE || quote.trim().is_empty() {
         return None;
     }
     let at = body.find(&format!("{prefix}{quote}{suffix}"))? + prefix.len();
@@ -1091,14 +1426,11 @@ fn head_of(text: &str) -> &str {
     &text[..to]
 }
 
-pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
-    let units = |s: &str| s.encode_utf16().count();
-    if text.trim().is_empty()
-        || body.contains(thread.quote.as_str())
-        || units(text) > 2 * units(&thread.quote) + NEAR
-    {
-        return None;
-    }
+fn units(text: &str) -> usize {
+    text.encode_utf16().count()
+}
+
+fn tails(thread: &Thread) -> Option<(&str, &str)> {
     let (before, after) = (tail_of(&thread.prefix), head_of(&thread.suffix));
     let short = |part: &str, whole: &str| !whole.is_empty() && units(part) < LEAST_TAIL;
     if before.is_empty() && after.is_empty()
@@ -1107,6 +1439,58 @@ pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
     {
         return None;
     }
+    Some((before, after))
+}
+
+pub fn shown(body: &str, thread: &Thread) -> bool {
+    if thread.quote.is_empty() {
+        return false;
+    }
+    if body.contains(thread.quote.as_str()) {
+        return true;
+    }
+    let Some((before, after)) = tails(thread) else {
+        return false;
+    };
+    let room = 2 * units(&thread.quote) + NEAR;
+    let fits = |from: usize| {
+        let to = if after.is_empty() {
+            body.len()
+        } else {
+            let Some(next) = body[from..].chars().next() else {
+                return false;
+            };
+            let past = from + next.len_utf8();
+            match body[past..].find(after) {
+                Some(at) => past + at,
+                None => return false,
+            }
+        };
+        let span = &body[from..to];
+        to > from && units(span) <= room && !span.trim().is_empty()
+    };
+    if before.is_empty() {
+        return fits(0);
+    }
+    let mut at = 0;
+    while let Some(hit) = body[at..].find(before) {
+        let start = at + hit;
+        if fits(start + before.len()) {
+            return true;
+        }
+        at = start + body[start..].chars().next().map_or(1, char::len_utf8);
+    }
+    false
+}
+
+pub fn by_context(body: &str, thread: &Thread, text: &str) -> Option<usize> {
+    if text.trim().is_empty()
+        || body.contains(thread.quote.as_str())
+        || units(text) > 2 * units(&thread.quote) + NEAR
+    {
+        return None;
+    }
+    let (before, after) = tails(thread)?;
     let needle = format!("{before}{text}{after}");
     if thread.prefix.is_empty() {
         body.starts_with(&needle).then_some(0)
@@ -1312,13 +1696,16 @@ pub fn read_prompt(title: &str, blocks: &[String], tag: &str, earlier: &str) -> 
 }
 
 fn nearby(body: &str, quote: &str) -> String {
-    let start = body
-        .find(quote)
-        .and_then(|at| body.get(..at))
-        .map_or(0, |before| {
-            before.chars().count().saturating_sub(NEARBY / 2)
-        });
-    body.chars().skip(start).take(NEARBY).collect()
+    let at = body.find(quote).unwrap_or(0);
+    let before = body.get(..at).unwrap_or_default().chars().count();
+    let start = before.saturating_sub(NEARBY / 2);
+    let read = read_start(quote, PASSAGE_READ_CHARS);
+    let room = if read.len() < quote.len() {
+        before - start + PASSAGE_READ_CHARS
+    } else {
+        NEARBY
+    };
+    body.chars().skip(start).take(room).collect()
 }
 
 pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) -> String {
@@ -1332,7 +1719,11 @@ pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) ->
         &nearby(body, &thread.quote),
         &fence,
     ));
-    user.push_str(&fenced("passage", &thread.quote, &fence));
+    user.push_str(&fenced(
+        "passage",
+        read_start(&thread.quote, PASSAGE_READ_CHARS),
+        &fence,
+    ));
     let earlier: Vec<String> = thread
         .messages
         .iter()
@@ -1344,6 +1735,7 @@ pub fn reply_prompt(title: &str, body: &str, thread: &Thread, question: &str) ->
     if !earlier.is_empty() {
         user.push_str(&fenced("thread_so_far", &earlier.join("\n"), &fence));
     }
+    let question = read_start(question, MESSAGE_READ_CHARS);
     user.push_str(&format!("User: {question}\n\nReply as Felix."));
     user
 }
@@ -1355,7 +1747,11 @@ pub fn weave_prompt(title: &str, passage: &str, thread: &Thread) -> String {
     );
     user.push_str(&fenced("note_title", &clip(title, 200), &fence));
     user.push_str(&fenced("passage", passage, &fence));
-    user.push_str(&fenced("quoted_words", &thread.quote, &fence));
+    user.push_str(&fenced(
+        "quoted_words",
+        read_start(&thread.quote, PASSAGE_READ_CHARS),
+        &fence,
+    ));
     let said: Vec<String> = thread
         .messages
         .iter()
@@ -1490,39 +1886,39 @@ pub struct Replying(Arc<Reads>, String);
 
 impl Drop for Reading {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.0 .0.lock() {
-            inner.busy = false;
-        }
+        self.0.held().busy = false;
     }
 }
 
 impl Drop for Replying {
     fn drop(&mut self) {
-        if let Ok(mut inner) = self.0 .0.lock() {
-            inner.replying.remove(&self.1);
-        }
+        self.0.held().replying.remove(&self.1);
     }
 }
 
 impl Reads {
+    fn held(&self) -> std::sync::MutexGuard<'_, Inner> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     pub fn edited(&self, note: &str, version: &str) {
-        if let Ok(mut inner) = self.0.lock() {
-            inner.edited.retain(|(n, _)| n != note);
-            inner.edited.push_back((note.into(), version.into()));
-            while inner.edited.len() > REMEMBERED {
-                inner.edited.pop_front();
-            }
+        let mut inner = self.held();
+        inner.edited.retain(|(n, _)| n != note);
+        inner.edited.push_back((note.into(), version.into()));
+        while inner.edited.len() > REMEMBERED {
+            inner.edited.pop_front();
         }
     }
 
     pub fn was_edited(&self, note: &str, version: &str) -> bool {
-        self.0
-            .lock()
-            .is_ok_and(|inner| inner.edited.iter().any(|(n, v)| n == note && v == version))
+        self.held()
+            .edited
+            .iter()
+            .any(|(n, v)| n == note && v == version)
     }
 
     pub fn begin(self: &Arc<Self>, note: &str, gap: Duration) -> Result<Reading, Refused> {
-        let mut inner = self.0.lock().map_err(|_| Refused::Busy)?;
+        let mut inner = self.held();
         if inner.busy {
             return Err(Refused::Busy);
         }
@@ -1533,19 +1929,17 @@ impl Reads {
         if soon {
             return Err(Refused::Soon);
         }
-        inner.busy = true;
         inner.last.retain(|(n, _)| n != note);
         inner.last.push_back((note.into(), Instant::now()));
         while inner.last.len() > REMEMBERED {
             inner.last.pop_front();
         }
+        inner.busy = true;
         Ok(Reading(Arc::clone(self)))
     }
 
     pub fn unseen(&self, note: &str, blocks: Vec<String>) -> Vec<String> {
-        let Ok(mut inner) = self.0.lock() else {
-            return Vec::new();
-        };
+        let mut inner = self.held();
         if inner.seen.len() >= REMEMBERED && !inner.seen.contains_key(note) {
             inner.seen.clear();
         }
@@ -1564,36 +1958,29 @@ impl Reads {
     }
 
     pub fn forget_blocks(&self, note: &str, blocks: &[String]) {
-        if let Ok(mut inner) = self.0.lock() {
-            if let Some(seen) = inner.seen.get_mut(note) {
-                let dropped: Vec<u64> = blocks.iter().map(|b| hash_of(b)).collect();
-                seen.retain(|hash| !dropped.contains(hash));
-            }
+        if let Some(seen) = self.held().seen.get_mut(note) {
+            let dropped: Vec<u64> = blocks.iter().map(|b| hash_of(b)).collect();
+            seen.retain(|hash| !dropped.contains(hash));
         }
     }
 
     pub fn replying(self: &Arc<Self>, thread: &str) -> Option<Replying> {
-        let mut inner = self.0.lock().ok()?;
-        inner
+        self.held()
             .replying
             .insert(thread.into())
             .then(|| Replying(Arc::clone(self), thread.into()))
     }
 
     pub fn is_replying(&self, thread: &str) -> bool {
-        self.0
-            .lock()
-            .is_ok_and(|inner| inner.replying.contains(thread))
+        self.held().replying.contains(thread)
     }
 
     pub fn problem(&self) -> Option<String> {
-        self.0.lock().ok()?.problem.clone()
+        self.held().problem.clone()
     }
 
     pub fn set_problem(&self, problem: Option<String>) {
-        if let Ok(mut inner) = self.0.lock() {
-            inner.problem = problem;
-        }
+        self.held().problem = problem;
     }
 }
 
@@ -1603,12 +1990,185 @@ pub const PROBLEM: &str = "Felix could not read your note just now. Try again in
 mod tests {
     use super::*;
 
+    fn swept(chats: &Path, kept: &HashSet<String>, now: DateTime<Utc>) -> usize {
+        forget_notes(chats, &sweep(chats, kept, now))
+    }
+
     fn about(quote: &str, prefix: &str, suffix: &str) -> Thread {
         let place = Place {
             prefix: prefix.into(),
             suffix: suffix.into(),
         };
         new_thread("n", "ask", place, quote, vec![felix_says("Hash it.")])
+    }
+
+    fn library(notes: usize, trash: usize) -> (tempfile::TempDir, leo_core::store::Store) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("notes");
+        let bin = root.join(".trash");
+        std::fs::create_dir_all(&bin).unwrap();
+        let body = "word ".repeat(1_000);
+        for n in 0..notes {
+            std::fs::write(
+                root.join(format!("Live {n}.md")),
+                format!("Live {n}\n\n{body}"),
+            )
+            .unwrap();
+        }
+        for n in 0..trash {
+            std::fs::write(
+                bin.join(format!("Gone {n}.md")),
+                format!("Gone {n}\n\n{body}"),
+            )
+            .unwrap();
+        }
+        let store = leo_core::store::Store::load_from(&root).unwrap();
+        let owners: Vec<String> = store
+            .notes
+            .iter()
+            .map(|n| n.id.clone())
+            .chain(leo_core::store::trashed_ids(&root))
+            .collect();
+        let chats = crate::chats::dir_for(&root);
+        db_of(&chats)
+            .with(|c| {
+                let tx = c.transaction()?;
+                for owner in &owners {
+                    let place = Place {
+                        prefix: String::new(),
+                        suffix: String::new(),
+                    };
+                    let thread =
+                        new_thread(owner, "read", place, "some quote", vec![felix_says("Hm.")]);
+                    insert(&tx, &thread, MOST_OPEN)?;
+                }
+                tx.commit()
+            })
+            .unwrap();
+        (dir, store)
+    }
+
+    #[test]
+    fn a_trashed_file_leo_cannot_read_stops_the_sweep() {
+        let (dir, _) = library(1, 0);
+        let notes = dir.path().join("notes");
+        let broken = notes.join(".trash").join("Broken.md");
+        std::fs::write(&broken, "---\ntitle: [unclosed\n---\nbody\n").unwrap();
+        let store = leo_core::store::Store::load_from(&notes).unwrap();
+        let chats = crate::chats::dir_for(&notes);
+        let place = Place {
+            prefix: String::new(),
+            suffix: String::new(),
+        };
+        assert!(put(
+            &chats,
+            &new_thread("elsewhere", "read", place, "words", Vec::new()),
+            MOST_OPEN
+        ));
+        let missing = |chats: &Path| {
+            state_of::<BTreeMap<String, Missing>>(chats, "missing").unwrap_or_default()
+        };
+        assert_eq!(
+            sweep_store(&chats, sweep_kept(&store).unwrap(), &[], &chats).len(),
+            0
+        );
+        assert!(missing(&chats).is_empty());
+        std::fs::remove_file(&broken).unwrap();
+        assert_eq!(
+            sweep_store(&chats, sweep_kept(&store).unwrap(), &[], &chats).len(),
+            0
+        );
+        assert!(
+            missing(&chats).is_empty(),
+            "a note leo never saw leave is never counted as gone"
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn benchmark_the_sweep_holds_the_notes_lock_briefly() {
+        for (live, trash) in [
+            (5_000, 5_000),
+            (5_000, 50_000),
+            (50_000, 5_000),
+            (50_000, 50_000),
+        ] {
+            let (_dir, store) = library(live, trash);
+            let chats = crate::chats::dir_for(&store.notes_dir);
+            for run in 0..3 {
+                let started = Instant::now();
+                let kept = sweep_kept(&store).unwrap();
+                let locked = started.elapsed().as_secs_f64() * 1e3;
+                let started = Instant::now();
+                let swept = sweep_store(&chats, kept, &[], &chats).len();
+                let outside = started.elapsed().as_secs_f64() * 1e3;
+                eprintln!("sweep live {live} trash {trash} run {run}: sweep_kept {locked:.2} ms, sweep_store {outside:.2} ms, swept {swept}");
+            }
+        }
+    }
+
+    #[test]
+    fn shown_agrees_with_the_pages_find() {
+        let source = "Save the password in the users table,\nthen login just checks if it matches, I think?\n\nSessions last a day.";
+        let quote = "just checks if it matches";
+        let near = |q: &str, p: &str, x: &str| about(q, p, x);
+        assert!(shown(source, &near(quote, "", "")));
+        let edited = source.replace("just checks if it matches", "only compares the two");
+        assert!(shown(
+            &edited,
+            &near(quote, "table,\nthen login ", ", I think?\n\nSessions last")
+        ));
+        let opening = "Rewritten opening\n\nrest of the note";
+        assert!(shown(
+            opening,
+            &near("Old opening", "", "\n\nrest of the note")
+        ));
+        assert!(shown(
+            opening,
+            &near("Old tail", "Rewritten opening\n\n", "")
+        ));
+        let around = near(quote, "table,\nthen login ", ", I think?");
+        assert!(!shown("Nothing like it.", &around));
+        assert!(!shown(
+            source,
+            &near("gone words", "then login ", "no such tail here")
+        ));
+        assert!(!shown(source, &near("gone words", "", "")));
+        assert!(!shown(source, &near("", "", "")));
+        let emptied = near(quote, "then login ", ", I think?");
+        assert!(!shown("table,\nthen login , I think?", &emptied));
+        assert!(!shown(
+            "then login   , I think?",
+            &near(quote, "then login ", "  , I think?")
+        ));
+        let far = format!("then login {}, I think?", "word ".repeat(100));
+        assert!(!shown(&far, &near("short", "then login ", ", I think?")));
+        let text = "ab some new words and a long enough tail";
+        assert!(!shown(
+            text,
+            &near("old words", "ab ", " and a long enough tail")
+        ));
+        assert!(!shown(text, &near("old words", "ab some ", " t")));
+        assert!(!shown("anything at all here", &near("old words", "", "")));
+        let pad = "\u{1F600}".repeat(4);
+        let emoji = format!("{pad} said new words here {pad}");
+        assert!(shown(
+            &emoji,
+            &near(
+                "old words",
+                &format!("{pad} said "),
+                &format!(" here {pad}")
+            )
+        ));
+        let wide = format!("{pad} said {} here {pad}", "\u{1F600}".repeat(70));
+        assert!(!shown(
+            &wide,
+            &near(
+                "old words",
+                &format!("{pad} said "),
+                &format!(" here {pad}")
+            )
+        ));
     }
 
     #[test]
@@ -1927,13 +2487,13 @@ mod tests {
         let start = Utc::now();
         let days = |n| start + chrono::Duration::days(n);
         let none = HashSet::new();
-        assert_eq!(sweep(&chats, &none, start), 0);
-        assert_eq!(sweep(&chats, &none, days(SWEEP_AFTER_DAYS - 1)), 0);
+        assert_eq!(swept(&chats, &none, start), 0);
+        assert_eq!(swept(&chats, &none, days(SWEEP_AFTER_DAYS - 1)), 0);
         let back = HashSet::from(["n".to_string()]);
-        assert_eq!(sweep(&chats, &back, days(SWEEP_AFTER_DAYS)), 0);
-        assert_eq!(sweep(&chats, &none, days(SWEEP_AFTER_DAYS + 1)), 0);
-        assert_eq!(sweep(&chats, &none, days(2 * SWEEP_AFTER_DAYS)), 0);
-        assert_eq!(sweep(&chats, &none, days(2 * SWEEP_AFTER_DAYS + 1)), 1);
+        assert_eq!(swept(&chats, &back, days(SWEEP_AFTER_DAYS)), 0);
+        assert_eq!(swept(&chats, &none, days(SWEEP_AFTER_DAYS + 1)), 0);
+        assert_eq!(swept(&chats, &none, days(2 * SWEEP_AFTER_DAYS)), 0);
+        assert_eq!(swept(&chats, &none, days(2 * SWEEP_AFTER_DAYS + 1)), 1);
         assert!(every(&chats).is_empty());
     }
 
@@ -2228,10 +2788,16 @@ mod tests {
         assert!(custom_id(&reissued[0].id));
         assert!(valid_personas((0..MOST_PERSONAS).map(|_| body("A", "b")).collect()).is_some());
         assert!(valid_personas((0..=MOST_PERSONAS).map(|_| body("A", "b")).collect()).is_none());
-        assert!(valid_personas(vec![body(&"n".repeat(33), "b")]).is_none());
-        assert!(valid_personas(vec![body(&"n".repeat(32), "b")]).is_some());
-        assert!(valid_personas(vec![body("A", &"s".repeat(501))]).is_none());
-        assert!(valid_personas(vec![body("A", &"s".repeat(500))]).is_some());
+        let name = "名".repeat(48);
+        let style = "根".repeat(500);
+        let says = format!("{style}STYLE_TAIL");
+        for (name, says) in [(&name, &"Check.".into()), (&"Chemist".into(), &says)] {
+            let saved = valid_personas(vec![body(name, says)]).expect("the persona can be saved");
+            assert_eq!((&saved[0].name, &saved[0].says), (name, says));
+        }
+        let prompt = voiced(READ_SYSTEM, &says, false);
+        assert!(prompt.contains(&style));
+        assert!(!prompt.contains("STYLE_TAIL"));
         assert!(valid_personas(vec![body("", "b")]).is_none());
         assert!(valid_personas(vec![body("A", "  ")]).is_none());
         assert!(valid_personas(vec![body("A\nB", "b")]).is_none());
@@ -2246,6 +2812,51 @@ mod tests {
             ..body("A", "b")
         };
         assert!(valid_personas(vec![dup("c0123abcd"), dup("c0123abcd")]).is_none());
+    }
+
+    #[test]
+    fn forgetting_a_note_forgets_its_reading_place() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        let place = |note: &str| {
+            db_of(&chats)
+                .with(|c| {
+                    c.execute(
+                        "INSERT INTO reading (note, anchor, at) VALUES (?1, 'h1', '2026-11-17T00:00:00Z')",
+                        [note],
+                    )
+                })
+                .unwrap();
+        };
+        let places = || -> BTreeSet<String> {
+            db_of(&chats)
+                .with(|c| {
+                    let mut q = c.prepare("SELECT note FROM reading")?;
+                    let rows = q.query_map([], |r| r.get(0))?;
+                    rows.collect()
+                })
+                .unwrap()
+        };
+        for note in ["gone", "held", "trashed", "vanished"] {
+            place(note);
+        }
+        forget_notes(&chats, &["gone".into()]);
+        assert_eq!(
+            places(),
+            BTreeSet::from(["held", "trashed", "vanished"].map(String::from))
+        );
+        let kept = HashSet::from(["held", "trashed"].map(String::from));
+        let start = Utc::now();
+        assert_eq!(swept(&chats, &kept, start), 0);
+        swept(
+            &chats,
+            &kept,
+            start + chrono::Duration::days(SWEEP_AFTER_DAYS),
+        );
+        assert_eq!(
+            places(),
+            BTreeSet::from(["held", "trashed"].map(String::from))
+        );
     }
 
     #[test]
@@ -2267,7 +2878,7 @@ mod tests {
     }
 
     #[test]
-    fn instructions_are_trimmed_capped_and_gone_when_empty() {
+    fn instructions_are_kept_whole_and_gone_when_empty() {
         let dir = tempfile::tempdir().unwrap();
         let chats = dir.path().join("chats");
         assert_eq!(
@@ -2275,9 +2886,13 @@ mod tests {
             Some("Check sources.")
         );
         assert_eq!(instructions_of(&chats, "n"), "Check sources.");
-        let long = "x".repeat(MOST_INSTRUCTIONS + 9);
-        let kept = set_instructions(&chats, "n", &long).unwrap();
-        assert_eq!(kept.chars().count(), MOST_INSTRUCTIONS);
+        let start = "根".repeat(500);
+        let long = format!("{start}INSTRUCTION_TAIL");
+        assert_eq!(set_instructions(&chats, "n", &long).unwrap(), long);
+        assert_eq!(instructions_of(&chats, "n"), long);
+        let prompt = instructed(READ_SYSTEM, &long);
+        assert!(prompt.contains(&start));
+        assert!(!prompt.contains("INSTRUCTION_TAIL"));
         assert_eq!(set_instructions(&chats, "n", "   ").as_deref(), Some(""));
         let rows: i64 = db_of(&chats)
             .with(|c| c.query_row("SELECT COUNT(*) FROM margin_instructions", [], |r| r.get(0)))
@@ -2354,6 +2969,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pinned: false,
+            reworded: false,
         }
     }
 
@@ -2409,6 +3025,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             pinned: false,
+            reworded: false,
         };
         let all: Vec<Thread> = (0..30).map(thread).collect();
         let text = context(&all, 100_000);
@@ -2422,5 +3039,127 @@ mod tests {
         assert!(!text.contains("passage 21"));
         assert_eq!(context(&all, 100), "");
         assert_eq!(context(&[], 100_000), "");
+    }
+
+    fn closed(note: &str, n: usize) -> Thread {
+        let mut thread = new_thread(
+            note,
+            "read",
+            Place {
+                prefix: String::new(),
+                suffix: String::new(),
+            },
+            &format!("closed quote {n}"),
+            vec![felix_says("Hm.")],
+        );
+        thread.status = "resolved".into();
+        thread.updated_at = Utc::now() - chrono::Duration::minutes(100 - n as i64);
+        thread
+    }
+
+    #[test]
+    fn a_put_whose_prune_fails_leaves_nothing_behind() {
+        let dir = tempfile::tempdir().unwrap();
+        let chats = dir.path().join("chats");
+        for n in 0..MOST_CLOSED {
+            assert!(put(&chats, &closed("n", n), MOST_OPEN));
+        }
+        db_of(&chats)
+            .with(|c| c.execute_batch("CREATE TRIGGER no_prune BEFORE DELETE ON margin_threads BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+            .unwrap();
+        let extra = closed("n", MOST_CLOSED);
+        let stored = put(&chats, &extra, MOST_OPEN);
+        let left = one(&chats, "n", &extra.id).is_some();
+        assert!(
+            stored || !left,
+            "put reported failure but its insert stayed"
+        );
+    }
+
+    #[test]
+    fn forgetting_a_note_whose_later_delete_fails_leaves_everything() {
+        for table in ["margin_modes", "reading"] {
+            let dir = tempfile::tempdir().unwrap();
+            let chats = dir.path().join("chats");
+            let thread = new_thread(
+                "gone-note",
+                "read",
+                Place {
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+                "some quote",
+                vec![felix_says("Hm.")],
+            );
+            assert!(put(&chats, &thread, MOST_OPEN));
+            assert!(set_mode(&chats, "gone-note", "along"));
+            db_of(&chats)
+                .with(|c| {
+                    c.execute(
+                        "INSERT INTO reading (note, anchor, at) VALUES ('gone-note', 'a', 't')",
+                        [],
+                    )?;
+                    c.execute_batch(&format!("CREATE TRIGGER no_forget BEFORE DELETE ON {table} BEGIN SELECT RAISE(ABORT, 'refused'); END;"))
+                })
+                .unwrap();
+            let removed = forget_notes(&chats, &["gone-note".to_string()]);
+            assert_eq!(removed, 0, "{table}");
+            assert!(
+                one(&chats, "gone-note", &thread.id).is_some(),
+                "the threads were deleted although forgetting failed at {table}"
+            );
+            let modes_left: i64 = db_of(&chats)
+                .with(|c| {
+                    c.query_row(
+                        "SELECT count(*) FROM margin_modes WHERE note = 'gone-note'",
+                        [],
+                        |r| r.get(0),
+                    )
+                })
+                .unwrap();
+            assert_eq!(modes_left, 1, "{table}");
+        }
+    }
+
+    fn poisoned() -> Arc<Reads> {
+        let reads = Arc::new(Reads::default());
+        let held = Arc::clone(&reads);
+        let _ = std::thread::spawn(move || {
+            let _guard = held.0.lock().unwrap();
+            panic!("poisoned on purpose");
+        })
+        .join();
+        assert!(reads.0.is_poisoned());
+        reads
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_lets_felix_read() {
+        let reads = poisoned();
+        let began = reads.begin("n", Duration::ZERO);
+        assert!(began.is_ok(), "a poisoned lock refuses every read as busy");
+        drop(began);
+        assert!(reads.replying("t").is_some());
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_ends_a_read_and_a_reply() {
+        let reads = poisoned();
+        let reading = reads.begin("n", Duration::ZERO);
+        assert!(reading.is_ok());
+        drop(reading);
+        assert!(reads.begin("n", Duration::ZERO).is_ok());
+        let replying = reads.replying("t");
+        assert!(replying.is_some());
+        drop(replying);
+        assert!(reads.replying("t").is_some());
+    }
+
+    #[test]
+    fn a_poisoned_reads_lock_still_remembers_seen_blocks() {
+        let reads = poisoned();
+        let blocks = vec!["one".to_string(), "two".to_string()];
+        assert_eq!(reads.unseen("n", blocks.clone()), blocks);
+        assert!(reads.unseen("n", blocks).is_empty());
     }
 }

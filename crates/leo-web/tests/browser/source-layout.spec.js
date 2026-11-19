@@ -114,7 +114,7 @@ test('documents split notes and keep Felix at the right without losing drafts', 
     await page.mouse.move(divider.x + 36, divider.y + 200);
     await expect.poll(async () => (await page.locator('#source-pane').boundingBox()).width).toBeLessThan(startWidth - 20);
     await page.evaluate(() => audit.close());
-    await expect(page.locator('body')).not.toHaveClass(/source-resizing/);
+    await expect(page.locator('body')).not.toHaveClass(/pane-resizing/);
     await page.mouse.up();
     await page.evaluate(() => { audit.wait(); audit.open('paper.pdf'); audit.close(); release(); });
     await expect(page.locator('#source-pane')).toBeHidden();
@@ -153,10 +153,10 @@ test('note headings navigate without losing edits and adapt beside Felix in both
     const noteHash = id => '#/n/' + encodeURIComponent(id);
     ${core.slice(core.indexOf('const SEARCH_HIGHLIGHT_MS'), core.indexOf('async function go('))}
     const source = {}, chat = {setContext() {}};
-    const saving = {open(note) {return {note, edit: {...note, tags: []}}}};
+    const saving = {open(note) {return {note, edit: {...note}}}};
     const chrome = () => {}, arriveOnPage = () => {}, drawOriginals = () => {}, hideAskFloat = () => {}, restoreReading = () => {}, drawRelated = () => {}, placeAskFloat = () => {};
     const swap = (_key, draw) => draw(), scrollToTop = () => window.scrollTo(0, 0);
-    const marginLoadPrefs = async () => {}, marginMount = async () => {}, marginEdited = () => {}, fail = error => { throw error; };
+    const marginLoadPrefs = async () => {}, marginMount = async () => {}, marginEdited = () => {}, marginIdle = fn => setTimeout(fn, 0), fail = error => { throw error; };
     const cleanTitle = text => text.trim(), folderLabel = () => 'Top level', rel = () => 'now';
     function changed(s) {saved = s.doc.source();}
     ${icons}

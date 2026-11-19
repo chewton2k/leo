@@ -13,6 +13,12 @@ fn no_settings() -> Response {
         .into_response()
 }
 
+fn with_usage(mut page: serde_json::Value, usage: &crate::usage::Usage) -> serde_json::Value {
+    page["felix_days"] = serde_json::json!(usage.days());
+    page["felix_recent"] = serde_json::json!(usage.recent());
+    page
+}
+
 pub(crate) async fn get_settings(State(state): State<AppState>) -> Response {
     settings_page(state, None).await
 }
@@ -21,17 +27,10 @@ async fn settings_page(state: AppState, note: Option<String>) -> Response {
     let Some(settings) = state.settings.clone() else {
         return no_settings();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let usage = std::sync::Arc::clone(&state.usage);
-    let described = tokio::task::spawn_blocking(move || {
-        let mut page = settings.describe(&notes_dir);
-        page["felix_days"] = serde_json::json!(usage.days());
-        page["felix_recent"] = serde_json::json!(usage.recent());
-        page
-    });
+    let described =
+        tokio::task::spawn_blocking(move || with_usage(settings.describe(&notes_dir), &usage));
     match described.await {
         Ok(mut page) => {
             if let Some(note) = note {
@@ -91,19 +90,13 @@ pub(crate) async fn change_setting(
     let Some(settings) = state.settings.clone() else {
         return no_settings();
     };
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let warm = std::sync::Arc::clone(&state.warm);
     let usage = std::sync::Arc::clone(&state.usage);
     let done = tokio::task::spawn_blocking(move || {
         settings.apply(&change).map(|message| {
             warm.clear();
-            let mut page = settings.describe(&notes_dir);
-            page["felix_days"] = serde_json::json!(usage.days());
-            page["felix_recent"] = serde_json::json!(usage.recent());
-            (message, page)
+            (message, with_usage(settings.describe(&notes_dir), &usage))
         })
     })
     .await;
@@ -132,7 +125,16 @@ pub(crate) async fn test_setting(
         .and_then(|t| t.as_str())
         .unwrap_or("")
         .to_string();
-    match tokio::task::spawn_blocking(move || settings.test(&task)).await {
+    let Ok(slot) = state.setting_tests.clone().acquire_owned().await else {
+        return crate::reply::error(StatusCode::SERVICE_UNAVAILABLE, "leo is stopping.");
+    };
+    let (_guard, stop) = crate::stop_when_dropped();
+    match tokio::task::spawn_blocking(move || {
+        let _slot = slot;
+        leo_core::children::with_stop(stop, || settings.test(&task))
+    })
+    .await
+    {
         Ok(Ok(message)) => Json(serde_json::json!({ "message": message })).into_response(),
         Ok(Err(e)) => (
             StatusCode::BAD_REQUEST,

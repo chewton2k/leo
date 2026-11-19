@@ -7,7 +7,7 @@ use serde_json::{json, Value};
 
 use super::process::{self, Process, Watchdog, MOST_OUTPUT, QUEUED_MESSAGES};
 use crate::ai::error::{ProviderError, ProviderResult};
-use crate::ai::provider::agent_cli::{codex_disables, codex_scope, locate, AgentCli};
+use crate::ai::provider::agent_cli::{codex_disables, codex_scope, locate, Agent, AgentCli};
 use crate::ai::provider::{Sink, Spent};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -87,8 +87,8 @@ impl CodexThread {
     pub fn start(agent: &AgentCli, system: &str, tools: &[Value]) -> ProviderResult<CodexThread> {
         let name = agent.provider_name().to_string();
         let fail = |what: String| ProviderError::Retryable(format!("{name}: {what}"));
-        let program =
-            locate(agent.bin()).ok_or_else(|| fail(format!("{} is not installed", agent.bin())))?;
+        let program = locate(agent.bin())
+            .ok_or_else(|| ProviderError::Retryable(Agent::Codex.missing(&name, agent.bin())))?;
         let room = agent.room()?;
         let mut command = leo_core::children::quiet_command(&program);
         super::scoped_cli::plan_environment(&mut command);
@@ -356,7 +356,7 @@ impl CodexThread {
                 }
                 if tool && (calls >= most_calls || tools_done()) {
                     limited = true;
-                    self.answer_server(&message, &mut |_, _| "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.".into())?;
+                    self.answer_server(&message, &mut |_, _| super::NO_MORE_TOOLS.into())?;
                 } else {
                     if tool {
                         calls += 1;
@@ -417,12 +417,12 @@ impl CodexThread {
                 model: self.model.clone(),
                 effort: self.effort.clone(),
                 input: if estimated {
-                    text.chars().count().div_ceil(4) as u64
+                    super::tokens_of(text.chars().count())
                 } else {
                     used.input
                 },
                 output: if estimated {
-                    answer.chars().count().div_ceil(4) as u64
+                    super::tokens_of(answer.chars().count())
                 } else {
                     used.output
                 },
@@ -444,7 +444,6 @@ impl Drop for CodexThread {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use crate::ai::provider::agent_cli::Agent;
     use crate::config::provider::{ProviderConfig, ProviderKind};
 
     fn fake(dir: &std::path::Path) -> String {

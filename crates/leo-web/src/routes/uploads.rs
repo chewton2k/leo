@@ -6,7 +6,7 @@ use leo_core::attachments;
 use serde::Deserialize;
 
 use crate::routes::notes::{directory, save};
-use crate::{store_now, AppState, Figure, Importer, Made, UploadFile};
+use crate::{read_now, store_now, AppState, Figure, Importer, Made, UploadFile};
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ImportJob {
@@ -20,46 +20,86 @@ pub(crate) struct ImportJob {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) notes: Vec<String>,
     pub(crate) error: Option<String>,
-    /// For an upload added to an open note: the section the page inserts.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "section_chars",
+        serialize_with = "count_chars",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub(crate) section: Option<String>,
 }
 
-pub(crate) const IMPORT_BYTES: usize = 120 * 1024 * 1024;
-const MOST_UPLOAD_FILES: usize = 20;
-const MOST_UPLOAD_BYTES: usize = 90 * 1024 * 1024;
+fn count_chars<S: serde::Serializer>(section: &Option<String>, out: S) -> Result<S::Ok, S::Error> {
+    out.serialize_u64(section.as_deref().map_or(0, |s| s.chars().count() as u64))
+}
+
+pub(crate) const IMPORT_JSON_BYTES: usize = 8 * 1024 * 1024;
+const ORIGINAL_PIECE: usize = 64 * 1024;
 const MOST_IMPORTS: usize = 2;
 const KEPT_IMPORTS: usize = 40;
-const IMPORT_READ_TIME: std::time::Duration = std::time::Duration::from_secs(30);
+const UPLOAD_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
+const INCOMING: &str = leo_core::paths::own::INCOMING;
+const INCOMING_KEPT: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+type Task = Box<dyn FnOnce() + Send>;
+
+#[derive(Default)]
+struct Queue {
+    waiting: std::collections::VecDeque<Task>,
+    running: usize,
+}
+
+#[derive(Default)]
 pub(crate) struct ImportSlots {
-    readers: std::sync::Arc<tokio::sync::Semaphore>,
-    checks: std::sync::Arc<tokio::sync::Semaphore>,
+    queue: std::sync::Mutex<Queue>,
 }
 
-impl Default for ImportSlots {
-    fn default() -> Self {
-        Self {
-            readers: std::sync::Arc::new(tokio::sync::Semaphore::new(MOST_IMPORTS)),
-            checks: std::sync::Arc::new(tokio::sync::Semaphore::new(MOST_IMPORTS)),
+impl ImportSlots {
+    fn submit(
+        self: &std::sync::Arc<Self>,
+        jobs: &std::sync::Mutex<std::collections::HashMap<String, ImportJob>>,
+        id: &str,
+        mut job: ImportJob,
+        task: Task,
+    ) -> std::io::Result<()> {
+        let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+        let starts = queue.running < MOST_IMPORTS;
+        job.state = if starts { "working" } else { "waiting" };
+        reserve_import(
+            &mut jobs.lock().unwrap_or_else(|e| e.into_inner()),
+            id.to_string(),
+            job,
+        );
+        queue.waiting.push_back(task);
+        if starts {
+            queue.running += 1;
+            let slots = std::sync::Arc::clone(self);
+            if let Err(error) = std::thread::Builder::new()
+                .name("leo-import".into())
+                .spawn(move || slots.work())
+            {
+                queue.running -= 1;
+                queue.waiting.pop_back();
+                jobs.lock().unwrap_or_else(|e| e.into_inner()).remove(id);
+                return Err(error);
+            }
         }
+        Ok(())
     }
-}
 
-fn import_busy() -> Response {
-    (StatusCode::TOO_MANY_REQUESTS, Json(serde_json::json!({ "error": "Two uploads are already being prepared. Wait for one to finish, then try again." }))).into_response()
-}
-
-pub(crate) async fn import_limit(
-    State(state): State<AppState>,
-    request: axum::extract::Request,
-    next: axum::middleware::Next,
-) -> Response {
-    let Ok(_permit) = std::sync::Arc::clone(&state.import_slots.readers).try_acquire_owned() else {
-        return import_busy();
-    };
-    match tokio::time::timeout(IMPORT_READ_TIME, next.run(request)).await {
-        Ok(response) => response,
-        Err(_) => (StatusCode::REQUEST_TIMEOUT, Json(serde_json::json!({ "error": "The upload took too long to arrive. Check your connection and try again." }))).into_response(),
+    fn work(&self) {
+        loop {
+            let task = {
+                let mut queue = self.queue.lock().unwrap_or_else(|e| e.into_inner());
+                match queue.waiting.pop_front() {
+                    Some(task) => task,
+                    None => {
+                        queue.running -= 1;
+                        return;
+                    }
+                }
+            };
+            task();
+        }
     }
 }
 
@@ -67,42 +107,187 @@ fn reserve_import(
     jobs: &mut std::collections::HashMap<String, ImportJob>,
     id: String,
     job: ImportJob,
-) -> bool {
-    if jobs.values().filter(|job| job.state == "working").count() >= MOST_IMPORTS {
-        return false;
-    }
+) {
     if jobs.len() >= KEPT_IMPORTS {
         let finished = jobs
             .iter()
-            .find(|(_, job)| job.state != "working")
+            .find(|(_, job)| !matches!(job.state, "waiting" | "working"))
             .map(|(id, _)| id.clone());
         if let Some(id) = finished {
             jobs.remove(&id);
-        } else {
-            return false;
         }
     }
     jobs.insert(id, job);
-    true
+}
+
+fn incoming_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 64
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+fn incoming_root(notes_dir: &std::path::Path) -> std::path::PathBuf {
+    crate::db::beside_of(notes_dir, None).join(INCOMING)
+}
+
+fn incoming_dir(notes_dir: &std::path::Path, upload: &str) -> Option<std::path::PathBuf> {
+    if !incoming_name(upload) {
+        return None;
+    }
+    let data = crate::db::beside_of(notes_dir, None);
+    leo_core::paths::contained_path(data, &std::path::Path::new(INCOMING).join(upload)).ok()
+}
+
+struct Incoming(Option<std::path::PathBuf>);
+
+impl Drop for Incoming {
+    fn drop(&mut self) {
+        if let Some(folder) = self.0.take() {
+            let _ = std::fs::remove_dir_all(folder);
+        }
+    }
+}
+
+pub(crate) fn sweep_incoming(notes_dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(incoming_root(notes_dir)) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|at| at.elapsed().is_ok_and(|age| age > INCOMING_KEPT));
+        if old && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+}
+
+fn refused(code: StatusCode, error: impl Into<String>) -> Response {
+    (code, Json(serde_json::json!({ "error": error.into() }))).into_response()
+}
+
+#[derive(Deserialize, Default)]
+pub(crate) struct Named {
+    #[serde(default)]
+    pub(crate) name: String,
+}
+
+pub(crate) async fn put_file(
+    State(state): State<AppState>,
+    Path((upload, item)): Path<(String, String)>,
+    Query(named): Query<Named>,
+    body: axum::body::Body,
+) -> Response {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    let name: String = named.name.chars().take(MOST_NAME_CHARS).collect();
+    let name = if name.is_empty() {
+        "the file".to_string()
+    } else {
+        name
+    };
+    let (Some(folder), true) = (
+        incoming_dir(&state.notes_dir, &upload),
+        incoming_name(&item),
+    ) else {
+        return refused(StatusCode::BAD_REQUEST, "Choose the files again.");
+    };
+    let target = folder.join(&item);
+    let started = {
+        let (folder, target) = (folder.clone(), target.clone());
+        tokio::task::spawn_blocking(
+            move || -> std::io::Result<Option<tempfile::NamedTempFile>> {
+                if target.exists() {
+                    return Ok(None);
+                }
+                std::fs::create_dir_all(&folder)?;
+                tempfile::NamedTempFile::new_in(&folder).map(Some)
+            },
+        )
+        .await
+    };
+    let temp = match started {
+        Ok(Ok(Some(temp))) => temp,
+        Ok(Ok(None)) => {
+            return refused(StatusCode::CONFLICT, format!("{name} was already sent."));
+        }
+        Ok(Err(error)) => return write_refused(&error, &name),
+        Err(_) => return refused(StatusCode::INTERNAL_SERVER_ERROR, "leo hit a problem."),
+    };
+    let (std_file, path) = temp.into_parts();
+    let mut file = tokio::fs::File::from_std(std_file);
+    let mut stream = body.into_data_stream();
+    loop {
+        let piece = match tokio::time::timeout(UPLOAD_IDLE, stream.next()).await {
+            Ok(piece) => piece,
+            Err(_) => {
+                return refused(
+                    StatusCode::REQUEST_TIMEOUT,
+                    format!("{name} stopped arriving. Check your connection and try again."),
+                );
+            }
+        };
+        match piece {
+            None => break,
+            Some(Ok(piece)) => {
+                if let Err(error) = file.write_all(&piece).await {
+                    return write_refused(&error, &name);
+                }
+            }
+            Some(Err(_)) => {
+                return refused(
+                    StatusCode::BAD_REQUEST,
+                    format!("{name} did not arrive intact; try again."),
+                );
+            }
+        }
+    }
+    if let Err(error) = file.sync_all().await {
+        return write_refused(&error, &name);
+    }
+    drop(file);
+    match tokio::task::spawn_blocking(move || path.persist_noclobber(&target)).await {
+        Ok(Ok(())) => StatusCode::NO_CONTENT.into_response(),
+        Ok(Err(error)) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+            refused(StatusCode::CONFLICT, format!("{name} was already sent."))
+        }
+        Ok(Err(error)) => write_refused(&error.error, &name),
+        Err(_) => refused(StatusCode::INTERNAL_SERVER_ERROR, "leo hit a problem."),
+    }
+}
+
+fn write_refused(error: &std::io::Error, name: &str) -> Response {
+    if error.kind() == std::io::ErrorKind::StorageFull {
+        return refused(
+            StatusCode::INSUFFICIENT_STORAGE,
+            format!("There is not enough room on this disk for {name}."),
+        );
+    }
+    refused(
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("leo could not save {name}: {error}"),
+    )
 }
 
 #[derive(Deserialize)]
-pub(crate) struct ImportFileBody {
+pub(crate) struct SentFile {
+    pub(crate) item: String,
     pub(crate) name: String,
     #[serde(default, rename = "type")]
     pub(crate) mime: String,
-    pub(crate) data: String,
 }
 
 #[derive(Deserialize)]
 pub(crate) struct ImportBody {
+    pub(crate) upload: String,
     #[serde(default)]
     pub(crate) directory: String,
     #[serde(default)]
     pub(crate) title: Option<String>,
     #[serde(default)]
     pub(crate) wants: String,
-    pub(crate) files: Vec<ImportFileBody>,
+    pub(crate) files: Vec<SentFile>,
     #[serde(default)]
     pub(crate) each: bool,
     /// A note to add the written section to, instead of making a new note
@@ -183,8 +368,12 @@ pub(crate) fn originals_dir(notes_dir: &std::path::Path, note: &str) -> Option<s
     if note.is_empty() || !note.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
         return None;
     }
-    let data = notes_dir.parent().unwrap_or(notes_dir);
-    leo_core::paths::contained_path(data, &std::path::Path::new("attachments").join(note)).ok()
+    let data = crate::db::beside_of(notes_dir, None);
+    leo_core::paths::contained_path(
+        data,
+        &std::path::Path::new(leo_core::paths::own::ORIGINALS).join(note),
+    )
+    .ok()
 }
 
 pub(crate) fn original_path(
@@ -196,21 +385,20 @@ pub(crate) fn original_path(
         return None;
     }
     originals_dir(notes_dir, note)?;
-    let relative = std::path::Path::new("attachments").join(note).join(name);
-    leo_core::paths::contained_path(notes_dir.parent().unwrap_or(notes_dir), &relative).ok()
+    let relative = std::path::Path::new(leo_core::paths::own::ORIGINALS)
+        .join(note)
+        .join(name);
+    leo_core::paths::contained_path(crate::db::beside_of(notes_dir, None), &relative).ok()
 }
 
-fn stage_originals(
-    files: &[UploadFile],
-) -> std::io::Result<Vec<(String, tempfile::NamedTempFile)>> {
-    use std::io::{Seek, Write};
+fn stage_originals(files: &[UploadFile]) -> std::io::Result<Vec<(String, std::path::PathBuf)>> {
     files
         .iter()
         .map(|file| {
-            let mut staged = tempfile::NamedTempFile::new()?;
-            staged.write_all(&file.bytes)?;
-            staged.rewind()?;
-            Ok((safe_file_name(&file.name), staged))
+            let path = file.path.clone().ok_or_else(|| {
+                std::io::Error::other("An uploaded file must wait on disk until its note is made")
+            })?;
+            Ok((safe_file_name(&file.name), path))
         })
         .collect()
 }
@@ -219,41 +407,76 @@ fn save_original(
     notes_dir: &std::path::Path,
     note: &str,
     name: &str,
-    staged: &mut tempfile::NamedTempFile,
+    source: &std::path::Path,
 ) -> std::io::Result<()> {
     let invalid =
         || std::io::Error::other("Original files must stay inside the attachments folder");
     let folder = originals_dir(notes_dir, note).ok_or_else(invalid)?;
     std::fs::create_dir_all(&folder)?;
     let path = original_path(notes_dir, note, name).ok_or_else(invalid)?;
+    if std::fs::hard_link(source, &path).is_ok() {
+        return Ok(());
+    }
     let mut out = tempfile::NamedTempFile::new_in(&folder)?;
-    std::io::copy(staged.as_file_mut(), &mut out)?;
+    std::io::copy(&mut leo_core::paths::open_regular(source)?, &mut out)?;
     out.as_file().sync_all()?;
     original_path(notes_dir, note, name).ok_or_else(invalid)?;
     out.persist_noclobber(path).map_err(|error| error.error)?;
     Ok(())
 }
 
-fn read_original(notes_dir: &std::path::Path, note: &str, name: &str) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
+pub(crate) fn share_originals(
+    notes_dir: &std::path::Path,
+    from: &str,
+    into: &str,
+) -> (Vec<String>, std::io::Result<()>) {
+    let mut written = Vec::new();
+    let shared = crate::originals::files(notes_dir, from)
+        .into_iter()
+        .try_for_each(|(name, _)| {
+            let name = share_original(notes_dir, from, into, &name, &written)?;
+            written.push(name);
+            Ok(())
+        });
+    (written, shared)
+}
+
+fn share_original(
+    notes_dir: &std::path::Path,
+    from: &str,
+    into: &str,
+    name: &str,
+    taken: &[String],
+) -> std::io::Result<String> {
+    let invalid =
+        || std::io::Error::other("Original files must stay inside the attachments folder");
+    let source = original_path(notes_dir, from, name).ok_or_else(invalid)?;
+    let free = free_original_name(notes_dir, into, name, taken);
+    let folder = originals_dir(notes_dir, into).ok_or_else(invalid)?;
+    std::fs::create_dir_all(&folder)?;
+    let target = original_path(notes_dir, into, &free).ok_or_else(invalid)?;
+    if std::fs::hard_link(&source, &target).is_err() {
+        let mut out = tempfile::NamedTempFile::new_in(&folder)?;
+        std::io::copy(&mut leo_core::paths::open_regular(&source)?, &mut out)?;
+        out.as_file().sync_all()?;
+        original_path(notes_dir, into, &free).ok_or_else(invalid)?;
+        out.persist_noclobber(&target)
+            .map_err(|error| error.error)?;
+    }
+    Ok(free)
+}
+
+fn open_original(
+    notes_dir: &std::path::Path,
+    note: &str,
+    name: &str,
+) -> std::io::Result<(std::fs::File, u64)> {
     let path = original_path(notes_dir, note, name).ok_or_else(|| {
         std::io::Error::other("Original files must stay inside the attachments folder")
     })?;
-    let refused =
-        || std::io::Error::other("The original file is too large or is not a regular file");
-    let file = match leo_core::paths::open_regular(&path) {
-        Err(error) if error.kind() == std::io::ErrorKind::Other => return Err(refused()),
-        opened => opened?,
-    };
-    if file.metadata()?.len() > IMPORT_BYTES as u64 {
-        return Err(refused());
-    }
-    let mut bytes = Vec::new();
-    file.take(IMPORT_BYTES as u64 + 1).read_to_end(&mut bytes)?;
-    if bytes.len() > IMPORT_BYTES {
-        return Err(std::io::Error::other("The original file is too large"));
-    }
-    Ok(bytes)
+    let file = leo_core::paths::open_regular(&path)?;
+    let size = file.metadata()?.len();
+    Ok((file, size))
 }
 
 fn set_job(state: &AppState, id: &str, change: impl FnOnce(&mut ImportJob)) {
@@ -277,7 +500,6 @@ pub(crate) fn settle_figures(
     save: &mut dyn FnMut(&Figure) -> Option<String>,
 ) -> String {
     let mut saved: Vec<Option<Option<String>>> = vec![None; figures.len()];
-    let mut placed = false;
     let mut lines = Vec::new();
     for line in body.lines() {
         let found = attachments::pictures_in(line);
@@ -304,7 +526,6 @@ pub(crate) fn settle_figures(
             let path = save(figure);
             if let Some(path) = &path {
                 out.push_str(&format!("![{}]({path})", shown.alt));
-                placed = true;
             }
             *slot = Some(path);
         }
@@ -332,9 +553,7 @@ pub(crate) fn settle_figures(
             body.push_str(&format!("\n\n## {heading}\n\n{}", shown.join("\n\n")));
         }
     };
-    if !placed {
-        section("Figures", &|f| !f.photo);
-    }
+    section("More figures", &|f| !f.photo);
     section("Photos", &|f| f.photo);
     body
 }
@@ -405,6 +624,7 @@ fn write_upload(
         title: made_title,
         body,
         figures,
+        scratch,
     } = importer(files, wants, step).map_err(|e| missed(None, &e.to_string()))?;
     // Originals take free names, so a file of the same name in this upload or
     // an earlier one (and its citations) stays as it was.
@@ -443,24 +663,33 @@ fn write_upload(
         .first()
         .and_then(|n| n.rsplit_once('.').map(|(s, _)| s.to_string()))
         .unwrap_or_else(|| "upload".into());
+    let pictures_dir = read_now(state, |store| Ok(store.notes_dir.clone()))
+        .map_err(|_| missed(None, "The note could not be saved."))?;
+    let body = settle_figures(&body, &figures, &mut |figure| {
+        use std::io::Read as _;
+        let mut file = leo_core::paths::open_regular(&figure.path).ok()?;
+        let mut head = Vec::new();
+        (&mut file)
+            .take(attachments::HEAD_BYTES as u64)
+            .read_to_end(&mut head)
+            .ok()?;
+        let kind = attachments::kind_of(&head)?;
+        let name = if figure.photo {
+            let named = figure
+                .place
+                .rsplit_once('.')
+                .map_or(figure.place.as_str(), |(s, _)| s);
+            format!("{named}.{kind}")
+        } else {
+            format!("{stem} {}.{kind}", figure.place)
+        };
+        attachments::save_from(&pictures_dir, &name, &head, file).ok()
+    });
+    drop(scratch);
     let made = store_now(state, |store| {
         if into.is_none() && !store.dir_exists(dir) {
             store.create_dir(dir);
         }
-        let notes_dir = store.notes_dir.clone();
-        let body = settle_figures(&body, &figures, &mut |figure| {
-            let kind = attachments::kind_of(&figure.bytes)?;
-            let name = if figure.photo {
-                let named = figure
-                    .place
-                    .rsplit_once('.')
-                    .map_or(figure.place.as_str(), |(s, _)| s);
-                format!("{named}.{kind}")
-            } else {
-                format!("{stem} {}.{kind}", figure.place)
-            };
-            attachments::save(&notes_dir, &name, &figure.bytes).ok()
-        });
         let written = format!("{}{footer}", body.trim());
         let wrote = match into {
             // Added to an open note: the page puts the section in through the
@@ -478,7 +707,7 @@ fn write_upload(
             }
             None => {
                 let note = store
-                    .create_note(title, written, vec![], dir)
+                    .create_note(title, written, dir)
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                     .id
                     .clone();
@@ -504,7 +733,7 @@ fn write_upload(
     })?;
     if originals
         .iter_mut()
-        .any(|(name, staged)| save_original(&notes_dir, &wrote.note, name, staged).is_err())
+        .any(|(name, source)| save_original(&notes_dir, &wrote.note, name, source).is_err())
     {
         if wrote.section.is_some() {
             // Nothing is in the note yet, so the section still goes in; only
@@ -527,6 +756,7 @@ fn run_import(
     title: Option<String>,
     wants: String,
     files: Vec<UploadFile>,
+    incoming: Incoming,
 ) {
     let mut step = |text: &str, done: usize, total: usize| {
         set_job(&state, &id, |job| {
@@ -545,6 +775,7 @@ fn run_import(
         files,
         &mut step,
     );
+    drop(incoming);
     set_job(&state, &id, |job| match made {
         Ok(wrote) => {
             job.state = "done";
@@ -569,6 +800,7 @@ fn run_each(
     dir: String,
     wants: String,
     files: Vec<UploadFile>,
+    incoming: Incoming,
 ) {
     let count = files.len();
     let mut notes = Vec::new();
@@ -599,6 +831,7 @@ fn run_each(
             }
         }
     }
+    drop(incoming);
     set_job(&state, &id, |job| {
         job.done = count;
         job.total = count;
@@ -611,8 +844,12 @@ fn run_each(
 
 pub(crate) async fn start_import(
     State(state): State<AppState>,
-    Json(mut body): Json<ImportBody>,
+    Json(body): Json<ImportBody>,
 ) -> Response {
+    let Some(folder) = incoming_dir(&state.notes_dir, &body.upload) else {
+        return refused(StatusCode::BAD_REQUEST, "Choose the files again.");
+    };
+    let incoming = Incoming(Some(folder.clone()));
     let Some(importer) = state.importer.clone() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
@@ -621,181 +858,135 @@ pub(crate) async fn start_import(
             .into_response();
     };
     if body.files.is_empty() {
-        return (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": "Choose a file first." })),
-        )
-            .into_response();
+        return refused(StatusCode::BAD_REQUEST, "Choose a file first.");
     }
     if let Some(note) = body.into.clone() {
         let found = state
-            .with_store(move |store| Ok(store.notes.iter().any(|n| n.id == note)))
+            .read_store(move |store| Ok(store.notes.iter().any(|n| n.id == note)))
             .await
             .unwrap_or(false);
         if !found {
-            return (
+            return refused(
                 StatusCode::NOT_FOUND,
-                Json(serde_json::json!({ "error": "The note to add to is gone. Open another note, or make a new note from the file." })),
-            )
-                .into_response();
+                "The note to add to is gone. Open another note, or make a new note from the file.",
+            );
         }
     }
     if body.directory.len() > 1_024
-        || body.files.len() > MOST_UPLOAD_FILES
         || body
             .files
             .iter()
             .any(|file| file.name.len() > 512 || file.mime.len() > 128)
-        || body.title.as_ref().is_some_and(|title| title.len() > 4_000)
-        || body
-            .files
-            .iter()
-            .try_fold(0usize, |size, file| size.checked_add(file.data.len()))
-            .is_none_or(|size| size > IMPORT_BYTES)
     {
-        return (StatusCode::PAYLOAD_TOO_LARGE, Json(serde_json::json!({ "error": "Upload up to 20 files and 90 MB at a time, with short file names and a short title." }))).into_response();
+        return refused(StatusCode::PAYLOAD_TOO_LARGE, "Use short file names.");
     }
     let dir = body.directory.trim().to_string();
-    let slots = std::sync::Arc::clone(&state.import_slots.checks);
-    let Ok(permit) = slots.try_acquire_owned() else {
-        return import_busy();
-    };
-    let checked = state.with_store({
+    let checked = state.read_store({
         let dir = dir.clone();
-        move |store| {
-            let _permit = permit;
-            directory(store, &dir)
-        }
+        move |store| directory(store, &dir)
     });
     if checked.await.is_err() {
         return StatusCode::BAD_REQUEST.into_response();
     }
-    let id = uuid::Uuid::new_v4().to_string();
-    let reserved = reserve_import(
-        &mut state.imports.lock().unwrap_or_else(|e| e.into_inner()),
-        id.clone(),
-        ImportJob {
-            state: "working",
-            label: "Preparing an upload".into(),
-            dir: dir.clone(),
-            step: "Uploading".into(),
-            done: 0,
-            total: 1,
-            note: None,
-            notes: Vec::new(),
-            error: None,
-            section: None,
-        },
-    );
-    if !reserved {
-        return import_busy();
-    }
-    type Jobs = std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, ImportJob>>>;
-    struct Reservation(Option<(Jobs, String)>);
-    impl Drop for Reservation {
-        fn drop(&mut self) {
-            if let Some((imports, id)) = self.0.take() {
-                imports
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .remove(&id);
-            }
-        }
-    }
-    let mut reservation = Reservation(Some((std::sync::Arc::clone(&state.imports), id.clone())));
-    let uploads = std::mem::take(&mut body.files);
-    let decoded =
-        tokio::task::spawn_blocking(move || -> Result<Vec<UploadFile>, (StatusCode, String)> {
-            let mut files = Vec::new();
-            let mut size = 0usize;
-            for file in uploads {
-                use base64::Engine;
-                let Ok(bytes) =
-                    base64::engine::general_purpose::STANDARD.decode(file.data.as_bytes())
-                else {
-                    return Err((
-                        StatusCode::BAD_REQUEST,
-                        format!("{} did not arrive intact; try again.", file.name),
-                    ));
-                };
-                size = size.saturating_add(bytes.len());
-                if size > MOST_UPLOAD_BYTES {
-                    return Err((
-                        StatusCode::PAYLOAD_TOO_LARGE,
-                        "Upload up to 90 MB at a time. Choose fewer files and try again.".into(),
-                    ));
+    let uploads = body.files;
+    let found = tokio::task::spawn_blocking(move || -> Result<Vec<UploadFile>, String> {
+        let mut seen = std::collections::HashSet::new();
+        uploads
+            .into_iter()
+            .map(|file| {
+                let path = folder.join(&file.item);
+                let arrived = incoming_name(&file.item)
+                    && seen.insert(file.item.clone())
+                    && std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file());
+                if arrived {
+                    Ok(UploadFile {
+                        name: safe_file_name(&file.name),
+                        mime: file.mime,
+                        bytes: Vec::new(),
+                        path: Some(path),
+                    })
+                } else {
+                    Err(format!("{} did not arrive intact; try again.", file.name))
                 }
-                files.push(UploadFile {
-                    name: safe_file_name(&file.name),
-                    mime: file.mime,
-                    bytes,
-                });
-            }
-            Ok(files)
-        })
-        .await
-        .unwrap_or_else(|_| {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "leo hit a problem.".into(),
-            ))
-        });
-    let files = match decoded {
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_else(|_| Err("leo hit a problem.".into()));
+    let files = match found {
         Ok(files) => files,
-        Err((code, error)) => {
-            return (code, Json(serde_json::json!({ "error": error }))).into_response();
-        }
+        Err(error) => return refused(StatusCode::BAD_REQUEST, error),
     };
-    reservation.0 = None;
+    let id = uuid::Uuid::new_v4().to_string();
     let into = body.into.clone();
     let each = body.each && files.len() > 1 && into.is_none();
-    set_job(&state, &id, |job| {
-        job.label = if into.is_some() {
-            upload_label(&files).replacen("Making a note from", "Adding to a note from", 1)
-        } else if each {
-            format!("Making {} notes, one from each file", files.len())
-        } else {
-            upload_label(&files)
+    let label = if into.is_some() {
+        upload_label(&files).replacen("Making a note from", "Adding to a note from", 1)
+    } else if each {
+        format!("Making {} notes, one from each file", files.len())
+    } else {
+        upload_label(&files)
+    };
+    let job = ImportJob {
+        state: "waiting",
+        label,
+        dir: dir.clone(),
+        step: "Uploading".into(),
+        done: 0,
+        total: 1,
+        note: None,
+        notes: Vec::new(),
+        error: None,
+        section: None,
+    };
+    let worker = state.clone();
+    let job_id = id.clone();
+    let wants: String = body.wants.chars().take(MOST_WANTS).collect();
+    let title = body.title;
+    let task: Task = Box::new(move || {
+        set_job(&worker, &job_id, |job| job.state = "working");
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if each {
+                run_each(
+                    worker.clone(),
+                    job_id.clone(),
+                    importer,
+                    dir,
+                    wants,
+                    files,
+                    incoming,
+                )
+            } else {
+                run_import(
+                    worker.clone(),
+                    job_id.clone(),
+                    importer,
+                    dir,
+                    into,
+                    title,
+                    wants,
+                    files,
+                    incoming,
+                )
+            }
+        }));
+        if outcome.is_err() {
+            set_job(&worker, &job_id, |job| {
+                job.state = "failed";
+                job.error =
+                    Some("The upload stopped unexpectedly. Try again with fewer files.".into());
+            });
         }
     });
-    let worker = state.clone();
-    let job = id.clone();
-    let wants: String = body.wants.chars().take(MOST_WANTS).collect();
-    if std::thread::Builder::new()
-        .name("leo-import".into())
-        .spawn(move || {
-            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                if each {
-                    run_each(worker.clone(), job.clone(), importer, dir, wants, files)
-                } else {
-                    run_import(
-                        worker.clone(),
-                        job.clone(),
-                        importer,
-                        dir,
-                        into,
-                        body.title,
-                        wants,
-                        files,
-                    )
-                }
-            }));
-            if outcome.is_err() {
-                set_job(&worker, &job, |job| {
-                    job.state = "failed";
-                    job.error =
-                        Some("The upload stopped unexpectedly. Try again with fewer files.".into());
-                });
-            }
-        })
+    if state
+        .import_slots
+        .submit(&state.imports, &id, job, task)
         .is_err()
     {
-        state
-            .imports
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .remove(&id);
-        return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({ "error": "The upload could not start. Close another busy task and try again." }))).into_response();
+        return refused(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "The upload could not start. Close another busy task and try again.",
+        );
     }
     (StatusCode::ACCEPTED, Json(serde_json::json!({ "id": id }))).into_response()
 }
@@ -828,34 +1019,35 @@ pub(crate) async fn list_originals(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Response {
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
+    let notes_dir = state.notes_dir.clone();
     let Some(folder) = originals_dir(&notes_dir, &id) else {
         return StatusCode::NOT_FOUND.into_response();
     };
-    let mut files: Vec<serde_json::Value> = std::fs::read_dir(&folder)
-        .map(|entries| {
-            entries
-                .take(MOST_UPLOAD_FILES * KEPT_IMPORTS)
-                .flatten()
-                .filter(|e| e.file_type().is_ok_and(|kind| kind.is_file()))
-                .filter(|e| {
-                    e.file_name()
-                        .to_str()
-                        .is_some_and(|name| original_path(&notes_dir, &id, name).is_some())
-                })
-                .map(|e| {
-                    serde_json::json!({
-                        "name": e.file_name().to_string_lossy(),
-                        "size": e.metadata().map(|m| m.len()).unwrap_or(0),
+    let files = tokio::task::spawn_blocking(move || {
+        let mut files: Vec<serde_json::Value> = std::fs::read_dir(&folder)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| e.file_type().is_ok_and(|kind| kind.is_file()))
+                    .filter(|e| {
+                        e.file_name()
+                            .to_str()
+                            .is_some_and(|name| original_path(&notes_dir, &id, name).is_some())
                     })
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-    files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+                    .map(|e| {
+                        serde_json::json!({
+                            "name": e.file_name().to_string_lossy(),
+                            "size": e.metadata().map(|m| m.len()).unwrap_or(0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        files.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
+        files
+    })
+    .await
+    .unwrap_or_default();
     Json(files).into_response()
 }
 
@@ -894,16 +1086,13 @@ pub(crate) async fn get_original(
     Path((id, name)): Path<(String, String)>,
     Query(how): Query<OriginalView>,
 ) -> Response {
-    let notes_dir = match state.read_store(|store| Ok(store.notes_dir.clone())).await {
-        Ok(dir) => dir,
-        Err(code) => return code.into_response(),
-    };
-    let read = {
+    let notes_dir = state.notes_dir.clone();
+    let opened = {
         let (id, name) = (id.clone(), name.clone());
-        tokio::task::spawn_blocking(move || read_original(&notes_dir, &id, &name)).await
+        tokio::task::spawn_blocking(move || open_original(&notes_dir, &id, &name)).await
     };
-    match read.unwrap_or_else(|_| Err(std::io::Error::other("The original could not be read"))) {
-        Ok(bytes) => {
+    match opened.unwrap_or_else(|_| Err(std::io::Error::other("The original could not be read"))) {
+        Ok((file, size)) => {
             let ascii: String = name
                 .chars()
                 .map(|c| {
@@ -915,8 +1104,19 @@ pub(crate) async fn get_original(
                 })
                 .filter(|c| *c != '"')
                 .collect();
-            let mut response = bytes.into_response();
+            let stream = futures_util::stream::try_unfold(
+                (tokio::fs::File::from_std(file), vec![0u8; ORIGINAL_PIECE]),
+                |(mut file, mut piece)| async move {
+                    use tokio::io::AsyncReadExt;
+                    let read = file.read(&mut piece).await?;
+                    Ok::<_, std::io::Error>(
+                        (read > 0).then(|| (piece[..read].to_vec(), (file, piece))),
+                    )
+                },
+            );
+            let mut response = axum::body::Body::from_stream(stream).into_response();
             let headers = response.headers_mut();
+            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
             if let Ok(value) = HeaderValue::from_str(mime_for(&name)) {
                 headers.insert(header::CONTENT_TYPE, value);
             }
@@ -960,16 +1160,20 @@ mod admission_tests {
     }
 
     #[test]
-    fn import_admission_caps_running_and_retained_jobs() {
+    fn import_admission_keeps_every_unfinished_job_and_caps_the_finished_ones() {
         let mut jobs = std::collections::HashMap::new();
-        assert!(reserve_import(&mut jobs, "a".into(), job("working")));
-        assert!(reserve_import(&mut jobs, "b".into(), job("working")));
-        assert!(!reserve_import(&mut jobs, "c".into(), job("working")));
-        jobs.get_mut("a").unwrap().state = "done";
+        for n in 0..KEPT_IMPORTS * 2 {
+            reserve_import(&mut jobs, format!("running-{n}"), job("working"));
+        }
+        assert_eq!(jobs.len(), KEPT_IMPORTS * 2);
+        jobs.clear();
+        reserve_import(&mut jobs, "a".into(), job("working"));
+        reserve_import(&mut jobs, "b".into(), job("waiting"));
         for n in 0..KEPT_IMPORTS * 3 {
-            assert!(reserve_import(&mut jobs, format!("done-{n}"), job("done")));
+            reserve_import(&mut jobs, format!("done-{n}"), job("done"));
         }
         assert!(jobs.len() <= KEPT_IMPORTS);
-        assert_eq!(jobs.get("b").unwrap().state, "working");
+        assert_eq!(jobs.get("a").unwrap().state, "working");
+        assert_eq!(jobs.get("b").unwrap().state, "waiting");
     }
 }

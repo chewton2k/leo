@@ -1,12 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 
 use leo_core::attachments;
-use leo_core::store::Store;
+use leo_core::notes::Note;
+use leo_core::store::{Changed, Store};
 
 pub struct Picture {
     pub mime: String,
@@ -24,12 +26,15 @@ pub struct Captions {
     db: Arc<crate::db::Db>,
     failed: Mutex<HashMap<String, Instant>>,
     pruned: Mutex<Option<Instant>>,
+    wait: Duration,
+    generation: AtomicU64,
+    scanned: Mutex<BTreeMap<String, Vec<PathBuf>>>,
 }
 
 impl Captions {
     pub fn for_notes(notes_dir: &Path) -> Captions {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
-        Captions::at(base.join("captions.json"))
+        let base = crate::db::beside_of(notes_dir, None);
+        Captions::at(base.join(leo_core::paths::own::CAPTIONS))
     }
 
     pub fn at(path: PathBuf) -> Captions {
@@ -56,12 +61,27 @@ impl Captions {
             db,
             failed: Mutex::default(),
             pruned: Mutex::default(),
+            wait: RETRY_FAILED_AFTER,
+            generation: AtomicU64::new(0),
+            scanned: Mutex::default(),
         }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    fn moved(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
     }
 
     pub fn waiting(&self) -> bool {
         let mut failed = self.failed.lock().unwrap_or_else(|e| e.into_inner());
-        failed.retain(|_, at| at.elapsed() < RETRY_FAILED_AFTER);
+        let before = failed.len();
+        failed.retain(|_, at| at.elapsed() < self.wait);
+        if failed.len() != before {
+            self.moved();
+        }
         !failed.is_empty()
     }
 
@@ -70,7 +90,7 @@ impl Captions {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .get(key)
-            .is_some_and(|at| at.elapsed() < RETRY_FAILED_AFTER)
+            .is_some_and(|at| at.elapsed() < self.wait)
     }
 
     pub fn get(&self, key: &str) -> Option<String> {
@@ -93,6 +113,7 @@ impl Captions {
                 [&key, &caption],
             )
         });
+        self.moved();
     }
 
     fn keys(&self) -> HashSet<String> {
@@ -134,14 +155,17 @@ impl Captions {
             }
             tx.commit()
         });
+        self.moved();
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.db
             .with(|c| c.query_row("SELECT COUNT(*) FROM captions", [], |r| r.get::<_, i64>(0)))
             .map_or(0, |n| n.max(0) as usize)
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
@@ -209,21 +233,70 @@ pub fn picture(path: &Path) -> Option<Picture> {
     Some(Picture { mime, bytes })
 }
 
-pub fn uncaptioned(store: &Store, captions: &Captions, most: usize) -> Vec<PathBuf> {
-    let stored = captions.keys();
-    let mut out: Vec<PathBuf> = Vec::new();
-    for note in &store.notes {
-        for (_, path) in pictures_of(&store.notes_dir, &note.directory, &note.body) {
-            let Some(key) = key_of(&path) else {
-                continue;
-            };
-            if out.len() < most
-                && !stored.contains(&key)
-                && !captions.failed_lately(&key)
-                && !out.contains(&path)
-            {
-                out.push(path);
+pub fn uncaptioned(
+    store: &Store,
+    captions: &Captions,
+    most: usize,
+    changed: &Changed,
+) -> Vec<PathBuf> {
+    uncaptioned_with(store, captions, most, changed, |note| {
+        pictures_of(&store.notes_dir, &note.directory, &note.body)
+            .into_iter()
+            .map(|(_, path)| path)
+            .collect()
+    })
+}
+
+fn uncaptioned_with(
+    store: &Store,
+    captions: &Captions,
+    most: usize,
+    changed: &Changed,
+    read: impl Fn(&Note) -> Vec<PathBuf>,
+) -> Vec<PathBuf> {
+    let mut scanned = captions.scanned.lock().unwrap_or_else(|e| e.into_inner());
+    let look = |note: &Note, scanned: &mut BTreeMap<String, Vec<PathBuf>>| {
+        let paths = read(note);
+        if !paths.is_empty() {
+            scanned.insert(note.id.clone(), paths);
+        }
+    };
+    match changed {
+        Changed::Everything => {
+            scanned.clear();
+            for note in &store.notes {
+                look(note, &mut scanned);
             }
+        }
+        Changed::Ids(ids) if !ids.is_empty() => {
+            let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
+            for id in &wanted {
+                scanned.remove(*id);
+            }
+            for note in store
+                .notes
+                .iter()
+                .filter(|n| wanted.contains(n.id.as_str()))
+            {
+                look(note, &mut scanned);
+            }
+        }
+        Changed::Ids(_) => {}
+    }
+    let mut out: Vec<PathBuf> = Vec::new();
+    if scanned.is_empty() {
+        return out;
+    }
+    let stored = captions.keys();
+    for path in scanned.values().flatten() {
+        if out.len() >= most {
+            break;
+        }
+        let Some(key) = key_of(path) else {
+            continue;
+        };
+        if !stored.contains(&key) && !captions.failed_lately(&key) && !out.contains(path) {
+            out.push(path.clone());
         }
     }
     out
@@ -247,8 +320,13 @@ pub fn describe(path: &Path, seer: &Seer, question: &str) -> Result<String> {
     Ok(said.split_whitespace().collect::<Vec<_>>().join(" "))
 }
 
+#[cfg(test)]
 pub fn caption_some(store: &Store, captions: &Captions, seer: &Seer, most: usize) -> usize {
-    caption_paths(&uncaptioned(store, captions, most), captions, seer)
+    caption_paths(
+        &uncaptioned(store, captions, most, &Changed::Everything),
+        captions,
+        seer,
+    )
 }
 
 pub fn caption_paths(paths: &[PathBuf], captions: &Captions, seer: &Seer) -> usize {
@@ -269,6 +347,7 @@ pub fn caption_paths(paths: &[PathBuf], captions: &Captions, seer: &Seer) -> usi
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .insert(key, Instant::now());
+                captions.moved();
                 break;
             }
         }
@@ -298,22 +377,204 @@ mod tests {
         other.push(1);
         std::fs::write(notes.join("attachments/b.png"), other).unwrap();
         store
-            .create_note(
-                "Two",
-                "![a](attachments/a.png) ![b](attachments/b.png)",
-                vec![],
-                "",
-            )
+            .create_note("Two", "![a](attachments/a.png) ![b](attachments/b.png)", "")
             .unwrap();
         let captions = Captions::for_notes(&notes);
         let failing: Seer = Arc::new(|_: &str, _: &str, _: Vec<Picture>| anyhow::bail!("no"));
         assert!(!captions.waiting());
-        assert_eq!(uncaptioned(&store, &captions, 10).len(), 2);
+        assert_eq!(
+            uncaptioned(&store, &captions, 10, &Changed::Everything).len(),
+            2
+        );
         assert_eq!(caption_some(&store, &captions, &failing, 10), 0);
-        assert_eq!(uncaptioned(&store, &captions, 10).len(), 1);
+        assert_eq!(
+            uncaptioned(&store, &captions, 10, &Changed::Everything).len(),
+            1
+        );
         assert_eq!(caption_some(&store, &captions, &failing, 10), 0);
-        assert!(uncaptioned(&store, &captions, 10).is_empty());
+        assert!(uncaptioned(&store, &captions, 10, &Changed::Everything).is_empty());
         assert!(captions.waiting(), "the loop comes back for them");
+    }
+
+    fn library_of_three(notes: &Path) -> Store {
+        let mut store = Store::load_from(notes).unwrap();
+        std::fs::create_dir_all(notes.join("attachments")).unwrap();
+        std::fs::write(notes.join("attachments/a.png"), png()).unwrap();
+        store
+            .create_note("Pictured", "![a](attachments/a.png)", "")
+            .unwrap();
+        store.create_note("Plain", "words", "").unwrap();
+        store.create_note("Other", "more words", "").unwrap();
+        store
+    }
+
+    fn reads_in(
+        store: &Store,
+        captions: &Captions,
+        changed: &Changed,
+        reads: &std::cell::Cell<usize>,
+    ) -> Vec<PathBuf> {
+        uncaptioned_with(store, captions, 10, changed, |note| {
+            reads.set(reads.get() + 1);
+            pictures_of(&store.notes_dir, &note.directory, &note.body)
+                .into_iter()
+                .map(|(_, path)| path)
+                .collect()
+        })
+    }
+
+    #[test]
+    fn an_unchanged_library_is_not_scanned_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let mut store = library_of_three(&notes);
+        let captions = Captions::for_notes(&notes);
+        let reads = std::cell::Cell::new(0);
+        let (seen, changed) = store.changes_since(0);
+        assert_eq!(reads_in(&store, &captions, &changed, &reads).len(), 1);
+        assert_eq!(reads.get(), 3);
+        for _ in 0..3 {
+            let (next, changed) = store.changes_since(seen);
+            assert_eq!(next, seen);
+            assert_eq!(reads_in(&store, &captions, &changed, &reads).len(), 1);
+        }
+        assert_eq!(reads.get(), 3, "nothing changed, so no note was read");
+        let plain = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Plain")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&plain).unwrap().body = "other words".into();
+        let (_, changed) = store.changes_since(seen);
+        assert_eq!(reads_in(&store, &captions, &changed, &reads).len(), 1);
+        assert_eq!(reads.get(), 4, "only the edited note was read");
+    }
+
+    #[test]
+    fn a_picture_added_to_a_note_is_found_and_one_taken_out_is_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let mut store = library_of_three(&notes);
+        let captions = Captions::for_notes(&notes);
+        let (mut seen, changed) = store.changes_since(0);
+        assert_eq!(uncaptioned(&store, &captions, 10, &changed).len(), 1);
+        let pictured = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Pictured")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&pictured).unwrap().body = "no picture now".into();
+        let (next, changed) = store.changes_since(seen);
+        seen = next;
+        assert!(uncaptioned(&store, &captions, 10, &changed).is_empty());
+        std::fs::write(notes.join("attachments/b.png"), [png(), vec![1]].concat()).unwrap();
+        let plain = store
+            .notes
+            .iter()
+            .find(|n| n.title == "Plain")
+            .unwrap()
+            .id
+            .clone();
+        store.find_note_mut(&plain).unwrap().body = "![b](attachments/b.png)".into();
+        let (next, changed) = store.changes_since(seen);
+        seen = next;
+        assert_eq!(uncaptioned(&store, &captions, 10, &changed).len(), 1);
+        store.delete_notes(&[plain]);
+        let (_, changed) = store.changes_since(seen);
+        assert!(uncaptioned(&store, &captions, 10, &changed).is_empty());
+    }
+
+    #[test]
+    fn catching_up_from_the_feed_finds_what_a_full_pass_finds() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let mut store = Store::load_from(&notes).unwrap();
+        std::fs::create_dir_all(notes.join("attachments")).unwrap();
+        for i in 0..6u8 {
+            std::fs::write(
+                notes.join(format!("attachments/p{i}.png")),
+                [png(), vec![i]].concat(),
+            )
+            .unwrap();
+        }
+        let captions = Captions::for_notes(&notes);
+        let (mut seen, changed) = store.changes_since(0);
+        uncaptioned(&store, &captions, usize::MAX, &changed);
+        let mut ids = Vec::new();
+        for step in 0..24usize {
+            match step % 4 {
+                0 => {
+                    let body = format!("![p](attachments/p{}.png)", step % 6);
+                    ids.push(
+                        store
+                            .create_note(format!("Note {step}"), body, "")
+                            .unwrap()
+                            .id
+                            .clone(),
+                    );
+                }
+                1 => {
+                    let id = ids[step % ids.len()].clone();
+                    store.find_note_mut(&id).unwrap().body =
+                        format!("![p](attachments/p{}.png) again", (step + 1) % 6);
+                }
+                2 => {
+                    let id = ids[step % ids.len()].clone();
+                    store.find_note_mut(&id).unwrap().body = "plain words".into();
+                }
+                _ => {
+                    let id = ids.remove(step % ids.len());
+                    store.delete_notes(&[id]);
+                }
+            }
+            if step % 3 == 2 {
+                captions.put(
+                    key_of(&notes.join(format!("attachments/p{}.png", step % 6))).unwrap(),
+                    "seen".into(),
+                );
+            }
+            let (next, changed) = store.changes_since(seen);
+            seen = next;
+            let fresh = Captions::for_notes(&notes);
+            let from_feed = uncaptioned(&store, &captions, usize::MAX, &changed);
+            let from_scratch = uncaptioned(&store, &fresh, usize::MAX, &Changed::Everything);
+            let mut from_feed = from_feed;
+            let mut from_scratch = from_scratch;
+            from_feed.sort();
+            from_scratch.sort();
+            assert_eq!(from_feed, from_scratch, "step {step}");
+        }
+    }
+
+    #[test]
+    fn a_failed_picture_is_offered_again_when_its_wait_ends() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        let store = library_of_three(&notes);
+        let mut captions = Captions::for_notes(&notes);
+        captions.wait = Duration::from_millis(50);
+        let failing: Seer = Arc::new(|_: &str, _: &str, _: Vec<Picture>| anyhow::bail!("no"));
+        let before = captions.generation();
+        let paths = uncaptioned(&store, &captions, 10, &Changed::Everything);
+        assert_eq!(caption_paths(&paths, &captions, &failing), 0);
+        let failed_at = captions.generation();
+        assert!(failed_at > before, "a failure moves the stamp");
+        assert!(captions.waiting());
+        assert!(uncaptioned(&store, &captions, 10, &Changed::Ids(vec![])).is_empty());
+        std::thread::sleep(Duration::from_millis(80));
+        assert!(!captions.waiting());
+        assert!(
+            captions.generation() > failed_at,
+            "the wait ending moves the stamp"
+        );
+        assert_eq!(
+            uncaptioned(&store, &captions, 10, &Changed::Ids(vec![])).len(),
+            1
+        );
     }
 
     #[test]
@@ -330,7 +591,7 @@ mod tests {
             std::fs::write(path, png()).unwrap();
         }
         store
-            .create_note("One", "![a](attachments/a.png)", vec![], "")
+            .create_note("One", "![a](attachments/a.png)", "")
             .unwrap();
         let captions = Captions::for_notes(&notes);
         let live = key_of(&shown).unwrap();
@@ -341,7 +602,7 @@ mod tests {
         captions.put(elsewhere.clone(), "trashed note".into());
         captions.put(gone.clone(), "deleted".into());
         captions.put(format!("{}:1:0", shown.display()), "changed".into());
-        assert!(uncaptioned(&store, &captions, 10).is_empty());
+        assert!(uncaptioned(&store, &captions, 10, &Changed::Everything).is_empty());
         assert!(may_forget(&store));
         captions.forget_stale();
         assert_eq!(captions.get(&live).as_deref(), Some("kept"));
@@ -361,12 +622,14 @@ mod tests {
             .create_note(
                 "Heaps",
                 "A heap:\n![min heap](attachments/heap.png) and ![[missing.png]]",
-                vec![],
                 "",
             )
             .unwrap();
         let captions = Captions::for_notes(&notes);
-        assert_eq!(uncaptioned(&store, &captions, 10).len(), 1);
+        assert_eq!(
+            uncaptioned(&store, &captions, 10, &Changed::Everything).len(),
+            1
+        );
         let calls = Arc::new(Mutex::new(0));
         let counted = Arc::clone(&calls);
         let seer: Seer = Arc::new(move |system: &str, user: &str, pictures: Vec<Picture>| {
@@ -389,5 +652,100 @@ mod tests {
             "A heap:\n![min heap](attachments/heap.png) [Picture: A min heap with 2 at the root.] and ![[missing.png]]",
             "captions are kept on disk"
         );
+    }
+
+    #[test]
+    #[ignore = "benchmark: run by hand with --ignored --nocapture, release"]
+    fn p_c10_benchmark_idle_tick() {
+        use std::time::Instant;
+        let n: usize = std::env::var("LEO_BENCH_NOTES")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(5000);
+        let dir = tempfile::tempdir().unwrap();
+        let notes = dir.path().join("notes");
+        for i in 0..n {
+            let folder = notes.join(format!("Course {}", i % 20));
+            std::fs::create_dir_all(&folder).unwrap();
+            let mut body = String::new();
+            while body.len() < 5000 {
+                body.push_str(&format!(
+                    "Lecture {i} words about graphs and queues {} ",
+                    body.len()
+                ));
+            }
+            std::fs::write(folder.join(format!("Lecture {i}.md")), body).unwrap();
+        }
+        let mut store = Store::load_from(&notes).unwrap();
+        assert_eq!(store.notes.len(), n);
+        let captions = Captions::for_notes(&notes);
+        let writer: crate::Writer = Arc::new(|_: &str, _: &str, _: u32| anyhow::bail!("no"));
+        let graphs = Arc::new(crate::graph::Graphs::for_notes(&notes, Some(writer)));
+        let mut cache = crate::graph::Cache::default();
+        for note in &store.notes {
+            cache.notes.insert(
+                note.id.clone(),
+                crate::graph::Read {
+                    hash: crate::vectors::hash_of(note),
+                    summary: format!("A summary of {}", note.title),
+                    concepts: vec!["queue".into(), "heap".into()],
+                    linked: None,
+                },
+            );
+        }
+        cache.built_at = Some("2026-11-17T00:00:00Z".into());
+        std::fs::write(graphs.path(), serde_json::to_string(&cache).unwrap()).unwrap();
+        graphs.load();
+        let idle = Duration::from_secs(60);
+        let time = |mut f: Box<dyn FnMut() + '_>| {
+            let mut v: Vec<f64> = (0..7)
+                .map(|_| {
+                    let at = Instant::now();
+                    f();
+                    at.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            v[3]
+        };
+        let (mut seen, first) = store.changes_since(0);
+        uncaptioned(&store, &captions, 4, &first);
+        let plan = graphs.status(&crate::graph::sources(&store.notes));
+        let key = (store.fingerprint(), graphs.inputs());
+        let caption_none = time(Box::new(|| {
+            let (_, changed) = store.changes_since(seen);
+            std::hint::black_box(uncaptioned(&store, &captions, 4, &changed));
+        }));
+        let graph_none = time(Box::new(|| {
+            assert_eq!(key, (store.fingerprint(), graphs.inputs()));
+            let status = graphs.live(&plan);
+            std::hint::black_box((graphs.due(&status, idle), graphs.settled_by(&status)));
+        }));
+        let ids: Vec<String> = store.notes.iter().take(7).map(|n| n.id.clone()).collect();
+        let mut caption_times = Vec::new();
+        for id in &ids {
+            store.find_note_mut(id).unwrap().body.push_str(" edited");
+            let at = Instant::now();
+            let (next, changed) = store.changes_since(seen);
+            std::hint::black_box(uncaptioned(&store, &captions, 4, &changed));
+            caption_times.push(at.elapsed().as_secs_f64() * 1000.0);
+            seen = next;
+        }
+        caption_times.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let caption_one = caption_times[3];
+        let graph_one = time(Box::new(|| {
+            let sources = crate::graph::sources(&store.notes);
+            std::hint::black_box(graphs.status(&sources));
+        }));
+        let reads = std::cell::Cell::new(0);
+        for _ in 0..10 {
+            let (next, changed) = store.changes_since(seen);
+            seen = next;
+            uncaptioned_with(&store, &captions, 4, &changed, |_| {
+                reads.set(reads.get() + 1);
+                Vec::new()
+            });
+        }
+        println!("P-C10 after notes={n} caption_scan_unchanged_ms={caption_none:.4} caption_scan_one_changed_ms={caption_one:.4} graph_part_unchanged_ms={graph_none:.5} graph_part_one_changed_ms={graph_one:.3} note_reads_over_10_ticks={}", reads.get());
     }
 }

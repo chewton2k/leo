@@ -93,13 +93,14 @@ test('Updates renders ready, busy and release notes safely with independent defa
   assert.equal((html.match(/role="switch"/g) || []).length, 2);
   assert.ok(!html.includes('<script>'));
   assert.ok(html.includes('Accessibility'));
-  assert.ok(html.includes('leo update') && html.includes('leo uninstall'));
+  assert.ok(!html.includes('leo update') && html.includes('leo uninstall'));
   assert.ok(html.includes('your notes stay') && html.includes('title="/notes"'));
 });
 
 function tail(extra) {
   const events = fs.readFileSync(path.join(__dirname, '../src/web/app/events.js'), 'utf8');
-  const window = {};
+  require('../src/web/recording.js');
+  const window = { leoRecording: { unsavedLine: globalThis.leoRecording.unsavedLine } };
   const messages = [];
   const calls = [];
   const scope = { window, toast: (text, options) => messages.push([text, options]), go: (hash) => calls.push(hash), location: { hash: '#/' }, setTimeout, saveWebsiteWork() {}, ...extra };
@@ -130,8 +131,8 @@ test('a failed or slow recording check keeps the usual quit text', async () => {
   assert.ok(await usual(() => new Promise((resolve) => setTimeout(() => resolve({ job: { state: 'writing' } }), 1000))));
 });
 test('unsaved recordings are announced once with a way to Record, never on the Record page', async () => {
-  const run = async (pending, hash = '#/') => {
-    const { window, messages, calls } = tail({ api: async () => ({ pending }), location: { hash } });
+  const run = async (pending, hash = '#/', more = false) => {
+    const { window, messages, calls } = tail({ api: async () => ({ pending, more }), location: { hash } });
     await window.warnUnsaved();
     return { messages, calls };
   };
@@ -144,6 +145,7 @@ test('unsaved recordings are announced once with a way to Record, never on the R
   one.messages[0][1].run();
   assert.deepEqual(one.calls, ['#/record']);
   assert.equal((await run([{ id: 'a' }, { id: 'b' }, { id: 'c' }])).messages[0][0], "3 recordings weren't saved");
+  assert.equal((await run([{ id: 'a' }, { id: 'b' }], '#/', true)).messages[0][0], "2 or more recordings weren't saved");
   const { window, messages } = tail({ api: async () => { throw new Error('offline'); } });
   await window.warnUnsaved();
   assert.equal(messages.length, 0);
@@ -156,7 +158,7 @@ test('the export text matches what the zip holds', () => {
 test('Keeping that could not be opened shows the broken pencil drawing', async () => {
   const keeping = fs.readFileSync(path.join(__dirname, '../src/web/app/keeping.js'), 'utf8');
   const shown = [];
-  const ctx = { seq: 0, state: {}, app: { addEventListener() {} }, chrome() {}, $: () => ({}), document: {}, settingsCrumbs: () => '', skeleton: () => 'loading', settingsFrame: (name, html) => html, refreshPanel: (box, html) => shown.push(html), DRAWN: { broken: '<svg class="drawn drawn-broken"></svg>' }, empty: (icon, title) => `${icon}<h3>${title}</h3>`, api: async () => { throw new Error('offline'); } };
+  const ctx = { seq: 0, state: {}, app: { addEventListener() {} }, chrome() {}, $: () => ({}), document: {}, skeleton: () => 'loading', settingsFrame: (name, html) => html, refreshPanel: (box, html) => shown.push(html), DRAWN: { broken: '<svg class="drawn drawn-broken"></svg>' }, empty: (icon, title) => `${icon}<h3>${title}</h3>`, api: async () => { throw new Error('offline'); } };
   vm.createContext(ctx);
   vm.runInContext(keeping, ctx);
   await assert.rejects(ctx.showKeeping());
@@ -241,4 +243,20 @@ test('the notifications fix button opens the system settings only once notificat
   };
   assert.match(button('not_requested'), />Allow access<\/button>/);
   assert.match(button('denied'), />Open System Settings<\/button>/);
+});
+test('Check again asks for a fresh Health check; other reloads do not', async () => {
+  const { value } = context();
+  const paths = [];
+  value.ICON = new Proxy({}, { get: () => '' });
+  value.api = async (url) => { paths.push(url); return { sections: [] }; };
+  value.document.querySelector = () => null;
+  value.state = { view: 'settings', section: 'health' };
+  vm.runInContext('var seq = 0', value);
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/actions.js'), 'utf8');
+  const line = source.split('\n').find(text => text.includes("'health-refresh'"));
+  const refresh = vm.runInContext(`({${line}})['health-refresh']`, value);
+  await refresh({ dataset: {} });
+  await value.loadHealth();
+  await value.loadHealth({ dataset: {} });
+  assert.deepEqual(paths, ['/api/health?fresh=true', '/api/health', '/api/health']);
 });

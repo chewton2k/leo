@@ -24,7 +24,7 @@
     requestAnimationFrame(step);
   }
 
-  function create({ handle, key, measure, limits, apply, enabled, storage = null, onChange = () => {} }) {
+  function create({ handle, key, measure, limits, apply, enabled, docked = 'left', storage = null, onChange = () => {} }) {
     let preferred = null;
     let drag = null;
     let tap = null;
@@ -102,7 +102,7 @@
       if (!drag || event.pointerId !== drag.id) return;
       if (!enabled() || !(event.buttons & 1)) return stop(event);
       if (!handle.hasPointerCapture(event.pointerId)) return stop(event);
-      const wanted = drag.width + event.clientX - drag.x;
+      const wanted = drag.width + (docked === 'right' ? drag.x - event.clientX : event.clientX - drag.x);
       change(wanted);
       if (drag) pull(wanted);
     });
@@ -112,14 +112,17 @@
     handle.addEventListener('keydown', (event) => {
       if (!enabled()) return;
       const step = event.shiftKey ? BIG_STEP : STEP;
-      if (event.key === 'ArrowLeft') change(measure() - step);
-      else if (event.key === 'ArrowRight') change(measure() + step);
+      const grow = docked === 'right' ? 'ArrowLeft' : 'ArrowRight';
+      const shrink = docked === 'right' ? 'ArrowRight' : 'ArrowLeft';
+      if (event.key === shrink) change(measure() - step);
+      else if (event.key === grow) change(measure() + step);
       else if (event.key === 'Home') change(null);
       else if (event.key === 'End') change(limits()[1]);
       else return;
       event.preventDefault();
       keep();
     });
+    if (preferred !== null && !enabled()) apply(preferred);
     fit();
     return { fit, stop };
   }

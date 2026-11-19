@@ -2,7 +2,7 @@
   'use strict';
 
   const NAME = /^leo-[a-z0-9-]{1,48}$/;
-  const CONTENT = ['leo-chat-v1', 'leo-search'];
+  const CONTENT = ['leo-chat-v1'];
   const MOST_VALUE = 16 * 1024;
   const WAIT = 400;
   const seed = root.__LEO_PREFS__;

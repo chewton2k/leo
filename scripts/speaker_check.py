@@ -52,15 +52,15 @@ def model(catalog, home, wanted):
     return entry
 
 
-def main():
-    if len(sys.argv) != 5:
-        sys.exit("usage: speaker_check.py <catalog.json> <leo-home> <model-id> <out-dir>")
-    catalog_path, home, wanted, out = sys.argv[1:5]
+def prepare_models(catalog_path, home, wanted):
     catalog = json.load(open(catalog_path))
     entry = model(catalog, home, wanted)
     model(catalog, home, DIARIZER)
     language = "en" if "en" in entry["languages"] else next(l for l in entry["languages"] if l.startswith("en"))
     json.dump({"id": wanted, "language": language}, open(os.path.join(home, "speech-model.json"), "w"))
+
+
+def prepare_meeting(out):
     os.makedirs(out, exist_ok=True)
     whole = os.path.join(out, "whole.wav")
     fetch(AUDIO, whole, AUDIO_SHA)
@@ -91,6 +91,19 @@ def main():
                     said.append((float(start), word.text))
     os.remove(annotations)
     open(os.path.join(out, "meeting.txt"), "w").write(" ".join(text for _, text in sorted(said)) + "\n")
+
+
+def main():
+    args = sys.argv[1:]
+    if len(args) == 2 and args[0] == "--meeting":
+        prepare_meeting(args[1])
+    elif len(args) in (3, 4):
+        catalog_path, home, wanted, *out = args
+        prepare_models(catalog_path, home, wanted)
+        if out:
+            prepare_meeting(out[0])
+    else:
+        sys.exit("usage: speaker_check.py --meeting <out-dir> or <catalog.json> <leo-home> <model-id> [out-dir]")
 
 
 if __name__ == "__main__":

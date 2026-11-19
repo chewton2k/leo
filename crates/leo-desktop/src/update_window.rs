@@ -1,6 +1,6 @@
 use std::path::Path;
 
-const FOREGROUND: &str = "update-foreground";
+const FOREGROUND: &str = leo_core::paths::own::UPDATE_FOREGROUND;
 
 #[cfg(target_os = "macos")]
 pub fn focus(window: &tauri::WebviewWindow) {

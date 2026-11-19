@@ -112,7 +112,7 @@ env -i HOME=$T/home SHELL=/bin/zsh PATH=/usr/bin:/bin \
 $T/home/.local/bin/leo --version
 ```
 
-Update your own copy with `leo update`.
+Your own copy updates itself from Settings → Updates & about.
 
 **A broken release:** delete the release and its tag on GitHub (and locally with
 `git tag -d vX.Y.Z`), fix the problem, then release a new patch version. Don't

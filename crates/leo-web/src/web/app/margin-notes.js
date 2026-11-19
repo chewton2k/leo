@@ -2,6 +2,8 @@ const MARGIN_KINDS = ['add_margin_note', 'remove_margin_note'];
 const READ_GAP_SECONDS = 90;
 const READ_FACE_AFTER_MS = 200;
 const MARGIN_SETTLE_MS = 1400;
+const REANCHOR_MS = 2000;
+const FIND_SETTLE_MS = 400;
 const MARGIN_LAYOUT_KEY = 'leo-margin-layout';
 const GLOW_MS = 2200;
 const NO_COMMENT_MS = 4000;
@@ -14,7 +16,8 @@ const QUIET_FADE_MS = 500;
 const WIPE_MS = 500;
 const MENU_MS = MOTION_MS;
 const MENU_SLIDE = [{ clipPath: 'inset(0 0 100% 0)', opacity: 0, transform: `scale(${POP_FROM})` }, { clipPath: 'inset(0 0 0 0)', opacity: 1, transform: 'none' }];
-const MOST_ASKED = 1000;
+const MARGIN_MESSAGE_READS = 1000;
+const MARGIN_PASSAGE_READS = 1000;
 const marginKit = window.leoMargin;
 const READ_PAUSE = marginKit.READ_PAUSE;
 const PERSONA_ICON = {
@@ -45,7 +48,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -93,6 +96,8 @@ async function marginLoadPrefs() {
 
 function marginLeave() {
   clearTimeout(marginPage.timer);
+  clearTimeout(marginPage.anchorTimer);
+  clearTimeout(marginPage.settle);
   clearTimeout(marginPage.faceTimer);
   clearTimeout(marginPage.statusTimer);
   cancelAnimationFrame(marginPage.frame);
@@ -104,7 +109,7 @@ function marginLeave() {
   marginPage.observer = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
-  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null });
+  Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), finds: new Map(), drawn: null, drawnAt: 0 });
   marginPage.els.clear();
   marginPage.paths.clear();
   marginPage.revisits.clear();
@@ -155,17 +160,48 @@ async function marginLoad(s, current = () => true, id = s.note.id) {
     return;
   }
   if (!current() || marginPage.s !== s || !view) return;
+  const was = marginPage.loaded;
+  const shown = (m) => JSON.stringify([m.mode, m.persona || 'reader', m.instructions || '', m.threads || [], m.resolved || []]);
+  if (was && shown(view) === shown(marginPage)) return;
   marginPage.mode = view.mode;
   marginPage.persona = view.persona || 'reader';
   marginPage.saved = marginPage.persona;
   marginPage.instructions = view.instructions || '';
   marginPage.threads = view.threads || [];
   marginPage.resolved = view.resolved || [];
+  const first = !marginPage.loaded;
   marginPage.loaded = true;
   cancelAnimationFrame(marginPage.frame);
   marginDraw();
   marginControl();
   marginInstructions();
+  if (first) marginReanchor(s).catch(() => {});
+}
+
+function marginKept(t) {
+  return t.source !== 'read' || t.pinned || (t.messages || []).some((m) => m.from !== 'felix');
+}
+
+async function marginReanchor(s) {
+  if (s !== marginPage.s || !s.note.id) return;
+  await flush(s);
+  if (s !== marginPage.s || saving.unsaved()) return;
+  const source = s.doc.source();
+  const version = s.note.version;
+  for (const { t, at } of [...marginPage.moved]) {
+    if (marginPage.anchoring.has(t.id)) continue;
+    marginPage.anchoring.add(t.id);
+    try {
+      const moved = await api(`/api/notes/${enc(s.note.id)}/margin/threads/${enc(t.id)}`, { method: 'PATCH', body: { version, quote: source.slice(at.from, at.to), ...marginKit.contextAt(source, at.from, at.to) } });
+      if (s !== marginPage.s || !moved?.id) continue;
+      marginPage.threads = marginPage.threads.map((one) => (one.id === moved.id ? moved : one));
+      marginRedraw();
+    } catch (e) {
+      if (e instanceof Locked) throw e;
+    } finally {
+      marginPage.anchoring.delete(t.id);
+    }
+  }
 }
 
 async function marginCreated(s, note) {
@@ -361,6 +397,12 @@ function marginPersonaControl() {
     + `<button type="button" role="menuitem" data-margin-persona="instructions"><span class="persona-icon" aria-hidden="true">${PERSONA_ICON.pen}</span><span class="persona-words"><b>Instructions for this note…</b></span></button>`;
 }
 
+function updateReadHint(area) {
+  const hint = area?.closest?.('[data-read-field]')?.querySelector('[data-read-hint]')
+    || (area?.id && document.getElementById(`${area.id}-hint`));
+  if (hint) hint.hidden = Array.from(area.value.trim()).length <= Number(area.dataset.reads);
+}
+
 function marginInstructions(open = false) {
   const box = $('#margin-instructions');
   const s = marginPage.s;
@@ -379,6 +421,7 @@ function marginInstructions(open = false) {
   }
   if (document.activeElement === input) return;
   input.value = marginPage.instructions;
+  updateReadHint(input);
   box.hidden = !open && !marginPage.instructions;
   if (open) input.focus({ preventScroll: true });
 }
@@ -400,6 +443,7 @@ async function marginSaveInstructions(s, box, input) {
   }
   if (document.activeElement === input) return;
   input.value = marginPage.instructions;
+  updateReadHint(input);
   box.hidden = !marginPage.instructions;
 }
 
@@ -542,9 +586,11 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body">
-    <form class="margin-reply"><textarea rows="1" maxlength="1000" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
-    <p class="margin-hint" hidden>Enter to ask · Esc to close</p>
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
+    <form class="margin-reply"><textarea rows="1" data-reads="${MARGIN_MESSAGE_READS}" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
+    <p class="margin-hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_MESSAGE_READS.toLocaleString('en')} characters of this.</p>
+    <p class="margin-hint" data-passage-hint hidden>Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.</p>
+    <p class="margin-hint" data-draft-hint hidden>Enter to ask · Esc to close</p>
     <p class="margin-problem" role="status" hidden></p>
     <div class="margin-acts"><button type="button" class="msg-act" data-margin-act="resolve">Resolve</button><button type="button" class="msg-act" data-margin-act="dismiss">Dismiss</button><button type="button" class="margin-add" data-margin-act="add">Add to note</button><button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger">${ICON.expand}</button><span class="margin-tools"><button type="button" class="margin-copy" data-margin-act="copy" aria-label="Copy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8.5" y="8.5" width="11" height="11" rx="2"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/></svg></button><button type="button" class="margin-pin" data-margin-act="pin" aria-pressed="false">${ICON.pin}</button><button type="button" class="margin-chat" data-margin-act="chat" aria-label="Ask in chat">${ICON.chat}</button></span></div></div></div>`;
   marginPage.layer.appendChild(el);
@@ -639,7 +685,8 @@ function marginFill(el, t, arriving, changed) {
   el.toggleAttribute('data-newest', marginPage.newest === t.id);
   $('.margin-add', el).hidden = draft || !marginNow(t);
   $('[data-margin-act="copy"]', el).hidden = draft || !marginNow(t);
-  $('.margin-hint', el).hidden = !draft || Boolean(waiting);
+  $('[data-draft-hint]', el).hidden = !draft || Boolean(waiting);
+  $('[data-passage-hint]', el).hidden = Array.from(t.quote).length <= MARGIN_PASSAGE_READS;
   $('[data-margin-act="resolve"]', el).hidden = draft;
   const dismiss = $('[data-margin-act="dismiss"]', el);
   dismiss.textContent = draft ? 'Cancel' : 'Dismiss';
@@ -801,14 +848,9 @@ function marginDraw() {
   const source = s.doc.source();
   const faded = ['right', 'both'].includes(layer.parentElement.dataset.margin) ? [...marginPage.faded.values()] : [];
   const threads = [...marginPage.threads, ...faded, ...(marginPage.draft ? [marginPage.draft] : [])];
-  const placed = [];
-  const gone = [];
-  for (const t of threads) {
-    const at = marginKit.find(source, t);
-    if (at) placed.push({ t, at });
-    else gone.push(t.id);
-  }
+  const { placed, gone, edit } = marginPlaced(source, threads);
   marginPage.gone = gone;
+  marginPage.moved = placed.filter(({ t, at }) => at.how === 'context' && marginPage.threads.includes(t) && marginKept(t));
   const layout = marginLayout(columns);
   if (columns.dataset.margin !== layout) columns.dataset.margin = layout;
   const margins = layout === 'right' || layout === 'both';
@@ -819,7 +861,7 @@ function marginDraw() {
   const page = $('article.note', columns).getBoundingClientRect();
   const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginIsOpen(box.t) ? marginElement(box.t) : null);
-    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how === 'context');
+    if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };
   });
   marginCuts(boxes);
@@ -850,7 +892,7 @@ function marginDraw() {
     marginPage.rects.set(t.id, rects);
     marginInk(t, rects);
   }
-  marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at));
+  marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at), edit);
   marginPaint();
   inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
@@ -865,10 +907,60 @@ function marginDraw() {
   } else marginPage.arriving.clear();
 }
 
-function marginRevisits(source, origin, open) {
+function marginFind(source, t, edit) {
+  const key = `${t.quote}\u0000${t.prefix}\u0000${t.suffix}`;
+  const cached = marginPage.finds.get(t.id);
+  const now = marginPage.drawnAt;
+  const usable = cached?.key === key && cached.at && (cached.drawnAt === now || (edit && cached.drawnAt === now - 1));
+  const kept = usable ? marginKit.carried(source, cached.at, cached.drawnAt === now ? null : edit, cached.text, t) : null;
+  const at = kept || marginKit.find(source, t);
+  marginPage.finds.set(t.id, { key, at, text: at && source.slice(at.from, at.to), drawnAt: now });
+  return at;
+}
+
+function marginIdle(fn) {
+  if (window.requestIdleCallback) return window.requestIdleCallback(fn);
+  return setTimeout(() => {
+    const end = Date.now() + 8;
+    fn({ timeRemaining: () => end - Date.now() });
+  }, 0);
+}
+
+function marginSettle(s) {
+  const source = marginPage.drawn;
+  if (s !== marginPage.s || source === null) return;
+  const left = [...marginPage.resolved, ...marginPage.faded.values(), ...(marginPage.draft ? [marginPage.draft] : []), ...marginPage.threads];
+  const step = (deadline) => {
+    if (s !== marginPage.s || marginPage.drawn !== source) return;
+    do {
+      const t = left.pop();
+      if (!t) return marginRedraw();
+      marginPage.finds.delete(t.id);
+      marginFind(source, t, null);
+    } while (deadline.timeRemaining() > 0);
+    marginIdle(step);
+  };
+  marginIdle(step);
+}
+
+function marginPlaced(source, threads) {
+  const edit = marginPage.drawn === source ? null : marginKit.edited(marginPage.drawn ?? '', source);
+  if (edit) marginPage.drawnAt += 1;
+  marginPage.drawn = source;
+  const placed = [];
+  const gone = [];
+  for (const t of threads) {
+    const at = marginFind(source, t, edit);
+    if (at) placed.push({ t, at });
+    else gone.push(t.id);
+  }
+  return { placed, gone, edit };
+}
+
+function marginRevisits(source, origin, open, edit) {
   const live = new Set();
   for (const r of marginPage.resolved) {
-    const at = marginKit.find(source, r);
+    const at = marginFind(source, r, edit);
     const covered = at && open.some((o) => o.from < at.to && at.from < o.to);
     const rects = at && !covered ? marginPage.s.doc.spanRects(at.from, at.to) : [];
     if (!rects.length) continue;
@@ -1311,6 +1403,7 @@ async function marginReply(s, el, t, text, area = null) {
 }
 
 function marginSized(area) {
+  updateReadHint(area);
   area.style.height = 'auto';
   area.style.height = `${Math.min(area.scrollHeight, MARGIN_AREA_MAX)}px`;
   const send = area.form?.querySelector('.margin-send');
@@ -1348,10 +1441,11 @@ async function marginAskOn(s, t, question) {
   marginSaying(marginPage.els.get('draft'), '');
   marginPage.thinking.set('draft', { text: question });
   marginDraw();
+  if (t.ask?.question !== question) t.ask = { question, request: requestId() };
   let done;
   try {
     await flush(s);
-    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone } });
+    done = await api(`/api/notes/${enc(s.note.id)}/margin/threads`, { method: 'POST', body: { version: s.note.version, quote: t.quote, prefix: t.prefix, suffix: t.suffix, question, gone: marginPage.gone, request: t.ask.request } });
   } catch (error) {
     if (marginPage.s !== s) return;
     marginPage.thinking.delete('draft');
@@ -1591,7 +1685,7 @@ async function marginAdd(t) {
 
 function marginBeside(s, picked) {
   const size = [...picked.text.trim()].length;
-  if (!marginPage.layer || chat.isOpen() || size < LEAST_ASKED || [...picked.text].length > MOST_ASKED) return null;
+  if (!marginPage.layer || chat.isOpen() || size < LEAST_ASKED) return null;
   return marginKit.around(s.doc.source(), picked.text, picked.from);
 }
 
@@ -1656,10 +1750,7 @@ function marginAskFirst(s, picked) {
 
 function marginAsk(s, picked, question = '') {
   const beside = marginBeside(s, picked);
-  if (!beside) {
-    if (marginPage.layer && !chat.isOpen() && [...picked.text].length > MOST_ASKED) marginSetStatus('Long selections go to the chat', true);
-    return false;
-  }
+  if (!beside) return false;
   const same = marginSame(s, picked, beside);
   if (same) {
     marginOpen(same.id, true);
@@ -1706,6 +1797,10 @@ function marginEdited(s) {
   marginRedraw();
   if (marginPage.brief) marginSetStatus('');
   if (s.note.id && !marginPage.loaded) marginLoad(s).catch(() => {});
+  clearTimeout(marginPage.anchorTimer);
+  marginPage.anchorTimer = setTimeout(() => marginReanchor(s).catch(() => {}), REANCHOR_MS);
+  clearTimeout(marginPage.settle);
+  marginPage.settle = setTimeout(() => marginSettle(s), FIND_SETTLE_MS);
   clearTimeout(marginPage.timer);
   if (marginPage.mode !== 'along') return;
   marginArm(s);
@@ -2154,7 +2249,8 @@ function felixReads(view) {
 
 function felixPersonaForm(view, p) {
   const icons = (view.persona_icons || []).map((icon) => `<label class="persona-tile" title="${esc(PERSONA_ICON_NAMES[icon] || icon)}"><input type="radio" name="persona-icon" value="${esc(icon)}" aria-label="${esc(PERSONA_ICON_NAMES[icon] || icon)}"${icon === p.icon ? ' checked' : ''}><span class="persona-icon" aria-hidden="true">${PERSONA_ICON[icon] || ''}</span></label>`).join('');
-  return `<form class="persona-form" data-persona-form="${esc(p.id)}"><div class="persona-tiles" role="radiogroup" aria-label="Icon">${icons}</div><input class="set-input" name="name" maxlength="32" required placeholder="Name" aria-label="Name" value="${esc(p.name)}"><textarea class="set-input" name="says" maxlength="500" rows="3" required placeholder="What should he look for? For example: check each claim against its evidence." aria-label="What should he look for?">${esc(p.details)}</textarea><div class="persona-form-acts"><button type="submit" class="btn primary sm">Save</button><button type="button" class="btn plain sm" data-persona-act="cancel">Cancel</button>${p.id ? '<button type="button" class="btn plain sm danger-text" data-persona-act="delete">Delete</button>' : ''}</div></form>`;
+  const long = Array.from(p.details.trim()).length > MARGIN_INSTRUCTIONS_READS;
+  return `<form class="persona-form" data-read-field data-persona-form="${esc(p.id)}"><div class="persona-tiles" role="radiogroup" aria-label="Icon">${icons}</div><input class="set-input" name="name" required placeholder="Name" aria-label="Name" value="${esc(p.name)}"><textarea class="set-input" name="says" data-reads="${MARGIN_INSTRUCTIONS_READS}" rows="3" required placeholder="What should he look for? For example: check each claim against its evidence." aria-label="What should he look for?">${esc(p.details)}</textarea><p class="hint" data-read-hint role="status"${long ? '' : ' hidden'}>Felix reads the first ${MARGIN_INSTRUCTIONS_READS} characters of this.</p><div class="persona-form-acts"><button type="submit" class="btn primary sm">Save</button><button type="button" class="btn plain sm" data-persona-act="cancel">Cancel</button>${p.id ? '<button type="button" class="btn plain sm danger-text" data-persona-act="delete">Delete</button>' : ''}</div></form>`;
 }
 
 function felixPersonaCard(view) {

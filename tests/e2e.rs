@@ -92,14 +92,6 @@ fn describe(out: &Output) -> String {
     )
 }
 
-fn make_executable(path: &Path) {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
-}
-
 // ── the basics ──────────────────────────────────────────────────────────────
 
 // ── notes ───────────────────────────────────────────────────────────────────
@@ -123,118 +115,18 @@ impl Retrying for Command {
     }
 }
 
-fn tripwire(leo: &Leo) -> (PathBuf, PathBuf) {
-    let ran = leo.home.path().join("installer-ran");
-    let script = leo.home.path().join("tripwire.sh");
-    std::fs::write(&script, format!("#!/bin/sh\nenv > '{}'\n", ran.display())).unwrap();
-    (script, ran)
-}
-
 #[test]
-fn update_does_nothing_when_already_on_the_latest_version() {
+fn the_update_command_is_gone() {
     let leo = Leo::new();
     let exe = leo.installed();
-    let (script, ran) = tripwire(&leo);
-    let out = leo
-        .cmd_at(&exe, &["update"])
-        .env("LEO_UPDATE_SCRIPT", &script)
-        .env("LEO_LATEST_RELEASE", env!("CARGO_PKG_VERSION"))
-        .output_retrying();
-    let said = String::from_utf8_lossy(&out.stdout);
-    assert!(out.status.success(), "{}", describe(&out));
-    assert!(said.contains("latest"), "{said}");
-    assert!(!ran.exists(), "downloaded anyway");
-}
-
-#[test]
-fn update_installs_when_a_newer_version_is_out_or_when_forced() {
-    let leo = Leo::new();
-    let exe = leo.installed();
-    let (script, ran) = tripwire(&leo);
-    let newer = leo
-        .cmd_at(&exe, &["update"])
-        .env_remove("LEO_INSTALL_NO_MODEL")
-        .env("LEO_INSTALL_MODEL_URL", "file:///nonexistent")
-        .env("LEO_UPDATE_SCRIPT", &script)
-        .env("LEO_LATEST_RELEASE", "999.0.0")
-        .output_retrying();
-    assert!(newer.status.success(), "{}", describe(&newer));
-    assert!(String::from_utf8_lossy(&newer.stdout).contains("999.0.0"));
-    assert!(ran.exists(), "did not install the newer version");
-    let installer_env = std::fs::read_to_string(&ran).unwrap();
+    let out = leo.cmd_at(&exe, &["update"]).output_retrying();
+    assert_eq!(out.status.code(), Some(2), "{}", describe(&out));
     assert!(
-        !installer_env.contains("LEO_INSTALL_SKIP_MODEL"),
-        "the installer was told to skip the speech model"
+        String::from_utf8_lossy(&out.stderr).contains("update"),
+        "{}",
+        describe(&out)
     );
-    let said = String::from_utf8_lossy(&newer.stdout);
-    assert!(
-        !said.contains("speech model"),
-        "the old leo checked the model instead of leaving it to the new installer:\n{said}"
-    );
-
-    std::fs::remove_file(&ran).unwrap();
-    leo.cmd_at(&exe, &["update", "--force"])
-        .env("LEO_UPDATE_SCRIPT", &script)
-        .env("LEO_LATEST_RELEASE", env!("CARGO_PKG_VERSION"))
-        .output_retrying();
-    assert!(ran.exists(), "--force did not reinstall");
-}
-
-fn sha256_of(path: &Path) -> String {
-    let run = |program: &str, args: &[&str]| {
-        Command::new(program)
-            .args(args)
-            .arg(path)
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
-    };
-    run("shasum", &["-a", "256"])
-        .or_else(|| run("sha256sum", &[]))
-        .expect("no sha256 tool")
-        .split_whitespace()
-        .next()
-        .unwrap()
-        .to_string()
-}
-
-#[test]
-fn update_fetches_the_model_that_finds_notes_by_meaning_once() {
-    let leo = Leo::new();
-    let exe = leo.installed();
-    let (script, ran) = tripwire(&leo);
-    let source = leo.home.path().join("meaning-source");
-    std::fs::create_dir_all(&source).unwrap();
-    std::fs::write(source.join("config.json"), b"{}").unwrap();
-    let manifest = format!("config.json={}", sha256_of(&source.join("config.json")));
-    std::fs::write(
-        leo.home.path().join("speech-model.json"),
-        r#"{"id":"fixture-unknown-model","language":"auto"}"#,
-    )
-    .unwrap();
-    let update = || {
-        leo.cmd_at(&exe, &["update"])
-            .env_remove("LEO_NO_MEANING_MODEL")
-            .env_remove("LEO_INSTALL_NO_MODEL")
-            .env("LEO_MEANING_URL", format!("file://{}", source.display()))
-            .env("LEO_MEANING_MANIFEST", &manifest)
-            .env("LEO_UPDATE_SCRIPT", &script)
-            .env("LEO_LATEST_RELEASE", env!("CARGO_PKG_VERSION"))
-            .output_retrying()
-    };
-    let out = update();
-    assert!(out.status.success(), "{}", describe(&out));
-    let said = String::from_utf8_lossy(&out.stdout);
-    assert!(said.contains("finds notes by meaning"), "{said}");
-    assert!(leo
-        .home
-        .path()
-        .join("models/bge-small-en-v1.5/config.json")
-        .is_file());
-    let again = update();
-    assert!(!String::from_utf8_lossy(&again.stdout).contains("by meaning"));
-    assert!(!ran.exists());
+    assert!(exe.exists());
 }
 
 fn installer_block(dir: &Path) -> String {
@@ -255,9 +147,22 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         "serve-token",
         "update-check.json",
         "recent.json",
+        ".manual-installed",
         ".env",
+        "keep.json",
+        "ui-prefs.json",
+        "calendars.json",
+        "usage.json",
     ] {
         std::fs::write(home.join(made), "x").unwrap();
+    }
+    let belongs = [
+        "attachments/note-k0001/source.pdf",
+        "recording-sources/note-k0001/source.json",
+    ];
+    for kept in belongs {
+        std::fs::create_dir_all(home.join(kept).parent().unwrap()).unwrap();
+        std::fs::write(home.join(kept), "kept").unwrap();
     }
     std::fs::create_dir_all(home.join(".leo/models")).unwrap();
     std::fs::write(home.join(".leo/models/ggml-base.en.bin"), "model").unwrap();
@@ -278,8 +183,15 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         ".leo",
         "models",
         ".manual-installed",
+        "keep.json",
+        "ui-prefs.json",
+        "calendars.json",
+        "usage.json",
     ] {
         assert!(!home.join(made).exists(), "{made} is still there");
+    }
+    for kept in belongs {
+        assert!(home.join(kept).is_file(), "{kept} went too");
     }
     assert!(
         home.join("my-own-file.txt").exists(),
@@ -290,6 +202,42 @@ fn uninstall_removes_everything_leo_made_except_the_notes() {
         "notes went too"
     );
     assert!(home.join("notes").is_dir());
+}
+
+#[test]
+fn a_kept_notes_failed_recording_reopens_after_uninstall() {
+    use leo_services::session::{Manifest, Session};
+    let leo = Leo::new();
+    leo.note("Kept", "---\nid: note-k0001\ntitle: Kept\n---\nKept\n");
+    let root = leo.home.path().join("recordings");
+    let recording = |saved: bool, note: Option<&str>| {
+        let mut manifest = Manifest::new(None, None, "", false);
+        manifest.saved = saved;
+        manifest.note = note.map(String::from);
+        let dir = Session::create(&root, manifest).unwrap().dir;
+        std::fs::write(dir.join("seg-00001.wav"), "audio").unwrap();
+        dir
+    };
+    let owned = recording(true, Some("note-k0001"));
+    let combined = recording(true, Some("note-k0001"));
+    let held = recording(true, Some("note-absent"));
+    let unfinished = recording(false, None);
+    let exe = leo.installed();
+
+    let out = leo.cmd_at(&exe, &["uninstall", "--yes"]).output_retrying();
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{}", describe(&out));
+    assert!(
+        said.contains("Kept 3 saved recordings and 1 unfinished recording not yet saved as notes, in ~/recordings."),
+        "{said}"
+    );
+    for dir in [owned, combined, held, unfinished] {
+        assert!(Session::open(&dir).is_ok(), "{dir:?} went");
+        assert!(
+            dir.join("seg-00001.wav").is_file(),
+            "{dir:?} lost its audio"
+        );
+    }
 }
 
 #[test]
@@ -333,22 +281,6 @@ fn uninstall_asks_first() {
         "{}",
         describe(&out)
     );
-}
-
-#[test]
-fn a_failed_installer_download_cannot_report_a_successful_update() {
-    let leo = Leo::new();
-    let exe = leo.installed();
-    let curl = leo.bin.join("curl");
-    std::fs::write(&curl, "#!/bin/sh\nexit 7\n").unwrap();
-    make_executable(&curl);
-    let out = leo.cmd_at(&exe, &["update", "--force"]).output_retrying();
-    assert!(
-        !out.status.success(),
-        "a failed download reported success: {}",
-        describe(&out)
-    );
-    assert!(exe.exists());
 }
 
 #[test]

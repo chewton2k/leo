@@ -111,6 +111,17 @@ async function dropFiles(page, selector, files) {
   await page.dispatchEvent(selector, 'drop', { dataTransfer: data });
 }
 
+async function fakeFileSends(page) {
+  const puts = [];
+  await page.route('**/api/import/files/**', async (route) => {
+    const request = route.request();
+    const parts = new URL(request.url()).pathname.split('/');
+    puts.push({ method: request.method(), upload: parts.at(-2), item: parts.at(-1), name: new URL(request.url()).searchParams.get('name'), body: request.postDataBuffer() });
+    await route.fulfill({ status: 204 });
+  });
+  return puts;
+}
+
 async function openNote(page, title) {
   const response = await page.request.post('/api/notes', { data: { title, body: 'Original sentence' } });
   expect(response.status()).toBe(201);
@@ -741,8 +752,8 @@ test.describe('drag and drop', () => {
     await expect(page.locator('.toast')).toContainText(`Moved ${b} into ${a}`);
     expect(await where()).toBe(`${a}/${b}`);
     await expect(page.locator(`#side .side-row[data-action="open-folder"][data-dir="${b}"]`)).toHaveCount(0);
-    const inside = await (await page.request.get(`/api/dirs?parent=${a}`)).json();
-    expect(inside.map((d) => d.name)).toEqual([b]);
+    const folders = await (await page.request.get('/api/folders')).json();
+    expect(folders.map((d) => d.name).filter((name) => name.startsWith(`${a}/`))).toEqual([`${a}/${b}`]);
     await page.locator('.toast button').click();
     await expect(page.locator(`#side .side-row[data-action="open-folder"][data-dir="${b}"]`)).toBeVisible();
     expect(await where()).toBe(b);
@@ -865,6 +876,38 @@ test('search shows placeholder cards while it waits', async ({ page }) => {
   await expect(page.locator('#app .section-title')).toHaveText('Searching…');
   await expect(page.locator('#app .cards .skeleton')).toHaveCount(3);
   await expect(page.locator('#app .cards .skeleton')).toHaveCount(0);
+});
+
+test('search reads a page at a time and Show more asks for the next page', async ({ page }) => {
+  test.slow();
+  const word = `zzpaged${Date.now().toString(36)}${test.info().project.name.replace(/\W/g, '')}`;
+  const ids = [];
+  for (let n = 0; n < 130; n++) {
+    const note = await (await page.request.post('/api/notes', { data: { title: `${word} ${n}`, body: `${word} note ${n}` } })).json();
+    ids.push(note.id);
+  }
+  await page.addInitScript(() => { delete window.IntersectionObserver; });
+  const asked = [];
+  page.on('request', (request) => { if (request.url().includes('/api/search')) asked.push(new URL(request.url()).searchParams); });
+  try {
+    await page.goto(`/#/search/${word}`);
+    const cards = page.locator('#app .cards .card');
+    await expect(cards).toHaveCount(60);
+    await expect(page.locator('#search-count')).toHaveText('60 notes so far');
+    const more = page.getByRole('button', { name: 'Show more' });
+    await more.click();
+    await expect(cards).toHaveCount(120);
+    await expect(page.locator('#search-count')).toHaveText('120 notes so far');
+    await more.click();
+    await expect(cards).toHaveCount(130);
+    await expect(page.locator('#search-count')).toHaveText('130 notes');
+    await expect(more).toHaveCount(0);
+    await expect(page.locator('#app')).not.toContainText('first 300');
+    expect(asked.map((params) => params.get('offset'))).toEqual(['0', '60', '120']);
+    expect(asked.every((params) => params.get('limit') === '61')).toBe(true);
+  } finally {
+    for (const id of ids) await page.request.delete(`/api/notes/${id}`);
+  }
 });
 
 test('nothing found offers Felix and a new note', async ({ page }) => {
@@ -998,8 +1041,10 @@ test.describe('Felix', () => {
     await check.locator('.quiz-sure-range').fill('30');
     await expect(check.locator('.quiz-sure-pct')).toHaveText('30%');
     await expect(check.locator('[data-chat="quiz-think"]')).toHaveAttribute('role', 'switch');
+    const thinkSwitch = await check.locator('[data-chat="quiz-think"]').elementHandle();
     await check.locator('[data-chat="quiz-think"]').click();
     await expect(check.locator('.quiz-thinking')).toBeFocused();
+    expect(await thinkSwitch.evaluate((el) => el.isConnected && el.checked), 'the switch itself moves, it is not redrawn').toBe(true);
     await page.keyboard.type('fairness maybe');
     await check.locator('.quiz-input').fill('so nobody waits forever');
     await check.locator('[data-chat="quiz-check"]').click();
@@ -1704,7 +1749,7 @@ test.describe('Felix', () => {
     const held = (await chat.boundingBox()).width;
     const cdp = await page.context().newCDPSession(page);
     for (const dx of [80, 120, 160]) await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: x - dx, y: 300, button: 'none', buttons: 0 });
-    await expect(page.locator('body')).not.toHaveClass(/chat-resizing/);
+    await expect(page.locator('body')).not.toHaveClass(/pane-resizing/);
     expect(Math.abs((await chat.boundingBox()).width - held)).toBeLessThan(2);
     expect(Math.abs(Number(await page.evaluate(() => localStorage.getItem('leo-chat-width'))) - held)).toBeLessThan(2);
   });
@@ -1745,8 +1790,9 @@ test.describe('Felix', () => {
   test('a message sent while a file is still being read waits for it, with Felix thinking', async ({ page }) => {
     let release;
     const held = new Promise((resolve) => { release = resolve; });
-    await page.route('**/api/chats/*/files', async (route) => {
-      if (route.request().method() !== 'POST') return route.fulfill({ json: [] });
+    await page.route(/\/api\/chats\/[^/]+\/files(\/|$)/, async (route) => {
+      if (route.request().method() === 'DELETE') return route.fallback();
+      if (route.request().method() !== 'PUT') return route.fulfill({ json: [] });
       await held;
       return route.fulfill({ status: 201, json: { id: 'doc-slow-1', name: 'slow.pdf', chars: 30, excerpt: 'Week 4: Graphs' } });
     });
@@ -2001,6 +2047,81 @@ test.describe('pictures', () => {
     await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.naturalWidth)).toBe(320);
   });
 
+  test('copying a selection with a picture puts the picture on the clipboard as a data url, and one without puts text only', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Copied ${test.info().project.name}`, body: 'Before the picture.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Before the picture.');
+    await pastePicture(page, '#doc');
+    const img = page.locator('#doc img.note-img');
+    await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
+    const copy = (selector) => page.evaluate((target) => {
+      getSelection().selectAllChildren(document.querySelector(target));
+      const data = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return { text: data.getData('text/plain'), html: data.getData('text/html') };
+    }, selector);
+    const both = await copy('#doc');
+    expect(both.text).toMatch(/!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)/);
+    expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
+    expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
+    const plain = await copy('#doc .blk:first-child');
+    expect(plain.text).toBe('Before the picture.');
+    expect(plain.html).toBe('');
+  });
+
+  test('the transcript pages through a long recording, finds a phrase and saves only the fixed line', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Lecture ${test.info().project.name}`, body: 'Notes from a recording.' } })).json();
+    const folder = path.join(process.env.LEO_BROWSER_HOME, 'recording-sources', note.id);
+    fs.mkdirSync(folder, { recursive: true });
+    const filler = 'lorem ipsum dolor sit amet '.repeat(2000);
+    const passages = Array.from({ length: 12 }, (_, i) => ({
+      start_secs: i * 60,
+      end_secs: i * 60 + 59,
+      text: `Passage ${i + 1} ${i === 11 ? 'about the zebrafish ' : ''}${filler}`.slice(0, 50000),
+      speaker: '',
+    }));
+    fs.writeFileSync(path.join(folder, 'browser-recording-1.json'), JSON.stringify({ id: 'browser-recording-1', started: '2026-11-03T09:00:00Z', passages, points: [], context: '', wants: '', warnings: [], trace: [] }));
+    await page.goto(`/#/n/${note.id}`);
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Show transcript' }).click();
+    const sheet = page.locator('.source-sheet');
+    await expect(sheet.locator('h3')).toHaveText('Transcript');
+    const rows = sheet.locator('.source-text');
+    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    const first = await rows.count();
+    expect(first, 'the first page holds part of the recording').toBeGreaterThan(0);
+    expect(first).toBeLessThan(12);
+    await expect(sheet.locator('[data-action="source-earlier"]')).toHaveCount(0);
+    await sheet.locator('[data-action="source-later"]').click();
+    await expect(rows.first()).toHaveValue(new RegExp(`^Passage ${first + 1} `));
+    expect(first + (await rows.count()), 'the two pages hold every passage once').toBe(12);
+    await expect(sheet.locator('[data-action="source-later"]')).toHaveCount(0);
+    await sheet.locator('[data-action="source-earlier"]').click();
+    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    await sheet.locator('#source-query').fill('zebrafish');
+    const match = sheet.locator('.source-match');
+    await expect(match).toHaveCount(1);
+    await match.click();
+    const fixed = rows.last();
+    await expect(fixed).toHaveValue(/Passage 12 about the zebrafish/);
+    await expect(sheet.locator('[data-action="source-earlier"]')).toBeVisible();
+    await fixed.evaluate((box) => {
+      box.value = `${box.value} Fixed.`;
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/api/notes/${note.id}/recording`));
+    await sheet.locator('[data-action="source-save"]').click();
+    const body = (await sent).postDataJSON();
+    expect(body.source).toBe('browser-recording-1');
+    expect(body.changes, 'only the fixed line is sent').toHaveLength(1);
+    expect(body.changes[0].kind).toBe('passage');
+    await expect(page.locator('.toast')).toContainText('Saved your fixes');
+    const after = await (await page.request.get(`/api/notes/${note.id}/recording?q=zebrafish`)).json();
+    expect(after.matches).toHaveLength(1);
+    expect(after.matches[0].passage.text.endsWith(' Fixed.')).toBe(true);
+    expect(after.list).toHaveLength(1);
+  });
+
   test('the Picture button adds a picture from the device', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Chosen ${test.info().project.name}`, body: 'x' } })).json();
     await page.goto(`/#/n/${note.id}`);
@@ -2027,9 +2148,11 @@ test.describe('pictures', () => {
     const uploaded = [];
     let finishReading;
     const reading = new Promise(resolve => { finishReading = resolve; });
-    await page.route('**/api/chats/*/files', async (route) => {
-      if (route.request().method() !== 'POST') return route.fulfill({ json: [] });
-      const body = route.request().postDataJSON();
+    await page.route(/\/api\/chats\/[^/]+\/files(\/|$)/, async (route) => {
+      if (route.request().method() === 'DELETE') return route.fallback();
+      if (route.request().method() !== 'PUT') return route.fulfill({ json: [] });
+      const url = new URL(route.request().url());
+      const body = { name: decodeURIComponent(url.pathname.split('/').pop()), type: url.searchParams.get('type'), data: route.request().postDataBuffer() };
       uploaded.push(body);
       await reading;
       return route.fulfill({ status: 201, json: { id: 'doc-pic-1', name: body.name, chars: 40 } });
@@ -2054,7 +2177,7 @@ test.describe('pictures', () => {
     await expect(chip.locator('.file-peek img')).toBeVisible();
     expect(uploaded).toHaveLength(1);
     expect(uploaded[0]).toMatchObject({ name: 'pasted-1.jpg', type: 'image/jpeg' });
-    expect(Buffer.from(uploaded[0].data, 'base64').subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
+    expect(uploaded[0].data.subarray(0, 3)).toEqual(Buffer.from([0xff, 0xd8, 0xff]));
     await page.locator('#chat-input').fill('what is this?');
     await page.locator('#chat-input').press('Enter');
     await expect(page.locator('#chat .msg.leo').last()).toContainText('That diagram shows a heap.');
@@ -2277,6 +2400,26 @@ test.describe('trash', () => {
     await expect(row(5)).toHaveCount(0);
     expect(await mine()).toEqual([]);
   });
+
+  test('an unreadable trashed file shows with Delete for good only', async ({ page }) => {
+    const name = `Broken ${test.info().project.name}`;
+    const trash = path.join(process.env.LEO_BROWSER_HOME, 'notes', '.trash');
+    fs.mkdirSync(trash, { recursive: true });
+    fs.writeFileSync(path.join(trash, `${name}.md`), '---\ntitle: [\n---\nx');
+    await page.goto('/#/trash');
+    const row = page.locator('.trash-row', { hasText: `${name}.md` });
+    await expect(row).toContainText('leo cannot read this file');
+    await expect(row.locator('[data-action="restore"]')).toHaveCount(0);
+    await page.locator('[data-action="trash-select"]').click();
+    await row.click();
+    await expect(page.locator('[data-action="trash-restore-picked"]')).toBeDisabled();
+    await expect(page.locator('[data-action="trash-delete-picked"]')).toBeEnabled();
+    await page.locator('[data-action="trash-delete-picked"]').click();
+    await page.locator('[data-action="trash-delete-now"]').click();
+    await expect(page.locator('.toast')).toContainText('Deleted 1 note for good');
+    await expect(row).toHaveCount(0);
+    expect(fs.existsSync(path.join(trash, `${name}.md`))).toBe(false);
+  });
 });
 
 test.describe('export and this browser', () => {
@@ -2420,6 +2563,7 @@ test.describe('uploads', () => {
     const made = await (await page.request.post('/api/notes', { data: { title: 'Lecture 9: Sorting', body: '## Merge sort\n- divide and conquer' } })).json();
     let sent = null;
     let polls = 0;
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent = route.request().postDataJSON();
       await route.fulfill({ status: 202, json: { id: 'job-1' } });
@@ -2439,7 +2583,12 @@ test.describe('uploads', () => {
     expect(sent.title).toBe('Sorting');
     expect(sent.wants).toBe('The algorithm, then the code, explained step by step');
     expect(sent.files[0].name).toBe('sorting.txt');
-    expect(Buffer.from(sent.files[0].data, 'base64').toString()).toBe('Merge sort splits the list in half.');
+    expect(puts.map((p) => p.method)).toEqual(['PUT']);
+    expect(puts[0].name).toBe('sorting.txt');
+    expect(puts[0].body.toString()).toBe('Merge sort splits the list in half.');
+    expect(sent.upload).toBe(puts[0].upload);
+    expect(sent.files[0].item).toBe(puts[0].item);
+    expect(sent.files[0], 'the file travels in its own request, never in the JSON').not.toHaveProperty('data');
   });
 
   test('files dropped on an open note can be added to it, or still make a new note', async ({ page }) => {
@@ -2447,13 +2596,19 @@ test.describe('uploads', () => {
     const note = await (await page.request.post('/api/notes', { data: { title: `Week 3 ${Date.now().toString(36)}`, body: 'My own notes on heaps.' } })).json();
     let sent = null;
     let polls = 0;
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent = route.request().postDataJSON();
       await route.fulfill({ status: 202, json: { id: 'job-into' } });
     });
+    let inserted = null;
+    await page.route('**/api/notes/*/insert', async (route) => {
+      inserted = route.request().postDataJSON();
+      await route.continue({ postData: JSON.stringify({ text: '## Heap proofs\n\nSift down keeps the order.', line: inserted.line, base: inserted.base }) });
+    });
     await page.route('**/api/import/job-into', (route) => {
       polls += 1;
-      route.fulfill({ json: polls < 2 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: note.id, section: '## Heap proofs\n\nSift down keeps the order.' } });
+      route.fulfill({ json: polls < 2 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: note.id, section_chars: 36 } });
     });
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#doc')).toContainText('My own notes on heaps.');
@@ -2477,7 +2632,12 @@ test.describe('uploads', () => {
     await expect(page.locator('#doc')).toContainText('Sift down keeps the order.');
     await expect(page).toHaveURL(new RegExp(`#/n/${note.id}$`));
     expect(sent).toMatchObject({ into: note.id, each: false, wants: 'just the proofs', title: null });
+    expect(inserted, 'the page names the upload and sends no text').toMatchObject({ job: 'job-into', line: null });
+    expect(inserted.text).toBeUndefined();
     expect(sent.files.map((f) => f.name)).toEqual(['proofs.pdf', 'board.png']);
+    expect(sent.files.map((f) => f.item).sort()).toEqual(puts.map((p) => p.item).sort());
+    expect(puts.find((p) => p.name === 'proofs.pdf').body.toString()).toBe('%PDF fake');
+    expect(new Set(puts.map((p) => p.upload))).toEqual(new Set([sent.upload]));
     const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
     await expect.poll(async () => (await body()).trim()).toBe('My own notes on heaps.\n\n## Heap proofs\n\nSift down keeps the order.');
     await page.locator('.toast button', { hasText: 'Undo' }).click();
@@ -2490,6 +2650,7 @@ test.describe('uploads', () => {
     const notes = [];
     for (const n of [1, 2]) notes.push(await (await page.request.post('/api/notes', { data: { title: `Lecture ${n}`, body: 'x', directory: dir } })).json());
     const sent = [];
+    const puts = await fakeFileSends(page);
     await page.route('**/api/import', async (route) => {
       sent.push(route.request().postDataJSON());
       await route.fulfill({ status: 202, json: { id: 'job-each' } });
@@ -2521,6 +2682,8 @@ test.describe('uploads', () => {
     expect(sent[0].each).toBe(true);
     expect(sent[0].title).toBe(null);
     expect(sent[0].files.map((f) => f.name)).toEqual(['lecture 1.txt', 'lecture 2.txt']);
+    expect(puts.map((p) => p.body.toString()).sort()).toEqual(['One', 'Two']);
+    expect(sent[0].files.map((f) => f.item)).toEqual(['lecture 1.txt', 'lecture 2.txt'].map((name) => puts.find((p) => p.name === name).item));
     for (const n of notes) await page.request.delete(`/api/notes/${n.id}`);
   });
 
@@ -2528,6 +2691,7 @@ test.describe('uploads', () => {
     const title = `Uploaded later ${test.info().project.name}`;
     let polls = 0;
     let made = null;
+    await fakeFileSends(page);
     await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-late' } }));
     await page.route('**/api/import/job-late', async (route) => {
       polls += 1;
@@ -2548,6 +2712,7 @@ test.describe('uploads', () => {
   });
 
   test('a failed upload says why and offers to try again', async ({ page }) => {
+    await fakeFileSends(page);
     await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-2' } }));
     await page.route('**/api/import/job-2', (route) => route.fulfill({ json: { state: 'failed', step: '', done: 0, total: 1, error: 'qwen3:8b cannot read images' } }));
     await page.goto('/');
@@ -2556,6 +2721,25 @@ test.describe('uploads', () => {
     await page.locator('#upload-go').click();
     await expect(page.locator('.upload-error')).toContainText('cannot read images');
     await expect(page.locator(':is(.sheet, .popup-menu) [data-action="upload"]')).toBeVisible();
+  });
+
+  test('an upload that has to wait for its turn says so, then runs and opens its note', async ({ page }) => {
+    const made = await (await page.request.post('/api/notes', { data: { title: `Waited ${test.info().project.name} ${Date.now().toString(36)}`, body: 'From the upload.' } })).json();
+    await fakeFileSends(page);
+    let polls = 0;
+    await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-wait' } }));
+    await page.route('**/api/import/job-wait', (route) => {
+      polls += 1;
+      route.fulfill({ json: polls < 3 ? { state: 'waiting', step: 'Uploading', done: 0, total: 1 } : polls < 4 ? { state: 'working', step: 'Writing the note', done: 0, total: 1 } : { state: 'done', step: '', done: 1, total: 1, note: made.id } });
+    });
+    await page.goto('/');
+    await control(page, 'upload').click();
+    await page.locator('#upload-input').setInputFiles({ name: 'queued.txt', mimeType: 'text/plain', buffer: Buffer.from('From the upload.') });
+    await page.locator('#upload-go').click();
+    const progress = page.locator('.upload-working #upload-progress');
+    await expect(progress).toContainText('Waiting for another upload to finish…');
+    await expect(progress).toContainText('Writing the note', { timeout: 8000 });
+    await expect(page).toHaveURL(new RegExp(`#/n/${made.id}$`), { timeout: 8000 });
   });
 });
 
@@ -2600,8 +2784,8 @@ test.describe('recording', () => {
     await page.goto('/');
     await control(page, 'record').click();
     await expect(page).toHaveURL(/#\/record$/);
-    await expect(page.locator('.rec-kind')).toHaveCount(3);
-    await expect(page.locator('.rec-kind b')).toHaveText(['Microphone', 'Screen', 'Call']);
+    await expect(page.locator('.rec-kinds .choice-pick')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
     await page.locator('#rec-title').fill('Graphs');
     await page.locator('#rec-wants').fill('Focus on BFS');
     await page.locator('[data-action="rec-start"]').click();
@@ -2692,7 +2876,7 @@ test.describe('recording', () => {
     await page.evaluate(() => {
       navigator.mediaDevices.getDisplayMedia = async () => { throw new Error('Browser capture must stay closed'); };
     });
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.source).toBe('screen');
@@ -2706,7 +2890,7 @@ test.describe('recording', () => {
     seen.source = 'screen';
     seen.levels = Array(12).fill(0.1);
     await page.goto('/#/record');
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('#rec-wave')).toBeVisible();
     await expect(page.locator('#rec-hear')).toHaveText('Hearing sound');
@@ -2721,7 +2905,7 @@ test.describe('recording', () => {
       ? { status:400, json:{error:'Allow Leo to record computer sound in System Settings, then try again.'} }
       : { json:{available:true,local:true,job:null} }));
     await page.goto('/#/record');
-    await page.locator('.rec-kind', { hasText: 'Screen' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('.toast.bad')).toContainText('Allow Leo to record computer sound');
     await expect(page.locator('[data-action="rec-start"]')).toBeEnabled();
@@ -2731,12 +2915,12 @@ test.describe('recording', () => {
   test('recording always uses this computer for microphone screen and call', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     await page.goto('/#/record');
-    await expect(page.locator('.rec-kind b')).toHaveText(['Microphone', 'Screen', 'Call']);
-    await expect(page.locator('.rec-kind', { hasText: 'Screen' })).toContainText('Records what this computer plays');
-    await expect(page.locator('.rec-kind .choice-diagram > svg')).toHaveCount(3);
+    await expect(page.locator('.rec-kinds .choice-title')).toHaveText(['Microphone', 'Screen', 'Call']);
+    await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
+    await expect(page.locator('.rec-kinds .choice-diagram > svg')).toHaveCount(3);
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
     await expect(page.locator('.rec-card .note-fields #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside the shared field group').toBeVisible();
-    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.source).toBe('nativecall');
@@ -2756,9 +2940,9 @@ test.describe('recording', () => {
     await page.reload();
     await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
     await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
-    await page.locator('.rec-kind', { hasText: 'Call' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
-    await page.locator('.rec-kind', { hasText: 'Microphone' }).click();
+    await page.locator('.rec-kinds .choice-pick', { hasText: 'Microphone' }).click();
     await expect(page.locator('#rec-speakers-box')).toBeVisible();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
@@ -3134,7 +3318,7 @@ test.describe('the kinds of bugs that reached people before', () => {
     await call('POST', '/api/dirs/move', { from: `contract-moved-${tag}`, into: `contract-${tag}` });
     await call('POST', `/api/notes/${made.id}/suggestion`, { find: 'new', replace: 'newer' });
     await call('PUT', `/api/chats/contract-${tag}`, { title: 'Contract', messages: [{ role: 'user', text: 'hi' }] });
-    for (const url of ['/api/notes', '/api/folders', '/api/dirs', `/api/search?q=contract`, '/api/trash', '/api/chats', `/api/chats/contract-${tag}`, '/api/review', '/api/activity', '/api/settings', '/api/keep', '/api/speech', '/api/record']) {
+    for (const url of ['/api/notes', '/api/folders', `/api/search?q=contract`, '/api/trash', '/api/chats', `/api/chats/contract-${tag}`, '/api/review', '/api/activity', '/api/settings', '/api/keep', '/api/speech', '/api/record']) {
       await call('GET', url);
     }
     const trashed = json(await call('POST', '/api/trash/move', { notes: [made.id], dirs: [] }));
@@ -3149,6 +3333,8 @@ test.describe('the kinds of bugs that reached people before', () => {
     await call('GET', '/api/boards');
     await call('GET', `/api/boards/${board.id}`);
     await call('DELETE', `/api/cards/${card.id}`);
+    await call('DELETE', `/api/boards/${board.id}`);
+    await call('POST', `/api/boards/${board.id}/undelete`);
     const gone = json(await call('DELETE', `/api/boards/${board.id}`));
     await call('POST', '/api/boards/restore', gone);
     await call('DELETE', `/api/boards/${board.id}`);
@@ -3688,7 +3874,7 @@ test('dropping one note on another combines them in the background with progress
   const a = await (await page.request.post('/api/notes', { data: { title: `BFS ${tag}`, body: 'BFS uses a queue.', directory: folder } })).json();
   const b = await (await page.request.post('/api/notes', { data: { title: `Graphs ${tag}`, body: 'A graph has nodes and edges.', directory: folder } })).json();
   const versions = async (id) => (await (await page.request.get(`/api/notes/${id}`)).json()).version;
-  const job = { id: `job-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working' };
+  const job = { id: `job-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working', parts: 3 };
   let percent = 30;
   let forgotten = false;
   await page.route(`**/api/notes/${b.id}/combine`, (route) => {
@@ -3732,6 +3918,69 @@ test('dropping one note on another combines them in the background with progress
   expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toBe('A graph has nodes and edges.');
 });
 
+test('a combine of many requests names the count, shows its part, and Stop deletes it and says neither note changed', async ({ page }) => {
+  const tag = Date.now().toString(36);
+  const a = await (await page.request.post('/api/notes', { data: { title: `Long A ${tag}`, body: 'First note.' } })).json();
+  const b = await (await page.request.post('/api/notes', { data: { title: `Long B ${tag}`, body: 'Second note.' } })).json();
+  const job = { id: `long-${tag}`, into: b.id, with: a.id, into_title: b.title, with_title: a.title, state: 'working', parts: 313 };
+  let done = 0;
+  let stopped = false;
+  await page.route(`**/api/notes/${b.id}/combine`, (route) => route.fulfill({ json: job }));
+  await page.route(`**/api/combines/${job.id}`, (route) => {
+    if (route.request().method() === 'DELETE') { stopped = true; return route.fulfill({ status: 204 }); }
+    return route.fulfill({ json: stopped ? { error: 'gone' } : { ...job, done }, status: stopped ? 404 : 200 });
+  });
+  await page.route('**/api/activity', (route) => route.fulfill({ json: { tasks: [] } }));
+  await page.goto('/#/search/' + tag);
+  await dragBetween(page, page.locator(`.card[data-id="${a.id}"]`), page.locator(`.card[data-id="${b.id}"]`));
+  await page.locator('.sheet #combine-go').click();
+  const sheet = page.locator('.sheet');
+  await expect(sheet.locator('h3')).toHaveText('This combine takes 313 requests to the AI');
+  await expect(sheet.locator('#combine-part')).toHaveText('Part 1 of 313');
+  done = 41;
+  await expect(sheet.locator('#combine-part')).toHaveText('Part 42 of 313', { timeout: 6000 });
+  await sheet.locator('#combine-stop').click();
+  await expect(sheet).toHaveCount(0);
+  await expect(page.locator('.toast')).toHaveText('Combining was stopped. Neither note was changed.');
+  expect(stopped).toBe(true);
+  expect((await (await page.request.get(`/api/notes/${b.id}`)).json()).body).toBe('Second note.');
+  expect((await (await page.request.get(`/api/notes/${a.id}`)).json()).body).toBe('First note.');
+});
+
+test('Combine into… reaches the 51st of many same-titled notes in different folders through Show more', async ({ page }) => {
+  test.skip(test.info().project.name === 'phone', 'the explorer is beside the page on wider screens');
+  const tag = Date.now().toString(36);
+  const title = `Twin ${tag}`;
+  const folders = Array.from({ length: 120 }, (_, i) => `twin-${tag}-${i}`);
+  for (let i = 0; i < folders.length; i += 20) {
+    await Promise.all(folders.slice(i, i + 20).map(async (folder) => {
+      await page.request.post('/api/dirs', { data: { path: folder } });
+      await page.request.post('/api/notes', { data: { title, body: 'x', directory: folder } });
+    }));
+  }
+  const mine = await (await page.request.post('/api/notes', { data: { title: `Mine ${tag}`, body: 'x' } })).json();
+  await page.goto(`/#/n/${mine.id}`);
+  const row = page.locator(`#side .side-note[data-id="${mine.id}"]`);
+  await expect(row).toBeVisible();
+  await row.click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Combine into…' }).click();
+  const picker = page.getByRole('menu', { name: `Combine “${mine.title}” into` });
+  await picker.locator('input').fill(title);
+  const twins = picker.getByRole('menuitem', { name: new RegExp(`^${title} · twin-${tag}-`) });
+  await expect(twins).toHaveCount(50);
+  const more = picker.getByRole('menuitem', { name: 'Show more' });
+  while (await more.count()) {
+    const before = await twins.count();
+    await more.click();
+    await expect(twins).not.toHaveCount(before);
+  }
+  await expect(twins).toHaveCount(120);
+  await picker.getByRole('menuitem', { name: `${title} · twin-${tag}-119`, exact: true }).click();
+  const sheet = page.locator('.scrim:not(.scrim-gone) .sheet');
+  await expect(sheet.locator('h3')).toHaveText('Combine these notes?');
+  await sheet.locator('[data-action="close"]').click();
+});
+
 test('Combine into… in the explorer menu and a “merge” line in Quick Leo pick the other note from a list', async ({ page }) => {
   test.skip(test.info().project.name === 'phone', 'the explorer is beside the page on wider screens');
   const tag = Date.now().toString(36);
@@ -3748,7 +3997,7 @@ test('Combine into… in the explorer menu and a “merge” line in Quick Leo p
   const picker = page.getByRole('menu', { name: `Combine “${a.title}” into` });
   await expect(picker.locator('input')).toBeFocused();
   await picker.locator('input').fill(b.title);
-  await expect(picker.getByRole('menuitem')).toHaveCount(1);
+  await expect(picker.getByRole('menuitem', { name: b.title })).toBeVisible();
   await picker.getByRole('menuitem', { name: b.title }).click();
   const sheet = page.locator('.scrim:not(.scrim-gone) .sheet');
   await expect(sheet.locator('h3')).toHaveText('Combine these notes?');
@@ -5817,14 +6066,14 @@ for (const width of [1280, 390]) {
   test(`Record and Settings keep consistent headers at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 });
     let reference;
-    for (const [route, crumb] of [
-      ['record', 'Record'],
-      ['settings/general', 'Settings / General'],
-      ['settings/keeping', 'Settings / Keeping'],
-      ['settings/trash', 'Settings / Trash'],
+    for (const [route, title] of [
+      ['record', 'Record · leo'],
+      ['settings/general', 'Settings · leo'],
+      ['settings/keeping', 'Keeping · leo'],
+      ['settings/trash', 'Trash · leo'],
     ]) {
       await page.goto('/#/' + route);
-      await expect(page.locator('#crumbs')).toContainText(new RegExp(crumb.replaceAll(' / ', '\\s*/\\s*')));
+      await expect(page).toHaveTitle(title);
       const header = await page.locator('.bar-row').boundingBox();
       if (width < 1000) expect(header.width).toBeLessThanOrEqual(760);
       if (reference) {

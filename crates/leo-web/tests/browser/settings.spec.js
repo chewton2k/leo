@@ -397,14 +397,12 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.getByRole('link',{name:'Keeping',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/keeping');
       await expect(page.getByRole('heading',{level:1,name:'Keeping'})).toBeVisible();
-      await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Keeping');
       await expect(page.locator('select[data-keep]')).toHaveCount(5);
       await expect(page.locator('select[data-keep="upload_days"]')).toHaveValue('90');
       await page.getByRole('link',{name:'Trash',exact:true}).click();
       await expect(page.locator('.settings-nav a[aria-current="page"]')).toHaveAttribute('href','#/settings/trash');
       await expect(page.getByText('Nothing thrown away.',{exact:true})).toBeVisible();
       await expect(page.locator('.empty svg.drawn-trash')).toBeVisible();
-      await expect(page.locator('#crumbs [aria-current="page"]')).toHaveText('Trash');
       expect(await keptNav.evaluate(el=>el.isConnected)).toBe(true);
       await page.setViewportSize({width:620,height:850});
       expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
@@ -412,6 +410,34 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await page.close();
     }
   } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
+
+test("Trash's All box keeps focus when toggled with the keyboard", async ({ page }) => {
+  const web = path.resolve(__dirname, '../../src/web/app');
+  const read = name => fs.readFileSync(path.join(web, name), 'utf8');
+  await page.setContent('<div id="crumbs"></div><div id="app"></div><div id="floating"></div>');
+  await page.addScriptTag({ content: `
+    const app=document.querySelector('#app'), floating=document.querySelector('#floating'), $=selector=>document.querySelector(selector);
+    const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+    const ICON=new Proxy({}, {get:()=>'<svg></svg>'}), DRAWN=ICON, plural=(n,w)=>n+' '+w+(n===1?'':'s'), rel=()=>'now';
+    const chrome=()=>{}, skeleton=()=>'', cascade=()=>{}, pulse=()=>{}, toast=()=>{}, empty=()=>'', confirmSheet=()=>{}, closeSheet=()=>{}, refreshSideTree=async()=>{};
+    const settingsFrame=(section,content)=>content;
+    let seq=0,state={view:'folder'};
+    async function api(url){ if(url==='/api/trash') return [{id:'a',title:'First',directory:'',deleted_at:1,readable:true},{id:'b',title:'Second',directory:'',deleted_at:1,readable:true}]; return null; }
+    ${read('refresh.js')}
+    ${read('trash.js')}
+    document.addEventListener('click',e=>{if(e.target.closest('[data-action="trash-select"]')){state.selecting=!state.selecting;state.picked=new Set();drawTrash();}});
+    window.ready=showTrash();
+  ` });
+  await page.evaluate(() => window.ready);
+  await page.getByRole('button', { name: 'Select', exact: true }).click();
+  const all = page.locator('[data-trash-all]');
+  await all.focus();
+  await page.keyboard.press('Space');
+  await expect(page.getByText('2 selected')).toBeVisible();
+  await expect(all).toBeFocused();
+  await expect(all).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Delete', exact: true })).toBeEnabled();
 });
 
 test('setup groups permissions with live checkmarks, then offers speech models as cards', async ({ browser }, testInfo) => {
@@ -640,7 +666,8 @@ test('Felix activity over 24 hours draws hourly bars and detail for that day', a
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   await page.setContent(`<style>${pageCss()}</style><main id="app"></main>`);
-  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true;` });
+  await page.addScriptTag({ content: read('schedule.js') });
+  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true, S=window.leoSchedule, calLocale=()=>'en-US';` });
   await page.addScriptTag({ content: read('chat.js') });
   await page.addScriptTag({ content: read('app/settings.js').replace(/^(const|let) /gm, 'var ') });
   await page.evaluate(() => {
@@ -668,7 +695,8 @@ test('Felix activity draws gridlines and colours bars by maker', async ({ page }
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
   await page.setContent(`<style>${css}</style><main id="app"></main>`);
-  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true;` });
+  await page.addScriptTag({ content: read('schedule.js') });
+  await page.addScriptTag({ content: `var app=document.querySelector('#app'), esc=t=>String(t), ICON=new Proxy({}, {get:()=>'<svg></svg>'}), svg=p=>'<svg>'+p+'</svg>', segmented=()=>'', stillMotion=()=>true, S=window.leoSchedule, calLocale=()=>'en-US';` });
   await page.addScriptTag({ content: read('chat.js') });
   await page.addScriptTag({ content: read('app/settings.js').replace(/^(const|let) /gm, 'var ') });
   await page.evaluate(() => {

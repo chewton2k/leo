@@ -32,7 +32,6 @@ use windows::Win32::UI::WindowsAndMessaging::{
 const CLASS_NAME: PCWSTR = w!("LeoPasteTxWindow");
 const TIMER_ID: usize = 1;
 const TIMER_INTERVAL_MS: u32 = 25;
-const MAX_FORMAT_BYTES: usize = 64 * 1024 * 1024;
 
 const IMAGE_BITMAP_TYPE: GDI_IMAGE_TYPE = GDI_IMAGE_TYPE(0);
 const LR_CREATEDIBSECTION_FLAG: IMAGE_FLAGS = IMAGE_FLAGS(0x2000);
@@ -340,8 +339,8 @@ unsafe fn snapshot_clipboard(hwnd: HWND, shared: &WinTxShared) -> Result<(), Str
         if format == 0 {
             break;
         }
-        if formats.len() >= 256 || format == CF_OWNERDISPLAY.0 as u32 {
-            return Err("The clipboard cannot be preserved automatically.".into());
+        if formats.len() >= super::MOST_ENTRIES || format == CF_OWNERDISPLAY.0 as u32 {
+            return Err(super::TOO_MANY.into());
         }
         if !preserved_format(format) {
             continue;
@@ -362,8 +361,8 @@ unsafe fn snapshot_clipboard(hwnd: HWND, shared: &WinTxShared) -> Result<(), Str
                 (bitmap.bmWidthBytes.unsigned_abs() as usize)
                     .saturating_mul(bitmap.bmHeight.unsigned_abs() as usize),
             );
-            if total > MAX_FORMAT_BYTES {
-                return Err("The clipboard is too large to preserve.".into());
+            if total > super::MAX_CLIPBOARD_BYTES {
+                return Err(super::TOO_LARGE.into());
             }
             let copy = CopyImage(handle, IMAGE_BITMAP_TYPE, 0, 0, LR_CREATEDIBSECTION_FLAG)
                 .map_err(|_| "The clipboard image could not be preserved.")?;
@@ -375,8 +374,8 @@ unsafe fn snapshot_clipboard(hwnd: HWND, shared: &WinTxShared) -> Result<(), Str
             }
             total = total.saturating_add(GetEnhMetaFileBits(HENHMETAFILE(handle.0), None) as usize);
             let data = SavedData::Enhanced(copy.0 as usize);
-            if total > MAX_FORMAT_BYTES {
-                return Err("The clipboard is too large to preserve.".into());
+            if total > super::MAX_CLIPBOARD_BYTES {
+                return Err(super::TOO_LARGE.into());
             }
             data
         } else if format == CF_PALETTE.0 as u32 {
@@ -411,9 +410,9 @@ unsafe fn snapshot_clipboard(hwnd: HWND, shared: &WinTxShared) -> Result<(), Str
                 return Err("The clipboard drawing could not be preserved.".into());
             }
             total = total.saturating_add(GetMetaFileBitsEx(picture.hMF, 0, None) as usize);
-            if total > MAX_FORMAT_BYTES {
+            if total > super::MAX_CLIPBOARD_BYTES {
                 let _ = DeleteMetaFile(copy);
-                return Err("The clipboard is too large to preserve.".into());
+                return Err(super::TOO_LARGE.into());
             }
             picture.hMF = copy;
             let hg = match GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<METAFILEPICT>()) {
@@ -436,8 +435,8 @@ unsafe fn snapshot_clipboard(hwnd: HWND, shared: &WinTxShared) -> Result<(), Str
             let hg = HGLOBAL(handle.0);
             let size = GlobalSize(hg);
             total = total.saturating_add(size);
-            if total > MAX_FORMAT_BYTES {
-                return Err("The clipboard is too large to preserve.".into());
+            if total > super::MAX_CLIPBOARD_BYTES {
+                return Err(super::TOO_LARGE.into());
             }
             let ptr = GlobalLock(hg) as *const u8;
             if ptr.is_null() {

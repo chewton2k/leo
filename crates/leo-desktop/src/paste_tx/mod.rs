@@ -18,6 +18,14 @@ pub(crate) const RESTORE_TIMEOUT: Duration = Duration::from_secs(8);
 
 pub(crate) const FAILED_INJECTION_TIMEOUT: Duration = Duration::from_millis(500);
 
+pub(crate) const MAX_CLIPBOARD_BYTES: usize = 64 * 1024 * 1024;
+
+pub(crate) const MOST_ENTRIES: usize = 256;
+
+pub(crate) const TOO_LARGE: &str = "The clipboard is too large to preserve.";
+
+pub(crate) const TOO_MANY: &str = "The clipboard cannot be preserved automatically.";
+
 #[derive(Debug)]
 pub(crate) struct TxState {
     pub published_at: Instant,
@@ -169,23 +177,6 @@ pub(crate) fn flush(app: &tauri::AppHandle) {
 
 #[cfg(any(target_os = "macos", test))]
 pub(crate) struct Snapshot(pub Vec<Vec<(String, Vec<u8>)>>);
-#[cfg(any(target_os = "macos", test))]
-impl Snapshot {
-    pub fn new(items: Vec<Vec<(String, Vec<u8>)>>) -> Result<Self, String> {
-        if items.len() > 256
-            || items.iter().any(|i| i.len() > 256)
-            || items
-                .iter()
-                .flatten()
-                .map(|(_, data)| data.len())
-                .sum::<usize>()
-                > 64 * 1024 * 1024
-        {
-            return Err("The clipboard is too large to preserve. Copy its contents elsewhere, then dictate again.".into());
-        }
-        Ok(Self(items))
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -294,20 +285,14 @@ mod tests {
 mod snapshot_tests {
     #[test]
     fn a_clipboard_snapshot_keeps_every_item_and_format() {
-        let snapshot = super::Snapshot::new(vec![
+        let snapshot = super::Snapshot(vec![
             vec![
                 ("text/plain".into(), b"hello".to_vec()),
                 ("text/rtf".into(), b"{rtf}".to_vec()),
             ],
             vec![("public.file-url".into(), b"file:///tmp/a".to_vec())],
-        ])
-        .unwrap();
+        ]);
         assert_eq!(snapshot.0.len(), 2);
         assert_eq!(snapshot.0[0].len(), 2);
-        assert!(super::Snapshot::new(vec![vec![(
-            "text/plain".into(),
-            vec![0; 64 * 1024 * 1024 + 1]
-        )]])
-        .is_err());
     }
 }

@@ -40,7 +40,7 @@ reaching upward:
 | `crates/leo-web` | leo's pages and the engine behind them. |
 | `crates/leo-host` | Gives the engine its AI, speech, settings, recording housekeeping and import powers; the Playwright test server. |
 | `crates/leo-desktop` | The leo app: window, menu bar icon, single instance, open at login. |
-| root `leo` | `leo` (opens the app), `leo update`, `leo uninstall`. |
+| root `leo` | `leo` (opens the app), `leo uninstall`, `--version`. |
 
 A few ideas run through all of it:
 
@@ -126,7 +126,7 @@ the pull request run. Branches without a pull request can use Actions → CI →
 Run workflow. Main compares with the newest successful CI ancestor or newer
 release tag, so failed or cancelled pushes remain covered. Pull requests compare
 with their base. Unknown paths, CI configuration changes, manual runs, merge
-queue runs and the daily 09:23 UTC run select every check.
+queue runs and the weekly run (Mondays, 09:23 UTC) select every check.
 
 | Change | Checks in addition to formatting and CI selection tests |
 |--------|---------------------------------------------------------|
@@ -136,14 +136,20 @@ queue runs and the daily 09:23 UTC run select every check.
 | Other page assets | All JavaScript unit tests, Chromium and WebKit integration suites |
 | JavaScript unit tests only | All JavaScript unit tests |
 | Browser tests only | Chromium and WebKit integration suites (`tests/browser/server.js` also runs the JavaScript unit tests) |
-| Core, services, host or web Rust | Workspace tests on macOS and Windows, clippy, Rust 1.88 check, Intel macOS build, both browser suites |
+| Core, services, host or web Rust | Workspace tests on macOS and Windows, clippy, Rust 1.88 check, Intel macOS compile check, both browser suites |
 | Desktop, CLI or Rust integration tests | The same Rust checks, without browser suites |
 | Installer or release helper scripts | Rust checks and installer validation, including PowerShell syntax on Windows |
 | Dependency or CI configuration | All affected checks; dependencies and CI configuration select everything |
 
-Chromium runs in four shards and WebKit in one job. All five jobs download the
-same test-server artifact built once earlier in that run, and each installs only
-its own browser. Each job has a timeout. Pull
+Chromium runs in three shards and WebKit in two; the first Chromium shard also
+runs the phone test. All five jobs download the same test-server artifact built
+once earlier in that run, and each installs only its own browser. Clippy, the
+Rust 1.88 check and the Intel Mac check share one macOS job: a pull request
+compile-checks the Intel target, and every other run (a push to main, the merge
+queue, the weekly and manual runs) builds its release, so a release never starts
+from a commit whose Intel build fails. A run
+starts eight macOS jobs and needs at most five at once, the number GitHub runs
+for this repository, so jobs do not wait on each other. Each job has a timeout. Pull
 requests restore Rust caches from main without uploading another copy; browser
 dependencies use pnpm's cache. Existing build scripts and release packaging stay
 the same.
@@ -152,6 +158,11 @@ the same.
 intentionally unselected checks may be skipped, and failures or cancellations
 block release. It is the recommended required check for branch protection.
 The scheduled full run does not publish a release.
+
+The speaker-label check (`speakers.yml`) builds its test once and shares it with
+every model job. A pull request that touches labelling runs three models (the
+default, a Whisper and a Canary), two at a time; the weekly run and a manual run
+check every curated model, three at a time.
 
 Run the CI planner's regression tests without compiling the app:
 
@@ -168,9 +179,8 @@ evaluate changed-line coverage against that baseline before adding a threshold.
 Each browser shard starts its own server with a separate temporary data directory.
 Tests within a shard keep one worker because they share mutable application state.
 `fullyParallel` lets Playwright split individual tests, including the large flow
-file, across machines; it does not increase workers. CI checks that the four
-desktop shards are balanced and select every test exactly once, and keeps the
-complete WebKit selection. Each shard retains its HTML report, screenshots and
+file, across machines; it does not increase workers. CI checks that the desktop and
+WebKit shards are balanced and select every test exactly once. Each shard retains its HTML report, screenshots and
 failure traces in an artifact named for its project and shard. Every shard must
 pass the existing aggregate `CI passed` gate; a failing shard does not cancel
 its siblings. Retries and test timeouts are unchanged.

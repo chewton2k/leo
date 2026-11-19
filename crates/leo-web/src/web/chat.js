@@ -3,9 +3,12 @@
 
   const KEY = 'leo-chat-v1';
   const noAi = (text) => typeof text === 'string' && text.startsWith("leo can't write yet: ");
+  function tookFor(ms) {
+    const secs = Math.max(0, Math.round(ms / 1000));
+    return secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `${secs} s`;
+  }
   const MOST_KEPT = 40;
   const MOST_REFS = 8;
-  const MOST_SAVED = 400;
   const COMPACT_IDLE_MS = 10 * 60 * 1000;
   const COMPACT_LEAST_TURNS = 8;
   const ACCESS = [
@@ -210,7 +213,7 @@
   function aside(quiz) {
     const felt = Number.isFinite(quiz.surePct) ? `${quiz.surePct}%` : SURE[quiz.sure] ? SURE[quiz.sure].toLowerCase() : '';
     const how = felt ? ` (how sure I felt: ${felt})` : '';
-    const why = quiz.thinking ? ` My thinking: ${clipped(quiz.thinking, MOST_THINKING)}` : '';
+    const why = quiz.thinking ? ` My thinking: ${Array.from(quiz.thinking.trim()).slice(0, MOST_THINKING).join('').replace(/\s+/g, ' ')}` : '';
     return how + why;
   }
 
@@ -507,8 +510,8 @@
     const effort = typeof spent.effort === 'string' && spent.effort ? `${spent.effort} effort` : '';
     const about = spent.estimated ? 'about ' : '';
     const steps = spent.steps > 1 ? ` over ${spent.steps} steps` : '';
-    const cached = Number(spent.cached || 0) > 0 ? ` (${Number(spent.cached).toLocaleString('en-US')} from the cache)` : '';
-    const title = `${about}${Number(spent.input || 0).toLocaleString('en-US')} tokens in${cached}, ${Number(spent.output || 0).toLocaleString('en-US')} out${steps}`;
+    const cached = Number(spent.cached || 0) > 0 ? ` (${Number(spent.cached).toLocaleString()} from the cache)` : '';
+    const title = `${about}${Number(spent.input || 0).toLocaleString()} tokens in${cached}, ${Number(spent.output || 0).toLocaleString()} out${steps}`;
     let parts;
     const by = spent.auto === true ? `Auto · ${spent.by}` : spent.by;
     if (spent.plan) parts = [by, model, effort || 'default effort', 'on your plan'];
@@ -774,19 +777,43 @@
     const fresh = { id: null, messages: [], refs: [] };
     try {
       const saved = JSON.parse(storage.getItem(KEY) || 'null');
-      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [] };
+      if (saved && Array.isArray(saved.messages)) return { id: typeof saved.id === 'string' ? saved.id : null, messages: saved.messages, refs: Array.isArray(saved.refs) ? saved.refs.slice(0, MOST_REFS) : [], ...(saved.synced === true ? { synced: true } : {}), ...(Number.isInteger(saved.first) && Number.isInteger(saved.saved) ? { first: saved.first, saved: saved.saved } : {}) };
     } catch (e) {
       return fresh;
     }
     return fresh;
   }
 
-  function save(storage, messages, refs = [], id = null) {
+  function save(storage, messages, refs = [], id = null, synced = false, mark = null) {
     try {
-      storage.setItem(KEY, JSON.stringify({ id, messages: messages.slice(-MOST_KEPT), refs }));
+      const kept = messages.slice(-MOST_KEPT);
+      const at = mark ? { first: mark.first + messages.length - kept.length, saved: mark.saved } : {};
+      storage.setItem(KEY, JSON.stringify({ id, messages: kept, refs, ...(synced ? { synced: true } : {}), ...at }));
     } catch (e) {
       return;
     }
+  }
+
+  function markOf(page) {
+    const messages = Array.isArray(page.messages) ? page.messages : [];
+    const first = Number.isInteger(page.from) ? page.from : 0;
+    return { first, saved: Number.isInteger(page.count) ? page.count : first + messages.length, held: messages.map((m) => JSON.stringify(m)) };
+  }
+
+  function toSave(mark, messages) {
+    const sure = Math.max(0, Math.min(messages.length, mark.saved - mark.first));
+    let from = mark.first + sure;
+    for (let i = 0; i < sure; i++) {
+      if (mark.held[i] !== JSON.stringify(messages[i])) {
+        from = mark.first + i;
+        break;
+      }
+    }
+    return { from, messages: messages.slice(from - mark.first) };
+  }
+
+  function savedAs(mark, messages, count) {
+    return { first: mark.first, saved: count, held: messages.map((m) => JSON.stringify(m)) };
   }
 
   function groups(list, now = new Date()) {
@@ -808,7 +835,6 @@
     return `${starter.text} for ${list}`;
   }
 
-  const MOST_FILES = 10;
 
   function splitFiles(docs, messages) {
     const ids = new Set();
@@ -897,9 +923,15 @@
       if (response.status === 401) onLocked();
       return response;
     };
+    const sentenceOf = async (response) => { try { return (await response.json()).error || ''; } catch (e) { return ''; } };
     const saved = load(storage);
+    const known = new Set(saved.synced && saved.id ? [saved.id] : []);
+    const gone = new Set();
+    const marks = new Map();
     const stepChevron = (icons.chevron || '').replace('<svg ', '<svg class="msg-step-chevron" ');
     const state = { open: false, id: saved.id || newId(), messages: saved.messages, refs: saved.refs, context: null, dropped: null, fresh: false, busy: null, streak: 0, pick: null, chats: null, sidebar: null, doomed: null, asking: null, files: [], sent: [], filesFor: null, review: [], drafts: {}, found: null, selection: null };
+    if (Number.isInteger(saved.first)) marks.set(state.id, { first: saved.first, saved: saved.saved, held: [] });
+    else if (!known.has(state.id)) marks.set(state.id, { first: 0, saved: 0, held: [] });
     const panel = document.createElement('aside');
     panel.className = 'chat';
     panel.id = 'chat';
@@ -991,10 +1023,6 @@
     }
     const working = new WeakMap();
     const timed = new WeakSet();
-    function tookFor(ms) {
-      const secs = Math.max(0, Math.round(ms / 1000));
-      return secs >= 60 ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, '0')}` : `${secs} s`;
-    }
     function workingFor(since) {
       return `Working · ${tookFor(Date.now() - since)}`;
     }
@@ -1145,95 +1173,24 @@
     grip.setAttribute('aria-label', 'Felix width');
     panel.prepend(grip);
 
-    function keptWidth() {
-      try {
-        const kept = Number(storage.getItem(WIDTH));
-        return kept > 0 ? kept : null;
-      } catch (e) {
-        return null;
-      }
-    }
-
     function widest() {
       const beside = parseFloat(root.getComputedStyle(document.body).paddingLeft) || 0;
       const room = root.innerWidth >= 1200 ? 380 : 120;
       return Math.max(LEAST_WIDTH, root.innerWidth - beside - room);
     }
 
-    function setWidth(px, keep) {
-      const style = document.documentElement.style;
-      if (px === null) {
-        style.removeProperty('--chat-w');
-        grip.removeAttribute('aria-valuenow');
-        if (keep) {
-          try {
-            storage.removeItem(WIDTH);
-          } catch (e) {}
-        }
-        return;
-      }
-      const width = Math.round(Math.min(widest(), Math.max(LEAST_WIDTH, px)));
-      style.setProperty('--chat-w', `${width}px`);
-      grip.setAttribute('aria-valuenow', String(width));
-      grip.setAttribute('aria-valuemin', String(LEAST_WIDTH));
-      grip.setAttribute('aria-valuemax', String(widest()));
-      if (keep) {
-        try {
-          storage.setItem(WIDTH, String(width));
-        } catch (e) {}
-      }
-    }
-
-    const fitWidth = () => setWidth(keptWidth(), false);
-    fitWidth();
-    root.addEventListener('resize', fitWidth);
-
-    let dragFrom = null;
-    let gripTap = null;
-    const stretchWidth = (px) => document.documentElement.style.setProperty('--chat-w', `${px}px`);
-    grip.addEventListener('pointerdown', (e) => {
-      if (!wide() || e.button !== 0) return;
-      e.preventDefault();
-      if (gripTap && e.timeStamp - gripTap.at < 400 && Math.abs(e.clientX - gripTap.x) < 6) {
-        gripTap = null;
-        setWidth(null, true);
-        return;
-      }
-      dragFrom = { x: e.clientX, width: panel.getBoundingClientRect().width };
-      grip.setPointerCapture(e.pointerId);
-      document.body.classList.add('chat-resizing');
-    });
-    grip.addEventListener('pointermove', (e) => {
-      if (!dragFrom) return;
-      if (!(e.buttons & 1)) return letGo(e);
-      if (!grip.hasPointerCapture(e.pointerId)) return;
-      const wanted = dragFrom.width + dragFrom.x - e.clientX;
-      setWidth(wanted, false);
-      dragFrom.back = root.leoPaneResize.stretched(wanted, wanted < LEAST_WIDTH ? LEAST_WIDTH : wanted > widest() ? widest() : null);
-      if (dragFrom.back) stretchWidth(dragFrom.back.limit + dragFrom.back.over);
-    });
-    const letGo = (e) => {
-      if (!dragFrom) return;
-      const tapped = e.type === 'pointerup' && Math.abs(e.clientX - dragFrom.x) < 4;
-      const back = dragFrom.back;
-      dragFrom = null;
-      if (grip.hasPointerCapture(e.pointerId)) grip.releasePointerCapture(e.pointerId);
-      document.body.classList.remove('chat-resizing');
-      gripTap = tapped ? { at: e.timeStamp, x: e.clientX } : null;
-      if (!tapped) setWidth(panel.getBoundingClientRect().width, true);
-      if (!tapped && back) root.leoPaneResize.bounceBack(back, stretchWidth, () => Boolean(dragFrom), () => setWidth(back.limit, false));
-    };
-    grip.addEventListener('pointerup', letGo);
-    grip.addEventListener('pointercancel', letGo);
-    grip.addEventListener('lostpointercapture', letGo);
-    grip.addEventListener('keydown', (e) => {
-      const step = e.shiftKey ? 96 : 32;
-      const now = panel.getBoundingClientRect().width;
-      if (e.key === 'ArrowLeft') setWidth(now + step, true);
-      else if (e.key === 'ArrowRight') setWidth(now - step, true);
-      else if (e.key === 'Home') setWidth(null, true);
-      else return;
-      e.preventDefault();
+    const chatResize = root.leoPaneResize.create({
+      handle: grip,
+      key: WIDTH,
+      storage,
+      docked: 'right',
+      measure: () => panel.getBoundingClientRect().width,
+      limits: () => [LEAST_WIDTH, widest()],
+      apply: (width) => {
+        if (width === null) document.documentElement.style.removeProperty('--chat-w');
+        else document.documentElement.style.setProperty('--chat-w', `${width}px`);
+      },
+      enabled: () => wide() && !panel.hidden,
     });
 
     const HISTORY_OVERLAY_WIDTH = 490;
@@ -1369,7 +1326,7 @@
     }
 
     function persist() {
-      save(storage, stored(), state.refs, state.id);
+      save(storage, stored(), state.refs, state.id, known.has(state.id), marks.get(state.id));
     }
 
     // Idle compaction: after warm.rs IDLE the warm session and the provider's
@@ -1404,15 +1361,29 @@
       const messages = chat.messages.filter((m) => !m.pending);
       if (!messages.length) return upload;
       const id = chat.id;
-      const sending = { refs: chat.refs, messages: messages.slice(-MOST_SAVED).map(({ pending, ...m }) => m) };
+      const local = messages.map(({ pending, ...m }) => m);
       upload = upload.then(async () => {
+        if (gone.has(id)) return;
+        const existed = known.has(id);
+        const mark = marks.get(id);
+        const sending = { refs: chat.refs, ...(mark ? toSave(mark, local) : { messages: local }) };
         try {
           const response = await request(`/api/chats/${encodeURIComponent(id)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(sending),
-          });
-          if (!response.ok) {
+            body: JSON.stringify({ ...sending, existed }),
+          }).catch(() => null);
+          if (response && response.status === 409) {
+            await reconcile(id, chat.refs, local, mark);
+            return;
+          }
+          if (!response || !response.ok) {
+            if (response && response.status === 410) {
+              known.delete(id);
+              gone.add(id);
+              freshIfGone();
+              return;
+            }
             if (!unsaved.has(id)) {
               unsaved.add(id);
               notify('Felix could not save this chat, so it may be missing from your history.');
@@ -1420,7 +1391,12 @@
             return;
           }
           unsaved.delete(id);
+          if (!known.has(id)) {
+            known.add(id);
+            if (id === state.id) persist();
+          }
           const summary = await response.json();
+          marks.set(id, savedAs(mark || { first: 0 }, local, summary.count));
           if (state.chats) {
             state.chats = [summary, ...state.chats.filter((c) => c.id !== summary.id)].sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
             drawChats();
@@ -1434,6 +1410,86 @@
         }
       });
       return upload;
+    }
+
+    async function reconcile(id, refs, local, mark) {
+      let page;
+      try {
+        const response = await request(`/api/chats/${encodeURIComponent(id)}`);
+        if (!response.ok) throw new Error();
+        page = await response.json();
+      } catch (e) {
+        notify('Felix could not save this chat, so it may be missing from your history.');
+        return;
+      }
+      const showing = id === state.id;
+      if (showing && (state.busy || state.preparingSend)) return;
+      const theirs = Array.isArray(page.messages) ? page.messages : [];
+      const seen = theirs.map((m) => JSON.stringify(m));
+      const last = local.findLastIndex((m) => seen.includes(JSON.stringify(m)));
+      const cut = mark ? Math.max(0, mark.saved - mark.first) : last + 1;
+      const unsent = local.slice(cut);
+      const earlier = Boolean(mark) && toSave(mark, local).from < mark.saved;
+      const fresh = markOf(page);
+      marks.set(id, fresh);
+      if (showing) {
+        state.messages = [...theirs, ...state.messages.slice(cut)];
+        persist();
+        draw(false);
+      }
+      if (earlier) notify('This chat changed in another window, so your change to an earlier message was not kept.');
+      if (!unsent.length) return;
+      const response = await request(`/api/chats/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refs, from: fresh.saved, messages: unsent, existed: true }),
+      }).catch(() => null);
+      if (!response || !response.ok) {
+        notify('Felix could not save this chat, so it may be missing from your history.');
+        return;
+      }
+      const summary = await response.json();
+      marks.set(id, savedAs(fresh, [...theirs, ...unsent], summary.count));
+    }
+
+    let loadingEarlier = false;
+    function earlier() {
+      const id = state.id;
+      if (loadingEarlier || state.busy || state.preparingSend || !(marks.get(id)?.first > 0)) return upload;
+      loadingEarlier = true;
+      upload = upload.then(async () => {
+        try {
+          const mark = marks.get(id);
+          if (!mark || mark.first <= 0 || state.id !== id) return;
+          const response = await request(`/api/chats/${encodeURIComponent(id)}?before=${mark.first}`);
+          if (!response.ok) return;
+          const page = await response.json();
+          const older = Array.isArray(page.messages) ? page.messages : [];
+          if (state.id !== id || state.busy || state.preparingSend || marks.get(id) !== mark || !older.length || page.from + older.length !== mark.first) return;
+          const height = body.scrollHeight;
+          const top = body.scrollTop;
+          state.messages = [...older, ...state.messages];
+          marks.set(id, { first: page.from, saved: mark.saved, held: [...older.map((m) => JSON.stringify(m)), ...mark.held] });
+          draw(false);
+          body.scrollTop = top + body.scrollHeight - height;
+        } catch (e) {
+          return;
+        } finally {
+          loadingEarlier = false;
+        }
+      });
+      return upload;
+    }
+
+    function freshIfGone() {
+      if (!gone.has(state.id) || state.busy || state.preparingSend) return;
+      const last = state.messages.filter((m) => m.role === 'user' && !m.next).at(-1);
+      begin();
+      if (last && !input.value.trim()) {
+        input.value = last.text;
+        fit();
+      }
+      notify('This chat was removed, so Felix started a new one. Your last message is in the box.');
     }
 
     const naming = new Set();
@@ -1512,6 +1568,7 @@
       state.fresh = true;
       stopCompacting();
       state.messages = [];
+      marks.set(id, { first: 0, saved: 0, held: [] });
       state.refs = [];
       state.files = [];
       state.sent = [];
@@ -1525,6 +1582,18 @@
       drawChats();
       loadReview();
       mood('wave', 1500);
+    }
+
+    async function checkStored() {
+      if (!known.has(state.id) || !state.messages.length) return;
+      const id = state.id, count = state.messages.length;
+      try {
+        const response = await request(`/api/chats/${encodeURIComponent(id)}`);
+        if (response.status !== 404 || state.id !== id || state.busy || state.messages.length !== count) return;
+        known.delete(id);
+        gone.add(id);
+        begin();
+      } catch (e) {}
     }
 
     async function resume(id) {
@@ -1543,22 +1612,24 @@
           drawChats();
           return false;
         }
-        if (!response.ok) throw new Error('Leo could not open that conversation. Try again.');
+        if (!response.ok) throw new Error('leo could not open that conversation. Try again.');
         chat = await response.json();
         if (mine !== resumeSeq) return null;
       } catch (e) {
-        if (mine === resumeSeq) notify('Leo could not open that conversation. Check your connection and try again.');
+        if (mine === resumeSeq) notify('leo could not open that conversation. Check your connection and try again.');
         return null;
       }
       state.id = chat.id;
       state.fresh = false;
       compactLater();
       state.messages = Array.isArray(chat.messages) ? chat.messages : [];
+      marks.set(chat.id, markOf(chat));
       state.refs = Array.isArray(chat.refs) ? chat.refs.slice(0, MOST_REFS) : [];
       state.files = [];
       state.sent = [];
       state.streak = 0;
       closePick();
+      known.add(chat.id);
       persist();
       await loadFiles();
       if (mine !== resumeSeq || state.id !== id) return null;
@@ -1596,7 +1667,7 @@
         const response = await request(`/api/chats/${encodeURIComponent(id)}`, { method: 'DELETE' });
         if (!response.ok) throw new Error('delete failed');
       } catch (e) {
-        notify('Leo could not delete that conversation. Try again.');
+        notify('leo could not delete that conversation. Try again.');
         return;
       } finally {
         deleting.delete(id);
@@ -1606,6 +1677,7 @@
         }
       }
       state.doomed = null;
+      known.delete(id);
       state.chats = (state.chats || []).filter((c) => c.id !== id);
       if (id === state.id) begin();
       else drawChats();
@@ -1630,6 +1702,7 @@
     function excerptOf(r) {
       if (excerpts.has(r.id)) return excerpts.get(r.id);
       excerpts.set(r.id, '');
+      if (excerpts.size > 200) excerpts.delete(excerpts.keys().next().value);
       request(`/api/notes/${encodeURIComponent(r.id)}`)
         .then((response) => (response.ok ? response.json() : null))
         .then((note) => {
@@ -1712,24 +1785,18 @@
       };
       let reply;
       try {
-        const body = await prepare(file);
-        reply = await request(`/api/chats/${encodeURIComponent(chat)}/files`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+        const ready = await prepare(file);
+        reply = await request(`/api/chats/${encodeURIComponent(chat)}/files/${encodeURIComponent(ready.name)}?type=${encodeURIComponent(ready.type || '')}`, {
+          method: 'PUT',
+          body: ready.blob,
         });
       } catch (e) {
         notify(e.message || `Felix could not read ${file.name}.`);
         return drop();
       }
       if (!reply.ok) {
-        let said = '';
-        try {
-          said = (await reply.json()).error || '';
-        } catch (e) {
-          said = '';
-        }
-        notify(said ? `Felix could not read ${file.name}: ${said}` : reply.status === 413 ? `${file.name} is too large for Felix.` : `Felix could not read ${file.name}.`);
+        const said = await sentenceOf(reply);
+        notify(said ? `Felix could not read ${file.name}: ${said}` : `Felix could not read ${file.name}.`);
         return drop();
       }
       const doc = { ...(await reply.json()), key, status: 'ready', thumb };
@@ -1749,10 +1816,7 @@
     }
 
     function addFiles(list) {
-      const room = MOST_FILES - state.files.length - state.sent.length;
-      const files = [...list];
-      if (files.length > room) notify(`A chat holds up to ${MOST_FILES} documents, so ${files.length - Math.max(room, 0)} ${files.length - Math.max(room, 0) === 1 ? 'was' : 'were'} left out.`);
-      for (const file of files.slice(0, Math.max(room, 0))) addFile(file);
+      for (const file of [...list]) addFile(file);
     }
 
     async function removeFile(id) {
@@ -1773,13 +1837,13 @@
         state.files = [...state.files.slice(0, at), file, ...state.files.slice(at)];
         drawRefs();
       }
-      notify(`Leo could not remove ${file?.name || 'that document'}. Try again.`);
+      notify(`leo could not remove ${file?.name || 'that document'}. Try again.`);
     }
 
     let pickTimer = 0;
     let pickSeq = 0;
     async function findNotes(query) {
-      const url = query.trim() ? `/api/search?q=${encodeURIComponent(query.trim())}` : '/api/notes?limit=12';
+      const url = query.trim() ? `/api/search?q=${encodeURIComponent(query.trim())}&limit=20` : '/api/notes?limit=12';
       const response = await request(url);
       if (!response.ok) return [];
       const notes = await response.json();
@@ -1804,7 +1868,7 @@
       let field = $('#chat-pick-search');
       let list = box.querySelector('.chat-pick-list');
       if (!list || Boolean(field) !== wantsSearch) {
-        box.innerHTML = `${wantsSearch ? `<input class="chat-pick-search" id="chat-pick-search" placeholder="Find a note…" autocomplete="off" value="${escape(p.query)}">` : ''}<div class="chat-pick-list" role="listbox" aria-label="Notes"></div>`;
+        box.innerHTML = `${wantsSearch ? `<input class="chat-pick-search" id="chat-pick-search" placeholder="Find a note…" aria-label="Find a note" autocomplete="off" value="${escape(p.query)}">` : ''}<div class="chat-pick-list" role="listbox" aria-label="Notes"></div>`;
         field = $('#chat-pick-search');
         list = box.querySelector('.chat-pick-list');
         list.addEventListener('wheel', (event) => {
@@ -2208,6 +2272,11 @@
       return `<svg class="quiz-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path pathLength="1"${writing} d="${path}"/></svg>`;
     }
 
+    function thinkingBox(where, text, off = '') {
+      const long = Array.from(text.trim()).length > MOST_THINKING;
+      return `<div class="quiz-thinking-wrap" data-read-field><textarea class="quiz-thinking" ${where} rows="2" data-reads="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(text)}</textarea><p class="hint" data-read-hint role="status"${long ? '' : ' hidden'}>Felix reads the first ${MOST_THINKING.toLocaleString('en')} characters of this.</p></div>`;
+    }
+
     function quizCard(q, i, k, pending, sources) {
       const where = `data-i="${i}" data-k="${k}"`;
       const done = typeof q.given === 'string';
@@ -2225,14 +2294,14 @@
           return `<button type="button" class="quiz-option${mark}" data-chat="quiz-pick" ${where} data-o="${n}"${off}><span class="quiz-letter">${String.fromCharCode(65 + n)}</span><span>${inline(o)}</span>${mark ? quizMark(q, mark === ' right' ? (o === q.given ? 'Your answer, right' : 'The right answer') : 'Your answer, not right') : ''}</button>`;
         }).join('')}</div>`;
       } else if (q.kind === 'fill_blank') {
-        answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
+        answer = `<div class="quiz-row"><input class="quiz-input" ${where} placeholder="The missing words" aria-label="The missing words" autocomplete="off" value="${draft}"${off}><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       } else {
-        answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
+        answer = `<div class="quiz-row column"><textarea class="quiz-input" ${where} rows="3" placeholder="Your answer, in your own words" aria-label="Your answer, in your own words"${off}>${draft}</textarea><button type="button" class="btn primary sm" data-chat="quiz-check" ${where}${off}>Check answer</button></div>`;
       }
       const result = checking.has(q) ? `<div class="quiz-result">${BLOT}Checking your answer…</div>` : marking && !(reply && reply.text) ? `<div class="quiz-result">${BLOT}Felix is reading your answer…</div>` : '';
       const open = !done && !q.predict;
       const writing = thinkingOpen.has(q);
-      const thinking = open && writing ? `<textarea class="quiz-thinking" ${where} rows="2" maxlength="${MOST_THINKING}" placeholder="What are you thinking? Half-formed is fine" aria-label="Your thinking"${off}>${escape(state.drafts[`think:${i}:${k}`] || '')}</textarea>` : '';
+      const thinking = open && writing ? thinkingBox(where, state.drafts[`think:${i}:${k}`] || '', off) : '';
       const pct = Number.isFinite(q.surePct) ? q.surePct : null;
       const sure = open ? `<div class="quiz-sure"><label class="quiz-sure-meter${pct === null ? ' unset' : ''}" style="--pct: ${pct ?? 50}%"><span class="quiz-sure-label">How sure?</span><input type="range" class="quiz-sure-range" ${where} min="0" max="100" step="5" value="${pct ?? 50}" aria-label="How sure are you"${pct === null ? ' aria-valuetext="Not set"' : ''}${off}><output class="quiz-sure-pct">${pct === null ? '–' : `${pct}%`}</output></label><label class="quiz-think-toggle"><input type="checkbox" class="switch" role="switch" data-chat="quiz-think" ${where}${writing ? ' checked' : ''}${off}><span>Add your thinking</span></label></div>${thinking}` : '';
       const own = done && (sureText(q) || q.thinking) ? `<div class="quiz-own">${[sureText(q), q.thinking].filter(Boolean).map(escape).join(' · ')}</div>` : '';
@@ -2280,7 +2349,7 @@
       const q = m && m.quizzes && m.quizzes[k];
       const text = String(given || '').trim();
       if (!q || typeof q.given === 'string' || state.busy || m.pending || !text || checking.has(q)) return;
-      const thinking = thinkingOpen.has(q) ? String(state.drafts[`think:${i}:${k}`] || '').trim().slice(0, MOST_THINKING) : '';
+      const thinking = thinkingOpen.has(q) ? String(state.drafts[`think:${i}:${k}`] || '').trim() : '';
       let correct = checkQuiz(q, text);
       if (correct === null && q.kind === 'fill_blank' && accepted(q).some((a) => plainAnswer(a) === plainAnswer(text))) correct = true;
       const known = correct;
@@ -2379,6 +2448,7 @@
         list.splice(list.indexOf(m), 1);
         const at = list.indexOf(work.answer);
         list.splice(at < 0 ? list.length : at, 0, m);
+        fullNext = true;
       }
     }
 
@@ -2407,12 +2477,7 @@
           body: JSON.stringify(post[1]),
         });
         if (!response.ok) {
-          let said = '';
-          try {
-            said = (await response.json()).error || '';
-          } catch (e) {
-            said = '';
-          }
+          const said = await sentenceOf(response);
           throw new Error(said || (p.kind === 'create' ? 'The note could not be made.' : 'The change could not be applied.'));
         }
         note = await response.json();
@@ -2564,6 +2629,7 @@
       state.pickWait = setTimeout(placeAddFloat, 120);
     });
     body.addEventListener('scroll', () => hideAddFloat(), { passive: true });
+    body.addEventListener('scroll', () => { if (body.scrollTop < 80) earlier(); }, { passive: true });
     body.addEventListener('click', (e) => {
       const trace = e.target.closest?.('.msg-trace > summary')?.parentElement;
       const m = trace && state.messages[Number(trace.dataset.i)];
@@ -2640,16 +2706,18 @@
       state.preparingSend = true;
       try {
         await upload;
-        const response = await request(`/api/chats/${encodeURIComponent(id)}/drop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2, total: stored().length }) });
+        const response = await request(`/api/chats/${encodeURIComponent(id)}/drop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ count: 2, total: (marks.get(id)?.first || 0) + stored().length }) });
         if (!response.ok) throw new Error();
       } catch (e) {
-        notify('Leo could not take back that reply. Try again.');
+        notify('leo could not take back that reply. Try again.');
         return null;
       } finally {
         state.preparingSend = false;
       }
       if (state.id !== id) return null;
       state.messages.splice(at, 2);
+      const mark = marks.get(id);
+      if (mark) marks.set(id, savedAs(mark, stored(), mark.first + stored().length));
       persist();
       draw(false);
       return asked;
@@ -2715,15 +2783,19 @@
     }
 
     let liveFrame = 0;
+    let liveOnly = null;
+    let drawn = [];
+    let fullNext = false;
 
-    function draw(stick = true, live = false, later = false) {
+    function draw(stick = true, live = false, later = false, only = null) {
       if (later && root.requestAnimationFrame) {
         if (!liveFrame) {
+          liveOnly = only;
           liveFrame = root.requestAnimationFrame(() => {
             liveFrame = 0;
-            draw(false, true);
+            draw(false, true, false, liveOnly);
           });
-        }
+        } else if (liveOnly !== only) liveOnly = null;
         return;
       }
       if (liveFrame) root.cancelAnimationFrame?.(liveFrame);
@@ -2733,17 +2805,31 @@
         ? { box: document.activeElement.className.split(' ')[0], i: document.activeElement.dataset.i, k: document.activeElement.dataset.k, from: document.activeElement.selectionStart, to: document.activeElement.selectionEnd }
         : null;
       const kept = body.scrollTop;
-      const session = currentSession();
-      const recap = session && session.state === 'finished' ? recapCard(session) : '';
-      const html = state.messages.length ? `${state.messages.map((m, i) => switches(state.messages, i) + bubble(m, i)).join('')}${recap}` : welcome();
       const perched = !state.messages.length;
       const land = perched !== panel.classList.contains('perched') && !panel.hidden && root.leoMotion?.dock ? root.leoMotion.dock($('.chat-foot'), $('#chat-form')) : null;
-      const first = body.firstElementChild;
-      const next = document.createElement('div');
-      next.innerHTML = html;
-      const hello = Boolean(first) && first.classList.contains('chat-hello') && Boolean(next.firstElementChild) && next.firstElementChild.dataset.hello === first.dataset.hello;
-      if (hello || (live && body.querySelector(':scope > .msg'))) settle(body, next);
-      else body.innerHTML = html;
+      const at = only && !fullNext && drawn.length === state.messages.length && drawn.every((m, k) => m === state.messages[k]) ? state.messages.indexOf(only) : -1;
+      const existing = at >= 0 ? body.querySelector(`:scope > .msg[data-i="${at}"]`) : null;
+      if (existing) {
+        const scratch = document.createElement('div');
+        scratch.innerHTML = bubble(only, at);
+        const fresh = scratch.firstElementChild;
+        if (existing.outerHTML !== fresh.outerHTML) {
+          match(existing, fresh);
+          settle(existing, fresh);
+        }
+      } else {
+        const session = currentSession();
+        const recap = session && session.state === 'finished' ? recapCard(session) : '';
+        const html = state.messages.length ? `${state.messages.map((m, i) => switches(state.messages, i) + bubble(m, i)).join('')}${recap}` : welcome();
+        const first = body.firstElementChild;
+        const next = document.createElement('div');
+        next.innerHTML = html;
+        const hello = Boolean(first) && first.classList.contains('chat-hello') && Boolean(next.firstElementChild) && next.firstElementChild.dataset.hello === first.dataset.hello;
+        if (hello || (live && body.querySelector(':scope > .msg'))) settle(body, next);
+        else body.innerHTML = html;
+        drawn = state.messages.slice();
+        fullNext = false;
+      }
       panel.classList.toggle('perched', perched);
       body.setAttribute('aria-busy', String(Boolean(state.busy)));
       document.getElementById('chat-toggle')?.classList.toggle('working', Boolean(state.busy));
@@ -2886,12 +2972,7 @@
         });
         if (response.status === 401) throw new Error('leo needs to sign in again. Quit leo and open it again.');
         if (!response.ok || !response.body) {
-          let said = '';
-          try {
-            said = (await response.json()).error || '';
-          } catch (e) {
-            said = '';
-          }
+          const said = await sentenceOf(response);
           throw new Error(said || `leo answered ${response.status}.`);
         }
         const reader = response.body.getReader();
@@ -2918,14 +2999,17 @@
               const before = currentSession();
               if (before && before.state !== 'finished') before.dismissed = true;
               answer.session = startSession(e.plan.ideas);
+              fullNext = true;
             }
             if (e.session_end === true) {
               const s = currentSession();
               if (s && s.state !== 'finished') s.state = 'finished';
+              fullNext = true;
             }
             if (e.quiz && typeof e.quiz === 'object' && typeof e.quiz.question === 'string') {
               // A new question moves the practice on: older cards lose Next question.
               for (const m of thread.messages) if (m !== answer) for (const q of m.quizzes || []) if (q.told) q.held = false;
+              fullNext = true;
               const idea = Number(e.quiz.idea) || 0;
               const last = thread.messages.flatMap((m) => (m === answer ? [] : m.quizzes || [])).findLast((q) => q.idea && !q.predict && typeof q.given === 'string');
               const retold = Boolean(last && idea === last.idea && (last.correct === false || (last === card && grade(answer.text).verdict === 'incorrect')));
@@ -2946,7 +3030,10 @@
             if (e.restart) answer.text = '';
             if (typeof e.step === 'string') pose(e.tool);
             if (typeof e.step === 'string') answer.steps = [...(answer.steps || []), { text: e.step, at: answer.text.length, tool: typeof e.tool === 'string' ? e.tool : '', failed: e.failed === true, found: Array.isArray(e.found) ? e.found.filter((f) => typeof f === 'string').slice(0, 12) : [] }];
-            if (e.spent && typeof e.spent === 'object') answer.spent = e.spent;
+            if (e.spent && typeof e.spent === 'object') {
+              answer.spent = e.spent;
+              fullNext = true;
+            }
             if (e.proposal && typeof e.proposal === 'object') {
               const done = e.proposal.state === 'applied';
               const { auto, ...shown } = e.proposal;
@@ -2962,7 +3049,7 @@
             }
             if (e.error) answer.error = e.error;
           }
-          draw(false, true, true);
+          draw(false, true, true, answer);
         }
       } catch (e) {
         if (e.name === 'AbortError') controller.abort();
@@ -3011,6 +3098,7 @@
         delete m.late;
       }
       state.busy = null;
+      freshIfGone();
       thinking(false);
       if (stopped && left.length && thread.id === state.id) {
         input.value = [input.value, ...left.map((m) => m.text)].filter((t) => t.trim()).join('\n\n');
@@ -3056,6 +3144,7 @@
       }
       if (state.open) {
         syncSidebar(sidebarOpen());
+        chatResize.fit();
         historyResize.fit();
         if (sidebarOpen()) loadChats();
         drawContext();
@@ -3086,7 +3175,7 @@
       }
       const el = e.target.closest('[data-chat]');
       if (!el) return;
-      e.preventDefault();
+      if (el.dataset.chat !== 'quiz-think') e.preventDefault();
       const what = el.dataset.chat;
       if (what === 'close') toggle(false);
       else if (what === 'new') {
@@ -3144,10 +3233,28 @@
       } else if (what === 'quiz-think') {
         const q = state.messages[Number(el.dataset.i)]?.quizzes?.[Number(el.dataset.k)];
         if (!q) return;
-        if (thinkingOpen.has(q)) thinkingOpen.delete(q);
-        else thinkingOpen.add(q);
-        draw(false);
-        if (thinkingOpen.has(q)) body.querySelector(`.quiz-thinking[data-i="${el.dataset.i}"][data-k="${el.dataset.k}"]`)?.focus();
+        const opening = !thinkingOpen.has(q);
+        if (opening) thinkingOpen.add(q);
+        else thinkingOpen.delete(q);
+        const sure = el.closest('.quiz-sure');
+        const slide = root.leoMotion?.slide;
+        let box = sure?.nextElementSibling?.matches('.quiz-thinking-wrap') ? sure.nextElementSibling : null;
+        if (!sure) draw(false);
+        else if (opening) {
+          const from = box ? box.offsetHeight : 0;
+          if (!box) {
+            sure.insertAdjacentHTML('afterend', thinkingBox(`data-i="${el.dataset.i}" data-k="${el.dataset.k}"`, state.drafts[`think:${el.dataset.i}:${el.dataset.k}`] || ''));
+            box = sure.nextElementSibling;
+          }
+          box.inert = false;
+          box.getAnimations?.().forEach((run) => run.cancel());
+          if (slide) slide(box, from, box.offsetHeight);
+        } else if (box) {
+          box.inert = true;
+          if (slide) slide(box, box.offsetHeight, 0, () => box.remove());
+          else box.remove();
+        }
+        if (opening) body.querySelector(`.quiz-thinking[data-i="${el.dataset.i}"][data-k="${el.dataset.k}"]`)?.focus();
       } else if (what === 'quiz-hint') {
         askHint(Number(el.dataset.i), Number(el.dataset.k));
       } else if (what === 'quiz-check') {
@@ -3185,8 +3292,7 @@
         openPick('button', '', 0);
       } else if (what === 'attach-file') {
         attachMenu(false);
-        if (state.files.length + state.sent.length >= MOST_FILES) notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        else $('#chat-file').click();
+        $('#chat-file').click();
       } else if (what === 'unfile') removeFile(el.dataset.id); else if (what === 'pick') choose(Number(el.dataset.i));
       else if (what === 'unref') {
         state.refs = state.refs.filter((r) => r.id !== el.dataset.id);
@@ -3212,6 +3318,16 @@
       else if (state.busy) state.busy.abort();
       else send(input.value);
     });
+    body.addEventListener('copy', (e) => {
+      const selection = root.getSelection ? root.getSelection() : null;
+      if (!selection || selection.isCollapsed || !selection.rangeCount || !e.clipboardData || !body.contains(selection.anchorNode)) return;
+      const html = root.leoMarkdown && root.leoMarkdown.selectionCopy(selection.getRangeAt(0));
+      if (!html) return;
+      e.preventDefault();
+      e.clipboardData.setData('text/plain', selection.toString());
+      e.clipboardData.setData('text/html', html);
+    });
+
     body.addEventListener('input', (e) => {
       if (e.target.classList.contains('quiz-input')) state.drafts[`${e.target.dataset.i}:${e.target.dataset.k}`] = e.target.value;
       if (e.target.classList.contains('quiz-thinking')) state.drafts[`think:${e.target.dataset.i}:${e.target.dataset.k}`] = e.target.value;
@@ -3260,10 +3376,7 @@
         drawRefs();
         remember();
       }
-      if (found.length) {
-        if (state.files.length + state.sent.length >= MOST_FILES) notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        else addFiles(pastedNames(found));
-      }
+      if (found.length) addFiles(pastedNames(found));
       input.focus();
     });
 
@@ -3271,10 +3384,6 @@
       const found = [...((e.clipboardData && e.clipboardData.files) || [])];
       if (!found.length) return;
       e.preventDefault();
-      if (state.files.length + state.sent.length >= MOST_FILES) {
-        notify(`A chat holds up to ${MOST_FILES} documents; remove one first.`);
-        return;
-      }
       addFiles(pastedNames(found));
     });
 
@@ -3406,6 +3515,7 @@
       else toggle(false);
     });
 
+    checkStored();
     return {
       toggle,
       attachSelection(selection) {
@@ -3458,5 +3568,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
 })(typeof window !== 'undefined' ? window : globalThis);

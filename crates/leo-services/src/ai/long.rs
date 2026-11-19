@@ -19,16 +19,23 @@ pub fn recorded_on(mut prompt: Prompt, day: chrono::NaiveDate) -> Prompt {
     prompt
 }
 
+fn read_of(text: &str, most: usize) -> &str {
+    let text = text.trim();
+    text.char_indices()
+        .nth(most)
+        .map_or(text, |(at, _)| text[..at].trim_end())
+}
+
 pub fn with_profile(prompt: Prompt, profile: &leo_core::recording::Profile) -> Prompt {
     let mut prompt = recorded_on(prompt, chrono::Local::now().date_naive());
-    let context = profile.context.trim();
+    let context = read_of(&profile.context, leo_core::recording::CONTEXT_READ_CHARS);
     if !context.is_empty() {
         prompt.user = format!(
             "<recording_context>\n{context}\n</recording_context>\n\n{}",
             prompt.user
         );
     }
-    let wants = profile.wants.trim();
+    let wants = read_of(&profile.wants, leo_core::recording::WANTS_READ_CHARS);
     if !wants.is_empty() {
         prompt.system.push_str(&format!("\n\n{WANTS}"));
         prompt.user = format!(
@@ -416,7 +423,14 @@ pub fn room_after_profile(
     budget: super::budget::Budget,
     profile: &leo_core::recording::Profile,
 ) -> super::budget::Budget {
-    let added = profile.context.chars().count() + profile.wants.chars().count() * 2 + 600;
+    let added = read_of(&profile.context, leo_core::recording::CONTEXT_READ_CHARS)
+        .chars()
+        .count()
+        + read_of(&profile.wants, leo_core::recording::WANTS_READ_CHARS)
+            .chars()
+            .count()
+            * 2
+        + 600;
     super::budget::Budget {
         words: budget.words.saturating_sub(added.div_ceil(6)),
         ..budget
@@ -503,40 +517,48 @@ pub fn structure_recording(
     let results: Vec<std::sync::Mutex<Option<Written>>> =
         groups.iter().map(|_| std::sync::Mutex::new(None)).collect();
     progress(0, total);
+    let stop = leo_core::children::current_stop();
     std::thread::scope(|scope| {
         for _ in 0..budget.at_once.max(1).min(groups.len()) {
-            scope.spawn(|| loop {
-                let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                let Some(g) = groups.get(i) else {
-                    return;
-                };
-                let own = points_for(points, &groups, i);
-                let prompt = chat::build_part_prompt(&g.text, &own, i + 1, groups.len(), &span(g));
-                let outcome = match chat_fn(prompt, super::STRUCTURE_MAX_TOKENS) {
-                    Ok(reply) if !chat::clean_reply(&reply).trim().is_empty() => {
-                        (chat::clean_reply(&reply), None)
+            scope.spawn(|| {
+                leo_core::children::with_stop(stop.clone().unwrap_or_default(), || loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(g) = groups.get(i) else {
+                        return;
+                    };
+                    let own = points_for(points, &groups, i);
+                    let prompt =
+                        chat::build_part_prompt(&g.text, &own, i + 1, groups.len(), &span(g));
+                    let outcome = match chat_fn(prompt, super::STRUCTURE_MAX_TOKENS) {
+                        Ok(reply) => {
+                            let cleaned = chat::clean_reply(&reply);
+                            if cleaned.trim().is_empty() {
+                                (
+                                    raw(&own, "Transcript", &g.text),
+                                    Some(format!(
+                                        "part {} came back empty; its transcript is included instead",
+                                        i + 1
+                                    )),
+                                )
+                            } else {
+                                (cleaned, None)
+                            }
+                        }
+                        Err(e) => (
+                            raw(&own, "Transcript", &g.text),
+                            Some(format!(
+                                "{} Part {}'s transcript is included instead.",
+                                super::writing_error(&e),
+                                i + 1
+                            )),
+                        ),
+                    };
+                    if let Ok(mut slot) = results[i].lock() {
+                        *slot = Some(outcome);
                     }
-                    Ok(_) => (
-                        raw(&own, "Transcript", &g.text),
-                        Some(format!(
-                            "part {} came back empty; its transcript is included instead",
-                            i + 1
-                        )),
-                    ),
-                    Err(e) => (
-                        raw(&own, "Transcript", &g.text),
-                        Some(format!(
-                            "{} Part {}'s transcript is included instead.",
-                            super::writing_error(&e),
-                            i + 1
-                        )),
-                    ),
-                };
-                if let Ok(mut slot) = results[i].lock() {
-                    *slot = Some(outcome);
-                }
-                let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                progress(done, total);
+                    let done = finished.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    progress(done, total);
+                })
             });
         }
     });
@@ -880,6 +902,40 @@ mod tests {
         assert!(s.body.contains("- exam\n"), "{}", s.body);
         assert_eq!(s.problems.len(), 1);
         assert!(s.writer_failed);
+    }
+
+    #[test]
+    fn a_stop_reaches_the_long_recording_workers() {
+        let parts: Vec<Part> = (0..12).map(|i| part(i, 1000, &format!("p{i}w"))).collect();
+        let caller = std::thread::current().id();
+        let on_workers = AtomicUsize::new(0);
+        let unstopped = AtomicUsize::new(0);
+        let chat = |p: Prompt, _: u32| -> Result<String> {
+            if std::thread::current().id() != caller {
+                on_workers.fetch_add(1, Ordering::SeqCst);
+            }
+            if leo_core::children::current_stop().is_none() {
+                unstopped.fetch_add(1, Ordering::SeqCst);
+            }
+            if p.system.contains("name and summarize") {
+                return Ok("A long day\n\nEverything covered.".to_string());
+            }
+            Ok("## Part\n- covered".to_string())
+        };
+        leo_core::children::with_stop(leo_core::children::Stop::default(), || {
+            structure_recording(
+                &parts,
+                &[],
+                None,
+                None,
+                "Recording",
+                &chat,
+                &|_, _| {},
+                TEST,
+            )
+        });
+        assert!(on_workers.load(Ordering::SeqCst) > 1);
+        assert_eq!(unstopped.load(Ordering::SeqCst), 0);
     }
 
     #[test]
@@ -1541,6 +1597,29 @@ mod tests {
         );
         assert_eq!(s.title, "Disk Scheduling");
         assert!(s.body.starts_with("How the arm is scheduled."));
+    }
+
+    #[test]
+    fn a_long_brief_is_read_at_its_budget_and_never_zeroes_the_room() {
+        use leo_core::recording::{CONTEXT_READ_CHARS, WANTS_READ_CHARS};
+        let long = leo_core::recording::Profile {
+            context: "ß".repeat(CONTEXT_READ_CHARS * 50),
+            wants: "界".repeat(WANTS_READ_CHARS * 50),
+            ..Default::default()
+        };
+        let p = with_profile(chat::build_structure_prompt_with("words", &[]), &long);
+        assert_eq!(p.user.matches('ß').count(), CONTEXT_READ_CHARS);
+        assert_eq!(p.user.matches('界').count(), WANTS_READ_CHARS);
+        let at_budget = leo_core::recording::Profile {
+            context: "ß".repeat(CONTEXT_READ_CHARS),
+            wants: "界".repeat(WANTS_READ_CHARS),
+            ..Default::default()
+        };
+        assert_eq!(
+            room_after_profile(TEST, &long).words,
+            room_after_profile(TEST, &at_budget).words
+        );
+        assert!(room_after_profile(TEST, &long).words > 0);
     }
 
     #[test]

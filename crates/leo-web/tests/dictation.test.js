@@ -28,7 +28,7 @@ test('dictation controls escape history and preserve explicit text settings', ()
   assert.ok(html.includes('role="radiogroup" aria-label="Popup"'));
   assert.ok(/<input type="checkbox" class="switch" role="switch" data-dictation="writing" data-on="quick">/.test(html));
   assert.ok(html.includes('Adds a few seconds'));
-  assert.ok(html.includes('Names and terms leo should spell your way, up to 200. Some models also listen for them; the first ones count most.'));
+  assert.ok(html.includes('Speech models that support vocabulary and your optional Writing AI read complete entries from the start, up to 4,000 characters total.'));
   for (const gone of ['Use shortcut', 'dictation-use-shortcut', 'dictation-resume', 'Change shortcut', 'dictation-record', 'dictation-shortcut-field', 'data-dictation="shortcut"']) assert.ok(!html.includes(gone));
   const row = context.dictationShortcutRow({ settings: { shortcut: 'option+space' }, shortcut: {} });
   assert.ok(row.includes('<kbd>\u2325</kbd><kbd>Space</kbd>'));
@@ -200,7 +200,7 @@ function editContext(words, recent) {
       const edited = context.state.dictation.recent.map((item) => item.id === options.body.id ? { ...item, text: options.body.text, edited: true } : item);
       return { settings: { custom_words: words }, recent: edited };
     },
-    seq: 1, updateDictationStatus() {}, appVisible: () => false, pulse() {},
+    seq: 1, dictateKeysSeen() {}, updateDictationStatus() {}, appVisible: () => false, pulse() {},
   };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/dictation.js'), 'utf8'), context);
@@ -257,7 +257,7 @@ test('an original is escaped', () => {
   assert.ok(panel.html.includes('Original: &lt;img'));
   assert.ok(!panel.html.includes('<img'));
 });
-test('accepting an offer adds the word once, respects the limit, and Escape cancels', async () => {
+test('accepting an offer adds the word once, including to long lists, and Escape cancels', async () => {
   const { context, listeners, calls, panel, field, result } = editContext(['Felix'], [{ id: 7, text: 'leo seal I' }]);
   context.startDictationEdit({ dataset: { id: '7' } });
   type(context, 'Leo CLI');
@@ -275,9 +275,9 @@ test('accepting an offer adds the word once, respects the limit, and Escape canc
   field.value = Array.from({ length: 200 }, (_, n) => `w${n}`).join('\n');
   vm.runInContext("dictationOffers[7] = ['Other']", context);
   await context.addDictationWord({ dataset: { id: '7', word: 'Other' } });
-  assert.equal(field.value.split('\n').length, 200);
-  assert.ok(!field.value.includes('Other'));
-  assert.ok(result.textContent.includes('full'));
+  assert.equal(field.value.split('\n').length, 201);
+  assert.equal(field.value.split('\n').at(-1), 'Other');
+  assert.equal(result.textContent, '');
   assert.deepEqual(chipWords(panel.html), []);
   context.state.dictation.recent = [{ id: 7, text: 'leo seal I' }];
   const before = calls.length;
@@ -424,4 +424,48 @@ test('a debounced custom-words save sends the shortcut saved since, not the one 
   context.state.view = 'notes';
   await vm.runInContext('dictationSaving', context);
   assert.deepEqual(plain(calls[0].settings), { shortcut: 'command+k', custom_words: ['Charlton'] });
+});
+test('word offers for a dictation that left the history are dropped after a refresh', async () => {
+  const { context } = editContext(['Felix'], [{ id: 7, text: 'leo seal I' }]);
+  context.startDictationEdit({ dataset: { id: '7' } });
+  type(context, 'Leo CLI');
+  await context.saveDictationEdit();
+  assert.deepEqual(plain(vm.runInContext('dictationOffers[7]', context)), ['Leo CLI']);
+  context.api = async () => ({ settings: { custom_words: ['Felix'] }, recent: [{ id: 8, text: 'newer' }] });
+  await vm.runInContext('dictationChange({ action: "refresh" })', context);
+  assert.deepEqual(plain(vm.runInContext('state.dictation.recent.map((i) => i.id)', context)), [8]);
+  assert.deepEqual(plain(vm.runInContext('Object.keys(dictationOffers)', context)), [], 'row 7 is gone from the history, so its offers should be too');
+});
+function longContext() {
+  const whole = 'start '.repeat(500) + 'the rest';
+  const recent = [{ id: 7, text: whole.slice(0, 2000), cut: true, edited: true, original: 'o'.repeat(2000), original_cut: true }];
+  const { context, calls, panel } = editContext([], recent);
+  context.state.view = 'settings';
+  context.api = async (url, options) => {
+    calls.push(plain(options.body));
+    const full = options.body.action === 'full' ? { full: { id: 7, text: whole, original: 'o'.repeat(3000) } } : {};
+    return { settings: { custom_words: [] }, recent, ...full };
+  };
+  return { context, calls, panel, whole };
+}
+test('a long recent dictation shows its start and opens whole on demand', async () => {
+  const { context, calls, panel, whole } = longContext();
+  context.showDictationRecent();
+  assert.ok(panel.html.includes('data-action="dictation-full" data-id="7">Show all</button>'));
+  assert.ok(panel.html.includes(whole.slice(0, 2000) + '…'));
+  assert.ok(!panel.html.includes('the rest'));
+  await context.showDictationFull({ dataset: { id: '7' } });
+  assert.deepEqual(calls, [{ action: 'full', id: 7 }]);
+  assert.ok(panel.html.includes(whole));
+  assert.ok(!panel.html.includes('dictation-full'));
+  await context.toggleDictationOriginal({ dataset: { id: '7' } });
+  assert.ok(panel.html.includes('Original: ' + 'o'.repeat(3000) + '</p>'));
+  assert.equal(calls.length, 1);
+});
+test('editing a cut row edits the whole text', async () => {
+  const { context, calls, panel, whole } = longContext();
+  await context.startDictationEdit({ dataset: { id: '7' } });
+  assert.deepEqual(calls, [{ action: 'full', id: 7 }]);
+  assert.ok(panel.html.includes(`<textarea class="set-input grow" data-edit-text rows="8" aria-label="Edit dictation">${whole}</textarea>`));
+  assert.equal(vm.runInContext('dictationEdit.text', context), whole);
 });

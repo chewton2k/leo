@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{anyhow, bail, ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -42,7 +42,7 @@ struct Download {
 }
 
 type Verified = BTreeMap<PathBuf, (u64, SystemTime)>;
-const VERIFIED_FILE: &str = "speech-verified.json";
+const VERIFIED_FILE: &str = leo_core::paths::own::SPEECH_VERIFIED;
 const MOST_VERIFIED_BYTES: u64 = 64 * 1024;
 
 fn remembered(config: &Path) -> Verified {
@@ -63,6 +63,7 @@ pub struct Library {
     jobs: Arc<Mutex<BTreeMap<String, Download>>>,
     verified: Arc<Mutex<Verified>>,
     hashing: Arc<Mutex<()>>,
+    damaged: Arc<Mutex<Verified>>,
 }
 
 pub fn library() -> Result<&'static Library> {
@@ -100,14 +101,17 @@ impl Library {
     }
 
     pub(crate) fn with_catalog(models: PathBuf, config: PathBuf, catalog: Arc<Catalog>) -> Self {
-        Self {
+        let library = Self {
             verified: Arc::new(Mutex::new(remembered(&config))),
             models,
             config,
             catalog,
             jobs: Default::default(),
             hashing: Default::default(),
-        }
+            damaged: Default::default(),
+        };
+        library.drop_partials();
+        library
     }
 
     pub fn models_dir(&self) -> &Path {
@@ -136,7 +140,7 @@ impl Library {
 
     fn selection_path(&self) -> Result<PathBuf> {
         safe_root(&self.config)?;
-        leo_core::paths::contained_path(&self.config, Path::new("speech-model.json"))
+        leo_core::paths::contained_path(&self.config, Path::new(leo_core::paths::own::SPEECH_MODEL))
     }
 
     pub fn selection(&self) -> Result<Selection> {
@@ -208,31 +212,56 @@ impl Library {
                 .get(&path)
                 == Some(&stamp)
         };
+        let said_damaged = || {
+            self.damaged
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get(&path)
+                == Some(&stamp)
+        };
+        let refusal = || {
+            anyhow!("This speech model is damaged. Delete it and download it again in Settings → Speech models.")
+        };
         if known() {
             return Ok(path);
+        }
+        if said_damaged() {
+            return Err(refusal());
         }
         let _hashing = self.hashing.lock().unwrap_or_else(|e| e.into_inner());
         if known() {
             return Ok(path);
         }
+        if said_damaged() {
+            return Err(refusal());
+        }
         let actual = crate::providers::sha256_of(&path)?;
-        ensure!(actual.eq_ignore_ascii_case(&model.file().sha256), "This speech model is damaged. Delete it and download it again in Settings → Speech models.");
+        if !actual.eq_ignore_ascii_case(&model.file().sha256) {
+            self.set_damaged(&path, Some(stamp));
+            return Err(refusal());
+        }
+        self.set_damaged(&path, None);
         self.change_verified(|verified| {
             verified.insert(path.clone(), stamp);
         });
         Ok(path)
     }
 
+    fn set_damaged(&self, path: &Path, now: Option<(u64, SystemTime)>) {
+        let mut damaged = self.damaged.lock().unwrap_or_else(|e| e.into_inner());
+        match now {
+            Some(stamp) => damaged.insert(path.to_path_buf(), stamp),
+            None => damaged.remove(path),
+        };
+    }
+
     fn change_verified(&self, change: impl FnOnce(&mut Verified)) {
         let mut verified = self.verified.lock().unwrap_or_else(|e| e.into_inner());
         change(&mut verified);
-        let saved = tempfile::NamedTempFile::new_in(&self.config)
+        let saved = serde_json::to_vec(&*verified)
             .map_err(anyhow::Error::from)
-            .and_then(|mut tmp| {
-                serde_json::to_writer(&mut tmp, &*verified)?;
-                tmp.persist(self.config.join(VERIFIED_FILE))
-                    .map_err(|e| e.error)?;
-                Ok(())
+            .and_then(|bytes| {
+                leo_core::paths::write_atomic(&self.config.join(VERIFIED_FILE), bytes)
             });
         if let Err(error) = saved {
             log::warn!("Could not remember the verified speech models: {error}");
@@ -286,23 +315,21 @@ impl Library {
             "Choose a language supported by this speech model."
         );
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         self.verify(id)?;
         let selection = Selection {
             id: id.into(),
             language: language.into(),
         };
-        let mut tmp = tempfile::NamedTempFile::new_in(&self.config)?;
-        serde_json::to_writer(&mut tmp, &selection)?;
-        tmp.as_file().sync_all()?;
-        tmp.persist(self.selection_path()?).map_err(|e| e.error)?;
-        Ok(())
+        leo_core::paths::write_atomic(&self.selection_path()?, serde_json::to_vec(&selection)?)
     }
 
     pub(crate) fn delete(&self, id: &str) -> Result<()> {
         self.catalog.known(id)?;
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         ensure!(
             !self
                 .jobs
@@ -316,20 +343,18 @@ impl Library {
         if path.exists() {
             std::fs::remove_file(&path)?;
         }
+        self.set_damaged(&path, None);
         self.change_verified(|verified| {
             verified.remove(&path);
         });
         if self.selection()?.id == id {
-            let mut tmp = tempfile::NamedTempFile::new_in(&self.config)?;
-            serde_json::to_writer(
-                &mut tmp,
-                &Selection {
+            leo_core::paths::write_atomic(
+                &self.selection_path()?,
+                serde_json::to_vec(&Selection {
                     id: String::new(),
                     language: "auto".into(),
-                },
+                })?,
             )?;
-            tmp.as_file().sync_all()?;
-            tmp.persist(self.selection_path()?).map_err(|e| e.error)?;
         }
         Ok(())
     }
@@ -602,7 +627,8 @@ impl Library {
             }
         })?;
         tmp.as_file().sync_all()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         ensure!(
             !cancel.load(Ordering::Acquire),
             "The model download was cancelled."
@@ -613,6 +639,7 @@ impl Library {
         );
         tmp.persist(&target).map_err(|e| e.error)?;
         let stamp = std::fs::symlink_metadata(&target).and_then(|m| Ok((m.len(), m.modified()?)));
+        self.set_damaged(&target, None);
         self.change_verified(|verified| match stamp {
             Ok(stamp) => {
                 verified.insert(target.clone(), stamp);
@@ -628,17 +655,7 @@ impl Library {
         if safe_root(&self.models).is_err() {
             return;
         }
-        let Ok(entries) = std::fs::read_dir(&self.models) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            if entry.file_name().to_string_lossy().starts_with(PARTIAL)
-                && entry.file_type().is_ok_and(|t| t.is_file())
-                && crate::providers::older_than(&entry, Duration::from_secs(600))
-            {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
+        crate::providers::drop_stale_downloads(&self.models);
     }
 
     fn extra_name(name: &str) -> bool {
@@ -663,7 +680,8 @@ impl Library {
             "Use the model’s Delete button instead."
         );
         self.folders()?;
-        let _lock = crate::private_file::lock(&self.config, ".speech.lock", LOCK_WAIT)?;
+        let _lock =
+            crate::private_file::lock(&self.config, leo_core::paths::own::SPEECH_LOCK, LOCK_WAIT)?;
         let path = leo_core::paths::contained_path(&self.models, Path::new(name))?;
         let metadata = std::fs::symlink_metadata(&path)?;
         ensure!(

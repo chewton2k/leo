@@ -9,6 +9,8 @@ const TASK_USE = {
   speech: 'Turns what was said into text while you record.',
 };
 
+const SETTINGS_WANTS = { shortcuts: ['dictation'], dictation: ['dictation'], models: ['speech'], calendar: ['calendar'], felix: ['margin'] };
+
 async function showSettings(section) {
   section = settingsSection(section);
   // Trash is a page of notes rather than a setting, so a bare #/settings never reopens it.
@@ -19,15 +21,17 @@ async function showSettings(section) {
   state = { view: 'settings', dir: '', section };
   scheduleAppStatus(appPollGeneration);
   chrome();
-  $('#crumbs').innerHTML = settingsCrumbs(section);
   document.title = 'Settings · leo';
   refreshPanel(app, settingsFrame(section, skeleton(3, 'settings')));
-  const [page, calendar, speech, dictation, margin] = await Promise.all([api('/api/settings'), api('/api/calendar').catch(() => null), api('/api/speech').catch(() => null), api('/api/dictation').catch(() => null), section === 'felix' ? api('/api/margin').catch(() => null) : null]);
+  const wants = SETTINGS_WANTS[section] || [];
+  const ask = (name, url) => (wants.includes(name) ? api(url).catch(() => null) : null);
+  const [page, calendar, speech, dictation, margin] = await Promise.all([api('/api/settings'), ask('calendar', '/api/calendar'), ask('speech', '/api/speech'), ask('dictation', '/api/dictation'), ask('margin', '/api/margin')]);
   if (mine !== seq) return;
   state.margin = margin;
   state.calendar = calendar;
   state.speech = speech;
   state.dictation = dictation;
+  if (dictation) dictateKeysSeen(dictation);
   drawSettings(page);
   if (section === 'health') loadHealth().catch(fail);
   startSpeechPolling(mine);
@@ -308,7 +312,7 @@ function taskCard(t) {
   let key = '';
   if (t.key) {
     const has = t.key.stored;
-    const form = `<div class="set-key-form"><input type="password" autocomplete="off" spellcheck="false"${has ? ` class="has-key" placeholder="${esc(t.key.hint || '••••••••')}" aria-label="${esc(t.key.name)} key is stored; type a new one to replace it"` : ` placeholder="Paste your ${esc(t.key.name)} API key"`} data-key-input="${esc(t.key.account)}"><button class="btn primary sm" data-action="set-key" data-account="${esc(t.key.account)}">${has ? 'Replace key' : 'Save key'}</button></div>`;
+    const form = `<div class="set-key-form"><input type="password" autocomplete="off" spellcheck="false"${has ? ` class="has-key" placeholder="${esc(t.key.hint || '••••••••')}" aria-label="${esc(t.key.name)} key is stored; type a new one to replace it"` : ` placeholder="Paste your ${esc(t.key.name)} API key" aria-label="${esc(t.key.name)} key"`} data-key-input="${esc(t.key.account)}"><button class="btn primary sm" data-action="set-key" data-account="${esc(t.key.account)}">${has ? 'Replace key' : 'Save key'}</button></div>`;
     key = `<div class="set-row column" data-find="writing-key"><div class="set-line"><span class="set-label">${esc(t.key.name)} key</span><span class="set-value">${has ? '' : '<span class="set-status missing">Not added</span>'}${has ? `<button class="btn plain sm" data-action="remove-key" data-account="${esc(t.key.account)}" data-name="${esc(t.key.name)}">Remove</button>` : ''}</span></div>${form}${t.key.ignored ? `<p class="hint">leo does not read $${esc(t.key.ignored)}; add the key here instead.</p>` : ''}</div>`;
   }
   const signin = t.signin ? `<p class="set-note${t.signin.installed ? '' : ' warn'}">${esc(t.signin.text).replace(/`([^`]+)`/g, '<code>$1</code>')}</p>` : '';
@@ -569,7 +573,7 @@ const FA_NEUTRAL = 'color-mix(in srgb, var(--text) 45%, transparent)';
 
 function faToday(hourly) {
   const now = new Date();
-  const day = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const day = S.dayKey(now);
   return hourly ? `${day} ${String(now.getHours()).padStart(2, '0')}` : day;
 }
 function faSpanName(span) { return span === 1 ? 'last 24 hours' : `last ${span} days`; }
@@ -578,13 +582,16 @@ function faCompact(n) {
   if (n >= 1000) return `${(n / 1e3).toFixed(1)}k`;
   return String(n);
 }
-function faExact(n) { return n.toLocaleString('en-US'); }
+function faExact(n) { return n.toLocaleString(calLocale()); }
 function faSeconds(ms) { return `${(ms / 1000).toFixed(1)} s`; }
 function faDate(day, long) {
   const [date, hour] = day.split(' ');
-  const [y, m, d] = date.split('-').map(Number);
-  if (hour !== undefined) return new Date(y, m - 1, d, Number(hour)).toLocaleString('en-US', long ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric' });
-  return new Date(y, m - 1, d).toLocaleDateString('en-US', long ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
+  const when = S.fromKey(date);
+  if (hour !== undefined) {
+    when.setHours(Number(hour));
+    return when.toLocaleString(calLocale(), long ? { weekday: 'short', hour: 'numeric' } : { hour: 'numeric' });
+  }
+  return when.toLocaleDateString(calLocale(), long ? { weekday: 'short', month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric' });
 }
 function faBarName(bar, weekly) { return weekly ? `${faDate(bar.from)} – ${faDate(bar.to)}` : faDate(bar.from, true); }
 function faModelName(name) { return name || 'Model not reported'; }
@@ -1170,7 +1177,7 @@ function speechCards(view) {
 }
 function speechBytes(bytes) {
   bytes = Math.max(0, Number(bytes) || 0);
-  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + ' GB' : bytes >= 1048576 ? Math.round(bytes / 1048576) + ' MB' : bytes + ' B';
+  return bytes >= 1073741824 ? (bytes / 1073741824).toFixed(1) + ' GB' : bytes >= 1048576 ? Math.round(bytes / 1048576) + ' MB' : bytes >= 1024 ? Math.round(bytes / 1024) + ' KB' : bytes + ' B';
 }
 function speechUseLanguage(model) {
   if (model.detects_language !== false) return 'auto';

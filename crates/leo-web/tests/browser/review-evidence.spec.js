@@ -550,6 +550,20 @@ test('R15 the mode dropdown opens and closes with an interruptible animation and
   await page.goto(`/#/n/${note.id}`);
   const button = page.locator('#margin-mode');
   await expect(button).toBeEnabled();
+  await page.evaluate(() => {
+    const menu = document.querySelector('#margin-mode-menu');
+    const animate = menu.animate;
+    window.__slow = true;
+    menu.animate = function (...args) {
+      const run = animate.apply(this, args);
+      const play = run.play;
+      run.play = function () {
+        if (window.__slow) this.playbackRate *= 0.1;
+        return play.call(this);
+      };
+      return run;
+    };
+  });
   const watch = () => page.evaluate(() => {
     window.__menu = [];
     window.__menuOn = true;
@@ -586,6 +600,7 @@ test('R15 the mode dropdown opens and closes with an interruptible animation and
   expect(closing.at(-1).hidden || !closing.at(-1).shown, 'and is gone afterwards').toBe(true);
   await expect(button).toBeFocused();
 
+  await page.evaluate(() => { window.__slow = false; });
   const reversals = await button.evaluate(button => {
     const menu = document.querySelector('#margin-mode-menu');
     const animate = menu.animate;

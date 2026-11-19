@@ -196,7 +196,7 @@ function combineSheet(from, into) {
     <h3>Combine these notes?</h3>
     <p>“${esc(from.title)}” will be merged into “${esc(into.title)}”.</p>
     <p class="hint">Heads up: the AI writes the combined note, so it may not be fully accurate.</p>
-    <div class="buttons"><button class="btn plain" data-action="close">Cancel</button><button class="btn primary" id="combine-go">Combine</button></div>
+    ${sheetButtons(['Combine', 'id="combine-go"'])}
   </div>`);
   $('#combine-go', box).addEventListener('click', () => combineNow(from, into).catch(fail));
 }
@@ -209,21 +209,45 @@ async function combineNow(from, into) {
     job = await api(`/api/notes/${enc(into.id)}/combine`, { method: 'POST', body: { with: from.id } });
   } catch (e) {
     const open = $('.scrim .combine');
-    if (open) open.innerHTML = `<h3>The notes could not be combined</h3><p class="upload-error">${esc(e.message)}</p><div class="buttons"><button class="btn plain" data-action="close">Close</button></div>`;
+    if (open) open.innerHTML = `<h3>The notes could not be combined</h3><p class="upload-error">${esc(e.message)}</p>${sheetButtons(null, { cancel: 'Close' })}`;
     return;
   }
   if ($('.scrim .combine')) closeSheet();
-  toast('Combining in the background. Its progress is in the Background panel; you’ll review it before anything changes.');
+  if (job.parts > LONG_COMBINE) longCombine(job);
+  else toast('Combining in the background. Its progress is in the Background panel; you’ll review it before anything changes.');
   checkActivity();
   watchCombine(job.id);
 }
 
+const LONG_COMBINE = 20;
+
+const combinePart = (job) => `Part ${Math.min((job.done || 0) + 1, job.parts)} of ${job.parts}`;
+
+function longCombine(job) {
+  const box = sheet(`<div class="combine combine-long">
+    <h3>This combine takes ${job.parts} requests to the AI</h3>
+    <p>The AI works through the notes one part at a time. You can carry on meanwhile: its progress is in the Background panel, and you’ll review it before anything changes.</p>
+    <p class="hint" id="combine-part" role="status">${combinePart(job)}</p>
+    ${sheetButtons(['Stop combining', 'id="combine-stop"'], { cancel: 'Keep going', kind: 'danger' })}
+  </div>`);
+  $('#combine-stop', box).addEventListener('click', () => stopCombine(job.id).catch(fail));
+}
+
+async function stopCombine(id) {
+  await api(`/api/combines/${enc(id)}`, { method: 'DELETE' });
+  closeSheet();
+  checkActivity();
+  toast('Combining was stopped. Neither note was changed.');
+}
+
 const combinesWatched = new Set();
+const combinesPaused = new Set();
 
 function watchCombine(id) {
   if (combinesWatched.has(id)) return;
   combinesWatched.add(id);
   const look = async () => {
+    if (!appVisible()) { combinesWatched.delete(id); combinesPaused.add(id); return; }
     let job;
     try {
       job = await api(`/api/combines/${enc(id)}`);
@@ -231,7 +255,13 @@ function watchCombine(id) {
       combinesWatched.delete(id);
       return;
     }
-    if (job.state === 'working') { setTimeout(look, 1500); return; }
+    const line = $('#combine-part');
+    if (job.state === 'working') {
+      if (line) line.textContent = combinePart(job);
+      setTimeout(look, 1500);
+      return;
+    }
+    if (line) closeSheet();
     combinesWatched.delete(id);
     checkActivity();
     if (job.state === 'ready') toast(`“${job.with_title}” and “${job.into_title}” are ready to review`, { action: 'Review', run: () => reviewCombine(id).catch(fail) });
@@ -247,7 +277,7 @@ async function forgetCombine(id) {
 
 async function reviewCombine(id) {
   const job = await api(`/api/combines/${enc(id)}`);
-  if (job.state === 'working') { toast('Still combining. Its progress is in the Background panel.'); return; }
+  if (job.state === 'working') { longCombine(job); return; }
   if (job.state !== 'ready') {
     await forgetCombine(id);
     toast(job.error || 'The notes could not be combined.', { bad: true });
@@ -285,7 +315,7 @@ async function saveCombined(made, from, into, id) {
       try {
         await api(`/api/notes/${enc(into.id)}`, { method: 'PATCH', body: { body: saved.before, base: saved.note.version } });
         await api('/api/trash/restore', { method: 'POST', body: { ids: [saved.removed] } });
-        if (saved.sources?.length) await api(`/api/notes/${enc(into.id)}/uncombine`, { method: 'POST', body: { sources: saved.sources } });
+        await api(`/api/notes/${enc(into.id)}/uncombine`, { method: 'POST', body: { from: saved.removed } });
         await afterCombine(into.id);
         toast('Both notes are back as they were.');
       } catch (e) {

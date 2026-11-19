@@ -19,8 +19,8 @@ const MOST_TOKENS: usize = 512;
 const BATCH: usize = 16;
 
 pub fn manifest() -> Vec<(String, String)> {
-    let text = std::env::var("LEO_MEANING_MANIFEST").unwrap_or_else(|_| MODEL_MANIFEST.to_string());
-    text.split_whitespace()
+    MODEL_MANIFEST
+        .split_whitespace()
         .filter_map(|pair| pair.split_once('='))
         .map(|(name, sha)| (name.to_string(), sha.to_string()))
         .collect()
@@ -30,30 +30,53 @@ pub fn dir() -> PathBuf {
     crate::config::choice::models_dir().join("bge-small-en-v1.5")
 }
 
+type Stamp = (u64, std::time::SystemTime);
+
+static VERIFIED: LazyLock<Mutex<HashMap<(PathBuf, String), Stamp>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn stamp_of(path: &Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
+fn checked(path: &Path, sha: &str) -> ModelState {
+    let stamp = stamp_of(path);
+    let key = (path.to_path_buf(), sha.to_string());
+    if stamp.is_some()
+        && VERIFIED.lock().unwrap_or_else(|e| e.into_inner()).get(&key) == stamp.as_ref()
+    {
+        return ModelState::Ready;
+    }
+    let state = model_state(path, sha);
+    if let (ModelState::Ready, Some(stamp)) = (state, stamp) {
+        VERIFIED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key, stamp);
+    }
+    state
+}
+
+fn remember(path: &Path, sha: &str) {
+    if let Some(stamp) = stamp_of(path) {
+        VERIFIED
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert((path.to_path_buf(), sha.to_string()), stamp);
+    }
+}
+
 pub fn state() -> ModelState {
-    type Stamp = (u64, std::time::SystemTime);
-    static VERIFIED: LazyLock<Mutex<HashMap<(PathBuf, String), Stamp>>> =
-        LazyLock::new(|| Mutex::new(HashMap::new()));
-    let dir = dir();
-    worst_state(manifest().into_iter().map(|(name, sha)| {
-        let path = dir.join(name);
-        let stamp = std::fs::metadata(&path)
-            .ok()
-            .and_then(|meta| Some((meta.len(), meta.modified().ok()?)));
-        let key = (path, sha);
-        let known = |cache: &HashMap<(PathBuf, String), Stamp>| cache.get(&key) == stamp.as_ref();
-        if stamp.is_some() && known(&VERIFIED.lock().unwrap_or_else(|e| e.into_inner())) {
-            return ModelState::Ready;
-        }
-        let state = model_state(&key.0, &key.1);
-        if let (ModelState::Ready, Some(stamp)) = (state, stamp) {
-            VERIFIED
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .insert(key, stamp);
-        }
-        state
-    }))
+    state_in(&dir(), &manifest())
+}
+
+pub(crate) fn state_in(dir: &Path, manifest: &[(String, String)]) -> ModelState {
+    worst_state(
+        manifest
+            .iter()
+            .map(|(name, sha)| checked(&dir.join(name), sha)),
+    )
 }
 
 pub fn wanted() -> bool {
@@ -62,19 +85,19 @@ pub fn wanted() -> bool {
         && state() != ModelState::Ready
 }
 
-pub fn fetch(quiet: bool) -> Result<PathBuf> {
-    let base = std::env::var("LEO_MEANING_URL").unwrap_or_else(|_| MODEL_URL.to_string());
-    let dir = dir();
-    for (name, sha) in manifest() {
-        if model_state(&dir.join(&name), &sha) == ModelState::Ready {
+pub fn fetch() -> Result<PathBuf> {
+    fetch_from(MODEL_URL, &dir(), &manifest())
+}
+
+pub(crate) fn fetch_from(base: &str, dir: &Path, manifest: &[(String, String)]) -> Result<PathBuf> {
+    for (name, sha) in manifest {
+        if checked(&dir.join(name), sha) == ModelState::Ready {
             continue;
         }
-        if !quiet {
-            println!("  {name}");
-        }
-        download_verified(&format!("{base}/{name}"), &sha, &dir, &name, quiet)?;
+        let path = download_verified(&format!("{base}/{name}"), sha, dir, name)?;
+        remember(&path, sha);
     }
-    Ok(dir)
+    Ok(dir.to_path_buf())
 }
 
 pub struct Model {
@@ -336,7 +359,125 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs the downloaded model: leo update fetches it"]
+    fn the_meaning_model_is_fetched_once_and_then_kept() {
+        let scratch = tempfile::tempdir().unwrap();
+        let source = scratch.path().join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("config.json"), b"{}").unwrap();
+        let manifest = vec![(
+            "config.json".to_string(),
+            crate::providers::sha256_of(&source.join("config.json")).unwrap(),
+        )];
+        let dest = scratch.path().join("models");
+        let base = format!("file://{}", source.display());
+        assert_eq!(fetch_from(&base, &dest, &manifest).unwrap(), dest);
+        assert_eq!(std::fs::read(dest.join("config.json")).unwrap(), b"{}");
+        std::fs::remove_dir_all(&source).unwrap();
+        assert_eq!(fetch_from(&base, &dest, &manifest).unwrap(), dest);
+        assert_eq!(std::fs::read(dest.join("config.json")).unwrap(), b"{}");
+    }
+
+    fn two_files(scratch: &Path) -> (String, Vec<(String, String)>, PathBuf) {
+        let source = scratch.join("source");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("one.json"), b"{\"one\":1}").unwrap();
+        std::fs::write(source.join("two.json"), b"{\"two\":2}").unwrap();
+        let manifest = ["one.json", "two.json"]
+            .map(|name| {
+                (
+                    name.to_string(),
+                    crate::providers::sha256_of(&source.join(name)).unwrap(),
+                )
+            })
+            .to_vec();
+        (
+            format!("file://{}", source.display()),
+            manifest,
+            scratch.join("models"),
+        )
+    }
+
+    fn overwrite_keeping_stamp(path: &Path, bytes: &[u8]) {
+        let before = std::fs::metadata(path).unwrap();
+        assert_eq!(before.len() as usize, bytes.len());
+        std::fs::write(path, bytes).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(before.modified().unwrap())
+            .unwrap();
+    }
+
+    #[test]
+    fn the_fetch_trusts_the_check_it_follows() {
+        let scratch = tempfile::tempdir().unwrap();
+        let (base, manifest, dest) = two_files(scratch.path());
+        std::fs::create_dir(&dest).unwrap();
+        let present = dest.join("one.json");
+        std::fs::copy(scratch.path().join("source/one.json"), &present).unwrap();
+        assert_eq!(state_in(&dest, &manifest), ModelState::Missing);
+        overwrite_keeping_stamp(&present, b"{\"one\":9}");
+        fetch_from(&base, &dest, &manifest).unwrap();
+        assert_eq!(std::fs::read(&present).unwrap(), b"{\"one\":9}");
+        assert_eq!(
+            std::fs::read(dest.join("two.json")).unwrap(),
+            b"{\"two\":2}"
+        );
+    }
+
+    #[test]
+    fn a_downloaded_file_is_remembered() {
+        let scratch = tempfile::tempdir().unwrap();
+        let (base, manifest, dest) = two_files(scratch.path());
+        fetch_from(&base, &dest, &manifest).unwrap();
+        overwrite_keeping_stamp(&dest.join("one.json"), b"{\"one\":9}");
+        overwrite_keeping_stamp(&dest.join("two.json"), b"{\"two\":9}");
+        assert_eq!(state_in(&dest, &manifest), ModelState::Ready);
+    }
+
+    #[test]
+    #[ignore = "times a 134 MB file; run by hand with --release"]
+    fn benchmark_meaning_fetch_after_check() {
+        use std::io::Write;
+        let scratch = tempfile::tempdir().unwrap();
+        let source = scratch.path().join("source");
+        let dest = scratch.path().join("models");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        std::fs::write(source.join("config.json"), vec![b'c'; 743]).unwrap();
+        let mut weights = std::fs::File::create(dest.join("model.safetensors")).unwrap();
+        let chunk: Vec<u8> = (0..1 << 20).map(|i| (i % 251) as u8).collect();
+        for _ in 0..134 {
+            weights.write_all(&chunk).unwrap();
+        }
+        drop(weights);
+        let manifest: Vec<(String, String)> = [
+            (source.join("config.json"), "config.json"),
+            (dest.join("model.safetensors"), "model.safetensors"),
+        ]
+        .iter()
+        .map(|(path, name)| (name.to_string(), crate::providers::sha256_of(path).unwrap()))
+        .collect();
+        let base = format!("file://{}", source.display());
+        let time = |what: &str, run: &mut dyn FnMut()| {
+            let at = std::time::Instant::now();
+            run();
+            eprintln!("{what}: {:?}", at.elapsed());
+        };
+        time("check, one file missing", &mut || {
+            assert_eq!(state_in(&dest, &manifest), ModelState::Missing);
+        });
+        time("fetch after the check", &mut || {
+            fetch_from(&base, &dest, &manifest).unwrap();
+        });
+        time("check after the fetch", &mut || {
+            assert_eq!(state_in(&dest, &manifest), ModelState::Ready);
+        });
+    }
+
+    #[test]
+    #[ignore = "needs the downloaded model: the app fetches it when it opens"]
     fn sentences_that_mean_the_same_are_closer_than_ones_that_do_not() {
         let model = Model::load(&dir()).unwrap();
         let v = model

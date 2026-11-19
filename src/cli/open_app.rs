@@ -13,9 +13,7 @@ pub fn open_command() -> Option<std::process::Command> {
     }
     #[cfg(windows)]
     {
-        let app = std::path::PathBuf::from(std::env::var_os("LOCALAPPDATA")?)
-            .join("Leo")
-            .join("leo-app.exe");
+        let app = super::installation::app_dir().ok()?.join("leo-app.exe");
         app.is_file()
             .then(|| leo_core::children::quiet_command(app))
     }

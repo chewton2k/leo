@@ -32,12 +32,28 @@ This file holds the rules. How each screen behaves, area by area, is in
   and `theme.js` are separate scripts too.
 - Everything leo-web computes or keeps besides notes and uploads lives in one
   SQLite file, `<data>/leo.db` (`db.rs`; rusqlite bundled, WAL, 0600, never
-  synced): chats (+ FTS5), chat documents, review progress, picture captions,
+  synced): chats (+ FTS5; chat messages are rows, `chat_messages` with
+  `chat_words` for search, db `VERSION` 7: a save adds only new rows, a chat
+  keeps every message and is read 200 at a time, a chat saved before is moved to
+  rows on its next save; 2026-11-17, the owner's principle 1: the 400-message cut
+  and its page slice are gone), chat documents, review progress, picture captions,
   meaning vectors, note connections, calendar feeds, note-task metadata,
   reading positions, margin threads, dictations, usage days, recordings whose
-  notes are not written yet. Old caption, graph and meaning JSON files are
+  notes are not written yet, a search index of note text (`notes_text`, trigram,
+  no copy of the text; no database version: it is checked against the notes by
+  hash at every start). Old caption, graph and meaning JSON files are
   brought in on first open and renamed `*.before-database` (browser tests seed
-  note connections this way). Writes touch only what changed.
+  note connections this way), and deleted 30 days later by the daily Keeping pass
+  once their table in leo.db holds rows and no `leo.db.damaged-*` sits beside it. Writes touch only what changed. New databases
+  give deleted space back in small steps when leo is idle and not recording
+  (`Db::give_back`, hourly, 256 pages a step, from 1,024 free pages). A database
+  made before 2026-11 is rewritten once while idle into a new file and swapped in
+  (`Db::rewrite`, just before `give_back`); the swap is the only step that holds the
+  connection, and it is abandoned if any other connection to the file is open.
+  The cache-capacity rewrite fixture runs in its own process because the connection
+  cache is process-wide. A damaged leo.db
+  is set aside as `leo.db.damaged-<stamp>` (Health says where); one from a
+  newer leo is refused before it is opened.
 
 ## Serving and security
 
@@ -46,14 +62,23 @@ This file holds the rules. How each screen behaves, area by area, is in
   tasks (graph, idle, Keeping expiry, calendar) and the server;
   `Running::{port, sign_in_url, stop}`. `stop` stops the background tasks first,
   drains requests and streams for at most `shutdown::GRACE` (5 s), then aborts
-  the server; warm-session cleanup has `shutdown::CLEANUP` (1 s). Tests use
+  the server; it first signals a native recording to stop, refuses new
+  recordings, and waits for the worker within the same grace; warm-session cleanup has `shutdown::CLEANUP` (1 s). Tests use
   `start_in(Places { store, sessions }, …)`. The app passes `fresh_token()`;
   `leo-test-server` uses `saved_token()`, the `<config>/serve-token` file the
   specs read.
 - Only the app's window talks to the engine: `same_host` refuses any Host but
   `127.0.0.1:<port>`/`localhost:<port>` (421); `?token=` on GET `/` → 303 + a
-  `leo_session` cookie (`SameSite=Strict`, 30 days, `serve-sessions.json`). No
+  `leo_session` cookie (`SameSite=Strict`, 30 days, `app-sessions.json`; a
+  damaged sessions file loads as none). No
   tunnel, Wi-Fi bind, QR, signed-in browsers list or link rotation.
+- A route that carries the person's own text takes a body of any honest size (2026-11-17, the user's call: no request-size limit):
+  create, save, `suggestion`, `insert`, `felix/act`, `tasks/import`, a recording's pasted `snapshot` (a screenshot of any size) and `/api/chat` carry `routes::text_limit()`
+  (`TEXT_BYTES`, 512 MiB, the one memory bound: a body is read whole and parsed whole, so one request
+  costs about three times its size). Hostile input is stopped before the body is read, not by its size: the
+  engine listens on 127.0.0.1 only, refuses any Host but its own (421) and any request without the window's
+  per-launch session (401). Routes that never carry a note's text keep axum's 2 MB default; the combine, margin,
+  chat-save, import, picture, preferences and dictation routes keep their own limits.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
   fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
@@ -68,7 +93,9 @@ This file holds the rules. How each screen behaves, area by area, is in
   returned to the page or put in exports. A stored key shows as a
   `secret::masked` placeholder; nothing changes until Save.
 - Every success is JSON or a bodiless 204 (`api()` treats an empty body as
-  `null`; a browser test sweeps the API). Session-gated JSON inputs are bounded.
+  `null`; a browser test sweeps the API); every `/api/` refusal is JSON `{error}`
+  (`reply::worded` words a bare one by its status; the folder routes say the folder
+  sentence). Session-gated JSON inputs are bounded.
 
 Decided: one app, window only (2026-10-31).
 
@@ -87,8 +114,7 @@ Decided: one app, window only (2026-10-31).
 - Point and screenshot workers keep their save guard through I/O and the
   in-memory acknowledgement even if the HTTP client leaves.
 - Recording warnings keep at most 40 entries of 2,000 Unicode characters.
-- Keeping's expiry refuses linked recording and originals roots; every pass is
-  bounded, never follows symlinks, stays in its folder and skips what it cannot
+- Keeping's expiry refuses linked recording and originals roots; every pass walks its folder entry by entry in bounded memory (2026-11-17, the owner's principle 1: no entry count; uploads are deleted as they are met and the preview gives way every 1,000 entries when it is abandoned) (a recordings pass deletes in batches of 256 under the recordings lock until done), never follows symlinks, stays in its folder and skips what it cannot
   delete.
 - Credentials never reach the page or note exports. Writing Settings offers
   Ollama, Codex and Claude Code only; removed AGY/Copilot choices and sign-in
@@ -124,7 +150,7 @@ Decided: one app, window only (2026-10-31).
   spot on every page (2026-11-16, replacing the bar that followed each page's content).
 - UI preferences survive a port change (2026-11-14): localStorage is per origin and
   the engine port drifts when the saved one is busy, so every `leo-*` key (not
-  `leo-draft*`, `leo-chat-v1` or `leo-search`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
+  `leo-draft*` or `leo-chat-v1`: content, not settings) is mirrored in `<data>/ui-prefs.json` (`prefs.rs`: keys
   `^leo-[a-z0-9-]{1,48}$`, 16 KB per value, 128 KB total, temp file + rename,
   merged per key under a lock). `/prefs.js` (behind the session gate, `no-store`,
   loads before `/theme.js`) seeds localStorage from the file (the file's keys win; keys it lacks are
@@ -158,7 +184,11 @@ Decided: one app, window only (2026-10-31).
   `doc-empty` set by doc.js on every draw and change);
   scrollbars are thin and warm (`* { scrollbar-width:
   thin }`, `:root` `scrollbar-color`), and `html.page-bar-on` still hides the
-  page's own bar for `.page-bar`. Focus rings are unchanged.
+  page's own bar for `.page-bar`. Focus rings are unchanged. Repeated style rules are written once (2026-11-18): one comma-list rule per focus-ring offset (a second one only where a rule between its members sets an outline for the same element), one rule for the chip on-state, one for the cut-off-with-dots trio (`overflow: hidden; text-overflow: ellipsis; white-space: nowrap`) per run of rules no other rule can interrupt, and the tokens `--ring-soft`, `--t-fade` and `--r-panel`. A new rule that repeats one of these joins the shared rule; `node tests/style-merge.check.js <base ref>` (Playwright library only, no server) compares the computed style of every changed selector against a base commit in light, dark, narrow and forced colours and must report 0 differences.
+- Copying a selection that holds a picture (note reading view and Felix's answers, 2026-11-18) also puts
+  `text/html` on the clipboard: `leoMarkdown.selectionCopy` draws each loaded picture to a canvas and
+  `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a
+  picture over 3 MB, or past 8 MB in all, stays its alt text). A selection without a picture is untouched.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.
@@ -384,15 +414,27 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   spellcheck off for tables, code, math and lines starting with `-`, `|` or `:`.
 - Saving: autosave PATCHes 700 ms after the last change with `base` = the loaded
   `version` (FNV-1a); 409 → "<title> (conflict from leo)". `saving.js` keeps
-  edits that did not reach leo and retries them on the next load; saving admits
-  bounded Unicode JSON bodies. Up to
-  `MOST_UNDO` page undo snapshots per note. Navigation serialises the departing
+  edits that did not reach leo and retries them on the next load; a note of
+  any size saves (see Serving and security). Up to
+  `MOST_UNDO` page undo steps per note, each only its changed span. A keystroke
+  hands the changed lines along and joins nothing (`doc.js` `changed(edit)`,
+  `source()` joins once per change); the draft is written at most four times a
+  second, then before a save, on hide and at quit; drafts over 256 KB
+  (`SMALL_DRAFT`) are one IndexedDB record (`leo-drafts`), and `saving.settle()`
+  makes every edit safe or gives up after 5 s (2026-11-17, the user's call: no
+  typed text is lost). Navigation serialises the departing
   save; a failed save keeps the editor and address; only a draft persisted in
   this browser may offer Leave, draft kept (rechecked at activation).
 - Pictures: `<notes>/attachments/` (`leo_core::attachments`, sniffed
-  PNG/JPEG/GIF/WebP only, ≤20 MB). Upload names (`safe_file_name`) drop
+  PNG/JPEG/GIF/WebP only), of any size, streamed to disk after their first bytes are checked
+  (`PUT /api/pictures/{name}`, body limit off, 60 s without a byte is a refusal; 2026-11-18, the owner's principle 1); `/api/image` streams a picture back in 64 KB pieces. Upload names (`safe_file_name`) drop
   trailing dots/spaces and dash Windows device names (`CON-.pdf`); older stored
-  names still open (`stored_file_name`).
+  names still open (`stored_file_name`). Counted per linking note; removed by the
+  rule in root CLAUDE.md, Dependents (`dependents::pictures_asked`: every text file in
+  the notes folder, live and held recordings, task descriptions and chat text can
+  name pictures. Saved chat rows carry quiz and study content. Typed recording
+  points live in session or transcript files. The pass scans outside the notes
+  lock and checks counts, revisions and the saved file digest before deletion).
 - Browsing never calls an AI. The explorer is the only folder listing: `#/` is
   an empty workspace, legacy `#/f/<path>` selects the folder then replaces the
   hash with `#/`. Explorer actions capture their target before opening a menu
@@ -438,31 +480,50 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   saves through version-checked POST `combined` or DELETE `/api/combines/{job}`;
   Undo is POST `uncombine`. The AI writes one note, leo puts back anything it
   dropped. Source parts are sized by the provider's graph budget (≤20,000
-  characters per source, 40,000 per request, ≤480,000 input, 128 requests);
+  characters per source, 40,000 per request; no total: 2026-11-17, the owner's principle 1; the parts are
+  read one at a time, the start answer carries `parts`, the job view `done`, and DELETE on a working job stops it);
   fenced code and display maths stay whole; a closing fence needs the opener's
   character and at least its length with no trailing text. Two combines at once,
-  15-minute between-request deadline; any failed part leaves both notes
-  unchanged. Saving copies the other note's transcripts (`recording::copy_to`).
+  15-minute limit on each answer (the clock restarts after every answer, and a wait on the writer is cut off at it); any failed part leaves both notes
+  unchanged. Saving copies the other note's transcripts (`recording::copy_to`)
+  and gives it the other note's original files (`share_originals`) before the
+  notes lock is taken; both versions are checked again after the copy, and a
+  change in between removes the copies and answers 409.
   In the explorer a note dropped on a note moves it unless held on that row for
   `SPRING_MS` (arms Combine: `.combine-wait`, then `.combine-armed`; the folder
-  is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists at
-  most 1000 notes (2026-11-09).
+  is not lit); the note menu's Combine into… (`explorerCombineMenu`) lists the
+  first 50 notes by title and finds any note by typing, through the page's search, with
+  Show more for further pages (2026-11-17, the user's call: no fixed limit on data;
+  overturns 2026-11-09).
 - Search (`search.rs`): titles and acronyms, text, graph concepts and summaries,
-  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Result cards
+  then meaning (`vectors.rs`, `CLOSE_ENOUGH`); hits carry `why`. Text matches for
+  words of three or more characters come from the index (`search_index.rs`) when it is in
+  step with the store, else from the notes themselves. Every word
+  counts, a repeated one looked up once; a query of more than `WORDS_UNDER_LOCK`
+  (16) different words is matched on a copy outside the notes lock. Results are
+  read a page at a time (`offset`, `limit`, `x-total`; a given `limit` is never
+  cut, none means 300); exact ties go by note id, and later pages come from the
+  ranking kept for the newest search (`AppState.searched`, dropped when the
+  store, the vectors or the graph cache change). Result cards
   mark matches with `<mark>` in ink and a pencil underline (`.card mark::after`,
   three masks by `nth-of-type`, a plain underline in forced colours); the in-note
   `::highlight(leo-search)` keeps its strong fill. Reading
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
-- Outline: at most 300 headings (excluding code, maths, quotes, tables), shown on
-  the rail 24 at a time (`OUTLINE_PAGE`) with Earlier/Later arrows; preview
+- Outline (2026-11-17, the user's call: no fixed limit on data): every heading
+  (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
+  (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
+  each heading row names its `block`, and the current heading is found by binary
+  search over those blocks' positions, touching only the previous and new
+  button and tick. The closed heading list uses `display: none` so WebKit skips
+  layout work for its rows until the disclosure opens. The preview is
   ≤24 lines / 800 UTF-16 units, escaped, always beside the rail; preview updates
   never redraw the editor.
 
 Decided: Obsidian-style live preview, nothing jumps when a line opens
-(2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags hidden on
-the web (root CLAUDE.md).
+(2026-11-02); `/` quick menu writes plain Markdown (2026-11-09); tags are not
+read (root CLAUDE.md, 2026-11-17).
 
 ## Felix (`chat.rs`, `routes/felix.rs`, `tools.rs`, `routing.rs`, `web/chat.js`)
 
@@ -504,6 +565,9 @@ the web (root CLAUDE.md).
   `LAST_REPLY_CHARS` (12,000), full at `FULL_ROOM` (32,000), never below
   `TURN_CHARS` (4,000). Warm follow-ups and steering (`steer::MOST_CHARS`) use the
   same cap. `clip_turn` closes a fence it cut and says what was left out.
+- Documents: `read_document` takes several documents (comma-separated) and `count`
+  parts in one call, at most `READ_PARTS` (3) parts' worth, naming what it left; `HELPING`
+  tells Felix to read every part a study request covers first (2026-11-18).
 - Tools: a text protocol (`<tool>{…}</tool>`) for every provider plus native
   sessions (Claude Code MCP bridge, isolation-capable Codex, compatible Ollama),
   all generated from `tools::SPECS` and `check`ed. At most `MOST_STEPS` (12)
@@ -541,17 +605,22 @@ the web (root CLAUDE.md).
   Unicode character.
 - Successful replies may contain only proposal, ask or quiz cards. Stopped means
   cancelled; saved replies keep elapsed ms and a cancellation flag.
-- Quizzes: marking never waits for a Felix reply. Multiple choice (needs
+- Quizzes: marking never waits for a Felix reply; two marks at a time; an
+  abandoned mark, rewrite, Settings test or document read stops its AI program
+  (`stop_when_dropped`). Multiple choice (needs
   `explain`) and matching fill-ins are marked by the page; the rest POST
-  `/api/quiz/mark` (quick model, `MARK`; `confidence` validated, `thinking`
-  bounded to `MOST_THINKING`). How sure is a 0–100% bar (`q.surePct`; `sureOf`
+  `/api/quiz/mark` (quick model, `MARK`, with `confidence` validated). The card
+  keeps all thinking. To mark or continue, Felix reads its first 2,000 characters
+  (`THINKING_READ_CHARS`, `MOST_THINKING` in `aside`). The box shows the read
+  budget through `data-reads`. How sure is a 0–100% bar (`q.surePct`, `sureOf`
   maps ≥75 sure, ≥40 think, else guess for `SURE`); thinking is sent only while
-  its switch is on (2026-11-09). Hidden grading accepts only the exact verdict
+  its switch is on (2026-11-09); the switch is toggled in place and its box slides open and shut with
+  `leoMotion.slide` (2026-11-18). Hidden grading accepts only the exact verdict
   words; a hidden check is authoritative for the card; an invalid check leaves
   the answer ungraded and releases the warm session. Predictions (`predict:
   yes`) are never marked, scored or counted. `quiz_from` shuffles options and
   refuses `gives_itself_away`. Sessions stop at `MOST_SESSION_QUESTIONS`; review
-  (`review.rs`) brings misses back after 20 h. The `aside` answer line must stay
+  (`review.rs`) brings misses back after 20 h; a mark lasts as long as its chat. The `aside` answer line must stay
   one line.
 - Marked quizzes read like a teacher's marks (2026-11-15, the user's call:
   green and red kept, in muted chalk tones): `--chalk-good`/`--chalk-bad` (one
@@ -576,8 +645,10 @@ the web (root CLAUDE.md).
   names who really answered. `Prefs.auto_model` turns it off.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
-- Files for Felix (`chat_files`): ≤10 per chat, text only, deleted with the
-  chat. Add to note (`routes/insert.rs`) is version-checked and request ids
+- Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed
+  `PUT /api/chats/{id}/files/{name}` into `<data>/incoming/`, is read through `Powers.reader_to` into `chat_files::Intake`, and a text over
+  `KEPT_WHOLE` (2,000,000 characters) is kept in pieces of at most `PIECE_CHARS` (64,000) in `chat_doc_parts` (`chat_docs.cuts` lists their lengths; `text` still holds the first 2,000,000 characters and the closing note, which is all an older leo reads); `part`, `texts` and the export read a piece at a time; a document's pieces go with its row (a trigger), and strays are swept by `tidy_orphans`; deleted with the
+  chat, with its review marks. Add to note (`routes/insert.rs`) is version-checked and request ids
   dedupe. Chat titles are local; history shows titles only.
 - Felix draws only when asked to see, draw or visualize something (2026-11-14,
   replacing the 2026-11-09 threshold): one ```svg, one picture unless it unfolds in order, then 2 to 5 steps (viewBox 320 wide,
@@ -599,14 +670,22 @@ Felix (2026-10-19).
   `margin_instructions` in leo.db, never note files or git. At most `MOST_OPEN`
   (24) open threads per note (held inside the INSERT and on reopening; a read-along saves up to 48) and
   `MOST_CLOSED` (48). Replies only while open, never two at once for a thread
-  (`MOST_REPLY` 4,000, `MOST_MESSAGES`, the last 8 sent). `/reply` takes `request` (a uuid per
-  typed message, kept on retry) and checks `insert::remembered` before the replying guard,
-  so a resent reply gets the first answer; a resend while it runs is 409 `busy`.
+  (`MOST_REPLY` 4,000, `MOST_MESSAGES`, the last 8 sent). `/reply` and asks (POST
+  `.../threads`) take `request` (a uuid per typed message or question, kept on retry) and check
+  `insert::remembered` first (a reply before the replying guard), so a resent reply or ask gets
+  the first answer and one AI call; a reply resent while it runs is 409 `busy`.
 - A thread whose passage is gone is not shown (2026-11-09; there is no lost-place
   box).
-- A passage found only by its context (`marginKit.find` answers `how: 'context'`) keeps
-  its note, with one muted line, "The passage changed since Felix wrote this."
-  (`.margin-changed`, set by `marginFill`); an exact match shows nothing.
+- A passage found only by its context (`marginKit.find` answers `how: 'context'`), or on
+  one of several copies its stored context cannot tell apart (`how: 'guess'`: no copy has 6
+  characters of its old surroundings matching, or another copy matches as well), keeps its
+  note, with one muted line, "The passage changed since Felix wrote this."
+  (`.margin-changed`, set by `marginFill`); an exact match shows nothing. A guess is never
+  sent as reworded text. A kept note (not `margin::replaceable`: an ask, Read through,
+  chat-made, pinned or answered note) found by context is re-anchored 2 s after editing
+  stops (PATCH `.../threads/{id}` `{version, quote, prefix, suffix}`, context from the
+  found offset, `margin_threads.reworded`, which keeps the muted line); untouched
+  read-along notes never are, so the 2026-11-16 replace rule holds.
 - An open thread shows its last 6 messages (`SHOWN_MESSAGES`); older ones sit behind a
   "Show N earlier" button (`.margin-earlier`) that shows them all for that note. From
   `LONG_THREAD` (6) messages it ends with "This has turned into its own question.
@@ -617,6 +696,12 @@ Felix (2026-10-19).
   them as `gone`; the open limit is then `min(MOST_OPEN + n, 2 × MOST_OPEN)`
   (`margin::room`, `n` counts only this note's open ids), passed to `put` and
   `set_status` as `limit`.
+- `marginDraw` keeps each thread's `find` answer (`marginPage.finds`, keyed by its
+  anchor) and, while typing, re-finds only threads whose passage or context the edit
+  touched (`marginKit.edited`, `carried`); a full pass runs 400 ms after typing stops,
+  in idle slices (`marginSettle`). `marginLoad` returns before drawing when the fetched
+  threads, resolved passages, mode, persona and instructions equal what is shown (a
+  return to the window).
 - Resolved passages stay findable (2026-11-14, the user's call: no Undo toast): GET
   `.../margin` adds `resolved: [{id, quote, prefix, suffix}]` (`margin::resolved_on`: status
   resolved, newest first, no messages, never dismissed). The page keeps them in
@@ -630,8 +715,8 @@ Felix (2026-10-19).
   stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
   the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
   read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
-  (guarded `ALTER`, db `VERSION` 4, in `margin.json`), PATCH
-  `.../threads/{id}` `{pinned}`; a pinned note stays open in every layout
+  (guarded `ALTER`, db `VERSION` 7 (5 added `reworded`, 6 `closed_by`, 7 chat message rows), a revert keeps 7; a revert never lowers `VERSION`, in `margin.json`), PATCH
+  `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
   unpinning folds it unless it is the one open) and a newest read-along note
   (`marginPage.newest`, `data-newest`) stays undimmed (2026-11-16, the user's call). An open thread's
@@ -662,8 +747,20 @@ Felix (2026-10-19).
   `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn(noteWidth, panel)`
   is the widest column the chosen margins allow (Infinity when they are marks).
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
-  (`forget_notes`). `sweep_store` waits `SWEEP_AFTER_DAYS` (7) and never runs
-  while no notes loaded or a file is unreadable. Export adds `leo/margin.json`
+  (`forget_notes`) and its reading place, task details, recording sources and original uploads
+  (`dependents::clear`), and so do trash expiry and the hourly sweep of notes gone
+  outside leo (the sweep also tracks kept audio and the originals and transcript
+  folders, counts only notes `Store::confirmed_gone` names, starts its clock again
+  whenever it cannot run, and returns the missing ids to `dependents::clear`, which
+  checks again under the notes lock and never follows a link); expiry and the sweep
+  first move the files to `<data>/held/` (Trash rows "Files of a removed note", with
+  Restore) and delete them with the rows a trash period later; a removal that fails is retried on the next delete and daily
+  (the `deleting` set in `margin_state`), a recording in use is skipped, and nothing is
+  removed for an id that is live or in the trash again, or while a note or trashed file
+  cannot be read. `sweep_kept` copies the live ids and the trash index, checked against
+  the files' sizes and times (`Store::trash_snapshot`, no file opened unless it changed), under
+  the notes lock and `sweep_store` works outside it; it waits `SWEEP_AFTER_DAYS` (7) and never runs
+  while no notes loaded or a file, trashed or live, is unreadable. Export adds `leo/margin.json`
   (personas and instructions are not exported).
 - Modes `along` (default for notes leo made after `Prefs.since`; a v4 id, never a
   headerless file) or `ask`. A note's own row wins; turning the default off pins
@@ -673,6 +770,8 @@ Felix (2026-10-19).
   refuses a stale version (409), a note not `along` or not edited in this engine
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a
   streaming reply, the gap, overlapping reads and the daily cap (429 with `why`).
+  `Reads` takes its lock the way `Db::with` does, so a crash inside it fails one
+  read, not every later one.
   The cap is checked before the model is asked and spent in one transaction only after it answered (silence counts, a failed read does not; the note is saved even if another read used the last one).
   A read-along never refuses for a full margin (2026-11-14, the user's call): it saves
   with `limit` 2 × `MOST_OPEN` (the storage guard, 48), and at 48 open it frees
@@ -705,10 +804,11 @@ Felix (2026-10-19).
   rewrite under half or over 3× + 400 of the block or with a new link),
   version-checked before and after the AI; only a lost, code or long passage falls
   back to `/insert`.
-- A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent. Read through sends none.
+- A read-along also sends up to 1,500 characters of the note before the first changed block (`margin::earlier_text`: its last occurrence, cut at a block boundary, fenced as `earlier_text`) as context only; the model's raw quote must lie inside a changed block, else the read is silent; a read whose blocks left the note meanwhile keeps a quote only if it is unique. Read through sends none.
 - The model's quote must be in the note now; reads grow it to the whole
   terminated sentence(s) it touches (`margin::whole_sentences`, else unchanged),
-  then `margin::crowded` allows one open note per sentence. A reworded passage still counts
+  then `margin::crowded` allows one open note per sentence; for read-along a dismissed note keeps its
+  sentence too while its words are in the note, and one you resolved yourself (`margin_threads.closed_by`), not one Felix tidied away (`margin::declined_on`), never in Read through. A reworded passage still counts
   (2026-11-16, the user's call): read and Read through send `changed` (`marginChanged`: each
   open thread the page places only by context, as `{id, text}` of its current wording, at most
   2 × `MOST_OPEN`). The server places each text itself between that thread's stored context
@@ -724,9 +824,11 @@ Felix (2026-10-19).
   read-along comment whose passage was the whole note and is gone (no stored context, untouched,
   not pinned, not in `keep`); the page could only hide it. `marginRevisits` draws no reopen
   underline under text an open note covers. The server anchors on prefix + quote + suffix exactly and
-  never falls back to another occurrence. Asks: 3 to `MOST_ASKED` (1,000)
-  characters, else the chat; read-along and `add_margin_note` quotes
-  `MOST_QUOTE` (600). The selection toolbar (`passages.js`) has Felix this
+  never falls back to another occurrence. An ask or re-anchored thread keeps
+  the whole selected passage (at least 3 characters). Felix reads its first
+  1,000 characters when answering, as the toolbar and reply area indicate.
+  Read-along and `add_margin_note` still use `MOST_QUOTE` (600) for model-chosen
+  anchors. The selection toolbar (`passages.js`) has Felix this
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else under its last word.
@@ -745,20 +847,30 @@ Felix (2026-10-19).
   under Reduce Motion, never when its step is remembered); ↻ plays it again.
 - Reads use `Powers.toolless`, never `quick` (`no_tools`: `--tools ""`,
   `web_search="disabled"`, chain cut to its first provider, so a read fails
-  closed). Replies and asks use `Powers.toolless_chat`. Every read is a fresh
+  closed), under a `READ_LIMIT` stop; the engine waits `READ_LIMIT` + 5 s as a
+  backstop. Replies and asks use `Powers.toolless_chat`; a disconnected ask,
+  reply or weave request stops its writer. Every read is a fresh
   process, no warm session, one retry on a stall.
 - Prompt safety: note text sits between tags with a random suffix and is never
   instructions; thread messages are one JSON record per line inside them.
   Plain messages use `textContent`; diagrams use the escaped renderer, strict
   Mermaid and inert SVG. Personas and note instructions go after the prompt's
   first paragraph (`margin::voiced`, `margin::instructed`), so the safety and
-  format rules come last. Personas: built-ins plus ≤`MOST_PERSONAS` (8) (name
-  ≤32, instructions ≤500, engine-made ids); never for Felix chat. Note
-  instructions ≤`MOST_INSTRUCTIONS` (500), control characters refused.
+  format rules come last. The eight custom persona slots use engine-made IDs
+  and keep full names and instructions. Per-note instructions are kept whole.
+  Persona names are UI labels. Felix reads the first 500 characters of each
+  instruction and the first 1,000 of a new margin question or reply. The boxes
+  use the shared `data-reads` hint. `margin-notes.js` owns `updateReadHint` and
+  the delegated listener in `uploads.js` uses it when available. `core.js` keeps
+  the page's 500-character instruction budget with the note header. Threads keep
+  full messages and tool-created margin notes. Prior thread messages still
+  contribute up to 320 characters each to prompts. Ask, reply and re-anchor use
+  Axum's 2 MiB JSON request limit.
 - Settings says text stays here only for a loopback address and a model without
   `cloud` in its name (`ai::reads_stay_here`). Failure text is the writer's own
   sentence (`leo_core::writing_said`), `no_writer()` or `margin::PROBLEM`.
-- Chat context: `margin::context` adds open threads (≤3,000 characters and an
+- Chat context: `margin::context` adds the open threads the page can place
+  (`margin::shown`, the page's `find` rule; ≤3,000 characters and an
   eighth of the note room) with a fence stable while content is (prefix caches).
 - Load margin prefs and reserve their space before positioning search matches or
   restoring reading; check the page sequence after loading. Read completion
@@ -789,18 +901,39 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
 
 - POST `/api/import` runs the `Importer` on a thread; "What do you want" goes in
   `<what_the_user_wants>`. Several files make a note each (`run_each`); a failed
-  file is listed in `error` and the rest are made. `into` (a note id, 404 if
-  gone, never with `each`) never touches the note: the job returns `section`
-  and the page appends it through version-checked `/insert`, so typing during an
+  file is listed in `error` and the rest are made. The box takes any length; the importer reads its first 2,000 characters (`MOST_WANTS`, a model budget) and the sheet says so under the box. `into` (a note id, 404 if
+  gone, never with `each`) never touches the note: the job keeps `section` and its status shows only `section_chars`
+  (a count: the text never reaches the page), and the page appends it through version-checked `/insert`, passing the job's id (`job`), not its text, so a section of any length is added (2026-11-18, the owner's principle 1; a job that is gone or not done is 404 with a sentence), so typing during an
   upload never makes a conflict copy.
 - Originals live in `<data>/attachments/<note-id>/` (never synced), named by
   `free_original_name`; figures go to the AI via `leo_services::figures`.
+- Uploads have no file count or size limit (2026-11-18, the owner's principle 1): each chosen file is
+  sent as its own streamed request (`PUT /api/import/files/{upload}/{item}`, body limit off, two at a
+  time from the page; `upload` and `item` are uuids the page makes, the file's name is not part of where
+  it is kept) and written 64 KB at a time through a temporary file into `<data>/incoming/<upload>/<item>`
+  (a second send of an item is 409; a full disk is 507; 60 s without a byte is 408). `POST /api/import`
+  carries `{upload, files: [{item, name, type}], …}` and no bytes (8 MiB of JSON at most); the importer
+  reads each `UploadFile.path`, and a note's originals are hard-linked (else copied) from there into
+  `attachments/<note-id>/` before the job ends. The `incoming/<upload>` folder is removed when the job
+  ends however it ends, and when `POST` refuses; any older than a day is removed at launch
+  (`sweep_incoming`). Two imports run at a time; a third is `waiting` in a queue (`ImportSlots`) and the
+  page says so. A PDF, Word or PowerPoint file is still read whole into memory by its reader.
+- An original of any size can be read (2026-11-18, the owner's principle 1): `Originals::lines`
+  asks `Powers.reader_to` (leo-services `import::read_to`, which streams a text file in 64 KB pieces) to
+  write into a writer that holds 1 MB and spills the rest to `<attachments>/<note>/.read/<name>.txt`
+  (first line: the original's length and modified time; reused while they match, written by temp file
+  and rename only after the read succeeded, refused through a linked `.read`). A PDF or Office file is
+  still loaded whole, one large one at a time. `Lines::iter` hands out lines of at most 64 KB, the same
+  numbering held or spilled; `pack_part` keeps only the part asked for. The copy is leo's, not the
+  person's: Keeping deletes it with its original, `forget_missing`/`forget_note` and the next read sweep
+  one whose original is gone, and nothing counts, expires or exports it.
 - Recording (`record.rs`, `recording.js`): capture runs in Rust through the
   listener; the page never opens a browser microphone or screen picker and the
   server takes no audio from the page. Native jobs have no page heartbeat.
   `capture_activity` is reserved before a job is created; its lease blocks
   updater installation through the durable save. Recovery lists only what the
-  `Housekeeper` lists (`pending_recordings`); a recovery job carries its session id.
+  `Housekeeper` lists (`pending_page`, every unfinished recording newest first; recover
+  and Delete look one up with `pending_recording`); a recovery job carries its session id.
 - Label speakers (2026-11-16, the user's call: per recording, for meetings,
   not lectures): a switch under the note fields, off by default, remembered as
   `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and
@@ -810,6 +943,12 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   while the model is ready or downloading. The switch is `settingsSwitch()`,
   and the choice is kept in memory when storage is blocked. Settings → Speech
   models lists the speaker model under Downloaded with Delete.
+- The transcript sheet pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`,
+  512 KB of each kind a page, Earlier and Later; a pick list when a note has several; search
+  matches across all of them open the page that holds each); a fix sends only the changed rows
+  (`{source, base: revision, changes}`, batches under 1 MB); Combine's Undo sends `{from}` and
+  removes the recordings copied from that note (`copied_from`).
+- What you want from the notes and the meeting details are kept whole, of any length (2026-11-18, the owner's principle 1); only what is sent is bounded: the AI reads the first `WANTS_READ_CHARS` (4,000) and `CONTEXT_READ_CHARS` (8,000) characters (`long::read_of`, also what `room_after_profile` charges to the word budget), and the Record page, the live card and the transcript sheet say so under the box once the brief is longer (`data-reads`). Felix's rename of a note keeps the whole title he gives; the file name is shortened by the usual rule.
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the
@@ -834,17 +973,34 @@ Decided: one note per uploaded file (2026-10-20).
 ## Note connections (`graph.rs`; "map" in storage)
 
 Embeddings, summaries, concepts and note links are shared by search, related
-notes and Felix, and refresh when idle. The graph page, canvas renderer and
-`/api/graph*` routes are removed; connection caches stay. Graph, vector and
+notes and Felix, and refresh when idle. A trashed note keeps its rows in `leo.db`,
+out of memory, search and connections, and gets them back on restore with no AI
+request; they go when it is deleted for good. The graph page, canvas renderer and
+`/api/graph*` routes are removed; connection caches stay. A note the meaning model refuses waits 10 minutes, or until edited, while the rest index. Graph, vector and
 caption maintenance starts after its first interval and defers while the window
-is hidden or the capture activity gate is busy.
+is hidden or the capture activity gate is busy. The idle check compares version
+stamps first (store fingerprint, caption generation, graph generation, meaning
+version) and reads no note when nothing changed; pictures are looked for only in
+the notes the store's changed-notes feed names (`Store::changes_since`, or
+every note after "start over"); whether a build is due is asked every time.
+
+The nearest-notes list (`Vectors::neighbours`, which decides which pairs of notes are worth asking the writing AI about) has no size cut-off (2026-11-17, the owner's principle 1): a library of 6,000 notes or fewer is finished in one call; a larger one is built `NEAR_SLICE` (256) notes per call, the rest are left out of the answer (every pair involving them is asked about, as before) until their slice comes, and after a change only the changed notes and the lists they enter are recomputed. Averages are kept at full precision (the owner chose speed over half-size vectors, 2026-11-18).
 
 ## Calendar and tasks (`calendar.rs`, `ics.rs`, `tasks.rs`, `routes/tasks.rs`, `app/calendar.js`, `schedule.js`)
 
-- Calendars: up to five secret iCal links through `CalendarAccess`
+- Calendars: any number of secret iCal links through `CalendarAccess`
   (`secret::default_store`), never sent to the page; leo-host fetches them
-  (`fetch_public`, capped at `CALENDAR_BYTES`). Feeds cached in leo.db with ETag /
-  Last-Modified. GET `/api/schedule?from&to&live` (≤43 days).
+  (`fetch_public`). A feed is kept as `<data>/calendar/<feed>.<hash>.ics` (0600,
+  the name carries `fnv64` of its bytes; a same-bytes refresh rewrites nothing; never
+  in a note export) and read as a stream by `ics::read_from`, twice: first for the
+  moved or cancelled occurrences' keys, then event by event for the window. No event
+  count and no count of calendars; links are refreshed one at a time (the fetch's own
+  10 s limit), each no sooner than `STALE_AFTER_MINUTES`; `CALENDAR_BYTES` (1 GB) only
+  stops an endless response (2026-11-17, the owner's principle 1). One line
+  of a feed is read up to 1 MiB (`MOST_LINE`). Event titles and locations keep
+  the full parsed values. The repeat-rule guards stay. leo.db `calendar_feeds` keeps the times, ETag and Last-Modified (a missing file means an
+  unconditional fetch); an old stored `body` is moved to a file on first read.
+  GET `/api/schedule?from&to&live` (≤43 days).
 - Offer to record: `calendar::offer_to_record`, a 60 s task (only with
   `Powers.app_settings`) over cached expansions after `catch_up` (same `Busy`
   guard): a timed event once when start−2 min ≤ now < start+10 min and nothing
@@ -854,16 +1010,33 @@ is hidden or the capture activity gate is busy.
   JSON line per save through `jsonline.rs` (one generic reader/writer for any
   `Line`: `DIR`, `id`, `stamp`; shared with boards and cards), written atomically; the newest `updated_at`
   wins; deletes write a tombstone (`deleted`). Rows in the old leo.db `tasks`
-  table are not read. Descriptions are optional plain text ≤4,000 characters.
+  table are not read. Descriptions are optional plain text with no fixed length, and so are titles (2026-11-17, the owner's principle 1); a one-line file is read up to 64 MB (`MOST_FILE_BYTES`), a guard against a damaged or planted file that no typed text reaches.
   One mutex (`tasks::writing`) serialises task writes; task and board file work
   runs on blocking workers and never holds the notes store lock.
+- No fixed number of tasks (2026-11-18, the owner's principle 1): tasks are kept in memory like boards and
+  cards (`tasks::table`, a `jsonline::Index<Task>` per data folder with the same watcher rule as Boards "Tables").
+  Every task is held whole, tombstones included. `tasks::snapshot` is the live tasks newest first, an `Arc`
+  rebuilt only when the table's `generation` moves; `tasks::load` still reads the one file. A restore
+  (`POST /api/tasks/import`) takes its tasks 500 at a time, each piece under one hold of `tasks::writing`, and
+  Keeping sends the file 500 at a time, stopping at a failed piece and saying how many came back.
+- The task list has no fixed length (2026-11-17, the owner's principle 1): `GET /api/tasks` takes
+  `offset`, `limit` (500 by default), `q` (a word of the title) and `note` (a note id), and answers
+  `{tasks, total}`; the Tasks card ends with Show more while it holds fewer than `total`, and a poll
+  asks for as many as it already holds. Felix's task tools look through every task. The Calendar's
+  schedule answer (`GET /api/schedule`) carries the first page of the list as `tasks` (`limit`, 500
+  by default, the page asks for as many as it already holds), `total`, and as `window` every task
+  past that page that is dated within a day of the asked dates or repeats (2026-11-18, no limit on
+  data); an event's task link looks through every task. The page reads page and window together
+  (`withWindow`); the Calendar's tray shows 50 rows of Earlier and No date and Show more reveals
+  50 more, asking for the next page when every loaded row is shown. Quick Leo reads `/api/tasks`
+  50 at a time until six due rows are known or the list passes today.
 - Note tasks: checkboxes under Action items (or To do, Next steps, Deadlines) plus
   promoted ones (`note_tasks`, located by text and neighbours, never the wrong
   box). A date change is written into the checkbox (409 with a preview when the
   old date is gone); checkbox descriptions never rewrite note content.
-- Repeating: `repeat` weekdays 0 (Mon)…6, `done_on` ≤ `MOST_DONE_DAYS`, never
+- Repeating: `repeat` weekdays 0 (Mon)…6, `done_on` holds every day ticked, never
   overdue. `moved` maps an occurrence's original date to `{date, time, end}`
-  (≤ `MOST_MOVED`, absent when empty so old files are unchanged); `on` stays the
+  (every move kept, absent when empty so old files are unchanged); `on` stays the
   original date. `tasks::occurs_on` and `schedule.occurrences` apply it; .ics
   adds EXDATE + RECURRENCE-ID; Google gets the weekly rule only.
 - Felix's task tools preserve missing descriptions, an explicit empty update
@@ -918,6 +1091,8 @@ is hidden or the capture activity gate is busy.
   (`.cal-past`, under the events, no pointer events).
 - POST `/api/tasks` takes `request` (uuid, kept across a retry of the same quick-add): a
   repeated one is answered with the first task (`insert::remembered_creation`, scope `task`, a queue of its own beside the margin's `insert::remembered`).
+  POST `/api/notes` (scope `note`, answered 200 on a repeat) and POST `/api/boards` (scope
+  `board`) take `request` the same way, so a resent first save or board create makes one.
 - Export adds `tasks.json`; POST `/api/tasks/import` (ids dedupe; a newer local
   copy is kept).
 
@@ -925,17 +1100,40 @@ is hidden or the capture activity gate is busy.
 
 - Files `<notes>/.leo/boards/<b…>.json` (name, columns `{id, name}`, 1–12) and
   `<notes>/.leo/cards/<c…>.json` (board, column, `rank`, title, subheading,
-  description ≤8,000, priority `""|low|medium|high`), read and written through
+  description with no fixed length (2026-11-17, the owner's principle 1), priority `""|low|medium|high`), read and written through
   `jsonline.rs` like tasks: one JSON line per save, atomic, nofollow reads,
   newest `updated_at` wins, tombstone deletes; a file counts only when its name
-  is its id. Limits: 100 boards, 5,000 cards. Not calendar tasks.
+  is its id. No fixed count of boards or cards (2026-11-17, the owner's principle 1). Not calendar tasks.
+- Tables (P-C52): boards and the faces of cards (`boards::Placed`: place, title, subheading,
+  priority, the first 240 characters of the description and `description_more`) are kept in memory
+  (`jsonline::Index`, one per kind per data folder, found by `boards::tables`). A file is trusted without
+  being read only while its size, modified time and change time (unix) are as they were. The notes
+  watcher also reports changes under `<notes>/.leo/` with their paths (`leo_core::watch::Leo`; at most
+  4,096 paths, past that or on an error "everything"), kept per folder in `jsonline::Hub`; leo's own writes
+  and removals add their path too. A request after a quiet moment lists no folder and reads no file; a
+  reported path is looked at alone. The folder is listed, one stamp per file and only changed files read,
+  when there is no watcher, it reported an error, on Windows (until `a_burst_of_changes_under_leos_folder_is_never_missed`
+  passes on the runner) and once a minute. A board's answer (`GET /api/boards/{id}`) carries faces;
+  `GET /api/cards/{id}` reads the whole card, and the card panel loads it before the description can be
+  edited. Undo of a deleted card is `POST /api/cards/{id}/undelete`. Felix's board tools and export still
+  read whole cards (`boards::all_cards`).
 - Order is `rank` (f64): a move writes only the moved card (`boards::between`)
   unless the gap is gone, then `settle` renumbers that column. A card whose
   column vanished shows in the first column and is rewritten only when it moves.
   One mutex (`boards::writing`) serialises writes.
 - API: GET/POST `/api/boards`, GET/PATCH/DELETE `/api/boards/{id}` (removed
-  columns' cards go to `move_to` or the first column; DELETE returns
-  `{board, cards}`), POST `/api/boards/restore`, POST `/api/boards/{id}/cards`,
+  columns' cards go to `move_to` or the first column). DELETE returns
+  `{board, undo}` and marks the board and its cards deleted or changes nothing;
+  a board's own mark is written first, its cards' marks are finished later if
+  interrupted (`boards::finish_deletes`, at each Keeping pass and before Undo),
+  and neither is removed for good before the other. POST
+  `/api/boards/{id}/undelete` (Undo of a delete, by id: the board and the cards
+  deleted with it, for as long as the trash period keeps them);
+  `/api/boards/restore` remains for undoing a column change saved in older
+  chats. Felix's Undo of a board change is by id too: `board_undos` in leo.db
+  keeps the board's name, columns and moved cards' places, used once by POST
+  `/api/boards/{id}/undo/{undo}` and expired with the trash period (30 days when
+  it is Forever) or when its board is gone. POST `/api/boards/{id}/cards`,
   PATCH/DELETE `/api/cards/{id}`, POST `/api/cards/{id}/move`
   `{board?, column?, after?}` (missing = end, null = top). Export adds
   `leo/boards.json`. Card create takes `request` (a uuid per user action,
@@ -943,8 +1141,8 @@ is hidden or the capture activity gate is busy.
   answered with the first result (`insert::remembered_creation`, scope
   `card:<board>`) and applies nothing twice. Moves take none (nothing retries them).
 - `description` stays plain Markdown. Leaving the card panel settles every field;
-  a failed save or over-limit description (`KANBAN_MOST_DESCRIPTION`) keeps the
-  panel, address and text, so a 400 never costs text; Discard is the only way
+  a failed save keeps the
+  panel, address and text, so a 400 never costs text; Discard (shown with the refusal) is the only way
   out that drops it. A board fetched after a change is dropped if a write began
   meanwhile.
   A card move (keyboard, status menu), a priority, a delete and ticking a task done apply and redraw
@@ -965,7 +1163,7 @@ a modal.
 - Settings go through `SettingsApi` (`leo_host::WebSettings`); `Powers.speech`
   (`SpeechApi`, `/api/speech`), `Powers.ollama` (`OllamaApi`,
   `/api/writing/ollama`), `Powers.dictation` (`DictationApi`, `/api/dictation`,
-  200 KB input) and `Powers.app_settings` (`AppApi`, `/api/app`, `/api/health`)
+  64 MiB input) and `Powers.app_settings` (`AppApi`, `/api/app`, `/api/health`)
   are session-gated with bounded JSON; work runs off async tasks and outside
   store locks; every success is JSON, errors actionable. Progress and polling
   update only their own card: fields, drafts, focus and caret survive
@@ -1007,20 +1205,69 @@ a modal.
   behind one refresh slot; a failed refresh keeps saved meters. `usage::Usage`
   keeps content-free counts, `usage_days`, `usage_calls` and `usage_tools` (90 days), never prompt or reply
   text; `/api/processes` never sends arguments to the page.
-- Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`): one list (7/30/90 days,
+- Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`; its daily pass also runs trash expiry and its dependents): one list (7/30/90 days,
   1 year, Forever) for Trash, Chats, Uploaded files, Recording transcripts,
   Unfinished recording audio. Shortening asks first with a count from POST
-  `/api/keep/preview` (`keeping::would_delete`, deletes nothing); one save at a
+  `/api/keep/preview` (the same list the deletion uses) (`keeping::would_delete`, deletes nothing); one save at a
   time. Forever deletes nothing. Expiry runs at `start_in`, daily and after POST
-  `/api/keep` (`keeping::expire_now`): uploads by file mtime (the folder and note
+  `/api/keep` (`keeping::expire_now`): chats past the choice and orphan chat
+  documents, uploads by file mtime (the folder and note
   never touched), transcripts in `recording-sources/`, unfinished audio through
-  `Housekeeper::pending_recordings` + `discard_recording` and
+  `Housekeeper::old_recordings` + `discard_recordings` (batches of 256) and
   `expire_kept_audio`, skipping the session in use (`RecordJob::session_id`) and
-  locked sessions. DELETE `/api/record/{id}` also deletes a waiting recording
+  locked sessions, and backups leo set aside (30 days, `expire_backups`: the
+  `*.before-database` files and `<notes>/directories.json.corrupt`, dated by the
+  newer of modified and change time, regular files only). DELETE `/api/record/{id}` also deletes a waiting recording
   without a job. The Storage page and `/api/storage` are gone; files only it
   managed stay untouched.
+- Automatic note, picture and dependent cleanup runs on an idle tick and defers
+  during recording or dictation. Save Keeping responds before applying expiry.
+  Move records survive restart and name the held directories and audio sessions.
+  A hold expires while its owner is gone. Directory digests verify the contents,
+  and only row versions enrolled by that hold can be deleted. A first missing-note
+  sweep after launch gives no time credit. Restore gives conflicts separate names
+  and reports files that could only partly be restored.
+- One rule for every move and deletion in that cleanup and in Delete for good: it is
+  authorised only by a SHA-256 digest leo recorded earlier for exactly those bytes,
+  checked again just before the step (the `pictures-made` ledger's fourth column, the
+  trash index, a hold's folder and audio digests, an older unused picture's digest from
+  the pass that listed it, a removed note's `created_at` and digest). Anything without
+  one, or whose generation leo cannot prove (an id seen reused: two different
+  `created_at` among the live notes, the trash and the recorded removals), is kept. Trash
+  rows carry `revision` (held rows: their recorded folder and audio digests); Delete for
+  good sends back what the page showed, and a changed item, or a picture whose bytes
+  changed, answers 409 with a sentence so the page asks again. Held folders and audio are
+  hashed outside the notes lock (`paths::digest_directory` returns the folder's stamps:
+  size, times, file id); under the lock leo rechecks those stamps and the notes folder's
+  fingerprint just before acting. Moves into the trash and `held/` never replace what is
+  there (`paths::move_new`, `paths::write_new`). Held rows are deleted only while their
+  content digest (`held_note_rows.digest`) is the one recorded. A file is hashed through
+  its open handle (`paths::digest_stamped`: file id, size and times taken from the handle
+  before and after, and the path checked to still be that file); the same stamp is
+  checked again on the path just before it is unlinked. A Delete for good that has to
+  wait (a recording running) queues the folder digests and the revision of any
+  already held item (`margin_state` `deleting-shown`). Audio and row revisions for a note
+  are captured before it is unlinked. Changes after confirmation and revisions
+  first seen on retry enter the normal hold. Purge unlinks each verified entry and
+  removes only empty directories, and manual Restore can return a changed folder
+  whose identity is still the one leo held. A combine copies transcripts into a
+  private staging folder, records each copy's digest from the staged bytes, publishes it
+  without replacing anything, and records it only while it still matches (originals:
+  the digest of the source bytes); a failed save or Undo removes only those that still
+  match. Transcript corrections and Combine Undo share the library's transcript writer lock.
+  The cleanup locks (`audio_work`, `clearing`, `picture_cleanup`) and
+  the task and board writer locks belong to each library, never the process. Keeping's
+  age-based expiry (uploads, transcripts, unfinished and kept audio, backups) is the
+  person's own choice and is not under this rule.
+- Recording snapshots take the picture destination from the loaded notes store. The request only supplies the image and recording metadata.
 - Export: zip of notes, optional uploads, chats, trash; never config or keys.
-  Restore tasks refuses a zip or file without task ids.
+  Held originals and transcripts are included when Trash and Uploads are selected.
+  Restore tasks refuses a zip or file without task ids. An export has no item or size limit
+  (2026-11-17, the owner's principle 1); it is streamed entry by entry into a temporary file
+  the response then sends (a file in 64 KB pieces, a chat's messages and a board's cards a page
+  or a card at a time, a chat document a million characters at a time, zip64 when needed), skips
+  a folder it has already entered or one deeper than leo reads (`MOST_DEPTH`, 64), and stops, removing its
+  file, when the request is abandoned. Tasks and margin threads are still held whole while written.
 - Appearance keys are per browser (`leo-theme`, `leo-note-width`,
   `leo-text-size`, `leo-felix-letters`, `leo-page-width`) and set before paint by `/theme.js`;
   only reading text multiplies `--read`. Page width (2026-11-16, the user's call): two `.page-mark` separators at the note's top corners (drag.js) set
@@ -1038,13 +1285,32 @@ AI uses a pen icon, never a sparkle.
 
 - `read_store` takes an immutable Store callback and coalesces filesystem scans
   with core's Watch: it checks first, on relevant/rescan notifications, every
-  60 s and after native foreground return; a missing watcher checks every access.
-  `with_store` and `store_now` always reconcile before mutations: a save must
-  never absorb an unread external edit into its fingerprint.
+  60 s and after native foreground return; a missing watcher checks every access, a broken one at most every 2 s, until it reports events again.
+  A save never absorbs an unread external edit: its fingerprint moves only by
+  the files it wrote (per-file stamps). `store_now` always reconciles first;
+  `with_store` reconciles when the watcher reported a change, the 60 s check is
+  due or there is no watcher, and always on Windows (2026-11-17, the owner's
+  call on ENG-D6: the most efficient and scalable method).
+- GET `/api/rev[?foreground=1]` answers `{rev}`, 16 hex digits over the store's fingerprint and a
+  the task, board and card tables' generation numbers (moved whenever an entry is added, replaced or
+  dropped; a file rewritten in place moves its table's number once the watcher or the minute's listing sees it). `foreground=1` forces a disk check first.
+  It is signed in like every API route and, as a GET, does not count as use.
+- The watcher's `.leo` signal is separate from the notes' one: a change under `.leo` never marks the
+  notes as changed (`leo_core::watch::Watch::leo`, taken by `jsonline::Hub` for the board and card tables).
 - App-status polling stops while the document or window is hidden and drops late
   responses on visibility changes; return refreshes once. Automatic status GETs
   do not reset user-idle time. Dictation, model-download and recording display
   polls pause while hidden.
+- On the Calendar the Tasks card does not poll `/api/tasks`: the schedule answer
+  carries the tasks and stamps `tasksWin.at`; the tasks timer only re-arms (with a
+  5 s grace so it never races the schedule poll) and loads again once the person
+  leaves the Calendar.
+- The task list is rebuilt only after a change: `AppState.generation` moves after every
+  store refresh and every `with_store`/`store_now` call, and `tasks::ListedCache` keeps the
+  last list (note tasks and standalone tasks, sorted once, with an id index for `find`) until
+  the generation, the note-task records or the standalone tasks' snapshot (`tasks::snapshot`, compared
+  by identity) differ; the generation is read inside the store closure, after any refresh. No task file
+  is read for a repeat list.
 
 ## Retired interview practice
 
@@ -1069,3 +1335,7 @@ keys and downloaded runtimes stay untouched.
   the "on a phone" test in flows.spec.js. There is no visual suite.
 - Fixture specs (boards.spec.js, calendar.spec.js) run the real CSS and page code
   over an in-memory API; flows.spec.js joins the page to the real routes.
+
+The note API preserves the preexisting version hash for ordinary notes after removing the unused tags field.
+
+Config and data file paths use the same `leo_core::paths::own` names as uninstall.

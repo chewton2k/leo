@@ -2,10 +2,31 @@ pub mod activation;
 pub mod audio_gate;
 pub mod capture;
 pub mod generation;
+pub mod pieces;
 pub mod polish;
 pub mod settings;
 pub mod text;
 pub mod visualizer;
+
+const MODEL_WORDS_CHARS: usize = 4_000;
+const WORD_SEPARATOR: &str = ", ";
+
+pub(crate) fn model_words(words: &[String]) -> Vec<&str> {
+    let mut room = MODEL_WORDS_CHARS + WORD_SEPARATOR.len();
+    words
+        .iter()
+        .filter(|word| !word.contains('\0'))
+        .map(String::as_str)
+        .take_while(|word| {
+            let size = word.chars().take(room + 1).count() + WORD_SEPARATOR.len();
+            if size > room {
+                return false;
+            }
+            room -= size;
+            true
+        })
+        .collect()
+}
 
 #[cfg(test)]
 mod tests {
@@ -86,8 +107,18 @@ mod tests {
         let mut s = Settings::default();
         s.save(&path).unwrap();
         assert_eq!(Settings::load(&path).unwrap(), s);
-        s.custom_words = vec!["x".repeat(201)];
-        assert!(s.save(&path).is_err());
+        for words in [
+            vec!["x".repeat(201)],
+            (0..201).map(|n| format!("word {n}")).collect(),
+            vec!["語".repeat(80_000)],
+        ] {
+            s.custom_words = words;
+            s.commit(&path, || Ok(())).unwrap();
+            assert_eq!(Settings::load(&path).unwrap(), s);
+        }
+        s.custom_words.clear();
+        s.commit(&path, || Ok(())).unwrap();
+        assert_eq!(Settings::load(&path).unwrap(), s);
         assert!(serde_json::from_str::<Settings>(r#"{"popup":"unknown"}"#).is_err());
     }
 }

@@ -13,15 +13,44 @@ esac
 if printf '%s' "$BIN_DIR$APPLICATIONS" | LC_ALL=C grep -q '[[:cntrl:]]'; then fail 'Choose installation folders without control characters.'; fi
 case "$BIN_DIR" in /*) ;; *) fail 'LEO_INSTALL_DIR must be an absolute folder.' ;; esac
 case "$APPLICATIONS" in /*) ;; *) fail 'The applications folder must be absolute.' ;; esac
+app="$APPLICATIONS/Leo.app"
+running() { ps -axo comm= 2>/dev/null | LC_ALL=C grep -Fxq "$app/Contents/MacOS/leo-app"; }
+if running; then fail 'Quit Leo before installing. Finish any recording or dictation first.'; fi
 work=$(mktemp -d)
 staged=''
 parked=''
-app="$APPLICATIONS/Leo.app"
+link=''
+record_tmp=''
+link_done=''
+record_done=''
+ok=''
+config=${LEO_HOME:-$HOME/Library/Application Support/leo}
 cleanup() {
-    if [ -n "$parked" ] && [ -d "$parked" ] && [ ! -e "$app" ]; then mv "$parked" "$app"; fi
-    [ -z "$staged" ] || rm -rf "$staged"
+    status=$?
+    trap - EXIT
+    set +e
+    [ -z "$link" ] || rm -f "$link"
+    [ -z "$record_tmp" ] || rm -f "$record_tmp"
+    if [ -z "$ok" ]; then
+        if [ -n "$parked" ] && [ -d "$parked" ] && [ ! -e "$app" ]; then mv "$parked" "$app"; fi
+        if [ -n "$link_done" ]; then
+            if [ -n "$old_link" ]; then rm -f "$BIN_DIR/leo"; ln -s "$old_link" "$BIN_DIR/leo"
+            elif [ -f "$work/old-leo" ]; then cp -p "$work/old-leo" "$BIN_DIR/leo"
+            else rm -f "$BIN_DIR/leo"; fi
+        fi
+        if [ -n "$record_done" ]; then
+            if [ -f "$work/old-record" ]; then cp "$work/old-record" "$config/app-cli-dir"; else rm -f "$config/app-cli-dir"; fi
+        fi
+        if [ -n "$had_app" ]; then printf 'The previous installation was left as it was.\n' >&2; else printf 'Nothing was installed.\n' >&2; fi
+    fi
+    if [ -z "$ok" ] && [ -n "$parked" ] && [ -d "$parked" ]; then
+        printf 'The previous app is still in %s.\n' "$staged" >&2
+    elif [ -n "$staged" ]; then rm -rf "$staged"; fi
     rm -rf "$work"
+    exit "$status"
 }
+old_link=''
+had_app=''
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 fetch() { curl --fail --location --proto '=https' --proto-redir '=https' --connect-timeout 15 --max-time 900 --max-filesize 1073741824 --retry 2 --output "$2" "$1"; }
@@ -49,31 +78,39 @@ new="$work/unpacked/Leo.app"
 identifier=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$new/Contents/Info.plist" 2>/dev/null) || fail 'The app information could not be read.'
 [ "$identifier" = io.github.chewton2k.leo ] || fail 'This archive is not the Leo app.'
 codesign --verify --deep --strict "$new" || fail 'The app signature is damaged. Download it again.'
-if pgrep -f "$app/Contents/MacOS/leo-app" >/dev/null 2>&1; then fail 'Quit Leo before installing. Finish any recording or dictation first.'; fi
+if running; then fail 'Quit Leo before installing. Finish any recording or dictation first.'; fi
 [ ! -L "$app" ] || fail 'Leo.app is a link. Remove that link before installing.'
 if [ -e "$app" ]; then
     old_id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist" 2>/dev/null) || fail 'An existing Leo.app could not be identified. Move it aside first.'
     [ "$old_id" = io.github.chewton2k.leo ] || fail 'The existing Leo.app belongs to another application. Move it aside first.'
 fi
 mkdir -p "$APPLICATIONS" "$BIN_DIR" || fail 'The installation folder is not writable. Install the disk image from Downloads instead.'
+mkdir -p "$config" || fail 'The Leo settings folder could not be created.'
+[ ! -L "$config/app-cli-dir" ] || fail 'The saved terminal folder is a link. Remove app-cli-dir from the Leo settings folder.'
+[ ! -e "$app" ] || had_app=1
+if [ -L "$BIN_DIR/leo" ]; then old_link=$(readlink "$BIN_DIR/leo")
+elif [ -f "$BIN_DIR/leo" ]; then cp -p "$BIN_DIR/leo" "$work/old-leo"; fi
+if [ -f "$config/app-cli-dir" ]; then cp -p "$config/app-cli-dir" "$work/old-record"; fi
 staged=$(mktemp -d "$APPLICATIONS/.leo-install.XXXXXX")
 ditto "$new" "$staged/Leo.app" || fail 'The app could not be copied. Check free disk space.'
 codesign --verify --deep --strict "$staged/Leo.app" || fail 'The copied app failed its signature check.'
-if [ -e "$app" ]; then parked="$staged/previous.app"; mv "$app" "$parked"; fi
-mv "$staged/Leo.app" "$app" || fail 'The app could not be put in Applications. The previous copy was kept.'
 link="$BIN_DIR/.leo-link.$$"
-ln -s "$app/Contents/MacOS/leo" "$link"
-mv -f "$link" "$BIN_DIR/leo"
-config=${LEO_HOME:-$HOME/Library/Application Support/leo}
-mkdir -p "$config"
-[ ! -L "$config/app-cli-dir" ] || fail 'The saved terminal folder is a link. Remove app-cli-dir from the Leo settings folder.'
-printf '%s\n' "$BIN_DIR" > "$work/app-cli-dir"
-chmod 600 "$work/app-cli-dir"
-record_tmp=$(mktemp "$config/.app-cli-dir.XXXXXX")
-cp "$work/app-cli-dir" "$record_tmp"
-mv -f "$record_tmp" "$config/app-cli-dir"
-if [ -z "${LEO_INSTALL_SKIP_PATH:-}" ]; then
-    quoted=$(printf '%s' "$BIN_DIR" | sed "s/'/'\\\\''/g")
+ln -s "$app/Contents/MacOS/leo" "$link" || fail 'The terminal command could not be prepared. Check that its folder is writable.'
+record_tmp=$(mktemp "$config/.app-cli-dir.XXXXXX") || fail 'The terminal command could not be prepared. Check that its folder is writable.'
+chmod 600 "$record_tmp"
+printf '%s\n' "$BIN_DIR" > "$record_tmp" || fail 'The terminal command could not be prepared. Check that its folder is writable.'
+mv -f "$link" "$BIN_DIR/leo" || fail 'The terminal command could not be put in place.'
+link_done=1
+link=''
+mv -f "$record_tmp" "$config/app-cli-dir" || fail 'The terminal folder could not be saved.'
+record_done=1
+record_tmp=''
+if [ -e "$app" ]; then parked="$staged/previous.app"; mv "$app" "$parked" || fail 'The previous app could not be moved aside.'; fi
+mv "$staged/Leo.app" "$app" || fail 'The app could not be put in Applications.'
+ok=1
+profile_line() {
+    [ -z "${LEO_INSTALL_SKIP_PATH:-}" ] || return 0
+    quoted=$(printf '%s' "$BIN_DIR" | sed "s/'/'\\\\''/g") || return 1
     line="export PATH='$quoted':\"\$PATH\""
     shell_name=${SHELL:-sh}
     case "${shell_name##*/}" in
@@ -85,11 +122,12 @@ if [ -z "${LEO_INSTALL_SKIP_PATH:-}" ]; then
     if [ -L "$rc" ]; then
         printf 'Your shell profile is a link. Add %s to PATH there yourself.\n' "$BIN_DIR"
     elif ! grep -qsFx "$line" "$rc"; then
-        mkdir -p "$(dirname "$rc")"
-        rc_tmp=$(mktemp "$(dirname "$rc")/.leo-path.XXXXXX")
-        if [ -f "$rc" ]; then cp -p "$rc" "$rc_tmp"; fi
-        printf '\n%s\n%s\n' '# Added by the leo installer' "$line" >> "$rc_tmp"
-        mv -f "$rc_tmp" "$rc"
+        mkdir -p "$(dirname "$rc")" &&
+        rc_tmp=$(mktemp "$(dirname "$rc")/.leo-path.XXXXXX") &&
+        { [ ! -f "$rc" ] || cp -p "$rc" "$rc_tmp"; } &&
+        printf '\n%s\n%s\n' '# Added by the leo installer' "$line" >> "$rc_tmp" &&
+        mv -f "$rc_tmp" "$rc" || { [ -z "${rc_tmp:-}" ] || rm -f "$rc_tmp"; return 1; }
     fi
-fi
+}
+profile_line || printf 'leo could not add %s to your PATH. Add it to your shell profile yourself.\n' "$BIN_DIR"
 printf '\nLeo is installed in %s.\nTerminal command: %s/leo\nOpen Leo in Applications, or type leo. Open a new terminal if needed.\nYour notes stay where they are. Thank you for using Leo!\n' "$app" "$BIN_DIR"

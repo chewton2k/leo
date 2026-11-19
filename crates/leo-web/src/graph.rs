@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use anyhow::Result;
@@ -159,21 +160,12 @@ pub struct NoteLink {
     pub why: String,
 }
 
-fn fnv(text: &str) -> String {
-    format!("{:016x}", fnv64(text))
-}
-
-fn fnv64(text: &str) -> u64 {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for byte in text.bytes() {
-        hash ^= u64::from(byte);
-        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
-    }
-    hash
+fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
+    format!("{:016x}", crate::vectors::fnv64(bytes))
 }
 
 fn hash_of(source: &Source) -> String {
-    fnv(&format!("{}\u{0}{}", source.title, source.body))
+    fnv(source.title.bytes().chain([0]).chain(source.body.bytes()))
 }
 
 fn key(label: &str) -> String {
@@ -213,6 +205,7 @@ fn class_name(directory: &str) -> &str {
     }
 }
 
+#[cfg(test)]
 pub fn plan(stale: &[&Source]) -> Vec<Vec<usize>> {
     plan_at(stale, &Scale::default())
 }
@@ -287,6 +280,7 @@ When a concept is already in the vocabulary, use exactly that name, so the same 
 Reply with JSON only, no other text, in this shape:
 {\"notes\": [{\"id\": \"n1\", \"summary\": \"How breadth-first search explores a graph level by level\", \"concepts\": [\"breadth-first search\", \"queue\"]}]}";
 
+#[cfg(test)]
 pub fn read_prompt(batch: &[&Source], vocabulary: &[String]) -> (String, String) {
     read_prompt_at(batch, vocabulary, NOTE_CHARS)
 }
@@ -442,7 +436,7 @@ fn group_count_at(notes: usize, group_notes: usize) -> usize {
 }
 
 fn link_key(source: &Source, read: &Read) -> String {
-    fnv(&note_line(0, source, Some(read)))
+    fnv(note_line(0, source, Some(read)).bytes())
 }
 
 pub struct Work<'a> {
@@ -601,6 +595,7 @@ fn settle_old_pairs(sources: &[Source], cache: &mut Cache) {
 
 pub type Write<'a> = &'a (dyn Fn(&str, &str, u32) -> Result<String> + Sync);
 
+#[cfg(test)]
 pub fn build(
     sources: &[Source],
     cache: &mut Cache,
@@ -617,6 +612,7 @@ fn in_parallel<T: Send>(jobs: Vec<Box<dyn FnOnce() -> T + Send + '_>>) -> Vec<Op
     })
 }
 
+#[cfg(test)]
 pub fn build_at(
     sources: &[Source],
     cache: &mut Cache,
@@ -781,7 +777,6 @@ pub struct Status {
     pub read: usize,
     pub stale: usize,
     pub requests: usize,
-    pub rebuild_requests: usize,
     pub built_at: Option<String>,
 }
 
@@ -793,15 +788,19 @@ struct Job {
     message: Option<String>,
 }
 
+type NearHeld = ((u64, u64), Arc<Near>);
+
 pub struct Graphs {
     path: PathBuf,
     db: Arc<crate::db::Db>,
     writer: Option<Writer>,
     room: Option<crate::Room>,
     vectors: Option<Arc<crate::vectors::Vectors>>,
-    near: Mutex<Option<(u64, Arc<Near>)>>,
+    near: Mutex<Option<NearHeld>>,
+    held: Mutex<Option<Arc<Cache>>>,
     job: Mutex<Job>,
     auto: Mutex<Option<std::time::Instant>>,
+    generation: AtomicU64,
 }
 
 impl Graphs {
@@ -820,14 +819,16 @@ impl Graphs {
         if vectors.is_empty() {
             return None;
         }
-        let version = vectors.version();
+        let key = (vectors.version(), vectors.near_progress());
         let mut held = self.near.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((at, near)) = held.as_ref().filter(|(at, _)| *at == version) {
-            let _ = at;
-            return Some(Arc::clone(near));
+        if let Some((at, near)) = held.as_ref() {
+            if *at == key && !vectors.near_pending() {
+                return Some(Arc::clone(near));
+            }
         }
-        let near = Arc::new(vectors.neighbours(crate::vectors::NEIGHBOURS));
-        *held = Some((version, Arc::clone(&near)));
+        *held = None;
+        let near = vectors.neighbours(crate::vectors::NEIGHBOURS, crate::vectors::NEAR_SLICE);
+        *held = Some(((key.0, vectors.near_progress()), Arc::clone(&near)));
         Some(near)
     }
 
@@ -849,7 +850,9 @@ impl Graphs {
             room: None,
             vectors: None,
             near: Mutex::new(None),
+            held: Mutex::new(None),
             auto: Mutex::new(None),
+            generation: AtomicU64::new(0),
             job: Mutex::new(Job {
                 state: "idle",
                 done: 0,
@@ -860,10 +863,11 @@ impl Graphs {
     }
 
     pub fn for_notes(notes_dir: &Path, writer: Option<Writer>) -> Graphs {
-        let base = notes_dir.parent().unwrap_or(notes_dir);
-        Graphs::new(base.join("graph.json"), writer)
+        let base = crate::db::beside_of(notes_dir, None);
+        Graphs::new(base.join(leo_core::paths::own::GRAPH), writer)
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -880,8 +884,18 @@ impl Graphs {
         }
     }
 
-    pub fn load(&self) -> Cache {
+    pub fn load(&self) -> Arc<Cache> {
         self.bring_in_file();
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(cache) = held.as_ref() {
+            return Arc::clone(cache);
+        }
+        let cache = Arc::new(self.read_cache());
+        *held = Some(Arc::clone(&cache));
+        cache
+    }
+
+    fn read_cache(&self) -> Cache {
         self.db
             .with(|c| {
                 let mut cache = Cache::default();
@@ -944,7 +958,7 @@ impl Graphs {
                     else {
                         continue;
                     };
-                    let hash = fnv(&format!("{}\u{0}{}", note.title, note.body));
+                    let hash = crate::vectors::hash_of(note);
                     if read.hash == hash && !read.summary.trim().is_empty() {
                         out.insert(
                             note.id.clone(),
@@ -957,14 +971,34 @@ impl Graphs {
             .unwrap_or_default()
     }
 
+    fn read_back(&self, cache: &mut Cache, sources: &[Source]) {
+        let _ = self.db.with(|c| {
+            let mut found = c.prepare_cached("SELECT data FROM graph_notes WHERE id = ?1")?;
+            let missing: Vec<&Source> = sources
+                .iter()
+                .filter(|s| !cache.notes.contains_key(&s.id))
+                .collect();
+            for source in missing {
+                let data: Option<String> = rusqlite::OptionalExtension::optional(
+                    found.query_row([&source.id], |r| r.get(0)),
+                )?;
+                if let Some(read) = data.and_then(|data| serde_json::from_str::<Read>(&data).ok()) {
+                    cache.notes.insert(source.id.clone(), read);
+                }
+            }
+            Ok(())
+        });
+    }
+
     fn save(&self, cache: &Cache) -> Result<()> {
         self.write_all(cache, false)
     }
 
     fn write_all(&self, cache: &Cache, replace: bool) -> Result<()> {
-        self.db.with(|c| {
+        let mut held = self.held.lock().unwrap_or_else(|e| e.into_inner());
+        let written = self.db.with(|c| {
             let tx = c.transaction()?;
-            let held: HashMap<String, String> = {
+            let stored: HashMap<String, String> = {
                 let mut found = tx.prepare("SELECT id, data FROM graph_notes")?;
                 let rows = found
                     .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
@@ -972,15 +1006,12 @@ impl Graphs {
             };
             for (id, read) in &cache.notes {
                 let data = serde_json::to_string(read).unwrap_or_default();
-                if replace || held.get(id) != Some(&data) {
+                if replace || stored.get(id) != Some(&data) {
                     tx.execute(
                         "INSERT OR REPLACE INTO graph_notes (id, data) VALUES (?1, ?2)",
                         [id, &data],
                     )?;
                 }
-            }
-            for id in held.keys().filter(|id| !cache.notes.contains_key(*id)) {
-                tx.execute("DELETE FROM graph_notes WHERE id = ?1", [id])?;
             }
             tx.execute("DELETE FROM graph_links", [])?;
             for (n, link) in cache.links.iter().enumerate() {
@@ -998,7 +1029,12 @@ impl Graphs {
                 [serde_json::to_string(&cache.pairs).unwrap_or_default()],
             )?;
             tx.commit()
-        })
+        });
+        if written.is_ok() {
+            *held = None;
+            self.generation.fetch_add(1, Ordering::AcqRel);
+        }
+        written
     }
 
     fn job(&self) -> Job {
@@ -1034,43 +1070,67 @@ impl Graphs {
             read,
             stale: stale(sources, &cache).len(),
             requests: requests_needed_near(sources, &cache, &self.scale(), self.near().as_deref()),
-            rebuild_requests: requests_needed_near(
-                sources,
-                &Cache::default(),
-                &self.scale(),
-                self.near().as_deref(),
-            ),
-            built_at: cache.built_at,
+            built_at: cache.built_at.clone(),
         }
     }
 
     pub fn settled(&self, sources: &[Source]) -> bool {
-        if self.writer.is_none() {
-            return true;
-        }
-        let status = self.status(sources);
+        self.writer.is_none() || self.settled_by(&self.status(sources))
+    }
+
+    pub fn settled_by(&self, status: &Status) -> bool {
         status.state != "building" && (status.built_at.is_none() || status.requests == 0)
     }
 
-    pub fn update_if_due(
-        self: &Arc<Self>,
-        sources: Vec<Source>,
-        idle: std::time::Duration,
-    ) -> bool {
-        if self.writer.is_none() {
-            return false;
+    pub fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub fn inputs(&self) -> (u64, u64, Scale) {
+        let vectors = self.vectors.as_ref().map_or(0, |v| v.version());
+        (self.generation(), vectors, self.scale())
+    }
+
+    pub fn live(&self, plan: &Status) -> Status {
+        let job = self.job();
+        Status {
+            state: job.state,
+            done: job.done,
+            total: job.total,
+            message: job.message,
+            ..plan.clone()
         }
+    }
+
+    pub fn due(&self, status: &Status, idle: std::time::Duration) -> bool {
         let since = self
             .auto
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .map(|at| at.elapsed());
-        if !should_update(&self.status(&sources), idle, since) {
-            return false;
-        }
+        self.writer.is_some() && should_update(status, idle, since)
+    }
+
+    pub fn begin(self: &Arc<Self>, sources: Vec<Source>) {
         *self.auto.lock().unwrap_or_else(|e| e.into_inner()) = Some(std::time::Instant::now());
         self.start(sources);
-        true
+    }
+
+    #[cfg(test)]
+    pub fn update_if_due(
+        self: &Arc<Self>,
+        sources: Vec<Source>,
+        idle: std::time::Duration,
+    ) -> (bool, bool) {
+        if self.writer.is_none() {
+            return (false, true);
+        }
+        let status = self.status(&sources);
+        if !self.due(&status, idle) {
+            return (false, self.settled_by(&status));
+        }
+        self.begin(sources);
+        (true, false)
     }
 
     pub fn start(self: &Arc<Self>, sources: Vec<Source>) {
@@ -1129,7 +1189,8 @@ impl Graphs {
         let Some(writer) = self.writer.clone() else {
             return;
         };
-        let mut cache = self.load();
+        let mut cache = (*self.load()).clone();
+        self.read_back(&mut cache, sources);
         let scale = self.scale();
         let near = self.near();
         let problems = build_near(
@@ -1269,7 +1330,6 @@ mod tests {
         let mut note = Note::new(
             "Queues",
             "FIFO queues process the earliest item first.",
-            vec![],
             "CS130",
         );
         let mut cache = Cache::default();
@@ -1295,6 +1355,16 @@ mod tests {
     }
 
     #[test]
+    fn the_note_hash_is_unchanged() {
+        let title = "Graph traversals";
+        let body = "BFS uses a queue — très vite.";
+        let read = source("a", title, body, "cs130");
+        assert_eq!(hash_of(&read), "f29dc93fe22f93cd");
+        let note = Note::new(title, body, "cs130");
+        assert_eq!(hash_of(&read), crate::vectors::hash_of(&note));
+    }
+
+    #[test]
     fn the_graph_updates_itself_only_when_built_before_changed_and_left_alone() {
         let minutes = |m: u64| std::time::Duration::from_secs(m * 60);
         let ready = Status {
@@ -1306,7 +1376,6 @@ mod tests {
             read: 3,
             stale: 1,
             requests: 2,
-            rebuild_requests: 4,
             built_at: Some("2026-10-09T00:00:00Z".into()),
         };
         assert!(should_update(&ready, minutes(2), None));
@@ -1386,22 +1455,24 @@ mod tests {
         });
         let graphs = Arc::new(Graphs::new(dir.path().join("graph.json"), Some(writer)));
         let idle = std::time::Duration::from_secs(300);
-        assert!(
-            !graphs.update_if_due(notes.to_vec(), idle),
-            "never built yet"
+        assert_eq!(
+            graphs.update_if_due(notes.to_vec(), idle),
+            (false, true),
+            "never built yet, so nothing to do before the first build"
         );
-        assert!(
-            graphs.settled(&notes),
-            "nothing to do before the first build"
-        );
+        assert!(graphs.settled(&notes));
         let cache = Cache {
             built_at: Some("2026-10-09T00:00:00Z".into()),
             ..Cache::default()
         };
         std::fs::write(graphs.path(), serde_json::to_string(&cache).unwrap()).unwrap();
         assert!(!graphs.settled(&notes), "an unread note is waiting");
-        assert!(graphs.update_if_due(notes.to_vec(), idle));
-        assert!(!graphs.update_if_due(notes.to_vec(), idle), "one at a time");
+        assert_eq!(graphs.update_if_due(notes.to_vec(), idle), (true, false));
+        assert_eq!(
+            graphs.update_if_due(notes.to_vec(), idle),
+            (false, false),
+            "one at a time, and still building"
+        );
         assert!(!graphs.settled(&notes), "still building");
         let waited = std::time::Instant::now();
         while graphs.status(&notes).state == "building" {
@@ -1413,6 +1484,57 @@ mod tests {
             graphs.load().notes.get("a").map(|r| r.summary.as_str()),
             Some("BFS")
         );
+    }
+
+    #[test]
+    fn a_due_build_starts_from_the_remembered_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let notes = [source(
+            "a",
+            "Graph traversals",
+            "BFS uses a queue.",
+            "cs130",
+        )];
+        let writer: Writer = Arc::new(|_: &str, _: &str, _: u32| {
+            Ok(r#"{"notes": [{"id": "a", "summary": "BFS", "concepts": ["queue"]}]}"#.into())
+        });
+        let graphs = Arc::new(Graphs::new(dir.path().join("graph.json"), Some(writer)));
+        let cache = Cache {
+            built_at: Some("2026-10-09T00:00:00Z".into()),
+            ..Cache::default()
+        };
+        std::fs::write(graphs.path(), serde_json::to_string(&cache).unwrap()).unwrap();
+        let plan = graphs.status(&notes);
+        let inputs = graphs.inputs();
+        assert_eq!(graphs.live(&plan), graphs.status(&notes));
+        let almost = UPDATE_WHEN_IDLE - std::time::Duration::from_secs(1);
+        assert!(!graphs.due(&graphs.live(&plan), almost));
+        assert!(graphs.due(&graphs.live(&plan), UPDATE_WHEN_IDLE));
+        graphs.begin(notes.to_vec());
+        assert_eq!(graphs.inputs(), inputs, "starting a build moves no stamp");
+        assert!(!graphs.due(&graphs.live(&plan), UPDATE_WHEN_IDLE));
+        let waited = std::time::Instant::now();
+        while graphs.building().is_some() {
+            assert!(waited.elapsed().as_secs() < 5);
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_ne!(graphs.inputs(), inputs, "a finished build moves the stamp");
+        assert!(graphs.generation() > 0);
+        let failed = Status {
+            state: "failed",
+            message: Some("no".into()),
+            ..plan.clone()
+        };
+        let retry = graphs.auto.lock().unwrap().unwrap();
+        assert!(retry.elapsed() < RETRY_AUTO_AFTER);
+        assert!(!graphs.due(&failed, UPDATE_WHEN_IDLE), "a failure waits");
+        if let Some(long_ago) = std::time::Instant::now().checked_sub(RETRY_AUTO_AFTER) {
+            *graphs.auto.lock().unwrap() = Some(long_ago);
+            assert!(
+                graphs.due(&failed, UPDATE_WHEN_IDLE),
+                "a retry that came due starts"
+            );
+        }
     }
 
     #[test]
@@ -1932,6 +2054,59 @@ mod tests {
             user.chars().count() < NOTE_CHARS + 400,
             "a long note is clipped"
         );
+    }
+
+    #[test]
+    fn a_trashed_notes_summary_stays_in_the_database_and_comes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let graphs = Graphs::for_notes(&dir.path().join("notes"), None);
+        let mut cache = Cache::default();
+        cache.notes.insert(
+            "n1".into(),
+            Read {
+                summary: "heaps".into(),
+                ..Read::default()
+            },
+        );
+        graphs.save(&cache).unwrap();
+        graphs.save(&Cache::default()).unwrap();
+        let mut back = Cache::default();
+        let source = Source {
+            id: "n1".into(),
+            title: "Heaps".into(),
+            body: String::new(),
+            directory: String::new(),
+        };
+        graphs.read_back(&mut back, &[source]);
+        assert_eq!(back.notes["n1"].summary, "heaps");
+    }
+
+    #[test]
+    fn a_written_cache_is_seen_by_the_next_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let graphs = Graphs::for_notes(&dir.path().join("notes"), None);
+        assert!(graphs.load().notes.is_empty());
+        let one = Read {
+            summary: "heaps".into(),
+            ..Read::default()
+        };
+        let mut cache = Cache::default();
+        cache.notes.insert("n1".into(), one);
+        graphs.save(&cache).unwrap();
+        assert_eq!(graphs.load().notes["n1"].summary, "heaps");
+        assert!(Arc::ptr_eq(&graphs.load(), &graphs.load()));
+
+        let mut file = Cache::default();
+        file.notes.insert(
+            "n2".into(),
+            Read {
+                summary: "queues".into(),
+                ..Read::default()
+            },
+        );
+        std::fs::write(graphs.path(), serde_json::to_string(&file).unwrap()).unwrap();
+        let seen = graphs.load();
+        assert_eq!(seen.notes["n2"].summary, "queues");
     }
 
     #[test]

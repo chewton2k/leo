@@ -1,4 +1,61 @@
 use super::*;
+use crate::routes::uploads::{put_file, Named, SentFile};
+
+fn making(state: &AppState, files: &[(&str, &str, &[u8])]) -> ImportBody {
+    let upload = uuid::Uuid::new_v4().to_string();
+    let files = files
+        .iter()
+        .map(|(name, mime, bytes)| {
+            let item = uuid::Uuid::new_v4().to_string();
+            let response = run(put_file(
+                State(state.clone()),
+                Path((upload.clone(), item.clone())),
+                Query(Named {
+                    name: name.to_string(),
+                }),
+                axum::body::Body::from(bytes.to_vec()),
+            ));
+            assert_eq!(response.status(), StatusCode::NO_CONTENT, "{name}");
+            SentFile {
+                item,
+                name: name.to_string(),
+                mime: mime.to_string(),
+            }
+        })
+        .collect();
+    ImportBody {
+        upload,
+        directory: String::new(),
+        title: None,
+        wants: String::new(),
+        files,
+        each: false,
+        into: None,
+    }
+}
+
+fn kept(figures: &[(&str, bool)]) -> (Vec<Figure>, crate::Scratch, std::path::PathBuf) {
+    let dir = Arc::new(tempfile::tempdir().unwrap());
+    let root = dir.path().to_path_buf();
+    let list = figures
+        .iter()
+        .enumerate()
+        .map(|(n, (place, photo))| {
+            let path = root.join(format!("{n:05}.png"));
+            std::fs::write(&path, PICTURE).unwrap();
+            Figure {
+                place: place.to_string(),
+                path,
+                photo: *photo,
+            }
+        })
+        .collect();
+    (list, crate::Scratch(dir), root)
+}
+
+fn bytes_of(file: &UploadFile) -> Vec<u8> {
+    std::fs::read(file.path.as_ref().unwrap()).unwrap()
+}
 
 const PICTURE: &[u8] = b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR\0\0\x01\0\0\0\0\xc8\x08\x02\0\0\0";
 
@@ -71,7 +128,6 @@ fn originals_refuse_symlinks_at_every_component_and_exports_omit_linked_files() 
 #[cfg(unix)]
 #[test]
 fn an_upload_cannot_write_originals_through_a_linked_attachment_root() {
-    use base64::Engine;
     let (mut state, home, _) = state_with(&[]);
     state.importer = Some(Arc::new(
         |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
@@ -79,6 +135,7 @@ fn an_upload_cannot_write_originals_through_a_linked_attachment_root() {
                 title: "Example".into(),
                 body: "Example body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
@@ -86,18 +143,10 @@ fn an_upload_cannot_write_originals_through_a_linked_attachment_root() {
     std::os::unix::fs::symlink(outside.path(), home.path().join("attachments")).unwrap();
     let made = json_of(run(start_import(
         State(state.clone()),
-        Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![ImportFileBody {
-                name: "example.txt".into(),
-                mime: "text/plain".into(),
-                data: base64::engine::general_purpose::STANDARD.encode("EXAMPLE ORIGINAL"),
-            }],
-            each: false,
-            into: None,
-        }),
+        Json(making(
+            &state,
+            &[("example.txt", "text/plain", b"EXAMPLE ORIGINAL")],
+        )),
     )));
     let job = wait_for(&state, made["id"].as_str().unwrap());
     assert_eq!(job.state, "failed");
@@ -107,7 +156,6 @@ fn an_upload_cannot_write_originals_through_a_linked_attachment_root() {
 
 #[test]
 fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares_the_rest() {
-    use base64::Engine;
     let (mut state, _d, _ids) = state_with(&[]);
     state.importer = Some(Arc::new(
         |files: Vec<UploadFile>, wants: &str, progress: &mut dyn FnMut(&str, usize, usize)| {
@@ -122,25 +170,24 @@ fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares
                 title: name.trim_end_matches(".pdf").to_string(),
                 body: format!("## From {name}"),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
-    let file = |name: &str| ImportFileBody {
-        name: name.into(),
-        mime: "application/pdf".into(),
-        data: base64::engine::general_purpose::STANDARD.encode(name.as_bytes()),
-    };
+    let file = |name: &'static str| (name, "application/pdf", name.as_bytes());
     let body = ImportBody {
         directory: "ma161".into(),
         title: Some("Ignored for separate notes".into()),
         wants: "just the proofs".into(),
-        files: vec![
-            file("lecture 1.pdf"),
-            file("broken.pdf"),
-            file("lecture 2.pdf"),
-        ],
         each: true,
-        into: None,
+        ..making(
+            &state,
+            &[
+                file("lecture 1.pdf"),
+                file("broken.pdf"),
+                file("lecture 2.pdf"),
+            ],
+        )
     };
     let made = json_of(run(start_import(State(state.clone()), Json(body))));
     let job = wait_for(&state, made["id"].as_str().unwrap());
@@ -170,12 +217,8 @@ fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares
     let one = json_of(run(start_import(
         State(state.clone()),
         Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![file("broken.pdf"), file("broken.pdf")],
             each: true,
-            into: None,
+            ..making(&state, &[file("broken.pdf"), file("broken.pdf")])
         }),
     )));
     let failed = wait_for(&state, one["id"].as_str().unwrap());
@@ -185,28 +228,19 @@ fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares
 
 #[test]
 fn an_upload_becomes_a_note_in_its_folder_and_keeps_the_original() {
-    use base64::Engine;
     let (mut state, _d, _ids) = state_with(&[]);
     state.importer = Some(Arc::new(
         |files: Vec<UploadFile>, wants: &str, progress: &mut dyn FnMut(&str, usize, usize)| {
             assert_eq!(wants, "the problem, then the code");
             progress("Writing the note", 0, 1);
-            assert_eq!(files[0].bytes, b"%PDF fake");
+            assert_eq!(bytes_of(&files[0]), b"%PDF fake");
+            assert!(files[0].bytes.is_empty(), "a file is read from its path");
+            let (figures, scratch, _) = kept(&[("slide 2", false), ("board.jpg", true)]);
             Ok(Made {
                 title: "Graph search".to_string(),
                 body: "## BFS\n- uses a queue\n\n![The BFS tree](figure:1)\n\n![again](figure:1)\n![nothing](figure:9)".to_string(),
-                figures: vec![
-                    Figure {
-                        place: "slide 2".into(),
-                        bytes: PICTURE.to_vec(),
-                        photo: false,
-                    },
-                    Figure {
-                        place: "board.jpg".into(),
-                        bytes: PICTURE.to_vec(),
-                        photo: true,
-                    },
-                ],
+                figures,
+                scratch: Some(scratch),
             })
         },
     ));
@@ -214,13 +248,10 @@ fn an_upload_becomes_a_note_in_its_folder_and_keeps_the_original() {
         directory: "cs130".into(),
         title: None,
         wants: "the problem, then the code".into(),
-        files: vec![ImportFileBody {
-            name: "../../lecture 4.pdf".into(),
-            mime: "application/pdf".into(),
-            data: base64::engine::general_purpose::STANDARD.encode(b"%PDF fake"),
-        }],
-        each: false,
-        into: None,
+        ..making(
+            &state,
+            &[("../../lecture 4.pdf", "application/pdf", b"%PDF fake")],
+        )
     };
     let response = run(start_import(State(state.clone()), Json(body)));
     assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -319,24 +350,9 @@ fn an_upload_becomes_a_note_in_its_folder_and_keeps_the_original() {
 
 #[test]
 fn a_failed_upload_says_why_and_bad_requests_are_refused() {
-    use base64::Engine;
-    let (mut state, _d, _ids) = state_with(&[]);
-    let file = || ImportFileBody {
-        name: "board.jpg".into(),
-        mime: "image/jpeg".into(),
-        data: base64::engine::general_purpose::STANDARD.encode([1, 2, 3]),
-    };
-    let none = run(start_import(
-        State(state.clone()),
-        Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![file()],
-            each: false,
-            into: None,
-        }),
-    ));
+    let (mut state, home, _ids) = state_with(&[]);
+    let file = |state: &AppState| making(state, &[("board.jpg", "image/jpeg", &[1, 2, 3])]);
+    let none = run(start_import(State(state.clone()), Json(file(&state))));
     assert_eq!(none.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert!(json_of(none)["error"]
         .as_str()
@@ -347,17 +363,7 @@ fn a_failed_upload_says_why_and_bad_requests_are_refused() {
             anyhow::bail!("qwen3:8b cannot read images")
         },
     ));
-    let response = run(start_import(
-        State(state.clone()),
-        Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![file()],
-            each: false,
-            into: None,
-        }),
-    ));
+    let response = run(start_import(State(state.clone()), Json(file(&state))));
     let bytes = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
     let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
         .as_str()
@@ -370,42 +376,49 @@ fn a_failed_upload_says_why_and_bad_requests_are_refused() {
         State(state.clone()),
         Json(ImportBody {
             directory: "../outside".into(),
-            title: None,
-            wants: String::new(),
-            files: vec![file()],
-            each: false,
-            into: None,
+            ..file(&state)
         }),
     ));
     assert_eq!(outside.status(), StatusCode::BAD_REQUEST);
     let empty = run(start_import(
         State(state.clone()),
         Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
             files: vec![],
-            each: false,
-            into: None,
+            ..file(&state)
         }),
     ));
     assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
-    let garbled = run(start_import(
-        State(state.clone()),
-        Json(ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![ImportFileBody {
-                name: "x.pdf".into(),
-                mime: String::new(),
-                data: "%%%".into(),
-            }],
-            each: false,
-            into: None,
-        }),
-    ));
-    assert_eq!(garbled.status(), StatusCode::BAD_REQUEST);
+    for item in ["never-sent", "../x", ""] {
+        let mut body = file(&state);
+        body.files[0].item = item.into();
+        let missing = run(start_import(State(state.clone()), Json(body)));
+        assert_eq!(missing.status(), StatusCode::BAD_REQUEST, "{item:?}");
+    }
+    let mut twice = making(&state, &[("a.txt", "text/plain", b"a")]);
+    twice.files.push(SentFile {
+        item: twice.files[0].item.clone(),
+        name: "b.txt".into(),
+        mime: "text/plain".into(),
+    });
+    assert_eq!(
+        run(start_import(State(state.clone()), Json(twice))).status(),
+        StatusCode::BAD_REQUEST,
+        "one sent file cannot stand for two"
+    );
+    let mut elsewhere = file(&state);
+    let sent_to = home.path().join("incoming").join(&elsewhere.upload);
+    elsewhere.upload = "../notes".into();
+    assert_eq!(
+        run(start_import(State(state.clone()), Json(elsewhere))).status(),
+        StatusCode::BAD_REQUEST
+    );
+    std::fs::remove_dir_all(sent_to).unwrap();
+    assert!(
+        std::fs::read_dir(home.path().join("incoming"))
+            .map(|mut folders| folders.next().is_none())
+            .unwrap_or(true),
+        "a refused or finished upload leaves nothing in incoming"
+    );
     assert_eq!(safe_file_name("../../etc/passwd"), "passwd");
     assert_eq!(safe_file_name("C:\\x\\notes?.pdf"), "notes-.pdf");
     assert_eq!(safe_file_name(".."), "upload");
@@ -413,47 +426,6 @@ fn a_failed_upload_says_why_and_bad_requests_are_refused() {
     assert_eq!(safe_file_name("aux"), "aux-");
     assert_eq!(safe_file_name("draft. "), "draft");
     assert_eq!(safe_file_name("Console.pdf"), "Console.pdf");
-}
-
-#[test]
-fn an_upload_dropped_while_it_is_decoded_gives_its_place_back() {
-    use base64::Engine;
-    use std::future::Future;
-    let (mut state, _dir, _) = state_with(&[]);
-    state.importer = Some(Arc::new(
-        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
-            anyhow::bail!("not reached")
-        },
-    ));
-    let body = ImportBody {
-        directory: String::new(),
-        title: None,
-        wants: String::new(),
-        files: vec![ImportFileBody {
-            name: "big.pdf".into(),
-            mime: String::new(),
-            data: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 8 * 1024 * 1024]),
-        }],
-        each: false,
-        into: None,
-    };
-    run(async {
-        let mut upload = Box::pin(start_import(State(state.clone()), Json(body)));
-        let started = std::time::Instant::now();
-        loop {
-            let ready = std::future::poll_fn(|cx| {
-                std::task::Poll::Ready(upload.as_mut().poll(cx).is_ready())
-            })
-            .await;
-            assert!(!ready, "the upload finished before it could be dropped");
-            if !state.imports.lock().unwrap().is_empty() {
-                break;
-            }
-            assert!(started.elapsed() < std::time::Duration::from_secs(10));
-            tokio::task::yield_now().await;
-        }
-    });
-    assert!(state.imports.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -480,6 +452,7 @@ fn background_work_is_listed_until_it_is_done() {
         name: name.into(),
         mime: String::new(),
         bytes: vec![],
+        path: None,
     };
     assert_eq!(
         upload_label(&[file("slides.pdf")]),
@@ -516,6 +489,7 @@ fn background_work_is_listed_until_it_is_done() {
         transcript: String::new(),
         warnings: vec![],
         points: vec![],
+        points_total: 0,
         wants: String::new(),
         levels: vec![],
         levels_start: 0,
@@ -549,18 +523,7 @@ fn background_work_is_listed_until_it_is_done() {
 
 #[test]
 fn figures_the_ai_did_not_place_are_kept_under_their_own_heading() {
-    let figures = vec![
-        Figure {
-            place: "page 3".into(),
-            bytes: PICTURE.to_vec(),
-            photo: false,
-        },
-        Figure {
-            place: "page 5".into(),
-            bytes: PICTURE.to_vec(),
-            photo: false,
-        },
-    ];
+    let (figures, _scratch, _) = kept(&[("page 3", false), ("page 5", false)]);
     let mut n = 0;
     let mut save = |f: &Figure| {
         n += 1;
@@ -568,7 +531,7 @@ fn figures_the_ai_did_not_place_are_kept_under_their_own_heading() {
     };
     assert_eq!(
         settle_figures("## Heaps\n- tree", &figures, &mut save),
-        "## Heaps\n- tree\n\n## Figures\n\n![Figure from page 3](attachments/1.png)"
+        "## Heaps\n- tree\n\n## More figures\n\n![Figure from page 3](attachments/1.png)"
     );
     let kept = settle_figures(
         "Intro ![a heap](figure:2) and ![x](attachments/old.png)\n![the tree](figure:1)",
@@ -582,9 +545,9 @@ fn figures_the_ai_did_not_place_are_kept_under_their_own_heading() {
 }
 
 #[test]
-fn uploads_bound_file_count_and_parallel_imports_before_starting_more_workers() {
+fn a_third_upload_waits_and_then_runs() {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-    let (mut state, _home, _) = state_with(&[]);
+    let (mut state, home, _) = state_with(&[]);
     let released = Arc::new(AtomicBool::new(false));
     let started = Arc::new(AtomicUsize::new(0));
     state.importer = Some(Arc::new({
@@ -592,7 +555,7 @@ fn uploads_bound_file_count_and_parallel_imports_before_starting_more_workers() 
         let started = Arc::clone(&started);
         move |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
             started.fetch_add(1, Ordering::Relaxed);
-            let until = std::time::Instant::now() + std::time::Duration::from_secs(2);
+            let until = std::time::Instant::now() + std::time::Duration::from_secs(5);
             while !released.load(Ordering::Relaxed) && std::time::Instant::now() < until {
                 std::thread::sleep(std::time::Duration::from_millis(5));
             }
@@ -600,47 +563,219 @@ fn uploads_bound_file_count_and_parallel_imports_before_starting_more_workers() 
                 title: "Upload".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         }
     }));
-    let body = |count| ImportBody {
-        directory: String::new(),
-        title: None,
-        wants: String::new(),
-        files: (0..count)
-            .map(|n| ImportFileBody {
-                name: format!("{n}.txt"),
-                mime: "text/plain".into(),
-                data: "dGVzdA==".into(),
-            })
-            .collect(),
-        each: false,
-        into: None,
+    let begin = || {
+        let body = making(&state, &[("a.txt", "text/plain", b"test")]);
+        let response = run(start_import(State(state.clone()), Json(body)));
+        assert_eq!(response.status(), StatusCode::ACCEPTED);
+        json_of(response)["id"].as_str().unwrap().to_string()
     };
-    assert_eq!(
-        run(start_import(State(state.clone()), Json(body(21)))).status(),
-        StatusCode::PAYLOAD_TOO_LARGE
+    let state_of = |id: &str| state.imports.lock().unwrap().get(id).unwrap().state;
+    let (first, second, third) = (begin(), begin(), begin());
+    assert_eq!(state_of(&first), "working");
+    assert_eq!(state_of(&second), "working");
+    assert_eq!(state_of(&third), "waiting");
+    assert!(
+        home.path().join("incoming").read_dir().unwrap().count() == 3,
+        "a waiting upload's files wait in incoming"
     );
-    assert_eq!(started.load(Ordering::Relaxed), 0);
-    let first = json_of(run(start_import(State(state.clone()), Json(body(1)))));
-    let second = json_of(run(start_import(State(state.clone()), Json(body(1)))));
-    let third = run(start_import(State(state.clone()), Json(body(1))));
     released.store(true, Ordering::Relaxed);
-    assert_eq!(third.status(), StatusCode::TOO_MANY_REQUESTS);
+    for id in [&first, &second, &third] {
+        assert_eq!(wait_for(&state, id).state, "done");
+    }
+    assert_eq!(started.load(Ordering::Relaxed), 3);
+}
+
+#[test]
+fn an_upload_with_a_very_long_title_makes_a_note_with_that_title() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            Ok(Made {
+                title: "Made".into(),
+                body: "Body".into(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let title = "界".repeat(5_000);
+    let body = ImportBody {
+        title: Some(title.clone()),
+        ..making(&state, &[("a.txt", "text/plain", b"test")])
+    };
+    let response = run(start_import(State(state.clone()), Json(body)));
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let id = json_of(response)["id"].as_str().unwrap().to_string();
+    let job = wait_for(&state, &id);
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    assert_eq!(note.title, title);
+    let names: Vec<String> = std::fs::read_dir(&state.notes_dir)
+        .unwrap()
+        .filter_map(|entry| entry.ok()?.file_name().into_string().ok())
+        .filter(|name| name.ends_with(".md"))
+        .collect();
+    assert_eq!(names.len(), 1);
+    let stem = names[0].trim_end_matches(".md");
+    assert!(stem.len() <= 200 && stem.chars().count() <= 100, "{stem}");
+}
+
+#[test]
+fn thirty_files_make_thirty_notes() {
+    let (mut state, _home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |files: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            Ok(Made {
+                title: files[0].name.trim_end_matches(".txt").to_string(),
+                body: String::from_utf8(bytes_of(&files[0])).unwrap(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let names: Vec<String> = (0..30).map(|n| format!("file {n}.txt")).collect();
+    let sent: Vec<(&str, &str, &[u8])> = names
+        .iter()
+        .map(|name| (name.as_str(), "text/plain", name.as_bytes()))
+        .collect();
+    let body = ImportBody {
+        each: true,
+        ..making(&state, &sent)
+    };
+    let response = run(start_import(State(state.clone()), Json(body)));
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+    assert_eq!(job.state, "done", "{job:?}");
+    assert_eq!(job.notes.len(), 30);
+    assert_eq!(job.error, None);
+}
+
+#[test]
+fn a_file_arrives_in_pieces_and_is_whole_on_disk() {
+    let (state, home, _) = state_with(&[]);
+    let data: Vec<u8> = (0..5 * 1024 * 1024).map(|i| (i % 253) as u8).collect();
+    let pieces: Vec<_> = data
+        .chunks(1024)
+        .map(|piece| Ok::<_, std::io::Error>(axum::body::Bytes::copy_from_slice(piece)))
+        .collect();
+    let response = run(put_file(
+        State(state),
+        Path(("up-1".into(), "item-1".into())),
+        Query(Named {
+            name: "lecture.pdf".into(),
+        }),
+        axum::body::Body::from_stream(futures_util::stream::iter(pieces)),
+    ));
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    let kept = std::fs::read(home.path().join("incoming/up-1/item-1")).unwrap();
+    assert_eq!(kept, data);
+    let folder: Vec<_> = std::fs::read_dir(home.path().join("incoming/up-1"))
+        .unwrap()
+        .collect();
+    assert_eq!(folder.len(), 1, "no half-written file is left beside it");
+}
+
+#[test]
+fn a_second_send_of_one_item_is_refused_and_replaces_nothing() {
+    let (state, home, _) = state_with(&[]);
+    let send = |bytes: &'static [u8]| {
+        run(put_file(
+            State(state.clone()),
+            Path(("up-2".into(), "item-2".into())),
+            Query(Named::default()),
+            axum::body::Body::from(bytes),
+        ))
+        .status()
+    };
+    assert_eq!(send(b"first"), StatusCode::NO_CONTENT);
+    assert_eq!(send(b"second"), StatusCode::CONFLICT);
     assert_eq!(
-        wait_for(&state, first["id"].as_str().unwrap()).state,
-        "done"
+        std::fs::read(home.path().join("incoming/up-2/item-2")).unwrap(),
+        b"first"
     );
-    assert_eq!(
-        wait_for(&state, second["id"].as_str().unwrap()).state,
-        "done"
-    );
-    assert_eq!(started.load(Ordering::Relaxed), 2);
+}
+
+#[test]
+fn an_upload_name_cannot_leave_its_folder() {
+    let (state, home, _) = state_with(&[]);
+    for (upload, item) in [
+        ("..", "item"),
+        ("up", ".."),
+        ("up", "a.b"),
+        ("a/b", "item"),
+        ("", "item"),
+        ("up", "../../escape"),
+    ] {
+        let response = run(put_file(
+            State(state.clone()),
+            Path((upload.into(), item.into())),
+            Query(Named::default()),
+            axum::body::Body::from("x"),
+        ));
+        assert_eq!(
+            response.status(),
+            StatusCode::BAD_REQUEST,
+            "{upload}/{item}"
+        );
+    }
+    assert!(!home.path().join("escape").exists());
+    assert!(!home.path().join("incoming").exists());
+}
+
+#[test]
+fn two_files_with_one_name_keep_both_contents() {
+    let (mut state, _home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |files: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let text = String::from_utf8(bytes_of(&files[0])).unwrap();
+            Ok(Made {
+                title: text,
+                body: "Body".into(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let read = |note: &str, name: &str| {
+        let response = run(get_original(
+            State(state.clone()),
+            Path((note.to_string(), name.to_string())),
+            Query(OriginalView::default()),
+        ));
+        assert_eq!(response.status(), StatusCode::OK, "{name}");
+        run(axum::body::to_bytes(response.into_body(), usize::MAX))
+            .unwrap()
+            .to_vec()
+    };
+    let same = [
+        ("lecture.pdf", "application/pdf", b"first".as_slice()),
+        ("lecture.pdf", "application/pdf", b"second".as_slice()),
+    ];
+    let alike = [
+        ("a:b.pdf", "application/pdf", b"colon".as_slice()),
+        ("a?b.pdf", "application/pdf", b"query".as_slice()),
+    ];
+    for files in [same, alike] {
+        let body = ImportBody {
+            each: true,
+            ..making(&state, &files)
+        };
+        let response = run(start_import(State(state.clone()), Json(body)));
+        let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+        assert_eq!(job.state, "done", "{job:?}");
+        assert_eq!(job.notes.len(), 2);
+        for (note, (name, _, bytes)) in job.notes.iter().zip(files) {
+            assert_eq!(read(note, &safe_file_name(name)), bytes, "{name}");
+        }
+    }
 }
 
 #[test]
 fn files_dropped_on_a_note_are_added_to_it_under_their_own_heading() {
-    use base64::Engine;
     let (mut state, _d, ids) = state_with(&[("Week 3", "")]);
     let note = ids[0].clone();
     let saved = run(crate::routes::notes::update_note(
@@ -661,21 +796,21 @@ fn files_dropped_on_a_note_are_added_to_it_under_their_own_heading() {
                 title: "Heap proofs".into(),
                 body: "Sift down keeps the heap order.".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
-    let file = |name: &str| ImportFileBody {
-        name: name.into(),
-        mime: "application/pdf".into(),
-        data: base64::engine::general_purpose::STANDARD.encode(name.as_bytes()),
-    };
     let body = |into: &str| ImportBody {
-        directory: String::new(),
-        title: None,
         wants: "just the proofs".into(),
-        files: vec![file("slides.pdf"), file("sheet.pdf")],
         each: true,
         into: Some(into.into()),
+        ..making(
+            &state,
+            &[
+                ("slides.pdf", "application/pdf", b"slides"),
+                ("sheet.pdf", "application/pdf", b"sheet"),
+            ],
+        )
     };
     assert_eq!(
         run(start_import(State(state.clone()), Json(body("nosuchnote")))).status(),
@@ -764,7 +899,6 @@ fn a_long_file_name_keeps_its_extension_and_a_numbered_copy_still_fits() {
 
 #[test]
 fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
-    use base64::Engine;
     let (mut state, _d, _ids) = state_with(&[]);
     state.importer = Some(Arc::new(
         |files: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
@@ -773,14 +907,11 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
                 title: "Slides".into(),
                 body: "Body".into(),
                 figures: vec![],
+                scratch: None,
             })
         },
     ));
-    let file = |name: &str, text: &str| ImportFileBody {
-        name: name.into(),
-        mime: "application/pdf".into(),
-        data: base64::engine::general_purpose::STANDARD.encode(text.as_bytes()),
-    };
+    let file = |name: &'static str, text: &'static str| (name, "application/pdf", text.as_bytes());
     let import = |state: &AppState, body: ImportBody| {
         let response = run(start_import(State(state.clone()), Json(body)));
         assert_eq!(response.status(), StatusCode::ACCEPTED);
@@ -796,14 +927,10 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
     };
     let job = import(
         &state,
-        ImportBody {
-            directory: String::new(),
-            title: None,
-            wants: String::new(),
-            files: vec![file("slides.pdf", "first"), file("slides.pdf", "second")],
-            each: false,
-            into: None,
-        },
+        making(
+            &state,
+            &[file("slides.pdf", "first"), file("slides.pdf", "second")],
+        ),
     );
     let note = job.note.unwrap();
     let names = |state: &AppState, note: &str| -> Vec<String> {
@@ -833,10 +960,10 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
     assert_eq!(&read("slides.pdf")[..], b"first");
     assert_eq!(&read("slides (2).pdf")[..], b"second");
 
-    let wide = format!("{}.pdf", "w".repeat(116));
+    let wide: &'static str = Box::leak(format!("{}.pdf", "w".repeat(116)).into_boxed_str());
     let target = state
         .fresh()
-        .create_note("Target", "", vec![], "")
+        .create_note("Target", "", "")
         .unwrap()
         .id
         .clone();
@@ -844,12 +971,8 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
         import(
             &state,
             ImportBody {
-                directory: String::new(),
-                title: None,
-                wants: String::new(),
-                files: vec![file(&wide, "one"), file("other.pdf", "two")],
-                each: false,
                 into: Some(target.clone()),
+                ..making(&state, &[file(wide, "one"), file("other.pdf", "two")])
             },
         );
     }
@@ -858,4 +981,309 @@ fn same_named_originals_never_overwrite_each_other_or_overrun_the_name_limit() {
     assert!(kept
         .iter()
         .all(|n| n.chars().count() <= 120 && n.ends_with(".pdf")));
+}
+
+#[test]
+fn an_original_is_sent_whole_and_byte_exact() {
+    let (state, home, ids) = state_with(&[("Big", "")]);
+    let folder = home.path().join("attachments").join(&ids[0]);
+    std::fs::create_dir_all(&folder).unwrap();
+    let data: Vec<u8> = (0..3 * 1024 * 1024 + 17).map(|i| (i % 251) as u8).collect();
+    std::fs::write(folder.join("deck.pdf"), &data).unwrap();
+    let response = run(get_original(
+        State(state),
+        Path((ids[0].clone(), "deck.pdf".into())),
+        Query(OriginalView::default()),
+    ));
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(response.headers()[header::CONTENT_TYPE], "application/pdf");
+    assert_eq!(
+        response.headers()[header::CONTENT_LENGTH],
+        data.len().to_string().as_str()
+    );
+    assert_eq!(
+        response.headers()[header::CONTENT_DISPOSITION],
+        "attachment; filename=\"deck.pdf\""
+    );
+    let sent = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
+    assert_eq!(sent.as_ref(), data.as_slice());
+}
+
+#[test]
+fn the_incoming_folder_is_gone_when_the_job_ends() {
+    let (mut state, home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |files: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            assert!(files[0].path.as_ref().unwrap().is_file());
+            if files[0].name == "broken.txt" {
+                anyhow::bail!("there is no text in broken.txt");
+            }
+            Ok(Made {
+                title: "Fine".into(),
+                body: "Body".into(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let incoming = home.path().join("incoming");
+    for (name, state_after) in [("fine.txt", "done"), ("broken.txt", "failed")] {
+        let body = making(&state, &[(name, "text/plain", b"text")]);
+        let upload = body.upload.clone();
+        let response = run(start_import(State(state.clone()), Json(body)));
+        let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+        assert_eq!(job.state, state_after, "{job:?}");
+        assert!(!incoming.join(&upload).exists(), "{name}");
+    }
+    let kept = state.fresh().notes.clone();
+    let original = home
+        .path()
+        .join("attachments")
+        .join(&kept[0].id)
+        .join("fine.txt");
+    assert_eq!(std::fs::read(original).unwrap(), b"text");
+}
+
+#[test]
+fn old_incoming_folders_are_swept_and_new_ones_stay() {
+    let (state, home, _) = state_with(&[]);
+    let incoming = home.path().join("incoming");
+    for name in ["old", "new"] {
+        std::fs::create_dir_all(incoming.join(name)).unwrap();
+        std::fs::write(incoming.join(name).join("item"), "x").unwrap();
+    }
+    let mut open = std::fs::File::options();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        open.write(true).custom_flags(0x0200_0000);
+    }
+    #[cfg(not(windows))]
+    open.read(true);
+    let old = open.open(incoming.join("old")).unwrap();
+    old.set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(25 * 3600))
+        .unwrap();
+    crate::routes::uploads::sweep_incoming(&state.notes_dir);
+    assert!(!incoming.join("old").exists());
+    assert!(incoming.join("new/item").exists());
+}
+
+fn resident_kb() -> u64 {
+    leo_core::children::quiet_command("ps")
+        .args(["-o", "rss=", "-p", &std::process::id().to_string()])
+        .output()
+        .ok()
+        .and_then(|out| String::from_utf8_lossy(&out.stdout).trim().parse().ok())
+        .unwrap_or(0)
+}
+
+fn peak_while<T>(work: impl FnOnce() -> T) -> (T, u64) {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    let baseline = resident_kb();
+    let peak = Arc::new(AtomicU64::new(baseline));
+    let done = Arc::new(AtomicBool::new(false));
+    let sampler = {
+        let (peak, done) = (Arc::clone(&peak), Arc::clone(&done));
+        std::thread::spawn(move || {
+            while !done.load(Ordering::SeqCst) {
+                peak.fetch_max(resident_kb(), Ordering::SeqCst);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        })
+    };
+    let out = work();
+    done.store(true, Ordering::SeqCst);
+    sampler.join().unwrap();
+    (out, peak.load(Ordering::SeqCst).saturating_sub(baseline))
+}
+
+#[test]
+#[ignore = "writes 500 MB and prints the memory it took"]
+fn a_large_text_file_becomes_a_note() {
+    const MEGABYTES: usize = 500;
+    let (mut state, home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |files: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            assert_eq!(
+                std::fs::metadata(files[0].path.as_ref().unwrap())
+                    .unwrap()
+                    .len(),
+                (MEGABYTES * 1024 * 1024) as u64
+            );
+            Ok(Made {
+                title: "Big".into(),
+                body: "Body".into(),
+                figures: vec![],
+                scratch: None,
+            })
+        },
+    ));
+    let upload = "big".to_string();
+    let mut line = vec![b'a'; 1023];
+    line.push(10);
+    let line = axum::body::Bytes::from(line);
+    let (sent, received) = peak_while(|| {
+        let pieces = (0..MEGABYTES * 1024).map({
+            let line = line.clone();
+            move |_| Ok::<_, std::io::Error>(line.clone())
+        });
+        run(put_file(
+            State(state.clone()),
+            Path((upload.clone(), "item".into())),
+            Query(Named {
+                name: "big.txt".into(),
+            }),
+            axum::body::Body::from_stream(futures_util::stream::iter(pieces)),
+        ))
+    });
+    assert_eq!(sent.status(), StatusCode::NO_CONTENT);
+    let body = ImportBody {
+        upload,
+        directory: String::new(),
+        title: None,
+        wants: String::new(),
+        files: vec![SentFile {
+            item: "item".into(),
+            name: "big.txt".into(),
+            mime: "text/plain".into(),
+        }],
+        each: false,
+        into: None,
+    };
+    let (job, made) = peak_while(|| {
+        let response = run(start_import(State(state.clone()), Json(body)));
+        wait_for(&state, json_of(response)["id"].as_str().unwrap())
+    });
+    assert_eq!(job.state, "done", "{job:?}");
+    assert!(!home.path().join("incoming/big").exists());
+    println!("receiving {MEGABYTES} MB grew memory by {received} KB; making the note by {made} KB");
+}
+
+#[test]
+fn unplaced_figures_are_kept_when_some_are_placed() {
+    let (mut state, _home, _) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, _) =
+                kept(&[("page 1", false), ("page 2", false), ("page 3", false)]);
+            Ok(Made {
+                title: "Heaps".into(),
+                body: "## Heaps\n\n![the tree](figure:1)".into(),
+                figures,
+                scratch: Some(scratch),
+            })
+        },
+    ));
+    let body = making(&state, &[("heaps.pdf", "application/pdf", b"%PDF")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    assert!(
+        note.body
+            .starts_with("## Heaps\n\n![the tree](attachments/"),
+        "{}",
+        note.body
+    );
+    let (placed, more) = note.body.split_once("\n\n## More figures\n\n").unwrap();
+    assert_eq!(placed.matches("attachments/").count(), 1, "{placed}");
+    assert!(
+        more.contains("![Figure from page 2](attachments/"),
+        "{more}"
+    );
+    assert!(
+        more.contains("![Figure from page 3](attachments/"),
+        "{more}"
+    );
+    assert!(!more.contains("page 1"), "{more}");
+}
+
+#[test]
+fn the_scratch_folder_is_gone_after_the_upload() {
+    let (mut state, _home, _) = state_with(&[]);
+    let folder = Arc::new(Mutex::new(None));
+    state.importer = Some(Arc::new({
+        let folder = Arc::clone(&folder);
+        move |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, root) = kept(&[("page 1", false)]);
+            *folder.lock().unwrap() = Some(root);
+            Ok(Made {
+                title: "Heaps".into(),
+                body: "Body".into(),
+                figures,
+                scratch: Some(scratch),
+            })
+        }
+    }));
+    let body = making(&state, &[("heaps.pdf", "application/pdf", b"%PDF")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    let job = wait_for(&state, json_of(response)["id"].as_str().unwrap());
+    assert_eq!(job.state, "done", "{job:?}");
+    let root = folder.lock().unwrap().clone().unwrap();
+    assert!(!root.exists(), "{}", root.display());
+}
+
+#[test]
+fn the_status_of_an_upload_into_a_note_counts_its_section_and_never_carries_it() {
+    let job = ImportJob {
+        state: "done",
+        label: String::new(),
+        dir: String::new(),
+        step: String::new(),
+        done: 1,
+        total: 1,
+        note: None,
+        notes: Vec::new(),
+        error: None,
+        section: Some("## Heap proofs\n\nSift down.".into()),
+    };
+    let shown = serde_json::to_value(&job).unwrap();
+    assert_eq!(shown["section_chars"], 26);
+    assert!(shown.get("section").is_none());
+    assert!(!shown.to_string().contains("Sift down"));
+    let none = serde_json::to_value(ImportJob {
+        section: None,
+        ..job
+    })
+    .unwrap();
+    assert!(none.get("section_chars").is_none());
+}
+
+#[test]
+fn a_photo_over_twenty_megabytes_is_kept_beside_the_note() {
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.importer = Some(Arc::new(
+        |_: Vec<UploadFile>, _: &str, _: &mut dyn FnMut(&str, usize, usize)| {
+            let (figures, scratch, _) = kept(&[("big.png", true)]);
+            let mut big = PICTURE.to_vec();
+            big.resize(21 * 1024 * 1024, 5);
+            std::fs::write(&figures[0].path, big).unwrap();
+            Ok(Made {
+                title: "Big photo".to_string(),
+                body: "A photo.".to_string(),
+                figures,
+                scratch: Some(scratch),
+            })
+        },
+    ));
+    let body = making(&state, &[("big.png", "image/png", b"x")]);
+    let response = run(start_import(State(state.clone()), Json(body)));
+    assert_eq!(response.status(), StatusCode::ACCEPTED);
+    let bytes = run(axum::body::to_bytes(response.into_body(), usize::MAX)).unwrap();
+    let id = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let job = wait_for(&state, &id);
+    assert_eq!(job.state, "done", "{job:?}");
+    let note = state.fresh().find_note(&job.note.unwrap()).unwrap().clone();
+    let link = note
+        .body
+        .split("](")
+        .nth(1)
+        .and_then(|rest| rest.split(')').next())
+        .unwrap()
+        .to_string();
+    let saved = state.fresh().notes_dir.join(&link);
+    assert_eq!(std::fs::metadata(saved).unwrap().len(), 21 * 1024 * 1024);
 }

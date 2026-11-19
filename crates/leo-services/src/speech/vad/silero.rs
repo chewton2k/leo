@@ -1,5 +1,4 @@
 use anyhow::{anyhow, bail, Context, Result};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock, PoisonError};
 
@@ -21,10 +20,7 @@ pub fn dir() -> PathBuf {
 
 fn store(folder: &Path, path: &Path) -> Result<()> {
     std::fs::create_dir_all(folder)?;
-    let mut file = tempfile::NamedTempFile::new_in(folder)?;
-    file.write_all(MODEL)?;
-    file.persist(path).map_err(|e| e.error)?;
-    Ok(())
+    leo_core::paths::write_atomic(path, MODEL)
 }
 
 fn model_file() -> Result<PathBuf> {

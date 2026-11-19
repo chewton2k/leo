@@ -4,10 +4,12 @@ use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime, TimeZone, Utc};
 
+use leo_core::store::Trashed;
+
 use crate::routes::notes::{save, CreateDirBody, MoveBody, MoveDirBody};
 use crate::tasks::{self, Listed};
 use crate::tools::{self, Access, Call, Done, Proposal};
-use crate::{store_now, AppState};
+use crate::{read_now, store_now, AppState};
 
 const MOST_DAYS: i64 = 42;
 const MOST_LINES: usize = 300;
@@ -91,13 +93,13 @@ fn kind_of(text: &str) -> Result<Option<String>, String> {
     }
 }
 
-pub(crate) fn listed_now(state: &AppState) -> Result<Vec<Listed>, String> {
+pub(crate) fn listed_now(state: &AppState) -> Result<std::sync::Arc<tasks::ListedIndex>, String> {
     let metas = tasks::metas(&state.chats);
-    let stored = tasks::load_all(&state.chats);
-    store_now(state, |store| {
-        let mut all = tasks::note_tasks(store, &metas);
-        all.extend(stored.iter().map(|t| tasks::standalone(t, Some(store))));
-        Ok(tasks::sorted(all))
+    let stored = tasks::snapshot(&state.chats);
+    read_now(state, |store| {
+        Ok(state
+            .listed
+            .index(&state.generation, store, &metas, &stored))
     })
     .map_err(|_| "leo could not read the tasks".to_string())
 }
@@ -131,30 +133,7 @@ pub(crate) fn run(state: &AppState, desk: &mut tools::Desk, access: Access, call
         "list_boards" | "open_board" => return crate::board_tools::read(&state.chats, call),
         _ => {}
     }
-    let step = match call.name.as_str() {
-        "add_task" => "Tried to add a task",
-        "update_task" => "Tried to change a task",
-        "delete_task" => "Tried to delete a task",
-        "move_note" => "Tried to move a note",
-        "make_folder" => "Tried to make a folder",
-        "move_folder" => "Tried to move a folder",
-        "rename_note" => "Tried to rename a note",
-        "rename_folder" => "Tried to rename a folder",
-        "pin_note" => "Tried to pin a note",
-        "add_margin_note" => "Tried to add a margin note",
-        "restore_note" => "Tried to bring a note back",
-        "delete_folder" => "Tried to delete a folder",
-        "restore_folder" => "Tried to bring a folder back",
-        "add_card" => "Tried to add a card",
-        "update_card" => "Tried to change a card",
-        "move_card" => "Tried to move a card",
-        "delete_card" => "Tried to delete a card",
-        "add_board" => "Tried to make a board",
-        "change_board" => "Tried to change a board",
-        "delete_board" => "Tried to delete a board",
-        "delete_note" => "Tried to delete a note",
-        _ => "Tried to change something",
-    };
+    let step = tools::step_of(&call.name);
     if !access.changes() {
         return fail(
             step,
@@ -245,23 +224,19 @@ pub(crate) fn summary_of(p: &Proposal) -> String {
         | Proposal::ChangeBoard { summary, .. }
         | Proposal::DeleteBoard { summary, .. }
         | Proposal::RestoreBoard { summary, .. }
+        | Proposal::UndeleteBoard { summary, .. }
+        | Proposal::UndoBoardChange { summary, .. }
         | Proposal::RestoreFolder { summary, .. } => summary.clone(),
         Proposal::Edit { title, .. } => format!("Change “{title}”"),
         Proposal::Create { title, .. } => format!("Make the note “{title}”"),
     }
 }
 
-const MOST_TITLE_CHARS: usize = 300;
 const MOST_CHATS_SHOWN: usize = 5;
 const MOST_CHAT_LINES: usize = 8;
 
 fn rename_note(state: &AppState, desk: &tools::Desk, call: &Call) -> Result<Proposal, String> {
-    let title: String = call
-        .text("title")
-        .trim()
-        .chars()
-        .take(MOST_TITLE_CHARS)
-        .collect();
+    let title = call.text("title").trim().to_string();
     if title.is_empty() {
         return Err("give the new title".into());
     }
@@ -304,11 +279,8 @@ fn rename_folder(state: &AppState, call: &Call) -> Result<Proposal, String> {
 fn add_margin_note(state: &AppState, desk: &tools::Desk, call: &Call) -> Result<Proposal, String> {
     let quote = call.text("quote");
     let text = call.text("text").trim().to_string();
-    if text.is_empty() || text.chars().count() > crate::margin::MOST_TEXT {
-        return Err(format!(
-            "a margin note holds at most {} characters",
-            crate::margin::MOST_TEXT
-        ));
+    if text.is_empty() {
+        return Err("give the text to leave in the margin".into());
     }
     let wanted = call.text("note");
     let quoted = quote.clone();
@@ -376,12 +348,20 @@ fn restore_note(state: &AppState, call: &Call) -> Result<Proposal, String> {
     let wanted = call.text("note").trim().to_string();
     let trashed = store_now(state, |store| Ok(store.trashed()))
         .map_err(|_| "leo could not read the trash".to_string())?;
+    note_to_restore(&trashed, &wanted)
+}
+
+fn note_to_restore(trashed: &[Trashed], wanted: &str) -> Result<Proposal, String> {
     let lower = wanted.to_lowercase();
     let found: Vec<_> = trashed
         .iter()
         .filter(|t| t.id == wanted || t.title.to_lowercase() == lower)
         .collect();
     match found.as_slice() {
+        [one] if !one.readable => Err(format!(
+            "“{}” is in the trash, but its file cannot be read, so it cannot be brought back",
+            one.title
+        )),
         [one] => Ok(Proposal::RestoreNote {
             summary: format!("Bring “{}” back from the trash", one.title),
             note: one.id.clone(),
@@ -431,31 +411,71 @@ fn restore_folder(state: &AppState, call: &Call) -> Result<Proposal, String> {
         Ok(store.trashed())
     })
     .map_err(|_| format!("\"{path}\" is not a folder path"))?;
+    folder_to_restore(&trashed, &path)
+}
+
+fn folder_to_restore(trashed: &[Trashed], path: &str) -> Result<Proposal, String> {
     let inside = format!("{path}/");
     let mut ids = Vec::new();
-    let mut dirs = vec![path.clone()];
-    for t in &trashed {
+    let mut dirs = vec![path.to_string()];
+    let mut unreadable = 0;
+    for t in trashed {
         if t.directory == path || t.directory.starts_with(&inside) {
+            if !t.readable {
+                unreadable += 1;
+                continue;
+            }
             ids.push(t.id.clone());
             if !dirs.contains(&t.directory) {
                 dirs.push(t.directory.clone());
             }
         }
     }
+    let files = |n: usize| if n == 1 { "file" } else { "files" };
     if ids.is_empty() {
-        return Err(format!(
-            "no trashed note came from the folder \"{path}\"; use list_trash to see where trashed notes came from"
-        ));
+        return Err(if unreadable == 0 {
+            format!(
+                "no trashed note came from the folder \"{path}\"; use list_trash to see where trashed notes came from"
+            )
+        } else {
+            format!(
+                "the {unreadable} trashed {} from the folder \"{path}\" cannot be read, so none can be brought back",
+                files(unreadable)
+            )
+        });
     }
+    let left = if unreadable == 0 {
+        String::new()
+    } else {
+        format!(
+            "; {unreadable} {} in it cannot be read and stay in the trash",
+            files(unreadable)
+        )
+    };
     Ok(Proposal::RestoreFolder {
         summary: format!(
-            "Bring the folder {path} back with its {} {}",
+            "Bring the folder {path} back with its {} {}{left}",
             ids.len(),
             if ids.len() == 1 { "note" } else { "notes" }
         ),
         ids,
         dirs,
     })
+}
+
+fn trash_line(t: &Trashed) -> String {
+    let unreadable = if t.readable {
+        ""
+    } else {
+        " · the file cannot be read, so it cannot be brought back"
+    };
+    format!(
+        "- [{}] “{}” from {} · deleted {}{unreadable}",
+        t.id,
+        t.title,
+        folder_label(&t.directory),
+        t.deleted_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
+    )
 }
 
 fn trash_list(state: &AppState) -> Done {
@@ -466,19 +486,7 @@ fn trash_list(state: &AppState) -> Done {
     };
     let mut trashed = trashed;
     trashed.sort_by_key(|t| std::cmp::Reverse(t.deleted_at));
-    let lines: Vec<String> = trashed
-        .iter()
-        .take(100)
-        .map(|t| {
-            format!(
-                "- [{}] “{}” from {} · deleted {}",
-                t.id,
-                t.title,
-                folder_label(&t.directory),
-                t.deleted_at.with_timezone(&Local).format("%Y-%m-%d %H:%M")
-            )
-        })
-        .collect();
+    let lines: Vec<String> = trashed.iter().take(100).map(trash_line).collect();
     Done {
         step: step.into(),
         result: if lines.is_empty() {
@@ -575,12 +583,7 @@ fn repeat_of(text: &str) -> Result<Vec<u8>, String> {
 }
 
 fn add_task(call: &Call) -> Result<Proposal, String> {
-    let title: String = call
-        .text("title")
-        .trim()
-        .chars()
-        .take(tasks::MOST_TITLE)
-        .collect();
+    let title = call.text("title").trim().to_string();
     if title.is_empty() {
         return Err("give the task a title".into());
     }
@@ -614,7 +617,7 @@ fn add_task(call: &Call) -> Result<Proposal, String> {
             }
         ),
         title,
-        description: tasks::description_of(&call.text("description"))?,
+        description: call.text("description").trim().to_string(),
         date: date.map(|d| d.to_string()),
         time: time.map(|t| t.format("%H:%M").to_string()),
         task_kind: kind,
@@ -629,8 +632,7 @@ fn update_task(state: &AppState, call: &Call) -> Result<Proposal, String> {
         .args
         .get("description")
         .and_then(|v| v.as_str())
-        .map(tasks::description_of)
-        .transpose()?;
+        .map(|text| text.trim().to_string());
     let done = match call.text("done").trim().to_lowercase().as_str() {
         "" => None,
         "yes" | "true" | "done" => Some(true),
@@ -822,10 +824,7 @@ fn schedule(state: &AppState, call: &Call) -> Done {
         Ok(all) => all,
         Err(why) => return fail(step, why),
     };
-    let notes = match store_now(state, |store| Ok(store.notes_dir.clone())) {
-        Ok(n) => n,
-        Err(_) => return fail(step, "leo could not read the notes"),
-    };
+    let notes = state.notes_dir.clone();
     let events = state.calendar.events(&notes, start, end);
     let task_line = |t: &Listed| {
         let from = t
@@ -908,7 +907,7 @@ fn schedule(state: &AppState, call: &Call) -> Done {
                 format!("- {when} {}{place} (event in {calendar})", e.title),
             ));
         }
-        for t in &all {
+        for t in all.iter() {
             let on = if t.repeat.is_empty() {
                 (t.date == Some(day)).then_some(day)
             } else {
@@ -951,7 +950,13 @@ fn schedule(state: &AppState, call: &Call) -> Done {
     if lines.len() == 1 {
         lines.push("Nothing scheduled and no tasks.".into());
     }
+    let unshown = lines.len().saturating_sub(MOST_LINES);
     lines.truncate(MOST_LINES);
+    if unshown > 0 {
+        lines.push(format!(
+            "{unshown} more lines are not shown; ask for fewer days, or name a task."
+        ));
+    }
     Done {
         step: step.into(),
         result: lines.join("\n"),
@@ -960,20 +965,37 @@ fn schedule(state: &AppState, call: &Call) -> Done {
     }
 }
 
-async fn reply_of(response: Response) -> Result<serde_json::Value, String> {
-    let ok = response.status().is_success();
+pub(crate) struct Refused(StatusCode, String);
+
+impl From<String> for Refused {
+    fn from(why: String) -> Self {
+        Refused(StatusCode::CONFLICT, why)
+    }
+}
+
+impl From<&str> for Refused {
+    fn from(why: &str) -> Self {
+        why.to_string().into()
+    }
+}
+
+async fn reply_of(response: Response) -> Result<serde_json::Value, Refused> {
+    let status = response.status();
     let bytes = axum::body::to_bytes(response.into_body(), 2_000_000)
         .await
-        .map_err(|_| "leo could not read its own answer".to_string())?;
+        .map_err(|_| "leo could not read its own answer")?;
     let value: serde_json::Value =
         serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null);
-    if ok {
+    if status.is_success() {
         Ok(value)
     } else {
-        Err(value["error"]
-            .as_str()
-            .unwrap_or("leo could not do that")
-            .to_string())
+        Err(Refused(
+            status,
+            value["error"]
+                .as_str()
+                .unwrap_or(crate::reply::sentence(status))
+                .to_string(),
+        ))
     }
 }
 
@@ -981,19 +1003,20 @@ fn parse<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T, 
     serde_json::from_value(value).map_err(|_| "that change could not be read".to_string())
 }
 
-fn status_error(code: StatusCode) -> String {
-    match code {
-        StatusCode::NOT_FOUND => "it is not there any more".into(),
-        StatusCode::CONFLICT => "something with that name is already there".into(),
-        StatusCode::BAD_REQUEST => "that name cannot be used".into(),
-        _ => "leo could not do that".into(),
-    }
+fn status_error(code: StatusCode) -> Refused {
+    let why = match code {
+        StatusCode::NOT_FOUND => "it is not there any more",
+        StatusCode::CONFLICT => "something with that name is already there",
+        StatusCode::BAD_REQUEST => "that name cannot be used",
+        _ => "leo could not do that",
+    };
+    Refused(code, why.into())
 }
 
 pub(crate) async fn act(
     state: &AppState,
     p: &Proposal,
-) -> Result<(serde_json::Value, Proposal), String> {
+) -> Result<(serde_json::Value, Proposal), Refused> {
     use crate::boards;
     use crate::routes::{boards as board_routes, notes, tasks as task_routes, trash};
     match p {
@@ -1231,7 +1254,7 @@ pub(crate) async fn act(
                 .await
                 .map_err(|code| {
                     if code == StatusCode::CONFLICT {
-                        "the folder has notes in it now, so leo left it".to_string()
+                        "the folder has notes in it now, so leo left it".into()
                     } else {
                         status_error(code)
                     }
@@ -1388,10 +1411,10 @@ pub(crate) async fn act(
                 Some(false) => {
                     return Err(
                         "you have replied to that margin note, so it stays; dismiss it instead"
-                            .to_string(),
+                            .into(),
                     )
                 }
-                None => return Err("that margin note is not there any more".to_string()),
+                None => return Err("that margin note is not there any more".into()),
             }
             Ok((
                 serde_json::Value::Null,
@@ -1545,11 +1568,11 @@ pub(crate) async fn act(
                 .await,
             )
             .await
-            .map_err(|why| {
+            .map_err(|Refused(code, why)| {
                 if why.contains("column") {
-                    "the card's column is not on its board any more".to_string()
+                    Refused(code, "the card's column is not on its board any more".into())
                 } else {
-                    why
+                    Refused(code, why)
                 }
             })?;
             let back: boards::Card = parse(made)?;
@@ -1687,8 +1710,9 @@ pub(crate) async fn act(
             move_to,
             ..
         } => {
-            let (before, cards) = crate::board_tools::snapshot(&state.chats, board)
-                .ok_or("that board is not there any more")?;
+            let before =
+                boards::board(&state.chats, board).ok_or("that board is not there any more")?;
+            let places = card_places(&state.chats, &before);
             let mut change = serde_json::Map::new();
             if let Some(name) = name {
                 change.insert("name".into(), serde_json::json!(name));
@@ -1710,11 +1734,24 @@ pub(crate) async fn act(
             .await?;
             Ok((
                 serde_json::json!({ "board": board }),
-                Proposal::RestoreBoard {
-                    summary: format!("Put the board “{}” back as it was", before.name),
-                    board: before,
-                    cards,
-                },
+                remembered(&state.chats, &before, places)?,
+            ))
+        }
+        Proposal::UndoBoardChange { board, undo, .. } => {
+            let before =
+                boards::board(&state.chats, board).ok_or("that board is not there any more")?;
+            let places = card_places(&state.chats, &before);
+            reply_of(
+                board_routes::undo_board_change(
+                    State(state.clone()),
+                    Path((board.clone(), undo.clone())),
+                )
+                .await,
+            )
+            .await?;
+            Ok((
+                serde_json::json!({ "board": board }),
+                remembered(&state.chats, &before, places)?,
             ))
         }
         Proposal::DeleteBoard { board, .. } => {
@@ -1723,13 +1760,25 @@ pub(crate) async fn act(
             )
             .await?;
             let board: boards::Board = parse(gone["board"].clone())?;
-            let cards: Vec<boards::Card> = parse(gone["cards"].clone())?;
             Ok((
                 serde_json::json!({ "board": board.id }),
-                Proposal::RestoreBoard {
+                Proposal::UndeleteBoard {
                     summary: format!("Bring the board “{}” back", board.name),
-                    board,
-                    cards,
+                    board: board.id,
+                },
+            ))
+        }
+        Proposal::UndeleteBoard { board, .. } => {
+            let back = reply_of(
+                board_routes::undelete_board(State(state.clone()), Path(board.clone())).await,
+            )
+            .await?;
+            let board: boards::Board = parse(back["board"].clone())?;
+            Ok((
+                serde_json::json!({ "board": board.id }),
+                Proposal::DeleteBoard {
+                    summary: format!("Delete the board “{}”", board.name),
+                    board: board.id,
                 },
             ))
         }
@@ -1763,21 +1812,59 @@ pub(crate) async fn act(
     }
 }
 
+fn card_places(
+    chats: &std::path::Path,
+    board: &crate::boards::Board,
+) -> Vec<(String, String, f64)> {
+    crate::boards::cards_of(chats, board)
+        .into_iter()
+        .map(|c| (c.id, c.column, c.rank))
+        .collect()
+}
+
+fn remembered(
+    chats: &std::path::Path,
+    before: &crate::boards::Board,
+    places: Vec<(String, String, f64)>,
+) -> Result<Proposal, Refused> {
+    let after: std::collections::HashMap<String, (String, f64)> = card_places(chats, before)
+        .into_iter()
+        .map(|(id, column, rank)| (id, (column, rank)))
+        .collect();
+    let moved: Vec<(String, String, f64)> = places
+        .into_iter()
+        .filter(|(id, column, rank)| {
+            after
+                .get(id)
+                .is_some_and(|(c, r)| c != column || r.to_bits() != rank.to_bits())
+        })
+        .collect();
+    let undo = crate::boards::remember_change(chats, before, &moved, chrono::Utc::now())
+        .map_err(|_| "leo could not keep the Undo for that change")?;
+    Ok(Proposal::UndoBoardChange {
+        summary: format!("Put the board “{}” back as it was", before.name),
+        board: before.id.clone(),
+        undo,
+    })
+}
+
 pub(crate) async fn act_route(State(state): State<AppState>, Json(p): Json<Proposal>) -> Response {
-    let applied = tokio::task::spawn_blocking(move || act_now(&state, &p))
+    let applied = tokio::task::spawn_blocking(move || applied(&state, &p))
         .await
         .unwrap_or_else(|_| Err("leo could not do that".into()));
     match applied {
         Ok(shown) => Json(shown).into_response(),
-        Err(why) => (
-            StatusCode::CONFLICT,
-            Json(serde_json::json!({ "error": why })),
-        )
-            .into_response(),
+        Err(Refused(code, why)) => {
+            (code, Json(serde_json::json!({ "error": why }))).into_response()
+        }
     }
 }
 
 pub(crate) fn act_now(state: &AppState, p: &Proposal) -> Result<serde_json::Value, String> {
+    applied(state, p).map_err(|Refused(_, why)| why)
+}
+
+fn applied(state: &AppState, p: &Proposal) -> Result<serde_json::Value, Refused> {
     let handle = tokio::runtime::Handle::current();
     let (extra, undo) = handle.block_on(act(state, p))?;
     let mut shown = serde_json::json!(p);
@@ -1787,4 +1874,58 @@ pub(crate) fn act_now(state: &AppState, p: &Proposal) -> Result<serde_json::Valu
     shown["state"] = serde_json::json!("applied");
     shown["undo"] = serde_json::json!(undo);
     Ok(shown)
+}
+
+#[cfg(test)]
+mod trash_tests {
+    use super::*;
+
+    fn row(id: &str, title: &str, directory: &str, readable: bool) -> Trashed {
+        Trashed {
+            id: id.into(),
+            title: title.into(),
+            directory: directory.into(),
+            deleted_at: Utc::now(),
+            readable,
+            revision: None,
+        }
+    }
+
+    #[test]
+    fn the_trash_list_says_a_row_whose_file_cannot_be_read() {
+        let line = trash_line(&row("t1", "Broken", "cs130", false));
+        assert!(line.contains("the file cannot be read"), "{line}");
+        let line = trash_line(&row("t2", "Fine", "cs130", true));
+        assert!(!line.contains("cannot be read"), "{line}");
+    }
+
+    #[test]
+    fn restoring_a_note_whose_file_cannot_be_read_says_so() {
+        let trashed = [row("t1", "Broken", "cs130", false)];
+        let said = note_to_restore(&trashed, "Broken").unwrap_err();
+        assert!(said.contains("file cannot be read"), "{said}");
+        let trashed = [row("t2", "Fine", "cs130", true)];
+        assert!(note_to_restore(&trashed, "Fine").is_ok());
+    }
+
+    #[test]
+    fn restoring_a_folder_says_how_many_unreadable_files_stay_behind() {
+        let trashed = [
+            row("a", "One", "cs130", true),
+            row("b", "Two", "cs130/labs", false),
+            row("c", "Three", "cs130", false),
+        ];
+        let Ok(Proposal::RestoreFolder { summary, ids, .. }) = folder_to_restore(&trashed, "cs130")
+        else {
+            panic!("expected a restore");
+        };
+        assert_eq!(ids, ["a"]);
+        assert!(
+            summary.contains("2 files in it cannot be read"),
+            "{summary}"
+        );
+        let only = [row("b", "Two", "cs130", false)];
+        let said = folder_to_restore(&only, "cs130").unwrap_err();
+        assert!(said.contains("cannot be read"), "{said}");
+    }
 }

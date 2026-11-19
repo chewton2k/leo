@@ -67,6 +67,14 @@ pub fn validate_bundle(bundle: &Path, identifier: &str) -> Result<()> {
     Ok(())
 }
 
+pub fn app_dir() -> Result<PathBuf> {
+    app_dir_in(std::env::var_os("LOCALAPPDATA"))
+}
+
+fn app_dir_in(local: Option<std::ffi::OsString>) -> Result<PathBuf> {
+    Ok(PathBuf::from(local.context("The Windows app folder could not be found.")?).join("Leo"))
+}
+
 pub fn installed_bundle(exe: &Path) -> Result<Option<PathBuf>> {
     let resolved = exe.canonicalize().unwrap_or_else(|_| exe.to_path_buf());
     if let Some(bundle) = bundle_for(&resolved) {
@@ -78,10 +86,7 @@ pub fn installed_bundle(exe: &Path) -> Result<Option<PathBuf>> {
     #[cfg(target_os = "macos")]
     let path = PathBuf::from("/Applications/Leo.app");
     #[cfg(windows)]
-    let path = PathBuf::from(
-        std::env::var_os("LOCALAPPDATA").context("The Windows app folder could not be found.")?,
-    )
-    .join("Leo");
+    let path = app_dir()?;
     #[cfg(not(any(target_os = "macos", windows)))]
     return Ok(None);
     #[cfg(any(target_os = "macos", windows))]
@@ -96,41 +101,16 @@ fn capture(program: &str, args: &[&std::ffi::OsStr]) -> Result<std::process::Out
 }
 
 #[cfg(any(target_os = "macos", windows))]
-fn capture_command(mut command: std::process::Command) -> Result<std::process::Output> {
-    use std::{
-        io::Read,
-        process::Stdio,
-        time::{Duration, Instant},
-    };
-    let mut child = command
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let deadline = Instant::now() + Duration::from_secs(3);
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!("A system check took too long. Reopen Leo and try again.");
-        }
-        std::thread::sleep(Duration::from_millis(10));
-    };
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    if let Some(pipe) = child.stdout.take() {
-        pipe.take(16_384).read_to_end(&mut stdout)?;
-    }
-    if let Some(pipe) = child.stderr.take() {
-        pipe.take(16_384).read_to_end(&mut stderr)?;
-    }
+fn capture_command(command: std::process::Command) -> Result<std::process::Output> {
+    let out = leo_core::children::run_bounded(command, std::time::Duration::from_secs(3), 16_384)?;
+    ensure!(
+        !out.timed_out,
+        "A system check took too long. Reopen Leo and try again."
+    );
     Ok(std::process::Output {
-        status,
-        stdout,
-        stderr,
+        status: out.status,
+        stdout: out.stdout,
+        stderr: out.stderr,
     })
 }
 
@@ -161,11 +141,7 @@ pub fn verify_installed_bundle(bundle: &Path) -> Result<()> {
     }
     #[cfg(windows)]
     {
-        let expected = PathBuf::from(
-            std::env::var_os("LOCALAPPDATA")
-                .context("The Windows app folder could not be found.")?,
-        )
-        .join("Leo");
+        let expected = app_dir()?;
         ensure!(bundle == expected, "This app is outside the Leo installation folder. Use its Windows uninstaller; your notes were kept.");
         validate_bundle(bundle, super::open_app::BUNDLE_ID)?;
         ensure!(
@@ -262,24 +238,49 @@ pub fn remove_login_item(home: &Path, bundle: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn remove_bundle(bundle: &Path) -> Result<()> {
+pub fn aside(bundle: &Path) -> PathBuf {
+    bundle.with_file_name(".Leo.app.removing")
+}
+
+pub fn remove_bundle(bundle: &Path) -> Result<Option<PathBuf>> {
     #[cfg(not(windows))]
-    std::fs::remove_dir_all(bundle)
-        .context("The app could not be removed. Check its folder permissions and try again.")?;
+    {
+        let aside = aside(bundle);
+        if std::fs::symlink_metadata(&aside).is_ok_and(|meta| meta.is_dir()) {
+            std::fs::remove_dir_all(&aside).with_context(|| {
+                format!(
+                    "An earlier removal left {}; delete it yourself.",
+                    aside.display()
+                )
+            })?;
+        }
+        std::fs::rename(bundle, &aside)
+            .context("The app could not be removed. Check its folder permissions and try again.")?;
+        std::fs::remove_dir_all(&aside).with_context(|| {
+            format!(
+                "The app was only partly removed. Delete {} yourself.",
+                aside.display()
+            )
+        })?;
+        Ok(None)
+    }
     #[cfg(windows)]
     {
-        let script = "$ErrorActionPreference='Stop'; Wait-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -Timeout 30 -ErrorAction SilentlyContinue; if(Get-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -ErrorAction SilentlyContinue){exit 1}; $uninstaller=Join-Path $env:LEO_UNINSTALL_APP 'uninstall.exe'; $p=Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru; if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){exit 1}; $bin=Join-Path $env:LEO_UNINSTALL_APP 'bin'; if((Test-Path -LiteralPath $bin -PathType Container) -and -not (Get-ChildItem -LiteralPath $bin -Force)){Remove-Item -LiteralPath $bin}; if((Test-Path -LiteralPath $env:LEO_UNINSTALL_APP -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LEO_UNINSTALL_APP -Force)){Remove-Item -LiteralPath $env:LEO_UNINSTALL_APP}";
+        let script = "$ErrorActionPreference='Stop'; Wait-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -Timeout 30 -ErrorAction SilentlyContinue; if(Get-Process -Id ([int]$env:LEO_UNINSTALL_PARENT_PID) -ErrorAction SilentlyContinue){throw 'The leo command did not exit.'}; $uninstaller=Join-Path $env:LEO_UNINSTALL_APP 'uninstall.exe'; $p=Start-Process -FilePath $uninstaller -ArgumentList '/S' -PassThru; if(-not $p.WaitForExit(120000) -or $p.ExitCode -ne 0){throw 'The Leo uninstaller did not finish.'}; $bin=Join-Path $env:LEO_UNINSTALL_APP 'bin'; if((Test-Path -LiteralPath $bin -PathType Container) -and -not (Get-ChildItem -LiteralPath $bin -Force)){Remove-Item -LiteralPath $bin}; if((Test-Path -LiteralPath $env:LEO_UNINSTALL_APP -PathType Container) -and -not (Get-ChildItem -LiteralPath $env:LEO_UNINSTALL_APP -Force)){Remove-Item -LiteralPath $env:LEO_UNINSTALL_APP}";
+        let log = std::env::temp_dir().join("leo-uninstall.log");
+        let file = std::fs::File::create(&log)
+            .context("The uninstall log could not be written. Remove Leo from Installed apps.")?;
         leo_core::children::quiet_command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", script])
             .env("LEO_UNINSTALL_PARENT_PID", std::process::id().to_string())
             .env("LEO_UNINSTALL_APP", bundle)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(file.try_clone()?))
+            .stderr(std::process::Stdio::from(file))
             .spawn()
             .context("The Windows uninstaller could not start. Remove Leo from Installed apps.")?;
+        Ok(Some(log))
     }
-    Ok(())
 }
 
 pub fn is_cli_link(link: &Path, bundle: &Path) -> bool {
@@ -311,6 +312,25 @@ pub fn is_cli_link(link: &Path, bundle: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_system_check_with_a_lot_of_output_is_not_called_too_slow() {
+        let mut command = leo_core::children::quiet_command("sh");
+        command.args(["-c", "head -c 200000 /dev/zero"]);
+        let started = std::time::Instant::now();
+        let output = capture_command(command).unwrap();
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert!(output.status.success());
+        assert!(output.stdout.len() <= 16_384);
+    }
+    #[test]
+    fn an_unset_local_app_data_is_an_error_not_a_relative_folder() {
+        assert!(app_dir_in(None).is_err());
+        assert_eq!(
+            app_dir_in(Some("data".into())).unwrap(),
+            PathBuf::from("data").join("Leo")
+        );
+    }
     #[test]
     fn terminal_link_removal_keeps_unrelated_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -354,7 +374,7 @@ mod tests {
         assert!(!file.exists());
     }
     #[test]
-    fn bundle_updates_use_the_saved_terminal_folder_and_never_the_bundle() {
+    fn uninstall_uses_the_saved_terminal_folder_and_never_the_bundle() {
         let dir = tempfile::tempdir().unwrap();
         let exe = dir.path().join("Leo.app/Contents/MacOS/leo");
         let record = dir.path().join("app-cli-dir");

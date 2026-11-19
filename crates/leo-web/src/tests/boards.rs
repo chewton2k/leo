@@ -1,7 +1,7 @@
 use super::*;
 use crate::routes::boards::{
     change_board, change_card, create_board, create_card, delete_board, delete_card, get_board,
-    list_boards, move_card, restore_board,
+    get_card, list_boards, move_card, restore_board, undelete_board, undelete_card,
 };
 
 fn new_board(state: &AppState, name: &str) -> serde_json::Value {
@@ -228,15 +228,6 @@ fn cards_are_edited_validated_and_deleted_with_undo() {
         400
     );
     assert_eq!(
-        add(
-            &state,
-            id,
-            serde_json::json!({ "title": "x", "description": "y".repeat(8_001) })
-        )
-        .status(),
-        400
-    );
-    assert_eq!(
         add(&state, "bmissing0000", serde_json::json!({ "title": "x" })).status(),
         404
     );
@@ -296,8 +287,10 @@ fn a_deleted_board_takes_its_cards_and_undo_brings_both_back() {
         &id,
         serde_json::json!({ "title": "Book train", "column": column(&board, 1) }),
     );
+    let card = shown(&state, &id)["cards"][0].clone();
     let gone = json_of(run(delete_board(State(state.clone()), Path(id.clone()))));
-    assert_eq!(gone["cards"].as_array().unwrap().len(), 1);
+    assert_eq!(gone["undo"]["board"], id.as_str());
+    assert!(gone.get("cards").is_none());
     assert_eq!(
         run(get_board(State(state.clone()), Path(id.clone()))).status(),
         404
@@ -307,9 +300,17 @@ fn a_deleted_board_takes_its_cards_and_undo_brings_both_back() {
         .unwrap()
         .is_empty());
 
+    let back = json_of(run(undelete_board(State(state.clone()), Path(id.clone()))));
+    assert_eq!(back["board"]["name"], "Trip");
+    assert_eq!(titles_in(&state, &id, &column(&board, 1)), ["Book train"]);
+
+    run(delete_board(State(state.clone()), Path(id.clone())));
     let back = json_of(run(restore_board(
         State(state.clone()),
-        Json(serde_json::from_value(gone).unwrap()),
+        Json(
+            serde_json::from_value(serde_json::json!({ "board": gone["board"], "cards": [card] }))
+                .unwrap(),
+        ),
     )));
     assert_eq!(back["board"]["name"], "Trip");
     assert_eq!(titles_in(&state, &id, &column(&board, 1)), ["Book train"]);
@@ -358,4 +359,351 @@ fn a_repeated_request_id_creates_one_card_and_a_move_ignores_it() {
     moved(&state, card, serde_json::json!({"column": todo}));
     json_of(moved(&state, card, to_doing));
     assert_eq!(titles_in(&state, &id, &doing), ["Essay"]);
+}
+
+#[test]
+fn an_expired_board_cannot_be_undone() {
+    let (state, _d, _) = state_with(&[]);
+    let board = new_board(&state, "Old");
+    let id = board["id"].as_str().unwrap().to_string();
+    run(delete_board(State(state.clone()), Path(id.clone())));
+    crate::boards::forget_deleted(
+        &state.chats,
+        Some(30),
+        chrono::Utc::now() + chrono::Duration::days(31),
+    );
+    let response = run(undelete_board(State(state.clone()), Path(id)));
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    assert_eq!(
+        json_of(response)["error"],
+        "That board is no longer in leo's trash."
+    );
+}
+
+#[test]
+fn a_very_large_board_deletes_and_comes_back() {
+    let (state, _d, _) = state_with(&[]);
+    let board = super::felix::big_board(&state, 3);
+    let gone = run(delete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(gone.status(), StatusCode::OK);
+    let gone = json_of(gone);
+    assert!(gone.to_string().len() < 2048, "{}", gone.to_string().len());
+    let back = run(undelete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(back.status(), StatusCode::OK);
+    let cards = shown(&state, &board.id)["cards"].as_array().unwrap().len();
+    assert_eq!(cards, 300);
+}
+
+fn written(state: &AppState, board: &crate::boards::Board, count: usize, text: usize) {
+    let now = chrono::Utc::now();
+    for number in 0..count {
+        let card = crate::boards::Card {
+            id: format!("cface{number:05}"),
+            board: board.id.clone(),
+            column: board.columns[0].id.clone(),
+            rank: (number + 1) as f64 * 1024.0,
+            title: format!("Card {number}"),
+            subheading: String::new(),
+            description: format!("{number} ").repeat(text / 2),
+            priority: String::new(),
+            created_at: now,
+            updated_at: now,
+            deleted: false,
+        };
+        crate::boards::put_card(&state.chats, &card).unwrap();
+    }
+}
+
+fn reads(work: impl FnOnce()) -> usize {
+    crate::jsonline::READS.with(|reads| reads.set(0));
+    work();
+    crate::jsonline::READS.with(|reads| reads.get())
+}
+
+#[test]
+fn a_move_reads_one_card_file() {
+    let (state, _d, _) = state_with(&[]);
+    let board = crate::boards::new_board("Many", chrono::Utc::now());
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    written(&state, &board, 200, 40);
+    let _ = crate::boards::places_of(&state.chats, &board);
+    let read = reads(|| {
+        let card = crate::boards::card(&state.chats, "cface00100").unwrap();
+        crate::boards::settle(
+            &state.chats,
+            &board,
+            card,
+            crate::boards::Spot::After("cface00150"),
+            chrono::Utc::now(),
+        )
+        .unwrap();
+    });
+    assert_eq!(read, 1);
+    let order: Vec<String> = crate::boards::places_of(&state.chats, &board)
+        .into_iter()
+        .map(|c| c.id)
+        .collect();
+    let at = order.iter().position(|id| id == "cface00100").unwrap();
+    assert_eq!(order[at - 1], "cface00150");
+}
+
+#[test]
+fn a_board_answer_carries_card_faces_not_descriptions() {
+    let (state, _d, _) = state_with(&[]);
+    let board = crate::boards::new_board("Faces", chrono::Utc::now());
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    written(&state, &board, 50, 8_000);
+    let shown = shown(&state, &board.id);
+    let cards = shown["cards"].as_array().unwrap();
+    assert_eq!(cards.len(), 50);
+    for card in cards {
+        assert_eq!(card["description"].as_str().unwrap().chars().count(), 240);
+        assert_eq!(card["description_more"], true);
+    }
+    let read = reads(|| {
+        let _ = crate::boards::places_of(&state.chats, &board);
+    });
+    assert_eq!(read, 0);
+}
+
+#[test]
+fn long_titles_names_and_descriptions_are_kept_whole() {
+    let (state, _d, _) = state_with(&[]);
+    let name = "n".repeat(1_000);
+    let board = new_board(&state, &name);
+    assert_eq!(board["name"], name);
+    let id = board["id"].as_str().unwrap();
+    let (title, sub, description) = ("t".repeat(1_000), "s".repeat(1_000), "界".repeat(50_000));
+    let made = json_of(add(
+        &state,
+        id,
+        serde_json::json!({"title": title, "subheading": sub, "description": description}),
+    ));
+    let card = json_of(run(get_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+    )));
+    assert_eq!(card["title"], title);
+    assert_eq!(card["subheading"], sub);
+    assert_eq!(card["description"], description);
+    let longer = "x".repeat(400_000);
+    let changed = run(change_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+        Json(serde_json::from_value(serde_json::json!({"description": longer})).unwrap()),
+    ));
+    assert_eq!(changed.status(), StatusCode::OK);
+    let card = json_of(run(get_card(
+        State(state.clone()),
+        Path(made["id"].as_str().unwrap().to_string()),
+    )));
+    assert_eq!(card["description"], longer);
+}
+
+#[test]
+fn opening_a_card_reads_its_whole_description() {
+    let (state, _d, _) = state_with(&[]);
+    let board = crate::boards::new_board("Open", chrono::Utc::now());
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    written(&state, &board, 1, 8_000);
+    let opened = json_of(run(get_card(
+        State(state.clone()),
+        Path("cface00000".into()),
+    )));
+    assert_eq!(
+        opened["description"].as_str().unwrap().chars().count(),
+        8_000 / 2 * 2
+    );
+    let missing = run(get_card(State(state.clone()), Path("cnone000000".into())));
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+}
+
+#[test]
+fn a_deleted_card_comes_back_whole() {
+    let (state, _d, _) = state_with(&[]);
+    let board = crate::boards::new_board("Back", chrono::Utc::now());
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    written(&state, &board, 1, 8_000);
+    let gone = run(delete_card(State(state.clone()), Path("cface00000".into())));
+    assert_eq!(gone.status(), StatusCode::OK);
+    assert!(shown(&state, &board.id)["cards"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+    let back = run(undelete_card(
+        State(state.clone()),
+        Path("cface00000".into()),
+    ));
+    assert_eq!(back.status(), StatusCode::OK);
+    let card = crate::boards::card(&state.chats, "cface00000").unwrap();
+    assert_eq!(card.description.chars().count(), 8_000 / 2 * 2);
+    assert_eq!(
+        shown(&state, &board.id)["cards"].as_array().unwrap().len(),
+        1
+    );
+}
+
+#[test]
+fn a_board_deleted_and_undone_keeps_every_cards_title_and_description() {
+    let (state, _d, _) = state_with(&[]);
+    let board = crate::boards::new_board("Round", chrono::Utc::now());
+    crate::boards::put_board(&state.chats, &board).unwrap();
+    written(&state, &board, 20, 8_000);
+    let before = crate::boards::all_cards(&state.chats);
+    let gone = run(delete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(gone.status(), StatusCode::OK);
+    let back = run(undelete_board(State(state.clone()), Path(board.id.clone())));
+    assert_eq!(back.status(), StatusCode::OK);
+    let mut after = crate::boards::all_cards(&state.chats);
+    let mut before = before;
+    after.sort_by(|a, b| a.id.cmp(&b.id));
+    before.sort_by(|a, b| a.id.cmp(&b.id));
+    assert_eq!(after.len(), 20);
+    for (was, now) in before.iter().zip(&after) {
+        assert_eq!(
+            (&was.title, &was.description),
+            (&now.title, &now.description)
+        );
+    }
+}
+
+#[test]
+fn the_hundred_and_first_board_and_a_card_past_five_thousand_are_accepted() {
+    let (state, _d, _) = state_with(&[]);
+    let mut first = serde_json::Value::Null;
+    for number in 0..101 {
+        let made = run(create_board(
+            State(state.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({ "name": format!("Board {number}") }))
+                    .unwrap(),
+            ),
+        ));
+        assert_eq!(made.status(), StatusCode::CREATED, "board {number}");
+        if number == 0 {
+            first = json_of(made);
+        }
+    }
+    assert_eq!(crate::boards::boards(&state.chats).len(), 101);
+    let board = crate::boards::board(&state.chats, first["id"].as_str().unwrap()).unwrap();
+    let folder = _d.path().join("notes/.leo/cards");
+    std::fs::create_dir_all(&folder).unwrap();
+    for number in 0..5_000 {
+        let id = format!("cmany{number:05}");
+        let line = bench_card_line(
+            &id,
+            &board.id,
+            &board.columns[0].id,
+            number as f64,
+            false,
+            10,
+        );
+        std::fs::write(folder.join(format!("{id}.json")), line).unwrap();
+    }
+    let last = add(
+        &state,
+        &board.id,
+        serde_json::json!({ "title": "Number 5001" }),
+    );
+    assert_eq!(last.status(), StatusCode::CREATED);
+    assert_eq!(crate::boards::live_counts(&state.chats)[&board.id], 5_001);
+}
+
+fn bench_card_line(
+    id: &str,
+    board: &str,
+    column: &str,
+    rank: f64,
+    gone: bool,
+    size: usize,
+) -> String {
+    let now = chrono::Utc::now().to_rfc3339();
+    serde_json::json!({
+        "id": id, "board": board, "column": column, "rank": rank,
+        "title": format!("Card {id}"), "subheading": "Sub", "description": "d".repeat(size),
+        "priority": "", "created_at": now, "updated_at": now, "deleted": gone,
+    })
+    .to_string()
+        + "\n"
+}
+
+#[test]
+#[ignore = "benchmark: run by hand with --release --ignored --nocapture"]
+fn benchmark_card_moves_at_scale() {
+    let sizes: Vec<usize> = std::env::var("LEO_BENCH_CARDS")
+        .unwrap_or_else(|_| "5000,50000".into())
+        .split(',')
+        .map(|n| n.parse().unwrap())
+        .collect();
+    let size: usize = std::env::var("LEO_BENCH_DESC").map_or(1000, |n| n.parse().unwrap());
+    let watching = std::env::var("LEO_BENCH_WATCH").is_ok_and(|v| v == "1");
+    let time = |runs: usize, work: &mut dyn FnMut()| {
+        let start = std::time::Instant::now();
+        for _ in 0..runs {
+            work();
+        }
+        start.elapsed().as_secs_f64() * 1000.0 / runs as f64
+    };
+    for n in sizes {
+        let (state, dir, _) = state_with(&[]);
+        let small = new_board(&state, "Small");
+        let big = new_board(&state, "Big");
+        let (small_id, big_id) = (
+            small["id"].as_str().unwrap().to_string(),
+            big["id"].as_str().unwrap().to_string(),
+        );
+        let cols = [column(&small, 0), column(&small, 1)];
+        let big_col = column(&big, 0);
+        let cards = dir.path().join("notes/.leo/cards");
+        std::fs::create_dir_all(&cards).unwrap();
+        for i in 0..n {
+            let id = format!("cbench{i:06}");
+            let line = if i < 10 {
+                bench_card_line(
+                    &id,
+                    &small_id,
+                    &cols[0],
+                    (i + 1) as f64 * 1024.0,
+                    false,
+                    size,
+                )
+            } else {
+                bench_card_line(&id, &big_id, &big_col, i as f64, i % 5 == 0, size)
+            };
+            std::fs::write(cards.join(format!("{id}.json")), line).unwrap();
+        }
+        let _changes = watching.then(|| crate::store_refresh::Changes::new(&state.notes_dir));
+        let mut moves = 0usize;
+        let mut move_once = || {
+            let to = &cols[(moves + 1) % 2];
+            moves += 1;
+            let response = moved(&state, "cbench000003", serde_json::json!({ "column": to }));
+            assert_eq!(response.status(), 200);
+        };
+        let first_move = time(1, &mut move_once);
+        let move_ms = time(5, &mut move_once);
+        let mut made = 0usize;
+        let mut created = 0u16;
+        let mut create_once = || {
+            made += 1;
+            let response = add(
+                &state,
+                &small_id,
+                serde_json::json!({ "title": format!("New {made}") }),
+            );
+            created = response.status().as_u16();
+        };
+        let create_ms = time(5, &mut create_once);
+        let mut answer = 0usize;
+        let mut board_once = || {
+            let response = run(get_board(State(state.clone()), Path(big_id.clone())));
+            answer = run(axum::body::to_bytes(response.into_body(), usize::MAX))
+                .unwrap()
+                .len();
+        };
+        let board_ms = time(3, &mut board_once);
+        println!(
+            "bench watcher={watching} cards={n} desc={size} first_move_ms={first_move:.2} move_ms={move_ms:.2} create_card_ms={create_ms:.2} create_status={created} board_answer_ms={board_ms:.2} board_answer_bytes={answer}"
+        );
+    }
 }

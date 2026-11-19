@@ -31,6 +31,12 @@ pub struct Spent {
     pub cache_written: u64,
 }
 
+pub(crate) const NO_MORE_TOOLS: &str = "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.";
+
+pub(crate) fn tokens_of(chars: usize) -> u64 {
+    chars.div_ceil(4) as u64
+}
+
 impl Spent {
     pub fn guessed(model: Option<String>, req: &ChatRequest, answer: &str) -> Spent {
         let asked =
@@ -38,8 +44,8 @@ impl Spent {
         Spent {
             model,
             effort: None,
-            input: asked.div_ceil(4) as u64,
-            output: answer.chars().count().div_ceil(4) as u64,
+            input: tokens_of(asked),
+            output: tokens_of(answer.chars().count()),
             estimated: true,
             ..Spent::default()
         }

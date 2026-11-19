@@ -5,11 +5,9 @@
 .source-pane[hidden] { display: none; }
 .source-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize; touch-action: none; }
 .source-grip::after { content: ""; position: absolute; left: 3px; top: 0; bottom: 0; width: 2px; background: var(--accent); opacity: 0; transition: opacity var(--t-press); }
-.source-grip:hover::after, .source-grip:focus-visible::after, body.source-resizing .source-grip::after { opacity: 1; }
-body.source-resizing { cursor: col-resize; user-select: none; -webkit-user-select: none; }
-body.source-resizing iframe { pointer-events: none; }
+.source-grip:hover::after, .source-grip:focus-visible::after, body.pane-resizing .source-grip:focus::after { opacity: 1; }
 .source-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 8px 16px; }
-.source-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-base); }
+.source-name { flex: 1; min-width: 0; font-size: var(--fs-base); }
 .source-files { flex: 1; min-width: 0; display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; }
 .source-files .chip { cursor: pointer; }
 .source-tools { flex: none; display: flex; align-items: center; gap: 4px; }
@@ -43,12 +41,12 @@ body.source-resizing iframe { pointer-events: none; }
 .related-row { text-decoration: none; color: var(--text); }
 .related-row svg { width: 16px; height: 16px; color: var(--muted); flex: none; }
 .related-title { display: block; font-size: var(--fs-md); }
-.related-row .sub { display: block; font-size: var(--fs-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.related-row .sub { display: block; font-size: var(--fs-sm); color: var(--muted); }
 .related-more { margin-top: 6px; }
 .study-progress { display: flex; align-items: center; gap: 8px; padding: 6px 16px 8px; font-size: var(--fs-xs); }
 .study-progress[hidden] { display: none; }
 .study-ideas { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 6px; max-height: 3.2em; overflow: hidden; color: var(--muted); }
-.study-idea { white-space: nowrap; max-width: 16em; overflow: hidden; text-overflow: ellipsis; }
+.study-idea { max-width: 16em; }
 .study-idea.now { color: var(--text); }
 .study-mark { width: 15px; height: 15px; margin-right: 4px; vertical-align: -3px; fill: none; stroke-linecap: round; stroke-linejoin: round; overflow: visible; -webkit-mask: var(--chalk-break); mask: var(--chalk-break); }
 .study-ring { stroke: currentColor; stroke-width: 1.1; }
@@ -76,7 +74,6 @@ body.source-resizing iframe { pointer-events: none; }
 .ask-float:hover { border-color: var(--line); color: var(--text); }
 .ask-float button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 9px; border: 0; border-radius: var(--r-pill); background: none; color: inherit; font: inherit; cursor: pointer; }
 .ask-float button:hover { background: var(--tint); color: var(--accent); }
-.ask-float button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
 .ask-float kbd { font: inherit; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
 .ask-long { display: none; margin: 0; padding: 0 9px; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
 .ask-float[data-long] .ask-long { display: block; }
@@ -111,7 +108,6 @@ body.source-resizing iframe { pointer-events: none; }
 .chat-access-menu svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--muted); }
 .chat-access-menu b { display: block; font-size: var(--fs-sm); font-weight: 650; }
 .chat-access-menu small { display: block; margin-top: 1px; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
-.chat-compose textarea::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chat-compose textarea { text-overflow: ellipsis; min-width: 0; border: 0; outline: 0; resize: none; background: none; font-size: var(--fs-md); line-height: 1.45; padding: 6px 6px 12px; max-height: 160px; }
 .chat-send { flex: none; width: 32px; height: 32px; border-radius: var(--r-tile); border: 0; display: grid; place-items: center; background: var(--accent); color: var(--accent-text); }
 .chat-send svg { width: 18px; height: 18px; }

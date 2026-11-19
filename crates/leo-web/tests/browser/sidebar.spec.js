@@ -28,8 +28,11 @@ async function sidebarFixture(browser, run) {
       'Course/Week 1':[{id:'week-note',title:'Lecture 1',directory:'Course/Week 1'}],
       Personal:Array.from({length:105},(_,i)=>({id:'personal-'+i,title:'Personal note '+i,directory:'Personal'}))
     };
-    let pending=null, broken=null;
+    let pending=null, broken=null, steady=null, revision=0;
+    const asked=[];
     async function api(url,options={}) {
+      asked.push(url.split('?')[0]);
+      if(url==='/api/rev')return {rev:steady||'r'+(++revision)};
       if(url==='/api/folders')return structuredClone(folders);
       if(options.method==='POST'){moves.push({url,body:options.body});return url==='/api/dirs/move'?{path:(options.body.into?options.body.into+'/':'')+options.body.from.split('/').pop()}:{};}
       const query=new URL(url,location.origin).searchParams, dir=query.get('dir'), offset=Number(query.get('offset')||0);
@@ -67,7 +70,7 @@ async function sidebarFixture(browser, run) {
       else if(action==='home') go('#/');
     });
     window.errors=[];
-    window.audit={moves,draw:drawSide,side,refresh:loadSideFolders,note:(id,dir)=>{seq++;state={view:'note',dir,session:{note:{id}}};drawSide();},dragging,drop:el=>dirOf(dropTargetOf(el)),stop:endDrag,rename:title=>{notes.Course[0].title=title;},route:(dir)=>{seq++;state={view:'workspace',dir:''};side.revealed.clear();side.open.clear();drawSide();revealFolder(dir);},mac:on=>{document.documentElement.dataset.app=on?'mac':'';},broken:dir=>{broken=dir;},hold:()=>{pending=new Promise(resolve=>window.release=()=>{pending=null;resolve();});}};
+    window.audit={moves,asked,steady:rev=>{steady=rev;},draw:drawSide,side,refresh:loadSideFolders,note:(id,dir)=>{seq++;state={view:'note',dir,session:{note:{id}}};drawSide();},dragging,drop:el=>dirOf(dropTargetOf(el)),stop:endDrag,rename:title=>{notes.Course[0].title=title;},route:(dir)=>{seq++;state={view:'workspace',dir:''};side.revealed.clear();side.open.clear();drawSide();revealFolder(dir);},mac:on=>{document.documentElement.dataset.app=on?'mac':'';},broken:dir=>{broken=dir;},hold:()=>{pending=new Promise(resolve=>window.release=()=>{pending=null;resolve();});}};
     loadSideFolders().catch(fail);`;
   const server = http.createServer((req,res) => {
     if(req.url==='/fixture.js') {res.setHeader('Content-Type','text/javascript; charset=utf-8');return res.end(fixture);}
@@ -336,6 +339,25 @@ test('explorer notes keep drag data and refuse stale reads with bounded requests
     expect(limits.cache).toBeLessThanOrEqual(64);
     expect(limits.active).toBeLessThanOrEqual(4);
     expect(limits.queued).toBeLessThanOrEqual(64);
+  });
+});
+
+test('an unchanged stamp lets the explorer move between pages with one small request', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page=await context.newPage();
+    await page.goto(url);
+    const row=dir=>page.locator('.side-tree .side-row[data-dir="'+dir+'"]');
+    await row('Course').click();
+    await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
+    await page.evaluate(()=>audit.steady('same'));
+    await page.evaluate(()=>audit.refresh());
+    await page.waitForFunction(()=>!audit.side.reading&&!audit.side.pending.length&&[...audit.side.notes.values()].every(entry=>!entry.loading));
+    await page.evaluate(()=>{audit.asked.length=0;seq++;return audit.refresh();});
+    await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
+    expect(await page.evaluate(()=>audit.asked)).toEqual(['/api/rev']);
+    await page.evaluate(()=>{audit.rename('Edited elsewhere');audit.steady('other');seq++;return audit.refresh();});
+    await expect(page.locator('.side-note[data-id="course-note"]')).toHaveText('Edited elsewhere');
+    expect(await page.evaluate(()=>audit.asked.includes('/api/folders'))).toBe(true);
   });
 });
 

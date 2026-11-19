@@ -23,7 +23,7 @@ static GRANT_RECORDED: std::sync::atomic::AtomicBool = std::sync::atomic::Atomic
 fn grant_file() -> Option<std::path::PathBuf> {
     leo_core::paths::config_dir()
         .ok()
-        .map(|dir| dir.join("accessibility-version"))
+        .map(|dir| dir.join(leo_core::paths::own::ACCESSIBILITY))
 }
 #[cfg(target_os = "macos")]
 fn record_grant() {
@@ -248,27 +248,68 @@ pub fn microphone() -> &'static str {
         "unknown"
     }
 }
+#[cfg(any(target_os = "macos", test))]
+const NOTIFICATION_FRESH: std::time::Duration = std::time::Duration::from_secs(10);
+#[cfg(any(target_os = "macos", test))]
+fn due(last: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    last.is_none_or(|at| now.duration_since(at) >= NOTIFICATION_FRESH)
+}
+#[cfg(target_os = "macos")]
+static LAST: std::sync::Mutex<Option<(std::time::Instant, Option<&'static str>)>> =
+    std::sync::Mutex::new(None);
+#[cfg(target_os = "macos")]
+static PROBING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(target_os = "macos")]
+fn probe() -> Option<&'static str> {
+    use mac_usernotifications::AuthorizationStatus::*;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(mac_usernotifications::blocking::get_notification_settings());
+    });
+    let settings = rx
+        .recv_timeout(std::time::Duration::from_millis(500))
+        .ok()?
+        .ok()?;
+    Some(match settings.authorization_status {
+        Authorized | Provisional | Ephemeral => "allowed",
+        NotDetermined => "not_requested",
+        _ => "denied",
+    })
+}
 pub fn notifications() -> Option<&'static str> {
     #[cfg(target_os = "macos")]
     {
-        use mac_usernotifications::AuthorizationStatus::*;
-        let (tx, rx) = std::sync::mpsc::channel();
-        std::thread::spawn(move || {
-            let _ = tx.send(mac_usernotifications::blocking::get_notification_settings());
-        });
-        let settings = rx
-            .recv_timeout(std::time::Duration::from_millis(500))
-            .ok()?
-            .ok()?;
-        Some(match settings.authorization_status {
-            Authorized | Provisional | Ephemeral => "allowed",
-            NotDetermined => "not_requested",
-            _ => "denied",
-        })
+        let answer = probe();
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), answer));
+        answer
     }
     #[cfg(not(target_os = "macos"))]
     {
         None
+    }
+}
+pub fn notifications_soon() -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::sync::atomic::Ordering::{AcqRel, Release};
+        let last = *LAST.lock().unwrap_or_else(|e| e.into_inner());
+        if due(last.map(|(at, _)| at), std::time::Instant::now()) && !PROBING.swap(true, AcqRel) {
+            std::thread::spawn(|| {
+                notifications();
+                PROBING.store(false, Release);
+            });
+        }
+        last.and_then(|(_, answer)| answer)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
+}
+pub fn forget_notifications() {
+    #[cfg(target_os = "macos")]
+    {
+        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
     }
 }
 pub fn request_notifications(app: &tauri::AppHandle) -> anyhow::Result<()> {
@@ -288,6 +329,7 @@ pub fn request_notifications(app: &tauri::AppHandle) -> anyhow::Result<()> {
             let _ = tx.send(mac_usernotifications::blocking::request_auth());
         });
         let _ = rx.recv_timeout(std::time::Duration::from_secs(30));
+        notifications();
     }
     #[cfg(not(target_os = "macos"))]
     let _ = app;
@@ -383,16 +425,13 @@ pub fn shortcut_clash(shortcut: &str) -> bool {
     let value = shortcut.to_ascii_lowercase();
     #[cfg(target_os = "macos")]
     {
-        use std::ffi::OsStr;
         if !["option+space", "alt+space", "opt+space"].contains(&value.as_str()) {
             return false;
         }
-        crate::helpers::capture(
-            "pgrep",
-            &[OsStr::new("-f"), OsStr::new("/Alfred[^/]*\\.app/")],
-            std::time::Duration::from_secs(1),
-        )
-        .is_ok_and(|output| output.status.success())
+        let mut command = leo_core::children::quiet_command("pgrep");
+        command.args(["-f", "/Alfred[^/]*\\.app/"]);
+        leo_core::children::run_bounded(command, std::time::Duration::from_secs(1), 4096)
+            .is_ok_and(|out| !out.timed_out && out.status.success())
     }
     #[cfg(windows)]
     unsafe {
@@ -416,7 +455,33 @@ pub fn shortcut_clash(shortcut: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::stale_grant;
+    use super::{due, stale_grant, NOTIFICATION_FRESH};
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_recent_answer_is_reused_and_an_old_one_is_not() {
+        let now = Instant::now();
+        let ago = |secs: u64| now.checked_sub(Duration::from_secs(secs));
+        assert!(due(None, now));
+        assert!(!due(ago(9), now));
+        assert!(due(ago(10), now));
+    }
+
+    #[test]
+    fn a_minute_of_polling_starts_at_most_six_probes() {
+        let start = Instant::now();
+        let mut last = None;
+        let mut probes = 0;
+        for poll in 0..24 {
+            let now = start + Duration::from_millis(2500 * poll);
+            if due(last, now) {
+                probes += 1;
+                last = Some(now);
+            }
+        }
+        assert_eq!(NOTIFICATION_FRESH, Duration::from_secs(10));
+        assert!(probes <= 6, "{probes} probes in a minute");
+    }
 
     #[test]
     fn reset_only_after_a_version_change_with_a_recorded_grant() {

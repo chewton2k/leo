@@ -5,6 +5,7 @@
 use anyhow::Result;
 
 use crate::ai;
+use crate::config::secret::SecretStore;
 use crate::config::{self, Config};
 
 /// Build the single transcription provider named by `name`, regardless of
@@ -29,15 +30,36 @@ fn build_one_transcriber(
 /// provider screen can show it in its status line. Transcription providers are
 /// only checked for reachability: exercising one needs audio, and a test that
 /// records from the microphone is not a test anyone wants to run twice.
-pub fn test_provider(name: &str) -> Result<String> {
-    let cfg = Config::load();
-    let store = config::secret::default_store();
+pub fn test_provider(cfg: &Config, store: &dyn SecretStore, name: &str) -> Result<String> {
+    test_with(cfg, store, name, TEST_LIMIT)
+}
+
+const TEST_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
+
+fn test_with(
+    cfg: &Config,
+    store: &dyn SecretStore,
+    name: &str,
+    limit: std::time::Duration,
+) -> Result<String> {
     let Some(pc) = cfg.provider(name) else {
         anyhow::bail!("no provider named '{name}' in your config");
     };
 
     let started = std::time::Instant::now();
-    if let Some(p) = ai::provider::build_one_chat(name, pc, &store) {
+    let chat: Option<Box<dyn ai::provider::ChatProvider>> =
+        match ai::provider::agent_cli::Agent::of(pc) {
+            Some(agent) => {
+                let mut pc = pc.clone();
+                pc.no_tools = true;
+                Some(Box::new(
+                    ai::provider::agent_cli::AgentCli::new(name.into(), agent, &pc)
+                        .with_limits(limit, limit),
+                ))
+            }
+            None => ai::provider::build_one_chat(name, pc, store),
+        };
+    if let Some(p) = chat {
         if !p.available() {
             anyhow::bail!("{}", p.unavailable_reason());
         }
@@ -84,14 +106,6 @@ pub fn model_state(path: &std::path::Path, sha256: &str) -> ModelState {
     }
 }
 
-pub fn files_state(dir: &std::path::Path, manifest: &[(String, String)]) -> ModelState {
-    worst_state(
-        manifest
-            .iter()
-            .map(|(name, sha)| model_state(&dir.join(name), sha)),
-    )
-}
-
 pub fn worst_state(states: impl IntoIterator<Item = ModelState>) -> ModelState {
     let states: Vec<ModelState> = states.into_iter().collect();
     if states.contains(&ModelState::Damaged) {
@@ -100,13 +114,6 @@ pub fn worst_state(states: impl IntoIterator<Item = ModelState>) -> ModelState {
         ModelState::Missing
     } else {
         ModelState::Ready
-    }
-}
-
-pub fn speech_model_state() -> ModelState {
-    match crate::speech::library::library().and_then(|l| l.selected()) {
-        Ok(_) => ModelState::Ready,
-        Err(_) => ModelState::Missing,
     }
 }
 
@@ -130,30 +137,11 @@ pub fn sha256_of(path: &std::path::Path) -> Result<String> {
     Ok(hex(&hasher.finalize()))
 }
 
-pub fn download_speech_model() -> Result<std::path::PathBuf> {
-    fetch_speech_model()
-}
-
-fn fetch_speech_model() -> Result<std::path::PathBuf> {
-    let library = crate::speech::library::library()?;
-    let selection = library.selection()?;
-    let model = crate::speech::catalog::catalog().get(&selection.id)?;
-    library.fetch(
-        &selection.id,
-        &model.url(),
-        &std::sync::atomic::AtomicBool::new(false),
-        &|_, _| {},
-    )?;
-    library.use_model(&selection.id, &selection.language)?;
-    Ok(library.selected()?.path)
-}
-
 pub fn download_verified(
     url: &str,
     sha256: &str,
     dir: &std::path::Path,
     name: &str,
-    quiet: bool,
 ) -> Result<std::path::PathBuf> {
     anyhow::ensure!(
         !name.is_empty()
@@ -170,16 +158,7 @@ pub fn download_verified(
         "the model folder cannot be a symbolic link"
     );
     let target = leo_core::paths::contained_path(dir, std::path::Path::new(name))?;
-    for entry in std::fs::read_dir(dir)?.flatten() {
-        let left = entry.file_name();
-        let left = left.to_string_lossy();
-        if left.starts_with(".leo-download-")
-            && left.ends_with(".part")
-            && older_than(&entry, STALE_DOWNLOAD)
-        {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
+    drop_stale_downloads(dir);
     let partial = tempfile::Builder::new()
         .prefix(".leo-download-")
         .suffix(".part")
@@ -199,15 +178,10 @@ pub fn download_verified(
     if !url.starts_with("file://") {
         curl.args(["--proto", "=https", "--proto-redir", "=https"]);
     }
-    curl.args(["--max-filesize", "1073741824"]);
-    if quiet {
-        curl.arg("-sS")
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-    } else {
-        curl.arg("--progress-bar");
-    }
+    curl.args(["--max-filesize", "1073741824", "-sS"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
     let curl = ai::provider::process::Process::new(
         curl.spawn()
             .map_err(|e| anyhow::anyhow!("could not run curl: {e}"))?,
@@ -233,6 +207,23 @@ pub fn download_verified(
     Ok(target)
 }
 
+pub(crate) fn drop_stale_downloads(dir: &std::path::Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_string_lossy()
+            .starts_with(".leo-download-")
+            && entry.file_type().is_ok_and(|t| t.is_file())
+            && older_than(&entry, STALE_DOWNLOAD)
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 const STALE_DOWNLOAD: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 
 pub(crate) fn older_than(entry: &std::fs::DirEntry, age: std::time::Duration) -> bool {
@@ -256,7 +247,7 @@ mod tests {
     fn model_download_names_stay_inside_the_model_folder() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["../outside", "/outside", "a/b", "a\\b", ".", "..", "a:b"] {
-            assert!(download_verified("file:///unused", "00", dir.path(), name, true).is_err());
+            assert!(download_verified("file:///unused", "00", dir.path(), name).is_err());
         }
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
     }
@@ -271,12 +262,11 @@ mod tests {
         std::fs::create_dir(&models).unwrap();
         let good = sha256_of(&outside).unwrap();
         std::os::unix::fs::symlink(&outside, models.join("weights.part")).unwrap();
-        let saved =
-            download_verified(&file_url(&outside), &good, &models, "weights", true).unwrap();
+        let saved = download_verified(&file_url(&outside), &good, &models, "weights").unwrap();
         assert_eq!(std::fs::read_to_string(saved).unwrap(), "keep");
         assert_eq!(std::fs::read_to_string(&outside).unwrap(), "keep");
         std::os::unix::fs::symlink(&outside, models.join("linked")).unwrap();
-        assert!(download_verified(&file_url(&outside), &good, &models, "linked", true).is_err());
+        assert!(download_verified(&file_url(&outside), &good, &models, "linked").is_err());
     }
 
     #[test]
@@ -299,21 +289,14 @@ mod tests {
             .unwrap()
             .set_modified(std::time::SystemTime::now() - STALE_DOWNLOAD * 2)
             .unwrap();
-        let saved =
-            download_verified(&file_url(&source), &good, &models, "ggml-x.bin", true).unwrap();
+        let saved = download_verified(&file_url(&source), &good, &models, "ggml-x.bin").unwrap();
         assert_eq!(std::fs::read(&saved).unwrap(), b"pretend model");
         assert!(!stale.exists());
         assert!(fresh.exists());
         assert!(!models.join("ggml-x.bin.part").exists());
 
-        let err = download_verified(
-            &file_url(&source),
-            &"0".repeat(64),
-            &models,
-            "ggml-y.bin",
-            true,
-        )
-        .unwrap_err();
+        let err = download_verified(&file_url(&source), &"0".repeat(64), &models, "ggml-y.bin")
+            .unwrap_err();
         assert!(err.to_string().contains("damaged"), "{err}");
         assert!(!models.join("ggml-y.bin").exists());
         assert!(!models.join("ggml-y.bin.part").exists());
@@ -323,7 +306,6 @@ mod tests {
             &good,
             &models,
             "ggml-z.bin",
-            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("failed"), "{err}");
@@ -343,21 +325,72 @@ mod tests {
         assert_eq!(model_state(&path, &good), ModelState::Damaged);
     }
 
+    #[cfg(unix)]
+    fn fake_writer(dir: &std::path::Path, body: &str) -> Config {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("fake-agent");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Config::parse(&format!(
+            "[providers.claude_code]\nkind = \"claude_code\"\nbin = \"{}\"\n",
+            path.display()
+        ))
+        .unwrap()
+    }
+
+    #[cfg(unix)]
     #[test]
-    fn a_model_of_several_files_is_ready_only_when_every_one_is() {
+    fn the_settings_test_runs_without_tools() {
         let dir = tempfile::tempdir().unwrap();
-        let a = dir.path().join("a.onnx");
-        let b = dir.path().join("b.txt");
-        std::fs::write(&a, b"aaa").unwrap();
-        std::fs::write(&b, b"bbb").unwrap();
-        let manifest = vec![
-            ("a.onnx".to_string(), sha256_of(&a).unwrap()),
-            ("b.txt".to_string(), sha256_of(&b).unwrap()),
-        ];
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Ready);
-        std::fs::remove_file(&b).unwrap();
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Missing);
-        std::fs::write(&a, b"aa").unwrap();
-        assert_eq!(files_state(dir.path(), &manifest), ModelState::Damaged);
+        let argv = dir.path().join("argv");
+        let cfg = fake_writer(
+            dir.path(),
+            &format!(
+                "echo \"$@\" >> '{}'\ncat >/dev/null\nprintf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"ok\"}}'",
+                argv.display()
+            ),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let said = test_provider(&cfg, &store, "claude_code").unwrap();
+        assert!(said.contains("ok"), "{said}");
+        let recorded = std::fs::read_to_string(&argv).unwrap();
+        assert!(recorded.contains("--tools"), "{recorded}");
+        assert!(!recorded.contains("WebSearch"), "{recorded}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_settings_test_of_a_stuck_writer_ends_at_its_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let pids = dir.path().join("pids");
+        let cfg = fake_writer(
+            dir.path(),
+            &format!("echo $$ >> '{}'\ncat >/dev/null\nsleep 20", pids.display()),
+        );
+        let store = crate::config::secret::MemoryStore::default();
+        let started = std::time::Instant::now();
+        let result = test_with(
+            &cfg,
+            &store,
+            "claude_code",
+            std::time::Duration::from_millis(300),
+        );
+        assert!(result.is_err());
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            started.elapsed()
+        );
+        let pids = std::fs::read_to_string(&pids).unwrap();
+        assert_eq!(pids.lines().count(), 2, "two runs: {pids}");
+        for pid in pids.lines() {
+            let alive = leo_core::children::quiet_command("kill")
+                .args(["-0", pid])
+                .stderr(std::process::Stdio::null())
+                .status()
+                .unwrap()
+                .success();
+            assert!(!alive, "{pid} still runs");
+        }
     }
 }

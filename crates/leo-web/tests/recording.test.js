@@ -130,7 +130,7 @@ test('a recording saved without written notes says so where the user lands', () 
     const went = [];
     const toasts = [];
     const accept = require('node:vm').runInNewContext(`(function(){${source.slice(start, end)} return accept;})()`, {
-      s: { view: { id: 'r1', state: 'writing', warnings: [] }, container: { isConnected: true } },
+      s: { view: { id: 'r1', state: 'writing', warnings: [] }, earlier: [], container: { isConnected: true } },
       api: () => Promise.resolve(), feedFromServer: () => {}, draw: () => {}, pill: () => {}, noteReady: null,
       go: (hash) => went.push(hash), noteHash: (id) => `#/n/${id}`, toast: (text, opts) => toasts.push({ text, ...opts }), root: {},
     });
@@ -207,8 +207,8 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'screen', false, true), 'Hearing sound');
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
   const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, clock: L.clock, stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
+    esc, icons, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -248,4 +248,50 @@ test('a meeting prompt preselects Call and its event and fills the meeting wordi
   assert.equal(ask({}).kind, 'microphone');
   const body = recordingSource.slice(recordingSource.indexOf('    function preselect('), recordingSource.indexOf('    function idleForm('));
   assert.doesNotMatch(body, /begin|start\(|rec-start|click/, 'the prompt never presses Start');
+});
+
+test('a hidden window pauses the speaker-model poll', async () => {
+  const timers = [];
+  const asked = [];
+  const box = { isConnected: true, querySelector: () => ({}) };
+  const scope = {
+    s: {}, setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout() {}, redrawSpeakers() {}, onScreen: () => false,
+    api: async (url) => { asked.push(url); return { speakers: { progress: { state: 'downloading', bytes: 1, total: 2 } } }; },
+  };
+  const speakerModel = require('node:vm').runInNewContext(`(function(){${recordingSource.slice(recordingSource.indexOf('    async function speakerModel('), recordingSource.indexOf('    function redrawSpeakers('))} return speakerModel;})()`, scope);
+  await speakerModel(box);
+  const first = asked.length;
+  for (let i = 0; i < 4; i++) {
+    for (const t of timers.splice(0)) t.fn();
+    for (let n = 0; n < 5; n++) await Promise.resolve();
+  }
+  assert.equal(asked.length - first, 0);
+});
+
+test('older recordings are appended once, newest page first', () => {
+  const first = { pending: [{ id: 'c' }, { id: 'b' }], more: true, after: '20260102-090000', checks: { speech: true } };
+  const second = { pending: [{ id: 'b' }, { id: 'a' }], more: false, after: null, checks: { speech: true } };
+  const merged = L.mergePages(first, second);
+  assert.deepEqual(merged.pending.map((p) => p.id), ['c', 'b', 'a']);
+  assert.equal(merged.more, false);
+  assert.equal(merged.after, null);
+  assert.deepEqual(first.pending.map((p) => p.id), ['c', 'b']);
+});
+
+test('the quit warning says when there are more than one page', () => {
+  assert.equal(L.unsavedLine(1, false), "1 recording wasn't saved");
+  assert.equal(L.unsavedLine(50, false), "50 recordings weren't saved");
+  assert.equal(L.unsavedLine(50, true), "50 or more recordings weren't saved");
+});
+
+test('earlier points go before the shown ones, once', () => {
+  const shown = [[50, 300, 'same words'], [51, 310, 'newest']];
+  const earlier = [[48, 280, 'same words'], [49, 290, 'older'], [50, 300, 'same words']];
+  assert.deepEqual(L.earlierFirst(earlier, shown), [
+    [48, 280, 'same words'],
+    [49, 290, 'older'],
+    [50, 300, 'same words'],
+    [51, 310, 'newest'],
+  ]);
+  assert.deepEqual(L.earlierFirst([], shown), shown);
 });

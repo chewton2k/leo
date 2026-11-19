@@ -34,6 +34,7 @@ pub struct Sessions {
 }
 
 impl Sessions {
+    #[cfg(test)]
     pub fn in_memory() -> Sessions {
         Sessions {
             path: None,
@@ -48,14 +49,16 @@ impl Sessions {
                 path.display()
             )
         })? {
-            Some(text) => serde_json::from_str(&text).with_context(|| {
-                format!(
-                    "{} is damaged; remove it to sign browsers in again",
+            Some(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
+                leo_core::diag::warn(format!(
+                    "{} is damaged ({e}); signing in again",
                     path.display()
-                )
-            })?,
+                ));
+                Vec::new()
+            }),
             None => Vec::new(),
         };
+        list.retain(|s| Utc::now() - s.last_seen < Duration::days(KEEP_DAYS));
         list.sort_by_key(|s| std::cmp::Reverse(s.last_seen));
         list.truncate(MOST);
         Ok(Sessions {
@@ -129,21 +132,17 @@ impl Sessions {
 }
 
 pub struct Gate {
-    token: std::sync::RwLock<String>,
+    token: String,
     pub sessions: Sessions,
 }
 
 impl Gate {
     pub fn new(token: String, sessions: Sessions) -> Gate {
-        Gate {
-            token: std::sync::RwLock::new(token),
-            sessions,
-        }
+        Gate { token, sessions }
     }
 
     pub fn token_matches(&self, given: &str) -> bool {
-        let token = self.token.read().unwrap_or_else(|e| e.into_inner());
-        token::same(given, &token)
+        token::same(given, &self.token)
     }
 }
 
@@ -160,8 +159,8 @@ mod tests {
     use super::*;
 
     fn at(minutes: i64) -> DateTime<Utc> {
-        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 10, 8, 12, 0, 0).unwrap()
-            + Duration::minutes(minutes)
+        static START: std::sync::OnceLock<DateTime<Utc>> = std::sync::OnceLock::new();
+        *START.get_or_init(Utc::now) + Duration::minutes(minutes)
     }
 
     #[test]
@@ -184,9 +183,12 @@ mod tests {
     fn a_session_file_with_unknown_fields_still_loads() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("app-sessions.json");
+        let when = at(0).to_rfc3339();
         std::fs::write(
             &path,
-            r#"[{"secret":"abc","created_at":"2026-10-08T12:00:00Z","last_seen":"2026-10-08T12:00:00Z","extra":"ignored"}]"#,
+            format!(
+                r#"[{{"secret":"abc","created_at":"{when}","last_seen":"{when}","extra":"ignored"}}]"#
+            ),
         )
         .unwrap();
         assert!(Sessions::load(&path).unwrap().check("abc", at(1)));
@@ -247,7 +249,7 @@ mod tests {
     fn existing_session_files_are_private_on_load_and_after_a_change() {
         use std::os::unix::fs::PermissionsExt;
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("serve-sessions.json");
+        let path = tmp.path().join("app-sessions.json");
         std::fs::write(&path, "[]").unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         let sessions = Sessions::load(&path).unwrap();
@@ -269,7 +271,7 @@ mod tests {
     fn unsafe_session_paths_cannot_load_start_or_refresh_a_sign_in() {
         use std::os::unix::fs::symlink;
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("serve-sessions.json");
+        let path = tmp.path().join("app-sessions.json");
         let sessions = Sessions::load(&path).unwrap();
         let secret = sessions.start(at(0)).unwrap();
         let target = tmp.path().join("example-file");
@@ -283,15 +285,64 @@ mod tests {
     }
 
     #[test]
-    fn oversized_or_damaged_session_files_fail_closed() {
+    fn oversized_session_files_fail_closed() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("serve-sessions.json");
-        for text in [
-            "broken".to_string(),
-            " ".repeat(token::AUTH_BYTES as usize + 1),
-        ] {
+        let path = tmp.path().join("app-sessions.json");
+        std::fs::write(&path, " ".repeat(token::AUTH_BYTES as usize + 1)).unwrap();
+        assert!(Sessions::load(&path).is_err());
+    }
+
+    #[test]
+    fn a_damaged_session_file_loads_as_no_sessions_and_is_rewritten() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("app-sessions.json");
+        for text in ["broken", ""] {
             std::fs::write(&path, text).unwrap();
-            assert!(Sessions::load(&path).is_err());
+            let sessions = Sessions::load(&path).unwrap();
+            assert!(!sessions.check("broken", Utc::now()));
+            let mine = sessions.start(Utc::now()).unwrap();
+            assert!(Sessions::load(&path).unwrap().check(&mine, Utc::now()));
+        }
+    }
+
+    #[test]
+    fn expired_sessions_are_dropped_on_load() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("app-sessions.json");
+        let old = Utc::now() - Duration::days(KEEP_DAYS + 1);
+        let fresh = Utc::now();
+        let list = [("old", old), ("fresh", fresh)].map(|(secret, seen)| Session {
+            secret: secret.into(),
+            created_at: seen,
+            last_seen: seen,
+        });
+        std::fs::write(&path, serde_json::to_string(&list).unwrap()).unwrap();
+        let sessions = Sessions::load(&path).unwrap();
+        let held = sessions.list.lock().unwrap();
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].secret, "fresh");
+    }
+
+    #[tokio::test]
+    async fn a_damaged_sessions_file_does_not_stop_the_engine() {
+        for content in ["x", ""] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("app-sessions.json");
+            std::fs::write(&path, content).unwrap();
+            let running = crate::start_in(
+                crate::Places {
+                    store: leo_core::store::Store::load_from(&dir.path().join("notes")).unwrap(),
+                    sessions: path,
+                },
+                crate::StartOptions {
+                    port: 0,
+                    token: "t".into(),
+                },
+                crate::Powers::default(),
+            )
+            .await
+            .unwrap();
+            running.stop().await;
         }
     }
 

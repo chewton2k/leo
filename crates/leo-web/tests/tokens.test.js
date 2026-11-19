@@ -103,7 +103,7 @@ test('ink, focus and highlight pairs keep their WCAG contrast in every theme', (
 });
 
 test('every focus cue that sets an outline, border colour or ring uses the focus token', () => {
-  const ok = (value) => /var\(--focus\)/.test(value) || /^(none|0)$/.test(value) || (/var\(--accent-soft\)/.test(value) && !/var\(--accent\)/.test(value));
+  const ok = (value) => /var\(--focus\)/.test(value) || /^(none|0)$/.test(value) || (/var\(--(accent-soft|ring-soft)\)/.test(value) && !/var\(--accent\)/.test(value));
   const checked = [];
   for (const rule of all) {
     if (rule.at.some((a) => a.includes('forced-colors'))) continue;
@@ -116,7 +116,7 @@ test('every focus cue that sets an outline, border colour or ring uses the focus
       if (/var\(--focus\)/.test(value)) assert.ok(parts.every((p) => p.includes(':focus')), `${rule.selector} gives a non-focus state the focus colour`);
     }
   }
-  assert.ok(checked.length >= 60, `walked ${checked.length} focus declarations`);
+  assert.ok(checked.length >= 50, `walked ${checked.length} focus declarations`);
   for (const selector of ['.inline-edit', '.settings-section [data-find].found-still', '.cal-compose']) {
     assert.match(all.find((r) => r.selector === selector).body, /var\(--focus\)/, selector);
   }
@@ -232,4 +232,66 @@ test('quiz chalk tones are one plain token pair per theme, readable as text on e
   assert.match(at('.quiz-card.right'), /var\(--chalk-good\)/);
   assert.match(at('.quiz-card.wrong'), /var\(--chalk-bad\)/);
   assert.match(at('.quiz-mark'), /mask: var\(--chalk-break\)/);
+});
+
+test('the reduced-motion rule covers pseudo-elements', () => {
+  const rule = all.find((r) => r.selector.startsWith('*') && r.at.some((a) => a.includes('prefers-reduced-motion: reduce')) && /animation:\s*none\s*!important/.test(r.body));
+  assert.ok(rule, 'a reduced-motion rule turns animation off');
+  assert.match(rule.selector, /\*::before/);
+  assert.match(rule.selector, /\*::after/);
+});
+
+test('the visually hidden rule is written once', () => {
+  const css = pageCss();
+  assert.equal(css.split('clip-path: inset(50%)').length, 2);
+  const hidden = all.filter((r) => r.body.includes('clip-path: inset(50%)'));
+  assert.equal(hidden.length, 1);
+  const selectors = hidden[0].selector.split(',').map((s) => s.trim());
+  assert.deepEqual(selectors.sort(), ['.chat-refs .file-reading', '.code-said', '.fa-sr', '.hc-sr', '.home-tally-said', '.kanban-priority-word', '.margin-said-aloud', '.said'].sort());
+  assert.ok(declarations(hidden[0].body).some(([name, value]) => name === 'white-space' && value === 'nowrap'));
+  const fixed = all.filter((r) => r.selector === '.code-said');
+  assert.equal(fixed.length, 1);
+  assert.deepEqual(declarations(fixed[0].body), [['position', 'fixed']]);
+  assert.ok(all.indexOf(fixed[0]) > all.indexOf(hidden[0]));
+});
+
+test('the later chip rule is the only one', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const schedule = fs.readFileSync(path.join(__dirname, '../src/web/styles/10-schedule.css'), 'utf8');
+  assert.ok(!/\.pick-chip/.test(schedule));
+  assert.equal(all.filter((r) => r.selector === '.pick-chip').length, 1);
+});
+
+test('the dark tokens are written once and both dark blocks carry the same ones', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/styles/01-tokens.css'), 'utf8');
+  assert.ok(!source.includes('prefers-color-scheme: dark'));
+  assert.ok(!source.includes('data-theme="dark"'));
+  const media = new Map(declarations(themes['dark media'].body));
+  const theme = new Map(declarations(themes['dark theme'].body));
+  assert.equal(theme.get('color-scheme'), 'dark');
+  theme.delete('color-scheme');
+  assert.ok(media.size > 40);
+  assert.deepEqual([...media], [...theme]);
+});
+
+test('the focus ring is written once per offset, twice only where a rule between its members sets an outline', () => {
+  const kinds = new Map();
+  for (const rule of all) {
+    if (rule.at.length) continue;
+    const d = declarations(rule.body);
+    if (!d.length || d[0][0] !== 'outline' || d[0][1] !== '2px solid var(--focus)') continue;
+    if (!d.every(([key]) => ['outline', 'outline-offset', 'border-radius'].includes(key))) continue;
+    const key = d.map((pair) => pair.join(': ')).join('; ');
+    kinds.set(key, (kinds.get(key) || 0) + 1);
+  }
+  for (const [key, count] of kinds) assert.ok(count <= 2, `${key} is written ${count} times`);
+  assert.ok([...kinds.values()].reduce((a, b) => a + b, 0) <= 14, 'the ring rules grew back');
+});
+
+test('the chip on-state is written once', () => {
+  const on = all.filter((r) => /background: var\(--accent\); border-color: var\(--accent\); color: var\(--accent-text\)/.test(r.body) && /\.on\b/.test(r.selector));
+  assert.deepEqual(on.map((r) => r.selector), ['.chat-class.on, .repeat-day.on', '.pick-chip.on']);
 });

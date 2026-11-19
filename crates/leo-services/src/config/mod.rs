@@ -172,7 +172,7 @@ kind = "parakeet"
     /// `~/.config/leo/config.toml`. Deliberately not beside the notes
     /// directory: this file holds machine-local values (ports, model paths).
     pub fn config_path() -> Result<std::path::PathBuf> {
-        Ok(leo_core::paths::config_dir()?.join("config.toml"))
+        Ok(leo_core::paths::config_dir()?.join(leo_core::paths::own::CONFIG))
     }
 
     /// Load from the standard path. Never fails: a missing or malformed file
@@ -190,28 +190,7 @@ kind = "parakeet"
     }
 
     pub fn load_from(path: &std::path::Path) -> Config {
-        let mut cfg = match std::fs::read_to_string(path).map(|text| tidied(path, text)) {
-            Ok(text) => match Config::parse_with_built_ins(&text) {
-                Ok(cfg) => cfg,
-                Err(e) => {
-                    leo_core::diag::warn(format!(
-                        "config: {} is invalid ({e}); using defaults",
-                        path.display()
-                    ));
-                    Config::default()
-                }
-            },
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Config::default(),
-            Err(e) => {
-                leo_core::diag::warn(format!(
-                    "config: {} could not be read ({e}); using defaults",
-                    path.display()
-                ));
-                Config::default()
-            }
-        };
-        cfg.apply_env_overrides();
-        cfg
+        load_at(path, std::time::Instant::now())
     }
 
     /// Env vars win over the file, so a one-off override needs no file edit.
@@ -267,6 +246,101 @@ kind = "parakeet"
     }
 }
 
+const RECHECK: std::time::Duration = std::time::Duration::from_secs(10);
+const RACY: std::time::Duration = std::time::Duration::from_secs(2);
+
+#[derive(Clone, PartialEq, Eq)]
+struct Stamp {
+    len: u64,
+    modified: std::time::SystemTime,
+    #[cfg(unix)]
+    changed: (i64, i64),
+    #[cfg(unix)]
+    file: (u64, u64),
+}
+
+type Held = std::collections::HashMap<std::path::PathBuf, (Stamp, std::time::Instant, Config)>;
+
+static LOADED: std::sync::LazyLock<std::sync::Mutex<Held>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn stamp(path: &std::path::Path) -> Option<Stamp> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some(Stamp {
+        len: meta.len(),
+        modified: meta.modified().ok()?,
+        #[cfg(unix)]
+        changed: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ctime(), meta.ctime_nsec())
+        },
+        #[cfg(unix)]
+        file: {
+            use std::os::unix::fs::MetadataExt;
+            (meta.ino(), meta.dev())
+        },
+    })
+}
+
+fn load_at(path: &std::path::Path, now: std::time::Instant) -> Config {
+    let seen = stamp(path);
+    if let Some(seen) = &seen {
+        let held = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((kept, at, cfg)) = held.get(path) {
+            if kept == seen && now.saturating_duration_since(*at) < RECHECK {
+                let mut cfg = cfg.clone();
+                cfg.apply_env_overrides();
+                return cfg;
+            }
+        }
+    }
+    let mut cfg = read_from(path).unwrap_or_default();
+    let settled = stamp(path)
+        .filter(|after| seen.is_some() && after.modified.elapsed().is_ok_and(|age| age > RACY));
+    let mut held = LOADED.lock().unwrap_or_else(|e| e.into_inner());
+    match settled {
+        Some(after) => {
+            held.insert(path.to_path_buf(), (after, now, cfg.clone()));
+        }
+        None => {
+            held.remove(path);
+        }
+    }
+    drop(held);
+    cfg.apply_env_overrides();
+    cfg
+}
+
+pub(crate) fn forget_loaded(path: &std::path::Path) {
+    LOADED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .remove(path);
+}
+
+fn read_from(path: &std::path::Path) -> Option<Config> {
+    match std::fs::read_to_string(path).map(|text| tidied(path, text)) {
+        Ok(text) => Some(match Config::parse_with_built_ins(&text) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                leo_core::diag::warn(format!(
+                    "config: {} is invalid ({e}); using defaults",
+                    path.display()
+                ));
+                Config::default()
+            }
+        }),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            leo_core::diag::warn(format!(
+                "config: {} could not be read ({e}); using defaults",
+                path.display()
+            ));
+            None
+        }
+    }
+}
+
 fn tidied(path: &std::path::Path, text: String) -> String {
     let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
         return text;
@@ -295,6 +369,93 @@ fn quoted_list(items: &[&str]) -> String {
 mod tests {
     use super::*;
     use provider::ProviderKind;
+
+    fn model_text(model: &str) -> String {
+        format!("[providers.claude_code]\nmodel = \"{model}\"\n")
+    }
+
+    fn model_of(cfg: &Config) -> String {
+        cfg.provider("claude_code").unwrap().model.clone().unwrap()
+    }
+
+    fn set_age(path: &std::path::Path, seconds: u64) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(seconds))
+            .unwrap();
+    }
+
+    fn aged_config(dir: &tempfile::TempDir, model: &str) -> std::path::PathBuf {
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, model_text(model)).unwrap();
+        set_age(&path, 10);
+        path
+    }
+
+    #[test]
+    fn a_same_stamp_outside_edit_is_seen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = aged_config(&dir, "model-aaaa");
+        assert_eq!(model_of(&Config::load_from(&path)), "model-aaaa");
+
+        let replacement = dir.path().join("replacement");
+        std::fs::write(&replacement, model_text("model-bbbb")).unwrap();
+        std::fs::rename(&replacement, &path).unwrap();
+        set_age(&path, 10);
+        #[cfg(unix)]
+        assert_eq!(model_of(&Config::load_from(&path)), "model-bbbb");
+
+        let loaded_before = Config::load_from(&path);
+        std::fs::write(&path, model_text("model-cccc")).unwrap();
+        set_age(&path, 10);
+        {
+            let mut held = LOADED.lock().unwrap();
+            let entry = held.get_mut(&path).unwrap();
+            entry.0 = stamp(&path).unwrap();
+        }
+        assert_eq!(
+            model_of(&Config::load_from(&path)),
+            model_of(&loaded_before)
+        );
+        let later = std::time::Instant::now() + RECHECK * 2;
+        assert_eq!(model_of(&load_at(&path, later)), "model-cccc");
+    }
+
+    #[test]
+    fn a_config_written_inside_two_seconds_is_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        std::fs::write(&path, model_text("model-aaaa")).unwrap();
+        assert_eq!(model_of(&Config::load_from(&path)), "model-aaaa");
+        std::fs::write(&path, model_text("model-bbbb")).unwrap();
+        assert_eq!(model_of(&Config::load_from(&path)), "model-bbbb");
+    }
+
+    #[test]
+    fn a_config_saved_by_settings_is_seen_at_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = aged_config(&dir, "model-aaaa");
+        assert_eq!(model_of(&Config::load_from(&path)), "model-aaaa");
+        let doc = model_text("model-bbbb")
+            .parse::<toml_edit::DocumentMut>()
+            .unwrap();
+        edit::save_document(&path, &doc).unwrap();
+        set_age(&path, 10);
+        assert_eq!(model_of(&Config::load_from(&path)), "model-bbbb");
+    }
+
+    #[test]
+    fn two_config_paths_do_not_share_an_entry() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let one = aged_config(&first, "model-aaaa");
+        let two = aged_config(&second, "model-bbbb");
+        assert_eq!(model_of(&Config::load_from(&one)), "model-aaaa");
+        assert_eq!(model_of(&Config::load_from(&two)), "model-bbbb");
+        assert_eq!(model_of(&Config::load_from(&one)), "model-aaaa");
+    }
 
     #[test]
     fn parses_a_full_config() {

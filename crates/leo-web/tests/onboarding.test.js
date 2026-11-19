@@ -125,6 +125,24 @@ test('the dictation hint names the real shortcut the way the page shows keys and
   }
 });
 
+test('the dictation hint asks once and follows a changed shortcut', async () => {
+  const core = fs.readFileSync(path.join(__dirname, '../src/web/app/core.js'), 'utf8');
+  let asked = 0;
+  const context = { ON_MAC: true, api: async () => { asked++; return { settings: { shortcut: 'option+space' } }; } };
+  vm.createContext(context);
+  vm.runInContext(core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('function wireHomeAsk(')), context);
+  const el = () => ({ hidden: true, isConnected: true, textContent: '' });
+  const first = el(), second = el(), third = el();
+  await context.dictateHint(first);
+  await context.dictateHint(second);
+  assert.equal(asked, 1);
+  assert.equal(second.textContent, 'Press ⌥Space anywhere to dictate.');
+  context.dictateKeysSeen({ settings: { shortcut: 'ctrl+space' } });
+  await context.dictateHint(third);
+  assert.equal(asked, 1);
+  assert.equal(third.textContent, 'Press ⌃Space anywhere to dictate.');
+});
+
 test('with no writing AI on the computer, setup preselects Ollama and says so', async () => {
   const absent = [{ id: 'claude_code', installed: false }, { id: 'codex', installed: false }, { id: 'ollama', installed: false, running: false, models: [] }];
   const found = { textContent: 'leo found these on this computer.' };

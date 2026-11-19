@@ -12,7 +12,9 @@ drift on which errors are fatal. The streaming chain takes an `on_restart`
 callback: text from a provider that then failed is discarded, or a fallback
 would glue half of one reply to all of another. OpenAI-compatible streams have
 the agent CLIs' caps (`process::MOST_LINE` per line, `process::MOST_OUTPUT` in
-total).
+total). OpenAI-compatible streams, plain and tool, are read by one `read_round`
+(an `error` object fails the round; reasoning is the answer only when no content
+came; every line checks for a stop).
 
 ### AI pipeline
 
@@ -62,7 +64,8 @@ explain beyond the source but facts stay the source's.
 
 A `Session` is `<data>/leo/recordings/<stamp>/` with `session.json`
 (`Manifest`), a `lock` (pid + 5 s heartbeat; stale when old or the pid is dead)
-and segments. `capture::Capture` reads s16 PCM from `mic::Mic`
+and segments. Manifest, trace and lock reads use regular files and bounded reads.
+`capture::Capture` reads s16 PCM from `mic::Mic`
 (`Source::Microphone`, `Source::Screen`: macOS 14.6+ process tap or Windows
 loopback, else BlackHole or `LEO_SCREEN_DEVICE`, see `mic::find_device`;
 `Source::Replay` from `LEO_FAKE_AUDIO` at `LEO_FAKE_SPEED`; `Source::Synthetic`
@@ -70,12 +73,13 @@ in tests). `wav::Writer` writes `seg-NNNNN.part.wav`, renamed to `.wav` every
 `SEGMENT_SECS` (300) with `OVERLAP_SECS` prefilled. Paused audio is never
 written. `transcriber::Transcriber` writes `.txt` atomically, deletes the audio,
 never gives up while recording, gives up after `attempts_after_stop` (writes
-`.err`, keeps audio) unless rate-limited. `recover_parts` seals a crash's
+`.err`, keeps audio). `recover_parts` seals a crash's
 `.part.wav`. `structure_recording` groups parts by `words_per_group`
 (`long::groups`); every failure falls back to the raw transcript, so it cannot
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
+Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
 Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
 never for call tracks; omitted from JSON when off, so old cache keys hold):
@@ -101,19 +105,20 @@ retry. `assemble` prefixes `[Speaker N]` per line (`live::stitch` keeps those
 lines) and `archive` gives one passage per run (raw text). Measured on AMI
 meetings: 86–91% of transcribed speech gets the right speaker, Sortformer
 ~0.5 s per minute on Metal, ~1.6 s per minute on CPU. The ignored
-`speakers_across_models` test and `speakers.yml` (weekly, manual, PRs touching
-labelling; models over 2.2 GB only on demand) run it per curated English model
+`speakers_across_models` test and `speakers.yml` (weekly and manual: every curated
+English model; PRs touching labelling: three models; models over 2.2 GB only on
+demand; the test is built once per run) run it per model
 on a pinned, checksummed AMI excerpt: right speaker ≥ 80%, speech with text
 ≥ 75%, and word error rate against AMI's manual words (fillers and cut-off words
 left out) at most 5 points above the same model's plain transcript. Words kept
 against the plain path is only printed: Whisper's plain 5-minute parts can run
 long (whisper-large-v3: 706 words where most models give about 575).
 
-Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s;
-`CLOUD_ROLL_INTERVAL` 8 s) re-transcribe from `settled_at`, at most
+Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
+re-transcribe from `settled_at`, at most
 `LIVE_MOST_SECS` (20); at `SETTLE_AFTER_SECS` (12) settle at `live::quietest`
 between 6 s and end − 2 s; only while no segment is waiting. Typed
-points go through `Controls.points` (`recorder::points_of`) into the manifest.
+points go through `Controls.points` (`recorder::points_of`) into the session's `points.jsonl`.
 Recording needs only speech and a microphone; the writing AI is optional.
 `LEO_NO_MICROPHONE` turns the device off (tests, e2e, CI).
 
@@ -131,7 +136,7 @@ Calendar secrets use the private credentials file, or the keychain with
 Config saves are atomic and serialised: `web_settings::apply` holds one `SAVING`
 lock and `config::edit::save_document` writes through `leo_core::paths::write_atomic`
 (a private temp file, 0600, renamed over), so no save interleaves and a crash
-never truncates config.toml. `toml_edit` keeps the user's text; unrelated TOML
+never truncates config.toml; a missing `config.toml` is created the same way; every replace-a-file write uses `leo_core::paths::write_atomic`. `Config::load` keeps one parsed copy per path until the file's size, mtime, change time or inode changes (a file stamped within 2 s is read again), `save_document` writes it, or 10 s pass; env overrides are applied on every load. `toml_edit` keeps the user's text; unrelated TOML
 and legacy `[sync]` survive (tolerated, never migrated). `config/choice.rs`
 keeps writing model/effort choices and the one local speech entry;
 `web_settings::describe` never includes a key; `apply` validates every change
@@ -146,7 +151,7 @@ accuracy stays unknown. Selection lives in `<config>/speech-model.json`, files i
 `models_dir()/speech`; an empty selected ID means the user deleted the current
 model. `Library` verifies exact size and SHA-256, keeps verified size/mtime
 stamps in `<config>/speech-verified.json` (never re-hash on every launch),
-downloads at most two models into owned temp files, checks cancellation while
+downloads at most two models into owned temp files (stale ones, over 15 minutes old, are removed when the library starts), checks cancellation while
 awaiting the network and promotes atomically; linked and hard-linked models are
 refused; selection/deletion/promotion use a private file lock.
 
@@ -167,7 +172,9 @@ target, 40 s max). `vad::detector` is Silero at 0.3, Earshot at 0.5 if Silero
 cannot load. Dictation filters while capturing; the engine only cuts and pads
 clips under a second. Recordings are never trimmed: a chunk goes whole unless
 VAD, on a copy raised to speech level (median frame level to 0.1, gain 1–50),
-hears nothing. Slow catalog models skip live passes.
+hears nothing; the check runs on the caller's thread, never on the engine actor,
+and a retried recording part reuses its last result (the last eight parts are kept).
+Slow catalog models skip live passes.
 
 The speaker model (`catalog::DIARIZER`, Sortformer 4-speaker, NVIDIA Open Model
 License) is found by `Catalog::known`, never `get`: `Library` downloads, verifies
@@ -237,7 +244,10 @@ including `memories` and `daemon_auto_start`. Never disable `code_mode_host`,
 `unified_exec` or `shell_snapshot` (every reply came back empty). Watchdog:
 Claude Code stops after `QUIET_LIMIT` (180 s) silent, either CLI after
 `TOTAL_LIMIT` (15 min); the whole process group is killed and the run tried once
-more. `Process::stop` reaps children after killing the group.
+more. `Process::stop` reaps children after killing the group. A caller's stop
+(`leo_core::children::with_stop`: a flag and/or deadline, re-entered on the
+long-recording and import worker threads) reaches every launch; the margin read
+runs under `READ_LIMIT`.
 
 Usable = program on PATH (`locate`, `.cmd` on Windows); failures are retryable and
 name the sign-in step. `health::writing` is SignInNeeded only from the last
@@ -251,7 +261,7 @@ availability and sign-in use the same normalized `AgentCli::bin`.
 ### Plan limits (`usage.rs`)
 
 `<config>/usage.json` keeps the latest `Usage` (5h/7d `Window`, `seen_at`) per
-provider. Claude Code's come free with every answer (`rate_limit_event` →
+provider (saved one at a time; an unchanged reading under a minute old is not rewritten). Claude Code's come free with every answer (`rate_limit_event` →
 `from_claude`, saved even when the request failed); never send a request just to
 check, except `refresh_claude` on an explicit Refresh (`POST /api/settings/usage`
 with `{ "claude": true }`; `{}` reads Codex only): one tiny request on the first
@@ -266,14 +276,22 @@ row shows `label` (age past `STALE_AFTER`; a window past its reset reads 0%).
 
 Native Markdown extraction precedes AI writing. Office XML is parsed with
 roxmltree (`nodes_limit`, DTDs refused by default) plus a post-parse depth check
-(`MOST_DEPTH`); parts, decompressed bytes and output are bounded; relationships
-stay inside the ZIP and external links are never fetched. PDF text uses
-`lopdf::extract_text_with_limit` per page; a page number must not hide a scan and
+(`MOST_DEPTH`). Word is read one top-level paragraph or table row at a time and
+PowerPoint one slide at a time, into the import's text spill (2026-11-17,
+principle 1: no part, total, table or output limit); each piece keeps the
+`nodes_limit` and depth bounds; a part over 4 GiB uncompressed is refused and
+reading stops before the disk's free space falls under 1 GB; relationships
+stay inside the ZIP and external links are never fetched. PDF text is read
+by page id (`pdf_page_text`, the same text and the same per-page limit as
+`lopdf::extract_text_with_limit`, without walking the page list for every
+page); a page number must not hide a scan and
 text on another page must not suppress one; an unreadable scan fails with its
 page number. Scans over 16 million pixels get a 4,000 px reading copy (the PDF is
-never rewritten). Source images ≤64 million pixels, 32,768 px per side, 20 MB
-encoded; decoding under a 192 MiB allocation limit; reading images share 90 MB,
-optional figures 64 MB. Photos and scans need `ai::see`; no local OCR. A tracking
+never rewritten). A scan of any real size is read (2026-11-18, the owner's principle 1): a Flate scan over 16 million pixels is read row by row
+into the reading copy (`scaled_rows`: memory is one row plus the copy, 27 MB at 560 million pixels), a JPEG scan is decoded whole
+under a 256 MiB allocation limit (about 89 million pixels); only a page over 4,000 million pixels or 65,535 px a side is refused,
+with its size in the sentence. Reading images are written to a private `leo-import-*` folder as they are found and read six at a time (2026-11-17, principle 1: no page, scan or text-size limit; per-page and per-image bounds stay against damaged files; the 90 MB upload bound is P-C64's),
+figures are written to the import's private folder as found, every one worth showing is kept, and each part is offered only its own pages' figures (2026-11-17, principle 1: no figure, slide or byte count). Photos and scans need `ai::see`; no local OCR. A tracking
 file name (`filename::file_label`, never camera, scan, screenshot or date names)
 is kept in front of the title (`filename::with_label`; `tracking_label` for
 calendar events). Action items are the fewest that matter: one per deliverable or
@@ -314,7 +332,7 @@ discovery is bounded and fails closed (shell control and hooks included). CLI
 probes, native turns and text runs share one process-group watchdog covering
 stdin, stdout EOF, exit and pipe joins. Bridge request reads keep partial bodies
 across polling timeouts and check cancellation on Windows and Unix. A failed
-native start is logged through `diag` and shown in Health ("Felix and Codex"). Tests use
+native start is logged through `diag` and the next provider is tried; Codex's is also shown in Health ("Felix and Codex"). Tests use
 local fake servers, never paid APIs.
 
 ### What an answer used (`ai/spend.rs`)
@@ -341,14 +359,18 @@ BAAI bge-small-en-v1.5 on CPU via candle (all three Candle crates pinned to
 tokenizer and pooling unchanged). Files pinned by commit and SHA-256
 (`MODEL_MANIFEST`) in `models_dir()/bge-small-en-v1.5`, re-hashed only when they
 change, unloaded after 60 s idle once no caller holds them (loading outside the
-cache mutex). `leo update` fetches it (`ensure_meaning_model`); the app fetches
-it quietly when missing. `LEO_INSTALL_NO_MODEL` / `LEO_NO_MEANING_MODEL` turn
-that off; `LEO_MEANING_URL` / `LEO_MEANING_MANIFEST` point tests at file://.
+cache mutex). The app fetches it in the background at launch when it is
+missing or damaged (`leo_host::felix::meaning`). `LEO_INSTALL_NO_MODEL` /
+`LEO_NO_MEANING_MODEL` turn that off; tests call `fetch_from` with a file://
+source.
 
 ### Durable recording workflows
 
 `Session::archive` keeps passages, points, event context, wants, warnings and
-metadata-only diagnostics. `recorder::write_up` caches by input hash; only a
+metadata-only diagnostics.
+Typed points have no count limit (2026-11-17, principle 1): each is appended to the session's `points.jsonl`; the job view carries the newest 50 and a count, and `/api/record/{id}/points` pages the rest. A saved session that still holds a failed part's audio
+(`has_retry`) is offered for recovery while its note is in the notes list; recovery adds the part to its note's sources and leaves the
+note's text. `recorder::write_up` caches by input hash; only a
 successful caller save permits `Session::commit` and audio cleanup. Finish
 retries have a bounded window; Finish available cancels queued work but lets the
 current request finish. `long::with_profile` adds `<recording_context>` and
@@ -358,11 +380,23 @@ synced temp files. Capture opens only when requested, never because the page is
 visible; `session::awake::Awake` holds App Nap off and native recording holds a
 core activity lease until finished. Transcription attempts and filesystem
 traversal are snapshotted outside their mutexes before disk I/O; temporary
-write-up WAVs are guarded. A missing model leaves
-segments pending without `.err`; the recorder waits for a model only the finish
+write-up WAVs are guarded. A missing model, or the speech engine stopping or
+busy, leaves segments pending without `.err`; the recorder waits for a model only the finish
 window (120 s), then ends unsaved with audio kept, releasing its guards, and the
 recording stays recoverable. `recorder::resume_with_controls` exposes the finish
 control in recovery; leo-host refuses to write a note when recovery failed.
+Saving a recovered recording's sources, and the call commit, merge with an
+existing archive of the same id (`recording::merge_into`, streamed): other speakers,
+points, warnings and context are kept, and a passage already there by time and
+text keeps its stored label, so running a recovery twice changes nothing. Plain
+`recording::save` replaces (a new recording, `Session::commit`), so a corrected
+point never brings back its old wording; transcript corrections go through
+`recording::edit`. `recording::save_from(notes, note, head, passages, points)`
+takes iterators, so a caller holding its points in `points.jsonl` can save
+without holding them whole.
+While recording, the transcriber finds the next part by name and lists the
+folder only at start, when recording ends and once a minute; the drafter reads
+each transcript once.
 Capture queues are bounded; shutdown never waits on an active transcription;
 lock heartbeats join on drop. Live previews pass PCM directly (never a temp
 live.wav); `Controls.preview` false skips only new preview passes.
@@ -400,10 +434,11 @@ or microphone.
 
 ## Dictation
 
-`dictation/settings.rs` validates bounded preferences in private atomic
-`<config>/dictation.json`; a failed live rebind restores the previous file;
-malformed settings fall back without overwriting the damaged file. `RETIRED`
-keys are stripped before parsing (the struct denies unknown fields).
+`dictation/settings.rs` saves preferences in private atomic
+`<config>/dictation.json`. Custom words keep every entry in order with a
+64 MiB limit for the whole file. A failed live rebind restores the previous
+file. Malformed settings fall back without overwriting the damaged file.
+`RETIRED` keys are stripped before parsing (the struct denies unknown fields).
 `activation.rs`: hold, tap and the 300 ms hold-or-tap decision, ignoring repeats.
 `generation.rs` gates completion after taking the state lock, so cancel wins.
 The catalog refuses language "auto" for a model without `languageDetection`,
@@ -435,13 +470,21 @@ only unwrapped (code fence, `<dictation>`), never `clean_reply`. A reply must ke
 multisets, `FILLERS` don't count and number words/digits count as one token.
 Added links, pipes, backticks, dollar signs, semicolons and stray line breaks
 are refused, as are changed digits and am/pm; a spoken "no" self-correction is
-honored. The prompt carries the custom words and spoken punctuation; the chain
-has no tools; a leading `<think>` block is stripped. Failures are logged without
+honored. The polish prompt and vocabulary-capable speech models (live and batch)
+read complete custom words from the start of the list within 4,000 characters
+including separators. Local matching still uses the full list. The polish
+prompt also handles spoken punctuation. The chain has no tools and a leading
+`<think>` block is stripped. Failures are logged without
 the provider's text. The call uses `ChatProvider::complete_until` so cancel or
 deadline stops an agent CLI; every fallback returns a reason the popup shows.
 
-`capture.rs` bounds dictation to 300 s and closes the input before draining and
-transcribing. It returns `Captured { pcm, stalled }`: a capture that stalls 5 s
+`capture.rs` has no length limit (2026-11-17, principle 1) and closes the input
+before draining and transcribing. It returns `Captured { samples, stalled }`; the
+audio goes to the caller as it arrives. From 4 minutes on, `dictation::pieces`
+cuts the dictation at the first pause (at most every 5 minutes), each piece is
+transcribed while listening goes on, and the texts are joined with
+`chunking::join_transcripts`, so memory holds at most four pieces and a backlog
+waits on disk. A capture that stalls 5 s
 after first audio ends and transcribes what was heard, and `Mic::heard_signal`
 tells a silent microphone from a quiet room. Dictation input takes the loudest
 channel instead of the average (recordings keep their downmix); Windows opens a
@@ -455,6 +498,6 @@ through dictation.
 The model library lists damaged and uncatalogued GGUF files; deletion stays
 contained and never follows links.
 
-`leo update` fetches the release installer over HTTPS with time/size limits and
-never pipes a failed curl into an empty successful shell. Git backup settings and
-Health checks are retired.
+Git backup settings and Health checks are retired.
+
+Top-level writer paths use `leo_core::paths::own`. The temp room creators and cleanup share `ai::ROOM_PREFIXES` and its named prefixes.

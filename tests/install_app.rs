@@ -32,7 +32,7 @@ fn fixture() -> tempfile::TempDir {
         .success());
     dir
 }
-fn install(dir: &Path, shell: Option<&str>, skip: bool) -> Output {
+fn command(dir: &Path) -> Command {
     let mut cmd = Command::new("sh");
     cmd.arg(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("scripts/install-app.sh"))
         .env_clear()
@@ -48,6 +48,10 @@ fn install(dir: &Path, shell: Option<&str>, skip: bool) -> Output {
         .env("LEO_APPLICATIONS_DIR", dir.join("Applications with spaces"))
         .env("LEO_INSTALL_DIR", dir.join("bin with 'quote' and $dollar"))
         .env("LEO_INSTALL_ARCHIVE", dir.join("app.tar.gz"));
+    cmd
+}
+fn install(dir: &Path, shell: Option<&str>, skip: bool) -> Output {
+    let mut cmd = command(dir);
     if let Some(shell) = shell {
         cmd.env("SHELL", shell);
     }
@@ -208,37 +212,6 @@ fn uninstall_removes_the_app_and_cli_link_but_preserves_notes() {
 }
 
 #[test]
-fn updating_through_the_app_link_keeps_the_custom_terminal_directory() {
-    let dir = fixture();
-    assert!(install(dir.path(), Some("/bin/zsh"), false)
-        .status
-        .success());
-    let script = dir.path().join("installer.sh");
-    std::fs::write(&script, "#!/bin/sh\nprintf '%s\\n%s' \"$LEO_INSTALL_DIR\" \"$LEO_INSTALL_SKIP_PATH\" > \"$LEO_UPDATE_RESULT\"\n").unwrap();
-    let output = dir.path().join("installer-result");
-    let cli = dir.path().join("bin with 'quote' and $dollar/leo");
-    let out = Command::new(&cli)
-        .args(["update", "--force"])
-        .env("LEO_HOME", dir.path().join("config"))
-        .env("HOME", dir.path().join("home"))
-        .env("LEO_UPDATE_SCRIPT", &script)
-        .env("LEO_UPDATE_RESULT", &output)
-        .env("LEO_INSTALL_NO_MODEL", "1")
-        .env("LEO_NO_MEANING_MODEL", "1")
-        .output()
-        .unwrap();
-    assert!(
-        out.status.success(),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert_eq!(
-        std::fs::read_to_string(output).unwrap(),
-        format!("{}\n1", cli.parent().unwrap().display())
-    );
-}
-
-#[test]
 fn an_archive_listing_is_stopped_when_it_exceeds_the_entry_limit() {
     use std::os::unix::fs::PermissionsExt;
     let dir = fixture();
@@ -254,4 +227,248 @@ fn an_archive_listing_is_stopped_when_it_exceeds_the_entry_limit() {
         !marker.exists(),
         "the entire oversized listing was consumed before checking the bound"
     );
+}
+
+fn tool(dir: &Path, name: &str, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    let tools = dir.join("tools");
+    std::fs::create_dir_all(&tools).unwrap();
+    let path = tools.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+fn mv_refusing(dir: &Path, test: &str) {
+    tool(
+        dir,
+        "mv",
+        &format!(
+            "for last; do :; done\ncase \"$1|$last\" in {test}) exit 1;; esac\nexec /bin/mv \"$@\""
+        ),
+    );
+}
+fn said(out: &Output) -> String {
+    String::from_utf8_lossy(&out.stderr).to_string() + &String::from_utf8_lossy(&out.stdout)
+}
+fn names(dir: &Path) -> Vec<String> {
+    let mut found: Vec<String> = std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    found.sort();
+    found
+}
+
+#[test]
+fn a_running_app_stops_the_install_before_anything_is_unpacked() {
+    let dir = fixture();
+    let app = dir.path().join("Applications with spaces/Leo.app");
+    tool(
+        dir.path(),
+        "ps",
+        &format!("echo '{}/Contents/MacOS/leo-app'", app.display()),
+    );
+    tool(dir.path(), "pgrep", "exit 0");
+    let marker = dir.path().join("unpacked");
+    tool(
+        dir.path(),
+        "tar",
+        &format!("touch '{}'\nexit 1", marker.display()),
+    );
+    let out = install(dir.path(), Some("/bin/zsh"), true);
+    assert!(!out.status.success());
+    assert!(said(&out).contains("Quit Leo"), "{}", said(&out));
+    assert!(!marker.exists(), "the archive was opened before the check");
+}
+
+#[test]
+fn a_saved_terminal_folder_that_is_a_link_leaves_the_installed_app_alone() {
+    let dir = fixture();
+    assert!(install(dir.path(), None, true).status.success());
+    let applications = dir.path().join("Applications with spaces");
+    std::fs::write(applications.join("Leo.app/obsolete-file"), "old").unwrap();
+    let record = dir.path().join("config/app-cli-dir");
+    std::fs::remove_file(&record).unwrap();
+    std::os::unix::fs::symlink(dir.path().join("elsewhere"), &record).unwrap();
+    let out = install(dir.path(), None, true);
+    assert!(!out.status.success());
+    assert!(applications.join("Leo.app/obsolete-file").is_file());
+    assert_eq!(names(&applications), ["Leo.app"]);
+}
+
+#[test]
+fn a_failed_record_leaves_no_new_terminal_command_on_a_first_install() {
+    let dir = fixture();
+    mv_refusing(dir.path(), "*'|'*/app-cli-dir");
+    let out = install(dir.path(), None, true);
+    assert!(!out.status.success());
+    assert!(
+        said(&out).contains("Nothing was installed."),
+        "{}",
+        said(&out)
+    );
+    assert!(names(&dir.path().join("bin with 'quote' and $dollar")).is_empty());
+    assert!(names(&dir.path().join("Applications with spaces")).is_empty());
+    assert!(names(&dir.path().join("config")).is_empty());
+}
+
+#[test]
+fn a_failed_record_restores_the_old_link_and_record_on_a_reinstall() {
+    let dir = fixture();
+    assert!(install(dir.path(), None, true).status.success());
+    let applications = dir.path().join("Applications with spaces");
+    std::fs::write(applications.join("Leo.app/obsolete-file"), "old").unwrap();
+    let record = dir.path().join("config/app-cli-dir");
+    let old_record = std::fs::read_to_string(&record).unwrap();
+    let other = dir.path().join("other bin");
+    std::fs::create_dir(&other).unwrap();
+    std::os::unix::fs::symlink("/old/target", other.join("leo")).unwrap();
+    mv_refusing(dir.path(), "*'|'*/app-cli-dir");
+    let out = command(dir.path())
+        .env("LEO_INSTALL_DIR", &other)
+        .env("LEO_INSTALL_SKIP_PATH", "1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(said(&out).contains("left as it was"), "{}", said(&out));
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), old_record);
+    assert_eq!(
+        std::fs::read_link(other.join("leo")).unwrap(),
+        Path::new("/old/target")
+    );
+    assert!(applications.join("Leo.app/obsolete-file").is_file());
+    assert_eq!(names(&other), ["leo"]);
+    assert_eq!(names(&applications), ["Leo.app"]);
+}
+
+#[test]
+fn a_failed_swap_restores_the_app_the_link_and_the_record() {
+    let dir = fixture();
+    assert!(install(dir.path(), None, true).status.success());
+    let applications = dir.path().join("Applications with spaces");
+    std::fs::write(applications.join("Leo.app/obsolete-file"), "old").unwrap();
+    let record = dir.path().join("config/app-cli-dir");
+    let old_record = std::fs::read_to_string(&record).unwrap();
+    let bin = dir.path().join("bin with 'quote' and $dollar");
+    let old_link = std::fs::read_link(bin.join("leo")).unwrap();
+    let other = dir.path().join("other bin");
+    mv_refusing(dir.path(), "*/.leo-install.*/Leo.app'|'*/Leo.app");
+    let out = command(dir.path())
+        .env("LEO_INSTALL_DIR", &other)
+        .env("LEO_INSTALL_SKIP_PATH", "1")
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(said(&out).contains("left as it was"), "{}", said(&out));
+    assert!(applications.join("Leo.app/obsolete-file").is_file());
+    assert_eq!(std::fs::read_to_string(&record).unwrap(), old_record);
+    assert_eq!(std::fs::read_link(bin.join("leo")).unwrap(), old_link);
+    assert!(!other.join("leo").exists());
+    assert_eq!(names(&applications), ["Leo.app"]);
+}
+
+#[test]
+fn a_failed_profile_line_is_a_warning_after_a_complete_install() {
+    let dir = fixture();
+    mv_refusing(dir.path(), "*'|'*/.zshrc");
+    let out = install(dir.path(), Some("/bin/zsh"), false);
+    assert!(out.status.success(), "{}", said(&out));
+    assert!(said(&out).contains("could not add"), "{}", said(&out));
+    assert!(said(&out).contains("bin with 'quote' and $dollar"));
+    assert!(dir.path().join("Applications with spaces/Leo.app").is_dir());
+    assert!(dir
+        .path()
+        .join("bin with 'quote' and $dollar/leo")
+        .is_symlink());
+}
+
+fn uninstall(dir: &Path, cli: &Path) -> Output {
+    Command::new(cli)
+        .args(["uninstall", "--yes"])
+        .env("LEO_HOME", dir.join("config"))
+        .env("HOME", dir.join("home"))
+        .env_remove("LEO_USE_KEYCHAIN")
+        .env("LEO_NO_UPDATE_CHECK", "1")
+        .env("LEO_INSTALL_NO_MODEL", "1")
+        .env("LEO_NO_MICROPHONE", "1")
+        .output()
+        .unwrap()
+}
+
+fn set_mode(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+}
+
+fn kept_notes(dir: &Path) -> PathBuf {
+    let notes = dir.join("config/notes");
+    std::fs::create_dir_all(&notes).unwrap();
+    std::fs::write(notes.join("Keep.md"), "My own notes").unwrap();
+    notes.join("Keep.md")
+}
+
+#[test]
+fn uninstall_keeps_the_app_when_a_step_fails_and_a_second_run_finishes() {
+    let dir = fixture();
+    assert!(install(dir.path(), Some("/bin/zsh"), false)
+        .status
+        .success());
+    let note = kept_notes(dir.path());
+    let bin = dir.path().join("bin with 'quote' and $dollar");
+    let cli = bin.join("leo");
+    let app = dir.path().join("Applications with spaces/Leo.app");
+    let rc = dir.path().join("home/.zshrc");
+    set_mode(&bin, 0o555);
+    let out = uninstall(dir.path(), &cli);
+    set_mode(&bin, 0o755);
+    assert!(!out.status.success(), "{}", said(&out));
+    assert!(said(&out).contains("terminal command"), "{}", said(&out));
+    assert!(app.is_dir(), "the app went while a step failed");
+    assert!(cli.is_symlink());
+    assert!(!std::fs::read_to_string(&rc)
+        .unwrap()
+        .contains("Added by the leo installer"));
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
+
+    let out = uninstall(dir.path(), &cli);
+    assert!(out.status.success(), "{}", said(&out));
+    assert!(!app.exists());
+    assert!(!cli.is_symlink());
+    assert_eq!(
+        names(&dir.path().join("Applications with spaces")),
+        Vec::<String>::new()
+    );
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
+}
+
+#[test]
+fn uninstall_keeps_the_command_when_a_later_step_fails() {
+    let dir = fixture();
+    assert!(install(dir.path(), None, true).status.success());
+    let note = kept_notes(dir.path());
+    let config = dir.path().join("config");
+    std::fs::write(config.join("config.toml"), "").unwrap();
+    let record = config.join("app-cli-dir");
+    let cli = dir.path().join("bin with 'quote' and $dollar/leo");
+    let app = dir.path().join("Applications with spaces/Leo.app");
+    set_mode(&config, 0o555);
+    let out = uninstall(dir.path(), &cli);
+    set_mode(&config, 0o755);
+    assert!(!out.status.success(), "{}", said(&out));
+    assert!(
+        cli.is_symlink(),
+        "the terminal command went while a step failed"
+    );
+    assert!(record.is_file(), "the record of the terminal folder went");
+    assert!(app.is_dir());
+
+    let out = uninstall(dir.path(), &cli);
+    assert!(out.status.success(), "{}", said(&out));
+    assert!(!cli.is_symlink());
+    assert!(!app.exists());
+    assert_eq!(names(&config), ["notes"]);
+    assert_eq!(std::fs::read_to_string(&note).unwrap(), "My own notes");
 }

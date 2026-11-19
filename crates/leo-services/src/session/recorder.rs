@@ -1,5 +1,5 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -16,6 +16,10 @@ const POLL: Duration = Duration::from_millis(250);
 pub const SILENT_RECORDING: &str = "No sound was recorded. macOS may not be letting \
      leo use the microphone: System Settings > Privacy & Security > \
      Microphone, then quit and reopen leo.";
+
+pub const SILENT_COMPUTER_AUDIO: &str = "No sound was recorded from the computer. Check that \
+     something was playing, and on a Mac that leo may record computer audio in System \
+     Settings > Privacy & Security, then try again.";
 
 const LIVE_MOST_SECS: u64 = 20;
 
@@ -50,6 +54,7 @@ pub struct Controls {
     pub stop: Arc<AtomicBool>,
     pub pause: Arc<AtomicBool>,
     pub points: Arc<Mutex<Vec<Jotted>>>,
+    pub saved_points: Arc<AtomicUsize>,
     pub wants: Arc<Mutex<Option<String>>>,
     pub preview: Option<Arc<AtomicBool>>,
 }
@@ -71,13 +76,36 @@ pub struct Request {
     pub screen: bool,
     pub input: Source,
     pub draft: Option<DraftFn>,
+    pub turns: bool,
 }
 
 pub fn transcribe_segment() -> TranscribeFn {
     Arc::new(|path: &Path| {
         let session = Session::open(path.parent().unwrap_or(Path::new("."))).ok();
         let start = Instant::now();
-        let outcome = crate::ai::transcribe_outcome(path).map_err(|e| e.to_string());
+        let turns = session
+            .as_ref()
+            .filter(|s| s.manifest.turns)
+            .zip(path.file_name().and_then(|name| name.to_str()))
+            .and_then(|(s, name)| match session::index_of(name) {
+                Some((index, "wav")) => Some(s.dir.join(session::turns_name(index))),
+                _ => None,
+            });
+        let outcome = match turns {
+            Some(file) => crate::ai::transcribe_turns(path)
+                .and_then(|timed| {
+                    leo_core::paths::write_atomic(&file, &serde_json::to_string(&timed)?)?;
+                    let texts: Vec<&str> = timed.iter().map(|(_, text)| text.as_str()).collect();
+                    Ok(crate::ai::chain::ChainOutcome {
+                        value: crate::speech::chunking::join_transcripts(&texts),
+                        provider: "local speech with times".into(),
+                        fallbacks: Vec::new(),
+                        spent: None,
+                    })
+                })
+                .map_err(|e| e.to_string()),
+            None => crate::ai::transcribe_outcome(path).map_err(|e| e.to_string()),
+        };
         if let Some(session) = session {
             let detail = match &outcome {
                 Ok(o) => format!(
@@ -132,6 +160,7 @@ pub struct Drafter {
     cancel: Arc<AtomicBool>,
     failures: usize,
     ended: bool,
+    read: std::collections::BTreeMap<u32, session::Segment>,
 }
 
 impl Drafter {
@@ -145,6 +174,7 @@ impl Drafter {
             cancel: Default::default(),
             failures: 0,
             ended: false,
+            read: Default::default(),
         }
     }
 
@@ -166,11 +196,21 @@ impl Drafter {
             self.profile = session.manifest.profile.clone();
         }
         let upto = self.done.as_ref().map_or(0, |d| d.upto);
-        let segments: Vec<session::Segment> = session
-            .segments()
-            .into_iter()
-            .filter(|s| s.index >= upto)
-            .collect();
+        for index in session.settled().0 {
+            if self.read.contains_key(&index) {
+                continue;
+            }
+            if let Some(segment) = session.segment(index).filter(|s| {
+                matches!(
+                    s.state,
+                    session::SegmentState::Done(_) | session::SegmentState::Failed(_)
+                )
+            }) {
+                self.read.insert(index, segment);
+            }
+        }
+        let segments: Vec<session::Segment> =
+            self.read.range(upto..).map(|(_, s)| s.clone()).collect();
         let run: Vec<session::Segment> = segments
             .iter()
             .enumerate()
@@ -192,8 +232,9 @@ impl Drafter {
             return;
         }
         let fresh = session::assemble(&run, session.manifest.segment_secs).parts;
-        let all = session.assemble().parts;
-        let points = session.manifest.jotted();
+        let read: Vec<session::Segment> = self.read.values().cloned().collect();
+        let all = session::assemble(&read, session.manifest.segment_secs).parts;
+        let points = session.jotted();
         let profile = self.profile.clone();
         let dir = session.dir.clone();
         let (start, end) = (fresh[0].start_secs, fresh[fresh.len() - 1].end_secs);
@@ -318,7 +359,7 @@ pub fn drafts_for(
         serde_json::from_slice(&std::fs::read(session.dir.join(DRAFTS)).ok()?).ok()?;
     let key = draft_key(
         parts,
-        &session.manifest.jotted(),
+        &session.jotted(),
         &session.manifest.profile,
         drafted.upto,
     );
@@ -432,14 +473,6 @@ fn live_model_ready() -> bool {
             .is_ok_and(|m| m.live)
 }
 
-fn live_pace() -> Duration {
-    if crate::ai::parallel_transcriptions() == 1 {
-        live::ROLL_INTERVAL
-    } else {
-        live::CLOUD_ROLL_INTERVAL
-    }
-}
-
 fn hear(samples: &[i16]) -> Option<String> {
     let selected = crate::speech::library::library().ok()?.selected().ok()?;
     let pcm = samples.iter().map(|s| *s as f32 / 32768.0).collect();
@@ -458,7 +491,15 @@ fn hear(samples: &[i16]) -> Option<String> {
     })
 }
 
-fn roll(capture: &Capture, state: &mut Live, emit: &dyn Fn(Event)) {
+fn silent_for(session: &Session) -> &'static str {
+    if session.manifest.screen {
+        SILENT_COMPUTER_AUDIO
+    } else {
+        SILENT_RECORDING
+    }
+}
+
+fn roll(capture: &Capture, state: &mut Live, screen: bool, emit: &dyn Fn(Event)) {
     let rate = wav::RATE as u64;
     let from = state.settled_at.max(state.base);
     let (start, samples) = capture.tail(from, (LIVE_MOST_SECS * rate) as usize);
@@ -477,9 +518,16 @@ fn roll(capture: &Capture, state: &mut Live, emit: &dyn Fn(Event)) {
         state.silent_slices += 1;
         if state.silent_slices >= 4 && !state.warned_silent {
             state.warned_silent = true;
-            emit(Event::Fallback {
-                from: "no sound from the microphone".to_string(),
-                to: "check System Settings > Privacy & Security > Microphone".to_string(),
+            emit(if screen {
+                Event::Fallback {
+                    from: "no sound from the computer".to_string(),
+                    to: "check that something is playing".to_string(),
+                }
+            } else {
+                Event::Fallback {
+                    from: "no sound from the microphone".to_string(),
+                    to: "check System Settings > Privacy & Security > Microphone".to_string(),
+                }
             });
         }
         return;
@@ -517,7 +565,6 @@ pub fn finish(
     updates: &Receiver<Update>,
     state: &mut Live,
     emit: &dyn Fn(Event),
-    silent: &str,
     finish_now: &AtomicBool,
 ) {
     session.manifest.stopped = true;
@@ -529,34 +576,32 @@ pub fn finish(
     }
     transcriber.recording_ended();
     let segment_samples = session.manifest.segment_secs * wav::RATE as u64;
+    let (mut settled, total) = session.settled();
     let mut no_model = false;
-    let mut take = |update: Update, state: &mut Live| {
-        if let Update::Failed { error, .. } = &update {
-            no_model |= session::transcriber::waiting_for_model(error);
-        }
-        state.apply(update, emit, segment_samples);
-    };
+    let mut take =
+        |update: Update, state: &mut Live, settled: &mut std::collections::BTreeSet<u32>| {
+            match &update {
+                Update::Done { index, .. } => {
+                    settled.insert(*index);
+                }
+                Update::Failed { index, error } => {
+                    settled.insert(*index);
+                    no_model |= session::transcriber::waiting_for_model(error);
+                }
+                _ => {}
+            }
+            state.apply(update, emit, segment_samples);
+        };
     while !transcriber.is_finished() {
         if finish_now.load(Ordering::Relaxed) {
             transcriber.cancel();
         }
         for update in updates.try_iter() {
-            take(update, state);
+            take(update, state, &mut settled);
         }
-        let segments = session.segments();
-        let total = segments.len();
-        let done = segments
-            .iter()
-            .filter(|s| {
-                matches!(
-                    s.state,
-                    session::SegmentState::Done(_) | session::SegmentState::Failed(_)
-                )
-            })
-            .count();
         emit(Event::Progress {
             label: "Transcribing the recording".to_string(),
-            steps: (total > 1).then_some((done, total)),
+            steps: (total > 1).then_some((settled.len().min(total), total)),
         });
         state.show(emit);
         std::thread::sleep(POLL);
@@ -576,7 +621,7 @@ pub fn finish(
         );
     }
     for update in updates.try_iter() {
-        take(update, state);
+        take(update, state, &mut settled);
     }
     let assembled = session.assemble();
     if assembled.pending > 0 {
@@ -587,9 +632,9 @@ pub fn finish(
         }));
         return;
     }
-    if assembled.is_silent() && session.manifest.points.is_empty() {
+    if assembled.is_silent() && session.points().is_empty() {
         let _ = std::fs::remove_dir_all(&session.dir);
-        emit(Event::Failed(silent.to_string()));
+        emit(Event::Failed(silent_for(&session).to_string()));
         return;
     }
     label_speakers(
@@ -624,6 +669,13 @@ pub fn finish(
         transcript: assembled.text(),
         session: session.dir.clone(),
     });
+}
+
+fn policy_for(session: &Session) -> Policy {
+    Policy {
+        keep_parts: kept_parts(session),
+        ..Policy::default()
+    }
 }
 
 fn kept_parts(session: &Session) -> u32 {
@@ -729,11 +781,7 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
     let transcriber = Transcriber::start(
         &session.dir,
         transcribe_segment(),
-        Policy {
-            workers: crate::ai::parallel_transcriptions(),
-            keep_parts: kept_parts(&session),
-            ..Policy::default()
-        },
+        policy_for(&session),
         false,
         updates_tx,
     );
@@ -744,7 +792,6 @@ pub fn resume_with_controls(dir: &Path, controls: &Controls, emit: &dyn Fn(Event
         &updates,
         &mut state,
         emit,
-        SILENT_RECORDING,
         &controls.finish_now,
     );
 }
@@ -758,6 +805,12 @@ fn take_wants(session: &mut Session, controls: &Controls) -> bool {
     }
     session.manifest.profile.wants = wants;
     true
+}
+
+fn lock_or_remove(session: &Session) -> anyhow::Result<session::Lock> {
+    session.lock().inspect_err(|_| {
+        let _ = std::fs::remove_dir_all(&session.dir);
+    })
 }
 
 pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
@@ -780,6 +833,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         screen,
         input,
         draft,
+        turns,
     } = request;
     let labelled = profile.as_ref().is_some_and(|p| p.speakers);
     let drafting = draft.is_some() && append_to.is_none() && !labelled;
@@ -794,10 +848,11 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         if let Some(profile) = profile {
             manifest.profile = profile;
         }
+        manifest.turns = turns;
         let session = Session::create(&root, manifest)?;
         session.trace("capture", "Recording started");
         session.trace("drafting", if drafting { "on" } else { "off" });
-        let lock = session.lock()?;
+        let lock = lock_or_remove(&session)?;
         let opened = Capture::start(&session.dir, 0, session.manifest.segment_secs, input);
         match opened {
             Ok(capture) => Ok((session, lock, capture)),
@@ -818,19 +873,14 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     let transcriber = Transcriber::start(
         &session.dir,
         transcribe_segment(),
-        Policy {
-            workers: crate::ai::parallel_transcriptions(),
-            keep_parts: kept_parts(&session),
-            ..Policy::default()
-        },
+        policy_for(&session),
         true,
         updates_tx,
     );
     let segment_samples = session.manifest.segment_secs * wav::RATE as u64;
-    let mut state = Live::new(live_pace());
+    let mut state = Live::new(live::ROLL_INTERVAL);
     let mut last_roll = Instant::now() - live::ROLL_INTERVAL;
     let mut last_draft = Instant::now();
-    let mut saved_points = 0;
     let mut save_failed = false;
     let mut heard_up_to = 0;
     let mut lost_up_to = 0;
@@ -839,20 +889,12 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         std::thread::sleep(POLL);
         capture.set_paused(controls.pause.load(Ordering::Relaxed));
 
-        let latest_points = controls.points.lock().ok().map(|points| points_of(&points));
-        if let Some(points) = latest_points.filter(|points| points.len() != saved_points) {
-            let count = points.len();
-            session.manifest.points = points;
-            match session.save() {
-                Ok(()) => {
-                    saved_points = count;
-                    save_failed = false;
-                }
-                Err(e) if !std::mem::replace(&mut save_failed, true) => {
-                    session.trace("save-failed", &format!("could not save typed points: {e}"));
-                }
-                Err(_) => {}
+        match save_points(&session, controls) {
+            Ok(()) => save_failed = false,
+            Err(e) if !std::mem::replace(&mut save_failed, true) => {
+                session.trace("save-failed", &format!("could not save typed points: {e}"));
             }
+            Err(_) => {}
         }
         if take_wants(&mut session, controls) {
             let _ = session.save();
@@ -873,7 +915,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             lost_up_to = lost;
         }
         let secs = capture.recorded_secs() as u64;
-        let backlog = session::transcriber::waiting(&session.dir).len();
+        let backlog = transcriber.backlog();
         if let Some(drafter) = drafter
             .as_mut()
             .filter(|_| last_draft.elapsed() >= DRAFT_EVERY)
@@ -911,7 +953,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             && live_model_ready()
         {
             last_roll = Instant::now();
-            if let Err(message) = caught(|| roll(&capture, &mut state, emit)) {
+            if let Err(message) =
+                caught(|| roll(&capture, &mut state, session.manifest.screen, emit))
+            {
                 state.interval = live::backoff(state.interval);
                 leo_core::diag::warn(format!(
                     "live transcription hit a problem ({message}); the recording continues"
@@ -948,7 +992,6 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         &updates,
         &mut state,
         emit,
-        SILENT_RECORDING,
         &controls.finish_now,
     );
     if let Some(drafter) = drafter {
@@ -961,10 +1004,29 @@ fn final_points(session: &mut Session, controls: &Controls, emit: &dyn Fn(Event)
         label: "Transcribing the recording".to_string(),
         steps: None,
     });
-    if let Ok(points) = controls.points.lock() {
-        session.manifest.points = points_of(&points);
+    if let Err(e) = save_points(session, controls) {
+        session.trace("save-failed", &format!("could not save typed points: {e}"));
+        emit(Event::Warning(
+            "Some typed points could not be saved; check free disk space.".into(),
+        ));
     }
     take_wants(session, controls);
+}
+
+fn save_points(session: &Session, controls: &Controls) -> anyhow::Result<()> {
+    let saved = controls.saved_points.load(Ordering::Acquire);
+    let fresh = match controls.points.lock() {
+        Ok(points) => points_of(points.get(saved..).unwrap_or_default()),
+        Err(_) => return Ok(()),
+    };
+    if fresh.is_empty() {
+        return Ok(());
+    }
+    let added = session.add_points(&fresh)?;
+    controls
+        .saved_points
+        .store(saved + added as usize, Ordering::Release);
+    Ok(())
 }
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
@@ -1000,14 +1062,14 @@ pub fn write_up(
         "Writing notes from transcript and typed points",
     );
     let assembled = session.assemble();
-    let points = session.manifest.jotted();
+    let points = session.jotted();
     use sha2::{Digest, Sha256};
     let key = base64::Engine::encode(
         &base64::engine::general_purpose::STANDARD,
         Sha256::digest(serde_json::to_vec(&(
             assembled.text(),
             &assembled.failed,
-            &session.manifest.points,
+            &session.points(),
             &session.manifest.profile,
             existing,
         ))?),
@@ -1228,6 +1290,17 @@ mod tests {
         }
     }
     #[test]
+    fn a_recording_without_a_model_uses_one_worker_and_the_local_pace() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", false)).unwrap();
+        assert_eq!(policy_for(&session).workers, 1);
+        assert_eq!(
+            Live::new(live::ROLL_INTERVAL).interval,
+            Duration::from_secs(3)
+        );
+    }
+
+    #[test]
     fn hiding_only_disables_preview_and_resume_keeps_capture_controls_intact() {
         let mut controls = Controls::default();
         assert!(controls.preview_enabled());
@@ -1240,6 +1313,106 @@ mod tests {
             assert!(!controls.pause.load(Ordering::Acquire));
             assert!(!controls.finish_now.load(Ordering::Acquire));
         }
+    }
+
+    #[test]
+    fn a_start_that_cannot_lock_leaves_no_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", true)).unwrap();
+        std::fs::create_dir(session.dir.join("lock")).unwrap();
+        assert!(lock_or_remove(&session).is_err());
+        assert!(std::fs::read_dir(root.path()).unwrap().next().is_none());
+        assert!(Session::unfinished(root.path()).is_empty());
+    }
+
+    fn ending_of_a_silent_recording(screen: bool) -> Option<Event> {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", screen)).unwrap();
+        wav::write(&session.dir.join(wav::done_name(0)), &vec![0i16; 16_000]).unwrap();
+        let (tx, updates) = mpsc::channel();
+        let transcriber = Transcriber::start(
+            &session.dir,
+            std::sync::Arc::new(|_| Ok("unused".into())),
+            Policy::default(),
+            false,
+            tx,
+        );
+        let events = std::sync::Mutex::new(Vec::new());
+        finish(
+            session,
+            transcriber,
+            &updates,
+            &mut Live::new(live::ROLL_INTERVAL),
+            &|event| events.lock().unwrap().push(event),
+            &AtomicBool::new(false),
+        );
+        events.into_inner().unwrap().pop()
+    }
+
+    #[test]
+    fn a_silent_computer_audio_recording_is_told_about_computer_audio() {
+        assert_eq!(
+            ending_of_a_silent_recording(true),
+            Some(Event::Failed(SILENT_COMPUTER_AUDIO.to_string()))
+        );
+    }
+
+    #[test]
+    fn a_silent_microphone_recording_keeps_the_microphone_sentence() {
+        assert_eq!(
+            ending_of_a_silent_recording(false),
+            Some(Event::Failed(SILENT_RECORDING.to_string()))
+        );
+    }
+
+    #[test]
+    fn progress_after_stop_counts_parts_settled_before_and_after() {
+        let root = tempfile::tempdir().unwrap();
+        let session = Session::create(root.path(), Manifest::new(None, None, "", false)).unwrap();
+        let dir = session.dir.clone();
+        for index in 0..3 {
+            std::fs::write(dir.join(format!("seg-{index:05}.txt")), "said").unwrap();
+        }
+        for index in 3..5 {
+            wav::write(&dir.join(wav::done_name(index)), &vec![3000i16; 16_000]).unwrap();
+        }
+        let (tx, updates) = mpsc::channel();
+        let transcriber = Transcriber::start(
+            &dir,
+            std::sync::Arc::new(|_| {
+                std::thread::sleep(Duration::from_millis(400));
+                Ok("said".into())
+            }),
+            Policy {
+                workers: 1,
+                ..Policy::default()
+            },
+            false,
+            tx,
+        );
+        let events = std::sync::Mutex::new(Vec::new());
+        finish(
+            session,
+            transcriber,
+            &updates,
+            &mut Live::new(live::ROLL_INTERVAL),
+            &|event| events.lock().unwrap().push(event),
+            &AtomicBool::new(false),
+        );
+        let steps: Vec<(usize, usize)> = events
+            .into_inner()
+            .unwrap()
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::Progress { steps, .. } => steps,
+                _ => None,
+            })
+            .collect();
+        assert!(steps.len() >= 2, "{steps:?}");
+        assert!(steps.iter().all(|&(_, total)| total == 5), "{steps:?}");
+        assert!(steps[0].0 >= 3, "{steps:?}");
+        assert!(steps.windows(2).all(|w| w[0].0 <= w[1].0), "{steps:?}");
+        assert!(steps.last().unwrap().0 >= 4, "{steps:?}");
     }
 
     #[test]
@@ -1268,7 +1441,6 @@ mod tests {
             &updates,
             &mut Live::new(live::ROLL_INTERVAL),
             &|event| events.lock().unwrap().push(event),
-            SILENT_RECORDING,
             &AtomicBool::new(false),
         );
         let events = events.into_inner().unwrap();
@@ -1278,7 +1450,11 @@ mod tests {
             events.last()
         );
         assert!(dir.join(wav::done_name(0)).exists());
-        assert_eq!(Session::unfinished(root.path()), [dir]);
+        let found: Vec<PathBuf> = Session::unfinished(root.path())
+            .into_iter()
+            .map(|s| s.dir)
+            .collect();
+        assert_eq!(found, [dir]);
     }
 
     #[test]
@@ -1295,8 +1471,9 @@ mod tests {
                 });
             }
         });
-        assert_eq!(session.manifest.points.len(), 1);
-        assert_eq!(session.manifest.points[0].text, "The pasted slide");
+        assert_eq!(session.points().len(), 1);
+        assert_eq!(session.points()[0].text, "The pasted slide");
+        assert_eq!(controls.saved_points.load(Ordering::Acquire), 1);
     }
 
     fn drafting_session(dir: &Path, files: &[(&str, &str)]) -> Session {
@@ -1361,6 +1538,30 @@ mod tests {
 
     fn budget() -> crate::ai::budget::Budget {
         crate::ai::budget::Budget::AGENT
+    }
+
+    #[test]
+    fn the_drafter_reads_each_transcript_once() {
+        let root = tempfile::tempdir().unwrap();
+        let session = drafting_session(root.path(), &[("seg-00000.txt", "first stretch")]);
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut drafter = Drafter::new(counting(&calls, "## First\n- one"), budget());
+        drafter.tick(&session, 0);
+        settle(&mut drafter, &session);
+        std::fs::write(session.dir.join("seg-00001.txt"), "second stretch").unwrap();
+        let all = session.assemble().parts;
+        std::fs::remove_file(session.dir.join("seg-00000.txt")).unwrap();
+        std::fs::create_dir(session.dir.join("seg-00000.txt")).unwrap();
+        drafter.tick(&session, 0);
+        settle(&mut drafter, &session);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let done = drafter.done.clone().unwrap();
+        assert_eq!(done.upto, 2);
+        let points = session.jotted();
+        assert_eq!(
+            done.key,
+            draft_key(&all, &points, &session.manifest.profile, 2)
+        );
     }
 
     #[test]

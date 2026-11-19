@@ -113,6 +113,27 @@
     return [when, PENDING_KINDS[p.source], p.directory || 'Top level'].filter(Boolean).join(' · ');
   }
 
+  function mergePages(shown, page) {
+    const ids = new Set((shown.pending || []).map((p) => p.id));
+    return { ...page, pending: [...(shown.pending || []), ...(page.pending || []).filter((p) => !ids.has(p.id))], more: page.more, after: page.after };
+  }
+
+  function earlierFirst(earlier, shown) {
+    const seen = new Set();
+    return [...earlier, ...shown].filter(([at]) => !seen.has(at) && seen.add(at)).sort((a, b) => a[0] - b[0]);
+  }
+
+  function placed(view) {
+    const points = view.points || [];
+    const first = (view.points_total ?? points.length) - points.length;
+    return points.map(([at, text], k) => [first + k, at, text]);
+  }
+
+  function unsavedLine(n, more) {
+    if (more) return `${n} or more recordings weren't saved`;
+    return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
+  }
+
   function failureOf(view) {
     const error = typeof view.error === 'string' ? view.error.slice(0, 12000) : '';
     const silent = Boolean(error) && error.split('; ').every((part) => /^(?:You: |Others: )?No sound was recorded\./.test(part));
@@ -132,7 +153,7 @@
 
   async function saveScreenshot(view, file, encode, api, current) {
     if (!live(view)) return null;
-    if (!file || !/^image\/(png|jpeg|gif|webp)$/.test(file.type) || file.size > 20 * 1024 * 1024) throw new Error('Paste a PNG, JPEG, GIF or WebP screenshot under 20 MB.');
+    if (!file || !/^image\/(png|jpeg|gif|webp)$/.test(file.type) ) throw new Error('Paste a PNG, JPEG, GIF or WebP screenshot.');
     const id = view.id;
     const at = view.secs;
     const data = await encode(file);
@@ -142,7 +163,7 @@
   }
 
   function create(deps) {
-    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields } = deps;
+    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields, choiceCards, syncChoiceCards, bytes } = deps;
     const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
@@ -167,6 +188,7 @@
           return true;
         }
       })(),
+      earlier: [],
       wantsDraft: null,
       wantsState: '',
       wantsTimer: 0,
@@ -216,6 +238,7 @@
     function accept(view) {
       const before = s.view;
       const warnings = before && before.id === view.id ? before.warnings.filter((w) => !view.warnings.includes(w)) : [];
+      s.earlier = before && before.id === view.id && s.earlier.length ? earlierFirst(s.earlier, placed(before)) : before && before.id === view.id ? s.earlier : [];
       s.view = { ...view, warnings: [...view.warnings, ...warnings] };
       if (view.state === 'failed' && !(before && before.state === 'failed')) api('/api/record').then((ov) => { s.overview = ov; draw(); }).catch(() => {});
       feedFromServer(view);
@@ -232,7 +255,8 @@
 
     async function start(source, directory, title, profile) {
       const made = await api('/api/record', { method: 'POST', body: { source, directory, title, profile } });
-      s.view = { id: made.id, source, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], note: null, error: null };
+      s.view = { id: made.id, source, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], points_total: 0, note: null, error: null };
+      s.earlier = [];
       s.wantsDraft = null;
       s.wantsState = '';
       s.follow = true;
@@ -350,16 +374,14 @@
       return `${icon.replace('<svg ', `<svg x="12" y="${y - 8}" width="16" height="16" `)}<path class="d-wave" d="${bars}"/>`;
     }
 
-    function kindChoices() {
+    function kindChoices(current = 'microphone') {
       const art = {
         microphone: track(icons.mic, 26),
         screen: track(icons.screen, 26),
         call: track(icons.mic, 16) + track(icons.screen, 36),
       };
-      return `<div class="rec-kinds" role="radiogroup" aria-label="What to record">${['microphone', 'screen', 'call']
-        .map((kind, i) => `<label class="rec-kind"><input type="radio" name="rec-kind" value="${kind}"${i === 0 ? ' checked' : ''}>
-            <span class="rec-kind-body choice-pick"><span class="choice-diagram" aria-hidden="true"><svg viewBox="0 0 120 52">${art[kind]}</svg></span><b class="choice-title">${KINDS[kind].title}</b><span class="sub choice-about">${esc(KINDS[kind].about)}</span></span></label>`)
-        .join('')}</div>`;
+      const choices = Object.keys(KINDS).map((kind) => [kind, KINDS[kind].title, KINDS[kind].about, `<svg viewBox="0 0 120 52">${art[kind]}</svg>`]);
+      return choiceCards({ label: 'What to record', name: 'rec-kind', className: 'rec-kinds', current, choices });
     }
 
     function speakersOn() {
@@ -382,7 +404,7 @@
       const missing = speakersOn() && model && !model.verified;
       const note = !missing ? '' : getting
         ? `Downloading the speaker model… ${Math.floor((100 * job.bytes) / Math.max(1, job.total))}%`
-        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${Math.round(model.size / 1048576)} MB, stays on this computer).`;
+        : `${job && job.state === 'failed' ? 'The download failed. ' : ''}Labels need the speaker model (${bytes(model.size)}, stays on this computer).`;
       return `<label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span>${settingsSwitch('id="rec-speakers"', speakersOn())}</label>`
         + (missing ? `<p class="set-note" id="rec-speakers-model">${esc(note)}${getting ? '' : ' <button type="button" class="btn plain sm" id="rec-speakers-get">Download</button>'}</p>` : '');
     }
@@ -393,7 +415,7 @@
       redrawSpeakers(box);
       const job = s.speakerModel && s.speakerModel.progress;
       clearTimeout(s.speakerPoll);
-      if (job && job.state === 'downloading') s.speakerPoll = setTimeout(() => { if (box.isConnected && box.querySelector('#rec-speakers-box')) speakerModel(box); }, 1000);
+      if (job && job.state === 'downloading') s.speakerPoll = setTimeout(() => { if (onScreen() && box.isConnected && box.querySelector('#rec-speakers-box')) speakerModel(box); }, 1000);
     }
 
     function redrawSpeakers(box) {
@@ -426,7 +448,7 @@
       if (back) back.focus();
     }
 
-    function drawIdle(folders, here) {
+    function drawIdle(folders, here, kind) {
       const ov = s.overview || {};
       const upcoming = (s.calendar && s.calendar.events) || [];
       const picked = s.event !== null ? upcoming[s.event] : null;
@@ -440,14 +462,14 @@
         + (micDenied('microphone') ? '<p class="set-note">leo can’t hear: microphone access is off. <button class="btn plain sm" data-action="app-command" data-app-action="microphone">' + (desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings') + '</button></p>' : '')
         + (ov.checks && ov.checks.headset ? `<p class="set-note" id="rec-headset" hidden>${esc(HEADSET)}</p>` : '');
       const recover = pending.length
-        ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}</div>`
+        ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}${ov.more ? '<button type="button" class="btn plain sm" data-action="rec-older">Show older</button>' : ''}</div>`
         : '';
       return `<div class="rec rec-idle">
         <div class="section-title">Record</div>
         ${recover ? `<section class="set-card"><header><h3>Not saved yet</h3></header>${recover}</section>` : ''}
         <section class="set-card rec-card">
-          ${kindChoices()}
-          ${noteFields({ id: 'rec', folders, here, most: 4000, before: event })}
+          ${kindChoices(kind)}
+          ${noteFields({ id: 'rec', folders, here, reads: 4000, before: event })}
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
@@ -464,13 +486,16 @@
       const v = s.view;
       const paused = v.state === 'paused';
       const transcript = v.transcript ? esc(v.transcript) : `<span class="hint">${paused ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
-      const points = v.points.length ? `<ul class="rec-points">${v.points.map(([at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
+      const listed = earlierFirst(s.earlier, placed(v));
+      const more = listed.length && listed[0][0] > 0 ? '<button type="button" class="btn plain sm" data-action="rec-earlier">Show earlier points</button>' : '';
+      const points = listed.length ? `${more}<ul class="rec-points">${listed.map(([, at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
       const warnings = v.warnings.map((w) => `<p class="set-note warn">${esc(w)}</p>`).join('');
       const kind = v.source === 'nativecall' ? 'Call · You + Others' : v.source === 'microphone' ? 'Microphone' : 'Screen';
       const controls = `<div class="rec-buttons">
             <button class="rec-round plain" data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}">${paused ? '<svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>' : '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>'}<span>${paused ? 'Resume' : 'Pause'}</span></button>
             <button class="rec-round stop rec-stop" data-action="rec-stop" aria-label="Stop and save"><span class="rec-square"></span><span>Stop and save</span></button>
           </div>`;
+      const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       return `<div class="rec rec-live${paused ? ' paused' : ''}">
         <section class="set-card rec-live-card">
           <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind}</span></div>
@@ -491,7 +516,8 @@
         <section class="set-card rec-wants-card">
           <header><h3>What you want from the notes</h3><span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></header>
           <p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p>
-          <textarea id="rec-wants-live" class="set-input rec-wants" rows="2" maxlength="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(s.wantsDraft !== null ? s.wantsDraft : v.wants || '')}</textarea>
+          <textarea id="rec-wants-live" class="set-input rec-wants" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
+          <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
         </section>
       </div>`;
     }
@@ -564,6 +590,8 @@
       if (fill && call && wants && !wants.value.trim()) wants.value = MEETING_WANTS;
       const speakers = box.querySelector('#rec-speakers-box');
       if (speakers) speakers.hidden = call;
+      const group = box.querySelector('.rec-kinds');
+      if (group) syncChoiceCards(group);
     }
 
     function preselect(box, asked) {
@@ -628,7 +656,7 @@
       s.page = page;
       s.paused = page === 'live' ? v.state === 'paused' : undefined;
       const paint = () => {
-        if (page === 'idle') box.innerHTML = drawIdle(folders, here);
+        if (page === 'idle') box.innerHTML = drawIdle(folders, here, form && form.kind);
         else if (page === 'live') {
           box.innerHTML = drawLive();
           s.heard = '';
@@ -733,7 +761,7 @@
       const text = area.value;
       area.value = '';
       addPoint(text).catch((e) => {
-        area.value = text;
+        if (e.status !== 503) area.value = text;
         toast(e.message, { bad: true });
       });
     }
@@ -787,6 +815,7 @@
       if (!onScreen()) return;
       pollNow();
       paintWaveNow();
+      if (s.speakerModel?.progress?.state === 'downloading' && s.container?.isConnected && s.container.querySelector('#rec-speakers-box')) speakerModel(s.container);
     }
     root.document.addEventListener('visibilitychange', recordingVisibility);
     root.addEventListener('leo-visibility', recordingVisibility);
@@ -830,7 +859,23 @@
       async recover(id) {
         await api(`/api/record/${id}/recover`,{method:'POST'}); await refresh();
       },
+      async older() {
+        if (!s.overview?.more) return;
+        const page = await api('/api/record?after=' + encodeURIComponent(s.overview.after));
+        s.overview = mergePages(s.overview, page);
+        draw();
+      },
 
+      async earlier() {
+        if (!s.view) return;
+        const listed = earlierFirst(s.earlier, placed(s.view));
+        if (!listed.length || listed[0][0] <= 0) return;
+        const id = s.view.id;
+        const page = await api(`/api/record/${id}/points?before=${listed[0][0]}`);
+        if (!s.view || s.view.id !== id) return;
+        s.earlier = earlierFirst(page.points.map(([at, text], k) => [page.from + k, at, text]), s.earlier);
+        draw();
+      },
       point: submitPoint,
       dismiss() {
         if (!s.view || s.view.state !== 'failed') return;
@@ -864,5 +909,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

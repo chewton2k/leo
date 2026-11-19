@@ -2,7 +2,7 @@ use crate::reply::error;
 use crate::AppState;
 use anyhow::Result;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     Json,
@@ -21,13 +21,13 @@ pub struct EventStarting {
 pub trait AppApi: Send + Sync {
     fn view(&self) -> Result<Value>;
     fn change(&self, value: Value) -> Result<Value>;
-    fn health(&self, notes: &Path) -> Result<Value>;
+    fn health(&self, notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<Value>;
     fn event_starting(&self, _event: EventStarting) {}
 }
 async fn call(
     api: Option<Arc<dyn AppApi>>,
     change: Option<Value>,
-    notes: Option<PathBuf>,
+    notes: Option<(PathBuf, leo_core::store::Facts, bool)>,
     margin: Option<String>,
 ) -> Response {
     let Some(api) = api else {
@@ -46,8 +46,8 @@ async fn call(
         );
     }
     match tokio::task::spawn_blocking(move || {
-        if let Some(notes) = notes {
-            let mut view = api.health(&notes)?;
+        if let Some((notes, facts, fresh)) = notes {
+            let mut view = api.health(&notes, facts, fresh)?;
             if let (Some(line), Some(sections)) = (margin, view["sections"].as_array_mut()) {
                 sections.push(json!({
                     "title": "Felix",
@@ -56,10 +56,10 @@ async fn call(
             }
             Ok(view)
         } else {
-            if let Some(change) = change {
-                api.change(change)?;
+            match change {
+                Some(change) => api.change(change),
+                None => api.view(),
             }
-            api.view()
         }
     })
     .await
@@ -87,15 +87,24 @@ pub(crate) async fn change(
     };
     call(state.app_settings.clone(), Some(value), None, None).await
 }
-pub(crate) async fn health(State(state): State<AppState>) -> Response {
-    let notes = match state.read_store(|s| Ok(s.notes_dir.clone())).await {
-        Ok(notes) => notes,
-        Err(status) => return status.into_response(),
+#[derive(serde::Deserialize, Default)]
+pub(crate) struct HealthQuery {
+    #[serde(default)]
+    fresh: bool,
+}
+pub(crate) async fn health(
+    State(state): State<AppState>,
+    Query(query): Query<HealthQuery>,
+) -> Response {
+    let facts = match state.read_store(|store| Ok(store.facts())).await {
+        Ok(facts) => facts,
+        Err(status) => return error(status, crate::reply::sentence(status)),
     };
+    let notes = state.notes_dir.clone();
     call(
         state.app_settings.clone(),
         None,
-        Some(notes),
+        Some((notes, facts, query.fresh)),
         state.margin.problem(),
     )
     .await
@@ -105,9 +114,13 @@ pub(crate) async fn health(State(state): State<AppState>) -> Response {
 mod tests {
     use super::*;
     #[derive(Default)]
-    struct Fake(std::sync::Mutex<Vec<serde_json::Value>>);
+    struct Fake(
+        std::sync::Mutex<Vec<serde_json::Value>>,
+        std::sync::atomic::AtomicUsize,
+    );
     impl AppApi for Fake {
         fn view(&self) -> anyhow::Result<serde_json::Value> {
+            self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(serde_json::json!({"automatic_updates":true,"install_on_quit":true}))
         }
         fn change(&self, value: serde_json::Value) -> anyhow::Result<serde_json::Value> {
@@ -118,7 +131,12 @@ mod tests {
             self.0.lock().unwrap().push(value);
             self.view()
         }
-        fn health(&self, _notes: &std::path::Path) -> anyhow::Result<serde_json::Value> {
+        fn health(
+            &self,
+            _notes: &std::path::Path,
+            _facts: leo_core::store::Facts,
+            _fresh: bool,
+        ) -> anyhow::Result<serde_json::Value> {
             Ok(serde_json::json!({"sections":[]}))
         }
     }
@@ -128,7 +146,7 @@ mod tests {
         let response = call(
             api,
             None,
-            Some(PathBuf::from("unused")),
+            Some((PathBuf::from("unused"), Default::default(), false)),
             Some("Felix could not read.".into()),
         )
         .await;
@@ -173,11 +191,32 @@ mod tests {
             axum::http::StatusCode::BAD_REQUEST
         );
         assert_eq!(
-            call(api, None, Some(std::path::PathBuf::from("unused")), None)
-                .await
-                .status(),
+            call(
+                api,
+                None,
+                Some((
+                    std::path::PathBuf::from("unused"),
+                    Default::default(),
+                    false
+                )),
+                None
+            )
+            .await
+            .status(),
             axum::http::StatusCode::OK
         );
+    }
+
+    #[tokio::test]
+    async fn an_app_change_builds_the_view_once() {
+        let fake = std::sync::Arc::new(Fake::default());
+        let api = Some(fake.clone() as std::sync::Arc<dyn AppApi>);
+        let asked = serde_json::json!({"action":"check_updates"});
+        assert_eq!(
+            call(api, Some(asked), None, None).await.status(),
+            axum::http::StatusCode::OK
+        );
+        assert_eq!(fake.1.load(std::sync::atomic::Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
