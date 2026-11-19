@@ -247,7 +247,7 @@ pub fn digest_stamped(
     use std::io::Read;
     let changed = || std::io::Error::other("the file changed while leo read it");
     let file = open_regular(path)?;
-    let before = entry_stamp(&file.metadata()?);
+    let before = handle_stamp(&file)?;
     if before.1 > most_bytes {
         return Err(std::io::Error::other("the file is too large to verify"));
     }
@@ -262,7 +262,7 @@ pub fn digest_stamped(
                 let mut hooks = WHILE_HASHING.lock().unwrap_or_else(|e| e.into_inner());
                 hooks
                     .iter()
-                    .position(|(at, _)| at.file_name() == path.file_name())
+                    .position(|(at, _)| at == path)
                     .map(|at| hooks.remove(at).1)
             };
             if let Some(hook) = hook {
@@ -277,14 +277,14 @@ pub fn digest_stamped(
     if reading.limit() == 0 {
         return Err(std::io::Error::other("the file is too large to verify"));
     }
-    if entry_stamp(&file.metadata()?) != before || !same_stamp(path, &before) {
+    if handle_stamp(&file)? != before || !same_stamp(path, &before) {
         return Err(changed());
     }
     Ok((hash.finalize().into(), before))
 }
 
 pub fn same_stamp(path: &std::path::Path, stamp: &EntryStamp) -> bool {
-    std::fs::symlink_metadata(path).is_ok_and(|meta| meta.is_file() && entry_stamp(&meta) == *stamp)
+    !stamp.0 && stamp_at(path).is_ok_and(|found| found == *stamp)
 }
 
 pub fn digest_text(digest: &FileDigest) -> String {
@@ -307,33 +307,117 @@ pub fn parse_digest(text: &str) -> Option<FileDigest> {
     Some(digest)
 }
 
-pub type EntryStamp = (bool, u64, u128, u128, u64, u64);
+pub type EntryStamp = (bool, u64, u128, u128, u64, u128);
 
 pub type FolderStamps = Vec<(String, EntryStamp)>;
 
-pub fn entry_stamp(meta: &std::fs::Metadata) -> EntryStamp {
-    let nanos = |time: std::io::Result<std::time::SystemTime>| {
-        time.ok()
-            .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-            .map_or(0, |since| since.as_nanos())
-    };
+fn handle_stamp(file: &std::fs::File) -> std::io::Result<EntryStamp> {
+    #[cfg(not(windows))]
+    {
+        Ok(metadata_stamp(&file.metadata()?))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::AsRawHandle;
+        use windows::Win32::{Foundation::*, Storage::FileSystem::*};
+        let handle = HANDLE(file.as_raw_handle());
+        let mut basic = FILE_BASIC_INFO::default();
+        let mut id = FILE_ID_INFO::default();
+        unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileBasicInfo,
+                (&mut basic as *mut FILE_BASIC_INFO).cast(),
+                std::mem::size_of_val(&basic) as u32,
+            )?;
+        }
+        let modern_id = unsafe {
+            GetFileInformationByHandleEx(
+                handle,
+                FileIdInfo,
+                (&mut id as *mut FILE_ID_INFO).cast(),
+                std::mem::size_of_val(&id) as u32,
+            )
+        };
+        let (volume, index) = match modern_id {
+            Ok(()) => (
+                id.VolumeSerialNumber,
+                u128::from_le_bytes(id.FileId.Identifier),
+            ),
+            Err(error)
+                if [
+                    ERROR_INVALID_FUNCTION,
+                    ERROR_NOT_SUPPORTED,
+                    ERROR_INVALID_PARAMETER,
+                ]
+                .iter()
+                .any(|code| code.to_hresult() == error.code()) =>
+            {
+                let mut legacy = BY_HANDLE_FILE_INFORMATION::default();
+                unsafe { GetFileInformationByHandle(handle, &mut legacy) }?;
+                let index =
+                    (u64::from(legacy.nFileIndexHigh) << 32) | u64::from(legacy.nFileIndexLow);
+                (u64::from(legacy.dwVolumeSerialNumber), u128::from(index))
+            }
+            Err(error) => return Err(error.into()),
+        };
+        if basic.FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT.0 != 0 {
+            return Err(std::io::Error::other("the path is a link"));
+        }
+        if index == 0 {
+            return Err(std::io::Error::other("the file has no identity"));
+        }
+        Ok((
+            basic.FileAttributes & FILE_ATTRIBUTE_DIRECTORY.0 != 0,
+            file.metadata()?.len(),
+            basic.LastWriteTime as u128,
+            basic.ChangeTime as u128,
+            volume,
+            index,
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+fn metadata_stamp(meta: &std::fs::Metadata) -> EntryStamp {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
     #[cfg(unix)]
     let (changed, dev, ino) = {
         use std::os::unix::fs::MetadataExt;
         let changed = u128::try_from(meta.ctime()).unwrap_or(0) * 1_000_000_000
             + u128::try_from(meta.ctime_nsec()).unwrap_or(0);
-        (changed, meta.dev(), meta.ino())
+        (changed, meta.dev(), u128::from(meta.ino()))
     };
     #[cfg(not(unix))]
-    let (changed, dev, ino) = (nanos(meta.created()), 0, 0);
-    (
-        meta.is_dir(),
-        meta.len(),
-        nanos(meta.modified()),
-        changed,
-        dev,
-        ino,
-    )
+    let (changed, dev, ino) = (0, 0, 0);
+    (meta.is_dir(), meta.len(), modified, changed, dev, ino)
+}
+
+pub fn stamp_at(path: &std::path::Path) -> std::io::Result<EntryStamp> {
+    #[cfg(not(windows))]
+    {
+        let meta = std::fs::symlink_metadata(path)?;
+        if !(meta.is_file() || meta.is_dir()) {
+            return Err(std::io::Error::other("not a regular file or folder"));
+        }
+        Ok(metadata_stamp(&meta))
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        };
+        let file = std::fs::OpenOptions::new()
+            .access_mode(FILE_READ_ATTRIBUTES.0)
+            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS.0 | FILE_FLAG_OPEN_REPARSE_POINT.0)
+            .open(path)?;
+        handle_stamp(&file)
+    }
 }
 
 pub fn folder_stamps(folder: &std::path::Path, left_out: &[&str]) -> std::io::Result<FolderStamps> {
@@ -344,7 +428,7 @@ pub fn folder_stamps(folder: &std::path::Path, left_out: &[&str]) -> std::io::Re
     let mut stack = vec![(folder.to_path_buf(), 0)];
     let mut stamps = Vec::new();
     while let Some((dir, depth)) = stack.pop() {
-        if depth > MOST_DEPTH || !std::fs::symlink_metadata(&dir)?.is_dir() {
+        if depth > MOST_DEPTH || !stamp_at(&dir)?.0 {
             return Err(refused());
         }
         for entry in std::fs::read_dir(dir)? {
@@ -361,13 +445,11 @@ pub fn folder_stamps(folder: &std::path::Path, left_out: &[&str]) -> std::io::Re
             if stamps.len() >= MOST_ENTRIES {
                 return Err(refused());
             }
-            let meta = std::fs::symlink_metadata(&path)?;
-            if meta.is_dir() {
+            let stamp = stamp_at(&path)?;
+            if stamp.0 {
                 stack.push((path.clone(), depth + 1));
-            } else if !meta.is_file() {
-                return Err(refused());
             }
-            stamps.push((key.to_string(), entry_stamp(&meta)));
+            stamps.push((key.to_string(), stamp));
         }
     }
     stamps.sort();
@@ -403,7 +485,11 @@ fn digest_listed(
         let content = if stamp.0 {
             None
         } else {
-            Some(digest_file(&folder.join(key), stamp.1)?)
+            let (digest, found) = digest_stamped(&folder.join(key), stamp.1)?;
+            if *stamp != found {
+                return Err(refused());
+            }
+            Some(digest)
         };
         files.insert(key.clone(), content);
     }
@@ -414,24 +500,83 @@ fn digest_listed(
     Ok(digest(&bytes))
 }
 
+pub fn purge_folder(
+    folder: &std::path::Path,
+    stamps: &FolderStamps,
+    last_file: Option<&str>,
+) -> std::io::Result<()> {
+    use std::{fs, io, path::Path};
+    let changed = || io::Error::other("the folder changed before leo could remove it");
+    let root = stamp_at(folder)?;
+    if !root.0 {
+        return Err(changed());
+    }
+    let directory_matches = |found: &EntryStamp, expected: &EntryStamp| {
+        found.0 && found.4 == expected.4 && found.5 == expected.5
+    };
+    let path_for = |key: &str| {
+        if !stamp_at(folder).is_ok_and(|found| directory_matches(&found, &root)) {
+            return Err(changed());
+        }
+        let path = contained_path(folder, Path::new(key)).map_err(io::Error::other)?;
+        for parent in Path::new(key)
+            .ancestors()
+            .skip(1)
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            let key = parent.to_str().ok_or_else(changed)?;
+            let index = stamps
+                .binary_search_by(|(name, _)| name.as_str().cmp(key))
+                .map_err(|_| changed())?;
+            if !stamp_at(&folder.join(parent))
+                .is_ok_and(|found| directory_matches(&found, &stamps[index].1))
+            {
+                return Err(changed());
+            }
+        }
+        Ok(path)
+    };
+    let files = stamps.iter().filter(|(_, stamp)| !stamp.0);
+    let last = files
+        .clone()
+        .find(|(key, _)| last_file == Some(key.as_str()));
+    for (key, stamp) in files.filter(|(key, _)| last_file != Some(key.as_str())) {
+        let path = path_for(key)?;
+        if !same_stamp(&path, stamp) {
+            return Err(changed());
+        }
+        fs::remove_file(path)?;
+    }
+    for (key, stamp) in stamps.iter().rev().filter(|(_, stamp)| stamp.0) {
+        let path = path_for(key)?;
+        if !stamp_at(&path).is_ok_and(|found| directory_matches(&found, stamp)) {
+            return Err(changed());
+        }
+        fs::remove_dir(path)?;
+    }
+    if !stamp_at(folder).is_ok_and(|found| directory_matches(&found, &root)) {
+        return Err(changed());
+    }
+    if let Some((key, stamp)) = last {
+        let mut entries = fs::read_dir(folder)?;
+        let path = path_for(key)?;
+        if entries
+            .next()
+            .transpose()?
+            .is_none_or(|entry| entry.path() != path)
+            || entries.next().is_some()
+            || !same_stamp(&path, stamp)
+        {
+            return Err(changed());
+        }
+        fs::remove_file(path)?;
+    }
+    fs::remove_dir(folder)
+}
+
 pub fn move_new(from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()> {
     let meta = std::fs::symlink_metadata(from)?;
-    if meta.is_file() {
-        match std::fs::hard_link(from, to) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => return Err(error),
-            Err(_) if std::fs::symlink_metadata(to).is_ok() => {
-                return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists))
-            }
-            Err(_) => return std::fs::rename(from, to),
-        }
-        if let Err(error) = std::fs::remove_file(from) {
-            let _ = std::fs::remove_file(to);
-            return Err(error);
-        }
-        return Ok(());
-    }
-    if !meta.is_dir() {
+    if !(meta.is_file() || meta.is_dir()) {
         return Err(std::io::Error::other("only files and folders are moved"));
     }
     #[cfg(target_os = "macos")]
@@ -448,15 +593,50 @@ pub fn move_new(from: &std::path::Path, to: &std::path::Path) -> std::io::Result
     }
     #[cfg(windows)]
     {
-        if std::fs::symlink_metadata(to).is_ok() {
-            return Err(std::io::Error::from(std::io::ErrorKind::AlreadyExists));
-        }
-        std::fs::rename(from, to)
+        use std::os::windows::ffi::OsStrExt;
+        use windows::{
+            core::PCWSTR,
+            Win32::Storage::FileSystem::{MoveFileExW, MOVE_FILE_FLAGS},
+        };
+        let wide = |path: &std::path::Path| -> std::io::Result<Vec<u16>> {
+            use std::path::{Component, Prefix};
+            let path = std::path::absolute(path)?;
+            let raw: Vec<_> = path.as_os_str().encode_wide().collect();
+            if raw.contains(&0) {
+                return Err(std::io::Error::from(std::io::ErrorKind::InvalidInput));
+            }
+            let (prefix, tail) = match path.components().next() {
+                Some(Component::Prefix(p)) => match p.kind() {
+                    Prefix::Disk(_) => (r"\\?\", raw.as_slice()),
+                    Prefix::UNC(_, _) => (r"\\?\UNC\", &raw[2..]),
+                    _ => ("", raw.as_slice()),
+                },
+                _ => ("", raw.as_slice()),
+            };
+            Ok(prefix
+                .encode_utf16()
+                .chain(tail.iter().copied())
+                .chain([0])
+                .collect())
+        };
+        let from = wide(from)?;
+        let to = wide(to)?;
+        unsafe {
+            MoveFileExW(
+                PCWSTR(from.as_ptr()),
+                PCWSTR(to.as_ptr()),
+                MOVE_FILE_FLAGS(0),
+            )
+        }?;
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {
-        let _ = to;
-        Err(std::io::Error::from(std::io::ErrorKind::Unsupported))
+        if !meta.is_file() {
+            return Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        }
+        std::fs::hard_link(from, to)?;
+        std::fs::remove_file(from)
     }
 }
 
@@ -485,6 +665,7 @@ pub mod own {
 
     pub const DATABASE: &str = "leo.db";
     pub const KEEP: &str = "keep.json";
+    pub const KEEPING_STATE: &str = ".leo-keeping";
     pub const UI_PREFS: &str = "ui-prefs.json";
     pub const CALENDARS: &str = "calendars.json";
     pub const CALENDAR: &str = "calendar";
@@ -522,6 +703,7 @@ pub mod own {
         CLI_DIR,
         DATABASE,
         KEEP,
+        KEEPING_STATE,
         UI_PREFS,
         CALENDARS,
         CALENDAR,
@@ -538,7 +720,7 @@ pub mod own {
     pub const DATABASE_SIDES: &[&str] = &["-wal", "-shm"];
     pub const DATABASE_REWRITE: &str = "leo.db.rewrite";
     pub const DATABASE_REWRITE_READY: &str = "leo.db.rewrite-ready";
-    pub const KEPT_WITH_NOTES: &[&str] = &[ORIGINALS, SOURCES, HELD];
+    pub const KEPT_WITH_NOTES: &[&str] = &[ORIGINALS, SOURCES, HELD, KEEPING_STATE];
     pub const LEGACY: &[&str] = &[
         "serve-sessions.json",
         "config.toml.new",
@@ -656,6 +838,26 @@ mod tests {
     }
 
     #[test]
+    fn purging_a_verified_folder_keeps_a_later_nested_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("held");
+        let nested = folder.join("nested");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("seen"), "seen").unwrap();
+        let manifest = folder.join("session.json");
+        std::fs::write(&manifest, "recording metadata").unwrap();
+        let (_, stamps) = digest_directory(&folder, 1 << 20, &[]).unwrap();
+        let synced = nested.join("synced");
+        std::fs::write(&synced, "arrived after checking").unwrap();
+        assert!(purge_folder(&folder, &stamps, Some("session.json")).is_err());
+        assert!(manifest.exists());
+        assert_eq!(
+            std::fs::read_to_string(&synced).unwrap(),
+            "arrived after checking"
+        );
+    }
+
+    #[test]
     fn a_new_file_never_replaces_one_that_arrived() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("Note.md");
@@ -665,6 +867,50 @@ mod tests {
         let free = temp.path().join("Other.md");
         write_new(&free, "leo").unwrap();
         assert_eq!(std::fs::read_to_string(free).unwrap(), "leo");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn an_exclusive_move_supports_windows_long_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        let folder = temp.path().join("a".repeat(140)).join("b".repeat(140));
+        std::fs::create_dir_all(&folder).unwrap();
+        let from = folder.join("note.md");
+        let to = folder.join("trashed.md");
+        std::fs::write(&from, "words").unwrap();
+        move_new(&from, &to).unwrap();
+        assert_eq!(std::fs::read_to_string(&to).unwrap(), "words");
+        assert!(!from.exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_stamps_distinguish_a_replacement_with_matching_timestamps() {
+        use std::fs::{self, FileTimes, OpenOptions};
+        use std::os::windows::fs::FileTimesExt;
+        let temp = tempfile::tempdir().unwrap();
+        let original = temp.path().join("note.md");
+        let replacement = temp.path().join("replacement.md");
+        fs::write(&original, "before").unwrap();
+        let (_, stamp) = digest_stamped(&original, 100).unwrap();
+        let times = fs::metadata(&original).unwrap();
+        fs::write(&replacement, "edited").unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&replacement)
+            .unwrap()
+            .set_times(
+                FileTimes::new()
+                    .set_created(times.created().unwrap())
+                    .set_modified(times.modified().unwrap()),
+            )
+            .unwrap();
+        fs::rename(replacement, &original).unwrap();
+        let replaced = fs::metadata(&original).unwrap();
+        assert_eq!(replaced.created().unwrap(), times.created().unwrap());
+        assert_eq!(replaced.modified().unwrap(), times.modified().unwrap());
+        assert!(!same_stamp(&original, &stamp));
+        assert_ne!(stamp_at(&original).unwrap().5, stamp.5);
     }
 
     #[cfg(windows)]

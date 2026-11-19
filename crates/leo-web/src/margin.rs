@@ -1049,21 +1049,53 @@ fn row_digests(
     found.collect()
 }
 
-pub(crate) fn record_held_rows(chats: &Path, note: &str) -> anyhow::Result<String> {
+fn dependent_revisions(
+    connection: &rusqlite::Connection,
+    note: &str,
+) -> rusqlite::Result<Vec<(&'static str, String, String)>> {
+    let mut revisions = Vec::new();
+    for (table, owner, key) in DEPENDENT_ROWS {
+        revisions.extend(
+            row_digests(connection, table, owner, &row_key(key, ""), note)?
+                .into_iter()
+                .map(|(row, digest)| (*table, row, digest)),
+        );
+    }
+    revisions.sort_unstable();
+    Ok(revisions)
+}
+
+fn revisions_digest(revisions: &[(&str, String, String)]) -> leo_core::paths::FileDigest {
+    leo_core::paths::digest(&serde_json::to_vec(revisions).expect("row revisions serialize"))
+}
+
+pub(crate) fn dependent_revision(
+    chats: &Path,
+    note: &str,
+) -> anyhow::Result<leo_core::paths::FileDigest> {
+    db_of(chats).with(|c| {
+        let tx = c.transaction()?;
+        Ok(revisions_digest(&dependent_revisions(&tx, note)?))
+    })
+}
+
+pub(crate) fn record_held_rows(
+    chats: &Path,
+    note: &str,
+) -> anyhow::Result<(String, leo_core::paths::FileDigest)> {
     let ticket = uuid::Uuid::new_v4().to_string();
     db_of(chats).with(|c| {
         let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        for (table, owner, key) in DEPENDENT_ROWS {
-            for (row, digest) in row_digests(&tx, table, owner, &row_key(key, ""), note)? {
-                tx.execute(
-                    "INSERT OR REPLACE INTO held_note_rows (kind, row_key, ticket, digest)
-                     VALUES (?1, ?2, ?3, ?4)",
-                    [table, &row.as_str(), &ticket.as_str(), &digest.as_str()],
-                )?;
-            }
+        let rows = dependent_revisions(&tx, note)?;
+        for (table, row, digest) in &rows {
+            tx.execute(
+                "INSERT OR REPLACE INTO held_note_rows (kind, row_key, ticket, digest)
+                 VALUES (?1, ?2, ?3, ?4)",
+                [table, &row.as_str(), &ticket.as_str(), &digest.as_str()],
+            )?;
         }
         tx.commit()?;
-        Ok(ticket)
+        Ok((ticket, revisions_digest(&rows)))
     })
 }
 

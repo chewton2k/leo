@@ -213,7 +213,18 @@ fn discard_held_audio(
             leo_core::paths::folder_stamps(&dir, &["lock"])? == *stamps,
             "The held recording changed. leo kept its audio."
         );
-        std::fs::remove_dir_all(dir)?;
+        let mut stamps = stamps.clone();
+        let lock = dir.join("lock");
+        match leo_core::paths::stamp_at(&lock) {
+            Ok(stamp) if !stamp.0 => {
+                stamps.push(("lock".into(), stamp));
+                stamps.sort();
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            _ => anyhow::bail!("The recording lock could not be checked. Try again later."),
+        }
+        unlocked(&dir)?;
+        leo_core::paths::purge_folder(&dir, &stamps, Some("session.json"))?;
     }
     Ok(())
 }

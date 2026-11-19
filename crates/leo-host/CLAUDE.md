@@ -36,7 +36,8 @@ the hold records its folder, session ID, start time and a digest of the session
 folder (its `lock` left out, at most 1 GiB). `verify_held_audio` hashes it again outside
 the notes lock and returns the files' stamps; `discard_held_audio`, under the lock,
 rereads the fields, the saved status and note owner and deletes only when the stamps
-are unchanged. Combine persists the
+are unchanged. Purge checks each file again as it unlinks it and removes only empty
+directories, so an arrival during deletion remains on disk. Combine persists the
 audio plan and previous manifest owners before applying it so startup can
 replay a saved combine and Undo can restore the same sessions. Ambiguous combine
 intents protect affected audio from automatic expiry. Held cleanup inventories

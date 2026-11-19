@@ -341,3 +341,27 @@ fn undo_keeps_a_copy_corrected_while_the_combine_was_still_copying() {
     let (path, text) = corrected.lock().unwrap().clone().unwrap();
     assert_eq!(std::fs::read_to_string(path).unwrap(), text);
 }
+
+#[test]
+fn undo_waits_when_a_transcript_correction_is_being_written() {
+    let (state, _d, ids) = state_with(&[("Notes", ""), ("Slides", "")]);
+    original(&state, &ids[1], "slides.pdf", "%PDF slides");
+    assert_eq!(combined(&state, &ids[0], &ids[1]).status(), StatusCode::OK);
+    run(async {
+        let correction = state.source_writing.lock().await;
+        let mut undo = Box::pin(combine::uncombine(
+            State(state.clone()),
+            Path(ids[0].clone()),
+            Json(serde_json::from_value(serde_json::json!({ "from": ids[1] })).unwrap()),
+        ));
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(500), &mut undo)
+                .await
+                .is_err()
+        );
+        assert_eq!(names(&state, &ids[0]), ["slides.pdf"]);
+        drop(correction);
+        assert_eq!(undo.await.status(), StatusCode::NO_CONTENT);
+    });
+    assert!(names(&state, &ids[0]).is_empty());
+}

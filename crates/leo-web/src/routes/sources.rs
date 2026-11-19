@@ -8,18 +8,6 @@ use axum::{
 };
 use leo_core::recording;
 use serde::Deserialize;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc,
-};
-
-struct Editing(Arc<AtomicBool>);
-impl Drop for Editing {
-    fn drop(&mut self) {
-        self.0.store(false, Ordering::Release);
-    }
-}
-
 async fn outside<R: Send + 'static>(
     state: &AppState,
     id: Option<String>,
@@ -212,14 +200,14 @@ pub(crate) async fn edit_sources(
     Path(id): Path<String>,
     Json(body): Json<Fix>,
 ) -> Response {
-    if state.source_writing.swap(true, Ordering::AcqRel) {
+    let Ok(editing) = state.source_writing.clone().try_lock_owned() else {
         return error(
             StatusCode::CONFLICT,
             "Another transcript correction is being saved. Try again in a moment.",
         );
-    }
-    let _editing = Editing(state.source_writing.clone());
+    };
     match outside(&state, Some(id.clone()), move |notes, _| {
+        let _editing = editing;
         recording::edit(&notes, &id, &body.source, body.base, &body.changes).map_err(|e| {
             match e.downcast_ref::<recording::Refused>() {
                 Some(recording::Refused::Stale) => StatusCode::CONFLICT,

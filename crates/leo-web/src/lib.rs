@@ -267,7 +267,7 @@ struct AppState {
     capture_activity: leo_core::activity::Gate,
     discarded_recordings: Arc<Mutex<std::collections::VecDeque<String>>>,
     calendar: Arc<calendar::Calendar>,
-    source_writing: Arc<std::sync::atomic::AtomicBool>,
+    source_writing: Arc<tokio::sync::Mutex<()>>,
     chats: std::path::PathBuf,
     notes_dir: std::path::PathBuf,
     captions: Arc<captions::Captions>,

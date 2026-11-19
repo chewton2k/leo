@@ -71,10 +71,8 @@ struct DirMove {
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 struct DirIdentity {
     modified: std::time::SystemTime,
-    #[cfg(unix)]
-    inode: (u64, u64),
-    #[cfg(not(unix))]
-    created: std::time::SystemTime,
+    #[serde(default)]
+    file_id: (u64, [u8; 16]),
 }
 
 pub(crate) struct Owners {
@@ -120,21 +118,16 @@ fn refused() -> std::io::Error {
 }
 
 fn dir_identity(folder: &Path) -> std::io::Result<Option<DirIdentity>> {
-    let meta = match std::fs::symlink_metadata(folder) {
+    let stamp = match leo_core::paths::stamp_at(folder) {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        meta => meta?,
+        stamp => stamp?,
     };
-    if !meta.is_dir() {
+    if !stamp.0 {
         return Err(refused());
     }
-    #[cfg(unix)]
-    use std::os::unix::fs::MetadataExt;
     Ok(Some(DirIdentity {
-        modified: meta.modified()?,
-        #[cfg(unix)]
-        inode: (meta.dev(), meta.ino()),
-        #[cfg(not(unix))]
-        created: meta.created()?,
+        modified: std::fs::symlink_metadata(folder)?.modified()?,
+        file_id: (stamp.4, stamp.5.to_le_bytes()),
     }))
 }
 
@@ -234,6 +227,14 @@ fn same_folder(folder: &Path, file: &DirMove, hashed: &Hashed, before: &Path) ->
             .is_some_and(|expected| hashed_now(hashed, folder, before) == Some(&expected))
 }
 
+fn purge_held(folder: &Path, file: &DirMove, hashed: &Hashed, before: &Path) -> bool {
+    same_folder(folder, file, hashed, before)
+        && hashed
+            .get(folder)
+            .or_else(|| hashed.get(before))
+            .is_some_and(|(_, stamps)| leo_core::paths::purge_folder(folder, stamps, None).is_ok())
+}
+
 fn hash_into(hashed: &mut Hashed, folder: PathBuf) {
     if hashed.contains_key(&folder) {
         return;
@@ -273,6 +274,7 @@ fn restore_dir(
     id: &str,
     held: &mut BTreeMap<String, Held>,
     at: usize,
+    manual: bool,
     substitute: bool,
 ) -> std::io::Result<()> {
     let file = &held[id].files.as_ref().unwrap()[at];
@@ -293,18 +295,22 @@ fn restore_dir(
         })
         .map(|name| home.with_file_name(name));
     if let Some(found) = &in_bin {
-        if found != &identity {
+        if found != &identity
+            && !(manual && found.file_id == identity.file_id && found.file_id.1 != [0; 16])
+        {
             return Err(refused());
         }
         let to = free_home(&home, substitute)?;
-        held.get_mut(id).unwrap().files.as_mut().unwrap()[at].restoring_to = to
+        let file = &mut held.get_mut(id).unwrap().files.as_mut().unwrap()[at];
+        file.identity = found.clone();
+        file.restoring_to = to
             .file_name()
             .and_then(|name| name.to_str())
             .map(str::to_string);
         if !crate::margin::set_state(&state.chats, HELD, held) {
             return Err(refused());
         }
-        if dir_identity(&bin)?.as_ref() != Some(&identity) || dir_identity(&to)?.is_some() {
+        if dir_identity(&bin)?.as_ref() != Some(found) || dir_identity(&to)?.is_some() {
             return Err(refused());
         }
         leo_core::paths::move_new(&bin, &to)?;
@@ -333,7 +339,7 @@ fn give_back(
     };
     let mut complete = true;
     for i in 0..count {
-        complete &= restore_dir(state, id, held, i, substitute).is_ok();
+        complete &= restore_dir(state, id, held, i, manual, substitute).is_ok();
     }
     crate::margin::set_state(&state.chats, HELD, held) && complete
 }
@@ -424,8 +430,34 @@ pub(crate) fn held_revision(row: &Held) -> leo_core::paths::FileDigest {
     leo_core::paths::digest(&serde_json::to_vec(&recorded).unwrap_or_default())
 }
 
+pub(crate) type Confirmed =
+    HashMap<String, (Vec<crate::record::KeptSession>, leo_core::paths::FileDigest)>;
+
+pub(crate) fn confirm_removal(state: &AppState, ids: HashSet<String>) -> Confirmed {
+    if ids.is_empty() || recording(state) {
+        return HashMap::new();
+    }
+    let sessions = state.housekeeper.as_ref().map_or_else(
+        || Ok(ids.iter().map(|id| (id.clone(), Vec::new())).collect()),
+        |housekeeper| housekeeper.kept_sessions_for(&ids),
+    );
+    sessions
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(id, sessions)| {
+            let rows = crate::margin::dependent_revision(&state.chats, &id).ok()?;
+            Some((id, (sessions, rows)))
+        })
+        .collect()
+}
+
 pub(crate) fn clear(state: &AppState, ids: Vec<String>, why: Why) {
-    clear_shown(state, ids, why, None);
+    let confirmed = if why == Why::Asked {
+        confirm_removal(state, ids.iter().cloned().collect())
+    } else {
+        Confirmed::new()
+    };
+    clear_shown(state, ids, why, None, &confirmed);
 }
 
 pub(crate) fn clear_shown(
@@ -433,6 +465,7 @@ pub(crate) fn clear_shown(
     ids: Vec<String>,
     why: Why,
     shown: Option<&HashMap<String, leo_core::paths::FileDigest>>,
+    confirmed: &Confirmed,
 ) {
     let (chats, notes) = (&state.chats, &state.notes_dir);
     let _clearing = state.clearing.lock().unwrap_or_else(|e| e.into_inner());
@@ -445,6 +478,7 @@ pub(crate) fn clear_shown(
     let mut hashed = Hashed::new();
     let mut queued: BTreeMap<String, Queued> =
         crate::margin::state_of(chats, QUEUED).unwrap_or_default();
+    let mut confirmed_now = HashSet::new();
     match why {
         Why::Asked => {
             let newly: Vec<String> = ids
@@ -477,6 +511,7 @@ pub(crate) fn clear_shown(
                     }
                 }
                 queued.insert(id.clone(), seen);
+                confirmed_now.insert(id.clone());
             }
             asked.extend(newly);
             queued.retain(|id, _| asked.contains(id));
@@ -600,22 +635,30 @@ pub(crate) fn clear_shown(
         let Some(_audio) = crate::routes::combine::try_audio(state) else {
             return Ok(());
         };
+        let Ok(_sources) = state.source_writing.try_lock() else {
+            return Ok(());
+        };
         let waiting = crate::routes::combine::pending_retargets(chats);
-        let confirmed =
+        let confirmed_gone =
             if holding.values().any(|&swept| swept) || held.values().any(|row| row.swept) {
                 store.confirmed_gone()
             } else {
                 HashSet::new()
             };
         let clock = store.sample_clock();
-        let trashed = store.trashed_ids();
-        let unchanged = std::cell::OnceCell::new();
-        let unchanged = |store: &Store| {
-            *unchanged.get_or_init(|| {
-                #[cfg(test)]
-                before_removing(state);
-                !store.changed_on_disk() && store.trashed_ids() == trashed
-            })
+        let unchanged = |id: &str| {
+            #[cfg(test)]
+            before_removing(state);
+            if store.changed_on_disk() {
+                return false;
+            }
+            let trash = store.trash_snapshot();
+            store.trash_complete()
+                && trash.into_iter().all(|entry| {
+                    entry
+                        .head
+                        .is_some_and(|head| !head.id.eq_ignore_ascii_case(id))
+                })
         };
         let blocked: HashSet<_> = waiting
             .iter()
@@ -659,12 +702,12 @@ pub(crate) fn clear_shown(
             if blocked.contains(id.as_str())
                 || held
                     .get(&id)
-                    .is_some_and(|row| row.swept && !confirmed.contains(&id))
+                    .is_some_and(|row| row.swept && !confirmed_gone.contains(&id))
             {
                 continue;
             }
             if !held.contains_key(&id) {
-                if holding.get(&id) == Some(&true) && !confirmed.contains(&id) {
+                if holding.get(&id) == Some(&true) && !confirmed_gone.contains(&id) {
                     holding.remove(&id);
                     continue;
                 }
@@ -681,9 +724,15 @@ pub(crate) fn clear_shown(
                 else {
                     continue;
                 };
-                let Ok(ticket) = crate::margin::record_held_rows(chats, &id) else {
+                let Ok((ticket, revision)) = crate::margin::record_held_rows(chats, &id) else {
                     continue;
                 };
+                if confirmed
+                    .get(&id)
+                    .is_none_or(|(audio, rows)| *rows != revision || audio != sessions)
+                {
+                    confirmed_now.remove(&id);
+                }
                 held.insert(
                     id.clone(),
                     Held {
@@ -706,7 +755,7 @@ pub(crate) fn clear_shown(
             }
             let row = held.get_mut(&id).unwrap();
             if row.pending && !row.protected {
-                if !unchanged(store) || hold_files(notes, &id, row, &hashed).is_err() {
+                if !unchanged(&id) || hold_files(notes, &id, row, &hashed).is_err() {
                     continue;
                 }
                 row.entered = store.sample_clock();
@@ -742,7 +791,9 @@ pub(crate) fn clear_shown(
                     file.digest.is_some()
                         && shown.and_then(|shown| shown.get(&file.kind)).copied() == file.digest
                 };
-                if row.files.iter().flatten().any(|file| !matches(file)) {
+                if !confirmed_now.contains(&id)
+                    || row.files.iter().flatten().any(|file| !matches(file))
+                {
                     let mut rest = Vec::new();
                     for file in row.files.iter().flatten() {
                         let Ok((home, bin)) = locations(notes, &file.kind, &id) else {
@@ -751,9 +802,8 @@ pub(crate) fn clear_shown(
                         };
                         let gone = matches(file)
                             && !file.returned
-                            && unchanged(store)
-                            && same_folder(&bin, file, &hashed, &home)
-                            && std::fs::remove_dir_all(&bin).is_ok();
+                            && unchanged(&id)
+                            && purge_held(&bin, file, &hashed, &home);
                         if !gone {
                             rest.push(file.clone());
                         }
@@ -787,7 +837,7 @@ pub(crate) fn clear_shown(
             let Some(audio) = audio_checked.get(&id) else {
                 continue;
             };
-            if verified.len() != files.len() || !unchanged(store) {
+            if verified.len() != files.len() || !unchanged(&id) {
                 continue;
             }
             if state
@@ -797,10 +847,15 @@ pub(crate) fn clear_shown(
             {
                 continue;
             }
-            let removed = verified.into_iter().flatten().all(|(dir, file, home)| {
-                same_folder(&dir, file, &hashed, &home) && std::fs::remove_dir_all(dir).is_ok()
-            });
+            if !row.sessions.is_empty() && !unchanged(&id) {
+                continue;
+            }
+            let removed = verified
+                .into_iter()
+                .flatten()
+                .all(|(dir, file, home)| purge_held(&dir, file, &hashed, &home));
             if removed
+                && (files.is_empty() || unchanged(&id))
                 && row
                     .row_ticket
                     .as_ref()
@@ -1175,14 +1230,14 @@ pub(crate) fn pictures_asked(state: &AppState, now: DateTime<Utc>, asked: &Asked
     #[cfg(test)]
     let locked = std::time::Instant::now();
     let answer = crate::store_now(state, |store| {
+        let Ok(_sources) = state.source_writing.try_lock() else {
+            return Ok(refused_all);
+        };
         if !store.unreadable.is_empty()
             || !store.revalidate_trash()
             || !scan.unchanged()
             || ledger_at() != Some(ledger_stamp)
             || recording(state)
-            || state
-                .source_writing
-                .load(std::sync::atomic::Ordering::Acquire)
         {
             return Ok(refused_all);
         }

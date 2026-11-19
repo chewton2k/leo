@@ -240,6 +240,7 @@ pub(crate) async fn delete_from_trash(
         choice.all,
         shown.clone(),
     );
+    let confirming = state.clone();
     let changed = tokio::task::spawn_blocking(move || {
         let (chats, pictures, ids, all, shown) = checking;
         let held_changed = crate::dependents::held_rows(&chats)
@@ -262,11 +263,21 @@ pub(crate) async fn delete_from_trash(
                 (id, seen)
             })
             .collect();
-        (held_changed, pictures)
+        let confirmed = if held_changed || !pictures.is_empty() {
+            Default::default()
+        } else {
+            let ids = shown
+                .keys()
+                .filter(|id| leo_core::recording::valid_id(id) && (all || ids.contains(id)))
+                .cloned()
+                .collect();
+            crate::dependents::confirm_removal(&confirming, ids)
+        };
+        (held_changed, pictures, confirmed)
     })
     .await
     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let (held_changed, pictures_changed) = changed;
+    let (held_changed, pictures_changed, confirmed) = changed;
     let pictures_moved = !pictures_changed.is_empty();
     if pictures_moved {
         state
@@ -362,6 +373,7 @@ pub(crate) async fn delete_from_trash(
             ids,
             crate::dependents::Why::Asked,
             Some(&shown_after),
+            &confirmed,
         );
         let still = crate::dependents::held_rows(&cleared.chats);
         let held_left = held.iter().filter(|id| still.contains_key(*id)).count();

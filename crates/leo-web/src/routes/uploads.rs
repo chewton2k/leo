@@ -423,7 +423,7 @@ pub(crate) fn share_originals(
     notes_dir: &std::path::Path,
     from: &str,
     into: &str,
-) -> std::io::Result<Vec<String>> {
+) -> (Vec<String>, std::io::Result<()>) {
     let mut written = Vec::new();
     let shared = crate::originals::files(notes_dir, from)
         .into_iter()
@@ -432,13 +432,7 @@ pub(crate) fn share_originals(
             written.push(name);
             Ok(())
         });
-    match shared {
-        Ok(()) => Ok(written),
-        Err(error) => {
-            let _ = remove_originals(notes_dir, into, &written);
-            Err(error)
-        }
-    }
+    (written, shared)
 }
 
 fn share_original(
@@ -464,31 +458,6 @@ fn share_original(
             .map_err(|error| error.error)?;
     }
     Ok(free)
-}
-
-pub(crate) fn remove_originals(
-    notes_dir: &std::path::Path,
-    note: &str,
-    names: &[String],
-) -> std::io::Result<()> {
-    let mut failed = None;
-    for name in names {
-        let removed = original_path(notes_dir, note, name)
-            .ok_or_else(|| {
-                std::io::Error::other("Original files must stay inside the attachments folder")
-            })
-            .and_then(|path| {
-                crate::originals::forget_copy(&path);
-                match std::fs::remove_file(path) {
-                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                    done => done,
-                }
-            });
-        if let Err(error) = removed {
-            failed.get_or_insert(error);
-        }
-    }
-    failed.map_or(Ok(()), Err)
 }
 
 fn open_original(

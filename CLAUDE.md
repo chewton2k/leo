@@ -119,7 +119,7 @@ settings and credentials are excluded from note exports.
   (`keep::DEFAULT_TRASH_DAYS`, 30) after a complete scan. Divergent copies stay.
   Trash records digests at entry and checks them before unlinking. A trashed copy of a
   live note is hidden, and its trash clock starts only when it can first be shown. Empty trash
-  and Delete for good skip a file they cannot verify and report it; leo keeps an index of the trash (`<notes>/.leo/trash.json`), checked against each file's size and times; the list opens only new or changed files, and every deletion checks the trash first; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
+  and Delete for good skip a file they cannot verify and report it; leo keeps an index of the trash (device-local `trash.json` under `<data>/.leo-keeping/`), checked against each file's size and times; the list opens only new or changed files, and every deletion checks the trash first; trashed files leo cannot read are listed by file name with Delete for good only. The Trash page restores and empties.
 - Dependents (2026-11-17, the owner's call): what belongs to a note (pictures by
   link, original files, recording sources, task details, margin rows, reading place,
   read copies, meaning vectors and summaries) stays while it is in the trash, comes
@@ -138,7 +138,7 @@ settings and credentials are excluded from note exports.
   once. A picture is leo's while it matches the
   SHA-256 digest (with size and time) recorded when leo saved it (`<notes>/.leo/pictures-made`); older ones
   are listed on the Trash page as "Pictures no note uses", deleted only when asked.
-  When leo is not sure, it keeps the file. Counts and clock: `<notes>/.leo/pictures.json`.
+  When leo is not sure, it keeps the file. Counts and clock live beside the local trash index. A hidden copy goes only while the verified live file still has the same stamp.
 - Updates: the app's signed updater is the only update path
   (`crates/leo-desktop/src/updates.rs`; `leo update` removed 2026-11-17).
   `LEO_NO_UPDATE_CHECK=1` disables its automatic check (e2e and the browser

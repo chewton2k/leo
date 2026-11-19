@@ -851,6 +851,7 @@ struct Audio {
     locked: std::sync::atomic::AtomicBool,
     retargeted: Mutex<Vec<(String, String)>>,
     restored: Mutex<Vec<crate::record::Moved>>,
+    after_discard: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl crate::record::Housekeeper for Audio {
@@ -888,6 +889,9 @@ impl crate::record::Housekeeper for Audio {
         if sessions.iter().any(|each| each.session == note) && owners.iter().any(|o| o == note) {
             owners.retain(|owner| owner != note);
             self.discarded.lock().unwrap().push(note.into());
+            if let Some(hook) = self.after_discard.lock().unwrap().take() {
+                hook();
+            }
         }
         Ok(())
     }
@@ -2435,7 +2439,7 @@ fn a_held_row_changed_behind_its_trigger_is_kept() {
     let (state, _dir, ids) = state_with(&[("A", "")]);
     let id = &ids[0];
     hang_everything_on(&state, id);
-    let ticket = crate::margin::record_held_rows(&state.chats, id).unwrap();
+    let ticket = crate::margin::record_held_rows(&state.chats, id).unwrap().0;
     crate::db::for_chats(&state.chats)
         .with(|c| {
             c.execute_batch("DROP TRIGGER held_reading_UPDATE")?;
@@ -2514,4 +2518,86 @@ fn a_deferred_delete_for_good_purges_only_what_was_there_when_asked() {
     let_days_pass(&state, 8);
     crate::keeping::expire_dependents(&state);
     assert!(!held.exists());
+}
+
+#[test]
+fn deferred_delete_holds_audio_and_rows_that_arrived_after_confirmation() {
+    let (mut state, _dir, ids) = state_with(&[("Lecture", ""), ("Other", "")]);
+    let id = &ids[0];
+    let audio = std::sync::Arc::new(Audio::default());
+    state.housekeeper = Some(audio.clone());
+    trash(&state, id);
+    let capture = state.capture_activity.begin().unwrap();
+    delete_for_good(&state, &[id], false);
+    audio.owners.lock().unwrap().push(id.clone());
+    crate::db::for_chats(&state.chats)
+        .with(|c| {
+            c.execute(
+                "INSERT INTO reading (note, anchor, at) VALUES (?1, 'a', 't')",
+                [id],
+            )
+        })
+        .unwrap();
+    drop(capture);
+    crate::keeping::expire_dependents(&state);
+    assert!(audio.discarded.lock().unwrap().is_empty());
+    assert_eq!(
+        rows(&state, "SELECT count(*) FROM reading WHERE note = ?1", id),
+        1
+    );
+    keep_trash(&state, Some(7));
+    let_days_pass(&state, 8);
+    crate::keeping::expire_dependents(&state);
+    assert_eq!(*audio.discarded.lock().unwrap(), [id.clone()]);
+    assert_eq!(
+        rows(&state, "SELECT count(*) FROM reading WHERE note = ?1", id),
+        0
+    );
+}
+
+#[test]
+fn a_note_synced_back_during_an_earlier_purge_keeps_its_hold() {
+    let (mut state, _dir, ids) = state_with(&[("First", ""), ("Second", "")]);
+    let audio = std::sync::Arc::new(Audio::default());
+    state.housekeeper = Some(audio.clone());
+    *audio.owners.lock().unwrap() = ids.clone();
+    let later = if ids[0] < ids[1] { 1 } else { 0 };
+    let earlier = 1 - later;
+    let live = state.notes_dir.join(["First.md", "Second.md"][later]);
+    let original = std::fs::read(&live).unwrap();
+    for id in &ids {
+        hang_everything_on(&state, id);
+        trash(&state, id);
+    }
+    *audio.after_discard.lock().unwrap() =
+        Some(Box::new(move || std::fs::write(live, original).unwrap()));
+    delete_for_good(&state, &[&ids[0], &ids[1]], false);
+    assert_eq!(*audio.discarded.lock().unwrap(), [ids[earlier].clone()]);
+    assert_eq!(held(&state, &ids[later])[2..], [true; 5]);
+}
+
+#[test]
+fn a_row_rewritten_after_confirmation_gets_its_own_hold() {
+    let (state, _dir, ids) = state_with(&[("Lecture", ""), ("Other", "")]);
+    let id = &ids[0];
+    hang_everything_on(&state, id);
+    trash(&state, id);
+    let confirmed = crate::dependents::confirm_removal(&state, [id.clone()].into());
+    let removed = state.fresh().delete_from_trash(std::slice::from_ref(id));
+    assert_eq!(removed.forgotten, [id.clone()]);
+    crate::db::for_chats(&state.chats)
+        .with(|c| c.execute("UPDATE reading SET anchor = 'later' WHERE note = ?1", [id]))
+        .unwrap();
+    crate::dependents::clear_shown(
+        &state,
+        removed.forgotten,
+        crate::dependents::Why::Asked,
+        None,
+        &confirmed,
+    );
+    assert_eq!(
+        rows(&state, "SELECT count(*) FROM reading WHERE note = ?1", id),
+        1
+    );
+    assert!(crate::dependents::held_rows(&state.chats).contains_key(id));
 }

@@ -10,7 +10,7 @@ use leo_core::notes::Note;
 use serde::Deserialize;
 
 use super::notes::{save, version_of, NoteResponse};
-use super::uploads::{remove_originals, share_originals};
+use super::uploads::share_originals;
 use crate::reply::error;
 use crate::{combine, progress, AppState};
 
@@ -353,6 +353,7 @@ pub(crate) async fn keep(
         }
     };
     let copying = {
+        let copying_state = state.clone();
         let (notes_dir, from, target, from_title) = (
             notes_dir.clone(),
             from.clone(),
@@ -375,24 +376,20 @@ pub(crate) async fn keep(
                             .map(|(digest, _)| digest)
                     })
                     .collect();
-            match share_originals(&notes_dir, &from, &target) {
-                Ok(originals) => {
-                    for name in originals {
-                        if let Some((path, stamp, digest)) =
-                            original_checked(&notes_dir, &target, &name)
-                                .filter(|(_, _, digest)| sources.contains(digest))
-                        {
-                            created.originals.insert(name.clone(), digest);
-                            checked.originals.push((name, path, stamp));
-                        }
-                    }
-                    Ok((created, checked))
-                }
-                Err(_) => {
-                    let _ = remove_checked(&notes_dir, &target, &checked);
-                    Err(StatusCode::INTERNAL_SERVER_ERROR)
+            let (originals, shared) = share_originals(&notes_dir, &from, &target);
+            for name in originals {
+                if let Some((path, stamp, digest)) = original_checked(&notes_dir, &target, &name)
+                    .filter(|(_, _, digest)| sources.contains(digest))
+                {
+                    created.originals.insert(name.clone(), digest);
+                    checked.originals.push((name, path, stamp));
                 }
             }
+            if shared.is_err() {
+                rollback_copies(&copying_state, &notes_dir, &target, &checked);
+                return Err(StatusCode::INTERNAL_SERVER_ERROR);
+            }
+            Ok((created, checked))
         })
         .await
     };
@@ -415,7 +412,7 @@ pub(crate) async fn keep(
         })
     };
     if !noting(true).await.unwrap_or(false) {
-        let _ = remove_checked(&state.notes_dir, &target, &checked);
+        rollback_copies(&state, &state.notes_dir, &target, &checked);
         return error(
             StatusCode::INTERNAL_SERVER_ERROR,
             "leo could not record the combine. Try again.",
@@ -439,7 +436,7 @@ pub(crate) async fn keep(
     let done = state
         .with_store(move |store| {
             let undo = |store: &leo_core::store::Store| {
-                let _ = remove_checked(&store.notes_dir, &target, &checked);
+                rollback_copies(&saving, &store.notes_dir, &target, &checked);
             };
             let still = store
                 .find_note(&from)
@@ -589,10 +586,8 @@ struct Checked {
 }
 
 fn stamp_of(path: &std::path::Path) -> Option<leo_core::paths::EntryStamp> {
-    let meta = std::fs::symlink_metadata(path)
-        .ok()
-        .filter(|meta| meta.is_file())?;
-    Some(leo_core::paths::entry_stamp(&meta))
+    let stamp = leo_core::paths::stamp_at(path).ok()?;
+    (!stamp.0).then_some(stamp)
 }
 
 fn transcript_files(
@@ -627,8 +622,8 @@ fn transcript_files(
 fn transcript_digest(files: &Stamped) -> Option<leo_core::paths::FileDigest> {
     let mut hashed = Vec::new();
     for (path, stamp) in files {
-        let digest = leo_core::paths::digest_file(path, stamp.1).ok()?;
-        (stamp_of(path) == Some(*stamp)).then_some(())?;
+        let (digest, found) = leo_core::paths::digest_stamped(path, stamp.1).ok()?;
+        (*stamp == found).then_some(())?;
         hashed.push((path.file_name()?.to_string_lossy().to_string(), digest));
     }
     let bytes = serde_json::to_vec(&hashed).ok()?;
@@ -645,9 +640,8 @@ fn original_checked(
     leo_core::paths::FileDigest,
 )> {
     let path = crate::routes::uploads::original_path(notes, note, name)?;
-    let stamp = stamp_of(&path)?;
-    let digest = leo_core::paths::digest_file(&path, stamp.1).ok()?;
-    (stamp_of(&path) == Some(stamp)).then_some((path, stamp, digest))
+    let (digest, stamp) = leo_core::paths::digest_stamped(&path, u64::MAX).ok()?;
+    Some((path, stamp, digest))
 }
 
 fn copy_transcripts(
@@ -722,30 +716,46 @@ fn check_created(notes: &std::path::Path, target: &str, created: &Created) -> Ch
     }
 }
 
-fn remove_checked(notes: &std::path::Path, target: &str, checked: &Checked) -> anyhow::Result<()> {
+fn rollback_copies(state: &AppState, notes: &std::path::Path, target: &str, checked: &Checked) {
+    if let Ok(_editing) = state.source_writing.try_lock() {
+        let _ = remove_checked(notes, target, checked);
+    }
+}
+
+fn remove_checked(
+    notes: &std::path::Path,
+    target: &str,
+    checked: &Checked,
+) -> Result<(), StatusCode> {
     let ids = checked
         .transcripts
         .iter()
         .map(|(id, _)| id.as_str())
         .collect();
     let now = transcript_files(notes, target, &ids);
-    let transcripts: Vec<String> = checked
-        .transcripts
-        .iter()
-        .filter(|(id, files)| {
-            now.get(id)
-                .is_some_and(|found| found.as_ref() == Some(files))
-        })
-        .map(|(id, _)| id.clone())
-        .collect();
-    leo_core::recording::remove(notes, target, &transcripts)?;
-    let originals: Vec<String> = checked
-        .originals
-        .iter()
-        .filter(|(_, path, stamp)| stamp_of(path) == Some(*stamp))
-        .map(|(name, _, _)| name.clone())
-        .collect();
-    remove_originals(notes, target, &originals)?;
+    for (id, files) in &checked.transcripts {
+        if now.get(id).and_then(Option::as_ref) != Some(files) {
+            continue;
+        }
+        let head = format!("{id}.json");
+        let (heads, rest): (Vec<_>, Vec<_>) = files
+            .iter()
+            .partition(|(path, _)| path.file_name().is_some_and(|name| name == head.as_str()));
+        for (path, stamp) in heads.into_iter().chain(rest) {
+            if !leo_core::paths::same_stamp(path, stamp) {
+                break;
+            }
+            std::fs::remove_file(path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+    }
+    for (name, path, stamp) in &checked.originals {
+        if super::uploads::original_path(notes, target, name).as_ref() == Some(path)
+            && leo_core::paths::same_stamp(path, stamp)
+        {
+            std::fs::remove_file(path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            crate::originals::forget_copy(path);
+        }
+    }
     Ok(())
 }
 
@@ -978,8 +988,10 @@ pub(crate) async fn uncombine(
     })
     .await
     .unwrap_or(None);
+    let editing = state.source_writing.clone().lock_owned().await;
     let done = state
         .with_store(move |store| {
+            let _editing = editing;
             store.find_note(&into).ok_or(StatusCode::NOT_FOUND)?;
             let from = body.from;
             let kept = store.find_note(&from).is_some() || store.trashed_ids().contains(&from);
@@ -989,8 +1001,7 @@ pub(crate) async fn uncombine(
             let record = combined_of(&chats, &into).filter(|r| r.from == from);
             if let (Some(record), Some((checked, at))) = (&record, &checked) {
                 if record.at == *at {
-                    remove_checked(&store.notes_dir, &into, checked)
-                        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+                    remove_checked(&store.notes_dir, &into, checked)?;
                 }
             }
             let _audio = audio(&undoing);

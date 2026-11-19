@@ -643,7 +643,7 @@ struct TrashIndex {
 }
 
 fn trash_index_path(notes_dir: &Path) -> Result<PathBuf> {
-    crate::paths::contained_path(notes_dir, &Path::new(".leo").join(TRASH_INDEX))
+    keeping_state_path(notes_dir, TRASH_INDEX)
 }
 
 impl TrashIndex {
@@ -772,7 +772,24 @@ impl TrashIndex {
 const PICTURES: &str = "pictures.json";
 
 fn pictures_path(notes_dir: &Path) -> Result<PathBuf> {
-    crate::paths::contained_path(notes_dir, &Path::new(".leo").join(PICTURES))
+    keeping_state_path(notes_dir, PICTURES)
+}
+
+fn keeping_state_path(notes_dir: &Path, file: &str) -> Result<PathBuf> {
+    let data = notes_dir
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let name = notes_dir
+        .file_name()
+        .context("the notes folder has no name")?;
+    let library = crate::paths::digest_text(&crate::paths::digest(name.as_encoded_bytes()));
+    crate::paths::contained_path(
+        data,
+        &Path::new(crate::paths::own::KEEPING_STATE)
+            .join(library)
+            .join(file),
+    )
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -830,19 +847,8 @@ struct Left {
 }
 
 fn device_of(path: &Path) -> Option<u64> {
-    let meta = fs::symlink_metadata(path)
-        .ok()
-        .filter(|meta| meta.is_dir())?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        Some(meta.dev()).filter(|device| *device != 0)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = meta;
-        None
-    }
+    let stamp = crate::paths::stamp_at(path).ok()?;
+    (stamp.0 && stamp.4 != 0).then_some(stamp.4)
 }
 
 fn folder_of(path: &Path) -> PathBuf {
@@ -2086,7 +2092,12 @@ impl Store {
         if let Some(parent) = dest.parent() {
             fs::create_dir_all(parent)?;
         }
-        let text = fs::read_to_string(path)?;
+        let stamp = crate::paths::stamp_at(path)?;
+        let text = read_regular_text(path)?;
+        anyhow::ensure!(
+            crate::paths::same_stamp(path, &stamp),
+            "the note changed before it could be moved to the trash"
+        );
         let mut note = parse_note_from_markdown(&text, relative, Utc::now())?;
         if note.id != id {
             note.id = id.to_string();
@@ -2094,13 +2105,19 @@ impl Store {
             let moved = crate::paths::write_new(&dest, &written);
             self.trashed_by_leo(&dest, &written, moved.is_ok());
             moved?;
+            anyhow::ensure!(
+                crate::paths::same_stamp(path, &stamp),
+                "the note changed before it could be moved to the trash"
+            );
             return Ok(fs::remove_file(path)?);
         }
         let moved = crate::paths::move_new(path, &dest)
             .map_err(anyhow::Error::from)
             .and_then(|()| {
-                if stamp_deleted(&dest).is_err() {
-                    write_atomic(&dest, &text)?;
+                if let Err(error) = stamp_deleted(&dest) {
+                    crate::diag::warn(format!(
+                        "leo could not mark when a note entered the trash: {error}"
+                    ));
                 }
                 Ok(())
             });
@@ -2425,31 +2442,31 @@ impl Store {
             let entries: Vec<_> = index
                 .entries(&self.notes_dir)
                 .into_iter()
-                .filter(|entry| {
-                    let Some(head) = &entry.head else {
-                        return false;
-                    };
+                .filter_map(|entry| {
+                    let head = entry.head.as_ref()?;
                     let indexed = &index.files[&entry.relative];
                     if live.contains(head.id.as_str()) {
-                        return seen.get(&head.id).is_some_and(|seen| {
-                            crate::paths::contained_path(&self.notes_dir, &seen.path)
-                                .ok()
-                                .and_then(|path| read_regular_text(&path).ok())
-                                .is_some_and(|live| {
-                                    read_regular_text(&entry.path)
-                                        .is_ok_and(|trashed| live == trashed)
-                                })
-                        });
+                        let path = crate::paths::contained_path(
+                            &self.notes_dir,
+                            &seen.get(&head.id)?.path,
+                        )
+                        .ok()?;
+                        let (digest, stamp) =
+                            crate::paths::digest_stamped(&path, MOST_TRASH_NOTE_BYTES).ok()?;
+                        return (indexed.digest == Some(digest))
+                            .then_some((entry, Some((path, stamp))));
                     }
-                    period.is_some_and(|period| {
-                        clock.saturating_sub(indexed.entered.unwrap_or(clock)) >= period
-                    })
+                    period
+                        .is_some_and(|period| {
+                            clock.saturating_sub(indexed.entered.unwrap_or(clock)) >= period
+                        })
+                        .then_some((entry, None))
                 })
                 .collect();
             {
                 let mut pictures = self.pictures.borrow_mut();
                 let mut has_expiry = false;
-                for entry in &entries {
+                for (entry, _) in &entries {
                     let Some(head) = entry
                         .head
                         .as_ref()
@@ -2478,7 +2495,7 @@ impl Store {
             }
             let mut expired = Vec::new();
             let mut removed = false;
-            for entry in entries {
+            for (entry, duplicate) in entries {
                 let head = entry
                     .head
                     .as_ref()
@@ -2490,7 +2507,11 @@ impl Store {
                     Self::carried(index, &entry)
                 };
                 let Some(pictures) = pictures else { continue };
-                match self.unlink_trash(&entry.relative, &index.files[&entry.relative]) {
+                match self.unlink_trash(
+                    &entry.relative,
+                    &index.files[&entry.relative],
+                    duplicate.as_ref(),
+                ) {
                     Ok(()) => {
                         removed = true;
                         index.files.remove(&entry.relative);
@@ -2515,7 +2536,12 @@ impl Store {
         expired
     }
 
-    fn unlink_trash(&self, relative: &Path, entry: &Indexed) -> std::io::Result<()> {
+    fn unlink_trash(
+        &self,
+        relative: &Path,
+        entry: &Indexed,
+        duplicate: Option<&(PathBuf, crate::paths::EntryStamp)>,
+    ) -> std::io::Result<()> {
         let path = crate::paths::contained_path(&self.notes_dir, &Path::new(TRASH).join(relative))
             .map_err(std::io::Error::other)?;
         let changed = || std::io::Error::other("the trashed file changed");
@@ -2524,7 +2550,10 @@ impl Store {
             return Err(changed());
         }
         let (digest, stamp) = crate::paths::digest_stamped(&path, MOST_TRASH_NOTE_BYTES)?;
-        if entry.digest != Some(digest) || !crate::paths::same_stamp(&path, &stamp) {
+        if entry.digest != Some(digest)
+            || duplicate.is_some_and(|(live, stamp)| !crate::paths::same_stamp(live, stamp))
+            || !crate::paths::same_stamp(&path, &stamp)
+        {
             return Err(changed());
         }
         fs::remove_file(path)
@@ -2646,7 +2675,7 @@ impl Store {
                 }
                 let pictures = Self::carried(index, &entry).unwrap_or_default();
                 let head_id = entry.head.map(|head| head.id);
-                match self.unlink_trash(&entry.relative, &index.files[&entry.relative]) {
+                match self.unlink_trash(&entry.relative, &index.files[&entry.relative], None) {
                     Ok(()) => {
                         index.files.remove(&entry.relative);
                         index.changed = true;
@@ -8090,8 +8119,9 @@ mod tests {
     #[test]
     fn a_damaged_picture_file_starts_empty_and_warns() {
         let (store, _tmp) = picture_store();
-        fs::create_dir_all(store.notes_dir.join(".leo")).unwrap();
-        fs::write(store.notes_dir.join(".leo/pictures.json"), "{not json").unwrap();
+        let keeping = pictures_path(&store.notes_dir).unwrap();
+        fs::create_dir_all(keeping.parent().unwrap()).unwrap();
+        fs::write(keeping, "{not json").unwrap();
         let reloaded = Store::load_from(&store.notes_dir).unwrap();
         assert!(crate::diag::recent()
             .iter()
@@ -8812,6 +8842,48 @@ mod tests {
     }
 
     #[test]
+    fn a_hidden_copy_survives_an_edit_during_its_final_verification() {
+        let (mut store, _tmp) = temp_store();
+        store
+            .create_note("Double", "original text", vec![], "")
+            .unwrap();
+        store.save().unwrap();
+        let live = store.notes_dir.join("Double.md");
+        let trash = store.notes_dir.join(".trash/Double.md");
+        fs::create_dir_all(trash.parent().unwrap()).unwrap();
+        let text = fs::read_to_string(&live).unwrap();
+        fs::write(&trash, &text).unwrap();
+        store.trash_snapshot();
+        let edited = text.replace("original text", "updated text");
+        crate::paths::WHILE_HASHING.lock().unwrap().push((
+            trash.clone(),
+            Box::new(move || fs::write(live, edited).unwrap()),
+        ));
+        store.tidy_trash_now();
+        assert_eq!(fs::read_to_string(trash).unwrap(), text);
+    }
+
+    #[test]
+    fn a_synced_clock_cannot_age_a_local_trash_entry_on_restart() {
+        let (mut store, _tmp) = temp_store();
+        let id = store
+            .create_note("Local", "", vec![], "")
+            .unwrap()
+            .id
+            .clone();
+        store.save().unwrap();
+        store.delete_notes(&[id]);
+        store.save().unwrap();
+        store.trash_snapshot();
+        let synced = store.notes_dir.join(".leo/pictures.json");
+        fs::create_dir_all(synced.parent().unwrap()).unwrap();
+        fs::write(synced, r#"{"clock":{"secs":3456000,"last":null}}"#).unwrap();
+        let restarted = Store::load_from(&store.notes_dir).unwrap();
+        assert!(restarted.tidy_trash_now().is_empty());
+        assert!(store.notes_dir.join(".trash/Local.md").exists());
+    }
+
+    #[test]
     fn a_hidden_trash_copy_starts_its_clock_when_its_note_leaves() {
         let (mut store, _tmp) = temp_store();
         let id = store
@@ -8943,7 +9015,7 @@ mod tests {
             .create_note("A", linking(PICTURE), vec![], "")
             .unwrap();
         store.save().unwrap();
-        let kept = store.notes_dir.join(".leo/pictures.json");
+        let kept = pictures_path(&store.notes_dir).unwrap();
         let _ = fs::remove_file(&kept);
         store.picture_batch(|| {
             store.picture_gone(PICTURE);
