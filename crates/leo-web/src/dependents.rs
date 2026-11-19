@@ -425,8 +425,13 @@ pub(crate) fn held_revision(row: &Held) -> leo_core::paths::FileDigest {
         .files
         .as_ref()
         .map(|files| files.iter().map(|file| (&file.kind, file.digest)).collect());
-    let sessions: Vec<_> = row.sessions.iter().map(|session| session.digest).collect();
-    let recorded = (files, sessions, row.owner, row.owner_digest);
+    let recorded = (
+        files,
+        &row.sessions,
+        &row.row_ticket,
+        row.owner,
+        row.owner_digest,
+    );
     leo_core::paths::digest(&serde_json::to_vec(&recorded).unwrap_or_default())
 }
 

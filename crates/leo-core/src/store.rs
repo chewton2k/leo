@@ -2112,13 +2112,12 @@ impl Store {
         }
         let moved = crate::paths::move_new(path, &dest)
             .map_err(anyhow::Error::from)
-            .and_then(|()| {
+            .inspect(|()| {
                 if let Err(error) = stamp_deleted(&dest) {
                     crate::diag::warn(format!(
                         "leo could not mark when a note entered the trash: {error}"
                     ));
                 }
-                Ok(())
             });
         self.trashed_by_leo(&dest, &text, moved.is_ok());
         moved
@@ -6907,10 +6906,7 @@ mod tests {
             "a/.hidden",
             "a//b",
         ] {
-            assert!(
-                store.create_note("Escape", "body", vec![], dir).is_err(),
-                "{dir}"
-            );
+            assert!(store.create_note("Escape", "body", dir).is_err(), "{dir}");
             assert!(!store.create_dir(dir), "{dir}");
         }
         store.save().unwrap();
@@ -6941,9 +6937,7 @@ mod tests {
         std::os::unix::fs::symlink(outside.join("Private.md"), notes.join("Alias.md")).unwrap();
         let mut store = Store::load_from(&notes).unwrap();
         assert!(store.notes.is_empty());
-        assert!(store
-            .create_note("Escape", "body", vec![], "linked")
-            .is_err());
+        assert!(store.create_note("Escape", "body", "linked").is_err());
         assert!(!store.create_dir("linked/nested"));
         assert_eq!(
             fs::read_to_string(outside.join("Private.md")).unwrap(),

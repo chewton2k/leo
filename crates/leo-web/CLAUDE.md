@@ -1244,9 +1244,11 @@ a modal.
   before and after, and the path checked to still be that file); the same stamp is
   checked again on the path just before it is unlinked. A Delete for good that has to
   wait (a recording running) queues the folder digests and the revision of any
-  already held item (`margin_state` `deleting-shown`). A retry can purge matching
-  folders, but audio and database rows first inventoried on retry enter the normal
-  hold. Purge unlinks each verified entry and removes only empty directories. A combine copies transcripts into a
+  already held item (`margin_state` `deleting-shown`). Audio and row revisions for a note
+  are captured before it is unlinked. Changes after confirmation and revisions
+  first seen on retry enter the normal hold. Purge unlinks each verified entry and
+  removes only empty directories, and manual Restore can return a changed folder
+  whose identity is still the one leo held. A combine copies transcripts into a
   private staging folder, records each copy's digest from the staged bytes, publishes it
   without replacing anything, and records it only while it still matches (originals:
   the digest of the source bytes); a failed save or Undo removes only those that still

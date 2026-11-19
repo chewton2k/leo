@@ -2544,7 +2544,10 @@ fn deferred_delete_holds_audio_and_rows_that_arrived_after_confirmation() {
     keep_trash(&state, Some(7));
     let_days_pass(&state, 8);
     crate::keeping::expire_dependents(&state);
-    assert_eq!(*audio.discarded.lock().unwrap(), [id.clone()]);
+    assert_eq!(
+        audio.discarded.lock().unwrap().as_slice(),
+        std::slice::from_ref(id)
+    );
     assert_eq!(
         rows(&state, "SELECT count(*) FROM reading WHERE note = ?1", id),
         0
@@ -2580,7 +2583,7 @@ fn a_row_rewritten_after_confirmation_gets_its_own_hold() {
     trash(&state, id);
     let confirmed = crate::dependents::confirm_removal(&state, [id.clone()].into());
     let removed = state.fresh().delete_from_trash(std::slice::from_ref(id));
-    assert_eq!(removed.forgotten, [id.clone()]);
+    assert_eq!(removed.forgotten, std::slice::from_ref(id));
     crate::db::for_chats(&state.chats)
         .with(|c| c.execute("UPDATE reading SET anchor = 'later' WHERE note = ?1", [id]))
         .unwrap();
@@ -2596,4 +2599,18 @@ fn a_row_rewritten_after_confirmation_gets_its_own_hold() {
         1
     );
     assert!(crate::dependents::held_rows(&state.chats).contains_key(id));
+}
+
+#[test]
+fn manual_restore_keeps_new_files_in_the_same_held_folder() {
+    let (state, _dir, ids) = state_with(&[("Lecture", ""), ("Other", "")]);
+    let id = &ids[0];
+    let bin = held_and_due(&state, id);
+    std::fs::write(bin.join("synced.pdf"), "from sync").unwrap();
+    assert_eq!(restore(&state, &[&format!("held:{id}")])["restored"], 1);
+    let home = crate::routes::uploads::originals_dir(&state.notes_dir, id).unwrap();
+    assert_eq!(
+        std::fs::read_to_string(home.join("synced.pdf")).unwrap(),
+        "from sync"
+    );
 }
