@@ -1874,7 +1874,7 @@ dialog has no nested settings card or setup prose; unknown readings stay explici
 Usage (2026-11-06, the owner: no small modal that grows): the sheet opens at its final
 size (`min-height`) with `.skeleton` shaped as two plans of two rows (pencil lines drawn once), then the saved
 readings come in with `cascade`, first draw only. Refresh and Close are icon buttons (labels
-kept; `.activity-spin` replaces the arrows while busy); "Plan limits" is a muted subtitle,
+kept; the breathing leo mark replaces the arrows while busy); "Plan limits" is a muted subtitle,
 and "Updated …" sits in each plan's header (`planUpdated`). A window past its reset says
 "Reset", one never read says "Not read yet", both with "Refresh to check". Opening POSTs
 `/api/settings/usage` with `{}`; the Refresh button POSTs `{ "claude": true }`; a `note` in the

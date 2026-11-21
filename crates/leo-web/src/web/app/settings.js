@@ -1281,7 +1281,7 @@ app.addEventListener('change', (event) => {
 const usageRefresh = { busy: false, failed: false };
 function usagePlansInner(page) {
   const busy = usageRefresh.busy;
-  return `<header><h3>Plan limits</h3><button type="button" class="icon-btn fa-run-refresh" data-action="usage-refresh" aria-label="Refresh" title="Refresh"${busy ? ' disabled' : ''}>${busy ? '<span class="activity-spin"></span>' : ICON.refresh}</button></header>${codingPlans(page) || '<p class="hint" role="status">No coding accounts detected.</p>'}${page.note ? `<p class="hint usage-note">${esc(page.note)}</p>` : ''}${usageRefresh.failed ? '<p class="hint usage-error" role="status">Refresh failed · showing saved usage</p>' : ''}`;
+  return `<header><h3>Plan limits</h3><button type="button" class="icon-btn fa-run-refresh" data-action="usage-refresh" aria-label="Refresh" title="Refresh"${busy ? ' disabled' : ''}>${busy ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : ICON.refresh}</button></header>${codingPlans(page) || '<p class="hint" role="status">No coding accounts detected.</p>'}${page.note ? `<p class="hint usage-note">${esc(page.note)}</p>` : ''}${usageRefresh.failed ? '<p class="hint usage-error" role="status">Refresh failed · showing saved usage</p>' : ''}`;
 }
 const usageShown = () => state.view === 'settings' && state.section === 'usage';
 function usagePlansShown() {

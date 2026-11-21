@@ -142,7 +142,7 @@ function calStatus() {
   if (cal.failed) return `<span>Couldn't update</span> · <button type="button" class="link-btn" data-action="cal-retry">Retry</button>`;
   if (!d) return '<span>Loading…</span>';
   if (!d.connected) return '';
-  if (d.refreshing) return `<span class="activity-spin" aria-hidden="true"></span><span>Updating…</span>`;
+  if (d.refreshing) return `<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg><span>Updating…</span>`;
   if (!(d.calendars || []).some((c) => c.problem)) return '';
   return '<span>A calendar could not be read</span> · <button type="button" class="link-btn" data-action="cal-retry">Retry</button>';
 }

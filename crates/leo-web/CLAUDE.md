@@ -261,8 +261,10 @@ Decided: one app, window only (2026-10-31).
   (that card shows no typing dots), and sits
   still in the Reads along chip, at the start of the calendar now-line (in place of
   its dot) and in `#save-state` (full ink while editing or saving, drying once to .45
-  when Saved; the words stay as hidden text, "Not saved" stays visible). No other
-  spinner or second breathing mark.
+  when Saved; the words stay as hidden text, "Not saved" stays visible). It also
+  shows leo's own background work in ink (the dock's head, the calendar's "Updating…",
+  Plan limits' Refresh, Health's "Checking…"; 2026-11-21, the user's call: the ring spinner
+  is gone). No other spinner or second breathing mark.
 - Colour: ink for actions and selection, `--focus` for focus cues (Felix blue since
   2026-11-16, the user's call: every former purple, `--focus` and the indigo tone
   `--hue-indigo` used by calendar assignments, callouts and note cards, is #3f6d97 /

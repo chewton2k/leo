@@ -218,7 +218,7 @@ test('idle Updates shows only the last-checked line', () => {
 test('Health loads in shape', () => {
   const { value } = context();
   const html = value.healthCards(null);
-  assert.ok(html.includes('Checking…') && html.includes('activity-spin'));
+  assert.ok(html.includes('Checking…') && html.includes('#leo-mark'));
   assert.ok(html.includes('class="skeleton"'));
 });
 test('the microphone fix button opens the system settings when access is denied', () => {

@@ -341,7 +341,7 @@ button.choice-pick .felix { cursor: inherit; }
 .hc-card { display: flex; flex-direction: column; gap: 18px; }
 .hc-card.hc-loading .skeleton { height: 64px; margin: 0; border-radius: var(--r-tile); --sk-base: var(--raised); }
 .hc-card.hc-loading .skeleton > svg:nth-child(3) { display: none; }
-.hc-sum .activity-spin { flex: none; margin-top: 2px; }
+.hc-sum .margin-drop { margin-top: 2px; }
 .hc-g { display: block; flex: none; width: 16px; height: 16px; stroke-width: 2; }
 .hc-g.ready { color: var(--muted); }
 .hc-ts .hc-g.ready { color: var(--text); }
