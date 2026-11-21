@@ -1138,6 +1138,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `jsonline.rs` like tasks: one JSON line per save, atomic, nofollow reads,
   newest `updated_at` wins, tombstone deletes; a file counts only when its name
   is its id. No fixed count of boards or cards (2026-11-17, the owner's principle 1). Not calendar tasks.
+- Typing @ in a card's description links a note as `[[Title]]` (2026-11-21, the user's call).
 - Tables (P-C52): boards and the faces of cards (`boards::Placed`: place, title, subheading,
   priority, the first 240 characters of the description and `description_more`) are kept in memory
   (`jsonline::Index`, one per kind per data folder, found by `boards::tables`). A file is trusted without
