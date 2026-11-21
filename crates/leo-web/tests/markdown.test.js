@@ -184,6 +184,13 @@ test('an answered @leo question reads as a question and answer', () => {
   assert.ok(html.includes('<strong>Q:</strong> what is BFS?'), html);
 });
 
+test('a picture with a described alt text carries it as a caption, and a file name or empty alt carries none', () => {
+  const caption = (alt) => md.render(`![${alt}](a.png)`).includes('class="note-fig"');
+  assert.ok(caption('Heap diagram') && caption('A graph of the loss'));
+  for (const alt of ['', 'Pasted picture', 'image', 'Drawing', 'IMG_4821', 'Screenshot 2026-11-01 at 10.23.45', 'board.png']) assert.ok(!caption(alt), alt);
+  assert.ok(md.render('![Heap diagram|300](a.png)').includes('data-cap="Heap diagram"'));
+});
+
 test('pictures in a note are shown from leo, and outside ones stay links', () => {
   const html = md.render('![Heap diagram](attachments/heap.png)\n\n![](<attachments/a b.png>)\n\n![[board.png|300]]\n\n![x](https://example.com/x.png)', { dir: 'cs130' });
   assert.ok(html.includes('<img class="note-img" src="/api/image?path=attachments%2Fheap.png&amp;from=cs130" alt="Heap diagram" loading="lazy">'), html);
@@ -361,7 +368,7 @@ test('placeholders inside links, images and math resolve, and attributes only ev
   const image = render('[![x](a.png)](https://x.com)');
   assert.ok(image.includes('<a href="https://x.com"') && image.includes('<img class="note-img"'), image);
   const alt = render('![$a$](foo.png)');
-  assert.ok(alt.includes('alt="$a$"') && !alt.includes('<span'), alt);
+  assert.ok(alt.includes('alt="$a$"') && alt.includes('data-cap="$a$"') && !alt.includes('data-tex'), alt);
   const tex = render('$x \\[y\\] z$');
   assert.ok(tex.includes('data-tex="x \\[y\\] z"'), tex);
   const wiki = render('[[note|`c`]]');
@@ -519,10 +526,10 @@ test('links, pictures and embeds read the same beside unclosed brackets', () => 
   assert.equal(render('[a [b](https://a.b)'), '<p><a href="https://a.b" target="_blank" rel="noopener noreferrer">a [b</a></p>');
   assert.equal(render('[a] [b](https://a.b) [c'), '<p>[a] <a href="https://a.b" target="_blank" rel="noopener noreferrer">b</a> [c</p>');
   assert.equal(render('![x](javascript:1)'), '<p>![x](javascript:1)</p>');
-  assert.equal(render('![a](<>) ![b](<c>)'), '<p>![a](&lt;&gt;) <img class="note-img" src="/api/image?path=c&amp;from=" alt="b" loading="lazy"></p>');
-  assert.equal(render('![a](<first) then > broken)'), '<p><img class="note-img" src="/api/image?path=%3Cfirst&amp;from=" alt="a" loading="lazy"> then &gt; broken)</p>');
-  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> "title") ![tail](<'), '<p><img class="note-img" src="/api/image?path=%20)%20then%20!%5Ba%5D(%3Cpath%20with%20spaces.png&amp;from=" alt="bad" loading="lazy"> ![tail](&lt;</p>');
-  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> nope) ![b](fallback.png)'), '<p>![bad](&lt; ) then ![a](&lt;path with spaces.png&gt; nope) <img class="note-img" src="/api/image?path=fallback.png&amp;from=" alt="b" loading="lazy"></p>');
+  assert.equal(render('![a](<>) ![b](<c>)'), '<p>![a](&lt;&gt;) <span class="note-fig" data-cap="b"><img class="note-img" src="/api/image?path=c&amp;from=" alt="b" loading="lazy"></span></p>');
+  assert.equal(render('![a](<first) then > broken)'), '<p><span class="note-fig" data-cap="a"><img class="note-img" src="/api/image?path=%3Cfirst&amp;from=" alt="a" loading="lazy"></span> then &gt; broken)</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> "title") ![tail](<'), '<p><span class="note-fig" data-cap="bad"><img class="note-img" src="/api/image?path=%20)%20then%20!%5Ba%5D(%3Cpath%20with%20spaces.png&amp;from=" alt="bad" loading="lazy"></span> ![tail](&lt;</p>');
+  assert.equal(render('![bad](< ) then ![a](<path with spaces.png> nope) ![b](fallback.png)'), '<p>![bad](&lt; ) then ![a](&lt;path with spaces.png&gt; nope) <span class="note-fig" data-cap="b"><img class="note-img" src="/api/image?path=fallback.png&amp;from=" alt="b" loading="lazy"></span></p>');
   assert.equal(md.plain('[a] ![[b]] ![c](d) [e](f) [g'), '[a] e [g');
 });
 
