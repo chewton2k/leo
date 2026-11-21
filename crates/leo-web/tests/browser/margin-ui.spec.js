@@ -553,7 +553,7 @@ test('the note tools live in one menu beside the Felix chips, and there is no fl
   const more = page.locator('.note-meta #note-more');
   await expect(more).toHaveAccessibleName('More for this note');
   await more.click();
-  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']);
+  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Read through', 'Share', 'Move to trash']);
   await page.getByRole('menuitem', { name: 'Share' }).click();
   await expect(page.getByRole('menuitem', { name: 'Copy as Markdown' })).toBeVisible();
   await page.keyboard.press('Escape');
