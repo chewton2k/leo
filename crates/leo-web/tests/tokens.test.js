@@ -192,7 +192,7 @@ test('ink details: a warm selection wash, a drawn rule with a plain fallback, an
   assert.match(at('html.page-bar-on').body, /scrollbar-width: none/);
 });
 
-test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works', () => {
+test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works and where he speaks', () => {
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);
     assert.match(t['--felix'] || '', /^#[0-9a-f]{6}$/i, `${name} defines --felix`);

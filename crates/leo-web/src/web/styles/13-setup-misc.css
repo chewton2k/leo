@@ -334,7 +334,7 @@ body.files-over main::after {
   .rec-go { transition: transform var(--t-press), scale var(--t-press) var(--ease-arrive); }
   .segment { transition: color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
   .switch { transition: background-color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
-  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .see-larger, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
+  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
   .rec-go:active:not(:disabled) { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
@@ -429,7 +429,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-hint > :last-child { margin-bottom: 0; }
 
 @media (forced-colors: active) {
-  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .see-larger, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
+  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
   .rec-card { border: 0; }
   .fa-stack i, .fa-meter i, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i, .kanban-col-head::before { forced-color-adjust: none; }
   .settings-section .segmented { border: 1px solid CanvasText; }

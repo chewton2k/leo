@@ -2076,7 +2076,6 @@
         : '';
       const drew = !m.pending && !m.error && /^\s*(```|~~~)\s*(mermaid|svg)\b/im.test(shown);
       const bigger = drew ? '<button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger" title="See it larger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>' : '';
-      const larger = drew ? '<button type="button" class="see-larger" data-action="diagram-expand" data-reply="here">See it larger</button>' : '';
       const keep = save || meta || bigger ? `<div class="msg-acts">${save}${meta}${bigger}</div>` : '';
       const removed = verdict ? m.text.length - spoken.length : 0;
       const parts = timeline(shown, (Array.isArray(m.steps) ? m.steps : []).slice(0, MOST_REPLY_STEPS).map((s) => typeof s === 'string' || !s ? s : { ...s, at: Number.isInteger(s.at) ? s.at - removed : 0 }));
@@ -2091,7 +2090,7 @@
         : '';
       const words = parts.length ? parts.map((part) => part.steps ? '' : prose(part.text)).join('') : html ? `<div class="prose">${html}</div>` : '';
       const outside = !m.pending && notFromNotes(taken, shown, used.length) ? '<div class="msg-note msg-outside">Not from your notes</div>' : '';
-      const body = `${trace}${words}${larger}${outside}`;
+      const body = `${trace}${words}${outside}`;
       const offers = (m.proposals || []).map((p, j) => proposalCard(p, i, j)).join('');
       const asks = (m.asks || []).map((a, k) => askCard(a, i, k, m.pending)).join('');
       const quizzes = (m.quizzes || []).map((q, k) => quizCard(q, i, k, m.pending, m.sources)).join('');
@@ -2606,7 +2605,7 @@
       const msg = start && start.closest('.msg.leo:not(.pending)');
       if (!msg || !body.contains(msg) || !end || end.closest('.msg.leo') !== msg || !start.closest('.prose') || !end.closest('.prose')) return null;
       const copy = range.cloneContents();
-      for (const chip of copy.querySelectorAll('.cite, .katex-mathml, .msg-steps, .see-larger')) chip.remove();
+      for (const chip of copy.querySelectorAll('.cite, .katex-mathml, .msg-steps')) chip.remove();
       const text = copy.textContent || selection.toString();
       if (!text.trim()) return null;
       const box = range.getBoundingClientRect();

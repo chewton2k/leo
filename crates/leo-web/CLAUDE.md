@@ -604,7 +604,7 @@ read (root CLAUDE.md, 2026-11-17).
   succeeds (`fixedSteps`). While Felix works the reply shows only his newest
   step, in one `.msg-status` row at the top of the reply, worded in the present
   tense (`doing`, keyed by the step's verb; unknown or failed steps keep their
-  words) in `--felix-letters` italic `--faint`, the one serif in chat chrome,
+  words) in `--felix-letters` italic `--faint`, the Felix serif in chat chrome (also his name on replies),
   because it is Felix speaking; the finished summary adds " · N s" only for
   replies timed on this page (`timed`) (2026-11-15). A broken agent
   session sends `{"reset"}` and is redone through the text protocol
