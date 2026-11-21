@@ -130,7 +130,7 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 .ask-option:disabled, .quiz-option:disabled { cursor: default; }
 .ask-option.chosen { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 .ask-hint { font-size: var(--fs-xs); color: var(--muted); }
-.quiz-kind { font-family: var(--felix-letters); font-size: var(--fs-xs); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); }
+.quiz-kind { font-family: var(--felix-letters); font-size: var(--fs-sm); font-weight: 500; color: var(--accent); }
 .quiz-q { font-size: var(--fs-base); font-weight: 600; }
 .quiz-q p { margin: 0; }
 .quiz-blank { display: inline-block; width: 4.5em; border-bottom: 2px solid var(--accent); margin: 0 3px; transform: translateY(-3px); }

@@ -439,7 +439,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-hint-ask { justify-self: start; margin-top: -4px; border: 0; background: none; padding: 4px 0; font: inherit; font-size: var(--fs-sm); font-weight: 600; color: var(--accent); cursor: pointer; }
 .quiz-hint-ask:hover { text-decoration: underline; }
 .quiz-hint { margin: 0; padding: 10px 12px; border-radius: var(--r-md); background: var(--accent-soft); font-size: var(--fs-base); }
-.quiz-hint-n { display: block; font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); margin-bottom: 2px; }
+.quiz-hint-n { display: block; font-size: var(--fs-sm); font-weight: 500; color: var(--accent); margin-bottom: 2px; }
 .quiz-hint > :first-child { margin-top: 0; }
 .quiz-hint > :last-child { margin-bottom: 0; }
 
