@@ -41,10 +41,11 @@ test('costs come from the dated price table, models on this computer are free an
   const price = value.faPrice({ prices: { as_of: '2026-11-21', models: { 'gpt-6.2-sol': [200, 10, 1000] } } });
   assert.deepEqual([...price('gpt-6.2-sol')], [2, 0.1, 10]);
   assert.deepEqual([...price('qwen3:8b')], [0, 0, 0]);
-  assert.deepEqual([...price('llama3.1')], [0, 0, 0]);
-  for (const name of ['gpt-oss:120b-cloud', 'gpt-5', 'claude-opus-9', '']) assert.equal(price(name), null, name);
+  assert.deepEqual([...price('gpt-oss:20b')], [0, 0, 0]);
+  for (const name of ['gpt-oss:120b-cloud', 'gpt-5', 'claude-opus-9', 'gemini-3.8-flash', 'openai/gpt-5', 'llama3.1', '']) assert.equal(price(name), null, name);
   assert.equal(value.faCost({ cost: 1.5, unpriced: 0 }), '≈ $1.50');
   assert.equal(value.faCost({ cost: 1.5, unpriced: 20 }), '≈ $1.50+');
+  assert.equal(value.faCost({ cost: 0.00004, unpriced: 0 }), '< $0.01');
   assert.equal(value.faCost({ cost: 0, unpriced: 20 }), 'no price');
   assert.equal(value.faCost({ cost: 0, unpriced: 0, tokens: 9 }), 'free');
   assert.equal(value.faCost({ cost: 0, unpriced: 0, tokens: 0 }), '–');

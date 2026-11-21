@@ -273,12 +273,12 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-grid { position: absolute; left: 36px; right: 0; height: 0; border-top: 1px solid var(--line); }
 .fa-grid.base { border-top-color: var(--faint); }
 .fa-grid span { position: absolute; left: -36px; top: 0; width: 30px; transform: translateY(-50%); line-height: 1; text-align: right; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
-.fa-days { display: flex; align-items: flex-end; height: 118px; position: relative; }
+.fa-days { display: flex; align-items: flex-end; height: 118px; position: relative; clip-path: inset(-8px -8px 0 -8px); }
 .fa-day { flex: 1 1 0; min-width: 2px; height: 100%; padding: 0 1px; display: flex; align-items: flex-end; justify-content: center; cursor: default; }
 .fa-stack { width: 100%; max-width: 28px; min-height: 2px; display: flex; flex-direction: column-reverse; gap: 2px; border-radius: var(--r-xs) 4px 0 0; }
 .fa-stack i { display: block; }
 .fa-stack i:last-child { border-radius: var(--r-xs) 4px 0 0; }
-.fa-day.on .fa-stack:not(:empty) { outline: 1.5px solid var(--text); outline-offset: 1px; border-radius: var(--r-xs) 4px 0 0; }
+.fa-day.on .fa-stack { outline: 1.5px solid var(--text); outline-offset: 1px; border-radius: var(--r-xs) 4px 0 0; }
 .fa-xl { position: absolute; left: 36px; right: 0; bottom: 0; height: 16px; font-size: var(--fs-xs); color: var(--muted); }
 .fa-xl span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .fa-readout { line-height: 1.4; height: 48px; margin-top: 6px; padding-top: 6px; font-size: var(--fs-sm); color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
@@ -293,7 +293,7 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-donuts { display: grid; grid-template-columns: 1fr; gap: 22px; margin-bottom: 22px; }
 .fa-panel { min-width: 0; container: dp / inline-size; }
 .fa-dp { display: flex; flex-direction: column; gap: 14px; }
-@container dp (min-width: 360px) { .fa-dp { flex-direction: row; align-items: center; gap: 20px; } }
+@container dp (min-width: 480px) { .fa-dp { flex-direction: row; align-items: center; gap: 20px; } }
 .fa-ring { position: relative; width: 120px; height: 120px; flex: none; }
 .fa-slice { pointer-events: stroke; }
 @media (prefers-reduced-motion: no-preference) { .fa-slice { transition: opacity var(--t-press) linear, stroke-width var(--t-press) linear; } .fa-lg { transition: background-color var(--t-press) linear; } }

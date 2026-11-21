@@ -602,10 +602,7 @@ function faShare(value, total) {
 }
 function faKindColour(name) { return `var(--chart-${Object.keys(window.leoChat.USAGE_KINDS).indexOf(name) + 6})`; }
 function faCost(item) {
-  if (item.cost > 0) {
-    const money = window.leoChat.money(item.cost);
-    return `${money.startsWith('$') ? '≈ ' : ''}${money}${item.unpriced ? '+' : ''}`;
-  }
+  if (item.cost > 0) return `${item.cost < 0.01 ? '< $0.01' : `≈ ${window.leoChat.money(item.cost)}`}${item.unpriced ? '+' : ''}`;
   if (item.unpriced) return 'no price';
   return item.cost === 0 && (item.tokens || item.input || item.output) ? 'free' : '–';
 }
@@ -614,7 +611,7 @@ function faPrice(page) {
   return (name) => {
     const cents = Object.hasOwn(table, name) ? table[name] : null;
     if (Array.isArray(cents) && cents.length === 3) return cents.map((n) => Number(n) / 100);
-    return name && faFamily(name) === 'local' && !/cloud/i.test(name) ? [0, 0, 0] : null;
+    return name.includes(':') && !/cloud/i.test(name) ? [0, 0, 0] : null;
   };
 }
 function faNiceMax(v) {
@@ -641,9 +638,8 @@ function faShades(names) {
   return shades;
 }
 function faSlices(items, ranks) {
-  const names = ranks.concat(items.map((item) => item.name).filter((name) => !ranks.includes(name)));
-  const shades = faShades(names);
-  return items.filter((item) => item.value > 0).sort((a, b) => b.value - a.value).map((item) => ({ ...item, rank: names.indexOf(item.name), colour: shades[item.name] }));
+  const shades = faShades(ranks);
+  return items.filter((item) => item.value > 0).sort((a, b) => b.value - a.value).map((item) => ({ ...item, rank: ranks.indexOf(item.name), colour: shades[item.name] }));
 }
 function faRanks(page, today) {
   if (felixActivity.ranks?.length) return felixActivity.ranks;
@@ -787,6 +783,7 @@ function felixUsageInner(page) {
   const recent = page.felix_recent || {};
   const price = faPrice(page);
   const period = span === 1 ? chat.usagePeriod(recent.hours, 1, faToday(true), price) : chat.usagePeriod(page.felix_days, span, today, price);
+  for (const row of period.models) if (!ranks.includes(row.name)) ranks.push(row.name);
   felixActivity.view = { period, ranks };
   const detail = (recent.spans && recent.spans[span]) || {};
   const kinds = chat.usageKinds(detail.kinds);
