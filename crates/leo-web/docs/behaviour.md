@@ -905,7 +905,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   “Title”`, `Problem n · title · tab`, or `Looks through your notes`; its title
   attribute says the connected notes are read too), while a note is attached an
   eye toggle (`data-chat="drop"`) and New/Close. Felix's words (greeting, answers) use
-  `--voice`; the user's messages stay sans in a `--field` bubble. The greeting
+  `--voice`; the user's messages stay sans in a `--surface-2` bubble with no outline (2026-11-21, the user's call). The greeting
   and starters arrive once per chat (`data-hello` key): words fade
   in (`.word`, `word-in` .5 s opacity and colour, no blur, nothing moves),
   starters are pills that appear together after it. `draw(stick, live)` no
