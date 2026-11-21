@@ -33,7 +33,8 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   (sheets.js) for permanent losses. Moving a note or folder to the trash asks nothing and
   offers Undo for 10 s. The time left is a pencil line under the toast (`.toast-time`, the
   Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
-  Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
+  Reduced Motion; a toast's action (Undo) is a small plain button on a 10% ink tint, and an error toast keeps
+  the toast surface with a red alert mark in front, never a red fill (2026-11-21, the user's call). Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` (popup-menu.js) is the one
   dropdown: explorer, ⋯ menus, More from 600 px, and Move with `find`. A row's `next` swaps
   the menu for a second step. `sheet()` itself focuses the first control and traps Tab.

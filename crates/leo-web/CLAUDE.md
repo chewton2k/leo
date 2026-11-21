@@ -223,7 +223,8 @@ Decided: one app, window only (2026-10-31).
   for permanent losses only. Moving to the trash asks nothing and offers Undo for
   10 s. The time left is a pencil line under the toast (`.toast-time`, the
   Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
-  Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
+  Reduced Motion; a toast's action (Undo) is a small plain button on a 10% ink tint, and an error toast keeps
+  the toast surface with a red alert mark in front, never a red fill (2026-11-21, the user's call). Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). Clicking its owner again closes it, as does a click
   outside (2026-11-16); a context menu (`point`) reopens at the new point instead. Side

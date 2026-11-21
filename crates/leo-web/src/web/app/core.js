@@ -22,6 +22,7 @@ const ICON = {
   readThrough: svg('<path d="M4 7h9M4 12h9M4 17h6"/><circle class="dot" cx="18.5" cy="12" r="2.6"/>'),
   sort: svg('<path d="M4 6h16M4 12h11M4 18h6"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>'),
   more: svg('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>'),
   folder: svg(FOLDER),
   folderPlus: svg('<path d="M11 19.5H6.5A3.5 3.5 0 0 1 3 16V8a3 3 0 0 1 3-3h2.9a2 2 0 0 1 1.5.7l1.2 1.4a2 2 0 0 0 1.5.7H18a3 3 0 0 1 3 3v1"/><circle cx="17.5" cy="17.5" r="4.6"/><path d="M17.5 15.2v4.6M15.2 17.5h4.6"/>'),
@@ -275,7 +276,7 @@ function toast(message, { action, run, bad } = {}) {
   el.className = 'toast' + (bad ? ' bad' : '');
   el.setAttribute('role', 'status');
   const lasts = action ? 10000 : 3500;
-  el.innerHTML = `<span>${esc(message)}</span>${action ? `<button>${esc(action)}</button><i class="toast-time" aria-hidden="true" style="animation-duration:${lasts}ms"></i>` : ''}`;
+  el.innerHTML = `${bad ? ICON.alert : ''}<span>${esc(message)}</span>${action ? `<button>${esc(action)}</button><i class="toast-time" aria-hidden="true" style="animation-duration:${lasts}ms"></i>` : ''}`;
   if (action) {
     el.querySelector('button').addEventListener('click', () => {
       el.remove();

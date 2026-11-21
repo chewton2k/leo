@@ -144,8 +144,10 @@ test('links are ink and underlined, toasts sit on paper, and scrims use the toke
   assert.match(toast, /background: var\(--raised\)/);
   assert.match(toast, /color: var\(--text\)/);
   assert.match(toast, /box-shadow: var\(--shadow-pop\)/);
-  assert.match(body('.toast button, .toast-gone button'), /text-decoration: underline/);
-  assert.match(body('.toast.bad, .toast-gone.bad'), /background: var\(--danger\)/);
+  assert.doesNotMatch(body('.toast button, .toast-gone button'), /text-decoration/);
+  assert.match(body('.toast button, .toast-gone button'), /background: color-mix\(in srgb, currentColor 10%/);
+  assert.match(body(':is(.toast, .toast-gone) > svg'), /color: var\(--danger\)/);
+  assert.ok(!all.some((r) => r.selector.includes('.toast.bad')), 'an error toast keeps the toast surface');
   assert.match(body('.scrim, .scrim-gone'), /background: var\(--scrim\)/);
   assert.doesNotMatch(pageCss(), /rgba\(0, 0, 0, \.35\);/);
   const forced = all.find((r) => r.at.some((a) => a.includes('forced-colors')) && r.selector.includes('.toast') && /CanvasText/.test(r.body));

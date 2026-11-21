@@ -204,13 +204,14 @@ label.trash-row { cursor: pointer; }
 
 .toast, .toast-gone {
   position: fixed; left: var(--mid); bottom: calc(var(--bottom) + 96px); transform: translateX(-50%); z-index: 50;
-  display: flex; align-items: center; gap: 14px; max-width: calc(100% - 32px);
-  background: var(--raised); color: var(--text); border-radius: var(--r-lg); padding: 11px 16px; font-size: var(--fs-base);
+  display: flex; align-items: center; gap: 16px; max-width: calc(100% - 32px);
+  background: var(--raised); color: var(--text); border-radius: var(--r-lg); padding: 12px 16px; font-size: var(--fs-base);
   box-shadow: var(--shadow-pop); animation: rise var(--t-open) var(--ease-arrive); text-wrap: pretty;
 }
 .toast-gone { pointer-events: none; animation: sink var(--t-open-out) var(--ease-exit) forwards; }
-.toast button, .toast-gone button { border: 0; background: none; color: inherit; font-weight: 700; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
-.toast.bad, .toast-gone.bad { background: var(--danger); color: var(--accent-text); }
+.toast button, .toast-gone button { flex: none; border: 0; border-radius: var(--r-sm); background: color-mix(in srgb, currentColor 10%, transparent); color: inherit; font-size: var(--fs-sm); font-weight: var(--fw-medium); padding: 6px 12px; }
+.toast button:hover { background: color-mix(in srgb, currentColor 18%, transparent); }
+:is(.toast, .toast-gone) > svg { flex: none; width: 16px; height: 16px; color: var(--danger); }
 .toast, .toast-gone { overflow: hidden; }
 :is(.toast, .toast-gone) > span { min-width: 0; overflow-wrap: anywhere; }
 .toast-time { position: absolute; left: 12px; right: 12px; bottom: 3px; height: 4px; margin: 0; background: currentColor; opacity: .5; -webkit-mask-size: max(100%, 544px) 100%; mask-size: max(100%, 544px) 100%; animation: toast-time linear forwards; }
