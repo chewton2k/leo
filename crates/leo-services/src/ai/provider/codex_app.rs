@@ -428,7 +428,6 @@ impl CodexThread {
                 },
                 estimated,
                 cached: used.cached,
-                cache_written: 0,
             },
         ))
     }

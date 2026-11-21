@@ -357,8 +357,9 @@ stay on disk.
 ### Meaning (`meaning.rs`)
 
 BAAI bge-small-en-v1.5 on CPU via candle (all three Candle crates pinned to
-0.10.0: 0.11 needs ARM FP16 types unavailable on the Rust 1.88 floor; model,
-tokenizer and pooling unchanged). Files pinned by commit and SHA-256
+0.11.1, which keeps ARM FP16 lanes in stable integer vectors so the Rust 1.88
+floor holds, and drops the vulnerable zip 7.4.0; tokenizers 0.23 matches it;
+model, tokenizer and pooling unchanged; 2026-11-21). Files pinned by commit and SHA-256
 (`MODEL_MANIFEST`) in `models_dir()/bge-small-en-v1.5`, re-hashed only when they
 change, unloaded after 60 s idle once no caller holds them (loading outside the
 cache mutex). The app fetches it in the background at launch when it is

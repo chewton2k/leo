@@ -119,7 +119,6 @@ mod tests {
             "anthropic",
             Spent {
                 cached: 800_000,
-                cache_written: 100_000,
                 ..spent("claude-sonnet-5-5", 1_000_000, 0)
             },
         );
