@@ -401,8 +401,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   the search match's three pencil strokes as a `box-decoration-break: clone`
   background (colours baked into the data URIs: a grey equal to ink 45% dark / 55%
   light at rest, full ink on hover, so a wrapped link gets a stroke per line); quotes
-  keep the `--surface` tint and radius beside a pencil bracket (the folder-guide
-  stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
+  are in ink and Newsreader (`--felix-letters`, 1.06 em) with no fill, beside a pencil bracket (the folder-guide
+  stroke with 10 px hooks, ink 38%), also while open (2026-11-21, the user's call); tables lose grid lines and the
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The title row's chips
