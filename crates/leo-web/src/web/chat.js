@@ -958,9 +958,10 @@
           <div class="chat-pick" id="chat-pick" hidden></div>
           <div class="chat-attach-menu" id="chat-attach-menu" role="menu" hidden><button type="button" role="menuitem" data-chat="attach-note">${icons.note || ''}<span>A note from leo</span></button>${prepare ? `<button type="button" role="menuitem" data-chat="attach-file">${icons.paperclip || ''}<span>A file from this device</span></button>` : ''}</div>
           <input type="file" id="chat-file" multiple accept="${FILE_TYPES}" hidden>
-          <textarea id="chat-input" rows="1" placeholder="Message Felix, or type @ to add a note…" enterkeyhint="send"></textarea>
+          <textarea id="chat-input" rows="1" placeholder="Ask Felix" aria-label="Message Felix, or type @ to add a note" enterkeyhint="send"></textarea>
           <div class="chat-tools">
             <button class="chat-attach" type="button" data-chat="attach" aria-haspopup="menu" aria-controls="chat-attach-menu" aria-expanded="false" aria-label="Add a note or a file" title="Add a note or a file to the conversation (or type @ for a note)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
+            <span class="chat-hint">@ adds a note</span>
             <button type="button" class="chat-chip" data-chat="drop" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></svg><span></span></button>
             <button type="button" class="chat-access" id="chat-access" data-chat="access" aria-haspopup="menu" aria-expanded="false"></button>
             <button class="chat-send" id="chat-send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -2860,7 +2861,7 @@
       if (send.classList.contains('stop') === stop) shown();
       else if (root.leoMotion) root.leoMotion.iconSwap(send, shown);
       else shown();
-      input.placeholder = state.busy ? 'Add to what Felix is doing…' : 'Message Felix, or type @ to add a note…';
+      input.placeholder = state.busy ? 'Add to what Felix is doing…' : 'Ask Felix';
     }
 
     function fit() {

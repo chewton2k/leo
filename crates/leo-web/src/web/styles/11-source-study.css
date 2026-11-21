@@ -91,6 +91,8 @@
 .chat-compose:focus-within { box-shadow: 0 0 0 2px var(--focus); }
 @media (forced-colors: active) { .chat-compose:focus-within { outline: 2px solid Highlight; } }
 .chat-tools { display: flex; align-items: center; gap: 4px; }
+.chat-hint { min-width: 0; padding-left: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-xs); color: var(--faint); }
+.chat:not(.perched) .chat-hint { display: none; }
 .chat-chip { flex: 0 1 auto; min-width: min(76px, 100%); display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 9px; border: 0; border-radius: var(--r-tile); background: var(--accent-soft); color: var(--accent); font-size: var(--fs-xs); font-weight: 600; }
 .chat-chip[hidden] { display: none; }
 .chat-chip.off { background: none; color: var(--muted); }
@@ -99,7 +101,7 @@
 .chat-access { display: inline-flex; align-items: center; gap: 6px; height: 32px; margin-left: auto; padding: 0 9px; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 600; white-space: nowrap; }
 .chat-access svg { width: 15px; height: 15px; flex: none; }
 .chat-access .chev { width: 13px; height: 13px; opacity: .7; }
-@container chatmain (max-width: 380px) { .chat-access .chev { display: none; } .chat-access { padding: 0 4px; } .chat-tools { gap: 2px; } }
+@container chatmain (max-width: 380px) { .chat-hint { display: none; } .chat-access .chev { display: none; } .chat-access { padding: 0 4px; } .chat-tools { gap: 2px; } }
 .chat-access:hover { color: var(--text); background: var(--tint); }
 .chat-access-menu { position: absolute; z-index: 6; right: 0; bottom: calc(100% + 6px); width: min(330px, 100%); padding: 4px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow); }
 .chat-access-menu button { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--r-tile); background: none; color: var(--text); text-align: left; }
