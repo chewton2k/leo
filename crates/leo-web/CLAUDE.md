@@ -956,7 +956,7 @@ Felix (2026-10-19).
   the list markers (left; `marginMarker` measures the bullet, number or checkbox with a hidden probe item, per layout pass, over every block the passage touches, else the block's
   text start −6). The tie runs from the spine's middle (one line: 8 px past its end, or that left edge)
   to the note's first line; a multi-line note aligns its first line with the passage's middle. It shows
-  while the note is hovered, focused or open, and always (fainter) for a pinned note. A newly shown
+  while the note is hovered, focused or open, and always (fainter, 25%) for a pinned note and the newest read-along note (`path.tether.rest`, 2026-11-21, the user's call). A newly shown
   tether draws passage to note with `pencil-draw` (`pathLength` 1: tie 450 ms, then spine 350 ms),
   once per light-up; repaints keep the path, so they never restart it; none under `stillMotion()`.
   The solid underline (one per text line) and the spine are drawn with `marginWobble` (the pencil's jitter), phased by

@@ -87,7 +87,7 @@
 .margin-ink path.pencil.leaving { opacity: 0; }
 @keyframes pencil-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .margin-ink path.tether { stroke: var(--accent); stroke-width: 1; opacity: 0; transition: opacity var(--t-fade) ease-out; }
-.margin-ink path.tether.pinned { opacity: .2; }
+.margin-ink path.tether.rest { opacity: .25; }
 .margin-ink path.tether.on { opacity: .45; }
 .margin-ink path.tether.sketching { stroke-dasharray: 1; animation: pencil-draw 450ms var(--ease-pencil) both; }
 .margin-ink path.spine.sketching { animation-duration: 350ms; animation-delay: 450ms; }

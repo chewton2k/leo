@@ -795,14 +795,14 @@ function marginMark(t) {
 
 function marginPaint() {
   for (const [id, d] of marginPage.tethers) {
-    const pinned = marginPage.threads.some((t) => t.id === id && t.pinned);
+    const rest = marginPage.threads.some((t) => t.id === id && t.pinned) || (marginPage.newest === id && !marginPage.faded.has(id));
     for (const part of ['tie', 'spine']) {
       const key = `${id}:tether ${part}:0`;
-      if (d?.[part] && (marginLit(id) || pinned)) {
+      if (d?.[part] && (marginLit(id) || rest)) {
         const fresh = !marginPage.paths.has(key);
         const path = marginPath(id, `tether ${part}`);
         path.setAttribute('d', d[part]);
-        path.classList.toggle('pinned', pinned);
+        path.classList.toggle('rest', rest);
         if (fresh) {
           path.setAttribute('pathLength', '1');
           if (!stillMotion()) path.classList.add('sketching');
