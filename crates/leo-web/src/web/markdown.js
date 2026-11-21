@@ -63,14 +63,21 @@
     return { alt: found[1], width: width >= 16 && width <= 4000 ? width : 0 };
   }
 
+  const AUTO_ALT = /^(?:pasted (?:picture|image)|image|picture|photo|drawing|(?:img|dsc|pxl)[\s_-]?\d.*|screen ?shot.*|.*\.(?:png|jpe?g|gif|webp|svg|heic|avif|bmp))$/i;
+
+  function captioned(img, alt) {
+    const said = alt.trim();
+    return said && !AUTO_ALT.test(said) ? `<span class="note-fig" data-cap="${escape(said)}">${img}</span>` : img;
+  }
+
   function picture(target, label) {
     const { alt, width } = sized(label);
     const size = width ? ` width="${width}"` : '';
     const src = String(target || '').trim().replace(/^<(.*)>$/, '$1');
-    if (/^data:image\/svg\+xml[;,][^\s"'<>]*$/i.test(src)) return `<img class="note-img drawing-img" src="${escape(src)}" alt="${escape(alt)}"${size}>`;
+    if (/^data:image\/svg\+xml[;,][^\s"'<>]*$/i.test(src)) return captioned(`<img class="note-img drawing-img" src="${escape(src)}" alt="${escape(alt)}"${size}>`, alt);
     if (!src || /^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//')) return null;
     const url = `/api/image?path=${encodeURIComponent(src)}&from=${encodeURIComponent(pictureDir)}`;
-    return `<img class="note-img" src="${escape(url)}" alt="${escape(alt)}" loading="lazy"${size}>`;
+    return captioned(`<img class="note-img" src="${escape(url)}" alt="${escape(alt)}" loading="lazy"${size}>`, alt);
   }
 
   const MOST_DRAWING = 200000;
@@ -514,11 +521,15 @@
       .trim();
   }
 
-  function readTime(markdown) {
+  function wordCount(markdown) {
     const text = plain(markdown);
-    const words = typeof Intl === 'object' && Intl.Segmenter
+    return typeof Intl === 'object' && Intl.Segmenter
       ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
       : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+  }
+
+  function readTime(markdown) {
+    const words = wordCount(markdown);
     return words ? `${Math.ceil(words / 238)} min read` : '';
   }
 
@@ -691,7 +702,7 @@
     return copyHtml(box.innerHTML);
   }
 
-  const api = { render, copyHtml, selectionCopy, plain, readTime, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

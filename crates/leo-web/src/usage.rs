@@ -21,6 +21,33 @@ pub enum Purpose {
     OtherWriting,
     QuickReview,
     MarginRead,
+    Connections,
+    Combine,
+    Margin,
+    Recording,
+    Import,
+    Pictures,
+    Dictation,
+}
+
+impl Purpose {
+    pub const ALL: [Purpose; 15] = [
+        Purpose::Answer,
+        Purpose::ToolContinuation,
+        Purpose::Retry,
+        Purpose::StudyGrading,
+        Purpose::Summary,
+        Purpose::OtherWriting,
+        Purpose::QuickReview,
+        Purpose::MarginRead,
+        Purpose::Connections,
+        Purpose::Combine,
+        Purpose::Margin,
+        Purpose::Recording,
+        Purpose::Import,
+        Purpose::Pictures,
+        Purpose::Dictation,
+    ];
 }
 
 #[derive(Default)]
@@ -58,6 +85,8 @@ pub struct Day {
     pub input: u64,
     pub cached: u64,
     pub output: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Serialize)]
@@ -200,18 +229,21 @@ fn rows_of(held: &BTreeMap<Purpose, Counts>) -> Vec<Row> {
         .collect()
 }
 
-fn by_hour(calls: &[Call], name: impl Fn(&Call) -> String) -> Vec<Day> {
-    let mut sums: BTreeMap<(String, String), Day> = BTreeMap::new();
+fn by_hour(calls: &[Call], name: impl Fn(&Call) -> (String, Option<String>)) -> Vec<Day> {
+    let mut sums: BTreeMap<(String, String, Option<String>), Day> = BTreeMap::new();
     for call in calls {
-        let (day, name) = (hour_of(call.at), name(call));
-        let held = sums.entry((day.clone(), name.clone())).or_insert(Day {
-            day,
-            name,
-            calls: 0,
-            input: 0,
-            cached: 0,
-            output: 0,
-        });
+        let (day, (name, model)) = (hour_of(call.at), name(call));
+        let held = sums
+            .entry((day.clone(), name.clone(), model.clone()))
+            .or_insert(Day {
+                day,
+                name,
+                calls: 0,
+                input: 0,
+                cached: 0,
+                output: 0,
+                model,
+            });
         held.calls += 1;
         held.input = held.input.saturating_add(call.input);
         held.cached = held.cached.saturating_add(call.cached);
@@ -278,11 +310,12 @@ impl Usage {
             return Days::default();
         };
         let db = crate::db::for_chats(chats);
-        let by = |column: &'static str| -> Vec<Day> {
+        let by = |column: &'static str, model: bool| -> Vec<Day> {
+            let with = if model { ", model" } else { "" };
             db.with(|c| {
                 c.prepare(&format!(
-                    "SELECT day, {column}, SUM(calls), SUM(input), SUM(cached), SUM(output)
-                     FROM usage_days WHERE day >= ?1 GROUP BY day, {column} ORDER BY day, {column}"
+                    "SELECT day, {column}, SUM(calls), SUM(input), SUM(cached), SUM(output){with}
+                     FROM usage_days WHERE day >= ?1 GROUP BY day, {column}{with} ORDER BY day, {column}{with}"
                 ))?
                 .query_map([&first], |r| {
                     Ok(Day {
@@ -292,6 +325,7 @@ impl Usage {
                         input: r.get::<_, i64>(3)?.max(0) as u64,
                         cached: r.get::<_, i64>(4)?.max(0) as u64,
                         output: r.get::<_, i64>(5)?.max(0) as u64,
+                        model: if model { Some(r.get(6)?) } else { None },
                     })
                 })?
                 .collect()
@@ -299,8 +333,8 @@ impl Usage {
             .unwrap_or_default()
         };
         Days {
-            models: by("model"),
-            kinds: by("purpose"),
+            models: by("model", false),
+            kinds: by("purpose", true),
         }
     }
 
@@ -374,8 +408,10 @@ impl Usage {
         let latest: Vec<Call> = calls.into_iter().filter(|c| c.at >= hour).collect();
         Recent {
             hours: Days {
-                models: by_hour(&latest, |c| c.model.clone()),
-                kinds: by_hour(&latest, |c| purpose_name(c.purpose)),
+                models: by_hour(&latest, |c| (c.model.clone(), None)),
+                kinds: by_hour(&latest, |c| {
+                    (purpose_name(c.purpose), Some(c.model.clone()))
+                }),
             },
             spans,
         }
@@ -587,6 +623,46 @@ mod tests {
             kinds,
             vec![("answer", 2), ("quick_review", 1), ("summary", 1)]
         );
+        let models: Vec<(&str, Option<&str>)> = days
+            .kinds
+            .iter()
+            .map(|d| (d.name.as_str(), d.model.as_deref()))
+            .collect();
+        assert!(models.contains(&("answer", Some("big"))));
+        assert!(models.contains(&("summary", Some("small"))));
+        assert!(days.models.iter().all(|d| d.model.is_none()));
+    }
+
+    #[test]
+    fn every_kind_of_work_has_a_label_on_the_usage_page() {
+        use Purpose::*;
+        let every = Purpose::ALL;
+        assert_eq!(
+            every
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            every.len()
+        );
+        for purpose in every {
+            match purpose {
+                Answer | ToolContinuation | Retry | StudyGrading | Summary | OtherWriting
+                | QuickReview | MarginRead | Connections | Combine | Margin | Recording
+                | Import | Pictures | Dictation => {}
+            }
+        }
+        let page = include_str!("web/chat.js");
+        let start = page
+            .find("const USAGE_KINDS = {")
+            .expect("chat.js lists the kinds");
+        let kinds = &page[start..start + page[start..].find("};").unwrap()];
+        for purpose in every {
+            let name = purpose_name(purpose);
+            assert!(
+                kinds.contains(&format!(" {name}: '")),
+                "{name} has no label in USAGE_KINDS"
+            );
+        }
     }
 
     #[test]

@@ -33,7 +33,8 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   (sheets.js) for permanent losses. Moving a note or folder to the trash asks nothing and
   offers Undo for 10 s. The time left is a pencil line under the toast (`.toast-time`, the
   Markdown rule's stroke) rubbed out from the right by a `clip-path` wipe, none under
-  Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
+  Reduced Motion; a toast's action (Undo) is a small plain button on a 10% ink tint, and an error toast keeps
+  the toast surface with a red alert mark in front, never a red fill (2026-11-21, the user's call). Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` (popup-menu.js) is the one
   dropdown: explorer, ⋯ menus, More from 600 px, and Move with `find`. A row's `next` swaps
   the menu for a second step. `sheet()` itself focuses the first control and traps Tab.
@@ -48,11 +49,11 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   no-writing-AI reply and Keeping could not be opened show a drawing too (an unplugged
   cord, a pen with no ink, a broken pencil; 2026-11-15). Counts: `.badge`. Small
   sentence-case section labels share one rule (`.source-label`,
-  `.quick-due-head`, `.chat-history-group`, `.pick-head`) and end in the note rule's
+  `.quick-due-head`, `.chat-history-group`, `.pick-head`, `.settings-group-title`) and end in the note rule's
   pencil stroke.
 - Loaders (2026-11-15): wherever `skeleton()` stands in for a list (search, board,
-  settings, Keeping, Trash, Health, plan), its cards hold faint pencil lines that draw
-  once and stay still; no shimmer. The explorer and chats keep their text loaders.
+  settings, Keeping, Trash, Health, plan), its cards hold faint pencil lines that redraw
+  on a calm loop while shown (2026-11-21, the user's call; still under Reduced Motion); no shimmer. The explorer and chats keep their text loaders.
 - Kept on purpose: the model picker (a menu of models with effort chips), the margin-mode menu (its own
   interrupted-motion and keyboard tests) and chat.js's attach and access menus (their
   rows are richer than a list; they move through `leoMotion`).
@@ -92,7 +93,7 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   "n more" when that tab went back into the overflow; it pulses on landing.
 - Opening a note (2026-11-08, the user's pick): the title wipes in left to right (`clip-path`, `OPEN_MS`, `EASE_OUT`)
   only when `swap` reports a new page; nothing glides over from the explorer. Enter or Tab in the title goes to the body
-  (Shift+Tab stays; Escape then Shift+Tab reaches the Read through button, then the Felix mode button, then the persona button).
+  (Shift+Tab stays; Escape then Shift+Tab reaches the ⋯ button, then the Felix mode button, then the persona button).
 - Pulse: `pulse(el, { lift, ring })`, one 320 ms pulse on what just succeeded; no repeats.
 - Write-on (2026-11-15): ticking a task wipes the pencil tick in over 160 ms (`--ease-pencil`; when
   Home, the Tasks list or the Calendar redraws the box mid-stroke, the new box carries on), and
@@ -108,7 +109,7 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 - Overlap: `overlapOut(el)` clones the old state on the body (`ghostOf`, shared with the sheet close)
   and fades it over 140 ms while the new state arrives. The clone keeps its classes, so a test that
   looks up by class right after a change scopes to `#app`.
-- Colour: selection colour arrives with the thumb (`.segment`, `.switch`) or as a wipe (`.tab-wipe`);
+- Colour: selection colour arrives with the thumb (`.segment`, `.switch`) or as a wipe (`.tab-wipe`, now the board tab's underline);
   never on hover. `iconSwap(host, change, part)` crossfades one icon into another with blur and scale.
 - Rubber band: `rubber(over, reach)` and `pastEdge(at, low, high)` resist a pull past a limit without
   overshoot (sheet swipe upward, pane and chat grips, board and calendar ghosts past the page).
@@ -143,8 +144,8 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   Cmd/Ctrl+N makes a note in the current folder (never inside a sheet, an inline
   edit, while composing or when locked). Both are customizable in Settings →
   Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
-  New folder, icons level and no Folders label (2026-11-16); folders show no note count
-  and one sort button's menu holds the sort, its order and open tasks only. New folder
+  New folder, icons level and no Folders label (2026-11-16); each folder row ends with its quiet note count and note rows
+  carry no icon (2026-11-21, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
   opens a row in place that slides the rows below down. The explorer
   also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
@@ -156,7 +157,11 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   Felix about “…”, Search every note for “…”, Add “…” to tasks (to today’s tasks, or
   to tasks for its day and time) and Start a note called “…”, the verb in
   `--muted` (`.quick-verb`) and the words in ink, with only ↵ on the right; note,
-  folder, chat and place rows keep their name and kind. It
+  folder, chat and place rows keep their name, with where they live as the hint (a note's
+  folder path, a folder's parent, "Chat · Tuesday"). When both kinds are present the rows
+  fall in two groups, Notes and Do (`.quick-due-head`), the group of the best match first,
+  and a one-line key footer (`.quick-foot`: ↑↓ move, ↵ open, esc close) ends the sheet
+  (2026-11-21, the user's call). It
   drops in from the top on desktop. Escape is always `preventDefault`ed in a
   capture listener, so it closes sheets and never leaves macOS full screen. It works like Spotlight
   (2026-10-19, the user's call): no title, modes or buttons, near the top of
@@ -256,7 +261,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   edge to edge, banded rows and right-aligned number columns; code blocks show their
   language and a Copy button on hover or keyboard focus. Chat, margin notes, previews
   and board cards keep plain styling. A faint line under the title says when the
-  note was edited and its read time ("M min read"; no word count). Note rows in the explorer edited in the last 30 minutes carry a small
+  note was edited and its read time ("M min read"); the note ⋯ menu ends with the word count alone, a quiet footer row (2026-11-21, the user's call). Note rows in the explorer edited in the last 30 minutes carry a small
   dot (not when sorted by Last edited).
 
 - No editor view: `editing.js` splits the body into blocks; `doc.js` renders
@@ -654,7 +659,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
 - Warm sessions (`warm.rs`): up to three recent conversations, sharing a
   480,000-character context ceiling. Switching chats keeps eligible sessions;
   same-chat history/access/config mismatches replace only that chat.
-  Settings changes clear all sessions. Sessions expire after ten idle minutes,
+  Settings changes clear all sessions. Sessions expire after the provider's
+  prompt-cache lifetime (Codex 30 idle minutes, others ten; 2026-11-21, the user's call),
   and deletion releases that chat. Eviction and process cleanup happen outside
   the slot mutex and away from async request workers. Only unchanged history plus the last reply/new message can
   continue; follow-ups carry new/changed material with stable source numbers.
@@ -662,8 +668,10 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   Failed sessions fall back with a fresh
   read cache; provider context accounting still bounds each retained session.
 
-- Idle compaction (2026-11-02, the user's request; usage drained fast): after
-  `COMPACT_IDLE_MS` (10 min, warm.rs `IDLE`) without a message, the page POSTs
+- Idle compaction (2026-11-02, the user's request; usage drained fast): 30 s
+  before the provider's prompt cache expires (`warm::compact_after`, sent as
+  `compact_after` on each answer's `done` line: Codex 29.5 min; ten minutes,
+  `COMPACT_IDLE_MS`, for others; 2026-11-21, the user's call) without a message, the page POSTs
   `/api/chat/compact` with the model history; when at least
   `COMPACT_LEAST_CHARS` (3,000) lie before the last `chat::COMPACT_KEEP` (4)
   turns, the server drops that chat's warm session and summarises them in the
@@ -787,7 +795,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   so forced colours keep it) or × (to look at again), and a heavier ring while the newest quiz on that
   idea is unanswered; names stay in `--muted`, the ringed one in `--text`, with no
   green or red text (2026-11-15). Each circle has `role="img"` and a label; forced
-  colours draw it in CanvasText.
+  colours draw it in CanvasText. A 2 px ink line along the strip's bottom edge (`.study-bar`, decorative) is
+  filled to ideas covered of the total and jumps as they change (2026-11-21, the user's call).
   Study review (`review.rs`) brings back missed questions after 20 h.
 
 - Tools: a text protocol (`<tool>{…}</tool>`) so every provider works, plus
@@ -872,7 +881,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   the two `.proposal-old`/`.proposal-new` boxes. Forced colours underline
   the added words.
 
-- Choosing the model (`routing.rs`, 2026-11-06, the user's call; same shape as Copilot Auto and Cursor Router, with rules instead of a trained classifier because leo has one user and a classifier call would cost tokens): `routing::light` sends only obvious cases (short lookups and greetings, no attachments, files, selection, study or Auto access, at most six turns) to the cheapest model of the chosen AI (`ai::quick_config`, through `Instructions.light` or `Powers.light_chat` when no session opens, as on a Codex without app-server isolation); every doubt stays on the chosen model, and other languages stay there too. `Powers.lighter` turns routing off when the quick tier is the same model and effort, and a failing light writer gives way to the chosen one on the last try, so `Auto` always names who really answered. The tier is part of the warm key, and `Slot::light` keeps a warm full chat from moving down, since a switch loses the cache: a chat moves up once when it needs to, never down while warm. Settings → Felix → Cheaper model for lookups (`Prefs.auto_model`, on by default) turns it off; a routed reply says `Auto` in its usage line.
+- Choosing the model (`routing.rs`, 2026-11-06, the user's call; same shape as Copilot Auto and Cursor Router, with rules instead of a trained classifier because leo has one user and a classifier call would cost tokens): `routing::light` sends short lookups, greetings and, since 2026-11-21 (the user's call), small formatting edits of something named (turn this bullet into a checkbox, make these a numbered list, fix the typos in this paragraph, rename this note; the edit rule alone passes with a selection) to the cheapest model of the chosen AI (`ai::quick_config`, through `Instructions.light` or `Powers.light_chat` when no session opens, as on a Codex without app-server isolation). Study, teaching, quizzes, analysis, why/how, comparisons, plans, summaries, other note changes, attachments, files, Auto access and more than six turns stay on the chosen model, and other languages stay there too. A plain English question the rules cannot place is compared (`routing::leans_light`) with the centroids of 40 light and 40 full examples, using the query vector the note search already computed for that request (`vectors::close_and_asked`), and goes light only past `MARGIN`; the centroids are built once on a background thread, and with no vector (no notes indexed, no model, an error), no centroids yet or a close call it stays on the chosen model. No AI call routes. `Powers.lighter` turns routing off when the quick tier is the same model and effort, and a failing light writer gives way to the chosen one on the last try, so `Auto` always names who really answered. The tier is part of the warm key, and `Slot::light` keeps a warm full chat from moving down, since a switch loses the cache: a chat moves up once when it needs to, never down while warm. Settings → Felix → Cheaper model for lookups (`Prefs.auto_model`, on by default) turns it off; a routed reply says `Auto` in its usage line.
 
 - Steering: messages sent while Felix works are added after the next tool
   step (`steer.rs`). Esc stops an answer, or closes the panel. Felix's Escape handling is on the
@@ -898,10 +907,10 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   “Title”`, `Problem n · title · tab`, or `Looks through your notes`; its title
   attribute says the connected notes are read too), while a note is attached an
   eye toggle (`data-chat="drop"`) and New/Close. Felix's words (greeting, answers) use
-  `--voice`; the user's messages stay sans in a `--field` bubble. The greeting
+  `--voice`; the user's messages stay sans in a `--surface-2` bubble with no outline (2026-11-21, the user's call). The greeting
   and starters arrive once per chat (`data-hello` key): words fade
   in (`.word`, `word-in` .5 s opacity and colour, no blur, nothing moves),
-  starters are pills that appear together after it. `draw(stick, live)` no
+  starters are a quiet list of rows with a chevron, there from the start (2026-11-21, the user's call; no outline, no late rise). `draw(stick, live)` no
   longer replaces the transcript on every streamed chunk: `settle(from, to)`
   keeps every node that already matches, appends only the new words of a
   growing text run and replaces only
@@ -920,7 +929,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   cancels on Escape or leaving the control, and keeps the chat on a failed request;
   Reduced Motion snaps the width and label.
 
-- Perch (2026-11-06, the user's call: "i like A. perch best flow and it's simple"; replaces the header and surface description above): the Chats list sits on `--ground`, the chat on `--page` with the 16 px corner, the composer, selected row and user bubble on `--raised`; `--field` and `--field-hi` are gone, pills and circles are 9 to 16 px rounded rectangles. An empty chat is `.chat.perched`: the greeting, composer and starters are one block centred in the panel at any height (`display: contents` on the body and hello, DOM order (`#chat-below` holds the starters after the footer) and two flex spacers), Felix perched on the composer's top edge, without a `hi!!` (2026-11-15, the user's call). Attached notes, passages and files stay above the composer (`#chat-refs`); there files are 52 px tiles (a 40 px page or picture, name, kind) so they never push the chat far down, while sent files in messages keep the full cards. Attached notes are the same cards (`noteCard`: a Note badge and the note's first lines, fetched once per note and cached), in the composer and in the sent message. The note finder (`#chat-pick`) is a small popover at the paperclip inside the composer, like the attach menu, and never pushes the layout (2026-11-09, the user's call). The first send docks the composer to the bottom (`leoMotion.dock`, `DRAWER_MS`, snaps under Reduced Motion) and it stays docked while the chat has messages. While a reply streams in, a 2 px caret in Felix's blue (`--felix`) sits after its last line, and his top-bar button carries a small blue dot (`#chat-toggle.working`) from send to done. Felix lives in `#chat-face` inside the composer, so his state classes still apply (`mood` finds every `.felix`). Cameos (2026-11-15, the user's call): Felix keeps his top-bar button and perches as a 50 px drawing (one unit of his `felix()` grid per pixel, never a fractional scale, the same size at every chat width) on the composer and on the top edge of Quick Leo (`.quick-perch`, `aria-hidden`, no clicks, hidden while the chat is open so only one Felix shows and on phones, where the sheet rises from the bottom; on wider windows the sheet lets it overhang and scrolls `.quick-results` instead). There is no cameo on home, in the rail or in lists. The header is toggle, chat title (or "New chat") and close; New chat is in the Chats heading while Chats is open and in the header otherwise (one `[data-chat="new"]` shows at a time; specs use `:visible`). The composer holds paperclip, the note chip (the `data-chat="drop"` eye toggle, hidden with no note, `.off` when not reading), the access chip (no indigo for Auto; "⇧Tab to switch" is only its tooltip) and send.
+- Perch (2026-11-06, the user's call: "i like A. perch best flow and it's simple"; replaces the header and surface description above): the Chats list sits on `--ground`, the chat on `--page` with the 16 px corner, the composer and selected row on `--raised`, the user bubble on `--surface-2`; `--field` and `--field-hi` are gone, pills and circles are 9 to 16 px rounded rectangles. An empty chat is `.chat.perched`: the greeting, composer and starters are one block centred in the panel at any height (`display: contents` on the body and hello, DOM order (`#chat-below` holds the starters after the footer) and two flex spacers), Felix perched on the composer's top edge, without a `hi!!` (2026-11-15, the user's call). Attached notes, passages and files stay above the composer (`#chat-refs`); there files are 52 px tiles (a 40 px page or picture, name, kind) so they never push the chat far down, while sent files in messages keep the full cards. Attached notes are the same cards (`noteCard`: a Note badge and the note's first lines, fetched once per note and cached), in the composer and in the sent message. The note finder (`#chat-pick`) is a small popover at the paperclip inside the composer, like the attach menu, and never pushes the layout (2026-11-09, the user's call). The first send docks the composer to the bottom (`leoMotion.dock`, `DRAWER_MS`, snaps under Reduced Motion) and it stays docked while the chat has messages. While a reply streams in, a 2 px caret in Felix's blue (`--felix`) sits after its last line, and his top-bar button carries a small blue dot (`#chat-toggle.working`) from send to done. Felix lives in `#chat-face` inside the composer, so his state classes still apply (`mood` finds every `.felix`). Cameos (2026-11-15, the user's call): Felix keeps his top-bar button and perches as a 50 px drawing (one unit of his `felix()` grid per pixel, never a fractional scale, the same size at every chat width) on the composer and on the top edge of Quick Leo (`.quick-perch`, `aria-hidden`, no clicks, hidden while the chat is open so only one Felix shows and on phones, where the sheet rises from the bottom; on wider windows the sheet lets it overhang and scrolls `.quick-results` instead). There is no cameo on home, in the rail or in lists. The header is toggle, chat title (or "New chat") and close; New chat is in the Chats heading while Chats is open and in the header otherwise (one `[data-chat="new"]` shows at a time; specs use `:visible`). The composer holds paperclip, the note chip (the `data-chat="drop"` eye toggle, hidden with no note, `.off` when not reading), the access chip (no indigo for Auto; "⇧Tab to switch" is only its tooltip) and send.
 - Chat titles (2026-11-06): a short question is told apart as `<question>: <note>` only by the open
   note (a source with `why: "open"`, `chats::note_of`), so the row reads the same while Felix answers
   (`draftTitle` uses the same rule, including attached notes and chat references, and the same clip of 80
@@ -944,6 +953,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   only when given `marks`: quiz cards and file chips keep their look. The prompt (`BASE`, `REPLY_STYLE`):
   one cite per bullet, short plain sentences, no bold except a closing "Next:" line.
 - Copy, Retry and Edit (2026-11-09): every answer has Copy (Markdown, citations as links); the last answer has Retry and the last question Edit, both off while a reply streams. They take the last pair back with POST `/api/chats/{id}/drop` `{count, total}` (`chats::drop_last`, 409 unless the saved chat has `total` messages), then resend or put the text in the composer.
+  Earlier answers show their action row only on hover or keyboard focus (2026-11-21, the user's call; on touch it stays), the newest always, and an answer's Set up writing AI button always.
 - Files for Felix (`chat_files`, ≤10 per chat, text only, deleted with the
   chat), passages (Ask Felix on a selection, ⌘⇧E by default, customizable in Settings → Shortcuts; no bottom Ask button), Add to note
   (`routes/insert.rs`, version-checked, request ids dedupe double presses),
@@ -1090,7 +1100,7 @@ target. Check the page sequence after loading preferences.
   tether draws once, and Reduced Motion shows it still.
   The lit passage's solid underline and the spine are slightly hand-drawn (a wobble under 1 px, the same jitter as the reading pencil, fixed per
   note and line so repaints never change it; same ink colours, same endpoints); the tie stays a smooth curve.
-- Read through (2026-11-08, the user's call): `#margin-through` beside the mode button reads the whole saved note once, in either mode and on any note. It is free: it never checks or spends Reads a day. `margin.js` `passes` cuts the note into parts of at most 6 blocks and 8,000 characters (blocks of 20+ characters without an open thread; blocks over 4,000 are cut); a note with more than 8 parts keeps 8 spread evenly through it (`spread: true`, status "This note is long, so Felix read parts from all through it."). The page POSTs each part to `.../margin/analyze` (`{version, blocks, most}`) and glows the part being read. The engine keeps the version, streaming-reply, overlap and `MOST_OPEN` guards and skips the along, `edited`, gap and daily checks. A part saves up to `MOST_PER_PASS` (3) `source: "through"` threads through `placed` (`THROUGH_SYSTEM`, `parsed_many`, which checks `notes` first and still takes a single object). A run ends at `THROUGH_MOST` (12, `app/margin-notes.js`) notes (each part's reply is capped at `margin::THROUGH_TOKENS`, 700 tokens), on Stop (the page aborts the part's request at once and shows nothing from it), or on a refusal or failure; read-along waits while it runs. Threads are held until the run ends, then revealed together top to bottom over the note: 80 ms apart, the whole stagger capped at 640 ms; Reduced Motion shows them at once, still. Leaving mid-run draws nothing. Undo DELETEs the run's threads (`DELETE .../threads/{id}`): 409 `replying` while Felix is answering that thread, 409 `replied` once you have replied.
+- Read through (2026-11-08, the user's call): the note's ⋯ menu row "Read through" (2026-11-21, the user's call: no button in the note head) opens a second step that lists the readers, the note's own checked; the pick reads the whole saved note once in that reader's voice (`persona` in the analyze body, used only here; 400 `persona` "That reader is gone." when unknown) and never changes the note's own reader, in either mode and on any note. While a read runs the row is "Stop reading through"; it is off for an unsaved note. It is free: it never checks or spends Reads a day. `margin.js` `passes` cuts the note into parts of at most 6 blocks and 8,000 characters (blocks of 20+ characters without an open thread; blocks over 4,000 are cut); a note with more than 8 parts keeps 8 spread evenly through it (`spread: true`, status "This note is long, so Felix read parts from all through it."). The page POSTs each part to `.../margin/analyze` (`{version, blocks, most}`) and glows the part being read. The engine keeps the version, streaming-reply, overlap and `MOST_OPEN` guards and skips the along, `edited`, gap and daily checks. A part saves up to `MOST_PER_PASS` (3) `source: "through"` threads through `placed` (`THROUGH_SYSTEM`, `parsed_many`, which checks `notes` first and still takes a single object). A run ends at `THROUGH_MOST` (12, `app/margin-notes.js`) notes (each part's reply is capped at `margin::THROUGH_TOKENS`, 700 tokens), on Stop (the page aborts the part's request at once and shows nothing from it), or on a refusal or failure; read-along waits while it runs. Threads are held until the run ends, then revealed together top to bottom over the note: 80 ms apart, the whole stagger capped at 640 ms; Reduced Motion shows them at once, still. Leaving mid-run draws nothing. Undo DELETEs the run's threads (`DELETE .../threads/{id}`): 409 `replying` while Felix is answering that thread, 409 `replied` once you have replied.
 - Resolved passages (2026-11-14, the user's call: an underline that reopens instead of an Undo toast): GET `.../margin` also returns `resolved: [{id, quote, prefix, suffix}]` (resolved notes, newest first, no messages, never dismissed ones). The page keeps them apart from `threads` and draws a faint dotted underline (`.margin-revisit`, the text colour at 20%, 60% on hover and focus, `CanvasText` in forced colours) under each passage it can still place: a 5 px strip entirely below each line's text, so the text itself stays clickable and editable. The first line is a focusable button titled "Reopen Felix's note"; Enter, Space or a click POSTs status `open` (with `gone`) and opens the returned thread. Resolving shows no toast; tidied notes join the list.
 - Reads use `Powers.toolless`, never `quick`: the quick path gives Claude Code
   WebSearch and Codex its web tool, so `no_tools` passes `--tools ""` and
@@ -1115,11 +1125,11 @@ target. Check the page sequence after loading preferences.
 - Selection: ⌘⇧E (customizable, stored per window in `leo-shortcuts`) opens a draft in the margin and asks at once, POST
   `.../margin/threads` (no read-along needed) with an empty question (`margin::UNSPOKEN`;
   only Felix's message is stored). A selection shows a small toolbar (`.ask-float`, `role=toolbar`, 2026-11-14, no
-  formatting row): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat
+  formatting row; hairline separators between its three actions and the Felix mark leading the first, 2026-11-21, the user's call): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat
   or a sheet) and Visualize ask at once with "Respond to this passage." / "Draw this." through
   the same POST, so its guards and the chat fallback apply. With margin room (Right or Both) the toolbar opens in the
   right margin level with the selection's first line as a short vertical list (`.ask-float.beside`); otherwise it sits
-  under the selection's last word (`selectionBox` measures text rects, never the full-width block box) (2026-11-15).
+  above the selection, or under its last word when there is no room above (2026-11-21, the user's call; `selectionBox` measures text rects, never the full-width block box) (2026-11-15).
   The Ask Felix button opens the margin draft beside the passage without asking (`marginAskFirst`, 2026-11-15,
   the user's call, replacing the floating field): its box has a Felix-blue border and the passage's underline, wash and
   tether are Felix blue while it is open; Enter sends the typed question, an empty Enter sends nothing, Cancel drops it,
@@ -1196,22 +1206,22 @@ target. Check the page sequence after loading preferences.
   column, so the note is min(its note width, the room left) and sits left of centre,
   and a first note cannot reflow text being typed. The layout is set in the same task
   as the first paint; `leo-margin-layout` remembers the setting per browser for that
-  moment, the server keeps the truth. Marks only in Settings, Full width, too little
-  room or Felix open centre the note with a left gutter reserved before the first
+  moment, the server keeps the truth. Marks only in Settings, Full width or too little
+  room (the room left beside Felix's open panel counts, 2026-11-21, the user's call) centre the note with a left gutter reserved before the first
   comment arrives. A mark centered vertically on the passage (24 px to hit,
   44 px on touch) opens the note inline, with
   `.margin-room` holding the space under its block. A thread whose passage is gone
   is not shown (2026-11-09, the user's call: the "lost its place" box in Felix was confusing).
-- The reading-mode menu, the Read through button and status sit on the line under the title, beside the save state, so a status never moves the note. Saving a mode keeps the
+- The reading-mode menu, the ⋯ button and status sit on the line under the title, beside the save state, so a status never moves the note. Saving a mode keeps the
   last confirmed value on failure. Its own menu class keeps generic select-menu
   click and close handlers from dismissing it. Each note remains a labelled article with an
   accessible margin toggle. Passage anchors use a separate gutter dot, never a
-  mascot on the text. Straight dotted underlines reveal in about 500 ms; there is
-  no default tether (only a lit note draws one). Hovering a passage washes its margin note with the passage's accent (`.margin-note[data-active]`). Reduced Motion stills the reveal and word arrivals.
+  mascot on the text. A soft ink wash behind the passage (12% ink, 20 px thick, `path.squiggle`) reveals in about 500 ms; there is
+  no default tether (only a lit note draws one, and a pinned or the newest note a faint one at rest). Hovering a passage washes its margin note with the passage's accent (`.margin-note[data-active]`). Reduced Motion stills the reveal and word arrivals.
 - Open replies have no card surface or boxed textarea outline. Their retained
   controls expand/collapse over 240 ms, become inert/aria-hidden on close and snap
   under Reduced Motion. Diagram size changes relayout the bounded thread stack.
-- Arrival keeps the dotted stroke pattern fixed and clips each line left to right
+- Arrival clips each line of the wash left to right
   over a shared 500 ms budget. Open, hover and keyboard focus use a solid accent
   underline and wash. The comment has no mascot; compact layouts reserve the full
   24 px (44 px touch) anchor gutter before the first comment arrives.
@@ -1313,6 +1323,27 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   tip under Start.
 
 - Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so in the live card with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
+
+- Live transcript (2026-11-21, the user's call): every second only the new words are
+  added to What's being heard; the words already shown stay put, so a selection and the
+  scroll position survive the poll. When recognition rewrites its last words, only that
+  changed tail is replaced; when the transcript's start is trimmed (the last 200,000
+  characters are kept), the trimmed words leave the top. New words fade in briefly (not with
+  reduced motion). Scrolled up, the view stays where it is and Back to latest returns to the
+  newest words and follows them again. Each new word is folded back into the plain text
+  once its fade ends, so a long recording keeps a few nodes.
+
+- Live layout and Felix's questions (2026-11-21, the user's call): on a wide window (main
+  area 1000 px or more) the live recording shows the clock, wave and Pause/Stop across the
+  top, then three columns: What's being heard | Your notes and What you want | Ask Felix.
+  With Felix's chat docked open, two columns, with Ask Felix above Your notes; narrower,
+  the cards stack as before with Ask Felix under Your notes. Start and the live controls
+  stay red. Ask Felix offers chat-starter chips that open Felix's chat with a passage
+  attached: before Start, once an event is chosen or What you want is filled, What should
+  I listen for? and What should I ask? (the event and the want); while recording, What did
+  I just miss?, Sum up so far and What should I ask next? (your points and the newest
+  8,000 characters of the transcript). On a note made from a recording, Felix's starters
+  add What was decided?, What are the open questions? and Action items as tasks.
 
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while
   recording instead of a browser screen picker. The existing snapshot endpoint
@@ -1427,7 +1458,8 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are
-  read-only. Colors follow the event title (`--hue-0..7`) and task kind
+  read-only. A click outside the peek closes it as Escape does, and a click on another item switches it
+  (2026-11-21, the user's call). Colors follow the event title (`--hue-0..7`) and task kind
   (`TASK_TONES`). "Hide completed" is remembered (`leo-calendar-hide-done`).
   Add to Google Calendar opens Google's prefilled page (no sign-in).
   Creation tolerates two minutes of pointer rounding only near drawn hour lines,
@@ -1512,7 +1544,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   the page fills the window and never scrolls itself. One header row (`kanbanHeadHtml`)
   holds the board tabs with count badges, a + for New board, Add column and the board's
   ⋯. The open board's tab is its name: `.kanban-title` edits in place inside it, so the
-  name shows once. A tab is one click; a card dropped on a tab moves to that board, with
+  name shows once, and the current tab is marked by the pencil underline of note rules (`.kanban-tab.on::after`; 2026-11-21, the user's call). A card is hovered, and open, with a one-step tone (`--step`, no ring); the open card also keeps a 3 px ink edge on its left. A tab is one click; a card dropped on a tab moves to that board, with
   Undo. `kanbanFit` shows whole tabs only, the open board's always among them, and puts
   the rest under "n more" (`#kanban-switch`, the shared dropdown; the tabs move to `.kanban-over`,
   and while a card is dragged they all show again and the row scrolls near its ends, so
@@ -1564,6 +1596,9 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   ignores the card's earlier pending moves and returns the card to its place). When the page is under 800 px wide
   (Felix or the explorer beside it) an open card panel takes the whole page and the board is hidden
   (container query on `#app`), so no sliver of it shows.
+  A click outside the panel closes it through the same leave as Escape and Close (2026-11-21, the user's call):
+  a failed save keeps it open, a click on another card switches it, and menus, sheets and the note list
+  inside it are not outside. Focus returns to the card when it fell to the page.
   The card on the board still previews the raw text.
 
 - Dragging is pointer events, not HTML drag and drop: mouse/pen lift past 5 px,
@@ -1756,8 +1791,7 @@ the nav scrolls with the page. Cards have 20 px gaps. The current section stays 
 search results replace the chips while searching. Keeping rows share one 150 px
 select width and stack under 500 px of card content.
 
-Owner decisions, 2026-11-07 (small-display pass): Felix's starters are outlined
-pills (no fill; `--text` border at 20 %, 16 % dark); the Chats list becomes an
+Owner decisions, 2026-11-07 (small-display pass): Felix's starters are a list of rows with a chevron, no outline (2026-11-21, the user's call); the Chats list becomes an
 overlay below a 490 px panel (560 px with an original open), and `.chat.slim`
 (chat column under 440 px) trims padding and keeps Felix's lane only beside the
 row directly above the composer. Writing AI providers are logo cards
@@ -1766,7 +1800,7 @@ are listed newest release first, then most capable first (the Rust list stays
 cheapest-first: `models.first()` is the quick model); Ollama models largest
 first. Felix activity is a dashboard (period switch, stat tiles, tokens-per-day
 bars scaled to `faNiceMax` with three labelled gridlines and dates under the bars,
-model and purpose donuts, Running now, and the chosen period's timing, failures
+model and purpose as ranked rows with thin share bars (2026-11-21, the user's call: no donut), Running now, and the chosen period's timing, failures
 and tools under a closed More detail; 24 hours shows hourly bars, 2026-11-09). Models are coloured by maker (2026-11-08, the user's call: `faFamily`, a
 name with `:` is local first, then GPT, then Claude; `--fam-openai|claude|local-1..3`,
 per-theme ramps at 3:1 or more; a fourth model of one maker and Other are hatched);
@@ -1839,9 +1873,9 @@ Usage keeps a single provider column with compact Session/Weekly rows: remaining
 percentage at left, a muted provider-colored bar and reset time at right. The
 dialog has no nested settings card or setup prose; unknown readings stay explicit.
 Usage (2026-11-06, the owner: no small modal that grows): the sheet opens at its final
-size (`min-height`) with `.skeleton` shaped as two plans of two rows (pencil lines drawn once), then the saved
+size (`min-height`) with `.skeleton` shaped as two plans of two rows (pencil lines on the skeleton loop), then the saved
 readings come in with `cascade`, first draw only. Refresh and Close are icon buttons (labels
-kept; `.activity-spin` replaces the arrows while busy); "Plan limits" is a muted subtitle,
+kept; the breathing leo mark replaces the arrows while busy); "Plan limits" is a muted subtitle,
 and "Updated …" sits in each plan's header (`planUpdated`). A window past its reset says
 "Reset", one never read says "Not read yet", both with "Refresh to check". Opening POSTs
 `/api/settings/usage` with `{}`; the Refresh button POSTs `{ "claude": true }`; a `note` in the

@@ -374,8 +374,9 @@ input. Reasoning tokens are already included in exec output tokens and are not
 added twice. Stderr banners remain a legacy fallback.
 An optional provider `effort` (letters and digits only) is passed as
 `--effort` to Claude Code and `-c model_reasoning_effort="…"` to Codex.
-`spend::answered` names the provider and prices tokens from `choice.rs`'s
-price strings (`rates`); agents are "on your plan" and local models free.
+`spend::answered` names the provider and its kind; agents are "on your plan"
+and local models free. Only the Usage page prices tokens, from `choice.rs`'s
+`api_cents`.
 `ai::chat_streaming` returns the text and that `Answered`.
 
 ### Context windows (`ai/budget.rs`)

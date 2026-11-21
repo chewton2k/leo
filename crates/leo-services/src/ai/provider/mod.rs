@@ -28,7 +28,6 @@ pub struct Spent {
     pub output: u64,
     pub estimated: bool,
     pub cached: u64,
-    pub cache_written: u64,
 }
 
 pub(crate) const NO_MORE_TOOLS: &str = "No more tools are available for this answer. Use the results already returned and answer the user now. Use interpretable language.";

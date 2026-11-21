@@ -22,6 +22,7 @@ const ICON = {
   readThrough: svg('<path d="M4 7h9M4 12h9M4 17h6"/><circle class="dot" cx="18.5" cy="12" r="2.6"/>'),
   sort: svg('<path d="M4 6h16M4 12h11M4 18h6"/>'),
   close: svg('<path d="M6 6l12 12M18 6L6 18"/>'),
+  alert: svg('<circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.5h.01"/>'),
   more: svg('<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>'),
   folder: svg(FOLDER),
   folderPlus: svg('<path d="M11 19.5H6.5A3.5 3.5 0 0 1 3 16V8a3 3 0 0 1 3-3h2.9a2 2 0 0 1 1.5.7l1.2 1.4a2 2 0 0 0 1.5.7H18a3 3 0 0 1 3 3v1"/><circle cx="17.5" cy="17.5" r="4.6"/><path d="M17.5 15.2v4.6M15.2 17.5h4.6"/>'),
@@ -70,7 +71,7 @@ const DRAWN = {
   broken: lineDrawing('broken', '0 0 120 92', '<g transform="rotate(-24 66 44)"><path d="M50 37.4 Q71 36.8 90.6 37.6 M50.2 52.2 Q71 52.6 90.4 51.8"/><path d="M90.6 37.6 Q97.4 37.8 97.8 44.8 Q97.4 51.6 90.4 51.8"/><path d="M50 37.4 Q44.6 40.4 40.8 42.2 Q42.4 43.6 40.6 45.2 Q42.4 46.4 40.6 47.8 Q44.8 49.6 50.2 52.2"/><path d="M85.4 37.8 Q85.8 44.8 85.4 51.8 M81.2 37.8 Q81.6 44.8 81.2 51.8 M52.6 44.8 Q66 45.1 78.6 44.8" stroke-width="1.1" opacity=".55"/></g><path d="M27.6 72.4 Q32.6 67.6 37.6 66 Q37.4 70.6 36 74.4 Q31.6 73.8 27.6 72.4" stroke-width="1.3"/><path d="M42.4 74.6 Q42.7 74.4 43 74.6 M46 71.4 Q46.3 71.2 46.6 71.4" stroke-width="1.1" opacity=".55"/>'),
 };
 
-const recorder = window.leoRecording.create({ bytes: speechBytes, encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, noteFields: (options) => noteFields(options), choiceCards: (options) => choiceCards(options), syncChoiceCards: (box) => syncChoiceCards(box), settingsSwitch: (attrs, on, label) => settingsSwitch(attrs, on, label), desktop: () => desktopApp, noteReady: () => showLatest().catch(() => {}) });
+const recorder = window.leoRecording.create({ bytes: speechBytes, encodePicture: async (file) => base64((await pictureFor(file)).blob), api, esc, toast, go: (hash, opts) => go(hash, opts), noteHash: (id) => noteHash(id), felix, icons: ICON, noteFields: (options) => noteFields(options), choiceCards: (options) => choiceCards(options), syncChoiceCards: (box) => syncChoiceCards(box), settingsSwitch: (attrs, on, label) => settingsSwitch(attrs, on, label), desktop: () => desktopApp, chat: () => chat, noteReady: () => showLatest().catch(() => {}) });
 const chat = felix.create({
   render: (text, options) => md.render(text, options),
   escape: md.escape,
@@ -275,7 +276,7 @@ function toast(message, { action, run, bad } = {}) {
   el.className = 'toast' + (bad ? ' bad' : '');
   el.setAttribute('role', 'status');
   const lasts = action ? 10000 : 3500;
-  el.innerHTML = `<span>${esc(message)}</span>${action ? `<button>${esc(action)}</button><i class="toast-time" aria-hidden="true" style="animation-duration:${lasts}ms"></i>` : ''}`;
+  el.innerHTML = `${bad ? ICON.alert : ''}<span>${esc(message)}</span>${action ? `<button>${esc(action)}</button><i class="toast-time" aria-hidden="true" style="animation-duration:${lasts}ms"></i>` : ''}`;
   if (action) {
     el.querySelector('button').addEventListener('click', () => {
       el.remove();
@@ -516,15 +517,12 @@ function empty(icon, title, text, actions = '') {
   return `<div class="empty">${icon}<h3>${esc(title)}</h3><p>${esc(text)}</p>${actions}</div>`;
 }
 
-const skeletonAt = {};
-const SKETCH_MS = 400;
+const SKETCH_LOOP_MS = 1600;
 const SKETCH_WIDTHS = [[33, 64, 47], [27, 69, 42], [37, 60, 51]];
 function skeleton(n, surface = 'page') {
-  const now = performance.now();
-  const draw = now - (skeletonAt[surface] ?? -Infinity) >= SKETCH_MS && !document.querySelector(`.skeleton[data-sketch="${surface}"]`);
-  skeletonAt[surface] = now;
+  const at = Math.round(performance.now() % SKETCH_LOOP_MS);
   const line = (width, seed) => `<svg viewBox="0 0 400 6" preserveAspectRatio="none" style="width: ${width}%" aria-hidden="true"><path d="${marginWobble(1, 3, 398, false, seed, 0.6)}"/></svg>`;
-  return Array.from({ length: n }, (_, i) => `<div class="skeleton${draw ? ' sk-draw' : ''}" data-sketch="${surface}">${SKETCH_WIDTHS[i % 3].map((width, j) => line(width, i * 3 + j + 1)).join('')}</div>`).join('');
+  return Array.from({ length: n }, (_, i) => `<div class="skeleton" data-sketch="${surface}" style="--sk-at: -${at}ms">${SKETCH_WIDTHS[i % 3].map((width, j) => line(width, i * 3 + j + 1)).join('')}</div>`).join('');
 }
 
 let state = { view: null };
@@ -541,23 +539,26 @@ let navigationRequest = 0;
 function clearSearchHighlight() {
   clearTimeout(searchHighlightTimer);
   CSS.highlights?.delete('leo-search');
+  CSS.highlights?.delete('leo-found');
 }
 
-function highlightSearch(root, query) {
+function highlightSearch(root, query, at) {
+  const find = at !== undefined;
   clearSearchHighlight();
   if (!CSS.highlights || typeof Highlight === 'undefined') return false;
-  const words = Array.from(String(query || '')).slice(0, 2000).join('').split(/\s+/).map(word => word.replace(/^#/, '')).filter(Boolean).slice(0, 20);
+  const most = find ? Infinity : SEARCH_HIGHLIGHT_MOST;
+  const words = find ? [String(query || '')].filter(Boolean) : Array.from(String(query || '')).slice(0, 2000).join('').split(/\s+/).map(word => word.replace(/^#/, '')).filter(Boolean).slice(0, 20);
   if (!words.length) return false;
   const pattern = new RegExp(words.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
   const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const ranges = [];
   let node;
   let seen = 0;
-  while (ranges.length < SEARCH_HIGHLIGHT_MOST && seen++ < SEARCH_HIGHLIGHT_NODES && (node = walk.nextNode())) {
+  while (ranges.length < most && (find || seen++ < SEARCH_HIGHLIGHT_NODES) && (node = walk.nextNode())) {
     if (node.parentElement.closest('textarea, script, style, .katex-mathml, .note-facts')) continue;
     pattern.lastIndex = 0;
     let match;
-    while (ranges.length < SEARCH_HIGHLIGHT_MOST && (match = pattern.exec(node.textContent))) {
+    while (ranges.length < most && (match = pattern.exec(node.textContent))) {
       const range = document.createRange();
       range.setStart(node, match.index);
       range.setEnd(node, match.index + match[0].length);
@@ -565,10 +566,18 @@ function highlightSearch(root, query) {
     }
   }
   if (!ranges.length) return false;
-  CSS.highlights.set('leo-search', new Highlight(...ranges));
-  const first = ranges[0];
+  const paint = new Highlight(...ranges.slice(0, SEARCH_HIGHLIGHT_MOST));
+  for (const range of ranges.slice(SEARCH_HIGHLIGHT_MOST)) paint.add(range);
+  CSS.highlights.set('leo-search', paint);
+  const first = ranges[find ? ((at % ranges.length) + ranges.length) % ranges.length : 0];
+  if (find) {
+    const now = new Highlight(first);
+    now.priority = 1;
+    CSS.highlights.set('leo-found', now);
+  }
   const rect = first.getBoundingClientRect();
   if (rect.top < 80 || rect.bottom > window.innerHeight) window.scrollBy({ top: (rect.top + rect.bottom - window.innerHeight) / 2, behavior: 'instant' });
+  if (find) return ranges.length;
   searchHighlightTimer = setTimeout(clearSearchHighlight, SEARCH_HIGHLIGHT_MS);
   return true;
 }
@@ -879,10 +888,10 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
     state = { view: 'note', dir: note.directory, session: s };
     chrome({ dir: note.directory });
     document.title = `${note.title || 'New note'} · leo`;
-    chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory } : null);
+    chat.setContext(note.id ? { id: note.id, title: note.title, directory: note.directory, recorded: note.recorded } : null);
     const when = note.id ? `Edited ${rel(note.updated_at)}` : 'New note';
     app.innerHTML = `<div class="note-layout"><div class="note-columns"><aside class="note-outline" aria-label="Note outline" hidden><details class="source-more"><summary aria-label="Headings in this note" title="Headings in this note"><span class="outline-icon">${ICON.list}</span>${ICON.chevron}</summary><nav aria-label="Headings"></nav></details></aside><article class="note"><div class="page-marks"><span class="page-mark" data-edge="left" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-mark" data-edge="right" role="separator" aria-orientation="vertical" tabindex="0" aria-label="Note width: drag to change, double-click to reset"></span><span class="page-width-label" hidden></span></div>
-    <header class="note-head"><div class="note-meta" data-tauri-drag-region><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="margin-through" class="margin-mode margin-through" aria-disabled="true" title="Felix reads the whole note and leaves margin notes. The text goes to your writing AI."><span id="margin-through-icon" class="margin-mode-icon" aria-hidden="true">${ICON.readThrough}</span><span id="margin-through-label">Read through</span></button><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
+    <header class="note-head"><div class="note-meta" data-tauri-drag-region><div class="margin-mode-wrap"><button type="button" id="margin-persona" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-persona-menu" disabled><span id="margin-persona-icon" class="margin-mode-icon" aria-hidden="true">${ICON.book}</span><span id="margin-persona-label">Felix as Reader</span>${ICON.chevron}</button><div id="margin-persona-menu" class="margin-mode-menu margin-persona-menu" role="menu" aria-label="Who reads this note" hidden></div></div><div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">${ICON.pen}</span><span id="margin-mode-label">When you ask</span>${ICON.chevron}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div><button type="button" id="note-more" class="margin-mode note-more" data-action="note-menu" aria-label="More for this note" aria-haspopup="menu" aria-expanded="false">${ICON.more}</button><span id="margin-status" role="status" class="hint"></span></div>
     <h1 id="title" contenteditable="plaintext-only" spellcheck="true" data-placeholder="Title" enterkeyhint="next">${esc(s.edit.title)}</h1><p class="note-facts" id="note-facts"><span id="save-state"></span><span id="note-edited">${when}</span><span id="note-read">${esc(readLine(s.edit.body))}</span></p><div class="note-originals"></div><div id="margin-instructions" class="margin-instructions" data-read-field hidden><label class="field">${ICON.pen}<input data-reads="${MARGIN_INSTRUCTIONS_READS}" placeholder="Instructions for this note, e.g. check that each claim has a source" aria-label="Instructions for this note" autocomplete="off"></label><p class="hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_INSTRUCTIONS_READS} characters of this.</p></div>${note.writeup_pending ? '<div class="set-card writeup-pending"><h3>These notes are not written up yet</h3><p class="set-note">No writing AI was ready, so leo kept the transcript as it is.</p><div class="buttons"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a><button type="button" class="btn plain sm" data-action="note-sources">Write the notes</button></div></div>' : ''}</header>
     <div class="prose doc" id="doc"></div>
     <section class="related" id="related" hidden aria-label="Related notes"></section>
@@ -1042,4 +1051,65 @@ window.addEventListener('beforeprint', () => {
 });
 window.addEventListener('afterprint', () => {
   document.body.querySelectorAll('[data-print-off]').forEach((el) => el.removeAttribute('data-print-off'));
+});
+
+function noteFind() {
+  const doc = state.session.doc;
+  const had = $('.note-find input');
+  if (had) {
+    had.focus();
+    had.select();
+    return;
+  }
+  const from = document.activeElement;
+  const line = doc.isEditing() ? doc.caretLine() : null;
+  const bar = document.createElement('div');
+  bar.className = 'note-find';
+  bar.innerHTML = `<div role="search"><label class="field">${ICON.search}<input placeholder="Find in note" aria-label="Find in note" autocomplete="off" spellcheck="false" enterkeyhint="search"></label><span class="hint" role="status"></span><button type="button" class="icon-btn" data-step="-1" aria-label="Previous match" title="Previous match">${ICON.chevron}</button><button type="button" class="icon-btn" data-step="1" aria-label="Next match" title="Next match">${ICON.chevron}</button><button type="button" class="icon-btn" aria-label="Close find" title="Close">${ICON.close}</button></div>`;
+  app.querySelector('article.note').prepend(bar);
+  const input = bar.querySelector('input');
+  let at = 0;
+  const show = (step) => {
+    doc.stop();
+    const found = highlightSearch($('#doc'), input.value, at + step);
+    at = found ? (((at + step) % found) + found) % found : 0;
+    bar.querySelector('.hint').textContent = found ? `${at + 1} of ${found}` : input.value ? 'No matches' : '';
+  };
+  let typing;
+  const close = () => {
+    clearTimeout(typing);
+    bar.remove();
+    clearSearchHighlight();
+    if (from?.isConnected) from.focus({ preventScroll: true });
+    else if (line !== null) doc.editAt(line);
+  };
+  input.addEventListener('input', () => {
+    at = 0;
+    clearTimeout(typing);
+    typing = setTimeout(show, 120, 0);
+  });
+  bar.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'Enter' && e.target === input) {
+      e.preventDefault();
+      clearTimeout(typing);
+      show(e.shiftKey ? -1 : 1);
+    }
+  });
+  bar.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) e.preventDefault();
+  });
+  bar.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (button) button.dataset.step ? show(Number(button.dataset.step)) : close();
+  });
+  input.focus();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.isComposing || chordOf(e) !== `${ON_MAC ? 'cmd' : 'ctrl'}+f` || state.view !== 'note' || !state.session?.doc || $('.scrim') || Object.keys(SHORTCUTS).some((name) => pressed(e, name))) return;
+  e.preventDefault();
+  noteFind();
 });

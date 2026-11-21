@@ -172,7 +172,7 @@ function idle(checks, platform, denied = false) {
   return piece('drawIdle', 'drawLive', 'drawIdle', {
     s: { overview: { available: true, checks }, calendar: null, event: null },
     esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '', speakersRow: () => '',
-    preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
+    askChips: L.askChips, preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
   })([], '');
 }
 
@@ -208,7 +208,7 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
   const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
     s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -294,4 +294,242 @@ test('earlier points go before the shown ones, once', () => {
     [51, 310, 'newest'],
   ]);
   assert.deepEqual(L.earlierFirst([], shown), shown);
+});
+
+test('a live recording off the Record page is announced for the activity panel, and not on it', () => {
+  const heard = [];
+  const from = recordingSource.indexOf('    function pill(');
+  const pill = (s) => require('node:vm').runInNewContext(`(function(){${recordingSource.slice(from, recordingSource.indexOf('    async function refresh(', from))} return pill;})()`, {
+    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock,
+    root: { CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
+  });
+  const page = { view: null, container: null };
+  const announce = (view, container) => {
+    Object.assign(page, { view, container });
+    pill(page)();
+  };
+  announce(null, null);
+  announce({ state: 'recording', secs: 75 }, null);
+  announce({ state: 'recording', secs: 75 }, null);
+  announce({ state: 'paused', secs: 3605 }, { isConnected: false });
+  announce({ state: 'recording', secs: 5 }, { isConnected: true });
+  announce({ state: 'recording', secs: 6 }, { isConnected: true });
+  announce({ state: 'done', secs: 5 }, null);
+  announce(null, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
+    ['leo-recording', { paused: false, label: 'Recording · 1:15' }],
+    ['leo-recording', { paused: true, label: 'Paused · 1:00:05' }],
+    ['leo-recording', null],
+  ]);
+});
+
+test('a new transcript keeps the shown words and replaces only the changed tail', () => {
+  const merged = (shown, next) => {
+    const m = L.tailMerge(shown, next);
+    assert.equal(shown.slice(m.drop, m.drop + m.keep) + m.tail, next);
+    return m;
+  };
+  assert.deepEqual(merged('', 'Hello there'), { drop: 0, keep: 0, tail: 'Hello there' });
+  assert.deepEqual(merged('Today we cover', 'Today we cover graphs'), { drop: 0, keep: 14, tail: ' graphs' });
+  assert.deepEqual(merged('Today we cover grafs and', 'Today we cover graphs and trees'), { drop: 0, keep: 15, tail: 'graphs and trees' });
+  assert.deepEqual(merged('Today we cover graphs', 'Today we cover'), { drop: 0, keep: 14, tail: '' });
+  assert.deepEqual(merged('same', 'same'), { drop: 0, keep: 4, tail: '' });
+  const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const trimmed = merged(long, `${long.slice(30)} more`);
+  assert.equal(trimmed.drop, 30);
+  assert.equal(trimmed.keep, long.length - 30);
+  const both = merged(`${long} tale`, `${long.slice(50)} tail end`);
+  assert.equal(both.drop, 50);
+  assert.equal(both.tail, 'tail end');
+  assert.deepEqual(merged('nothing alike', 'Something else entirely'), { drop: 0, keep: 0, tail: 'Something else entirely' });
+  assert.equal(merged('we laughed \u{1F600}', 'we laughed \u{1F601}').keep, 11);
+  assert.equal(merged('a'.repeat(100), 'a'.repeat(100) + 'b').keep, 100 - 32);
+});
+
+function fakeTranscript() {
+  const text = { kids: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0, wired: 0 };
+  const own = (node) => Object.assign(node, { remove() { text.kids.splice(text.kids.indexOf(node), 1); } });
+  const textNode = (data) => own({ nodeType: 3, firstChild: null, data, get textContent() { return this.data; }, deleteData(at, count) { this.data = this.data.slice(0, at) + this.data.slice(at + count); } });
+  Object.defineProperties(text, {
+    firstChild: { get: () => text.kids[0] || null },
+    lastChild: { get: () => text.kids[text.kids.length - 1] || null },
+    textContent: { get: () => text.kids.map((k) => k.textContent).join(''), set: (v) => { text.kids = v ? [textNode(v)] : []; } },
+    innerHTML: { set: (v) => { text.kids = [own({ hint: v, textContent: '' })]; } },
+  });
+  text.append = (node) => text.kids.push(node);
+  text.addEventListener = () => text.wired++;
+  text.querySelectorAll = (at) => text.kids.filter((k) => at === '.rec-new' && k.className === 'rec-new');
+  text.normalize = () => {
+    for (let i = text.kids.length - 1; i > 0; i--) {
+      if (text.kids[i].nodeType === 3 && text.kids[i - 1].nodeType === 3) text.kids[i - 1].data += text.kids.splice(i, 1)[0].data;
+    }
+  };
+  const document = {
+    createTextNode: textNode,
+    createElement: () => own({
+      firstChild: null,
+      get childNodes() { return [this.firstChild]; },
+      get textContent() { return this.firstChild.data; },
+      set textContent(v) { this.firstChild = textNode(v); },
+      getAnimations() { return this.fading ? [{}] : []; },
+      replaceWith(...nodes) { text.kids.splice(text.kids.indexOf(this), 1, ...nodes); },
+    }),
+  };
+  const heard = { addEventListener: () => text.wired++ };
+  const latest = { hidden: true, addEventListener: () => text.wired++ };
+  const box = { querySelector: (at) => ({ '#rec-transcript': text, '#rec-heard': heard, '#rec-latest': latest })[at] };
+  return { text, latest, box, document };
+}
+
+test('the live transcript is patched in place: kept words stay the same node and only new words fade in', () => {
+  const { text, latest, box, document } = fakeTranscript();
+  const s = { view: { state: 'recording', transcript: '' }, follow: true };
+  const said = 'We started with the outline of the course and what the exam will ask about.';
+  const selection = { isCollapsed: true, containsNode: () => true };
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document, getSelection: () => selection }, tailMerge: L.tailMerge });
+  show(box);
+  assert.ok(text.kids[0].hint.includes('Listening'));
+  s.view.transcript = `${said} Today we cover graphs`;
+  show(box);
+  assert.equal(text.kids[0].className, 'rec-new', 'the first words after Listening fade in');
+  const first = text.kids[0].firstChild;
+  s.view.transcript = `${said} Today we cover graphs and treez`;
+  show(box);
+  s.view.transcript = `${said} Today we cover graphs and trees today`;
+  show(box);
+  assert.equal(text.textContent, s.view.transcript);
+  assert.equal(text.kids[0], first, 'faded words are folded back into the kept text node');
+  assert.deepEqual(text.kids.map((k) => [k.className, k.textContent]), [[undefined, `${said} Today we cover graphs and `], ['rec-new', 'trees today']]);
+  s.view.transcript = s.view.transcript.slice(30) + ' more';
+  show(box);
+  assert.equal(text.textContent, s.view.transcript, 'a trimmed head is dropped from the front');
+  assert.equal(text.kids[0], first);
+  assert.equal(text.wired, 3, 'listeners are added once, when the transcript is made');
+  assert.equal(latest.hidden, true);
+  s.follow = false;
+  s.view.transcript += ' again';
+  show(box);
+  assert.equal(latest.hidden, false, 'a reader scrolled up is offered Back to latest');
+  const again = fakeTranscript();
+  piece('showTranscript', 'draw', 'showTranscript', { s: { view: { state: 'recording', transcript: 'Said before' } }, root: { document: again.document }, tailMerge: L.tailMerge })(again.box);
+  assert.equal(again.text.kids[0].nodeType, 3, 'what was already said arrives without a fade');
+  assert.equal(again.text.textContent, 'Said before');
+});
+
+test('a long recording keeps a handful of transcript nodes, and never folds under a selection or a running fade', () => {
+  const { text, box, document } = fakeTranscript();
+  const s = { view: { state: 'recording', transcript: 'Start.' } };
+  const selection = { isCollapsed: true, containsNode: () => true };
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document, getSelection: () => selection }, tailMerge: L.tailMerge });
+  show(box);
+  for (let poll = 0; poll < 3000; poll++) {
+    s.view.transcript += ` word${poll}`;
+    show(box);
+    assert.ok(text.kids.length <= 2);
+  }
+  assert.equal(text.textContent, s.view.transcript);
+  text.kids[1].fading = true;
+  s.view.transcript += ' later';
+  show(box);
+  assert.equal(text.kids.length, 3, 'a fade still running is left alone');
+  selection.isCollapsed = false;
+  for (let poll = 0; poll < 3; poll++) {
+    s.view.transcript += ` held${poll}`;
+    show(box);
+  }
+  assert.equal(text.kids.length, 6, 'a selection in the transcript is never collapsed by folding');
+  selection.isCollapsed = true;
+  text.kids.forEach((k) => { k.fading = false; });
+  s.view.transcript += ' free';
+  show(box);
+  assert.equal(text.kids.length, 2);
+  assert.equal(text.textContent, s.view.transcript);
+});
+
+test('a live redraw replaces the cards around the transcript and Felix\'s questions, at any depth, and never those two', () => {
+  const el = (id, children = [], className = '') => {
+    const node = { id, className, children };
+    node.contains = (other) => node === other || node.children.some((child) => child.contains(other));
+    children.forEach((child) => {
+      child.replaceWith = (next) => { if (['rec-heard', 'rec-ask'].includes(child.id)) throw new Error(`${child.id} was replaced`); node.children[node.children.indexOf(child)] = next; };
+    });
+    return node;
+  };
+  const page = (paused) => [el('card'), el('pane', [el('side'), el('rec-heard')], paused ? 'pane paused' : 'pane'), el('pad'), el('rec-ask'), el('wants')];
+  const shown = page(false);
+  const heard = shown[1].children[1];
+  const ask = shown[3];
+  const box = el('box', [el('', shown, 'rec rec-live')]);
+  box.querySelectorAll = (at) => (at === '[data-keep]' ? [heard, ask] : []);
+  Object.defineProperty(box, 'innerHTML', { set() { throw new Error('the whole page was rewritten'); } });
+  const fresh = el('', page(true), 'rec rec-live paused');
+  const document = { createElement: () => el('made', [fresh]) };
+  piece('graft', 'showTranscript', 'paintLive', { root: { document }, drawLive: () => '' })(box);
+  const shell = box.children[0];
+  assert.equal(shell.className, 'rec rec-live paused');
+  assert.equal(shell.children[1].className, 'pane paused');
+  assert.equal(shell.children[1].children[1], heard);
+  assert.equal(shell.children[3], ask);
+  assert.deepEqual([shell.children[0], shell.children[1].children[0], shell.children[2], shell.children[4]], [fresh.children[0], fresh.children[1].children[0], fresh.children[2], fresh.children[4]]);
+  const other = el('box', [el('', [el('card')], 'rec rec-idle')]);
+  let rewritten = '';
+  other.querySelectorAll = () => [];
+  Object.defineProperty(other, 'innerHTML', { set(v) { rewritten = v; } });
+  piece('graft', 'showTranscript', 'paintLive', { root: { document: { createElement: () => el('made', []) } }, drawLive: () => '<live>' })(other);
+  assert.equal(rewritten, '<live>', 'without a transcript yet, the live page is drawn whole');
+});
+
+test('Felix\'s questions follow the stage: before Start, while recording, and on a recorded note', () => {
+  assert.deepEqual(L.FELIX_ASKS.before, ['What should I listen for?', 'What should I ask?']);
+  assert.deepEqual(L.FELIX_ASKS.live, ['What did I just miss?', 'Sum up so far', 'What should I ask next?']);
+  assert.equal((L.askChips('live', esc).match(/class="starter" data-rec-ask=/g) || []).length, 3);
+  const chips = idle({ speech: true, writing: true }, 'macos');
+  assert.match(chips, /<div class="rec-ask" id="rec-ask" hidden>.*What should I listen for\?/s, 'hidden until an event is chosen or a want is typed');
+  const s = { event: null };
+  const ask = { hidden: false };
+  const wants = { value: '' };
+  const sync = piece('syncAsk', 'askFelix', 'syncAsk', { s });
+  const box = { querySelector: (at) => ({ '.rec-idle #rec-ask': ask, '#rec-wants': wants })[at] };
+  sync(box);
+  assert.equal(ask.hidden, true);
+  wants.value = 'the exam topics';
+  sync(box);
+  assert.equal(ask.hidden, false);
+  wants.value = '';
+  s.event = 0;
+  sync(box);
+  assert.equal(ask.hidden, false);
+  const live = piece('drawLive', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
+    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
+  })();
+  assert.match(live, /rec-notepad.*<section class="set-card rec-ask" id="rec-ask" data-keep>.*What did I just miss\?.*rec-wants-card/s, 'the questions sit under Your notes');
+  assert.match(live, /id="rec-heard" data-keep/);
+});
+
+test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {
+  const said = 'x'.repeat(250000) + ' the newest words';
+  const text = L.liveAsk(['first point', 'second point'], said);
+  assert.ok(text.length <= L.MOST_ASK, `${text.length}`);
+  assert.ok(Array.from(text).length <= 8000);
+  assert.match(text, /^My points so far:\n- first point\n- second point\n\nThe newest part of the transcript:\n/);
+  assert.ok(text.endsWith(' the newest words'), 'the tail is sent, not the head');
+  const many = L.liveAsk(Array.from({ length: 2000 }, (_, i) => `point ${i}`), said);
+  assert.ok(many.length <= L.MOST_ASK);
+  assert.match(many, /- point 1999\n\nThe newest part/);
+  const emoji = L.liveAsk([], '\u{1F600}'.repeat(5000));
+  assert.ok(emoji.length <= L.MOST_ASK);
+  assert.doesNotMatch(emoji, /\n[\uDC00-\uDFFF]/, 'never starts inside a surrogate pair');
+  assert.match(L.liveAsk([], ''), /nothing heard yet/);
+  const brief = L.briefAsk({ title: 'Design sync', start: '2026-11-21T15:00:00Z', end: '2026-11-21T16:00:00Z', context: 'Agenda: launch' }, 'decisions only');
+  assert.match(brief, /^Calendar event: Design sync \(.*\)\nAgenda: launch\n\nWhat I want from the notes: decisions only$/);
+  assert.equal(L.briefAsk(null, 'only wants'), 'What I want from the notes: only wants');
+});
+
+test('the live page keeps the stacked page unless a container or the docked chat asks for columns', () => {
+  const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
+  const gated = css.split('\n').filter((line) => /\.rec-live \{[^}]*display: grid/.test(line));
+  assert.equal(gated.length, 2, 'a wide main area and a docked chat each lay out columns');
+  assert.ok(gated.every((line) => /^\s*(?:@media \([^)]*\) \{ )?@container recroom \(min-width: \d+px\) \{/.test(line)), 'only inside a container query');
+  assert.ok(gated.some((line) => /@media \(min-width: 1200px\) \{ @container[^\n]*body\.chat-open \.rec-live/.test(line)), 'two columns only beside a docked chat');
 });

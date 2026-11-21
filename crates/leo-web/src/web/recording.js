@@ -129,6 +129,43 @@
     return points.map(([at, text], k) => [first + k, at, text]);
   }
 
+  function tailMerge(shown, next) {
+    const probe = next.slice(0, 64);
+    const found = next.startsWith(shown.slice(0, probe.length)) ? 0 : shown.indexOf(probe);
+    const drop = found > 0 ? found : 0;
+    const rest = shown.slice(drop);
+    const most = Math.min(rest.length, next.length);
+    let keep = 0;
+    while (keep < most && rest.charCodeAt(keep) === next.charCodeAt(keep)) keep++;
+    if (/\S/.test(next[keep] || '')) keep -= /\S{0,32}$/.exec(next.slice(Math.max(0, keep - 32), keep))[0].length;
+    if (keep > 0 && /[\uD800-\uDBFF]/.test(next[keep - 1])) keep--;
+    return { drop, keep, tail: next.slice(keep) };
+  }
+
+  const MOST_ASK = 8000;
+  const FELIX_ASKS = {
+    before: ['What should I listen for?', 'What should I ask?'],
+    live: ['What did I just miss?', 'Sum up so far', 'What should I ask next?'],
+  };
+
+  function askChips(stage, esc) {
+    return FELIX_ASKS[stage].map((q) => `<button type="button" class="starter" data-rec-ask="${esc(q)}">${esc(q)}</button>`).join('');
+  }
+
+  function newest(text, most) {
+    const tail = text.length > most ? text.slice(text.length - most) : text;
+    return /^[\uDC00-\uDFFF]/.test(tail) ? tail.slice(1) : tail;
+  }
+
+  function liveAsk(points, transcript) {
+    const typed = points.length ? `My points so far:\n${newest(points.map((p) => `- ${p}`).join('\n'), 2000)}\n\n` : '';
+    return `${typed}The newest part of the transcript:\n${newest(transcript || '', MOST_ASK - typed.length - 40) || '(nothing heard yet)'}`;
+  }
+
+  function briefAsk(event, wants) {
+    return [event && `Calendar event: ${event.title} (${whenOf(event)})${event.context ? `\n${event.context}` : ''}`, wants && `What I want from the notes: ${wants}`].filter(Boolean).join('\n\n');
+  }
+
   function unsavedLine(n, more) {
     if (more) return `${n} or more recordings weren't saved`;
     return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
@@ -473,6 +510,7 @@
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
+          <div class="rec-ask" id="rec-ask"${s.event !== null ? '' : ' hidden'}><p class="hint">Ask Felix before you start</p><div class="chat-starters">${askChips('before', esc)}</div></div>
           <div class="rec-start">
             <button class="rec-go" data-action="rec-start" aria-label="Start recording" ${ov.available === false ? 'disabled' : ''}><span class="rec-go-dot"></span></button>
             <span class="rec-start-label">Start recording</span>
@@ -485,7 +523,6 @@
     function drawLive() {
       const v = s.view;
       const paused = v.state === 'paused';
-      const transcript = v.transcript ? esc(v.transcript) : `<span class="hint">${paused ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
       const listed = earlierFirst(s.earlier, placed(v));
       const more = listed.length && listed[0][0] > 0 ? '<button type="button" class="btn plain sm" data-action="rec-earlier">Show earlier points</button>' : '';
       const points = listed.length ? `${more}<ul class="rec-points">${listed.map(([, at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
@@ -498,21 +535,23 @@
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       return `<div class="rec rec-live${paused ? ' paused' : ''}">
         <section class="set-card rec-live-card">
-          <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind}</span></div>
+          <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind === 'Screen' ? icons.screen : icons.mic}${kind}</span></div>
           <div class="rec-clock"><span id="rec-time">${clock(v.secs)}</span></div>
           <div class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></div><p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, micDenied(v.source)))}</p>${micDenied(v.source) ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}
           ${controls}
           ${warnings}
         </section>
-        <details class="set-card rec-heard" id="rec-heard"${s.showHeard ? ' open' : ''}>
+        <details class="set-card rec-heard" id="rec-heard" data-keep${s.showHeard ? ' open' : ''}>
           <summary><span class="grow"><b>What’s being heard</b><span class="cal-sub">The live transcript</span></span>${icons.chevron}</summary>
-          <div class="rec-transcript" id="rec-transcript" aria-live="polite">${transcript}</div>
+          <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
+          <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
         </details>
         <section class="set-card rec-notepad">
           <header><h3>Your notes</h3></header><p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>
           ${points}
           <div class="rec-point rec-compose"><textarea id="rec-point-text" class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm" data-action="rec-point">Add point</button></div></div>
         </section>
+        <section class="set-card rec-ask" id="rec-ask" data-keep><header><h3>Ask Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div></section>
         <section class="set-card rec-wants-card">
           <header><h3>What you want from the notes</h3><span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></header>
           <p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p>
@@ -637,6 +676,109 @@
       }
     }
 
+    function graft(now, made, kept) {
+      const fresh = [...made.children];
+      if (fresh.length !== now.children.length) return false;
+      return [...now.children].every((child, i) => {
+        if (kept.includes(child)) return fresh[i].id === child.id;
+        if (!kept.some((k) => child.contains(k))) return child.replaceWith(fresh[i]) || true;
+        child.className = fresh[i].className;
+        return graft(child, fresh[i], kept);
+      });
+    }
+
+    function paintLive(box) {
+      const html = drawLive();
+      const kept = [...box.querySelectorAll('[data-keep]')];
+      const made = root.document.createElement('div');
+      made.innerHTML = html;
+      if (!kept.length || !graft(box, made, kept)) box.innerHTML = html;
+    }
+
+    function syncAsk(box) {
+      const ask = box.querySelector('.rec-idle #rec-ask');
+      const wants = box.querySelector('#rec-wants');
+      if (ask) ask.hidden = s.event === null && !(wants && wants.value.trim());
+    }
+
+    function askFelix(question) {
+      const chat = deps.chat && deps.chat();
+      if (!chat) return;
+      if (chat.isBusy()) return toast('Felix is still answering. Try again in a moment.', { bad: true });
+      const v = s.view;
+      const events = (s.calendar && s.calendar.events) || [];
+      const wants = s.container && s.container.querySelector('#rec-wants');
+      const text = live(v) ? liveAsk(earlierFirst(s.earlier, placed(v)).map(([, , said]) => said), v.transcript) : briefAsk(s.event !== null ? events[s.event] : null, wants ? wants.value.trim() : '');
+      chat.attachSelection({ note: '', title: 'Live recording', text });
+      chat.askNew(question);
+    }
+
+    function showTranscript(box) {
+      const text = box.querySelector('#rec-transcript');
+      if (!text) return;
+      const heard = box.querySelector('#rec-heard');
+      const latest = box.querySelector('#rec-latest');
+      const fresh = s.shownIn !== text;
+      if (fresh) {
+        Object.assign(s, { shownIn: text, shownText: '', follow: true });
+        heard.addEventListener('toggle', () => {
+          s.showHeard = heard.open;
+          try {
+            root.localStorage.setItem('leo-rec-heard', heard.open ? 'open' : 'shut');
+          } catch (e) {}
+          if (!heard.open) return;
+          s.follow = true;
+          latest.hidden = true;
+          text.scrollTop = text.scrollHeight;
+        });
+        text.addEventListener('scroll', () => {
+          s.follow = text.scrollTop + text.clientHeight >= text.scrollHeight - 24;
+          latest.hidden = s.follow;
+        });
+        latest.addEventListener('click', () => {
+          s.follow = true;
+          latest.hidden = true;
+          text.focus({ preventScroll: true });
+          text.scrollTop = text.scrollHeight;
+        });
+      }
+      const next = s.view.transcript || '';
+      const shown = s.shownText;
+      s.shownText = next;
+      if (!next) {
+        text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
+        return;
+      }
+      const picked = root.getSelection && root.getSelection();
+      if (!(picked && !picked.isCollapsed && picked.containsNode(text, true))) {
+        text.querySelectorAll('.rec-new').forEach((span) => { if (!(span.getAnimations && span.getAnimations().length)) span.replaceWith(...span.childNodes); });
+        text.normalize();
+      }
+      if (!shown) text.textContent = '';
+      const { drop, keep, tail } = tailMerge(shown, next);
+      const height = text.scrollHeight;
+      let left = drop;
+      while (left > 0 && text.firstChild) {
+        const node = text.firstChild;
+        const size = node.textContent.length;
+        if (size > left) (node.firstChild || node).deleteData(0, left);
+        else node.remove();
+        left -= Math.min(size, left);
+      }
+      if (drop && !s.follow) text.scrollTop -= height - text.scrollHeight;
+      let size = shown.length - drop;
+      while (size > keep && text.lastChild) {
+        const node = text.lastChild;
+        const part = node.textContent.length;
+        if (size - part >= keep) node.remove();
+        else (node.firstChild || node).deleteData(part - (size - keep), size - keep);
+        size = Math.max(keep, size - part);
+      }
+      if (tail) text.append(fresh ? root.document.createTextNode(tail) : Object.assign(root.document.createElement('span'), { className: 'rec-new', textContent: tail }));
+      if (s.follow) text.scrollTop = text.scrollHeight;
+      latest.hidden = s.follow;
+    }
+
     function draw() {
       const box = s.container;
       if (!box || !box.isConnected) return;
@@ -645,8 +787,6 @@
       const keep = typed ? { value: typed.value, focused: root.document.activeElement === typed, start: typed.selectionStart, end: typed.selectionEnd } : null;
       const wantsBox = box.querySelector('#rec-wants-live');
       const wantsKeep = wantsBox && root.document.activeElement === wantsBox ? { start: wantsBox.selectionStart, end: wantsBox.selectionEnd } : null;
-      const old = box.querySelector('#rec-transcript');
-      if (old) s.follow = old.scrollTop + old.clientHeight >= old.scrollHeight - 24;
       const form = idleForm(box);
       const motion = root.leoMotion;
       const page = !v || v.state === 'done' ? 'idle' : live(v) ? 'live' : v.state === 'writing' ? 'writing' : 'failed';
@@ -658,7 +798,7 @@
       const paint = () => {
         if (page === 'idle') box.innerHTML = drawIdle(folders, here, form && form.kind);
         else if (page === 'live') {
-          box.innerHTML = drawLive();
+          paintLive(box);
           s.heard = '';
           paintWaveNow();
         }
@@ -668,17 +808,7 @@
       if (paused && motion) motion.iconSwap(box, paint, '.rec-round.plain svg');
       else paint();
       if (moved) motion?.cascade(box, 'settling');
-      const heard = box.querySelector('#rec-heard');
-      if (heard) {
-        heard.addEventListener('toggle', () => {
-          s.showHeard = heard.open;
-          try {
-            root.localStorage.setItem('leo-rec-heard', heard.open ? 'open' : 'shut');
-          } catch (e) {}
-          const text = heard.querySelector('#rec-transcript');
-          if (heard.open && text) text.scrollTop = text.scrollHeight;
-        });
-      }
+      if (page === 'live') showTranscript(box);
       const wantsArea = box.querySelector('#rec-wants-live');
       if (wantsArea) {
         if (wantsKeep) {
@@ -717,7 +847,10 @@
       redrawSpeakers(box);
       if (box.querySelector('#rec-speakers-box')) speakerModel(box);
       pickKind(box, false);
-      box.querySelectorAll('input[name="rec-kind"]').forEach((radio) => radio.addEventListener('change', () => pickKind(box, true)));
+      box.querySelectorAll('input[name="rec-kind"]').forEach((radio) => radio.addEventListener('change', () => { pickKind(box, true); syncAsk(box); }));
+      syncAsk(box);
+      const idleWants = box.querySelector('.rec-idle #rec-wants');
+      if (idleWants) idleWants.addEventListener('input', () => syncAsk(box));
       const event=box.querySelector('#rec-event');
       if (event) {
         event.addEventListener('change', () => {
@@ -727,8 +860,6 @@
         });
       }
       const dir=box.querySelector('#rec-dir');
-      const text = box.querySelector('#rec-transcript');
-      if (text && s.follow) text.scrollTop = text.scrollHeight;
     }
 
     async function saveWants() {
@@ -768,21 +899,12 @@
 
 
     function pill() {
-      let el = root.document.getElementById('rec-pill');
       const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
-      if (!show) {
-        if (el) el.remove();
-        return;
-      }
-      if (!el) {
-        el = root.document.createElement('button');
-        el.id = 'rec-pill';
-        el.className = 'rec-pill';
-        el.dataset.action = 'record';
-        root.document.body.appendChild(el);
-      }
-      el.classList.toggle('paused', s.view.state === 'paused');
-      el.innerHTML = `<span class="rec-dot"></span>${s.view.state === 'paused' ? 'Paused' : 'Recording'} ${clock(s.view.secs)}`;
+      const paused = show && s.view.state === 'paused';
+      const label = show ? `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` : '';
+      if (label === (s.pilled || '')) return;
+      s.pilled = label;
+      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label } : null }));
     }
 
     async function refresh() {
@@ -795,6 +917,11 @@
         s.view = null;
       }
     }
+
+    root.document.addEventListener('click', (event) => {
+      const button = event.target && event.target.closest && event.target.closest('[data-rec-ask]');
+      if (button && s.container && s.container.contains(button)) askFelix(button.dataset.recAsk);
+    });
 
     let pasting = false;
     root.document.addEventListener('paste', (event) => {
@@ -909,5 +1036,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

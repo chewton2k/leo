@@ -115,3 +115,19 @@ document.addEventListener('click', (event) => {
   if (kept && kept.owner.contains(event.target)) setTimeout(() => popup === kept && closePopup(false));
 }, true);
 addEventListener('hashchange', () => closePopup(false));
+
+function closeOnOutsidePress(inside, leave) {
+  const keep = `${inside}, .scrim, .popup-menu, .select-menu, .toast`;
+  let armed = false;
+  document.addEventListener('pointerdown', (e) => {
+    armed = e.button === 0 && e.isPrimary && !e.target.closest?.(keep);
+  });
+  document.addEventListener('click', (e) => {
+    const pressed = armed && e.detail > 0 && !e.target.closest?.(keep);
+    armed = false;
+    if (!pressed) return;
+    Promise.resolve(leave()).then((opener) => {
+      if (opener && (!document.activeElement || document.activeElement === document.body)) opener.focus({ preventScroll: true });
+    }, fail);
+  });
+}

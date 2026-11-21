@@ -4,6 +4,86 @@
   const md = root.leoMarkdown;
   const ed = root.leoEditing;
 
+  function caretBox(area, at) {
+    const style = getComputedStyle(area);
+    const mirror = document.createElement('div');
+    for (const p of ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize', 'textIndent']) mirror.style[p] = style[p];
+    Object.assign(mirror.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', top: '0', left: '-9999px' });
+    mirror.textContent = area.value.slice(0, at);
+    const mark = document.createElement('span');
+    mark.textContent = area.value.slice(at, at + 1) || '.';
+    mirror.appendChild(mark);
+    document.body.appendChild(mirror);
+    const box = area.getBoundingClientRect();
+    const frame = mirror.getBoundingClientRect();
+    const spot = mark.getBoundingClientRect();
+    const point = { x: box.left + spot.left - frame.left - area.scrollLeft, y: box.top + spot.bottom - frame.top - area.scrollTop };
+    mirror.remove();
+    return point;
+  }
+
+  function caretMenu({ id, label, pick }) {
+    const menu = { area: null, box: null, at: 0 };
+    const place = () => {
+      const { area, box, at } = menu;
+      const spot = caretBox(area, at);
+      const high = parseFloat(getComputedStyle(area).lineHeight) || 24;
+      box.style.left = `${Math.max(8, Math.min(spot.x - 12, root.innerWidth - box.offsetWidth - 8))}px`;
+      box.style.top = `${spot.y + 6 + box.offsetHeight > root.innerHeight - 8 ? Math.max(8, spot.y - high - box.offsetHeight - 6) : spot.y + 6}px`;
+      return spot;
+    };
+    menu.move = (i) => {
+      menu.active = i;
+      const row = menu.box.querySelector(`#${id}-${i}`);
+      for (const other of menu.box.querySelectorAll('[data-row]')) other.setAttribute('aria-selected', String(other === row));
+      if (row) menu.area.setAttribute('aria-activedescendant', row.id);
+      else menu.area.removeAttribute('aria-activedescendant');
+      row?.scrollIntoView({ block: 'nearest' });
+    };
+    menu.show = (area, at, html, active = 0) => {
+      if (menu.area !== area) {
+        menu.close();
+        const box = document.createElement('div');
+        box.className = 'popup-menu slash-menu';
+        box.id = `${id}-menu`;
+        box.setAttribute('role', 'listbox');
+        box.setAttribute('aria-label', label);
+        box.addEventListener('mousedown', (e) => e.preventDefault());
+        box.addEventListener('click', (e) => {
+          const row = e.target.closest('[data-row]');
+          if (row) pick(Number(row.dataset.row));
+        });
+        document.body.appendChild(box);
+        Object.assign(menu, { area, box });
+        area.setAttribute('aria-controls', box.id);
+        addEventListener('scroll', place, true);
+      }
+      menu.at = at;
+      menu.box.innerHTML = html;
+      const spot = place();
+      menu.move(active);
+      if (!menu.box.dataset.shown) {
+        menu.box.dataset.shown = '1';
+        root.leoMotion?.unfold(menu.box, spot);
+      }
+    };
+    menu.close = () => {
+      const { area, box } = menu;
+      if (!area) return;
+      menu.area = null;
+      removeEventListener('scroll', place, true);
+      area.removeAttribute('aria-activedescendant');
+      area.removeAttribute('aria-controls');
+      for (const named of [box, ...box.querySelectorAll('[id]')]) named.removeAttribute('id');
+      box.className = 'popup-menu-gone slash-menu';
+      box.setAttribute('aria-hidden', 'true');
+      box.inert = true;
+      if (root.leoMotion) root.leoMotion.fold(box, () => box.remove());
+      else box.remove();
+    };
+    return menu;
+  }
+
   function mount(container, { source, onChange, placeholder, dir = '', onPictures = null, onSelection = null, outline = null, noteTools = false }) {
     let lines = String(source || '').replace(/\r\n?/g, '\n').split('\n');
     let blocks = [];
@@ -747,24 +827,6 @@
       });
     }
 
-    function caretBox(area, at) {
-      const style = getComputedStyle(area);
-      const mirror = document.createElement('div');
-      for (const p of ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize', 'textIndent']) mirror.style[p] = style[p];
-      Object.assign(mirror.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', top: '0', left: '-9999px' });
-      mirror.textContent = area.value.slice(0, at);
-      const mark = document.createElement('span');
-      mark.textContent = area.value.slice(at, at + 1) || '.';
-      mirror.appendChild(mark);
-      document.body.appendChild(mirror);
-      const box = area.getBoundingClientRect();
-      const frame = mirror.getBoundingClientRect();
-      const spot = mark.getBoundingClientRect();
-      const point = { x: box.left + spot.left - frame.left - area.scrollLeft, y: box.top + spot.bottom - frame.top - area.scrollTop };
-      mirror.remove();
-      return point;
-    }
-
     function onSelectionChange() {
       if (!container.isConnected) return;
       if (editing && editing.selectionText && !pressed) settle();
@@ -888,12 +950,12 @@
       const raw = lines.slice(block.start, block.end).join('\n');
       const inside = at - lineStart(block.start);
       const texts = [];
-      const walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT);
+      const walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
       let node;
-      while ((node = walker.nextNode())) texts.push(node);
+      while ((node = walker.nextNode())) if (node.nodeType === 3 || node.matches('img.note-img')) texts.push(node);
       const whole = { node: blk, offset: inside > 0 ? blk.childNodes.length : 0 };
       if (block.kind !== 'line' || !raw.trim() || !texts.length) return whole;
-      const total = texts.reduce((n, text) => n + text.data.replace(/\u200b/g, '').length, 0);
+      const total = texts.reduce((n, text) => n + (text.nodeType === 1 ? 1 : text.data.replace(/\u200b/g, '').length), 0);
       const isItem = ed.listed(lines, block.start);
       let low = 0;
       let high = total;
@@ -904,6 +966,11 @@
       }
       let seen = 0;
       for (const text of texts) {
+        if (text.nodeType === 1) {
+          if (seen >= low) return beside(text, 0);
+          seen++;
+          continue;
+        }
         let offset = 0;
         for (const ch of text.data) {
           if (ch !== '\u200b') {
@@ -914,7 +981,17 @@
         }
       }
       const last = texts[texts.length - 1];
-      return { node: last, offset: last.data.length };
+      return last.nodeType === 1 ? beside(last, 1) : { node: last, offset: last.data.length };
+    }
+
+    function beside(img, after) {
+      return { node: img.parentNode, offset: [...img.parentNode.childNodes].indexOf(img) + after };
+    }
+
+    function shownBefore(blk, range) {
+      let pictures = 0;
+      for (const img of blk.querySelectorAll('img.note-img')) if (range.intersectsNode(img)) pictures++;
+      return range.toString().replace(/\u200b/g, '') + '\ufffc'.repeat(pictures);
     }
 
     function selectSpan(from, to) {
@@ -1011,7 +1088,7 @@
         range.setStart(blk, 0);
         try {
           range.setEnd(node, offset);
-          inside = ed.rawOffset(raw, range.toString().replace(/\u200b/g, ''), ed.listed(lines, start));
+          inside = ed.rawOffset(raw, shownBefore(blk, range), ed.listed(lines, start));
         } catch (e) {
           inside = side === 'start' ? 0 : raw.length;
         }
@@ -1146,7 +1223,7 @@
       Divider: lineIcon('<path d="M3.5 12h17M8 7h8M8 17h8"/>'),
     };
     const SLASH_ROWS = [...ed.SLASH.map((row) => ({ ...row, icon: SLASH_ICON[row.text] })), ...Object.entries(md.NOTE_ICONS).map(([name, [text]]) => ({ text: `${text} icon`, mark: `:${name}:`, icon: md.noteIcon(name, true), name }))];
-    let slash = null;
+    const slash = caretMenu({ id: 'slash', label: 'Insert', pick: (i) => slashPick(i) });
     let slashGone = null;
 
     function slashSeen() {
@@ -1156,68 +1233,14 @@
       const rows = typed ? SLASH_ROWS.filter((row) => !word || row.name?.startsWith(word) || row.text.toLowerCase().split(' ').some((part) => part.startsWith(word))) : [];
       const at = typed ? area.selectionStart - word.length - 1 : -1;
       if (slashGone && (slashGone.area !== area || slashGone.at !== at)) slashGone = null;
-      if (!rows.length || slashGone) return slashClose();
-      if (slash && slash.area === area && slash.at === at && slash.word === word) return;
-      if (!slash || slash.area !== area) {
-        slashClose();
-        const box = document.createElement('div');
-        box.className = 'popup-menu slash-menu';
-        box.id = 'slash-menu';
-        box.setAttribute('role', 'listbox');
-        box.setAttribute('aria-label', 'Insert');
-        box.addEventListener('mousedown', (e) => e.preventDefault());
-        box.addEventListener('click', (e) => {
-          const row = e.target.closest('[data-row]');
-          if (row) slashPick(Number(row.dataset.row));
-        });
-        document.body.appendChild(box);
-        slash = { area, box };
-        area.setAttribute('aria-controls', 'slash-menu');
-        addEventListener('scroll', slashPlace, true);
-      }
-      Object.assign(slash, { at, word, rows });
-      slash.box.innerHTML = rows.map((row, i) => `${i && row.name && !rows[i - 1].name ? '<hr aria-hidden="true">' : ''}<button type="button" tabindex="-1" role="option" id="slash-${i}" data-row="${i}">${row.icon}<span class="grow">${md.escape(row.text)}</span>${row.name ? `<kbd>${row.mark}</kbd>` : ''}</button>`).join('');
-      const spot = slashPlace();
-      slashMove(0);
-      if (!slash.box.dataset.shown) {
-        slash.box.dataset.shown = '1';
-        window.leoMotion?.unfold(slash.box, spot);
-      }
-    }
-
-    function slashPlace() {
-      const { area, box, at } = slash;
-      const spot = caretBox(area, at);
-      const high = parseFloat(getComputedStyle(area).lineHeight) || 24;
-      box.style.left = `${Math.max(8, Math.min(spot.x - 12, root.innerWidth - box.offsetWidth - 8))}px`;
-      box.style.top = `${spot.y + 6 + box.offsetHeight > root.innerHeight - 8 ? Math.max(8, spot.y - high - box.offsetHeight - 6) : spot.y + 6}px`;
-      return spot;
-    }
-
-    function slashMove(i) {
-      slash.active = i;
-      for (const row of slash.box.querySelectorAll('[data-row]')) row.setAttribute('aria-selected', String(Number(row.dataset.row) === i));
-      slash.area.setAttribute('aria-activedescendant', `slash-${i}`);
-      slash.box.querySelector(`#slash-${i}`)?.scrollIntoView({ block: 'nearest' });
-    }
-
-    function slashClose() {
-      if (!slash) return;
-      const { area, box } = slash;
-      slash = null;
-      removeEventListener('scroll', slashPlace, true);
-      area.removeAttribute('aria-activedescendant');
-      area.removeAttribute('aria-controls');
-      for (const named of [box, ...box.querySelectorAll('[id]')]) named.removeAttribute('id');
-      box.className = 'popup-menu-gone slash-menu';
-      box.setAttribute('aria-hidden', 'true');
-      box.inert = true;
-      if (window.leoMotion) window.leoMotion.fold(box, () => box.remove());
-      else box.remove();
+      if (!rows.length || slashGone) return slash.close();
+      if (slash.area === area && slash.at === at && slash.word === word) return;
+      Object.assign(slash, { word, rows });
+      slash.show(area, at, rows.map((row, i) => `${i && row.name && !rows[i - 1].name ? '<hr aria-hidden="true">' : ''}<button type="button" tabindex="-1" role="option" id="slash-${i}" data-row="${i}">${row.icon}<span class="grow">${md.escape(row.text)}</span>${row.name ? `<kbd>${row.mark}</kbd>` : ''}</button>`).join(''));
     }
 
     function slashPick(i) {
-      const row = slash && slash.rows[i];
+      const row = slash.area && slash.rows[i];
       if (!row || !editing) return;
       const { area, start, prefix } = editing;
       const value = prefix + area.value;
@@ -1225,7 +1248,7 @@
       const from = value.lastIndexOf('\n', caret - 1) + 1;
       const line = start + value.slice(0, from).split('\n').length - 1;
       const done = ed.slash(lines[line], lines.slice(0, line), prefix.length + slash.at - from, caret - from, row.mark);
-      slashClose();
+      slash.close();
       lines.splice(line, 1, ...done.lines);
       ed.renumber(lines, line + done.line, line + done.line);
       changed();
@@ -1298,10 +1321,10 @@
 
     function onKey(e) {
       if (e.isComposing || e.keyCode === 229) return;
-      if (slash && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (slash.area && !e.metaKey && !e.ctrlKey && !e.altKey) {
         if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.shiftKey) {
           e.preventDefault();
-          slashMove((slash.active + (e.key === 'ArrowDown' ? 1 : slash.rows.length - 1)) % slash.rows.length);
+          slash.move((slash.active + (e.key === 'ArrowDown' ? 1 : slash.rows.length - 1)) % slash.rows.length);
           return;
         }
         if ((e.key === 'Enter' || e.key === 'Tab') && !e.shiftKey) {
@@ -1313,7 +1336,7 @@
           e.preventDefault();
           e.stopPropagation();
           slashGone = { area: slash.area, at: slash.at };
-          slashClose();
+          slash.close();
           return;
         }
       }
@@ -1449,6 +1472,23 @@
           offset = range.startOffset;
         }
       }
+      if (!(node && node.nodeType === 3 && el.contains(node))) {
+        let near = null;
+        let gap = Infinity;
+        for (const pic of el.querySelectorAll('img.note-img')) {
+          const box = pic.getBoundingClientRect();
+          if (y < box.top || y > box.bottom) continue;
+          const away = x < box.left ? box.left - x : Math.max(0, x - box.right);
+          if (away < gap) {
+            gap = away;
+            near = pic;
+          }
+        }
+        if (near) {
+          const box = near.getBoundingClientRect();
+          ({ node, offset } = beside(near, x > box.left + box.width / 2 ? 1 : 0));
+        }
+      }
       if (!node || !el.contains(node)) return null;
       const range = document.createRange();
       range.setStart(el, 0);
@@ -1457,7 +1497,7 @@
       } catch (e) {
         return null;
       }
-      return range.toString().replace(/\u200b/g, '');
+      return shownBefore(el, range);
     }
 
     let pressed = false;
@@ -1729,8 +1769,12 @@
       return pictures.length === 1 && pictures[0].naturalWidth ? pictures[0] : null;
     }
 
+    container.addEventListener('mousedown', (e) => {
+      if (e.detail > 1 && e.target.closest('img.note-img')) e.preventDefault();
+    });
+
     container.addEventListener('dblclick', (e) => {
-      const img = e.target.closest('img.note-img') || lonePicture(e.target);
+      const img = !e.target.closest('img.note-img') && lonePicture(e.target);
       if (!img || img.closest('.editing')) return;
       const blk = img.closest('.blk');
       unframe();
@@ -1832,7 +1876,7 @@
         editLine(lines.length - 1, 'end', false);
         return;
       }
-      const lone = !e.shiftKey && lonePicture(blk);
+      const lone = !e.shiftKey && !blk.querySelector('li') && lonePicture(blk);
       if (lone) {
         frame(lone);
         return;
@@ -2070,6 +2114,7 @@
       },
       editStart: () => editLine(0, 'start'),
       editEnd: () => editLine(lines.length - 1, 'end'),
+      editAt: (line) => editLine(line, 'end'),
     };
   }
 
@@ -2100,5 +2145,5 @@
     else node.splitText(offset).before(el);
   }
 
-  root.leoDoc = { mount, insertAt };
+  root.leoDoc = { mount, insertAt, caretMenu };
 })(window);

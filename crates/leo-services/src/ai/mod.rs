@@ -340,11 +340,15 @@ fn why(state: crate::health::WritingState, agent: Option<&str>, text: &str) -> S
     format!("{NO_WRITING_AI}{reason}")
 }
 
-pub fn see(prompt: chat::Prompt, images: &[provider::Image], max_tokens: u32) -> Result<String> {
+pub fn see(
+    prompt: chat::Prompt,
+    images: &[provider::Image],
+    max_tokens: u32,
+) -> Result<chain::ChainOutcome<String>> {
     let (cfg, store) = context();
     let req = prompt.request(0.2, max_tokens);
     let providers = provider::build_chat_chain(&cfg, &store);
-    Ok(chain::run_vision_chain(providers, &req, images)?.value)
+    chain::run_vision_chain(providers, &req, images)
 }
 
 pub fn quick_streaming(

@@ -48,6 +48,13 @@ const actions = {
     if (el.dataset.to) calSetView(el.dataset.to);
     calGo();
   },
+  'cal-more': (el) => {
+    cal.more = cal.more === el.dataset.day ? '' : el.dataset.day;
+    drawCalendar();
+    const cell = $(`.cal-cell[data-day="${el.dataset.day}"]`);
+    cell?.querySelector(cal.more ? '.cal-pop .cal-more' : '.cal-more')?.focus({ preventScroll: true });
+    cell?.querySelector('.cal-pop')?.scrollIntoView({ block: 'nearest' });
+  },
   'home-day': (el) => {
     cal.selected = el.dataset.id;
     go('#/calendar');
@@ -146,7 +153,7 @@ const actions = {
   'text-size-pick': (el) => { pickTextSize(el); pulse(el, { lift: 1.02 }); },
   'letters-pick': (el) => { pickLetters(el); pulse(el, { lift: 1.02 }); },
   'setting-reset': (el) => resetSetting(el),
-  'usage': () => showUsage(),
+  'usage-refresh': () => refreshPlans({ claude: true }),
   'quick-leo': () => quickLeo(),
   'quick-run': (el) => quickGo(Number(el.dataset.at)),
   'quick-done': (el) => quickDone(el),

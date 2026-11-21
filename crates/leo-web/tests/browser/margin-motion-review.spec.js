@@ -26,6 +26,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
   const fixtureScript = `const $=(selector,root=document)=>root.querySelector(selector);
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const enc=encodeURIComponent;
+    const plural=(n,word,many=word+"s")=>n+" "+(n===1?word:many);
     class Locked extends Error {}
     ${icons}
     ${motion}
@@ -66,7 +67,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     };
     window.rectsOf=id=>{const t=marginPage.threads.find(x=>x.id===id);const at=leoMargin.find(session.doc.source(),t);return session.doc.spanRects(at.from,at.to).map(r=>({left:r.left,right:r.right,top:r.top,bottom:r.bottom}));};
     window.arrive=thread=>{marginPage.threads.push(thread);marginPage.arriving.add(thread.id);marginRedraw();};
-    window.dots=id=>[...document.querySelectorAll('.margin-ink path.squiggle[data-id="'+id+'"]')].sort((a,b)=>a.dataset.line-b.dataset.line).map(p=>{const cs=getComputedStyle(p);const m=cs.clipPath.match(/inset\\(([^)]*)\\)/);let progress=1;if(m){const right=m[1].trim().split(/\\s+/)[1];progress=right.endsWith('%')?1-parseFloat(right)/100:1;}const dash=cs.strokeDasharray.split(/[ ,]+/).map(parseFloat);const n=Math.floor(p.getTotalLength()/4)+1;const pts=[];for(let k=0;k<n&&pts.length<400;k++){const pt=p.getPointAtLength(Math.min(k*4,p.getTotalLength()));pts.push([+pt.x.toFixed(2),+pt.y.toFixed(2)]);}return {progress,dash,d:p.getAttribute('d'),pts,clip:cs.clipPath,anim:cs.animationName};});
+    window.dots=id=>[...document.querySelectorAll('.margin-ink path.squiggle[data-id="'+id+'"]')].sort((a,b)=>a.dataset.line-b.dataset.line).map(p=>{const cs=getComputedStyle(p);const m=cs.clipPath.match(/inset\\(([^)]*)\\)/);let progress=1;if(m){const right=m[1].trim().split(/\\s+/)[1];progress=right.endsWith('%')?1-parseFloat(right)/100:1;}const width=parseFloat(cs.strokeWidth);const n=Math.floor(p.getTotalLength()/4)+1;const pts=[];for(let k=0;k<n&&pts.length<400;k++){const pt=p.getPointAtLength(Math.min(k*4,p.getTotalLength()));pts.push([+pt.x.toFixed(2),+pt.y.toFixed(2)]);}return {progress,width,d:p.getAttribute('d'),pts,clip:cs.clipPath,anim:cs.animationName};});
     window.start().catch(fail);`;
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(fixtureScript); }
@@ -136,7 +137,7 @@ const stateOf = (id) => {
   const wash = get(`.margin-ink path.wash[data-id="${id}"]`);
   const dotted = get(`.margin-ink path.squiggle[data-id="${id}"]`);
   const number = (el, prop) => (el ? parseFloat(getComputedStyle(el)[prop]) : NaN);
-  return { solid: number(solid, 'opacity'), wash: number(wash, 'opacity'), dash: dotted ? getComputedStyle(dotted).strokeDasharray : '', solidDash: solid ? getComputedStyle(solid).strokeDasharray : '' };
+  return { solid: number(solid, 'opacity'), wash: number(wash, 'opacity'), width: dotted ? parseFloat(getComputedStyle(dotted).strokeWidth) : 0, solidDash: solid ? getComputedStyle(solid).strokeDasharray : '' };
 };
 
 test.describe('arriving underline', () => {
@@ -172,7 +173,7 @@ test.describe('arriving underline', () => {
         for (const frame of seen) {
           expect(frame.dots).toHaveLength(count);
           frame.dots.forEach((line, i) => {
-            expect(line.dash).toEqual([1, 3]);
+            expect(line.width).toBe(20);
             expect(line.d).toBe(final[i].d);
             expect(line.pts).toEqual(final[i].pts);
           });
@@ -218,14 +219,14 @@ test.describe('arriving underline', () => {
           const p = frame.dots[i].progress;
           expect(p).toBeGreaterThanOrEqual(last - 0.001);
           last = p;
-          expect(frame.dots[i].dash).toEqual([1, 3]);
+          expect(frame.dots[i].width).toBe(20);
         }
         expect(last).toBeCloseTo(1, 2);
       }
     });
   });
 
-  test('reduced motion shows the finished dotted line at once', async ({ browser }) => {
+  test('reduced motion shows the finished wash at once', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const long = { ...THREADS.long, id: 't3', quote: WORDS.slice(0, 200), suffix: WORDS.slice(200, 224) };
       const timeline = await frames(page, 600, () => ({ dots: window.dots('t3') }), [[20, `window.arrive(${JSON.stringify(long)})`]]);
@@ -234,7 +235,7 @@ test.describe('arriving underline', () => {
       for (const frame of seen) for (const line of frame.dots) {
         expect(line.clip).toBe('none');
         expect(line.anim).toBe('none');
-        expect(line.dash).toEqual([1, 3]);
+        expect(line.width).toBe(20);
       }
     }, { context: { reducedMotion: 'reduce' } });
   });
@@ -541,12 +542,12 @@ test.describe('passage states', () => {
     }, { threads: [{ ...THREADS.short, pinned: true }] });
   });
 
-  test('quiet dotted at rest, solid underline and a subtle wash when open, hovered or focused', async ({ browser }) => {
+  test('soft wash at rest, solid underline and a subtle wash when open, hovered or focused', async ({ browser }) => {
     await fixture(browser, async (page) => {
       const rest = await page.evaluate(stateOf, 't1');
       expect(rest.solid).toBeLessThan(0.05);
       expect(rest.wash).toBeLessThan(0.02);
-      expect(rest.dash).toMatch(/^1(px)?[ ,]+3/);
+      expect(rest.width).toBe(20);
       const box = (await page.evaluate(() => rectsOf('t1')))[0];
       await page.mouse.move(box.left + 20, (box.top + box.bottom) / 2);
       await expect.poll(async () => (await page.evaluate(stateOf, 't1')).solid).toBeGreaterThan(0.95);
@@ -554,7 +555,7 @@ test.describe('passage states', () => {
       expect(hovered.wash).toBeGreaterThan(0.02);
       expect(hovered.wash).toBeLessThan(0.25);
       expect(hovered.solidDash).toBe('none');
-      expect(hovered.dash).toMatch(/^1(px)?[ ,]+3/);
+      expect(hovered.width).toBe(20);
       await page.mouse.move(5, 5);
       await expect.poll(async () => (await page.evaluate(stateOf, 't1')).solid).toBeLessThan(0.05);
       await page.locator('.margin-note[data-id="t1"] .margin-toggle').focus();
@@ -1031,7 +1032,7 @@ const PLANS = '<div class="coding-plans">' + ['codex', 'claude_code'].map((provi
 test.describe('usage tones', () => {
   for (const scheme of ['light', 'dark']) {
     test(`${scheme}: Codex and Claude keep their own tones and the second row has no rule`, async ({ browser }) => {
-      await plain(browser, `<div class="scrim"><div class="sheet usage-sheet">${PLANS}</div></div>`, async (page) => {
+      await plain(browser, `<section class="set-card usage-plans">${PLANS}</section>`, async (page) => {
         const tone = (provider) => page.locator(`[data-provider="${provider}"] .plan-meter i`).first().evaluate((el) => {
           const pixel = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
           pixel.canvas.width = pixel.canvas.height = 1;
@@ -1044,7 +1045,7 @@ test.describe('usage tones', () => {
         const codex = await tone('codex');
         expect(claude.r).toBeGreaterThan(claude.b + 8);
         expect(claude.spread).toBeGreaterThan(8);
-        const text = await page.locator('.usage-sheet').evaluate((el) => getComputedStyle(el).color);
+        const text = await page.locator('.usage-plans').evaluate((el) => getComputedStyle(el).color);
         const fill = await page.locator('[data-provider="codex"] .plan-meter i').first().evaluate((el) => getComputedStyle(el).backgroundColor);
         expect(fill).not.toBe(text);
         expect(Math.abs(claude.r - codex.r) + Math.abs(claude.b - codex.b)).toBeGreaterThan(12);
@@ -1159,14 +1160,18 @@ test('every open thread offers the chat fallback, pin and chat close the action 
   }, { threads: [THREADS.short] });
 });
 
-test('a closed thread with replies says how many more and marks-only shows a ring', async ({ browser }) => {
+test('a closed thread with replies says how many more and marks-only shows the count beside the blot', async ({ browser }) => {
   const two = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it.' }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Salt it too.' }] };
   await fixture(browser, async page => {
     await expect(page.locator('.margin-note[data-id="t1"] .margin-foot')).toHaveText('2 replies');
     await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Salt it too.');
   }, { threads: [two] });
   await fixture(browser, async page => {
-    await expect(page.locator('.margin-mark[data-id="t1"]')).toHaveAttribute('data-more', '');
+    const mark = page.locator('.margin-mark[data-id="t1"]');
+    await expect(mark).toHaveAttribute('data-more', '');
+    await expect(mark.locator('.margin-count')).toHaveText('2');
+    await expect(mark).toHaveAttribute('aria-label', /, 2 replies$/);
+    await expect(page.locator('.margin-slot[data-id="t1"]')).toHaveAttribute('data-more', '');
   }, { threads: [two], layout: 'marks' });
 });
 

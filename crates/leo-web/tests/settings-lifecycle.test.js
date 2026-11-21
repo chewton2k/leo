@@ -51,17 +51,35 @@ test('late onboarding completion cannot close a newer sheet', async () => {
   assert.equal(closed, 0);
 });
 
-test('the note menu keeps every note tool, with Share as a second step and trash last', () => {
+test('the note menu keeps every note tool, with Read through and Share as second steps and trash last', () => {
   const sheets = fs.readFileSync(path.join(__dirname, '../src/web/app/sheets.js'), 'utf8');
   const script = sheets.slice(sheets.indexOf('function shareRows('), sheets.indexOf('async function share('));
   const shown = [];
-  const context = { ICON: new Proxy({}, { get: () => '<svg></svg>' }), state: { view: 'note', session: { note: { id: 'note-id', recorded: true } } }, popupMenu: (owner, { rows }) => shown.push(rows), marginPrintable: () => [], copyMarkdown() {}, saveMarkdown() {}, share() {} };
+  const marginPage = { through: null, changing: false, persona: 'reader', s: { note: { id: 'note-id' } } };
+  const context = { marginPage, marginPrefs: { personas: [{ id: 'reader', name: 'Reader', icon: 'book' }, { id: 'critic', name: 'Critic', icon: 'target' }] }, PERSONA_ICON: { book: '<svg></svg>', target: '<svg></svg>' }, ICON: new Proxy({}, { get: () => '<svg></svg>' }), state: { view: 'note', session: { note: { id: 'note-id', recorded: true } } }, popupMenu: (owner, { rows }) => shown.push(rows), marginPrintable: () => [], copyMarkdown() {}, saveMarkdown() {}, share() {} };
   vm.createContext(context);
   vm.runInContext(script, context);
   context.noteMenu({});
-  assert.equal(JSON.stringify(shown[0].filter((row) => row.text).map((row) => row.text)), JSON.stringify(['Show transcript', 'Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']));
-  assert.equal(JSON.stringify(shown[0][4].next.map((row) => row.text)), JSON.stringify(['Copy as Markdown', 'Save .md file', 'Export as PDF']));
+  assert.equal(JSON.stringify(shown[0].filter((row) => row.text).map((row) => row.text)), JSON.stringify(['Show transcript', 'Tasks', 'Add picture', 'Move to folder', 'Read through', 'Share', 'Move to trash']));
+  const through = shown[0].find((row) => row.text === 'Read through');
+  assert.equal(JSON.stringify(through.next.map((row) => [row.text, row.checked])), JSON.stringify([['Reader', true], ['Critic', false]]));
+  assert.equal(through.off, false);
+  assert.equal(JSON.stringify(shown[0][5].next.map((row) => row.text)), JSON.stringify(['Copy as Markdown', 'Save .md file', 'Export as PDF']));
+  Object.assign(marginPage, { changing: true });
+  context.noteMenu({});
+  assert.equal(shown[1].find((row) => row.text === 'Read through').off, true);
+  Object.assign(marginPage, { changing: false, through: {} });
+  context.noteMenu({});
+  assert.equal(shown[2].find((row) => row.text === 'Stop reading through').next, undefined);
   assert.ok(shown[0].at(-1).danger);
+  let loads = 0;
+  Object.assign(context, { marginPrefs: null, marginLoadPrefs: () => loads++ });
+  Object.assign(marginPage, { through: null });
+  context.noteMenu({});
+  const idle = shown[3].findIndex((row) => row.text === 'Read through');
+  assert.equal(shown[3][idle].off, true);
+  assert.match(shown[3][idle + 1].note, /did not load/);
+  assert.equal(loads, 1);
 });
 
 test('Codex and Claude Code models list newest release first, then by power', () => {

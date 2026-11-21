@@ -75,7 +75,7 @@
 .margin-layer > * { pointer-events: auto; }
 .margin-ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none !important; }
 .margin-ink path { fill: none; stroke-linecap: round; }
-.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 48%, transparent); stroke-width: 1; stroke-dasharray: 1 3; transition: opacity var(--t-fade) ease-out; }
+.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: 20px; stroke-linecap: butt; transform: translateY(-12px); transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid { stroke: var(--accent); stroke-width: 1.5; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.wash { fill: var(--accent); stroke: none; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid.on { opacity: 1; }
@@ -87,7 +87,7 @@
 .margin-ink path.pencil.leaving { opacity: 0; }
 @keyframes pencil-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
 .margin-ink path.tether { stroke: var(--accent); stroke-width: 1; opacity: 0; transition: opacity var(--t-fade) ease-out; }
-.margin-ink path.tether.pinned { opacity: .2; }
+.margin-ink path.tether.rest { opacity: .25; }
 .margin-ink path.tether.on { opacity: .45; }
 .margin-ink path.tether.sketching { stroke-dasharray: 1; animation: pencil-draw 450ms var(--ease-pencil) both; }
 .margin-ink path.spine.sketching { animation-duration: 350ms; animation-delay: 450ms; }
@@ -99,7 +99,7 @@
 .margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: var(--room, none); overflow: hidden; }
 .margin-note:not([data-open]) .margin-over { margin-block: 0; }
 .margin-cut { mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent); }
-.margin-note[data-open] :is(.margin-said, .margin-pending) { border-left: 1px solid var(--line); padding-left: 10px; }
+.margin-note[data-open] :is(.margin-said, .margin-pending) { border-left: 1px solid var(--line); padding-left: 12px; }
 .margin-note[data-active]:not([data-open]) { background: color-mix(in srgb, var(--accent) 9%, transparent); box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 9%, transparent); }
 .margin-waiting { position: absolute; left: 0; top: 0; pointer-events: none !important; transition: opacity .12s ease-out; }
 .margin-waiting.leaving { opacity: 0; }
@@ -123,37 +123,39 @@
 .margin-note.arriving .margin-felix figure { animation: fade .3s var(--ease-arrive) both; }
 .margin-note[data-open] { z-index: 2; }
 .margin-note[data-open] .margin-said { max-height: min(420px, calc(100dvh - 260px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
-.margin-said { position: relative; display: grid; gap: 7px; }
+.margin-said { position: relative; display: grid; gap: 8px; }
 .margin-said p, .margin-said > div { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .margin-felix { font-family: var(--felix-letters); font-variation-settings: "opsz" 14; font-size: calc(15px * var(--read)); line-height: 1.46; color: var(--text); }
 .margin-you { font-size: calc(13.5px * var(--read)); line-height: 1.45; color: var(--muted); }
 .ink-word { display: inline-block; white-space: pre; animation: ink-in .64s ease both; }
 @keyframes ink-in { from { color: transparent; } 45% { color: var(--ink-settling); } to { color: var(--text); } }
-.margin-pending { display: grid; gap: 7px; margin-top: 7px; }
+.margin-pending { display: grid; gap: 8px; margin-top: 8px; }
 .margin-pending[hidden] { display: none; }
 .margin-note[data-side="left"]:not([data-open]) .margin-said { text-align: right; }
 .margin-note[data-side="left"]:not([data-open]) .margin-foot { justify-content: flex-end; }
 .margin-quiet { position: absolute; left: 0; top: 0; display: flex; align-items: center; white-space: nowrap; pointer-events: none; font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); animation: fade .3s var(--ease-arrive) both; transition: opacity .5s var(--ease-exit); }
 .margin-quiet.leaving { opacity: 0; }
-.margin-note[data-resolved] { opacity: .45; }
-.margin-note[data-resolved]:hover, .margin-note[data-resolved]:focus-within { opacity: .7; }
-.margin-resolved-label { font-size: var(--fs-xs); color: var(--faint); }
+.margin-note[data-resolved]:not([data-open]) { opacity: 1; }
+.margin-note[data-resolved]:not([data-open]) .margin-felix { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; color: var(--muted); font-size: calc(13px * var(--read)); }
+.margin-note[data-resolved]:not([data-open]) :is(.margin-cut, .margin-over) { mask-image: none; }
+.margin-note[data-resolved]:not([data-open]) .margin-foot { display: none; }
+.margin-resolved-label { font-size: var(--fs-xs); color: var(--muted); }
 .margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
-.margin-foot { display: flex; align-items: center; gap: 5px; font-size: var(--fs-xs); color: var(--muted); }
+.margin-foot { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--muted); }
 .margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
 .margin-long .link-btn { font-size: inherit; color: inherit; }
 .margin-more { position: relative; z-index: 2; display: grid; grid-template-rows: 0fr; opacity: 0; visibility: hidden; transition: grid-template-rows var(--t-drawer) var(--ease-arrive), opacity var(--t-follow) var(--ease-arrive), visibility 0s var(--t-drawer); }
 .margin-more-body { min-height: 0; overflow: hidden; }
 .margin-note[data-open] .margin-more { grid-template-rows: 1fr; opacity: 1; visibility: visible; transition-delay: 0s; }
 .margin-felix.prose { font-size: calc(15px * var(--read)); line-height: 1.46; }
-.margin-felix.prose > p { margin: 0 0 7px; }
+.margin-felix.prose > p { margin: 0 0 8px; }
 .margin-felix.prose > :last-child { margin-bottom: 0; }
 .margin-felix figure { margin: 9px 0; }
 .margin-felix .diagram-art { padding: 6px; background: transparent; }
 .margin-felix .diagram-art svg { max-height: 320px; }
 @media (prefers-reduced-motion: reduce) { .margin-more { transition: none; } }
-.margin-reply { position: relative; margin-top: 9px; }
-.margin-reply textarea { display: block; width: 100%; max-height: 140px; margin: 0; padding: 0 28px 0 0; border: 0; outline: 0; resize: none; overflow-y: auto; background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 20px; }
+.margin-reply { position: relative; margin-top: 8px; }
+.margin-reply textarea { display: block; width: 100%; max-height: 140px; margin: 0; padding: 0 28px 0 0; border: 0; outline: 0; resize: none; overflow-y: auto; overscroll-behavior: contain; background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 20px; }
 .margin-send { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--accent); display: grid; place-items: center; cursor: pointer; }
 .margin-send:disabled { color: var(--faint); opacity: .6; cursor: default; }
 .margin-send svg { width: 16px; height: 16px; }
@@ -207,26 +209,29 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .margin-earlier { justify-self: start; padding: 3px 6px; margin-left: -6px; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
 .margin-note[data-open] .margin-said > .margin-earlier { padding-right: 6px; }
 .margin-earlier:hover { color: var(--accent); }
-.margin-changed { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
-.margin-problem { margin: 7px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
-.margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; padding-top: 10px; }
-.margin-add { font-size: var(--fs-xs); font-weight: 550; line-height: 1.3; padding: 6px 11px; border: 0; border-radius: var(--r-pill); background: var(--accent-soft); color: var(--accent); }
-.margin-add:hover { background: color-mix(in srgb, var(--accent) 16%, var(--accent-soft)); }
+.margin-changed { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
+.margin-problem { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
+.margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-top: 8px; }
+.margin-acts > button { min-height: 28px; }
+.margin-add { font-size: var(--fs-xs); font-weight: var(--fw-medium); line-height: 1.3; padding: 4px 8px; border: 0; border-radius: var(--r-tile); background: var(--surface-2); color: var(--accent); }
+.margin-add:hover { background: color-mix(in srgb, var(--text) 8%, var(--surface-2)); }
 .margin-revisit { position: absolute; left: 0; top: 0; height: 5px; box-sizing: border-box; padding: 0; border: 0; border-bottom: 1px dotted color-mix(in srgb, var(--text) 20%, transparent); border-radius: 0; background: none; cursor: pointer; transition: border-color var(--t-fade) ease-out; }
 .margin-revisit:hover, .margin-revisit:focus-visible { border-bottom-color: color-mix(in srgb, var(--text) 60%, transparent); }
-.margin-mark { position: absolute; left: 0; top: 0; width: 24px; height: 24px; box-sizing: border-box; padding: 0; border: 0; border-radius: var(--r-xs); background: none; display: grid; place-items: center; cursor: pointer; }
-.margin-anchor { display: grid; width: 13px; height: 13px; color: color-mix(in srgb, var(--text) 55%, transparent); transition: transform var(--t-fade) ease-out, color var(--t-fade) ease-out; }
+.margin-mark { position: absolute; left: 0; top: 0; min-width: 24px; height: 24px; box-sizing: border-box; padding: 0 4px; gap: 2px; border: 0; border-radius: var(--r-xs); background: none; display: grid; grid-auto-flow: column; place-content: center; align-items: center; color: color-mix(in srgb, var(--text) 55%, transparent); cursor: pointer; transition: color var(--t-fade) ease-out; }
+.margin-anchor { display: grid; width: 13px; height: 13px; transition: transform var(--t-fade) ease-out; }
+.margin-count { font-size: var(--fs-xs); line-height: 1; font-variant-numeric: tabular-nums; }
+.margin-count:empty { display: none; }
 .margin-slot { display: inline; padding-left: 21px; }
+.margin-slot[data-more] { padding-left: 32px; }
 @media print { .margin-slot { display: none; } }
 .margin-note[data-inline] { padding: 14px 18px 10px; background: var(--raised); box-shadow: var(--shadow-pop); }
 .margin-anchor svg { width: 100%; height: 100%; }
-.margin-mark:hover .margin-anchor, .margin-mark[data-active] .margin-anchor { color: var(--text); }
+.margin-mark:hover, .margin-mark[data-active], .margin-mark[data-more] { color: var(--text); }
 .margin-mark[data-active] .margin-anchor { transform: scale(1.2); }
-.margin-mark[data-more] .margin-anchor { color: var(--text); }
-@media (pointer: coarse) { .margin-mark { width: 44px; height: 44px; } }
+@media (pointer: coarse) { .margin-mark { min-width: 44px; height: 44px; } }
 @container note (min-width: 900px) { .note-columns[data-margin="marks"] { padding-left: 48px; } }
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
-.note-meta .margin-mode { font-size: var(--fs-sm); padding: 2px 6px; margin-left: -2px; }
+.note-meta .margin-mode { font-size: var(--fs-sm); }
 #margin-status { margin-left: auto; }
 .margin-mode-wrap { position: relative; flex: none; }
 .margin-instructions { margin: 0 0 16px; }
@@ -273,18 +278,13 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .persona-form-acts { display: flex; align-items: center; gap: 8px; }
 .persona-form-acts .danger-text { margin-left: auto; }
 .margin-mode:disabled { cursor: default; opacity: 1; }
-.margin-mode { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--muted); font-size: var(--fs-xs); padding: 3px 6px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap; }
-.margin-mode svg { width: 12px; height: 12px; flex: none; opacity: .7; }
+.margin-mode { display: inline-flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--muted); font-size: var(--fs-xs); padding: 4px 8px; border-radius: var(--r-pill); cursor: pointer; white-space: nowrap; }
+.margin-mode svg { width: 14px; height: 14px; flex: none; opacity: .7; }
+.margin-mode:not(.note-more) { box-shadow: inset 0 0 0 1px var(--line); }
 .margin-mode > svg:last-child { transform: rotate(90deg); transition: transform var(--t-follow) var(--ease-arrive); }
 .margin-mode[aria-expanded="true"] > svg:last-child { transform: rotate(-90deg); }
 .margin-mode-icon { display: inline-grid; place-items: center; flex: none; }
-.margin-mode-icon svg { width: 13px; height: 13px; }
 .margin-mode:hover { background: var(--tint); color: var(--text); }
-.margin-through { background: var(--tint); }
-.margin-through:hover { background: color-mix(in srgb, var(--text) 10%, var(--tint)); }
-.margin-through .margin-mode-icon svg { opacity: 1; }
-.margin-through .dot { fill: var(--accent); stroke: none; }
-.margin-through[aria-disabled="true"] { color: var(--faint); cursor: default; }
 @media (pointer: coarse) { .note-meta .margin-mode { min-height: 32px; } }
 .choice-diagram .d-page { fill: var(--raised); }
 .choice-diagram .d-felix { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; fill: none; }
@@ -292,10 +292,10 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .choice-diagram .d-mark { fill: var(--accent); }
 @media (prefers-reduced-motion: reduce) {
   .margin-quiet, .margin-ink path.squiggle.arriving, .margin-note.arriving .margin-felix figure, .ink-word, .margin-ink path.pencil.sketching, .margin-ink path.tether.sketching, .margin-drop { animation: none; }
-  .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
+  .margin-ink path, .margin-mark, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
 }
 @media (forced-colors: active) {
-  .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-ink path.squiggle { stroke: CanvasText; stroke-width: 1px; stroke-dasharray: 1 3; stroke-linecap: round; transform: none; }
   .margin-note[data-inline] { outline: 1px solid CanvasText; }
   .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }
@@ -306,7 +306,7 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
   .margin-note[data-id="draft"] .margin-reply { border-color: CanvasText; }
   .persona-tile:has(> input:checked) { outline: 2px solid Highlight; }
   .margin-persona-menu button[aria-checked="true"] .persona-icon { outline: 2px solid Highlight; }
-  .margin-anchor { color: Highlight; }
+  .margin-mark { color: Highlight; }
   .page-mark::before { background: CanvasText; }
   .choice-diagram .d-page { fill: Canvas; stroke: CanvasText; }
   .choice-diagram .d-felix, .choice-diagram .d-text { stroke: CanvasText; }

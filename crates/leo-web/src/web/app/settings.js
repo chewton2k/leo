@@ -34,6 +34,7 @@ async function showSettings(section) {
   if (dictation) dictateKeysSeen(dictation);
   drawSettings(page);
   if (section === 'health') loadHealth().catch(fail);
+  if (section === 'usage') refreshPlans();
   startSpeechPolling(mine);
   if (dictationSection(section)) pollDictation(mine, ++dictationGeneration);
 }
@@ -568,7 +569,6 @@ function pickLetters(el) {
 let felixActivity = { span: 30, day: null, pin: null, ranks: null, view: null, processes: null, busy: false, roll: false, drawn: false, timer: 0, watching: false, watch: null };
 const faBound = new WeakSet();
 const FA_HEIGHT = 118;
-const FA_RING = 2 * Math.PI * 52;
 const FA_NEUTRAL = 'color-mix(in srgb, var(--text) 45%, transparent)';
 
 function faToday(hourly) {
@@ -599,9 +599,20 @@ function faShare(value, total) {
   const part = total ? value / total * 100 : 0;
   return part > 0 && part < 0.5 ? '<1%' : `${Math.round(part)}%`;
 }
-function faColour(rank, base) { return rank < 0 ? null : `var(--chart-${rank + base})`; }
-function faBg(colour) { return colour ? `background:${colour}` : ''; }
-function faCls(colour) { return colour ? '' : ' class="fa-other"'; }
+function faKindColour(name) { return `var(--chart-${Object.keys(window.leoChat.USAGE_KINDS).indexOf(name) + 6})`; }
+function faCost(item) {
+  if (item.cost > 0) return `${item.cost < 0.01 ? '< $0.01' : `≈ ${window.leoChat.money(item.cost)}`}${item.unpriced ? '+' : ''}`;
+  if (item.unpriced) return 'no price';
+  return item.cost === 0 && (item.tokens || item.input || item.output) ? 'free' : '–';
+}
+function faPrice(page) {
+  const table = (page.prices && page.prices.models) || {};
+  return (name) => {
+    const cents = Object.hasOwn(table, name) ? table[name] : null;
+    if (Array.isArray(cents) && cents.length === 3) return cents.map((n) => Number(n) / 100);
+    return name.includes(':') && !/cloud/i.test(name) ? [0, 0, 0] : null;
+  };
+}
 function faNiceMax(v) {
   if (!(v > 0)) return 1;
   const unit = 10 ** Math.floor(Math.log10(v));
@@ -612,32 +623,31 @@ function faFamily(name) {
   if (/^(gpt|o\d|codex|chatgpt)/i.test(name)) return 'openai';
   return /claude|opus|sonnet|haiku|fable/i.test(name) ? 'claude' : 'local';
 }
-function faShades(ranks) {
+const FA_SHADES = { openai: 7, claude: 4, local: 3 };
+function faShades(names) {
   const used = { openai: 0, claude: 0, local: 0 };
   const shades = {};
-  for (const name of ranks.models) {
+  for (const name of names) {
     const family = faFamily(name);
-    if (used[family] < 3) shades[name] = `var(--fam-${family}-${++used[family]})`;
+    const n = used[family]++;
+    const shade = `var(--fam-${family}-${n % FA_SHADES[family] + 1})`;
+    const round = Math.floor(n / FA_SHADES[family]);
+    shades[name] = round ? `color-mix(in srgb, ${shade}, var(--text) ${Math.min(80, 30 * round)}%)` : shade;
   }
   return shades;
 }
-function faFold(items, ranks) {
+function faSlices(items, ranks) {
   const shades = faShades(ranks);
-  return window.leoChat.usageFold(items, Object.keys(shades)).map((item) => ({ ...item, colour: item.other ? null : shades[item.name] }));
+  return items.filter((item) => item.value > 0).sort((a, b) => b.value - a.value).map((item) => ({ ...item, rank: ranks.indexOf(item.name), colour: shades[item.name] }));
 }
 function faRanks(page, today) {
-  const held = felixActivity.ranks;
-  if (held && (held.models.length || held.kinds.length)) return held;
+  if (felixActivity.ranks?.length) return felixActivity.ranks;
   felixActivity.ranks = window.leoChat.usageRank(page.felix_days, today);
   return felixActivity.ranks;
 }
-function faKindLabel(purpose) {
-  const row = window.leoChat.usageKinds([{ purpose, calls: 1 }])[0];
-  return row ? row.label : purpose;
-}
+function faKindLabel(purpose) { return window.leoChat.USAGE_KINDS[purpose] || purpose; }
 function faParts(bar, ranks) {
-  const items = bar.by.map(([name, value]) => ({ name, value }));
-  return faFold(items, ranks).sort((a, b) => (a.rank < 0) - (b.rank < 0) || a.rank - b.rank);
+  return faSlices(bar.by.map(([name, value]) => ({ name, value })), ranks).sort((a, b) => a.rank - b.rank);
 }
 
 function faReadout(i) {
@@ -646,38 +656,24 @@ function faReadout(i) {
   if (!bar) return '';
   const total = bar.input + bar.output;
   const head = bar.calls ? `${bar.calls === 1 ? '1 request' : `${faExact(bar.calls)} requests`} · ${faCompact(bar.input)} in · ${faCompact(bar.output)} out` : 'No requests';
-  const parts = faParts(bar, ranks).map((part) => `<span title="${esc(faModelName(part.name))}"><i${faCls(part.colour)} style="${faBg(part.colour)}"></i><em class="fa-rn">${esc(part.other ? 'Other' : faModelName(part.name))}</em><b>${faShare(part.value, total)}</b></span>`).join('');
+  const parts = faParts(bar, ranks).map((part) => `<span title="${esc(faModelName(part.name))}"><i style="background:${part.colour}"></i><em class="fa-rn">${esc(faModelName(part.name))}</em><b>${faShare(part.value, total)}</b></span>`).join('');
   return `<div class="fa-rh"><b>${esc(faBarName(bar, period.length === 90))}</b> · ${head}</div><div class="fa-rm">${parts}</div>`;
 }
 
-function faDonut(kind, slices, total, label) {
-  let at = 0;
-  const colourOf = (item) => (kind === 'm' ? item.colour : faColour(item.rank, 4));
-  const arcs = slices.map((slice, i) => {
-    const arc = slice.value / total * FA_RING;
-    const length = Math.max(0, arc - (arc < 3 ? 0 : 2));
-    const ring = `<circle class="fa-slice${felixActivity.pin && felixActivity.pin.d === kind && felixActivity.pin.i === i ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" cx="60" cy="60" r="52" fill="none" stroke="${colourOf(slice) ? colourOf(slice) : `url(#fa-hatch-${kind})`}" stroke-width="12" stroke-dasharray="${length.toFixed(2)} ${(FA_RING - length).toFixed(2)}" stroke-dashoffset="${(-at).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
-    at += arc;
-    return ring;
-  }).join('');
-  const pinned = felixActivity.pin && felixActivity.pin.d === kind ? slices[felixActivity.pin.i] : null;
-  const shown = pinned ? { big: faCompact(pinned.value), small: pinned.other ? 'Other' : (kind === 'm' ? faModelName(pinned.name) : faKindLabel(pinned.name)) } : { big: faCompact(total), small: label };
-  return `<div class="fa-ring${pinned ? ' hl' : ''}"><svg width="120" height="120" viewBox="0 0 120 120" aria-hidden="true"><defs><pattern id="fa-hatch-${kind}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0v5" style="stroke:var(--faint)" stroke-width="2.5"/></pattern></defs><mask id="fa-mask-${kind}"><circle class="fa-sweep" cx="60" cy="60" r="52" fill="none" stroke="#fff" stroke-width="16" stroke-dasharray="${FA_RING.toFixed(2)} ${FA_RING.toFixed(2)}" transform="rotate(-90 60 60)"/></mask><g mask="url(#fa-mask-${kind})">${arcs}</g></svg><div class="fa-centre" data-big="${esc(faCompact(total))}" data-small="${esc(label)}"><b>${esc(shown.big)}</b><span>${esc(shown.small)}</span></div></div>`;
-}
-function faPanel(kind, title, items, unit, label) {
-  const colourOf = (item) => (kind === 'm' ? item.colour : faColour(item.rank, 4));
+function faPanel(kind, title, items, unit) {
   const total = items.reduce((sum, item) => sum + item.value, 0);
-  const name = (item) => item.other ? 'Other' : (kind === 'm' ? faModelName(item.name) : faKindLabel(item.name));
+  const name = (item) => (kind === 'm' ? faModelName(item.name) : faKindLabel(item.name));
+  const cost = (item) => `<span class="fa-lg-c" title="At API prices">${esc(faCost(item))}</span>`;
   let body;
   if (!items.length) body = `<p class="set-note">${kind === 'm' ? 'No token counts reported.' : 'No requests.'}</p>`;
-  else if (items.length === 1) body = `<p class="fa-one"><i${faCls(colourOf(items[0]))} style="${faBg(colourOf(items[0]))}"></i><b title="${esc(name(items[0]))}">${esc(name(items[0]))}</b><span>${faCompact(items[0].value)} ${unit}</span></p>`;
+  else if (items.length === 1) body = `<p class="fa-one"><i style="background:${items[0].colour}"></i><b title="${esc(name(items[0]))}">${esc(name(items[0]))}</b><span>${faCompact(items[0].value)} ${unit}</span>${cost(items[0])}</p>`;
   else {
     const rows = items.map((item, i) => {
       const on = felixActivity.pin && felixActivity.pin.d === kind && felixActivity.pin.i === i;
       const calls = kind === 'm' ? `<span class="fa-lg-r">${faCompact(item.calls)} req</span>` : '';
-      return `<button type="button" class="fa-lg${kind === 'k' ? ' k' : ''}${on ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" data-big="${esc(faCompact(item.value))}" data-small="${esc(name(item))}" aria-pressed="${on}"><i${faCls(colourOf(item))} style="${faBg(colourOf(item))}"></i><span class="fa-lg-n" title="${esc(name(item))}">${esc(name(item))}</span><span class="fa-lg-v" title="${faExact(item.value)}">${faCompact(item.value)}</span>${calls}<span class="fa-lg-s">${faShare(item.value, total)}</span></button>`;
+      return `<button type="button" class="fa-lg${kind === 'k' ? ' k' : ''}${on ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" aria-pressed="${on}"><i style="background:${item.colour}"></i><span class="fa-lg-n" title="${esc(name(item))}">${esc(name(item))}</span><span class="fa-lg-v" title="${faExact(item.value)}">${faCompact(item.value)}</span>${calls}${cost(item)}<span class="fa-lg-s">${faShare(item.value, total)}</span><span class="fa-lg-bar" style="--w:${(item.value / total * 100).toFixed(1)}%;--c:${item.colour}"></span></button>`;
     }).join('');
-    body = `<div class="fa-dp">${faDonut(kind, items, total, label)}<div class="fa-legend">${rows}</div></div>`;
+    body = `<div class="fa-legend">${rows}</div>`;
   }
   return `<div class="fa-panel" data-fa-d="${kind}"><div class="fa-h">${title}</div>${body}</div>`;
 }
@@ -695,7 +691,7 @@ function faPeriod(period, ranks, span) {
   const days = bars.map((bar, i) => {
     const segments = faParts(bar, ranks).map((part) => {
       const height = top ? part.value / scale * spare : 0;
-      return `<i${faCls(part.colour)} style="height:${height.toFixed(1)}px;${faBg(part.colour)}${height < 3 ? ';margin-top:-2px' : ''}"></i>`;
+      return `<i style="height:${height.toFixed(1)}px;background:${part.colour}${height < 3 ? ';margin-top:-2px' : ''}"></i>`;
     }).join('');
     return `<div class="fa-day${i === at ? ' on' : ''}" data-i="${i}"><div class="fa-stack">${segments}</div></div>`;
   }).join('');
@@ -706,15 +702,16 @@ function faPeriod(period, ranks, span) {
   const stats = `<div class="fa-stats"><div class="fa-top"><div class="fa-tile fa-hero"><span class="fa-lab">Requests</span><b title="${faExact(t.calls)}">${faCompact(t.calls)}</b></div><span class="fa-cap">in the ${faSpanName(span)}</span></div>
     <div class="fa-tile"><span class="fa-lab">Tokens in</span><b title="${faExact(t.input)}">${faCompact(t.input)}</b></div>
     <div class="fa-tile"><span class="fa-lab">Tokens out</span><b title="${faExact(t.output)}">${faCompact(t.output)}</b></div>
-    <div class="fa-tile"><span class="fa-lab">From cache</span><b>${Math.round(t.share * 100)}%</b><span class="fa-meter"><i style="width:${Math.round(t.share * 100)}%"></i></span></div></div>`;
+    <div class="fa-tile"><span class="fa-lab">From cache</span><b>${Math.round(t.share * 100)}%</b></div>
+    <div class="fa-tile"><span class="fa-lab">At API prices</span><b>${esc(faCost(t))}</b>${t.unpriced ? `<span class="fa-lab">${faCompact(t.unpriced)} tokens with no price</span>` : ''}</div></div>`;
   const per = hourly ? 'Tokens per hour' : 'Tokens per day';
   const chart = bars.length ? `<div class="fa-block"><div class="fa-h">${per}</div>
     <div class="fa-chart" tabindex="0" role="group" aria-roledescription="chart" aria-label="${per}" aria-describedby="fa-hint">${grid}<div class="fa-days">${days}</div><div class="fa-xl">${labels}</div></div>
     <span id="fa-hint" class="fa-sr">Use arrow keys to move between days</span><div id="fa-say" class="fa-sr" aria-live="polite"></div>
     <div class="fa-readout">${faReadout(at)}</div></div>` : '';
-  const models = faFold(period.models.map((row) => ({ name: row.name, value: row.tokens, calls: row.calls })), ranks);
-  const kinds = window.leoChat.usageFold(period.kinds.map((row) => ({ name: row.name, value: row.calls, calls: row.calls })), ranks.kinds.slice(0, 2));
-  return `${stats}${chart}<div class="fa-donuts">${faPanel('m', 'Tokens by model', models, 'tokens', 'tokens')}${faPanel('k', 'Requests by kind', kinds, 'requests', 'requests')}</div>`;
+  const models = faSlices(period.models.map((row) => ({ ...row, value: row.tokens })), ranks);
+  const kinds = period.kinds.filter((row) => row.calls > 0).map((row) => ({ ...row, value: row.calls, colour: faKindColour(row.name) }));
+  return `${stats}${chart}<div class="fa-panels">${faPanel('m', 'Tokens by model', models, 'tokens')}${faPanel('k', 'Requests by kind', kinds, 'requests')}</div>`;
 }
 
 function faProcessIcon(name) {
@@ -728,12 +725,12 @@ function faProcessIcon(name) {
 function faProcessColour(name, ranks) {
   const family = name === 'Codex' ? 'openai' : name === 'Claude Code' ? 'claude' : null;
   const shades = faShades(ranks);
-  const model = ranks.models.find((one) => faFamily(one) === family && shades[one]);
+  const model = ranks.find((one) => faFamily(one) === family);
   return model ? shades[model] : FA_NEUTRAL;
 }
 function faRunning() {
   const held = felixActivity.processes;
-  const ranks = felixActivity.view ? felixActivity.view.ranks : { models: [], kinds: [] };
+  const ranks = felixActivity.view ? felixActivity.view.ranks : [];
   const refresh = `<button type="button" class="icon-btn fa-run-refresh" data-fa-refresh aria-label="Refresh" title="Refresh"${felixActivity.busy && felixActivity.roll ? ' disabled' : ''}>${ICON.refresh}</button>`;
   let top;
   let rows = '';
@@ -770,7 +767,9 @@ function felixUsageInner(page) {
   const span = felixActivity.span;
   const ranks = faRanks(page, today);
   const recent = page.felix_recent || {};
-  const period = span === 1 ? chat.usagePeriod(recent.hours, 1, faToday(true)) : chat.usagePeriod(page.felix_days, span, today);
+  const price = faPrice(page);
+  const period = span === 1 ? chat.usagePeriod(recent.hours, 1, faToday(true), price) : chat.usagePeriod(page.felix_days, span, today, price);
+  for (const row of period.models) if (!ranks.includes(row.name)) ranks.push(row.name);
   felixActivity.view = { period, ranks };
   const detail = (recent.spans && recent.spans[span]) || {};
   const kinds = chat.usageKinds(detail.kinds);
@@ -783,35 +782,29 @@ function felixUsageInner(page) {
     <details class="source-more fa-more"><summary>${ICON.chevron}More detail</summary><div class="fa-block"><div class="fa-h">In the ${name}</div>
       ${kinds.length ? `<div class="fa-kinds">${faKindRows(kinds)}</div>` : ''}
       <div class="fa-tools"><span class="fa-lab">Tools</span><span>${faCompact(Number(tools.calls) || 0)} calls · ${faCompact(Number(tools.reused) || 0)} unchanged reads reused · ${faCompact(Number(tools.failures) || 0)} failed</span></div>
-      <p class="fa-foot">Cache is part of input, not your subscription balance. Provider retries may be unreported.</p></div></details>`;
+      <p class="fa-foot">Cache is part of input, not your subscription balance. Provider retries may be unreported. Costs are estimates at the API prices of ${esc(page.prices?.as_of || 'today')}: Codex and Claude Code use your plan, and models on this computer are free.</p></div></details>`;
 }
 
 function felixUsageCard(page) {
-  return `<section class="set-card fa-card" data-find="writing-activity">${felixUsageInner(page)}</section>`;
+  return `<section class="set-card fa-card" data-find="usage-activity">${felixUsageInner(page)}</section>`;
 }
 
 function faHighlight(card, kind, index) {
   const panel = card.querySelector(`.fa-panel[data-fa-d="${kind}"]`);
-  if (!panel || !panel.querySelector('.fa-ring')) return;
+  if (!panel) return;
   const pin = felixActivity.pin && felixActivity.pin.d === kind ? felixActivity.pin.i : null;
   const shown = index === null ? pin : index;
-  panel.querySelector('.fa-ring').classList.toggle('hl', shown !== null);
-  for (const slice of panel.querySelectorAll('.fa-slice')) slice.classList.toggle('on', Number(slice.dataset.faI) === shown);
   for (const row of panel.querySelectorAll('.fa-lg')) {
     row.classList.toggle('on', Number(row.dataset.faI) === shown);
     row.setAttribute('aria-pressed', String(Number(row.dataset.faI) === pin));
   }
-  const centre = panel.querySelector('.fa-centre');
-  const row = shown === null ? null : panel.querySelector(`.fa-lg[data-fa-i="${shown}"]`);
-  centre.querySelector('b').textContent = row ? row.dataset.big : centre.dataset.big;
-  centre.querySelector('span').textContent = row ? row.dataset.small : centre.dataset.small;
 }
 function faEscape(e) {
   if (!felixActivity.pin) {
     document.removeEventListener('keydown', faEscape, true);
     return;
   }
-  if (e.key !== 'Escape' || state.view !== 'settings' || state.section !== 'writing' || document.querySelector('.scrim') || !app.querySelector('[data-find="writing-activity"]')) return;
+  if (e.key !== 'Escape' || state.view !== 'settings' || state.section !== 'usage' || document.querySelector('.scrim') || !app.querySelector('[data-find="usage-activity"]')) return;
   e.stopPropagation();
   e.preventDefault();
   faPin(null);
@@ -821,7 +814,7 @@ function faPin(next) {
   felixActivity.pin = next;
   if (next && !was) document.addEventListener('keydown', faEscape, true);
   if (!next) document.removeEventListener('keydown', faEscape, true);
-  const card = app.querySelector('[data-find="writing-activity"]');
+  const card = app.querySelector('[data-find="usage-activity"]');
   if (!card) return;
   for (const kind of ['m', 'k']) faHighlight(card, kind, null);
 }
@@ -860,11 +853,11 @@ function bindActivity(card) {
   });
   card.addEventListener('focusin', (e) => {
     const hit = lens(e);
-    if (hit && hit.matches('.fa-lg')) faHighlight(card, hit.dataset.faD, Number(hit.dataset.faI));
+    if (hit) faHighlight(card, hit.dataset.faD, Number(hit.dataset.faI));
   });
   card.addEventListener('focusout', (e) => {
     const hit = lens(e);
-    if (hit && hit.matches('.fa-lg')) faHighlight(card, hit.dataset.faD, null);
+    if (hit) faHighlight(card, hit.dataset.faD, null);
   });
   card.addEventListener('click', (e) => {
     const row = e.target.closest('.fa-lg');
@@ -932,7 +925,7 @@ function activityVisible() {
   if (felixActivity.watching && appVisible()) loadProcesses(false);
 }
 function tickProcesses() {
-  if (state.view !== 'settings' || state.section !== 'writing') stopActivity();
+  if (state.view !== 'settings' || state.section !== 'usage') stopActivity();
   else if (appVisible()) loadProcesses(false);
 }
 function playActivity(card) {
@@ -944,7 +937,6 @@ function playActivity(card) {
   const run = () => {
     if (felixActivity.drawn || !card.isConnected) return;
     felixActivity.drawn = true;
-    for (const sweep of card.querySelectorAll('.fa-sweep')) sweep.animate([{ strokeDashoffset: FA_RING }, { strokeDashoffset: 0 }], { duration: OPEN_MS, easing: EASE_OUT });
     card.querySelector('.fa-days').animate([{ opacity: 0 }, { opacity: 1 }], { duration: OPEN_MS, easing: EASE_OUT });
   };
   if (typeof IntersectionObserver !== 'function') return run();
@@ -959,8 +951,8 @@ function playActivity(card) {
   watch.observe(card);
 }
 function activityShown(section) {
-  if (section !== 'writing') return stopActivity();
-  const card = app.querySelector('[data-find="writing-activity"]');
+  if (section !== 'usage') return stopActivity();
+  const card = app.querySelector('[data-find="usage-activity"]');
   if (!card) return;
   bindActivity(card);
   playActivity(card);
@@ -979,7 +971,7 @@ document.addEventListener('change', (e) => {
   felixActivity.span = span;
   felixActivity.day = null;
   if (felixActivity.pin) faPin(null);
-  const card = app.querySelector('[data-find="writing-activity"]');
+  const card = app.querySelector('[data-find="usage-activity"]');
   if (!card) return;
   refreshPanel(card, felixUsageInner(state.settings));
   bindActivity(card);
@@ -988,7 +980,7 @@ document.addEventListener('change', (e) => {
 });
 
 const shortcutRec = { name: '', on: false, held: '', hint: '', bad: false };
-const SHORTCUT_RESERVED = { q: 'quit', w: 'closing the window', r: 'reload', c: 'copy', v: 'paste', x: 'cut', z: 'undo', y: 'redo', a: 'select all', s: 'save', b: 'bold', i: 'italic', u: 'underline', p: 'print', h: 'hiding leo', m: 'minimizing', ',': 'settings' };
+const SHORTCUT_RESERVED = { q: 'quit', w: 'closing the window', r: 'reload', c: 'copy', v: 'paste', x: 'cut', z: 'undo', y: 'redo', a: 'select all', s: 'save', f: 'find in note', b: 'bold', i: 'italic', u: 'underline', p: 'print', h: 'hiding leo', m: 'minimizing', ',': 'settings' };
 function shortcutRow(name, find) {
   const mine = shortcutRec.name === name, on = mine && shortcutRec.on, label = SHORTCUTS[name][0];
   const hint = on ? 'Esc to cancel' : mine ? shortcutRec.hint : '';
@@ -1080,7 +1072,8 @@ function drawSettings(page) {
   else if (section === 'shortcuts') content = shortcutsCard();
   else if (section === 'dictation') content = `<div id="dictation-library">${dictationCards(state.dictation) || '<section class="set-card">Open the leo app to set up dictation.</section>'}</div>`;
   else if (section === 'models') content = `<div id="speech-library">${speechCards(state.speech)}</div>`;
-  else if (section === 'writing') content = page.tasks.filter((task) => task.task === 'writing').map(taskCard).join('') + felixUsageCard(page);
+  else if (section === 'writing') content = page.tasks.filter((task) => task.task === 'writing').map(taskCard).join('');
+  else if (section === 'usage') content = `<section class="set-card usage-plans" data-find="usage-plans">${usagePlansInner(page)}</section>${felixUsageCard(page)}`;
   else if (section === 'felix') content = felixSettingsCards(state.margin, page);
   else if (section === 'calendar') content = calendarCard(state.calendar);
   else if (section === 'health') content = `<div id="app-health">${healthCards(state.health)}</div>`;
@@ -1285,65 +1278,28 @@ app.addEventListener('change', (event) => {
   if (language) speechChange({ action: 'use', id: language.dataset.speechLanguage, language: language.value }).catch(fail);
 });
 
-async function showUsage(trigger = null) {
-  const opener = trigger?.closest?.('.scrim') ? $('#menu') : trigger || document.activeElement;
-  const plan = `<section class="coding-plan">${skeleton(3, 'plan')}</section>`;
-  const box = sheet(`<header class="usage-head"><div><h3>Usage</h3><p class="usage-sub">Plan limits</p></div><div class="usage-tools"><button type="button" class="icon-btn" data-action="usage-refresh" aria-label="Refresh" title="Refresh" disabled>${ICON.refresh}</button><button type="button" class="icon-btn" data-action="close" aria-label="Close" title="Close">${ICON.close}</button></div></header><div class="usage-content" aria-busy="true"><div class="coding-plans" aria-hidden="true">${plan}${plan}</div></div>`);
-  box.returnFocus = opener;
-  box.querySelector('.sheet').classList.add('usage-sheet');
-  box.querySelector('[data-action="close"]').focus();
-  const mine = seq;
-  let saved = false, refreshing = true, drawn = false;
-  const live = () => mine === seq && box.isConnected && !box.classList.contains('scrim-gone');
-  const content = box.querySelector('.usage-content');
-  const button = box.querySelector('[data-action="usage-refresh"]');
-  const busy = (on) => {
-    refreshing = on;
-    button.disabled = on;
-    button.innerHTML = on ? '<span class="activity-spin"></span>' : ICON.refresh;
-  };
-  const draw = (page) => {
-    content.removeAttribute('aria-busy');
-    content.innerHTML = (codingPlans(page) || '<p class="hint" role="status">No coding accounts detected.</p>') + (page.note ? `<p class="hint usage-note">${esc(page.note)}</p>` : '');
-    if (!drawn) cascade(content.querySelector('.coding-plans'));
-    drawn = true;
-  };
-  const refresh = async (body = {}) => {
-    if (refreshing || !live()) return;
-    const focused = document.activeElement === button;
-    busy(true);
-    try {
-      const fresh = await api('/api/settings/usage', { method: 'POST', body });
-      if (!live()) return;
-      draw(fresh);
-      saved = true;
-    } catch (e) {
-      if (!live()) return;
-      if (!saved) { content.removeAttribute('aria-busy'); content.innerHTML = '<p class="hint" role="status">Usage could not be loaded.</p>'; }
-      else {
-        content.querySelector('.usage-error')?.remove();
-        content.insertAdjacentHTML('beforeend', '<p class="hint usage-error" role="status">Refresh failed · showing saved usage</p>');
-      }
-    } finally {
-      if (live()) {
-        busy(false);
-        if (focused && document.activeElement === document.body) button.focus();
-      } else refreshing = false;
-    }
-  };
-  box.addEventListener('click', event => {
-    if (event.target.closest('[data-action="usage-refresh"]') && !refreshing) { button.focus(); refresh({ claude: true }); }
-  });
+const usageRefresh = { busy: false, failed: false };
+function usagePlansInner(page) {
+  const busy = usageRefresh.busy;
+  return `<header><h3>Plan limits</h3><button type="button" class="icon-btn fa-run-refresh" data-action="usage-refresh" aria-label="Refresh" title="Refresh"${busy ? ' disabled' : ''}>${busy ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : ICON.refresh}</button></header>${codingPlans(page) || '<p class="hint" role="status">No coding accounts detected.</p>'}${page.note ? `<p class="hint usage-note">${esc(page.note)}</p>` : ''}${usageRefresh.failed ? '<p class="hint usage-error" role="status">Refresh failed · showing saved usage</p>' : ''}`;
+}
+const usageShown = () => state.view === 'settings' && state.section === 'usage';
+function usagePlansShown() {
+  if (usageShown() && state.settings) refreshPanel(app.querySelector('[data-find="usage-plans"]'), usagePlansInner(state.settings));
+}
+async function refreshPlans(body = {}) {
+  if (usageRefresh.busy) return;
+  const button = () => app.querySelector('[data-action="usage-refresh"]');
+  const focused = document.activeElement === button() || Boolean(body.claude);
+  Object.assign(usageRefresh, { busy: true, failed: false });
+  usagePlansShown();
   try {
-    const page = await api('/api/settings');
-    if (!live()) return;
-    draw(page);
-    saved = Boolean(page.plans?.length);
+    const fresh = await api('/api/settings/usage', { method: 'POST', body });
+    if (usageShown() && state.settings) state.settings = fresh;
   } catch (e) {
-    if (!live()) return;
-    content.removeAttribute('aria-busy');
-    content.innerHTML = '<p class="hint" role="status">Usage could not be loaded.</p>';
+    usageRefresh.failed = true;
   }
-  busy(false);
-  refresh();
+  usageRefresh.busy = false;
+  usagePlansShown();
+  if (focused && usageShown() && [null, document.body].includes(document.activeElement)) button()?.focus();
 }

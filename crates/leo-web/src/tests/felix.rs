@@ -815,7 +815,7 @@ fn what_every_step_of_an_answer_spent_is_added_up_and_sent_before_done() {
             Ok(chat::Reply {
                 text: text.into(),
                 spent: Some(chat::Spent {
-                    by: "Anthropic".into(),
+                    by: "Codex".into(),
                     model: Some("claude-sonnet-5-5".into()),
                     input: 1000,
                     output: 100,
@@ -828,6 +828,7 @@ fn what_every_step_of_an_answer_spent_is_added_up_and_sent_before_done() {
     let lines = chat_lines(&state, "what is a queue?");
     let at = lines.iter().position(|l| l.get("spent").is_some()).unwrap();
     assert_eq!(lines[at + 1]["done"], true);
+    assert_eq!(lines[at + 1]["compact_after"], 600_000);
     let spent = &lines[at]["spent"];
     assert_eq!(
         (spent["input"].as_u64(), spent["output"].as_u64()),
@@ -2636,7 +2637,14 @@ fn a_follow_up_in_the_same_chat_reuses_one_warm_session_and_sends_only_whats_new
             self.heard.lock().unwrap().push(text.to_string());
             let reply = "Heaps keep the smallest key on top [n1].";
             (exchange.piece)(reply);
-            Ok(chat::Reply::from(reply))
+            Ok(chat::Reply {
+                text: reply.into(),
+                spent: Some(chat::Spent {
+                    by: "Codex".into(),
+                    kind: "codex".into(),
+                    ..chat::Spent::default()
+                }),
+            })
         }
     }
     impl Drop for Echo {
@@ -2703,7 +2711,9 @@ fn a_follow_up_in_the_same_chat_reuses_one_warm_session_and_sends_only_whats_new
             - stopped.load(std::sync::atomic::Ordering::SeqCst)
     };
     let first = ask("warm-chat-0001", &[("user", "what is a heap?")], false);
-    assert!(first.iter().any(|l| l.get("done").is_some()));
+    assert!(first
+        .iter()
+        .any(|l| l.get("done").is_some() && l["compact_after"] == 1_770_000));
     assert_eq!(opened.load(std::sync::atomic::Ordering::SeqCst), 1);
     assert_eq!(alive(), 1, "the finished answer's session stays warm");
     let second = ask(

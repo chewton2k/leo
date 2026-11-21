@@ -143,6 +143,8 @@ pub struct Spent {
     pub local: bool,
     #[serde(default)]
     pub cached: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
     pub steps: u32,
     #[serde(default)]
     pub auto: bool,
@@ -1267,8 +1269,8 @@ mod tests {
 
     #[test]
     fn notes_felix_used_earlier_in_the_chat_come_along_with_the_next_question() {
-        let mut store =
-            Store::load_from(&tempfile::tempdir().unwrap().keep().join("notes")).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&temp.path().join("notes")).unwrap();
         let paper = store
             .create_note(
                 "Neuro-Symbolic Drive",

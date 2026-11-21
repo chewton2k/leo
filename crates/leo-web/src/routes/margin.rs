@@ -28,6 +28,8 @@ pub(crate) struct ReadBody {
     keep: Vec<String>,
     #[serde(default)]
     changed: Vec<Changed>,
+    #[serde(default)]
+    persona: Option<String>,
 }
 
 fn listed<'de, D: serde::Deserializer<'de>>(to: D) -> Result<Vec<String>, D::Error> {
@@ -471,27 +473,44 @@ async fn pass(state: &AppState, id: String, body: ReadBody, through: bool) -> Pa
         let gone = body.gone.clone();
         let keep = body.keep.clone();
         let reads = state.margin.clone();
+        let persona = body.persona.clone().filter(|_| through);
         let facts = blocking(move || {
             let prefs = margin::prefs(&held);
+            if persona
+                .as_deref()
+                .is_some_and(|p| !margin::persona_known(&prefs, p))
+            {
+                return None;
+            }
             let open = margin::open_on(&held, &id);
-            ReadFacts {
+            Some(ReadFacts {
                 limit: margin::room(&open, &gone),
                 free: open
                     .iter()
                     .any(|thread| margin::freeable(&reads, thread, &keep)),
                 along: margin::mode_of(&held, &id, created) == "along",
-                voice: margin::voice_of(&prefs, &margin::persona_of(&held, &id)),
+                voice: margin::voice_of(
+                    &prefs,
+                    &persona.unwrap_or_else(|| margin::persona_of(&held, &id)),
+                ),
                 instructions: margin::instructions_of(&held, &id),
                 cap: prefs.cap,
                 gap: prefs.gap,
                 quotes: open.iter().map(|thread| thread.quote.clone()).collect(),
                 declined: margin::declined_on(&held, &id),
                 open,
-            }
+            })
         })
         .await;
         match facts {
-            Ok(facts) => (facts, chats),
+            Ok(Some(facts)) => (facts, chats),
+            Ok(None) => {
+                return Pass::Refused(said(
+                    StatusCode::BAD_REQUEST,
+                    "persona",
+                    "That reader is gone.",
+                ))
+            }
             Err(refused) => return Pass::Refused(*refused),
         }
     };
@@ -878,7 +897,7 @@ async fn written(
         );
         let spent = reply.as_ref().ok().and_then(|r| r.spent.clone());
         usage.record(
-            Purpose::OtherWriting,
+            Purpose::Margin,
             spent.as_ref(),
             started.elapsed(),
             reply.is_err(),

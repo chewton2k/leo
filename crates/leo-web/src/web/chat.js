@@ -30,6 +30,9 @@
     { text: 'Teach me this note step by step', needs: 'note', ask: 'Which note should I teach you?' },
     { text: 'Quiz me on this note', needs: 'note', ask: 'Which note should the quiz cover?' },
     { text: 'Make me a 3-day review plan', needs: 'classes', ask: 'Which classes should the plan cover?' },
+    { text: 'What was decided?', needs: 'recorded', ask: 'Which recording should I read?' },
+    { text: 'What are the open questions?', needs: 'recorded', ask: 'Which recording should I read?' },
+    { text: 'Action items as tasks', needs: 'recorded', ask: 'Which recording should I read?' },
   ];
   const SURE = { sure: 'Sure', think: 'Think so', guess: 'Guessing' };
   const sureOf = (percent) => (percent >= 75 ? 'sure' : percent >= 40 ? 'think' : 'guess');
@@ -107,6 +110,7 @@
   const VERDICT_WITHIN = 240;
   const QUIZ_MARK_MS = 160;
   const BLOT = '<svg class="msg-step-busy" role="img" aria-label="working"><use href="#leo-mark"/></svg>';
+  const VISUALIZE = 'Draw this.';
   const DELETE_MARK = '<svg class="proposal-loop" width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><path d="M0.5 8.1 Q5.2 7.6 7.6 4.6 Q9.4 1.9 7.2 1.3 Q4.9 1.1 5.6 4.6 Q6.4 8.4 10.2 10.6"/></svg>';
   const STUDY_MARKS = {
     rings: ['M9 2.3 Q14.9 2.6 15.4 8.7 Q15.2 15.2 8.8 15.5 Q2.6 15.2 2.4 9.1 Q2.7 3.2 9.6 2.4', 'M9.2 2.4 Q15.3 2.9 15.3 9.2 Q14.8 15.4 8.7 15.3 Q2.5 14.9 2.6 8.8 Q2.9 2.6 9.8 2.6', 'M8.8 2.5 Q15.1 2.4 15.5 9 Q15.4 15.1 9.2 15.6 Q2.4 15.4 2.3 8.9 Q2.4 2.9 9.4 2.3'],
@@ -406,7 +410,7 @@
     return 'under $0.0001';
   }
 
-  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Conversation summaries', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along' };
+  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Chat memory', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along', connections: 'Note connections', combine: 'Combining notes', margin: 'Margin replies', recording: 'Recording notes', import: 'Imported files', pictures: 'Reading pictures', dictation: 'Dictation' };
 
   function usageCount(value) {
     const n = Number(value);
@@ -434,23 +438,29 @@
     return new Date(Date.UTC(y, m - 1, d, Number(hour) - offset)).toISOString().slice(0, 13).replace('T', ' ');
   }
 
-  function usagePeriod(days, span, today) {
+  function usagePeriod(days, span, today, price) {
     const length = [1, 7, 30, 90].includes(span) ? span : 30;
     const units = length === 1 ? 24 : length;
     const ok = (length === 1 ? /^\d{4}-\d{2}-\d{2} \d{2}$/ : /^\d{4}-\d{2}-\d{2}$/).test(String(today)) && !Number.isNaN(Date.parse(String(today).slice(0, 10)));
     const first = ok ? usageBack(units - 1, today) : '';
     const pick = (list, allowed) => (Array.isArray(list) ? list : []).filter((row) => ok && row && typeof row.day === 'string' && typeof row.name === 'string' && row.day >= first && row.day <= today && allowed(row.name)).map((row) => {
       const input = usageCount(row.input);
-      return { day: row.day, name: row.name, calls: usageCount(row.calls), input, cached: Math.min(input, usageCount(row.cached)), output: usageCount(row.output) };
+      const cached = Math.min(input, usageCount(row.cached));
+      const output = usageCount(row.output);
+      const rates = price ? price(typeof row.model === 'string' ? row.model : row.name) : null;
+      const cost = rates ? ((input - cached) * rates[0] + cached * rates[1] + output * rates[2]) / 1e6 : null;
+      return { day: row.day, name: row.name, calls: usageCount(row.calls), input, cached, output, cost };
     });
     const models = pick(days && days.models, () => true);
     const kinds = pick(days && days.kinds, (name) => Object.hasOwn(USAGE_KINDS, name));
-    const totals = { calls: 0, input: 0, cached: 0, output: 0, share: 0 };
+    const totals = { calls: 0, input: 0, cached: 0, output: 0, share: 0, cost: 0, unpriced: 0 };
     for (const row of models) {
       totals.calls += row.calls;
       totals.input += row.input;
       totals.cached += row.cached;
       totals.output += row.output;
+      if (row.cost === null) totals.unpriced += row.input + row.output;
+      else totals.cost += row.cost;
     }
     totals.share = totals.input ? totals.cached / totals.input : 0;
     const size = length === 90 ? 7 : 1;
@@ -474,11 +484,13 @@
     const group = (rows, measures) => {
       const sums = new Map();
       for (const row of rows) {
-        const held = sums.get(row.name) || { name: row.name, calls: 0, input: 0, output: 0, tokens: 0 };
+        const held = sums.get(row.name) || { name: row.name, calls: 0, input: 0, output: 0, tokens: 0, cost: 0, unpriced: 0 };
         held.calls += row.calls;
         held.input += row.input;
         held.output += row.output;
         held.tokens += row.input + row.output;
+        if (row.cost === null) held.unpriced += row.input + row.output;
+        else held.cost += row.cost;
         sums.set(row.name, held);
       }
       return [...sums.values()].sort((a, b) => b[measures] - a[measures] || (a.name < b.name ? -1 : 1));
@@ -487,21 +499,8 @@
   }
 
   function usageRank(days, today) {
-    const week = usagePeriod(days, 7, today);
-    const all = usagePeriod(days, 90, today);
-    const order = (key, list, ofWeek) => {
-      const recent = new Map(ofWeek.map((row) => [row.name, row[key]]));
-      return list.slice().sort((a, b) => (recent.get(b.name) || 0) - (recent.get(a.name) || 0) || b[key] - a[key] || (a.name < b.name ? -1 : 1)).map((row) => row.name);
-    };
-    return { models: order('tokens', all.models, week.models), kinds: order('calls', all.kinds, week.kinds) };
-  }
-
-  function usageFold(items, keep) {
-    const rows = items.filter((item) => item.value > 0);
-    const shown = rows.filter((item) => keep.includes(item.name)).sort((a, b) => b.value - a.value).map((item) => ({ ...item, rank: keep.indexOf(item.name) }));
-    const rest = rows.filter((item) => !keep.includes(item.name));
-    if (rest.length) shown.push({ name: 'Other', other: true, rank: -1, value: rest.reduce((sum, item) => sum + item.value, 0), calls: rest.reduce((sum, item) => sum + (item.calls || 0), 0) });
-    return shown;
+    const recent = new Map(usagePeriod(days, 7, today).models.map((row) => [row.name, row.tokens]));
+    return usagePeriod(days, 90, today).models.sort((a, b) => (recent.get(b.name) || 0) - (recent.get(a.name) || 0) || b.tokens - a.tokens || (a.name < b.name ? -1 : 1)).map((row) => row.name);
   }
 
   function spentLabel(spent) {
@@ -959,9 +958,10 @@
           <div class="chat-pick" id="chat-pick" hidden></div>
           <div class="chat-attach-menu" id="chat-attach-menu" role="menu" hidden><button type="button" role="menuitem" data-chat="attach-note">${icons.note || ''}<span>A note from leo</span></button>${prepare ? `<button type="button" role="menuitem" data-chat="attach-file">${icons.paperclip || ''}<span>A file from this device</span></button>` : ''}</div>
           <input type="file" id="chat-file" multiple accept="${FILE_TYPES}" hidden>
-          <textarea id="chat-input" rows="1" placeholder="Message Felix, or type @ to add a note…" enterkeyhint="send"></textarea>
+          <textarea id="chat-input" rows="1" placeholder="Ask Felix" aria-label="Message Felix, or type @ to add a note" enterkeyhint="send"></textarea>
           <div class="chat-tools">
             <button class="chat-attach" type="button" data-chat="attach" aria-haspopup="menu" aria-controls="chat-attach-menu" aria-expanded="false" aria-label="Add a note or a file" title="Add a note or a file to the conversation (or type @ for a note)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11l-8.5 8.5a5 5 0 0 1-7-7L14 4a3.5 3.5 0 0 1 5 5l-8.5 8.5a2 2 0 0 1-3-3L15 7"/></svg></button>
+            <span class="chat-hint">@ adds a note</span>
             <button type="button" class="chat-chip" data-chat="drop" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></svg><span></span></button>
             <button type="button" class="chat-access" id="chat-access" data-chat="access" aria-haspopup="menu" aria-expanded="false"></button>
             <button class="chat-send" id="chat-send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
@@ -1329,10 +1329,10 @@
       save(storage, stored(), state.refs, state.id, known.has(state.id), marks.get(state.id));
     }
 
-    // Idle compaction: after warm.rs IDLE the warm session and the provider's
-    // prompt cache are cold, so the next message would resend every recent turn
-    // at full price. leo summarises the older part with the cheap model instead
-    // (POST /api/chat/compact); the chat on screen stays exactly as it is.
+    // Idle compaction: once the provider's prompt cache expires the next message
+    // would resend every recent turn at full price, so just before then
+    // (compact_after, sent with each answer) leo summarises the older part with the
+    // cheap model (POST /api/chat/compact); the chat on screen stays as it is.
     let compactTimer = 0;
     function stopCompacting() {
       clearTimeout(compactTimer);
@@ -1340,7 +1340,7 @@
     function compactLater() {
       clearTimeout(compactTimer);
       const id = state.id;
-      if (id) compactTimer = setTimeout(() => compactNow(id), COMPACT_IDLE_MS);
+      if (id) compactTimer = setTimeout(() => compactNow(id), state.compactAfter || COMPACT_IDLE_MS);
     }
     async function compactNow(id) {
       if (state.busy || state.id !== id) return;
@@ -1968,7 +1968,7 @@
         return `<span class="study-idea ${o.state}${now ? ' now' : ''}" title="${escape(t)}"><svg class="study-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path class="study-ring" d="${STUDY_MARKS.rings[i % STUDY_MARKS.rings.length]}"/>${mark}</svg>${escape(t)}</span>`;
       }).join('');
       box.hidden = false;
-      box.innerHTML = `<div class="study-ideas" aria-label="Ideas in this session">${ideas}</div><span class="study-count">${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'}</span><button type="button" class="msg-act" data-chat="session-finish">Finish</button>`;
+      box.innerHTML = `<div class="study-ideas" aria-label="Ideas in this session">${ideas}</div><span class="study-count">${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'}</span><button type="button" class="msg-act" data-chat="session-finish">Finish</button><span class="study-bar" aria-hidden="true"><i style="width: ${c.total ? Math.round(100 * c.covered / c.total) : 0}%"></i></span>`;
     }
 
     function recapCard(s) {
@@ -2075,7 +2075,6 @@
         : '';
       const drew = !m.pending && !m.error && /^\s*(```|~~~)\s*(mermaid|svg)\b/im.test(shown);
       const bigger = drew ? '<button type="button" class="msg-act icon-act" data-action="diagram-expand" data-reply="all" aria-label="See it larger" title="See it larger"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg></button>' : '';
-      const larger = drew ? '<button type="button" class="see-larger" data-action="diagram-expand" data-reply="here">See it larger</button>' : '';
       const keep = save || meta || bigger ? `<div class="msg-acts">${save}${meta}${bigger}</div>` : '';
       const removed = verdict ? m.text.length - spoken.length : 0;
       const parts = timeline(shown, (Array.isArray(m.steps) ? m.steps : []).slice(0, MOST_REPLY_STEPS).map((s) => typeof s === 'string' || !s ? s : { ...s, at: Number.isInteger(s.at) ? s.at - removed : 0 }));
@@ -2090,14 +2089,15 @@
         : '';
       const words = parts.length ? parts.map((part) => part.steps ? '' : prose(part.text)).join('') : html ? `<div class="prose">${html}</div>` : '';
       const outside = !m.pending && notFromNotes(taken, shown, used.length) ? '<div class="msg-note msg-outside">Not from your notes</div>' : '';
-      const body = `${trace}${words}${larger}${outside}`;
+      const body = `${trace}${words}${outside}`;
       const offers = (m.proposals || []).map((p, j) => proposalCard(p, i, j)).join('');
       const asks = (m.asks || []).map((a, k) => askCard(a, i, k, m.pending)).join('');
       const quizzes = (m.quizzes || []).map((q, k) => quizCard(q, i, k, m.pending, m.sources)).join('');
       const since = m.pending ? working.get(m) : 0;
       if (since) tick();
       const clock = since ? `<div class="msg-note msg-clock" data-since="${since}" role="timer">${workingFor(since)}</div>` : '';
-      return `<div class="msg leo${m.pending ? ' pending' : ''}" data-i="${i}">${badge}${body}${quizzes}${asks}${offers}${clock}${error}${from}${keep}</div>`;
+      const who = state.messages[i - 1]?.role === 'assistant' ? '' : '<div class="msg-who"><svg aria-hidden="true"><use href="#leo-mark"/></svg>Felix</div>';
+      return `<div class="msg leo${m.pending ? ' pending' : ''}" data-i="${i}">${who}${badge}${body}${quizzes}${asks}${offers}${clock}${error}${from}${keep}</div>`;
     }
 
     function onNote() {
@@ -2130,7 +2130,7 @@
       const next = document.createElement('div');
       if (!state.messages.length) {
         const unread = Boolean(state.context) && state.dropped === state.context.id;
-        next.innerHTML = `<div class="chat-starters">${STARTERS.map((s, i) => unread && s.needs === 'note' ? '' : `<button class="starter${state.asking && state.asking.starter === s ? ' on' : ''}" data-chat="starter" data-i="${i}">${escape(s.text)}</button>`).join('')}</div>${asking()}`;
+        next.innerHTML = `<div class="chat-starters">${STARTERS.map((s, i) => (unread && s.needs !== 'classes') || (s.needs === 'recorded' && !state.context?.recorded) ? '' : `<button class="starter${state.asking && state.asking.starter === s ? ' on' : ''}" data-chat="starter" data-i="${i}">${escape(s.text)}</button>`).join('')}</div>${asking()}`;
       }
       settle($('#chat-below'), next);
     }
@@ -2316,7 +2316,7 @@
       const verdict = judged ? `<div class="quiz-verdict">${q.correct ? 'Right' : 'Not quite'}</div>` : '';
       const feedback = judged && q.feedback ? `<div class="quiz-explain prose">${cite(render(q.feedback), sources, escape)}</div>` : '';
       const why = `${verdict}${feedback}${judged && q.explain && !(q.feedback && q.kind !== 'multiple_choice') ? `<div class="quiz-explain">${cite(inline(q.explain), sources, escape)}</div>` : ''}`;
-      const onward = q.held && marked && !marking ? `<div class="quiz-next"><button type="button" class="btn primary sm" data-chat="quiz-next" ${where}${state.busy ? ' disabled' : ''}>Next question</button>${reply ? '' : `<button type="button" class="btn plain sm" data-chat="quiz-why" ${where}${state.busy ? ' disabled' : ''}>Ask Felix ${q.correct ? 'why' : 'to explain'}</button>`}</div>` : '';
+      const onward = q.held && marked && !marking ? `<div class="quiz-next"><button type="button" class="btn primary sm" data-chat="quiz-next" ${where}${state.busy ? ' disabled' : ''}>Next question</button>${reply ? '' : `<button type="button" class="btn plain sm" data-chat="quiz-why" ${where}${state.busy ? ' disabled' : ''}>Ask Felix ${q.correct ? 'why' : 'to explain'}</button>`}<button type="button" class="btn plain sm" data-chat="quiz-draw"${state.busy ? ' disabled' : ''}>Visualize</button></div>` : '';
       const said = reply
         ? (grade(reply.text || '').text
           ? `<div class="quiz-reply prose">${cite(render(grade(reply.text).text), reply.sources || sources, escape, reply.files)}</div>`
@@ -2604,7 +2604,7 @@
       const msg = start && start.closest('.msg.leo:not(.pending)');
       if (!msg || !body.contains(msg) || !end || end.closest('.msg.leo') !== msg || !start.closest('.prose') || !end.closest('.prose')) return null;
       const copy = range.cloneContents();
-      for (const chip of copy.querySelectorAll('.cite, .katex-mathml, .msg-steps, .see-larger')) chip.remove();
+      for (const chip of copy.querySelectorAll('.cite, .katex-mathml, .msg-steps')) chip.remove();
       const text = copy.textContent || selection.toString();
       if (!text.trim()) return null;
       const box = range.getBoundingClientRect();
@@ -2861,7 +2861,7 @@
       if (send.classList.contains('stop') === stop) shown();
       else if (root.leoMotion) root.leoMotion.iconSwap(send, shown);
       else shown();
-      input.placeholder = state.busy ? 'Add to what Felix is doing…' : 'Message Felix, or type @ to add a note…';
+      input.placeholder = state.busy ? 'Add to what Felix is doing…' : 'Ask Felix';
     }
 
     function fit() {
@@ -3030,6 +3030,7 @@
             if (e.restart) answer.text = '';
             if (typeof e.step === 'string') pose(e.tool);
             if (typeof e.step === 'string') answer.steps = [...(answer.steps || []), { text: e.step, at: answer.text.length, tool: typeof e.tool === 'string' ? e.tool : '', failed: e.failed === true, found: Array.isArray(e.found) ? e.found.filter((f) => typeof f === 'string').slice(0, 12) : [] }];
+            if (Number.isFinite(e.compact_after) && e.compact_after > 0) state.compactAfter = e.compact_after;
             if (e.spent && typeof e.spent === 'object') {
               answer.spent = e.spent;
               fullNext = true;
@@ -3230,6 +3231,8 @@
         if (q) answerQuiz(Number(el.dataset.i), Number(el.dataset.k), q.options[Number(el.dataset.o)]);
       } else if (what === 'quiz-next' || what === 'quiz-why') {
         continueQuiz(Number(el.dataset.i), Number(el.dataset.k), what === 'quiz-why');
+      } else if (what === 'quiz-draw') {
+        send(VISUALIZE);
       } else if (what === 'quiz-think') {
         const q = state.messages[Number(el.dataset.i)]?.quizzes?.[Number(el.dataset.k)];
         if (!q) return;
@@ -3556,8 +3559,8 @@
       },
       send,
       setContext(ctx) {
-        const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '' } : null;
-        if ((next && next.id) === (state.context && state.context.id) && (!next || next.title === state.context.title)) return;
+        const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '', recorded: Boolean(ctx.recorded) } : null;
+        if ((next && next.id) === (state.context && state.context.id) && (!next || (next.title === state.context.title && next.recorded === state.context.recorded))) return;
         state.context = next;
         if (state.open) {
           drawContext();
@@ -3568,5 +3571,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, money, USAGE_KINDS, usageKinds, usagePeriod, usageRank, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -3183,6 +3183,45 @@ async fn a_persona_shapes_the_system_prompt_and_reader_leaves_it_alone() {
 }
 
 #[tokio::test]
+async fn a_read_through_as_another_persona_changes_one_pass_and_nothing_stored() {
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let kept = Arc::clone(&seen);
+    let writer: Writer = Arc::new(move |system, _, _| {
+        kept.lock().unwrap().push(system.to_string());
+        Ok("{}".to_string())
+    });
+    let engine = Engine::with(Powers {
+        toolless: Some(writer),
+        ..Default::default()
+    })
+    .await;
+    let (id, version) = engine.note("Styled", PASSAGE).await;
+    let path = format!("/api/notes/{id}/margin");
+    let through = format!("{path}/analyze");
+    let body = |persona: &str| serde_json::json!({ "version": version, "blocks": [PASSAGE], "persona": persona });
+    assert_eq!(
+        engine.post(&format!("{path}/read"), body("nobody")).await.0,
+        200
+    );
+    assert_eq!(seen.lock().unwrap()[0], margin::READ_SYSTEM);
+    for _ in 0..2 {
+        assert_eq!(engine.post(&through, body("critic")).await.0, 200);
+    }
+    {
+        let systems = seen.lock().unwrap();
+        assert_eq!(systems.len(), 3);
+        assert!(systems[1..].iter().all(|s| s.contains("demanding critic")));
+    }
+    assert_eq!(engine.get(&path).await.1["persona"], "reader");
+    let (status, said) = engine.post(&through, body("nobody")).await;
+    assert_eq!((status, said["why"].as_str()), (400, Some("persona")));
+    assert_eq!(seen.lock().unwrap().len(), 3);
+    assert_eq!(engine.analyze(&id, &version, &[PASSAGE], None).await.0, 200);
+    assert_eq!(seen.lock().unwrap()[3], margin::THROUGH_SYSTEM);
+    engine.stop().await;
+}
+
+#[tokio::test]
 async fn a_note_keeps_its_own_instructions_and_every_margin_prompt_carries_them() {
     let seen = Arc::new(Mutex::new(Vec::<String>::new()));
     let kept = Arc::clone(&seen);

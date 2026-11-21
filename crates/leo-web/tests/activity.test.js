@@ -8,7 +8,7 @@ function context() {
   const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/settings.js'), 'utf8');
   const value = {};
   vm.createContext(value);
-  vm.runInContext(source.slice(source.indexOf('function faNiceMax'), source.indexOf('function faFold')), value);
+  vm.runInContext(source.slice(source.indexOf('function faNiceMax'), source.indexOf('function faSlices')), value);
   return value;
 }
 
@@ -17,15 +17,38 @@ test('the chart maximum is the next 1, 2, 2.5 or 5 times a power of ten', () => 
   for (const [value, max] of [[0, 1], [0.7, 1], [1, 1], [1.5, 2], [2.2, 2.5], [3, 5], [5, 5], [6, 10], [180, 200], [232500, 250000], [250000, 250000], [250001, 500000], [1000, 1000]]) assert.equal(faNiceMax(value), max, String(value));
 });
 
-test('models belong to the maker that trains them and shade by rank, a fourth going to Other', () => {
+test('models belong to the maker that trains them and every one gets its own shade, never Other', () => {
   const { faFamily, faShades } = context();
   for (const [name, family] of [['gpt-6.1-sol', 'openai'], ['o3-mini', 'openai'], ['codex-mini', 'openai'], ['gpt-oss:20b', 'local'], ['claude-sonnet-5-5', 'claude'], ['Opus', 'claude'], ['llama3.1', 'local'], ['', 'local']]) assert.equal(faFamily(name), family, name);
-  const shades = faShades({ models: ['gpt-a', 'claude-a', 'gpt-b', 'gpt-c', 'gpt-d', 'llama3.1'] });
-  assert.equal(shades['gpt-a'], 'var(--fam-openai-1)');
-  assert.equal(shades['gpt-c'], 'var(--fam-openai-3)');
-  assert.equal(shades['gpt-d'], undefined);
+  const gpts = Array.from({ length: 8 }, (_, i) => `gpt-${i}`);
+  const locals = Array.from({ length: 8 }, (_, i) => `local${i}:7b`);
+  const shades = faShades([...gpts, 'claude-a', ...locals]);
+  assert.equal(shades['gpt-0'], 'var(--fam-openai-1)');
+  assert.equal(shades['gpt-6'], 'var(--fam-openai-7)');
+  assert.equal(shades['gpt-7'], 'color-mix(in srgb, var(--fam-openai-1), var(--text) 30%)');
   assert.equal(shades['claude-a'], 'var(--fam-claude-1)');
-  assert.equal(shades['llama3.1'], 'var(--fam-local-1)');
+  assert.equal(shades['local2:7b'], 'var(--fam-local-3)');
+  assert.equal(shades['local7:7b'], 'color-mix(in srgb, var(--fam-local-2), var(--text) 60%)');
+  const every = Object.values(shades);
+  assert.equal(new Set(every).size, every.length, 'no two models share a colour');
+});
+
+test('costs come from the dated price table, models on this computer are free and unknown ones have no price', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../src/web/app/settings.js'), 'utf8');
+  const value = { window: { leoChat: { money: (n) => `$${n.toFixed(2)}` } } };
+  vm.createContext(value);
+  vm.runInContext(source.slice(source.indexOf('function faCost'), source.indexOf('const FA_SHADES')), value);
+  const price = value.faPrice({ prices: { as_of: '2026-11-21', models: { 'gpt-6.2-sol': [200, 10, 1000] } } });
+  assert.deepEqual([...price('gpt-6.2-sol')], [2, 0.1, 10]);
+  assert.deepEqual([...price('qwen3:8b')], [0, 0, 0]);
+  assert.deepEqual([...price('gpt-oss:20b')], [0, 0, 0]);
+  for (const name of ['gpt-oss:120b-cloud', 'gpt-5', 'claude-opus-9', 'gemini-3.8-flash', 'openai/gpt-5', 'llama3.1', '']) assert.equal(price(name), null, name);
+  assert.equal(value.faCost({ cost: 1.5, unpriced: 0 }), '≈ $1.50');
+  assert.equal(value.faCost({ cost: 1.5, unpriced: 20 }), '≈ $1.50+');
+  assert.equal(value.faCost({ cost: 0.00004, unpriced: 0 }), '< $0.01');
+  assert.equal(value.faCost({ cost: 0, unpriced: 20 }), 'no price');
+  assert.equal(value.faCost({ cost: 0, unpriced: 0, tokens: 9 }), 'free');
+  assert.equal(value.faCost({ cost: 0, unpriced: 0, tokens: 0 }), '–');
 });
 
 test('Felix activity dates use the page language', () => {

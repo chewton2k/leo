@@ -7,14 +7,21 @@ use crate::config::provider::ProviderKind;
 use crate::config::secret::SecretStore;
 use crate::config::Config;
 
+pub static API_PRICES_AS_OF: &str = "2026-11-21";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Model {
     pub id: &'static str,
     pub price: &'static str,
+    pub api_cents: [u32; 3],
 }
 
-const fn m(id: &'static str, price: &'static str) -> Model {
-    Model { id, price }
+const fn m(id: &'static str, price: &'static str, api_cents: [u32; 3]) -> Model {
+    Model {
+        id,
+        price,
+        api_cents,
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,23 +70,63 @@ pub const WRITING: &[Choice] = &[
         provider: "codex",
         name: "Codex",
         models: &[
-            m("gpt-6-luna", "included in your ChatGPT plan"),
-            m("gpt-6-sol", "included in your ChatGPT plan"),
-            m("gpt-6.1-sol", "included in your ChatGPT plan"),
-            m("gpt-6.2-sol", "included in your ChatGPT plan"),
-            m("gpt-6.2-astra", "included in your ChatGPT plan"),
-            m("gpt-6.1-terra", "included in your ChatGPT plan"),
-            m("gpt-6-astra", "included in your ChatGPT plan"),
+            m("gpt-6-luna", "included in your ChatGPT plan", [10, 1, 50]),
+            m(
+                "gpt-6-sol",
+                "included in your ChatGPT plan",
+                [200, 20, 1000],
+            ),
+            m(
+                "gpt-6.1-sol",
+                "included in your ChatGPT plan",
+                [200, 10, 1000],
+            ),
+            m(
+                "gpt-6.2-sol",
+                "included in your ChatGPT plan",
+                [200, 10, 1000],
+            ),
+            m(
+                "gpt-6.2-astra",
+                "included in your ChatGPT plan",
+                [800, 40, 4000],
+            ),
+            m(
+                "gpt-6.1-terra",
+                "included in your ChatGPT plan",
+                [100, 5, 500],
+            ),
+            m(
+                "gpt-6-astra",
+                "included in your ChatGPT plan",
+                [1000, 100, 5000],
+            ),
         ],
     },
     Choice {
         provider: "claude_code",
         name: "Claude Code",
         models: &[
-            m("claude-haiku-5-5", "included in your Claude plan"),
-            m("claude-sonnet-5-5", "included in your Claude plan"),
-            m("claude-opus-5-5", "included in your Claude plan"),
-            m("claude-fable-5-2", "included with Max plans and above"),
+            m(
+                "claude-haiku-5-5",
+                "included in your Claude plan",
+                [10, 1, 50],
+            ),
+            m(
+                "claude-sonnet-5-5",
+                "included in your Claude plan",
+                [200, 10, 1000],
+            ),
+            m(
+                "claude-opus-5-5",
+                "included in your Claude plan",
+                [400, 20, 2000],
+            ),
+            m(
+                "claude-fable-5-2",
+                "included with Max plans and above",
+                [800, 20, 4000],
+            ),
         ],
     },
 ];
@@ -440,6 +487,13 @@ mod tests {
                     "{}: {}",
                     model.id,
                     model.price
+                );
+                let [input, cached, output] = model.api_cents;
+                assert!(
+                    cached > 0 && cached < input && input < output,
+                    "{}: {:?}",
+                    model.id,
+                    model.api_cents
                 );
             }
         }

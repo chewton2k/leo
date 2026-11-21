@@ -9,16 +9,18 @@ use leo_services::session::recorder::{self, Controls, Event, Request};
 use leo_services::session::recording_id;
 use leo_web::record::{Heard, Listener, Listening, Recorded};
 
-pub fn listener() -> Listener {
-    Arc::new(|listening, heard| listen(listening, heard))
+type Usage = Arc<leo_web::usage::Usage>;
+
+pub fn listener(usage: Usage) -> Listener {
+    Arc::new(move |listening, heard| listen(&usage, listening, heard))
 }
 
-fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
+fn listen(usage: &Usage, listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
     if listening.recover.is_some() {
-        return recover(listening, heard);
+        return recover(usage, listening, heard);
     }
     if listening.call {
-        return listen_call(listening, heard);
+        return listen_call(usage, listening, heard);
     }
     let Listening {
         preview,
@@ -68,7 +70,7 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
             dir: directory,
             screen,
             input,
-            draft: draft_fn(),
+            draft: draft_fn(usage),
             turns: false,
         },
         &controls,
@@ -110,9 +112,18 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
     let work_dir = dir.clone();
     let written = std::thread::scope(|scope| {
         let work = scope.spawn(move || {
-            recorder::write_up(&work_dir, None, &move |done, total| {
-                let _ = tx.send((done, total));
-            })
+            recorder::write_up(
+                &work_dir,
+                None,
+                &|prompt, max| {
+                    crate::felix::counted(usage, leo_web::usage::Purpose::Recording, || {
+                        leo_services::ai::chat_outcome(prompt, max)
+                    })
+                },
+                &move |done, total| {
+                    let _ = tx.send((done, total));
+                },
+            )
         });
         for (done, total) in rx {
             heard(Heard::Step {
@@ -139,9 +150,9 @@ fn listen(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded
     })
 }
 
-pub fn regenerator() -> leo_web::record::Regenerator {
-    Arc::new(|sources, profile| {
-        let written = parts_of(&sources)?.write(&profile);
+pub fn regenerator(usage: Usage) -> leo_web::record::Regenerator {
+    Arc::new(move |sources, profile| {
+        let written = parts_of(&sources)?.write(&usage, &profile);
         if !written.problems.is_empty() {
             anyhow::bail!(written.problems.join("; "));
         }
@@ -195,7 +206,11 @@ impl Parts {
         self.end = 0;
     }
 
-    fn write(&self, profile: &leo_core::recording::Profile) -> leo_services::ai::long::Structured {
+    fn write(
+        &self,
+        usage: &leo_web::usage::Usage,
+        profile: &leo_core::recording::Profile,
+    ) -> leo_services::ai::long::Structured {
         leo_services::ai::long::structure_recording(
             &self.parts,
             &self.points,
@@ -203,10 +218,12 @@ impl Parts {
             None,
             "Recording",
             &|prompt, max| {
-                leo_services::ai::chat_outcome(
-                    leo_services::ai::long::with_profile(prompt, profile),
-                    max,
-                )
+                crate::felix::counted(usage, leo_web::usage::Purpose::Recording, || {
+                    leo_services::ai::chat_outcome(
+                        leo_services::ai::long::with_profile(prompt, profile),
+                        max,
+                    )
+                })
                 .map(|o| o.value)
             },
             &|_, _| {},
@@ -254,7 +271,11 @@ fn parts_of_archive(source: &leo_core::recording::Archive) -> Parts {
     parts
 }
 
-fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
+fn listen_call(
+    usage: &Usage,
+    listening: Listening,
+    heard: &mut dyn FnMut(Heard),
+) -> Result<Recorded> {
     let Listening {
         preview,
         id,
@@ -349,7 +370,7 @@ fn listen_call(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Rec
             }
         }
     });
-    finish_tracks(dirs, warnings, id, profile, wants, heard)
+    finish_tracks(usage, dirs, warnings, id, profile, wants, heard)
 }
 
 fn clock_of(speaker: &str, event: &Event, last_others: &mut f32) -> Option<Heard> {
@@ -373,6 +394,7 @@ fn clock_of(speaker: &str, event: &Event, last_others: &mut f32) -> Option<Heard
 }
 
 fn finish_tracks(
+    usage: &Usage,
     dirs: Vec<(&'static str, std::path::PathBuf)>,
     warnings: Vec<String>,
     id: String,
@@ -397,7 +419,7 @@ fn finish_tracks(
         profile.wants = latest;
     }
     source.wants = profile.wants.clone();
-    let written = parts_of_archive(&source).write(&profile);
+    let written = parts_of_archive(&source).write(usage, &profile);
     for problem in &written.problems {
         heard(Heard::Warning(problem.clone()));
     }
@@ -565,7 +587,7 @@ pub fn pending_before(
     grouped(sessions)
 }
 
-fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
+fn recover(usage: &Usage, listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
     let id = listening
         .recover
         .as_deref()
@@ -623,6 +645,7 @@ fn recover(listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorde
         }
     }
     let mut recorded = finish_tracks(
+        usage,
         dirs,
         warnings,
         id.to_owned(),
@@ -668,9 +691,14 @@ fn resume_retained(
     Ok(())
 }
 
-fn draft_fn() -> Option<recorder::DraftFn> {
+fn draft_fn(usage: &Usage) -> Option<recorder::DraftFn> {
+    let usage = Arc::clone(usage);
     leo_services::ai::writing_ready().then(|| -> recorder::DraftFn {
-        Arc::new(|prompt, max, stopped| leo_services::ai::chat_outcome_until(prompt, max, stopped))
+        Arc::new(move |prompt, max, stopped| {
+            crate::felix::counted_until(&usage, leo_web::usage::Purpose::Recording, stopped, || {
+                leo_services::ai::chat_outcome_until(prompt, max, stopped)
+            })
+        })
     })
 }
 
@@ -918,6 +946,7 @@ mod tests {
                     .dir;
                 std::fs::write(dir.join("seg-00000.txt"), "the second side").unwrap();
                 let recorded = super::finish_tracks(
+                    &Default::default(),
                     vec![(second, dir)],
                     vec![],
                     "call-0001".into(),
@@ -1077,6 +1106,7 @@ mod tests {
                 }
                 let dirs: Vec<_> = tracks.iter().map(|(s, d)| (*s, d.clone())).collect();
                 let recorded = super::finish_tracks(
+                    &Default::default(),
                     dirs,
                     vec![],
                     "call-named".into(),
@@ -1115,7 +1145,9 @@ mod tests {
                     "kept-retry-01"
                 )
                 .is_some());
-                let recorded = super::recover(listening("kept-retry-01"), &mut |_| {}).unwrap();
+                let recorded =
+                    super::recover(&Default::default(), listening("kept-retry-01"), &mut |_| {})
+                        .unwrap();
                 assert_eq!(recorded.into.as_deref(), Some("note-owner-1"));
                 assert_eq!(recorded.source.unwrap().id, "kept-retry-01");
                 let listed =
@@ -1138,7 +1170,9 @@ mod tests {
                 std::fs::write(dir.join("seg-00000.txt"), "the first part").unwrap();
                 silent_part(&dir);
                 std::fs::rename(dir.join("seg-00000.wav"), dir.join("seg-00001.wav")).unwrap();
-                let recorded = super::recover(listening("kept-old-0001"), &mut |_| {}).unwrap();
+                let recorded =
+                    super::recover(&Default::default(), listening("kept-old-0001"), &mut |_| {})
+                        .unwrap();
                 assert_eq!(recorded.into.as_deref(), Some("kept-old-0001"));
                 let again = leo_services::session::Session::open(&dir).unwrap().manifest;
                 assert!(!again.saved);
@@ -1156,7 +1190,7 @@ mod tests {
                 std::fs::write(you.join("seg-00000.txt"), "hello from my side").unwrap();
                 silent_part(&track("x-others", true));
                 let mut warnings = Vec::new();
-                let first = super::recover(listening("x"), &mut |heard| {
+                let first = super::recover(&Default::default(), listening("x"), &mut |heard| {
                     if let leo_web::record::Heard::Warning(w) = heard {
                         warnings.push(w)
                     }
@@ -1181,7 +1215,7 @@ mod tests {
             || {
                 let dir = track("y", false);
                 silent_part(&dir);
-                let error = super::recover(listening("y"), &mut |_| {})
+                let error = super::recover(&Default::default(), listening("y"), &mut |_| {})
                     .err()
                     .unwrap()
                     .to_string();

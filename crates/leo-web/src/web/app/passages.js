@@ -3,7 +3,7 @@ const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
 askFloat.setAttribute('role', 'toolbar');
 askFloat.setAttribute('aria-label', 'Felix and this passage');
-askFloat.innerHTML = `<p class="ask-long"></p><button type="button" data-ask="this"><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
+askFloat.innerHTML = `<p class="ask-long"></p><button type="button" data-ask="this"><svg aria-hidden="true"><use href="#leo-mark"/></svg><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><i class="ask-sep" aria-hidden="true"></i><button type="button" data-ask="ask">Ask Felix</button><i class="ask-sep" aria-hidden="true"></i><button type="button" data-ask="draw">Visualize</button>`;
 askFloat.hidden = true;
 askFloat.dataset.keepSelection = '';
 askFloat.addEventListener('mousedown', (e) => e.preventDefault());
@@ -26,7 +26,8 @@ function placeFloat(el, point) {
   const area = doc.getBoundingClientRect();
   const left = Math.max(area.left, Math.min(point.x - width / 2, area.right - width));
   el.style.left = `${Math.max(8, left)}px`;
-  el.style.top = `${Math.min(point.y + 6, window.innerHeight - el.offsetHeight - 12)}px`;
+  const above = point.top - el.offsetHeight - 8;
+  el.style.top = `${above >= readingTop() ? above : Math.min(point.y + 6, window.innerHeight - el.offsetHeight - 12)}px`;
   return true;
 }
 

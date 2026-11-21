@@ -160,6 +160,13 @@ test('a starter that needs classes names the ones picked', () => {
   for (const s of C.STARTERS) assert.ok(s.ask, `${s.text} asks when nothing is open`);
 });
 
+test('a note made from a recording adds three starters about the meeting', () => {
+  assert.deepEqual(C.STARTERS.filter((s) => s.needs === 'recorded').map((s) => s.text), ['What was decided?', 'What are the open questions?', 'Action items as tasks']);
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  assert.match(source, /s\.needs === 'recorded' && !state\.context\?\.recorded\) \? ''/, 'shown only when the open note was recorded');
+  assert.match(source, /recorded: Boolean\(ctx\.recorded\)/);
+});
+
 test('splitFiles keeps files already sent out of the box for the next message', () => {
   const docs = [{ id: 'a', name: 'week3.txt' }, { id: 'b', name: 'week4.txt' }, { id: 'c', name: 'old.pdf' }];
   const messages = [
@@ -590,6 +597,14 @@ test('completed and stopped replies retain elapsed time without confusing comple
   }
 });
 
+test('the compaction delay follows the server and ignores a bad value', async () => {
+  const fixture = chatSendFixture('practice', 'ask', undefined, { replies: [{ events: [{ t: 'Ready.' }, { done: true, compact_after: 1770000 }] }, { events: [{ t: 'Again.' }, { done: true, compact_after: 'soon' }] }] });
+  await fixture.send('Hello.');
+  assert.equal(fixture.state.compactAfter, 1770000);
+  await fixture.send('Again.');
+  assert.equal(fixture.state.compactAfter, 1770000);
+});
+
 test('successful card-only replies finish without a stopped error for every proposal kind and state', async () => {
   const kinds = ['create', 'edit', 'add_task', 'update_task', 'delete_task', 'restore_task', 'move_note', 'make_folder', 'remove_folder', 'move_folder', 'delete_note', 'restore_note', 'rename_note', 'rename_folder', 'pin_note', 'delete_folder', 'restore_folder', 'add_task', ];
   for (const kind of kinds) {
@@ -835,7 +850,7 @@ const USAGE_DAYS = {
 
 test('a usage period adds up tokens, states the cache share and drops garbage', () => {
   const week = C.usagePeriod(USAGE_DAYS, 7, '2026-11-07');
-  assert.deepEqual(week.totals, { calls: 6, input: 1300, cached: 1050, output: 70, share: 1050 / 1300 });
+  assert.deepEqual(week.totals, { calls: 6, input: 1300, cached: 1050, output: 70, share: 1050 / 1300, cost: 0, unpriced: 1370 });
   assert.deepEqual(week.models.map((m) => [m.name, m.tokens]), [['big', 1040], ['small', 330], ['', 0], ['<b>', 0]]);
   assert.deepEqual(week.kinds.map((k) => [k.name, k.calls]), [['answer', 3], ['margin_read', 2]]);
   assert.equal(week.bars.length, 7);
@@ -864,7 +879,7 @@ test('a 24 hour period has one bar per hour and crosses midnight', () => {
   assert.equal(day.bars[0].from, '2026-11-06 03');
   assert.equal(day.bars[23].to, '2026-11-07 02');
   assert.equal(day.bars[22].calls, 2);
-  assert.deepEqual(day.totals, { calls: 3, input: 110, cached: 50, output: 11, share: 50 / 110 });
+  assert.deepEqual(day.totals, { calls: 3, input: 110, cached: 50, output: 11, share: 50 / 110, cost: 0, unpriced: 121 });
   assert.deepEqual(day.kinds.map((k) => [k.name, k.calls]), [['answer', 2]]);
   assert.deepEqual(C.usagePeriod(hours, 1, '2026-11-07').bars, []);
 });
@@ -881,20 +896,37 @@ test('an empty or unreadable usage period is empty and never throws', () => {
   assert.equal(C.usagePeriod(USAGE_DAYS, 12, '2026-11-07').length, 30);
 });
 
-test('colours go to the models in use this week first, and the rest fold into Other', () => {
+test('colours go to the models in use this week first, then the rest by size', () => {
   const days = { models: [
     { day: '2026-11-07', name: 'now', calls: 1, input: 10, cached: 0, output: 0 },
     { day: '2026-10-01', name: 'then', calls: 1, input: 9000, cached: 0, output: 0 },
     { day: '2026-10-02', name: 'more', calls: 1, input: 500, cached: 0, output: 0 },
     { day: '2026-10-03', name: 'least', calls: 1, input: 1, cached: 0, output: 0 },
   ], kinds: [] };
-  const ranked = C.usageRank(days, '2026-11-07');
-  assert.deepEqual(ranked.models, ['now', 'then', 'more', 'least']);
-  const items = C.usagePeriod(days, 90, '2026-11-07').models.map((m) => ({ name: m.name, value: m.tokens, calls: m.calls }));
-  const folded = C.usageFold(items, ranked.models.slice(0, 3));
-  assert.deepEqual(folded.map((s) => [s.name, s.rank, s.value]), [['then', 1, 9000], ['more', 2, 500], ['now', 0, 10], ['Other', -1, 1]]);
-  assert.equal(folded[3].calls, 1);
-  assert.deepEqual(C.usageFold([{ name: 'x', value: 0 }], ['x']), []);
+  assert.deepEqual([...C.usageRank(days, '2026-11-07')], ['now', 'then', 'more', 'least']);
+});
+
+test('a period prices each model and kind at its own rates and keeps what has no price apart', () => {
+  const days = {
+    models: [
+      { day: '2026-11-07', name: 'big', calls: 2, input: 1000000, cached: 400000, output: 100000 },
+      { day: '2026-11-07', name: 'mystery', calls: 1, input: 500, cached: 0, output: 20 },
+    ],
+    kinds: [
+      { day: '2026-11-07', name: 'answer', model: 'big', calls: 2, input: 1000000, cached: 400000, output: 100000 },
+      { day: '2026-11-07', name: 'import', model: 'mystery', calls: 1, input: 500, cached: 0, output: 20 },
+    ],
+  };
+  const price = (model) => (model === 'big' ? [2, 0.1, 10] : null);
+  const week = C.usagePeriod(days, 7, '2026-11-07', price);
+  const big = (600000 * 2 + 400000 * 0.1 + 100000 * 10) / 1e6;
+  assert.ok(Math.abs(week.totals.cost - big) < 1e-9);
+  assert.equal(week.totals.unpriced, 520);
+  assert.deepEqual(week.models.map((m) => [m.name, m.unpriced]), [['big', 0], ['mystery', 520]]);
+  assert.ok(Math.abs(week.kinds.find((k) => k.name === 'answer').cost - big) < 1e-9);
+  assert.equal(week.kinds.find((k) => k.name === 'import').cost, 0);
+  assert.equal(week.kinds.find((k) => k.name === 'import').unpriced, 520);
+  assert.equal(C.usagePeriod(days, 7, '2026-11-07').totals.unpriced, 1100520);
 });
 
 test('usage kinds keep counts as numbers and refuse arbitrary labels', () => {
@@ -1737,4 +1769,105 @@ test('an attached file of any size is sent as one streamed PUT of its blob and n
   assert.equal('headers' in requests[0].init, false);
   assert.deepEqual(notices, []);
   assert.equal(doc.id, 'doc-1');
+});
+
+test('a chat drawing is inked on first insert and stays inked when the reply is redrawn', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const records = [];
+  class N {
+    constructor(tag, attrs = {}, kids = []) {
+      Object.assign(this, { nodeType: 1, localName: tag, tagName: tag.toUpperCase(), isConnected: true, parentElement: null, childNodes: [], attrs: new Map(Object.entries(attrs)) });
+      this.append(...kids);
+      const data = (k) => `data-${String(k)}`;
+      this.dataset = new Proxy({}, { get: (o, k) => this.attrs.get(data(k)), has: (o, k) => this.attrs.has(data(k)), set: (o, k, v) => (this.setAttribute(data(k), v), true), deleteProperty: (o, k) => this.attrs.delete(data(k)) || true });
+      this.classList = { contains: (c) => (this.getAttribute('class') || '').split(' ').includes(c), add: (c) => this.setAttribute('class', `${this.getAttribute('class') || ''} ${c}`.trim()) };
+    }
+    get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); }
+    get children() { return this.childNodes; }
+    get textContent() { return ''; }
+    get outerHTML() { return `<${this.localName}${this.attributes.map((a) => ` ${a.name}="${a.value}"`).join('')}>${this.childNodes.map((n) => n.outerHTML).join('')}</${this.localName}>`; }
+    set src(v) { this.setAttribute('src', v); }
+    getAttribute(n) { return this.attrs.has(n) ? this.attrs.get(n) : null; }
+    hasAttribute(n) { return this.attrs.has(n); }
+    removeAttribute(n) { this.attrs.delete(n); }
+    setAttribute(n, v) {
+      this.attrs.set(n, String(v));
+      if (n === 'src') records.push({ type: 'attributes', target: this, addedNodes: [] });
+    }
+    append(...kids) {
+      for (const k of kids) {
+        k.parentElement = this;
+        this.childNodes.push(k);
+        records.push({ type: 'childList', addedNodes: [k] });
+      }
+    }
+    closest() { return null; }
+    matches(sel) { return sel === 'figure.drawing > img' && this.localName === 'img' && this.parentElement.classList.contains('drawing'); }
+    querySelector(sel) { return this.childNodes.find((k) => k.localName === sel) || null; }
+    querySelectorAll(sel) { return this.childNodes.flatMap((k) => [...(k.matches(sel) ? [k] : []), ...k.querySelectorAll(sel)]); }
+  }
+  let observe;
+  const context = vm.createContext({
+    window: { leoTheme: { onChange() {}, dark: () => true } },
+    document: { body: {}, documentElement: {}, addEventListener() {}, querySelectorAll: () => [] },
+    MutationObserver: class { constructor(fn) { observe = fn; } observe() {} },
+    DOMParser: class { parseFromString() { return { documentElement: new N('svg', { viewBox: '0 0 320 80' }, [new N('path', { stroke: 'var(--text)' })]), getElementsByTagName: () => [] }; } },
+    XMLSerializer: class { serializeToString(el) { return el.outerHTML; } },
+    getComputedStyle: () => ({ getPropertyValue: (name) => (name === '--text' ? '#e9e7e2' : '') }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/diagrams.js'), 'utf8'), context);
+  const raw = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg viewBox="0 0 320 80"><path stroke="var(--text)"></path></svg>')}`;
+  const reply = () => new N('div', { class: 'prose' }, [new N('figure', { class: 'drawing' }, [new N('img', { src: raw, alt: '' })])]);
+  const prose = reply();
+  const [fig] = prose.childNodes;
+  const [img] = fig.childNodes;
+  const inked = () => {
+    const src = decodeURIComponent(img.getAttribute('src'));
+    return fig.classList.contains('inked') && src.includes('stroke="#e9e7e2"') && !src.includes('var(--');
+  };
+  records.length = 0;
+  observe([{ type: 'childList', addedNodes: [prose] }]);
+  assert.ok(inked(), 'the first insert is inked');
+  const fresh = reply();
+  records.length = 0;
+  C.settle(prose, fresh);
+  assert.ok(!inked(), 'a redraw puts the raw drawing back');
+  observe(records.splice(0));
+  assert.ok(inked(), 'and the drawing is inked again before it paints');
+  observe(records.splice(0));
+  assert.equal(records.length, 0, 'inking it again does not loop');
+});
+
+test('a marked quiz offers Visualize, asking with the selection toolbar\'s words', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const code = source.slice(source.indexOf('    function quizCard('), source.indexOf('    const checking = new WeakSet()'));
+  const context = vm.createContext({ ...C, escape: esc, state: { drafts: {} }, checking: new WeakSet(), thinkingOpen: new WeakSet(), markedAt: new WeakMap(), inline: (t) => esc(t), render: (t) => esc(t), cite: (t) => t, hintsOf: () => [], quizMark: () => '', sureText: () => '' });
+  vm.runInContext(`${code}\n;globalThis.__card = quizCard;`, context);
+  const q = { kind: 'multiple_choice', question: 'Which?', options: ['A', 'B'], answer: 'A', explain: 'Because.', given: 'A', correct: true, held: true };
+  let html;
+  for (let tries = 0; tries < 40 && html === undefined; tries++) {
+    try { html = context.__card(q, 0, 0, false, []); }
+    catch (e) { if (e.name !== 'ReferenceError') throw e; context[e.message.split(' ')[0]] = ''; }
+  }
+  assert.match(html, /<div class="quiz-next">.*data-chat="quiz-why"[^>]*>Ask Felix why<\/button><button type="button" class="btn plain sm" data-chat="quiz-draw">Visualize<\/button><\/div>/);
+  const said = /const VISUALIZE = '([^']+)';/.exec(source)[1];
+  const from = source.indexOf("    panel.addEventListener('click', (e) => {");
+  const listener = source.slice(from, source.indexOf('\n    });\n', from) + 8);
+  const sent = [];
+  const clicks = {};
+  const button = { dataset: { chat: 'quiz-draw' } };
+  const clicked = vm.createContext({ panel: { addEventListener: (type, run) => { clicks[type] = run; } }, VISUALIZE: said, awake() {}, attachMenu() {}, accessMenu() {}, send: (text) => sent.push(text) });
+  vm.runInContext(listener, clicked);
+  clicks.click({ target: { closest: (query) => (query === '[data-chat]' ? button : null) }, preventDefault() {} });
+  assert.deepEqual(sent, [said], 'Visualize sends the words the selection toolbar sends');
+  assert.equal(said, /draw: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'))[1]);
+  const seeing = /SEE_WORDS: \[&str; \d+\] = \[([^\]]+)\]/.exec(fs.readFileSync(path.join(__dirname, '../src/drawing.rs'), 'utf8'))[1].match(/"(\w+)"/g).map((w) => w.slice(1, -1));
+  assert.ok(said.toLowerCase().split(/\W+/).some((w) => seeing.includes(w)), 'the server knows the user asked to see something');
 });

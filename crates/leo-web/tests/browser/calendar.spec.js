@@ -81,6 +81,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${read('app/motion.js')}
+    ${read('app/popup-menu.js')}
     ${read('app/settings-navigation.js')}
     ${page}
     const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
@@ -824,8 +825,25 @@ test('larger month tasks keep every preview and the more action inside their day
     await page.locator('.cal-month-grid').evaluate(grid => { grid.scrollTop = 40; });
     await page.evaluate(() => drawCalendar());
     expect(await page.locator('.cal-month-grid').evaluate(grid => grid.scrollTop)).toBe(40);
+    await page.locator('.cal-month-grid').evaluate(grid => { grid.scrollTop = 0; });
 
+    const next = page.locator('.cal-cell[data-day="2026-11-06"]');
+    const [before, nextBefore] = [await cell.boundingBox(), await next.boundingBox()];
+    for (const close of [() => page.keyboard.press('Escape'), () => page.locator('.cal-month-names').click(), () => cell.getByRole('button', { name: 'Show less' }).click()]) {
+      await cell.getByRole('button', { name: '3 more' }).click();
+      await expect(cell).toHaveClass(/open/);
+      await expect(cell.locator('.cal-pop .cal-item')).toHaveCount(6);
+      await expect(cell.getByRole('button', { name: 'Show less' })).toBeFocused();
+      expect(await cell.boundingBox()).toEqual(before);
+      expect(await next.boundingBox()).toEqual(nextBefore);
+      expect(await cell.locator('.cal-pop').evaluate((pop) => getComputedStyle(pop).boxShadow)).not.toBe('none');
+      await expect(page.locator('.cal-dayhead')).toHaveCount(0);
+      await close();
+      await expect(cell).not.toHaveClass(/open/);
+      await expect(cell.locator('.cal-pop')).toHaveCount(0);
+    }
     await cell.getByRole('button', { name: '3 more' }).click();
+    await cell.locator('.cal-num').click();
     await expect(page.locator('.cal-dayhead')).toHaveCount(1);
     await expect(page.locator('.cal-item[data-kind="task"]')).toHaveCount(5);
   });
@@ -856,7 +874,7 @@ test("month view's more link and task times use the calendar's own styles", asyn
     expect(look.morePad).toBe('0px');
     expect(look.subs.length).toBeGreaterThan(0);
     for (const size of look.subs) expect(size).toBe(look.xs);
-    expect(look.name).toBe('650');
+    expect(look.name).toBe('500');
   });
 });
 
@@ -874,5 +892,20 @@ test('a sideways deadline resize at the scroll edge still preserves its absent e
     await dragTo(page, from, { x: from.x + 12, y: from.y });
     expect((await task(page, 'task-lab')).end).toBe(null);
     expect(await patches(page, 'task-lab')).toHaveLength(0);
+  });
+});
+
+test('a click outside the side peek closes it and returns focus, and another item switches it', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const side = page.locator('#cal-side.peek');
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await expect(side.locator('#cal-peek-title')).toHaveValue('Lab report');
+    await side.locator('#cal-peek-title').click();
+    await expect(side).toHaveCount(1);
+    await page.locator('.cal-item[data-id="task-study"] .cal-title').click();
+    await expect(side.locator('#cal-peek-title')).toHaveValue('Study group');
+    await page.locator('.cal-name').click();
+    await expect(side).toHaveCount(0);
+    await expect(page.locator('.cal-item[data-id="task-study"] .cal-open')).toBeFocused();
   });
 });

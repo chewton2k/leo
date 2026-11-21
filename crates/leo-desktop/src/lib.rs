@@ -233,6 +233,7 @@ fn set_up(
     let dictation = dictation::Dictation::new(app.handle().clone())?;
     let app_settings = app_settings::AppSettings::new(app.handle().clone(), dictation.clone())?;
     let mut powers = leo_host::powers();
+    let _ = dictation.usage.set(powers.usage.clone());
     powers.dictation = Some(dictation.clone());
     powers.app_settings = Some(app_settings.clone());
     let updates = updates::Updates::start(app.handle().clone(), &app_settings);

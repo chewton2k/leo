@@ -138,6 +138,7 @@ pub struct Dictation {
     stop: Mutex<Option<Arc<AtomicBool>>>,
     tx: mpsc::SyncSender<Event>,
     shortcut: OnceLock<crate::shortcut::Shortcuts>,
+    pub usage: OnceLock<Arc<leo_web::usage::Usage>>,
 }
 impl Dictation {
     pub fn new(app: AppHandle) -> Result<Arc<Self>> {
@@ -160,6 +161,7 @@ impl Dictation {
             stop: Mutex::new(None),
             tx,
             shortcut: OnceLock::new(),
+            usage: OnceLock::new(),
         });
         let input = this.tx.clone();
         if !Self::test_mode() {
@@ -667,7 +669,8 @@ impl Dictation {
         } else {
             self.phase(id, "writing");
             let this = self.clone();
-            match leo_services::dictation::polish::polish(
+            match leo_host::polish(
+                self.usage.get().cloned().unwrap_or_default(),
                 &text,
                 settings.writing,
                 language,

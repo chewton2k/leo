@@ -11,7 +11,7 @@ function fixture(texts, supported = true) {
   const timers = new Map();
   let next = 0;
   const context = {
-    CSS: supported ? { highlights: registry } : {}, Highlight: class extends Array { constructor(...ranges) { super(...ranges); } }, NodeFilter: { SHOW_TEXT: 4 },
+    CSS: supported ? { highlights: registry } : {}, Highlight: class extends Array { constructor(...ranges) { super(...ranges); } add(range) { this.push(range); } }, NodeFilter: { SHOW_TEXT: 4 },
     document: {
       createTreeWalker() { let index = 0; return { nextNode: () => nodes[index++] }; },
       createRange() { return { setStart(node, at) { this.node = node; this.startContainer = node; this.start = at; }, setEnd(node, at) { this.end = at; }, getBoundingClientRect: () => ({ top: 120, bottom: 140 }) }; },
@@ -102,4 +102,19 @@ test('the facts line under the title is never searched, so a match lands in the 
   assert.equal(value.registry.get('leo-search').length, 1);
   assert.equal(value.registry.get('leo-search')[0].node, nodes[1]);
   assert.match(source, /closest\('textarea, script, style, \.katex-mathml, \.note-facts'\)/);
+});
+
+test('find in note matches the whole phrase, counts every match, marks the current one and does not expire', () => {
+  const value = fixture(['a b a b', 'A b, a']);
+  assert.equal(value.highlightSearch({}, 'a b', 0), 3);
+  assert.equal(value.registry.get('leo-search').length, 3);
+  assert.equal(value.registry.get('leo-found')[0], value.registry.get('leo-search')[0]);
+  assert.equal(value.registry.get('leo-found').priority, 1);
+  assert.equal(value.timers.size, 0);
+  assert.equal(value.highlightSearch({}, 'a b', -1), 3);
+  assert.equal(value.registry.get('leo-found')[0].node.textContent, 'A b, a');
+  assert.equal(value.highlightSearch({}, 'b a b', 4), 1);
+  assert.equal(value.highlightSearch({}, 'absent', 0), false);
+  assert.equal(value.registry.size, 0);
+  assert.equal(fixture(['a '.repeat(1000)]).highlightSearch({}, 'a', 0), 1000);
 });

@@ -554,7 +554,7 @@ pub struct Heard {
     pub usage: Option<crate::usage::Usage>,
     pub model: Option<String>,
     pub tokens: Option<(u64, u64)>,
-    pub cache: (u64, u64),
+    pub cache: u64,
     pub exceeded: bool,
 }
 
@@ -603,10 +603,7 @@ pub fn hear(line: &str, heard: &mut Heard, sink: Sink<'_>) -> bool {
                 usage["output_tokens"].as_u64(),
             ) {
                 heard.tokens = Some((input, output));
-                heard.cache = (
-                    usage["cached_input_tokens"].as_u64().unwrap_or(0),
-                    usage["cache_write_input_tokens"].as_u64().unwrap_or(0),
-                );
+                heard.cache = usage["cached_input_tokens"].as_u64().unwrap_or(0);
             }
             true
         }
@@ -656,10 +653,7 @@ pub fn hear(line: &str, heard: &mut Heard, sink: Sink<'_>) -> bool {
             .sum::<u64>();
             if let Some(output) = usage["output_tokens"].as_u64() {
                 heard.tokens = Some((input, output));
-                heard.cache = (
-                    usage["cache_read_input_tokens"].as_u64().unwrap_or(0),
-                    usage["cache_creation_input_tokens"].as_u64().unwrap_or(0),
-                );
+                heard.cache = usage["cache_read_input_tokens"].as_u64().unwrap_or(0);
             }
             true
         }
@@ -859,8 +853,7 @@ impl ClaudeSession {
                 input,
                 output,
                 estimated,
-                cached: heard.cache.0,
-                cache_written: heard.cache.1,
+                cached: heard.cache,
             },
         ))
     }
@@ -1142,7 +1135,7 @@ impl AgentCli {
         };
         if let Some((input, output)) = heard.tokens {
             (spent.input, spent.output, spent.estimated) = (input, output, false);
-            (spent.cached, spent.cache_written) = heard.cache;
+            spent.cached = heard.cache;
         } else if let Some(total) = banner_tokens {
             spent.output = spent.output.min(total);
             spent.input = total - spent.output;
@@ -2806,7 +2799,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"x
         let heard = read_stream(stream.as_bytes(), &mut |_| {});
         assert_eq!(heard.model.as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(heard.tokens, Some((3052, 7)));
-        assert_eq!(heard.cache, (3000, 40));
+        assert_eq!(heard.cache, 3000);
     }
 
     #[test]

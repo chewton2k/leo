@@ -341,7 +341,9 @@ Providers report `spent()` (`Spent { model, effort, input, output, estimated }`)
 into `ChainOutcome.spent`. OpenAI-compatible providers read `usage` (asking while
 streaming only from api.openai.com, openrouter.ai, api.x.ai), else estimate 4
 characters a token; reasoning tokens are not added twice. `spend::answered`
-prices from `choice.rs` (`rates`); agents are "on your plan", local models free.
+labels the answer and its provider kind; agents are "on your plan", local models
+free. Prices are worked out only on the Usage page, from each model's `api_cents`
+in `choice.rs`.
 Metering never records prompt or reply contents; the root wiring meters
 writing/quick/summary outcomes before string-only callbacks drop token metadata.
 
@@ -355,8 +357,9 @@ stay on disk.
 ### Meaning (`meaning.rs`)
 
 BAAI bge-small-en-v1.5 on CPU via candle (all three Candle crates pinned to
-0.10.0: 0.11 needs ARM FP16 types unavailable on the Rust 1.88 floor; model,
-tokenizer and pooling unchanged). Files pinned by commit and SHA-256
+0.11.1, which keeps ARM FP16 lanes in stable integer vectors so the Rust 1.88
+floor holds, and drops the vulnerable zip 7.4.0; tokenizers 0.23 matches it;
+model, tokenizer and pooling unchanged; 2026-11-21). Files pinned by commit and SHA-256
 (`MODEL_MANIFEST`) in `models_dir()/bge-small-en-v1.5`, re-hashed only when they
 change, unloaded after 60 s idle once no caller holds them (loading outside the
 cache mutex). The app fetches it in the background at launch when it is

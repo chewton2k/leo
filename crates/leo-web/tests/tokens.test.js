@@ -81,6 +81,17 @@ test('the remapped tokens are plain hex or rgba, never color-mix, so Mermaid can
   }
 });
 
+test('every model and kind colour on the Usage page stands out from its card in every theme', () => {
+  const names = [...Array(15)].map((_, i) => `--chart-${i + 6}`)
+    .concat([1, 2, 3, 4, 5, 6, 7].map((n) => `--fam-openai-${n}`), [1, 2, 3, 4].map((n) => `--fam-claude-${n}`), [1, 2, 3].map((n) => `--fam-local-${n}`));
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    for (const key of names) {
+      for (const under of ['--tint', '--raised']) assert.ok(contrast(rgb(t[key]), rgb(t[under])) >= 3, `${name}: ${key} on ${under} is ${contrast(rgb(t[key]), rgb(t[under])).toFixed(2)}`);
+    }
+  }
+});
+
 test('ink, focus and highlight pairs keep their WCAG contrast in every theme', () => {
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);
@@ -133,8 +144,10 @@ test('links are ink and underlined, toasts sit on paper, and scrims use the toke
   assert.match(toast, /background: var\(--raised\)/);
   assert.match(toast, /color: var\(--text\)/);
   assert.match(toast, /box-shadow: var\(--shadow-pop\)/);
-  assert.match(body('.toast button, .toast-gone button'), /text-decoration: underline/);
-  assert.match(body('.toast.bad, .toast-gone.bad'), /background: var\(--danger\)/);
+  assert.doesNotMatch(body('.toast button, .toast-gone button'), /text-decoration/);
+  assert.match(body('.toast button, .toast-gone button'), /background: color-mix\(in srgb, currentColor 10%/);
+  assert.match(body(':is(.toast, .toast-gone) > svg'), /color: var\(--danger\)/);
+  assert.ok(!all.some((r) => r.selector.includes('.toast.bad')), 'an error toast keeps the toast surface');
   assert.match(body('.scrim, .scrim-gone'), /background: var\(--scrim\)/);
   assert.doesNotMatch(pageCss(), /rgba\(0, 0, 0, \.35\);/);
   const forced = all.find((r) => r.at.some((a) => a.includes('forced-colors')) && r.selector.includes('.toast') && /CanvasText/.test(r.body));
@@ -192,7 +205,7 @@ test('ink details: a warm selection wash, a drawn rule with a plain fallback, an
   assert.match(at('html.page-bar-on').body, /scrollbar-width: none/);
 });
 
-test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works', () => {
+test('Felix blue is one plain token per theme, readable on the page and ground, used only while he works and where he speaks', () => {
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);
     assert.match(t['--felix'] || '', /^#[0-9a-f]{6}$/i, `${name} defines --felix`);
@@ -210,9 +223,11 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
     '.margin-note[data-id="draft"] .margin-reply',
     '.margin-waiting .margin-drop, .margin-mark.reading .margin-drop',
     '.msg-step-busy',
+    '.msg-who',
     '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
     '.proposal-wait',
     '.side-reading',
+    '.study-idea.now .study-ring',
   ]);
 });
 

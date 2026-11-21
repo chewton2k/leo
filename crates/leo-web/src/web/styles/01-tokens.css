@@ -7,8 +7,12 @@
   --muted: #5c5b56;
   --faint: #696863;
   --chart-1: #2a78d6; --chart-2: #eb6834; --chart-3: #10a39a; --chart-4: #e87ba4; --chart-5: #b0703a;
-  --fam-openai-1: #0d8a6a; --fam-openai-2: #0a5a46; --fam-openai-3: #3c7d22;
-  --fam-claude-1: #c4613f; --fam-claude-2: #8a3a1c; --fam-claude-3: #b0485f;
+  --chart-6: #3d74c2; --chart-7: #784526; --chart-8: #2d7d8f; --chart-9: #932f30; --chart-10: #29826f;
+  --chart-11: #8f2d56; --chart-12: #2a844c; --chart-13: #8a2b78; --chart-14: #2c862a; --chart-15: #7d2f93;
+  --chart-16: #4e8229; --chart-17: #6537ae; --chart-18: #6c7c27; --chart-19: #3d3fc2; --chart-20: #86722a;
+  --fam-openai-1: #0d8a6a; --fam-openai-2: #0a5a46; --fam-openai-3: #3c7d22; --fam-openai-4: #1f737a;
+  --fam-openai-5: #163b29; --fam-openai-6: #657c1f; --fam-openai-7: #1e4867;
+  --fam-claude-1: #c4613f; --fam-claude-2: #8a3a1c; --fam-claude-3: #b0485f; --fam-claude-4: #895522;
   --fam-local-1: #66707f; --fam-local-2: #2c323c; --fam-local-3: #4e6a9e;
   --line: #e9e7e2;
   --accent: #1c1c1a;

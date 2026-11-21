@@ -99,7 +99,7 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
     const link = doc.locator('a');
     expect(await link.evaluate(el => [getComputedStyle(el).textDecorationLine, getComputedStyle(el).backgroundImage.includes('svg')])).toEqual(['none', true]);
     const quote = doc.locator('blockquote');
-    expect(await quote.evaluate(el => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).paddingLeft, getComputedStyle(el, '::before').maskImage.includes('svg'), getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'])).toEqual(['0px', '17px', true, true]);
+    expect(await quote.evaluate(el => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).paddingLeft, getComputedStyle(el, '::before').maskImage.includes('svg'), getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'])).toEqual(['0px', '16px', true, false]);
     await expect(doc.locator('th.align-right')).toHaveText('To A');
     await expect(doc.locator('td.align-right')).toHaveText(['0.20', '1,200']);
     expect(await doc.locator('thead').evaluate(el => [getComputedStyle(el.querySelector('th')).backgroundColor, getComputedStyle(el.querySelector('th'), '::after').maskImage.includes('svg')])).toEqual(['rgba(0, 0, 0, 0)', true]);
@@ -122,8 +122,8 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
       const button = el.querySelector('.code-copy').getBoundingClientRect();
       const range = document.createRange();
       range.selectNodeContents(el.querySelector('pre code'));
-      return range.getClientRects()[0].top >= button.bottom;
-    }), 'no code sits under the label or Copy').toBe(true);
+      return [range.getClientRects()[0].top - el.getBoundingClientRect().top < 24, range.getClientRects()[0].right <= button.left];
+    }), 'the code starts at the top of the block and short code clears Copy').toEqual([true, true]);
     const source = await page.evaluate(() => window.doc.source());
     await copy.focus();
     await page.keyboard.press('Enter');
@@ -1770,7 +1770,7 @@ test('every kind of formatting is typed with the keyboard and stays plain Markdo
 test('a new note focuses the title first, the reading controls come before it, and Tab leaves it for the body', async ({ page }) => {
   await signIn(page, '#/new');
   await expect(page.locator('#title')).toBeFocused();
-  expect(await page.evaluate(() => ['#margin-persona', '#margin-mode', '#margin-through'].map((id) => Boolean(document.querySelector(id).compareDocumentPosition(document.querySelector('#title')) & Node.DOCUMENT_POSITION_FOLLOWING)))).toEqual([true, true, true]);
+  expect(await page.evaluate(() => ['#margin-persona', '#margin-mode'].map((id) => Boolean(document.querySelector(id).compareDocumentPosition(document.querySelector('#title')) & Node.DOCUMENT_POSITION_FOLLOWING)))).toEqual([true, true]);
   await page.keyboard.type('Reading order');
   await page.keyboard.press('Tab');
   await expect(page.locator('#doc .line-edit')).toBeFocused();

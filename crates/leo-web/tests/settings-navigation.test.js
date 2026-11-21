@@ -11,7 +11,7 @@ function helpers(listeners = {}) {
 }
 test('all grouped Settings routes resolve, with Keeping and Trash under Data', () => {
   const h = helpers();
-  for (const section of ['general', 'shortcuts', 'dictation', 'models', 'writing', 'calendar', 'keeping', 'trash', 'health', 'updates']) assert.equal(h.settingsSection(section), section);
+  for (const section of ['general', 'shortcuts', 'dictation', 'models', 'writing', 'calendar', 'keeping', 'trash', 'health', 'usage', 'updates']) assert.equal(h.settingsSection(section), section);
   assert.equal(h.settingsSection(''), 'dictation');
   assert.equal(h.settingsSection('../bad'), 'general');
   const html = h.settingsFrame('keeping', '<section>Keeping content</section>');
@@ -23,8 +23,9 @@ test('all grouped Settings routes resolve, with Keeping and Trash under Data', (
   assert.ok(html.includes('<span class="settings-nav-pill" aria-hidden="true"></span>'));
   assert.ok(html.includes('class="settings-section arrive"'));
   assert.equal((html.match(/class="settings-link/g) || []).length, 12);
-  assert.ok(html.includes('<button type="button" class="settings-link" data-action="usage">'), 'Usage opens from the This app group');
-  assert.equal((html.match(/<svg>/g) || []).length, 9, 'the search icon, Usage and every section without a shared icon draw their own');
+  assert.ok(html.includes('href="#/settings/usage"'), 'Usage is a page in the This app group');
+  assert.ok(!html.includes('data-action="usage"'), 'no Usage sheet');
+  assert.equal((html.match(/<svg>/g) || []).length, 9, 'the search icon and every section without a shared icon draw their own');
   assert.ok(html.includes('<nav class="settings-nav" aria-label="Settings sections">'));
   assert.ok(html.includes('id="settings-search" type="text" role="combobox" aria-label="Search settings"'));
   assert.ok(html.includes('<div class="settings-results" id="settings-results"></div>'));

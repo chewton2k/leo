@@ -1,4 +1,4 @@
-const MERMAID_URL = '/vendor/mermaid-11.4.1.js';
+const MERMAID_URL = '/vendor/mermaid-11.17.2.js';
 const DIAGRAMS_KEPT = 60;
 const DIAGRAM_WAITING = 'figure.diagram:not([data-drawn])';
 const DRAWING_IMAGE = 'figure.drawing > img';
@@ -75,17 +75,18 @@ function stepDrawings() {
       continue;
     }
     if (!source.includes('var(--') && !source.includes('data-step')) continue;
-    const variants = drawingSteps(source);
+    const was = diagrams.inked.get(fig)?.source === source ? diagrams.inked.get(fig) : null;
+    const variants = was ? was.variants : drawingSteps(source);
     if (!variants) continue;
     const stepped = variants.length > 1 && !fig.closest('.doc');
     const thread = fig.closest('.margin-note')?.dataset.id;
     const key = thread ? `${thread}|${source}` : '';
-    diagrams.inked.set(fig, { variants, at: 0, key });
+    diagrams.inked.set(fig, { variants, at: 0, key, source });
     fig.classList.add('inked');
     if (stepped) fig.insertAdjacentHTML('beforeend', '<figcaption class="drawing-steps"><button type="button" data-step-go="-1" aria-label="Previous step">‹</button><span class="drawing-count"></span><button type="button" data-step-go="1" aria-label="Next step">›</button><button type="button" data-step-go="0" aria-label="Start again">↻</button><span class="drawing-caption" aria-live="polite"></span></figcaption>');
     const play = stepped && 'play' in fig.dataset && !(key && diagrams.steps.has(key));
     delete fig.dataset.play;
-    paintDrawing(fig, stepped ? (key && diagrams.steps.get(key)) || 0 : variants.length - 1);
+    paintDrawing(fig, stepped ? (was ? was.at : (key && diagrams.steps.get(key)) || 0) : variants.length - 1);
     if (play) playDrawing(fig);
   }
 }
@@ -347,6 +348,10 @@ function watchDiagrams(records) {
   if (records) {
     let added = false;
     for (const r of records) {
+      if (r.type === 'attributes' && r.target.matches(DRAWING_IMAGE) && r.target.parentElement.dataset.inked === undefined) {
+        added = true;
+        diagrams.images.add(r.target);
+      }
       for (const n of r.addedNodes) {
         if (n.nodeType !== 1) continue;
         added = true;
@@ -362,7 +367,7 @@ function watchDiagrams(records) {
 }
 
 for (const el of document.querySelectorAll(`${DIAGRAM_WAITING}, ${DRAWING_IMAGE}`)) (el.localName === 'img' ? diagrams.images : diagrams.waiting).add(el);
-new MutationObserver(watchDiagrams).observe(document.body, { childList: true, subtree: true });
+new MutationObserver(watchDiagrams).observe(document.body, { childList: true, subtree: true, attributeFilter: ['src'] });
 window.leoTheme.onChange(() => {
   for (const fig of document.querySelectorAll('figure.drawing.inked')) if (diagrams.inked.has(fig)) paintDrawing(fig, diagrams.inked.get(fig).at);
   for (const fig of document.querySelectorAll('figure.diagram[data-drawn]')) {

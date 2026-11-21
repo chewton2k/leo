@@ -183,6 +183,7 @@ const QUICK_PLACES = [
   { name: 'Keeping', hash: '#/settings/keeping', icon: 'storage' },
   { name: 'Settings', hash: '#/settings', icon: 'gear' },
 ];
+const QUICK_DOES = new Set(['ask', 'search', 'task', 'note', 'combine']);
 const QUICK_SEARCH_MS = 120;
 const QUICK_WAIT_MS = 800;
 const quick = { due: [], rows: [], at: 0, picked: null, notes: [], chats: [], folders: [], asked: '', timer: 0, seq: 0, busy: false, root: null };
@@ -193,6 +194,7 @@ function quickLeo() {
   quick.root = sheet(`<div class="quick-leo"><span class="quick-perch" aria-hidden="true">${chat.button(50)}</span>
     <label class="quick-bar">${ICON.search}<input id="quick-input" placeholder="Search notes, or ask Felix" autocomplete="off" spellcheck="false" enterkeyhint="go" maxlength="2000" aria-label="Quick Leo" role="combobox" aria-controls="quick-results" aria-expanded="true"><kbd>${shortcutText(shortcutKeys('quick'))}</kbd></label>
     <div class="quick-results" id="quick-results" role="listbox" aria-label="Results"></div>
+    <div class="quick-foot"><span><kbd>↑</kbd><kbd>↓</kbd> move</span><span><kbd>↵</kbd> open</span><span><kbd>esc</kbd> close</span></div>
   </div>`);
   const input = inQuick('#quick-input');
   input.addEventListener('input', () => {
@@ -234,8 +236,8 @@ async function quickSearch() {
     ? await Promise.all([api(`/api/search?q=${enc(text)}&brief=true&limit=4`), api(`/api/chats?q=${enc(text)}`).catch(() => [])])
     : [[], []];
   if (mine !== quick.seq || !inQuick('#quick-input')) return;
-  quick.notes = (found || []).map((n) => ({ id: n.id, title: n.title }));
-  quick.chats = (talks || []).map((c) => ({ id: c.id, title: c.title }));
+  quick.notes = (found || []).map((n) => ({ id: n.id, title: n.title, directory: n.directory }));
+  quick.chats = (talks || []).map((c) => ({ id: c.id, title: c.title, updated_at: c.updated_at }));
   quick.asked = text;
   drawQuick();
 }
@@ -267,9 +269,12 @@ function quickLook(row) {
   if (row.kind === 'combine') return { icon: ICON.note, label: row.id ? `Combine “${row.title || 'Untitled'}” into…` : 'Open a note to combine it', hint: 'Combine notes' };
   if (row.kind === 'ask') return { icon: chat.button(20), said: quickSaid('Ask Felix about', row.text) };
   if (row.kind === 'task') return { icon: ICON.check, said: quickSaid('Add', row.title, quickTaskWhen(row)) };
-  if (row.kind === 'open') return { icon: ICON.note, label: row.title, hint: 'Open note' };
-  if (row.kind === 'folder') return { icon: ICON.folder, label: row.path.split('/').pop(), hint: row.path.includes('/') ? `Folder in ${row.path.split('/').slice(0, -1).join('/')}` : 'Folder' };
-  if (row.kind === 'chat') return { icon: ICON.chat, label: row.title, hint: 'Past chat' };
+  if (row.kind === 'open') return { icon: ICON.note, label: row.title, hint: (quick.notes.find((n) => n.id === row.id)?.directory || '').replaceAll('/', ' / ') };
+  if (row.kind === 'folder') return { icon: ICON.folder, label: row.path.split('/').pop(), hint: row.path.includes('/') ? row.path.split('/').slice(0, -1).join(' / ') : 'Folder' };
+  if (row.kind === 'chat') {
+    const when = quick.chats.find((c) => c.id === row.id)?.updated_at;
+    return { icon: ICON.chat, label: row.title, hint: when ? `Chat · ${rel(when)}` : 'Chat' };
+  }
   if (row.kind === 'search') return { icon: ICON.search, said: quickSaid('Search every note for', row.text) };
   if (row.kind === 'place') return { icon: ICON[QUICK_PLACES.find((p) => p.hash === row.hash)?.icon] || ICON.folder, label: row.name, hint: 'Go to' };
   return { icon: ICON.plus, said: quickSaid('Start a note called', row.title) };
@@ -280,9 +285,13 @@ function drawQuick() {
   if (!box) return;
   const text = (inQuick('#quick-input')?.value || '').trim();
   const fresh = quick.asked && text.toLowerCase().startsWith(quick.asked.toLowerCase());
-  quick.rows = S.quickRank(text, { notes: fresh ? quick.notes : [], chats: fresh ? quick.chats : [], folders: quick.folders, places: QUICK_PLACES });
+  const ranked = S.quickRank(text, { notes: fresh ? quick.notes : [], chats: fresh ? quick.chats : [], folders: quick.folders, places: QUICK_PLACES });
   const open = state.view === 'note' && state.session?.note;
-  if (/^(merge|combine)(\s+(this|this note|note|notes|it|into|with))?$/i.test(text)) quick.rows.unshift(open ? { kind: 'combine', id: open.id, title: open.title, dir: open.directory } : { kind: 'combine' });
+  if (/^(merge|combine)(\s+(this|this note|note|notes|it|into|with))?$/i.test(text)) ranked.unshift(open ? { kind: 'combine', id: open.id, title: open.title, dir: open.directory } : { kind: 'combine' });
+  const doing = (row) => QUICK_DOES.has(row.kind);
+  const lead = ranked.length && doing(ranked[0]);
+  quick.rows = [...ranked.filter((row) => doing(row) === lead), ...ranked.filter((row) => doing(row) !== lead)];
+  const headed = ranked.some(doing) && !ranked.every(doing);
   const picked = quick.picked ? quick.rows.findIndex((row) => JSON.stringify(row) === quick.picked) : -1;
   if (picked >= 0) quick.at = picked;
   quick.at = Math.min(quick.at, Math.max(0, quick.rows.length - 1));
@@ -299,7 +308,8 @@ function drawQuick() {
     box.innerHTML = quick.rows.map((row, i) => {
       const look = quickLook(row);
       const on = i === quick.at;
-      return `<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${on ? '<kbd>↵</kbd>' : ''}</button>`;
+      const head = headed && (i === 0 || doing(row) !== doing(quick.rows[i - 1])) ? `<div class="quick-due-head" role="presentation">${doing(row) ? 'Do' : 'Notes'}</div>` : '';
+      return `${head}<button type="button" class="quick-row${on ? ' on' : ''}" id="quick-row-${i}" role="option" aria-selected="${on}" data-action="quick-run" data-at="${i}" tabindex="-1"><span class="quick-icon">${look.icon}</span><span class="quick-label${look.said ? ' quick-said' : ''}">${look.said || esc(look.label)}</span>${look.hint ? `<span class="quick-hint">${esc(look.hint)}</span>` : ''}${on ? '<kbd>↵</kbd>' : ''}</button>`;
     }).join('');
   }, { ms: QUICK_FLIP_MS });
   inQuick('#quick-input')?.setAttribute('aria-activedescendant', `quick-row-${quick.at}`);
@@ -630,8 +640,18 @@ function shareMenu(owner) {
   popupMenu(owner, { label: 'Share', rows: shareRows() });
 }
 
+function throughRow() {
+  if (marginPage.through) return [{ text: 'Stop reading through', icon: ICON.close, run: () => marginThroughClick() }];
+  const personas = marginPrefs?.personas || [];
+  const off = !marginPage.s?.note.id || marginPage.changing || !personas.length;
+  if (!marginPrefs) marginLoadPrefs();
+  const why = personas.length ? [] : [{ note: marginPrefs ? 'No readers to choose from' : 'Readers did not load, open this menu again' }];
+  return [{ text: 'Read through', icon: ICON.readThrough, off, next: personas.map((p) => ({ text: p.name, icon: PERSONA_ICON[p.icon] || PERSONA_ICON.book, checked: p.id === marginPage.persona, run: () => marginThroughClick(p.id) })) }, ...why];
+}
+
 function noteMenu(owner) {
   const note = state.view === 'note' ? state.session?.note || {} : {};
+  const words = note.id && state.session.doc ? md.wordCount(state.session.doc.source()) : 0;
   popupMenu(owner, {
     label: 'This note',
     rows: [
@@ -639,9 +659,11 @@ function noteMenu(owner) {
       ...(note.id ? [{ text: 'Tasks', icon: ICON.calendar, run: () => noteTasksSheet() }] : []),
       { text: 'Add picture', icon: ICON.image, run: () => choosePictures() },
       { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(owner) },
+      ...throughRow(),
       { text: 'Share', icon: ICON.share, next: shareRows() },
       { line: true },
       { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },
+      ...(words ? [{ line: true }, { note: `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}` }] : []),
     ],
   });
 }

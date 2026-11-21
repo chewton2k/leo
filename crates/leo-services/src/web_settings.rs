@@ -179,6 +179,14 @@ pub fn describe(
             "notes": notes_dir.map(|p| p.display().to_string()),
             "config": Config::config_path().ok().map(|p| p.display().to_string()),
         },
+        "prices": {
+            "as_of": choice::API_PRICES_AS_OF,
+            "models": choice::WRITING
+                .iter()
+                .flat_map(|c| c.models)
+                .map(|m| (m.id, m.api_cents))
+                .collect::<std::collections::BTreeMap<_, _>>(),
+        },
     })
 }
 

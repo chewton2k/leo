@@ -205,7 +205,7 @@ test('selected note text is painted as its own text only, clipped to the note, a
   await expect.poll(painted).toBeNull();
 });
 
-test('the Felix bar opens in the margin beside a selection when there is room, and under its last word when not', async ({ page }) => {
+test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
   await page.setViewportSize({ width: 1600, height: 900 });
@@ -229,7 +229,7 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect(await pickText(page, 'Three short')).toBe(true);
   await expect(menu).toBeVisible();
   const word = await page.locator('#doc .blk', { hasText: 'Three short' }).boundingBox();
-  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves under the new selection on the next frame').toBeGreaterThan(word.y);
+  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves above the new selection on the next frame').toBeLessThan(word.y);
   expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 
@@ -314,8 +314,8 @@ test('hovering an underlined passage lights its margin note', async ({ page }) =
   const card = page.locator('.margin-note');
   await expect(card).toBeVisible();
   await expect(card).not.toHaveAttribute('data-active', '');
-  const line = await page.locator('.margin-ink .squiggle').first().boundingBox();
-  await page.mouse.move(line.x + line.width / 2, line.y - 6);
+  const passage = await page.locator('.margin-ink .wash').first().boundingBox();
+  await page.mouse.move(passage.x + passage.width / 2, passage.y + passage.height / 2);
   await expect(card).toHaveAttribute('data-active', '');
   await expect.poll(() => card.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.mouse.move(5, 5);
@@ -397,13 +397,9 @@ test('compact margin anchors stay outside the passage and open real persisted re
   expect(anchor.y + anchor.height / 2).toBeGreaterThan(paragraph.y);
   expect(anchor.y + anchor.height / 2).toBeLessThan(paragraph.y + paragraph.height);
   const stroke = page.locator('.margin-ink .squiggle');
-  const dashes = await stroke.evaluateAll(lines => lines.map(el => {
-    const length = el.getTotalLength();
-    const units = el.hasAttribute('pathLength') ? el.pathLength.baseVal.value : length;
-    return parseFloat(getComputedStyle(el).strokeDasharray) * length / units;
-  }));
-  expect(dashes.length).toBeGreaterThan(0);
-  for (const dash of dashes) expect(dash).toBeLessThanOrEqual(2);
+  const widths = await stroke.evaluateAll(lines => lines.map(el => parseFloat(getComputedStyle(el).strokeWidth)));
+  expect(widths.length).toBeGreaterThan(0);
+  for (const width of widths) expect(width).toBe(20);
   await mark.click();
   await expect(page.locator('.margin-note .margin-felix')).toContainText(thread.messages.at(-1).text);
   await expect(page.locator('.margin-reply textarea')).toBeFocused();
@@ -479,7 +475,7 @@ test('the Tasks window leaves every outline tick reachable and the preview sits 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Outline over tasks', body } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.reload();
-  await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
+  await expect(page.locator('#tasks-window'), 'note pages carry the Tasks panel').toBeVisible();
   await expect(page.locator('.outline-ticks span')).toHaveCount(12);
   await quiet(page);
   const hits = await page.evaluate(() => [...document.querySelectorAll('.outline-ticks span')].map((tick) => {
@@ -549,11 +545,11 @@ test('the note tools live in one menu beside the Felix chips, and there is no fl
   const note = await (await page.request.post('/api/notes', { data: { title: 'Note menu', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('nav.actions')).toHaveCount(0);
-  await expect(page.locator('.dock')).toBeHidden();
+  await expect(page.locator('.dock')).toHaveCSS('display', 'flex');
   const more = page.locator('.note-meta #note-more');
   await expect(more).toHaveAccessibleName('More for this note');
   await more.click();
-  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Share', 'Move to trash']);
+  await expect(page.getByRole('menu', { name: 'This note' }).getByRole('menuitem')).toHaveText(['Tasks', 'Add picture', 'Move to folder', 'Read through', 'Share', 'Move to trash']);
   await page.getByRole('menuitem', { name: 'Share' }).click();
   await expect(page.getByRole('menuitem', { name: 'Copy as Markdown' })).toBeVisible();
   await page.keyboard.press('Escape');
@@ -561,13 +557,13 @@ test('the note tools live in one menu beside the Felix chips, and there is no fl
   await expect(page.locator('#crumbs')).toHaveCSS('visibility', 'hidden');
 });
 
-test('the Usage sheet icon buttons name themselves on hover', async ({ page }) => {
+test('the Usage page refresh button names itself on hover', async ({ page }) => {
   await page.goto('/#/settings');
-  await expect(page.locator('#side [data-action="usage"]'), 'Usage lives in Settings, not the rail').toHaveCount(0);
-  await page.locator('.settings-nav [data-action="usage"]').click();
-  const tools = page.locator('.usage-tools .icon-btn');
-  await expect(tools).toHaveCount(2);
-  for (const button of await tools.all()) expect(await button.getAttribute('title')).toBe(await button.getAttribute('aria-label'));
+  await expect(page.locator('#side a[href="#/settings/usage"]'), 'Usage lives in Settings, not the rail').toHaveCount(0);
+  await page.locator('.settings-nav a[href="#/settings/usage"]').click();
+  const refresh = page.locator('.usage-plans [data-action="usage-refresh"]');
+  await expect(refresh).toHaveCount(1);
+  expect(await refresh.getAttribute('title')).toBe(await refresh.getAttribute('aria-label'));
 });
 
 test('Felix only bobs while his panel is open', async ({ page }) => {
@@ -790,9 +786,11 @@ test('a resolved note stays faded with a Resolved label until it is reopened', a
   await expect(thread.locator('.margin-resolved-label')).toHaveText('Resolved');
   await page.mouse.move(5, 5);
   await page.evaluate(() => document.activeElement?.blur());
-  await expect(thread).toHaveCSS('opacity', '0.45');
+  await expect(thread).toHaveCSS('opacity', '1');
+  await expect(thread.locator('.margin-felix')).toHaveCSS('-webkit-line-clamp', '1');
   await thread.locator('.margin-toggle').click({ force: true });
   await expect(thread).not.toHaveAttribute('data-resolved', /.+/);
+  await expect(thread.locator('.margin-resolved-label')).toHaveCount(0);
   await expect(thread).toHaveAttribute('data-open', '');
 });
 

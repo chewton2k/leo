@@ -48,7 +48,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, watch: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -70,15 +70,20 @@ function marginSetting() {
   return marginPrefs?.layout || marginRemembered() || 'both';
 }
 
+function marginCovered() {
+  const panel = chat.isOpen() && $('.chat');
+  return panel ? Math.max(0, panel.offsetWidth - parseFloat(getComputedStyle(document.body).paddingRight)) : 0;
+}
+
 function marginMostColumn(width) {
-  return marginKit.mostColumn({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  return marginKit.mostColumn({ width: width - marginCovered(), setting: marginSetting(), noteWidth: window.leoTheme.noteWidth() });
 }
 
 function marginLayout(columns) {
   const max = getComputedStyle($('article.note', columns)).maxWidth;
   const column = max.endsWith('px') ? parseFloat(max) : Infinity;
-  const width = columns.clientWidth;
-  const layout = marginKit.arrangement({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  const width = columns.clientWidth - marginCovered();
+  const layout = marginKit.arrangement({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth() });
   const size = `${marginKit.marginWidth({ width, column, layout })}px`;
   if (columns.style.getPropertyValue('--margin-w') !== size) columns.style.setProperty('--margin-w', size);
   return layout;
@@ -107,6 +112,8 @@ function marginLeave() {
   marginPage.personaSlide?.cancel();
   marginPage.observer?.disconnect();
   marginPage.observer = null;
+  marginPage.watch?.disconnect();
+  marginPage.watch = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
   Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), finds: new Map(), drawn: null, drawnAt: 0 });
@@ -141,6 +148,10 @@ async function marginMount(s, mine) {
     marginPage.observer = new ResizeObserver(() => marginPage.folds.size || marginPage.unfolds.size || marginRedraw());
     marginPage.observer.observe(columns);
     marginPage.observer.observe($('#doc'));
+  }
+  if (window.MutationObserver) {
+    marginPage.watch = new MutationObserver(() => marginRedraw());
+    marginPage.watch.observe($('#doc'), { childList: true });
   }
   if (s.note.id) return marginLoad(s, () => mine === seq);
   const prefs = await marginLoadPrefs();
@@ -350,7 +361,6 @@ function marginControl() {
     if (icon.dataset.along) iconSwap(icon, paint);
     else paint();
   }
-  marginThroughControl();
   $('#margin-mode-label').textContent = along ? 'Reads along' : 'When you ask';
   button.title = along ? 'Felix reads changes after a pause. The text goes to your writing AI.' : `Select a passage, then choose Ask Felix or press ${marginAskKeys()}.`;
   for (const option of menu.querySelectorAll('[data-margin-mode]')) {
@@ -533,7 +543,7 @@ function marginNow(t) {
   return felixSaid ? felixSaid.text : '';
 }
 
-const INK_SKIP = 'pre, code, figure, svg, a, .see-larger, .katex, [class*="math"], [class*="diagram"], [class*="mermaid"]';
+const INK_SKIP = 'pre, code, figure, svg, a, .katex, [class*="math"], [class*="diagram"], [class*="mermaid"]';
 
 function inkNodes(root) {
   const nodes = [];
@@ -570,7 +580,6 @@ function marginAnswer(line, text, arriving = false) {
     line.classList.add('prose');
     line.innerHTML = html;
     if (arriving) for (const fig of line.querySelectorAll('figure.drawing')) fig.dataset.play = '';
-    if (/<figure class="(diagram|drawing)/.test(html)) line.insertAdjacentHTML('beforeend', '<button type="button" class="see-larger" data-action="diagram-expand" data-reply="here">See it larger</button>');
   } else {
     line.textContent = text;
   }
@@ -764,6 +773,8 @@ function marginDropThread(id) {
   if (marginPage.focus === id) marginPage.focus = null;
 }
 
+const marginReplies = (t) => Math.max(0, (t.messages || []).length - 1);
+
 function marginMark(t) {
   let mark = marginPage.marks.get(t.id);
   if (!mark) {
@@ -772,7 +783,7 @@ function marginMark(t) {
     mark.className = 'margin-mark';
     mark.dataset.id = t.id;
     mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”`);
-    mark.innerHTML = t.id === 'reading' ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : '<span class="margin-anchor" aria-hidden="true"><svg><use href="#leo-mark"/></svg></span>';
+    mark.innerHTML = t.id === 'reading' ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : '<span class="margin-anchor" aria-hidden="true"><svg><use href="#leo-mark"/></svg></span><span class="margin-count" aria-hidden="true"></span>';
     if (t.id === 'reading') {
       mark.classList.add('reading');
       mark.tabIndex = -1;
@@ -786,14 +797,14 @@ function marginMark(t) {
 
 function marginPaint() {
   for (const [id, d] of marginPage.tethers) {
-    const pinned = marginPage.threads.some((t) => t.id === id && t.pinned);
+    const rest = marginPage.threads.some((t) => t.id === id && t.pinned) || (marginPage.newest === id && !marginPage.faded.has(id));
     for (const part of ['tie', 'spine']) {
       const key = `${id}:tether ${part}:0`;
-      if (d?.[part] && (marginLit(id) || pinned)) {
+      if (d?.[part] && (marginLit(id) || rest)) {
         const fresh = !marginPage.paths.has(key);
         const path = marginPath(id, `tether ${part}`);
         path.setAttribute('d', d[part]);
-        path.classList.toggle('pinned', pinned);
+        path.classList.toggle('rest', rest);
         if (fresh) {
           path.setAttribute('pathLength', '1');
           if (!stillMotion()) path.classList.add('sketching');
@@ -1133,6 +1144,7 @@ function marginSlots(placed, columns) {
     leoDoc.insertAt(point, slot);
     slots.set(id, slot);
   }
+  for (const { t } of placed) slots.get(t.id)?.toggleAttribute('data-more', marginReplies(t) > 0);
   return slots;
 }
 
@@ -1176,7 +1188,13 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
   }
   for (const { t, rects } of boxes) {
     const mark = marginMark(t);
-    mark.toggleAttribute('data-more', (t.messages || []).length > 1);
+    const replies = marginReplies(t);
+    mark.toggleAttribute('data-more', replies > 0);
+    const count = $('.margin-count', mark);
+    if (count) {
+      count.textContent = replies > 9 ? '9+' : replies || '';
+      mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”${replies ? `, ${plural(replies, 'reply', 'replies')}` : ''}`);
+    }
     const size = mark.offsetWidth;
     const slot = slots.get(t.id)?.getBoundingClientRect();
     let x, y;
@@ -2050,7 +2068,6 @@ async function marginRead(s) {
   }
 }
 
-const THROUGH_TIP = 'Felix reads the whole note and leaves margin notes. The text goes to your writing AI.';
 const THROUGH_MOST = 12;
 const THROUGH_STOP_GRACE_MS = 400;
 const THROUGH_STAGGER_MS = 80;
@@ -2061,36 +2078,12 @@ const THROUGH_SAYS = {
   felix: 'Felix is answering in chat. Try again when he’s done.',
   busy: 'Felix is already reading. Try again in a moment.',
   changed: 'This note changed while Felix was reading. Read through again.',
+  persona: 'That reader is gone. Pick another.',
 };
 
-function marginThroughControl() {
-  const button = $('#margin-through');
+async function marginThroughClick(persona) {
   const s = marginPage.s;
-  if (!button || !s) return;
-  if (!button.dataset.ready) {
-    button.dataset.ready = '1';
-    button.addEventListener('click', () => marginThroughClick().catch(fail));
-  }
-  const running = Boolean(marginPage.through);
-  const icon = $('#margin-through-icon');
-  if (icon && icon.dataset.running !== String(running)) {
-    const paint = () => { icon.innerHTML = running ? ICON.close : ICON.readThrough; icon.dataset.running = String(running); };
-    if (icon.dataset.running) iconSwap(icon, paint);
-    else paint();
-  }
-  const label = $('#margin-through-label');
-  if (label) label.textContent = running ? 'Stop' : 'Read through';
-  const off = !s.note.id || marginPage.changing;
-  if (running) button.setAttribute('aria-busy', 'true');
-  else button.removeAttribute('aria-busy');
-  button.setAttribute('aria-disabled', String(off));
-  button.title = off ? 'Felix can read this note once it is saved.' : THROUGH_TIP;
-}
-
-async function marginThroughClick() {
-  const s = marginPage.s;
-  const button = $('#margin-through');
-  if (!s || button?.getAttribute('aria-disabled') === 'true') return;
+  if (!s?.note.id) return;
   const run = marginPage.through;
   if (run) {
     if (Date.now() - run.started >= THROUGH_STOP_GRACE_MS) {
@@ -2102,7 +2095,7 @@ async function marginThroughClick() {
   if (chat.isBusy()) return marginSetStatus(THROUGH_SAYS.felix);
   const { parts, spread } = marginKit.passes(s.doc.source(), marginPage.threads.map((t) => t.quote));
   if (!parts.length) return marginSetStatus('Write a few lines first, then read through.');
-  await marginThrough(s, parts, spread);
+  await marginThrough(s, parts, spread, persona);
 }
 
 async function marginThroughPart(s, run, part, label) {
@@ -2120,7 +2113,7 @@ async function marginThroughPart(s, run, part, label) {
       s.doc.glow(part.from, part.to);
       let got;
       try {
-        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone, changed: marginChanged(s) } });
+        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone, changed: marginChanged(s), ...(run.persona && { persona: run.persona }) } });
       } finally {
         s.doc.glow();
       }
@@ -2130,6 +2123,10 @@ async function marginThroughPart(s, run, part, label) {
       if (marginPage.s !== s) return { gone: true };
       if (run.stop) return { notes: [] };
       const why = e.data?.why;
+      if (why === 'persona') {
+        marginPrefs = null;
+        await marginLoadPrefs();
+      }
       if (e.status === 409 && !why && !stale++) continue;
       if (why === 'busy' && busy++ < 3) {
         await new Promise((resolve) => setTimeout(resolve, READ_PAUSE.regular));
@@ -2193,10 +2190,9 @@ function marginThroughUndo(s, added) {
   };
 }
 
-async function marginThrough(s, parts, spread) {
-  const run = { started: Date.now(), stop: false, added: [], abort: new AbortController() };
+async function marginThrough(s, parts, spread, persona) {
+  const run = { started: Date.now(), stop: false, added: [], abort: new AbortController(), persona };
   marginPage.through = run;
-  marginThroughControl();
   let say = '';
   try {
     for (let i = 0; i < parts.length && !run.stop && run.added.length < THROUGH_MOST; i++) {
@@ -2212,8 +2208,7 @@ async function marginThrough(s, parts, spread) {
     if (marginPage.through === run) marginPage.through = null;
     if (marginPage.s === s) {
       s.doc.glow();
-      marginThroughControl();
-    }
+        }
   }
   if (marginPage.s !== s) return;
   const count = run.added.length;
