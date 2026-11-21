@@ -1325,10 +1325,10 @@
       save(storage, stored(), state.refs, state.id, known.has(state.id), marks.get(state.id));
     }
 
-    // Idle compaction: after warm.rs IDLE the warm session and the provider's
-    // prompt cache are cold, so the next message would resend every recent turn
-    // at full price. leo summarises the older part with the cheap model instead
-    // (POST /api/chat/compact); the chat on screen stays exactly as it is.
+    // Idle compaction: once the provider's prompt cache expires the next message
+    // would resend every recent turn at full price, so just before then
+    // (compact_after, sent with each answer) leo summarises the older part with the
+    // cheap model (POST /api/chat/compact); the chat on screen stays as it is.
     let compactTimer = 0;
     function stopCompacting() {
       clearTimeout(compactTimer);
@@ -1336,7 +1336,7 @@
     function compactLater() {
       clearTimeout(compactTimer);
       const id = state.id;
-      if (id) compactTimer = setTimeout(() => compactNow(id), COMPACT_IDLE_MS);
+      if (id) compactTimer = setTimeout(() => compactNow(id), state.compactAfter || COMPACT_IDLE_MS);
     }
     async function compactNow(id) {
       if (state.busy || state.id !== id) return;
@@ -3026,6 +3026,7 @@
             if (e.restart) answer.text = '';
             if (typeof e.step === 'string') pose(e.tool);
             if (typeof e.step === 'string') answer.steps = [...(answer.steps || []), { text: e.step, at: answer.text.length, tool: typeof e.tool === 'string' ? e.tool : '', failed: e.failed === true, found: Array.isArray(e.found) ? e.found.filter((f) => typeof f === 'string').slice(0, 12) : [] }];
+            if (Number.isFinite(e.compact_after) && e.compact_after > 0) state.compactAfter = e.compact_after;
             if (e.spent && typeof e.spent === 'object') {
               answer.spent = e.spent;
               fullNext = true;

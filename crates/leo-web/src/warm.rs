@@ -8,6 +8,18 @@ use crate::chat::{Conversation, SourceRef, Turn};
 pub const IDLE: Duration = Duration::from_secs(10 * 60);
 const MOST_SESSIONS: usize = 3;
 
+fn cache_life(by: &str) -> Option<Duration> {
+    matches!(by, "Codex" | "codex").then_some(Duration::from_secs(30 * 60))
+}
+
+pub fn idle_for(by: &str) -> Duration {
+    cache_life(by).unwrap_or(IDLE)
+}
+
+pub fn compact_after(by: &str) -> Duration {
+    cache_life(by).map_or(IDLE, |life| life - Duration::from_secs(30))
+}
+
 pub fn context_limit(room: usize, supported: Option<usize>) -> usize {
     supported
         .unwrap_or_else(|| room.saturating_mul(2))
@@ -29,6 +41,7 @@ pub struct Warm {
     pub limit: usize,
     pub talk: Box<dyn Conversation>,
     pub used: Instant,
+    pub idle: Duration,
 }
 
 #[derive(Default)]
@@ -62,7 +75,7 @@ impl Warm {
         self.key == key
             && self.chat == chat
             && self.sent < self.limit
-            && self.used.elapsed() < IDLE
+            && self.used.elapsed() < self.idle
             && messages.len() == self.seen + 2
             && messages[self.seen].role == "assistant"
             && messages.last().is_some_and(|t| t.role == "user")
@@ -74,7 +87,7 @@ impl Slot {
     pub fn light(&self, chat: &str) -> Option<bool> {
         let held = self.0.lock().unwrap_or_else(|e| e.into_inner());
         held.iter()
-            .find(|warm| warm.chat == chat && warm.used.elapsed() < IDLE)
+            .find(|warm| warm.chat == chat && warm.used.elapsed() < warm.idle)
             .map(|warm| warm.light)
     }
 
@@ -95,7 +108,7 @@ impl Slot {
             if let Some(index) = held.iter().position(|old| old.chat == warm.chat) {
                 removed.extend(held.remove(index));
             }
-            if warm.sent < warm.limit && warm.used.elapsed() < IDLE {
+            if warm.sent < warm.limit && warm.used.elapsed() < warm.idle {
                 held.push_back(warm);
             } else {
                 removed.push(warm);
@@ -129,7 +142,7 @@ impl Slot {
         {
             let mut held = self.0.lock().unwrap_or_else(|e| e.into_inner());
             for index in (0..held.len()).rev() {
-                if held[index].used.elapsed() >= IDLE {
+                if held[index].used.elapsed() >= held[index].idle {
                     removed.extend(held.remove(index));
                 }
             }
@@ -313,6 +326,7 @@ mod tests {
             limit: 1_000,
             talk: Box::new(Quiet),
             used: Instant::now(),
+            idle: IDLE,
         }
     }
 
@@ -470,5 +484,22 @@ mod tests {
         assert!(slot.holding());
         slot.clear();
         assert!(!slot.holding());
+    }
+
+    #[test]
+    fn a_codex_session_outlives_ten_idle_minutes_and_compacts_before_its_cache_expires() {
+        assert_eq!(idle_for("Codex"), Duration::from_secs(30 * 60));
+        assert_eq!(compact_after("codex"), Duration::from_secs(29 * 60 + 30));
+        for other in ["Claude Code", "Ollama", ""] {
+            assert_eq!((idle_for(other), compact_after(other)), (IDLE, IDLE));
+        }
+        let slot = Slot::default();
+        let next = [turn("assistant", "answer"), turn("user", "next")];
+        let mut codex = warm(&[]);
+        codex.idle = idle_for("Codex");
+        codex.used = Instant::now() - IDLE;
+        slot.keep(codex);
+        slot.tidy();
+        assert!(slot.take(7, "chat-0001", &next).is_some());
     }
 }

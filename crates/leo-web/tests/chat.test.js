@@ -590,6 +590,14 @@ test('completed and stopped replies retain elapsed time without confusing comple
   }
 });
 
+test('the compaction delay follows the server and ignores a bad value', async () => {
+  const fixture = chatSendFixture('practice', 'ask', undefined, { replies: [{ events: [{ t: 'Ready.' }, { done: true, compact_after: 1770000 }] }, { events: [{ t: 'Again.' }, { done: true, compact_after: 'soon' }] }] });
+  await fixture.send('Hello.');
+  assert.equal(fixture.state.compactAfter, 1770000);
+  await fixture.send('Again.');
+  assert.equal(fixture.state.compactAfter, 1770000);
+});
+
 test('successful card-only replies finish without a stopped error for every proposal kind and state', async () => {
   const kinds = ['create', 'edit', 'add_task', 'update_task', 'delete_task', 'restore_task', 'move_note', 'make_folder', 'remove_folder', 'move_folder', 'delete_note', 'restore_note', 'rename_note', 'rename_folder', 'pin_note', 'delete_folder', 'restore_folder', 'add_task', ];
   for (const kind of kinds) {

@@ -383,8 +383,8 @@ pub(crate) struct CompactBody {
 /// again than a summary request does.
 const COMPACT_LEAST_CHARS: usize = 3_000;
 
-/// Compacts a chat the page saw go quiet (`COMPACT_IDLE_MS`): by then the warm
-/// session has expired and the provider's prompt cache is cold, so the next
+/// Compacts a chat the page saw go quiet (`warm::compact_after`): by then the warm
+/// session is ending and the provider's prompt cache is about to expire, so the next
 /// message would resend every recent turn at full price. Everything but the
 /// last `chat::COMPACT_KEEP` turns is summarised in the background with the
 /// cheap model (`remember_in_background`); the next prompt starts at the
@@ -1456,7 +1456,8 @@ fn answer(
                 notes: std::collections::BTreeMap<String, u64>,
                 documents: std::collections::BTreeSet<u64>,
                 final_access: tools::Access,
-                reads: crate::read_cache::Reads| {
+                reads: crate::read_cache::Reads,
+                spent: &Option<chat::Spent>| {
         let sent = sent.max(talk.context_chars().unwrap_or(0));
         if let Some(chat) = remember
             .chat
@@ -1478,6 +1479,7 @@ fn answer(
                 limit: remember.limit,
                 talk,
                 used: std::time::Instant::now(),
+                idle: crate::warm::idle_for(spent.as_ref().map_or("", |s| s.by.as_str())),
             });
         }
     };
@@ -1521,6 +1523,7 @@ fn answer(
                     documents,
                     final_access,
                     desk.reads.clone(),
+                    &spent,
                 );
                 return Ok(finished(spent, desk.verdict));
             }
@@ -1590,6 +1593,7 @@ fn answer(
                     remember.documents.clone(),
                     final_access,
                     desk.reads.clone(),
+                    &spent,
                 );
                 return Ok(finished(spent, desk.verdict));
             }
@@ -2298,10 +2302,21 @@ pub(crate) async fn chat_reply(
         };
         let end = match answer(&worker, &streamer, ask, &tx) {
             Ok(spent) => {
+                let by = spent.as_ref().map_or("", |s| s.by.as_str());
+                let warm = body
+                    .chat
+                    .as_deref()
+                    .is_some_and(|chat| worker.warm.light(chat).is_some());
+                let compact_after = if warm {
+                    crate::warm::compact_after(by)
+                } else {
+                    crate::warm::IDLE
+                }
+                .as_millis() as u64;
                 if let Some(spent) = spent {
                     let _ = tx.send(ndjson(serde_json::json!({ "spent": spent })));
                 }
-                serde_json::json!({ "done": true })
+                serde_json::json!({ "done": true, "compact_after": compact_after })
             }
             Err(e) => serde_json::json!({ "error": e.to_string() }),
         };

@@ -577,11 +577,15 @@ read (root CLAUDE.md, 2026-11-17).
   `SESSION_DONE` carry `Session::unshown`. Refusals say to correct the call without
   mentioning it. Felix keeps no running score.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
-  ten idle minutes, Settings changes clear all; eviction and process cleanup run
+  idle for the provider's prompt-cache lifetime (`warm::idle_for`: Codex 30
+  minutes, OpenAI's documented minimum for GPT-5.6 and later; others ten,
+  2026-11-21, the user's call), Settings changes clear all; eviction and process cleanup run
   outside the slot mutex and off async workers. Only unchanged history plus the
   last reply/new message can continue. Automatic note retrieval is separate from
   warm capacity: reducing excerpts must not evict a long conversation early.
-- Idle compaction: after `COMPACT_IDLE_MS` (10 min) the page POSTs
+- Idle compaction: 30 s before that lifetime ends (`warm::compact_after`, sent
+  as `compact_after` on each answer's `done` line; ten minutes, `COMPACT_IDLE_MS`,
+  for providers without a known cache, 2026-11-21, the user's call) the page POSTs
   `/api/chat/compact`; with at least `COMPACT_LEAST_CHARS` (3,000) before the
   last `chat::COMPACT_KEEP` (4) turns the server drops the warm session and
   summarises in the background (`kept_from`, hash-checked). The chat on screen

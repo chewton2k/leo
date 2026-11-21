@@ -654,7 +654,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
 - Warm sessions (`warm.rs`): up to three recent conversations, sharing a
   480,000-character context ceiling. Switching chats keeps eligible sessions;
   same-chat history/access/config mismatches replace only that chat.
-  Settings changes clear all sessions. Sessions expire after ten idle minutes,
+  Settings changes clear all sessions. Sessions expire after the provider's
+  prompt-cache lifetime (Codex 30 idle minutes, others ten; 2026-11-21, the user's call),
   and deletion releases that chat. Eviction and process cleanup happen outside
   the slot mutex and away from async request workers. Only unchanged history plus the last reply/new message can
   continue; follow-ups carry new/changed material with stable source numbers.
@@ -662,8 +663,10 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   Failed sessions fall back with a fresh
   read cache; provider context accounting still bounds each retained session.
 
-- Idle compaction (2026-11-02, the user's request; usage drained fast): after
-  `COMPACT_IDLE_MS` (10 min, warm.rs `IDLE`) without a message, the page POSTs
+- Idle compaction (2026-11-02, the user's request; usage drained fast): 30 s
+  before the provider's prompt cache expires (`warm::compact_after`, sent as
+  `compact_after` on each answer's `done` line: Codex 29.5 min; ten minutes,
+  `COMPACT_IDLE_MS`, for others; 2026-11-21, the user's call) without a message, the page POSTs
   `/api/chat/compact` with the model history; when at least
   `COMPACT_LEAST_CHARS` (3,000) lie before the last `chat::COMPACT_KEEP` (4)
   turns, the server drops that chat's warm session and summarises them in the
