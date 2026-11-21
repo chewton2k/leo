@@ -1311,7 +1311,7 @@ function usagePlansShown() {
 async function refreshPlans(body = {}) {
   if (usageRefresh.busy) return;
   const button = () => app.querySelector('[data-action="usage-refresh"]');
-  const focused = document.activeElement === button();
+  const focused = document.activeElement === button() || Boolean(body.claude);
   Object.assign(usageRefresh, { busy: true, failed: false });
   usagePlansShown();
   try {
