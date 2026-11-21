@@ -200,9 +200,9 @@ svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
 
 .note-head h1 { text-wrap: balance; position: relative; min-height: 1.25em; font-family: var(--writing-font); font-size: var(--fs-title); font-weight: 500; line-height: 1.25; letter-spacing: -.032em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
 .note-head h1.blank::before { content: attr(data-placeholder); color: var(--faint); position: absolute; left: 0; top: 0; pointer-events: none; }
-.note-facts { margin: -4px 0 4px; font-size: var(--fs-sm); line-height: 20px; color: var(--faint); font-variant-numeric: tabular-nums; }
+.note-facts { margin: 0 0 4px; font-size: var(--fs-sm); line-height: 20px; color: var(--faint); font-variant-numeric: tabular-nums; }
 @media print { .note-facts { display: none; } }
-.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin-top: 8px; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
+.note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin-top: 8px; color: var(--muted); font-size: var(--fs-sm); font-variant-numeric: tabular-nums; }
 .note-originals { display: flex; flex-wrap: wrap; gap: 6px; }
 .note-originals:not(:empty) { margin: 0 0 8px; }
 .note-originals .chip { cursor: pointer; }

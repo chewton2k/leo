@@ -405,7 +405,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   stroke with 10 px hooks, ink 38%), also while open; tables lose grid lines and the
   header fill, every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
-  the old look: a plain underline, the 3 px quote bar, row rules. The line under
+  the old look: a plain underline, the 3 px quote bar, row rules. The title row's chips
+  (`.margin-mode`) sit 16 px apart with 14 px icons and 4/8 padding, and the two Felix chips
+  (not the ⋯) carry a 1 px `--line` ring at rest (2026-11-21, the user's call). The line under
   the title (`#note-facts`) holds the save state, `#save-state` (the drying mark, its
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
