@@ -2332,7 +2332,7 @@ test.describe('background work', () => {
 
     await tray.locator('.activity-head').click();
     await expect(tray.locator('.activity-row')).toHaveCount(0);
-    await expect(tray.locator('.activity-fold')).toHaveText('Show');
+    await expect(tray.locator('.activity-head')).toHaveAttribute('aria-expanded', 'false');
     await tray.locator('.activity-head').click();
 
     await tray.locator('.activity-row', { hasText: 'recording' }).click();

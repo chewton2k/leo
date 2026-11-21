@@ -231,7 +231,7 @@ function drawActivity() {
     .join('');
   const settled = !activity.live && shown.every((t) => t.ready);
   const said = settled ? (count === 1 ? 'Ready in the background' : `${count} ready in the background`) : count === 1 ? 'Working in the background' : `${count} things in the background`;
-  const head = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>'}<span class="grow">${said}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>`;
+  const head = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}" aria-label="${activity.folded ? 'Show' : 'Hide'} background work">${settled ? '' : '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>'}<span class="grow">${said}</span><span class="activity-fold">${ICON.chevron}</span></button>`;
   refreshPanel(box, `<span class="said" role="status">${esc(said)}</span>${head}${activity.folded ? '' : rows}`);
 }
 
