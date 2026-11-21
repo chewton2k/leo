@@ -817,8 +817,8 @@ mod tests {
     }
 
     fn note(title: &str, body: &str) -> Note {
-        let mut store =
-            Store::load_from(&tempfile::tempdir().unwrap().keep().join("notes")).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = Store::load_from(&temp.path().join("notes")).unwrap();
         store.create_note(title, body, "").unwrap().clone()
     }
 
@@ -1247,9 +1247,9 @@ mod tests {
         v
     }
 
-    fn library_of(count: usize, width: usize, pieces: usize) -> Vectors {
+    fn library_of(count: usize, width: usize, pieces: usize) -> (tempfile::TempDir, Vectors) {
         let dir = tempfile::tempdir().unwrap();
-        let vectors = Vectors::at(dir.keep().join("meaning.json"));
+        let vectors = Vectors::at(dir.path().join("meaning.json"));
         let mut seed = 11u32;
         {
             let mut known = vectors.known.lock().unwrap();
@@ -1268,15 +1268,16 @@ mod tests {
             }
         }
         vectors.changed();
-        vectors
+        (dir, vectors)
     }
 
     #[test]
     fn lists_are_built_a_slice_at_a_time_and_end_equal_to_a_full_build() {
-        let vectors = Arc::new(library_of(6400, 8, 1));
-        let graphs =
-            crate::graph::Graphs::new(tempfile::tempdir().unwrap().keep().join("graph.json"), None)
-                .with_vectors(Arc::clone(&vectors));
+        let (_dir, vectors) = library_of(6400, 8, 1);
+        let vectors = Arc::new(vectors);
+        let graph_dir = tempfile::tempdir().unwrap();
+        let graphs = crate::graph::Graphs::new(graph_dir.path().join("graph.json"), None)
+            .with_vectors(Arc::clone(&vectors));
         let mut sizes = Vec::new();
         while sizes.is_empty() || vectors.near_pending() {
             sizes.push(graphs.near().unwrap().len());
@@ -1286,7 +1287,7 @@ mod tests {
         assert_eq!(sizes[0], NEAR_SLICE);
         assert!(sizes.windows(2).all(|pair| pair[0] < pair[1]));
         assert_eq!(*sizes.last().unwrap(), 6400);
-        let fresh = library_of(6400, 8, 1);
+        let (_fresh_dir, fresh) = library_of(6400, 8, 1);
         assert_eq!(
             graphs.near().unwrap(),
             fresh.neighbours(NEIGHBOURS, usize::MAX)
@@ -1295,7 +1296,7 @@ mod tests {
 
     #[test]
     fn a_note_without_a_list_yet_is_left_out() {
-        let vectors = library_of(6100, 8, 1);
+        let (_dir, vectors) = library_of(6100, 8, 1);
         let near = vectors.neighbours(5, 10);
         assert_eq!(near.len(), 10);
         assert!(vectors.near_pending());
@@ -1305,7 +1306,7 @@ mod tests {
 
     #[test]
     fn a_small_library_gets_its_full_list_in_one_call() {
-        let vectors = library_of(5000, 8, 1);
+        let (_dir, vectors) = library_of(5000, 8, 1);
         let near = vectors.neighbours(NEIGHBOURS, NEAR_SLICE);
         assert_eq!(near.len(), 5000);
         assert!(near.values().all(|list| list.len() == NEIGHBOURS));
@@ -1314,7 +1315,7 @@ mod tests {
 
     #[test]
     fn a_library_over_six_thousand_notes_gets_lists() {
-        let vectors = library_of(6100, 8, 1);
+        let (_dir, vectors) = library_of(6100, 8, 1);
         let near = vectors.neighbours(NEIGHBOURS, usize::MAX);
         assert_eq!(near.len(), 6100);
         assert!(near.values().all(|list| list.len() == NEIGHBOURS));
@@ -1322,7 +1323,7 @@ mod tests {
 
     #[test]
     fn an_edit_removal_and_addition_leave_the_lists_equal_to_a_full_build() {
-        let vectors = library_of(300, 8, 3);
+        let (_dir, vectors) = library_of(300, 8, 3);
         let first = vectors.neighbours(5, usize::MAX);
         let mut seed = 5u32;
         for round in 0..5 {
@@ -1508,7 +1509,7 @@ mod tests {
             .map(|v| v.split(',').filter_map(|n| n.parse().ok()).collect())
             .unwrap_or_else(|_| vec![5000]);
         for count in sizes {
-            let vectors = library_of(count, 384, 6);
+            let (_dir, vectors) = library_of(count, 384, 6);
             let time = |label: &str, run: &dyn Fn() -> usize| {
                 let start = std::time::Instant::now();
                 let lists = run();

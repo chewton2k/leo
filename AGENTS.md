@@ -34,16 +34,18 @@ with a strict CSP (no inline script).
    a 204, every block type in a selection, both orders of a decision tree.
 5. **Prove the tests work.** Put the bug back for a moment and confirm the new
    test fails, then restore the fix.
-6. **Run the full gate once, at the end of the batch** (commands below). If a
-   browser test fails only in the full run, rerun it alone. Check the machine
-   load (`uptime`) before calling it flaky, and say so in the report.
+6. **Let CI run the full gate.** Never run workspace-wide tests, clippy or the
+   full Playwright suite on Charlton's Mac unless explicitly requested. Use
+   only the smallest relevant local check and coordinate one compiled check
+   at a time across agents. Pass `-- --test-threads=2` to targeted Rust tests.
 7. **Commit only your own files.**
    - `git add <the files you changed>`. Never `git add -A` or `git commit -a`:
      that sweeps in other agents' unfinished work.
    - One commit per coherent change. Message: a `type(scope): summary` line,
      then why.
-   - Push only after the gate passes. A push to main that changes code releases
-     a version, so `git pull --rebase` before the next push.
+   - Push after the relevant targeted checks pass; let CI run the full gate.
+     A push to main that changes code releases a version, so
+     `git pull --rebase` before the next push.
 8. **Check CI once after pushing.** Without credentials, use the public API at
    `https://api.github.com/repos/chewton2k/leo-cli/actions/runs`, at most one
    request a minute. Unauthenticated requests are limited to 60 an hour.
@@ -52,7 +54,7 @@ with a strict CSP (no inline script).
    - Mention any finding outside the task: a security issue, someone else's
      broken code.
 
-## Gate commands
+## CI gate commands (not local defaults)
 
 ```sh
 cargo fmt --all
@@ -63,6 +65,22 @@ cd crates/leo-web/tests/browser && pnpm test --reporter=line   # Playwright, ~5 
 
 Never run `cargo build` or `cargo install` unless the user asks. `cargo test`
 builds the binary the browser tests use.
+
+## Local storage and cleanup
+
+- Reuse the existing checkout and build cache. Do not copy build output or
+  create extra worktrees solely for validation. Do not run a local benchmark
+  or generate large test libraries unless explicitly requested.
+- Check free space and artifact size before compiled checks. Use CI if a run
+  would add over 5 GiB or leave less than 50 GiB free. Respect the user's
+  Cargo job limit; parallel agents must not each start their own build.
+- Keep `TempDir` owners alive until their files and database connections are
+  closed. Do not use `keep`, `into_path`, `disable_cleanup` or forget a guard
+  without an explicit cleanup owner. Shell scratch directories need an exit
+  trap; stop and reap owned test processes on completion or failure.
+- Remove only scratch files and fixtures created by the task. Preserve user
+  data, other sessions, uncommitted source and unmerged worktrees. Report any
+  remaining generated artifacts and their sizes without creating report files.
 
 ## Code rules
 
@@ -136,7 +154,9 @@ builds the binary the browser tests use.
 - [ ] Every requested item is built, or explicitly reported as not done and why.
 - [ ] New behaviour has tests, including the failure cases, and the tests were
       seen to fail without the fix.
-- [ ] Gate passed: fmt, clippy, cargo test, node tests, Playwright.
+- [ ] Relevant targeted checks passed; full validation runs in CI.
+- [ ] Owned test processes and scratch fixtures cleaned up; remaining artifact
+      sizes reported.
 - [ ] The CLAUDE.md for the touched crate records any new decision or
       invariant, in a sentence or two.
 - [ ] Only your files are committed; CI checked once after the push.

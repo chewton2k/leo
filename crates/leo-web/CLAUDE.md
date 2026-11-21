@@ -11,6 +11,10 @@ This file holds the rules. How each screen behaves, area by area, is in
 
 ## Layout
 
+Test fixtures retain their `TempDir` guard until stores and database connections
+drop, so notes and `leo.db` are removed automatically; never persist a temporary
+directory with `keep()` just to pass its path to a fixture.
+
 - `lib.rs`: `Powers`, `AppState` (holds `powers: Powers` and derefs to it; plus
   `with_store`, `read_store`, `store_now`, `fresh`), `start` → `Running`,
   `start_in`. `router()` is in `routes/mod.rs`; handlers live in

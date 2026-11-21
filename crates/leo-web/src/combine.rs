@@ -552,8 +552,8 @@ mod tests {
     use super::*;
 
     fn note(title: &str, dir: &str, body: &str) -> Note {
-        let mut store =
-            leo_core::store::Store::load_from(&tempfile::tempdir().unwrap().keep()).unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let mut store = leo_core::store::Store::load_from(temp.path()).unwrap();
         let mut n = store.create_note(title, body, "").unwrap().clone();
         n.directory = dir.into();
         n
