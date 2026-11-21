@@ -705,6 +705,11 @@
         text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
         return;
       }
+      const picked = root.getSelection && root.getSelection();
+      if (!(picked && !picked.isCollapsed && picked.containsNode(text, true))) {
+        text.querySelectorAll('.rec-new').forEach((span) => { if (!(span.getAnimations && span.getAnimations().length)) span.replaceWith(...span.childNodes); });
+        text.normalize();
+      }
       if (!shown) text.textContent = '';
       const { drop, keep, tail } = tailMerge(shown, next);
       const height = text.scrollHeight;

@@ -350,9 +350,22 @@ function fakeTranscript() {
   });
   text.append = (node) => text.kids.push(node);
   text.addEventListener = () => text.wired++;
+  text.querySelectorAll = (at) => text.kids.filter((k) => at === '.rec-new' && k.className === 'rec-new');
+  text.normalize = () => {
+    for (let i = text.kids.length - 1; i > 0; i--) {
+      if (text.kids[i].nodeType === 3 && text.kids[i - 1].nodeType === 3) text.kids[i - 1].data += text.kids.splice(i, 1)[0].data;
+    }
+  };
   const document = {
     createTextNode: textNode,
-    createElement: () => own({ firstChild: null, get textContent() { return this.firstChild.data; }, set textContent(v) { this.firstChild = { data: v, deleteData(at, count) { this.data = this.data.slice(0, at) + this.data.slice(at + count); } }; } }),
+    createElement: () => own({
+      firstChild: null,
+      get childNodes() { return [this.firstChild]; },
+      get textContent() { return this.firstChild.data; },
+      set textContent(v) { this.firstChild = textNode(v); },
+      getAnimations() { return this.fading ? [{}] : []; },
+      replaceWith(...nodes) { text.kids.splice(text.kids.indexOf(this), 1, ...nodes); },
+    }),
   };
   const heard = { addEventListener: () => text.wired++ };
   const latest = { hidden: true, addEventListener: () => text.wired++ };
@@ -364,20 +377,21 @@ test('the live transcript is patched in place: kept words stay the same node and
   const { text, latest, box, document } = fakeTranscript();
   const s = { view: { state: 'recording', transcript: '' }, follow: true };
   const said = 'We started with the outline of the course and what the exam will ask about.';
-  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document }, tailMerge: L.tailMerge });
+  const selection = { isCollapsed: true, containsNode: () => true };
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document, getSelection: () => selection }, tailMerge: L.tailMerge });
   show(box);
   assert.ok(text.kids[0].hint.includes('Listening'));
   s.view.transcript = `${said} Today we cover graphs`;
   show(box);
-  const first = text.kids[0];
-  assert.equal(first.className, 'rec-new', 'the first words after Listening fade in');
+  assert.equal(text.kids[0].className, 'rec-new', 'the first words after Listening fade in');
+  const first = text.kids[0].firstChild;
   s.view.transcript = `${said} Today we cover graphs and treez`;
   show(box);
   s.view.transcript = `${said} Today we cover graphs and trees today`;
   show(box);
   assert.equal(text.textContent, s.view.transcript);
-  assert.equal(text.kids[0], first);
-  assert.deepEqual(text.kids.slice(1).map((k) => [k.className, k.textContent]), [['rec-new', ' and '], ['rec-new', 'trees today']]);
+  assert.equal(text.kids[0], first, 'faded words are folded back into the kept text node');
+  assert.deepEqual(text.kids.map((k) => [k.className, k.textContent]), [[undefined, `${said} Today we cover graphs and `], ['rec-new', 'trees today']]);
   s.view.transcript = s.view.transcript.slice(30) + ' more';
   show(box);
   assert.equal(text.textContent, s.view.transcript, 'a trimmed head is dropped from the front');
@@ -392,6 +406,36 @@ test('the live transcript is patched in place: kept words stay the same node and
   piece('showTranscript', 'draw', 'showTranscript', { s: { view: { state: 'recording', transcript: 'Said before' } }, root: { document: again.document }, tailMerge: L.tailMerge })(again.box);
   assert.equal(again.text.kids[0].nodeType, 3, 'what was already said arrives without a fade');
   assert.equal(again.text.textContent, 'Said before');
+});
+
+test('a long recording keeps a handful of transcript nodes, and never folds under a selection or a running fade', () => {
+  const { text, box, document } = fakeTranscript();
+  const s = { view: { state: 'recording', transcript: 'Start.' } };
+  const selection = { isCollapsed: true, containsNode: () => true };
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document, getSelection: () => selection }, tailMerge: L.tailMerge });
+  show(box);
+  for (let poll = 0; poll < 3000; poll++) {
+    s.view.transcript += ` word${poll}`;
+    show(box);
+    assert.ok(text.kids.length <= 2);
+  }
+  assert.equal(text.textContent, s.view.transcript);
+  text.kids[1].fading = true;
+  s.view.transcript += ' later';
+  show(box);
+  assert.equal(text.kids.length, 3, 'a fade still running is left alone');
+  selection.isCollapsed = false;
+  for (let poll = 0; poll < 3; poll++) {
+    s.view.transcript += ` held${poll}`;
+    show(box);
+  }
+  assert.equal(text.kids.length, 6, 'a selection in the transcript is never collapsed by folding');
+  selection.isCollapsed = true;
+  text.kids.forEach((k) => { k.fading = false; });
+  s.view.transcript += ' free';
+  show(box);
+  assert.equal(text.kids.length, 2);
+  assert.equal(text.textContent, s.view.transcript);
 });
 
 test('a live redraw replaces the cards around the transcript, at any depth, and never the transcript itself', () => {
