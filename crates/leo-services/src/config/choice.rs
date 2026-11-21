@@ -7,7 +7,7 @@ use crate::config::provider::ProviderKind;
 use crate::config::secret::SecretStore;
 use crate::config::Config;
 
-pub const API_PRICES_AS_OF: &str = "2026-11-21";
+pub static API_PRICES_AS_OF: &str = "2026-11-21";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Model {
