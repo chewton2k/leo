@@ -187,37 +187,29 @@ test('opening a note fades only the note text from .6 over 140 ms, never the tit
   assert.doesNotMatch(show, /title\.animate/);
 });
 
-test('a loader sketch draws once per surface and takes the end frame while one shows or within 400 ms', () => {
-  let now = 1000, showing = null;
-  const context = { performance: { now: () => now }, document: { querySelector: (sel) => (showing && sel.includes(`"${showing}"`) ? {} : null) }, marginWobble: (x, y, length, down, seed) => `M${x} ${y} h${length} s${seed}` };
+test('a loader sketch carries the loop clock, so a skeleton drawn again continues the same phase', () => {
+  let now = 1000;
+  const context = { performance: { now: () => now }, marginWobble: (x, y, length, down, seed) => `M${x} ${y} h${length} s${seed}` };
   vm.createContext(context);
-  vm.runInContext(core.slice(core.indexOf('const skeletonAt = {};'), core.indexOf('let state = { view: null };')), context);
-  const drawing = (html) => (html.match(/class="skeleton sk-draw"/g) || []).length;
+  vm.runInContext(core.slice(core.indexOf('const SKETCH_LOOP_MS'), core.indexOf('let state = { view: null };')), context);
   const first = context.skeleton(3, 'search');
-  assert.equal((first.match(/class="skeleton/g) || []).length, 3);
-  assert.equal(drawing(first), 3);
+  assert.equal((first.match(/class="skeleton"/g) || []).length, 3);
   assert.equal((first.match(/<svg /g) || []).length, 9);
+  assert.equal((first.match(/style="--sk-at: -1000ms"/g) || []).length, 3);
   assert.match(first, /data-sketch="search"/);
-  now += 200;
-  assert.equal(drawing(context.skeleton(3, 'search')), 0);
-  assert.equal(drawing(context.skeleton(2, 'trash')), 2);
-  now += 1000;
-  showing = 'search';
-  assert.equal(drawing(context.skeleton(3, 'search')), 0);
-  now += 1000;
-  showing = null;
-  const again = context.skeleton(3, 'search');
-  assert.equal(drawing(again), 3);
-  assert.equal(again.replace(/ sk-draw/g, ''), context.skeleton(3, 'search'));
+  now += 700;
+  assert.match(context.skeleton(2, 'trash'), /--sk-at: -100ms/);
+  assert.doesNotMatch(first, /sk-draw/);
 });
 
-test('loader sketches animate only without reduced motion and never loop', () => {
+test('loader sketches redraw on a calm loop, only without reduced motion', () => {
   const css = require('./page-source').pageCss();
   assert.doesNotMatch(css, /shimmer/);
   const base = css.match(/(^|\n)\.skeleton \{[^}]*\}/)[0];
   assert.doesNotMatch(base, /animation/);
-  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{ \.skeleton\.sk-draw > svg \{ animation: tick-write 400ms var\(--ease-pencil\) both; \}/);
-  assert.doesNotMatch(css, /\.skeleton[^{]*\{[^}]*infinite/);
+  assert.match(css, /@media \(prefers-reduced-motion: no-preference\) \{ \.skeleton > svg \{ animation: sk-draw 1600ms var\(--ease-pencil\) var\(--sk-at, 0ms\) infinite both; \}/);
+  assert.match(css, /@keyframes sk-draw \{ from \{ clip-path: inset\(0 100% 0 0\); \} 25% \{ clip-path: inset\(-2px\); \} \}/);
+  assert.equal(css.match(/\.skeleton[^{]*\{[^}]*infinite/g).length, 1);
 });
 
 test('a lifted ghost is measured from its own size and carries its tilt to the settle', () => {

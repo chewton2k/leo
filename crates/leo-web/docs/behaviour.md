@@ -52,8 +52,8 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   `.quick-due-head`, `.chat-history-group`, `.pick-head`, `.settings-group-title`) and end in the note rule's
   pencil stroke.
 - Loaders (2026-11-15): wherever `skeleton()` stands in for a list (search, board,
-  settings, Keeping, Trash, Health, plan), its cards hold faint pencil lines that draw
-  once and stay still; no shimmer. The explorer and chats keep their text loaders.
+  settings, Keeping, Trash, Health, plan), its cards hold faint pencil lines that redraw
+  on a calm loop while shown (2026-11-21, the user's call; still under Reduced Motion); no shimmer. The explorer and chats keep their text loaders.
 - Kept on purpose: the model picker (a menu of models with effort chips), the margin-mode menu (its own
   interrupted-motion and keyboard tests) and chat.js's attach and access menus (their
   rows are richer than a list; they move through `leoMotion`).
@@ -1873,7 +1873,7 @@ Usage keeps a single provider column with compact Session/Weekly rows: remaining
 percentage at left, a muted provider-colored bar and reset time at right. The
 dialog has no nested settings card or setup prose; unknown readings stay explicit.
 Usage (2026-11-06, the owner: no small modal that grows): the sheet opens at its final
-size (`min-height`) with `.skeleton` shaped as two plans of two rows (pencil lines drawn once), then the saved
+size (`min-height`) with `.skeleton` shaped as two plans of two rows (pencil lines on the skeleton loop), then the saved
 readings come in with `cascade`, first draw only. Refresh and Close are icon buttons (labels
 kept; the breathing leo mark replaces the arrows while busy); "Plan limits" is a muted subtitle,
 and "Updated …" sits in each plan's header (`planUpdated`). A window past its reset says

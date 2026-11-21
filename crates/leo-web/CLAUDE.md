@@ -366,11 +366,13 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   when a refresh brings an id created in the last minute. The explorer fold is the one
   width animation (`--side` as an `@property`).
 - Loaders (2026-11-15): `skeleton(n, surface)` (search, board, settings,
-  keeping, trash, health, plan) holds faint pencil lines that wipe in once with
-  `tick-write` (400 ms, `--ease-pencil`, 30 ms stagger, class `sk-draw`, only
-  under `prefers-reduced-motion: no-preference`) and then stay still; a skeleton
-  rendered while one of its surface shows, or within 400 ms of the last
-  (`skeletonAt`), takes the end frame. No shimmer, no loop.
+  keeping, trash, health, plan) holds faint pencil lines that redraw on a calm loop
+  (`sk-draw`: a 400 ms wipe in `--ease-pencil`, 30 ms stagger, then a rest to 1.6 s, repeating
+  while the skeleton is shown and gone with it; only under `prefers-reduced-motion:
+  no-preference`, so none under `stillMotion()`). Each skeleton starts from the shared clock
+  (`--sk-at`, a negative delay from `performance.now() % 1600`), so one drawn again continues
+  the same phase instead of restarting. No shimmer; the loop is for skeletons only
+  (2026-11-21, the user's call, reversing "no loop"; 12 px between cards, 12 and 16 px between lines).
 - Cancelling a menu animation clears closing state synchronously and detaches its
   old cancellation callback before a new animation owns that state.
 

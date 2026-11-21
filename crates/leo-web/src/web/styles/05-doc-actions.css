@@ -221,15 +221,16 @@ label.trash-row { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) { .toast-time { display: none; } }
 
 #app .cards .skeleton { height: 96px; margin: 0; }
-.skeleton { display: flex; flex-direction: column; justify-content: center; height: 76px; padding: 0 20px; border-radius: var(--radius); background: var(--sk-base, var(--surface-2)); margin-bottom: 10px; color: var(--faint); }
+.skeleton { display: flex; flex-direction: column; justify-content: center; height: 76px; padding: 0 20px; border-radius: var(--radius); background: var(--sk-base, var(--surface-2)); margin-bottom: 12px; color: var(--faint); }
 :root[data-theme="dark"] .skeleton { background: var(--sk-base, var(--surface)); }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .skeleton { background: var(--sk-base, var(--surface)); } }
 .skeleton > svg { display: block; flex: none; height: 6px; overflow: visible; clip-path: inset(-2px); fill: none; stroke: currentColor; stroke-width: 1.3; stroke-linecap: round; opacity: .75; }
 .skeleton > svg:first-child { stroke-width: 1.5; }
 .skeleton > svg + svg { margin-top: 12px; }
-.skeleton > svg:first-child + svg { margin-top: 17px; }
+.skeleton > svg:first-child + svg { margin-top: 16px; }
 .skeleton path { vector-effect: non-scaling-stroke; }
-@media (prefers-reduced-motion: no-preference) { .skeleton.sk-draw > svg { animation: tick-write 400ms var(--ease-pencil) both; } .skeleton.sk-draw > svg:nth-child(2) { animation-delay: 30ms; } .skeleton.sk-draw > svg:nth-child(3) { animation-delay: 60ms; } }
+@media (prefers-reduced-motion: no-preference) { .skeleton > svg { animation: sk-draw 1600ms var(--ease-pencil) var(--sk-at, 0ms) infinite both; } .skeleton > svg:nth-child(2) { animation-delay: calc(var(--sk-at, 0ms) + 30ms); } .skeleton > svg:nth-child(3) { animation-delay: calc(var(--sk-at, 0ms) + 60ms); } }
+@keyframes sk-draw { from { clip-path: inset(0 100% 0 0); } 25% { clip-path: inset(-2px); } }
 @keyframes rise { from { transform: translate(var(--tx, 0), 16px); opacity: 0; } }
 .toast, .toast-gone { --tx: -50%; }
 @keyframes fade { from { opacity: 0; } }

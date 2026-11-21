@@ -744,14 +744,14 @@ test('switch rows that sit together share one raised panel split by an inset hai
   expect(await page.locator('#b').evaluate((el) => [getComputedStyle(el).borderTopStyle, getComputedStyle(el, '::before').display])).toEqual(['solid', 'none']);
 });
 
-test('loader sketches draw once without reduced motion and show the drawn lines still with it', async ({ page }) => {
+test('loader sketches redraw on a loop without reduced motion and show the drawn lines still with it', async ({ page }) => {
   const line = (w) => `<svg viewBox="0 0 400 6" preserveAspectRatio="none" style="width: ${w}%"><path d="M1 3 h398"/></svg>`;
-  const card = `<div class="skeleton sk-draw" data-sketch="search">${line(33)}${line(64)}${line(47)}</div>`;
+  const card = `<div class="skeleton" data-sketch="search">${line(33)}${line(64)}${line(47)}</div>`;
   for (const reducedMotion of ['no-preference', 'reduce']) {
     await page.emulateMedia({ reducedMotion });
     await page.setContent(`<style>${pageCss()}</style><div id="app"><div class="cards">${card}</div></div>`);
     const lines = await page.locator('.skeleton svg').evaluateAll((els) => els.map((el) => el.getAnimations().map((a) => [a.animationName, a.effect.getTiming().delay, a.effect.getTiming().iterations])));
-    expect(lines).toEqual(reducedMotion === 'reduce' ? [[], [], []] : [[['tick-write', 0, 1]], [['tick-write', 30, 1]], [['tick-write', 60, 1]]]);
+    expect(lines).toEqual(reducedMotion === 'reduce' ? [[], [], []] : [[['sk-draw', 0, Infinity]], [['sk-draw', 30, Infinity]], [['sk-draw', 60, Infinity]]]);
     expect(await page.locator('.skeleton').evaluate((el) => [el.getBoundingClientRect().height, el.getAnimations().length])).toEqual([96, 0]);
     const half = await page.locator('.skeleton svg').first().evaluate((el) => { el.getAnimations().forEach((a) => { a.pause(); a.currentTime = 200; }); return getComputedStyle(el).clipPath; });
     if (reducedMotion === 'reduce') expect(half).toBe('inset(-2px)');

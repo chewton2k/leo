@@ -517,15 +517,12 @@ function empty(icon, title, text, actions = '') {
   return `<div class="empty">${icon}<h3>${esc(title)}</h3><p>${esc(text)}</p>${actions}</div>`;
 }
 
-const skeletonAt = {};
-const SKETCH_MS = 400;
+const SKETCH_LOOP_MS = 1600;
 const SKETCH_WIDTHS = [[33, 64, 47], [27, 69, 42], [37, 60, 51]];
 function skeleton(n, surface = 'page') {
-  const now = performance.now();
-  const draw = now - (skeletonAt[surface] ?? -Infinity) >= SKETCH_MS && !document.querySelector(`.skeleton[data-sketch="${surface}"]`);
-  skeletonAt[surface] = now;
+  const at = Math.round(performance.now() % SKETCH_LOOP_MS);
   const line = (width, seed) => `<svg viewBox="0 0 400 6" preserveAspectRatio="none" style="width: ${width}%" aria-hidden="true"><path d="${marginWobble(1, 3, 398, false, seed, 0.6)}"/></svg>`;
-  return Array.from({ length: n }, (_, i) => `<div class="skeleton${draw ? ' sk-draw' : ''}" data-sketch="${surface}">${SKETCH_WIDTHS[i % 3].map((width, j) => line(width, i * 3 + j + 1)).join('')}</div>`).join('');
+  return Array.from({ length: n }, (_, i) => `<div class="skeleton" data-sketch="${surface}" style="--sk-at: -${at}ms">${SKETCH_WIDTHS[i % 3].map((width, j) => line(width, i * 3 + j + 1)).join('')}</div>`).join('');
 }
 
 let state = { view: null };
