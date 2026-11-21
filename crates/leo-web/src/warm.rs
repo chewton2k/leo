@@ -8,16 +8,16 @@ use crate::chat::{Conversation, SourceRef, Turn};
 pub const IDLE: Duration = Duration::from_secs(10 * 60);
 const MOST_SESSIONS: usize = 3;
 
-fn cache_life(by: &str) -> Option<Duration> {
-    matches!(by, "Codex" | "codex").then_some(Duration::from_secs(30 * 60))
+fn cache_life(kind: &str) -> Option<Duration> {
+    (kind == "codex").then_some(Duration::from_secs(30 * 60))
 }
 
-pub fn idle_for(by: &str) -> Duration {
-    cache_life(by).unwrap_or(IDLE)
+pub fn idle_for(kind: &str) -> Duration {
+    cache_life(kind).unwrap_or(IDLE)
 }
 
-pub fn compact_after(by: &str) -> Duration {
-    cache_life(by).map_or(IDLE, |life| life - Duration::from_secs(30))
+pub fn compact_after(kind: &str) -> Duration {
+    cache_life(kind).map_or(IDLE, |life| life - Duration::from_secs(30))
 }
 
 pub fn context_limit(room: usize, supported: Option<usize>) -> usize {
@@ -488,15 +488,15 @@ mod tests {
 
     #[test]
     fn a_codex_session_outlives_ten_idle_minutes_and_compacts_before_its_cache_expires() {
-        assert_eq!(idle_for("Codex"), Duration::from_secs(30 * 60));
+        assert_eq!(idle_for("codex"), Duration::from_secs(30 * 60));
         assert_eq!(compact_after("codex"), Duration::from_secs(29 * 60 + 30));
-        for other in ["Claude Code", "Ollama", ""] {
+        for other in ["Codex", "claude_code", "openai", ""] {
             assert_eq!((idle_for(other), compact_after(other)), (IDLE, IDLE));
         }
         let slot = Slot::default();
         let next = [turn("assistant", "answer"), turn("user", "next")];
         let mut codex = warm(&[]);
-        codex.idle = idle_for("Codex");
+        codex.idle = idle_for("codex");
         codex.used = Instant::now() - IDLE;
         slot.keep(codex);
         slot.tidy();

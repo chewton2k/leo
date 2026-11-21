@@ -1479,7 +1479,7 @@ fn answer(
                 limit: remember.limit,
                 talk,
                 used: std::time::Instant::now(),
-                idle: crate::warm::idle_for(spent.as_ref().map_or("", |s| s.by.as_str())),
+                idle: crate::warm::idle_for(spent.as_ref().map_or("", |s| s.kind.as_str())),
             });
         }
     };
@@ -2302,13 +2302,13 @@ pub(crate) async fn chat_reply(
         };
         let end = match answer(&worker, &streamer, ask, &tx) {
             Ok(spent) => {
-                let by = spent.as_ref().map_or("", |s| s.by.as_str());
+                let kind = spent.as_ref().map_or("", |s| s.kind.as_str());
                 let warm = body
                     .chat
                     .as_deref()
                     .is_some_and(|chat| worker.warm.light(chat).is_some());
                 let compact_after = if warm {
-                    crate::warm::compact_after(by)
+                    crate::warm::compact_after(kind)
                 } else {
                     crate::warm::IDLE
                 }

@@ -143,6 +143,8 @@ pub struct Spent {
     pub local: bool,
     #[serde(default)]
     pub cached: u64,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub kind: String,
     pub steps: u32,
     #[serde(default)]
     pub auto: bool,

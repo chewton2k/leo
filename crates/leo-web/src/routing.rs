@@ -98,7 +98,7 @@ const THOUGHT: [&str; 33] = [
     "contradict",
 ];
 const WEIGHED: [&str; 3] = ["compar", "analy", "review"];
-const REFERS: [&str; 8] = ["this", "these", "that", "those", "it", "them", "into", "to"];
+const REFERS: [&str; 5] = ["this", "these", "that", "those", "them"];
 const CHANGES: [&str; 17] = [
     "fix", "change", "edit", "update", "move", "delete", "remove", "replace", "rename", "create",
     "make", "add", "merge", "combine", "restore", "pin", "trash",
@@ -239,6 +239,14 @@ const FULL_EXAMPLES: [&str; 40] = [
 static CENTROIDS: OnceLock<(Vec<f32>, Vec<f32>)> = OnceLock::new();
 static BUILDING: AtomicBool = AtomicBool::new(false);
 
+struct Building;
+
+impl Drop for Building {
+    fn drop(&mut self) {
+        BUILDING.store(false, Ordering::Release);
+    }
+}
+
 pub struct Asked<'a> {
     pub message: &'a str,
     pub turns: usize,
@@ -278,16 +286,16 @@ pub fn light(asked: &Asked<'_>) -> Option<bool> {
             .iter()
             .any(|word| stems.iter().any(|stem| word.starts_with(stem)))
     };
-    let thoughtful = has(&THOUGHT) || has(&WEIGHED) || words.contains(&"how");
+    let thought = has(&THOUGHT) || has(&WEIGHED);
+    let thoughtful = thought || words.contains(&"how");
     let first = words
         .iter()
         .find(|word| !POLITE.contains(word))
         .copied()
         .unwrap_or("");
-    let edit = first == "rename"
-        || (EDITS.contains(&first)
-            && words.iter().any(|w| FORMS.contains(w))
-            && words.iter().any(|w| REFERS.contains(w)));
+    let pointing = words.iter().any(|w| REFERS.contains(w));
+    let shaping = EDITS.contains(&first) && words.iter().any(|w| FORMS.contains(w));
+    let edit = (first == "rename" && pointing) || (shaping && (pointing || asked.selected));
     if edit && !thoughtful {
         return Some(true);
     }
@@ -299,13 +307,18 @@ pub fn light(asked: &Asked<'_>) -> Option<bool> {
     }
     if OPENINGS.iter().any(|opening| message.starts_with(opening))
         && words.iter().any(|word| THEIRS.contains(word))
-        && !has(&THOUGHT)
+        && !thought
         && !has(&CHANGES)
         && !words.iter().skip(1).any(|word| *word == "how")
     {
         return Some(true);
     }
-    if thoughtful || has(&CHANGES) || message.is_empty() || !message.is_ascii() {
+    if thoughtful
+        || (shaping && first == "put")
+        || has(&CHANGES)
+        || message.is_empty()
+        || !message.is_ascii()
+    {
         return Some(false);
     }
     None
@@ -322,17 +335,15 @@ pub fn leans_light(meaning: &Meaning, asked: Option<&[f32]>) -> bool {
     let Some(centroids) = CENTROIDS.get() else {
         if !BUILDING.swap(true, Ordering::AcqRel) {
             let meaning = Arc::clone(meaning);
-            let started = std::thread::Builder::new()
+            let building = Building;
+            let _ = std::thread::Builder::new()
                 .name("leo-routing".into())
                 .spawn(move || {
+                    let _building = building;
                     if let Some(built) = centroids_of(&meaning) {
                         let _ = CENTROIDS.set(built);
                     }
-                    BUILDING.store(false, Ordering::Release);
                 });
-            if started.is_err() {
-                BUILDING.store(false, Ordering::Release);
-            }
         }
         return false;
     };
@@ -417,7 +428,6 @@ mod tests {
             "when is my essay due",
             "find my essay",
             "open my lesson 4 note",
-            "show my review notes",
         ] {
             assert_eq!(light(&plainly(message)), Some(true), "{message}");
         }
@@ -463,6 +473,11 @@ mod tests {
             "find my notes on recursion and tell me how it works",
             "find my notes on recursion and how it works",
             "show my notes that describe recursion",
+            "show my review notes",
+            "find my notes and analyze them",
+            "make a list of things to do in paris",
+            "put together a list of questions to ask my professor",
+            "rename every note in my bio folder after its main topic",
             "wann ist meine prüfung",
             "",
             "show $x^2$",
@@ -484,6 +499,7 @@ mod tests {
             "do i need a visa for japan",
             "what is the capital of peru",
             "show that the square root of 2 is irrational",
+            "bold the key terms",
         ] {
             assert_eq!(light(&plainly(message)), None, "{message}");
         }

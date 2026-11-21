@@ -341,7 +341,9 @@ Providers report `spent()` (`Spent { model, effort, input, output, estimated }`)
 into `ChainOutcome.spent`. OpenAI-compatible providers read `usage` (asking while
 streaming only from api.openai.com, openrouter.ai, api.x.ai), else estimate 4
 characters a token; reasoning tokens are not added twice. `spend::answered`
-prices from `choice.rs` (`rates`); agents are "on your plan", local models free.
+labels the answer and its provider kind; agents are "on your plan", local models
+free. Prices are worked out only on the Usage page, from each model's `api_cents`
+in `choice.rs`.
 Metering never records prompt or reply contents; the root wiring meters
 writing/quick/summary outcomes before string-only callbacks drop token metadata.
 

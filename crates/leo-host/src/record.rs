@@ -695,7 +695,7 @@ fn draft_fn(usage: &Usage) -> Option<recorder::DraftFn> {
     let usage = Arc::clone(usage);
     leo_services::ai::writing_ready().then(|| -> recorder::DraftFn {
         Arc::new(move |prompt, max, stopped| {
-            crate::felix::counted(&usage, leo_web::usage::Purpose::Recording, || {
+            crate::felix::counted_until(&usage, leo_web::usage::Purpose::Recording, stopped, || {
                 leo_services::ai::chat_outcome_until(prompt, max, stopped)
             })
         })

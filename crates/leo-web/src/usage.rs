@@ -30,6 +30,26 @@ pub enum Purpose {
     Dictation,
 }
 
+impl Purpose {
+    pub const ALL: [Purpose; 15] = [
+        Purpose::Answer,
+        Purpose::ToolContinuation,
+        Purpose::Retry,
+        Purpose::StudyGrading,
+        Purpose::Summary,
+        Purpose::OtherWriting,
+        Purpose::QuickReview,
+        Purpose::MarginRead,
+        Purpose::Connections,
+        Purpose::Combine,
+        Purpose::Margin,
+        Purpose::Recording,
+        Purpose::Import,
+        Purpose::Pictures,
+        Purpose::Dictation,
+    ];
+}
+
 #[derive(Default)]
 struct Counts {
     calls: u64,
@@ -616,23 +636,14 @@ mod tests {
     #[test]
     fn every_kind_of_work_has_a_label_on_the_usage_page() {
         use Purpose::*;
-        let every = [
-            Answer,
-            ToolContinuation,
-            Retry,
-            StudyGrading,
-            Summary,
-            OtherWriting,
-            QuickReview,
-            MarginRead,
-            Connections,
-            Combine,
-            Margin,
-            Recording,
-            Import,
-            Pictures,
-            Dictation,
-        ];
+        let every = Purpose::ALL;
+        assert_eq!(
+            every
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            every.len()
+        );
         for purpose in every {
             match purpose {
                 Answer | ToolContinuation | Retry | StudyGrading | Summary | OtherWriting

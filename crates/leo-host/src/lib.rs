@@ -23,6 +23,7 @@ pub fn polish(
     words: &[String],
     cancelled: std::sync::Arc<dyn Fn() -> bool + Send + Sync>,
 ) -> Result<String, &'static str> {
+    let stopped = std::sync::Arc::clone(&cancelled);
     leo_services::dictation::polish::polish(
         text,
         writing,
@@ -31,10 +32,22 @@ pub fn polish(
         words,
         cancelled,
         move |prompt, tokens, quick, stop| {
-            felix::counted(&usage, leo_web::usage::Purpose::Dictation, || {
-                leo_services::ai::dictation_outcome(prompt, tokens, quick, stop)
-            })
-            .map(|outcome| outcome.value)
+            let started = std::time::Instant::now();
+            let result = leo_services::ai::dictation_outcome(prompt, tokens, quick, stop);
+            if let Some((spent, failed)) = felix::tally(&result, &*stopped) {
+                let elapsed = started.elapsed();
+                let _ = std::thread::Builder::new()
+                    .name("leo-usage".into())
+                    .spawn(move || {
+                        usage.record(
+                            leo_web::usage::Purpose::Dictation,
+                            spent.as_ref(),
+                            elapsed,
+                            failed,
+                        )
+                    });
+            }
+            result.map(|outcome| outcome.value)
         },
     )
 }

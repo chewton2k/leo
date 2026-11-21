@@ -585,7 +585,7 @@ read (root CLAUDE.md, 2026-11-17).
   `SESSION_DONE` carry `Session::unshown`. Refusals say to correct the call without
   mentioning it. Felix keeps no running score.
 - Warm sessions (`warm.rs`): up to three, sharing a 480,000-character ceiling,
-  idle for the provider's prompt-cache lifetime (`warm::idle_for`: Codex 30
+  idle for the provider's prompt-cache lifetime (`warm::idle_for`, by `Spent.kind`: Codex 30
   minutes, OpenAI's documented minimum for GPT-5.6 and later; others ten,
   2026-11-21, the user's call), Settings changes clear all; eviction and process cleanup run
   outside the slot mutex and off async workers. Only unchanged history plus the
@@ -679,8 +679,9 @@ read (root CLAUDE.md, 2026-11-17).
 - Routing (`routing::light`, widened 2026-11-21, the user's call): short lookups,
   greetings and small formatting edits of something named (turn/convert/make this
   into a checkbox, bullet, heading, list or table, fix typos, rename, bold, sort,
-  tidy; the edit rule alone passes with a selection) go to the quick tier; study, teaching, quizzes,
-  analysis, why/how, comparisons, plans, summaries, other note changes,
+  tidy, each naming this/these/that/those/them, or a selection except for rename)
+  go to the quick tier; study, teaching, quizzes,
+  analysis, why/how, comparisons, plans, summaries, new lists (make/put together a list), other note changes,
   attachments, files, Auto access and >6 turns stay on the chosen model, and so do
   other languages. A plain English question the rules cannot place reuses the note
   search's query vector (`vectors::close_and_asked`; `routing::leans_light`: cosine
@@ -1294,7 +1295,7 @@ a modal.
   maker's `--fam-*` shades by rank, then the same shades mixed toward `--text`; each is
   at least 3:1 on `--tint` and `--raised` (tokens.test.js). Costs are estimates at API
   prices (2026-11-21, the user's call): the dated `api_cents` on each model in
-  leo-services `choice.rs` (also `Spent.cost`) reach the page as `prices`; the page
+  leo-services `choice.rs` reach the page as `prices`, the one place costs are worked out; the page
   prices each stored day by model (kind rows carry their model), cached input at the
   cached rate, models on this computer free, any other model "no price". Shown in the
   stat tiles and both legends as "≈ $x".

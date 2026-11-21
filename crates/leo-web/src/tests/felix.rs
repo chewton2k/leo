@@ -2641,6 +2641,7 @@ fn a_follow_up_in_the_same_chat_reuses_one_warm_session_and_sends_only_whats_new
                 text: reply.into(),
                 spent: Some(chat::Spent {
                     by: "Codex".into(),
+                    kind: "codex".into(),
                     ..chat::Spent::default()
                 }),
             })
