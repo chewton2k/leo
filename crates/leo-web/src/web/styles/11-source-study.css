@@ -43,7 +43,7 @@
 .related-title { display: block; font-size: var(--fs-md); }
 .related-row .sub { display: block; font-size: var(--fs-sm); color: var(--muted); }
 .related-more { margin-top: 6px; }
-.study-progress { display: flex; align-items: center; gap: 8px; padding: 6px 16px 8px; font-size: var(--fs-xs); }
+.study-progress { position: relative; display: flex; align-items: center; gap: 8px; padding: 6px 16px 8px; font-size: var(--fs-xs); }
 .study-progress[hidden] { display: none; }
 .study-ideas { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 2px 6px; max-height: 3.2em; overflow: hidden; color: var(--muted); }
 .study-idea { max-width: 16em; }
@@ -54,8 +54,10 @@
 .study-ok { stroke: var(--chalk-good); stroke-width: 1.8; }
 .study-once { stroke-linecap: butt; stroke-dasharray: 1.4 2.6; }
 .study-no { stroke: var(--chalk-bad); stroke-width: 1.7; }
-@media (forced-colors: active) { .study-mark { forced-color-adjust: none; -webkit-mask: none; mask: none; } .study-mark path { stroke: CanvasText; } }
+@media (forced-colors: active) { .study-mark { forced-color-adjust: none; -webkit-mask: none; mask: none; } .study-mark path { stroke: CanvasText; } .study-bar, .study-bar i { forced-color-adjust: none; } .study-bar { background: GrayText; } .study-bar i { background: CanvasText; opacity: 1; } }
 .study-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
+.study-bar { position: absolute; left: 16px; right: 16px; bottom: 0; height: 2px; border-radius: 1px; background: var(--line); }
+.study-bar i { display: block; height: 100%; border-radius: inherit; background: var(--text); opacity: .55; }
 .session-recap { margin: 6px 0 14px; padding: 14px 16px; border-radius: var(--radius); background: var(--tint); }
 .session-recap h4 { margin: 0 0 4px; font-size: var(--fs-md); }
 .session-recap p { margin: 4px 0; font-size: var(--fs-base); color: var(--muted); }

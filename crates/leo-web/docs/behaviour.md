@@ -794,7 +794,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   so forced colours keep it) or × (to look at again), and a heavier ring while the newest quiz on that
   idea is unanswered; names stay in `--muted`, the ringed one in `--text`, with no
   green or red text (2026-11-15). Each circle has `role="img"` and a label; forced
-  colours draw it in CanvasText.
+  colours draw it in CanvasText. A 2 px ink line along the strip's bottom edge (`.study-bar`, decorative) is
+  filled to ideas covered of the total and jumps as they change (2026-11-21, the user's call).
   Study review (`review.rs`) brings back missed questions after 20 h.
 
 - Tools: a text protocol (`<tool>{…}</tool>`) so every provider works, plus

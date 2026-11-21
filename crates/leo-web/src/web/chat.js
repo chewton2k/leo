@@ -1968,7 +1968,7 @@
         return `<span class="study-idea ${o.state}${now ? ' now' : ''}" title="${escape(t)}"><svg class="study-mark" viewBox="0 0 18 18" role="img" aria-label="${said}"><path class="study-ring" d="${STUDY_MARKS.rings[i % STUDY_MARKS.rings.length]}"/>${mark}</svg>${escape(t)}</span>`;
       }).join('');
       box.hidden = false;
-      box.innerHTML = `<div class="study-ideas" aria-label="Ideas in this session">${ideas}</div><span class="study-count">${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'}</span><button type="button" class="msg-act" data-chat="session-finish">Finish</button>`;
+      box.innerHTML = `<div class="study-ideas" aria-label="Ideas in this session">${ideas}</div><span class="study-count">${c.covered} of ${c.total} ${c.total === 1 ? 'idea' : 'ideas'}</span><button type="button" class="msg-act" data-chat="session-finish">Finish</button><span class="study-bar" aria-hidden="true"><i style="width: ${c.total ? Math.round(100 * c.covered / c.total) : 0}%"></i></span>`;
     }
 
     function recapCard(s) {
