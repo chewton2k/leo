@@ -22,6 +22,7 @@
 .doc .blk p, .doc .blk ul, .doc .blk ol, .doc .blk li { margin-top: 0; margin-bottom: 0; }
 .doc .blk h2, .doc .blk h3, .doc .blk h4, .doc .blk h5, .doc .blk h6 { margin: .5em 0 .15em; }
 .doc .blk:first-child h2, .doc .blk:first-child h3 { margin-top: 0; }
+.doc .blk:not(:first-child) > :is(h1, h2, h3, h4, h5, h6, .line-edit[data-head]) { padding-top: 16px; }
 .doc .blk pre, .doc .blk .table, .doc .blk blockquote { margin: .4em 0; }
 .doc .blk :where(.code) { margin: .4em 0; }
 .doc .blk hr { margin: .8em 0; }
