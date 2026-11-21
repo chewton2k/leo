@@ -46,7 +46,7 @@ candle-core = "=0.11.1"
 rusqlite = { version = "0.40", features = ["bundled"] }
 candle-nn = "=0.11.1"
 candle-transformers = "=0.11.1"
-tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+tokenizers = { version = "0.23", default-features = false, features = ["fancy-regex"] }
 libc = "0.2"
 uuid = { version = "1", features = ["v4"] }
 zeroize = "1"
