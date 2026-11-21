@@ -206,7 +206,7 @@ function drawActivity() {
   const shown = activity.tasks.filter((t) => !hiddenHere(t));
   const count = shown.length + (activity.live ? 1 : 0);
   box.hidden = !count;
-  if (!count) return;
+  if (!count) return refreshPanel(box, '');
   box.classList.toggle('folded', activity.folded);
   const now = Date.now();
   const rows = (activity.live ? `<button class="activity-row${activity.live.paused ? ' paused' : ''}" data-action="record"><span class="activity-label"><span class="rec-dot"></span>${esc(activity.live.label)}</span></button>` : '') + shown
