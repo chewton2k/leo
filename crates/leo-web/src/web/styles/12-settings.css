@@ -22,9 +22,9 @@ body.on-settings .app-update-banner { max-width: none; margin: 0; border-radius:
 .settings-result-label { font-size: var(--fs-base); font-weight: 550; line-height: 1.3; color: var(--text); }
 .settings-result-where { font-size: var(--fs-sm); line-height: 1.35; color: var(--muted); }
 .settings-empty { margin: 0; padding: 8px 10px; font-size: var(--fs-base); color: var(--muted); }
-.settings-group + .settings-group { margin-top: 20px; }
-.settings-group-title { padding: 0 10px 6px; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
-.settings-link { display: flex; align-items: center; gap: 11px; min-height: 36px; padding: 0 10px; border-radius: var(--r-md); color: var(--muted); font-size: var(--fs-base); text-decoration: none; white-space: nowrap; }
+.settings-group + .settings-group { margin-top: 24px; }
+.settings-group-title { padding: 0 10px 4px; font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
+.settings-link { display: flex; align-items: center; gap: 12px; min-height: 36px; padding: 0 10px; border-radius: var(--r-md); color: var(--muted); font-size: var(--fs-base); text-decoration: none; white-space: nowrap; }
 .settings-link + .settings-link { margin-top: 2px; }
 button.settings-link { width: 100%; border: 0; background: none; font-family: inherit; text-align: left; cursor: pointer; }
 .settings-link svg { width: 16px; height: 16px; flex: none; }
@@ -32,14 +32,14 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .settings-link:hover { background: var(--tint); color: var(--text); }
 .settings-link.on { background: var(--raised); color: var(--text); font-weight: 600; }
 .settings-section { grid-column: 3; grid-row: 1; min-width: 0; padding: 14px 0 calc(var(--bottom) + 110px); }
-.settings-head { margin-bottom: 22px; }
-.settings-head h1 { text-wrap: balance; margin: 0; font-size: var(--fs-2xl); font-weight: 720; line-height: 1.2; letter-spacing: -.02em; }
-.settings-head p { margin: 6px 0 0; font-size: var(--fs-base); color: var(--muted); }
+.settings-head { margin-bottom: 24px; }
+.settings-head h1 { text-wrap: balance; margin: 0; font-size: var(--fs-2xl); font-weight: 600; line-height: 1.2; letter-spacing: -.01em; }
+.settings-head p { margin: 8px 0 0; font-size: var(--fs-base); color: var(--muted); }
 .settings-section .set-row { flex-wrap: wrap; }
 .settings-section .set-input { max-width: 100%; }
 .settings-section .trash-head .section-title { margin: 0; }
 .set-row > .grow, .set-line > .grow { flex: 1; min-width: 0; font-size: var(--fs-base); }
-.settings-section .set-card { container-type: inline-size; padding: 18px 20px; }
+.settings-section .set-card { container-type: inline-size; padding: 20px; }
 .settings-section .set-card > header { margin-bottom: 8px; }
 .settings-section > .skeleton { height: 160px; margin-bottom: 20px; --sk-base: var(--tint); }
 .set-value-text { color: var(--text); font-size: var(--fs-base); font-weight: var(--fw-medium); }
@@ -118,7 +118,6 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .settings-section .set-label, .settings-section .set-row > .grow, .settings-section .set-line > .grow { color: var(--text); font-size: var(--fs-base); font-weight: 500; }
 .settings-section .set-card h3 { font-size: var(--fs-lg); font-weight: 650; letter-spacing: -.012em; }
 .settings-section .hint { line-height: 1.5; }
-.settings-head h1 { font-weight: 700; letter-spacing: -.025em; }
 .settings-link { position: relative; z-index: 1; font-weight: 500; transition: background-color var(--t-press) ease, color var(--t-press) ease; }
 .settings-link svg { transition: color var(--t-open) ease; }
 .settings-nav-pill { position: absolute; top: 0; left: 0; right: 0; height: 36px; border-radius: var(--r-md); background: var(--raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .06); pointer-events: none; visibility: hidden; }
