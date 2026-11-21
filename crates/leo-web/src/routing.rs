@@ -315,10 +315,10 @@ pub fn choose(rule: Option<bool>, warm: Option<bool>, unclear: impl FnOnce() -> 
     warm != Some(false) && rule.unwrap_or_else(unclear)
 }
 
-pub fn leans_light(meaning: &Meaning, message: &str) -> bool {
-    if meaning(&[], true).is_err() {
+pub fn leans_light(meaning: &Meaning, asked: Option<&[f32]>) -> bool {
+    let Some(asked) = asked else {
         return false;
-    }
+    };
     let Some(centroids) = CENTROIDS.get() else {
         if !BUILDING.swap(true, Ordering::AcqRel) {
             let meaning = Arc::clone(meaning);
@@ -336,10 +336,7 @@ pub fn leans_light(meaning: &Meaning, message: &str) -> bool {
         }
         return false;
     };
-    meaning(&[message.trim().to_string()], true)
-        .ok()
-        .and_then(|mut found| found.pop())
-        .is_some_and(|asked| closer_to_light(&asked, centroids))
+    closer_to_light(asked, centroids)
 }
 
 fn centroids_of(meaning: &Meaning) -> Option<(Vec<f32>, Vec<f32>)> {
@@ -560,17 +557,14 @@ mod tests {
     }
 
     #[test]
-    fn the_embedder_is_skipped_until_it_is_loaded() {
+    fn without_the_note_search_vector_the_embedder_is_never_called() {
         let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let counted = Arc::clone(&calls);
-        let unloaded: Meaning = Arc::new(move |texts: &[String], query: bool| {
-            if texts.is_empty() && query {
-                anyhow::bail!("not loaded");
-            }
+        let meaning: Meaning = Arc::new(move |texts: &[String], _: bool| {
             counted.fetch_add(1, Ordering::SeqCst);
             Ok(texts.iter().map(|_| vec![1.0, 0.0]).collect())
         });
-        assert!(!leans_light(&unloaded, "what is the capital of peru"));
+        assert!(!leans_light(&meaning, None));
         assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 

@@ -2031,14 +2031,14 @@ pub(crate) async fn chat_reply(
         .as_ref()
         .map_or(chat::ROOM, |measure| measure())
         .min(chat::MOST_ROOM);
-    let (close, indexed) = {
+    let ((close, question_vector), indexed) = {
         let meaning = state.meaning.clone();
         let vectors = Arc::clone(&state.vectors);
         let index = Arc::clone(&state.search_index);
         let asked = question.clone();
         tokio::task::spawn_blocking(move || {
             (
-                crate::vectors::close_to(meaning.as_ref(), &vectors, &asked, 24),
+                crate::vectors::close_and_asked(meaning.as_ref(), &vectors, &asked, 24),
                 index.for_question(&asked),
             )
         })
@@ -2147,10 +2147,6 @@ pub(crate) async fn chat_reply(
     let light = asked_lightly != Some(false) && {
         let view = state.clone();
         let chat = warm_chat.clone();
-        let message = body
-            .messages
-            .last()
-            .map_or_else(String::new, |t| t.text.clone());
         tokio::task::spawn_blocking(move || {
             crate::margin::prefs(&view.chats).auto_model
                 && view.lighter.as_ref().is_some_and(|exists| exists())
@@ -2158,9 +2154,9 @@ pub(crate) async fn chat_reply(
                     asked_lightly,
                     chat.and_then(|id| view.warm.light(&id)),
                     || {
-                        view.meaning
-                            .as_ref()
-                            .is_some_and(|meaning| crate::routing::leans_light(meaning, &message))
+                        view.meaning.as_ref().is_some_and(|meaning| {
+                            crate::routing::leans_light(meaning, question_vector.as_deref())
+                        })
                     },
                 )
         })

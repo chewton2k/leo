@@ -670,11 +670,11 @@ read (root CLAUDE.md, 2026-11-17).
   tidy; the edit rule alone passes with a selection) go to the quick tier; study, teaching, quizzes,
   analysis, why/how, comparisons, plans, summaries, other note changes,
   attachments, files, Auto access and >6 turns stay on the chosen model, and so do
-  other languages. A plain English question the rules cannot place asks the local
-  meaning model (`routing::leans_light`: cosine to centroids of 40 light and 40
-  full examples, built once in the background, light only past `MARGIN`) and only
-  when it is already in memory (`meaning(&[], true)`); not loaded, an error or a
-  close call keeps the chosen model. No AI call routes. A chat moves up once when needed, never down while warm
+  other languages. A plain English question the rules cannot place reuses the note
+  search's query vector (`vectors::close_and_asked`; `routing::leans_light`: cosine
+  to centroids of 40 light and 40 full examples, built once in the background,
+  light only past `MARGIN`); no vector, no centroids yet or a close call keeps the
+  chosen model. No AI call routes. A chat moves up once when needed, never down while warm
   (`routing::choose`, `Slot::light`); a failing light writer gives way on the last try, so `Auto`
   names who really answered. `Prefs.auto_model` turns it off.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`

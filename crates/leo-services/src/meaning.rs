@@ -282,14 +282,6 @@ fn present(dir: &Path) -> bool {
 }
 
 pub fn embed(texts: &[String], query: bool) -> Result<Vec<Vec<f32>>> {
-    if texts.is_empty() && query {
-        let loaded = LOADED
-            .get()
-            .and_then(|slot| slot.try_lock().ok())
-            .is_some_and(|held| held.model.is_some());
-        anyhow::ensure!(loaded, "the meaning model is not loaded");
-        return Ok(Vec::new());
-    }
     if texts.is_empty() {
         anyhow::ensure!(present(&dir()), "the meaning model is not downloaded yet");
         return Ok(Vec::new());
@@ -503,29 +495,6 @@ mod tests {
             "{} vs {}",
             dot(&v[0], &v[1]),
             dot(&v[0], &v[2])
-        );
-    }
-
-    #[test]
-    #[ignore = "needs the downloaded model and candle, gemm and tokenizers built at opt-level 3"]
-    fn a_short_message_embeds_within_fifty_milliseconds_once_loaded() {
-        let model = Model::load(&dir()).unwrap();
-        model.embed(&[format!("{QUERY}warm up")]).unwrap();
-        let mut took: Vec<std::time::Duration> = (0..100)
-            .map(|i| {
-                let at = std::time::Instant::now();
-                model
-                    .embed(&[format!("{QUERY}what is the capital of country {i}")])
-                    .unwrap();
-                at.elapsed()
-            })
-            .collect();
-        took.sort();
-        eprintln!("p50 {:?} p95 {:?}", took[49], took[94]);
-        assert!(
-            took[94] <= std::time::Duration::from_millis(50),
-            "{:?}",
-            took[94]
         );
     }
 }

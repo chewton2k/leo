@@ -726,17 +726,29 @@ pub fn close_to(
     text: &str,
     most: usize,
 ) -> Vec<(String, f32)> {
+    close_and_asked(meaning, vectors, text, most).0
+}
+
+pub fn close_and_asked(
+    meaning: Option<&Meaning>,
+    vectors: &Vectors,
+    text: &str,
+    most: usize,
+) -> (Vec<(String, f32)>, Option<Vec<f32>>) {
     let Some(meaning) = meaning else {
-        return Vec::new();
+        return (Vec::new(), None);
     };
     if vectors.is_empty() || text.trim().is_empty() {
-        return Vec::new();
+        return (Vec::new(), None);
     }
-    meaning(&[text.to_string()], true)
+    let asked = meaning(&[text.to_string()], true)
         .ok()
-        .and_then(|mut v| v.pop())
-        .map(|q| vectors.nearest(&q, most, CLOSE_ENOUGH))
-        .unwrap_or_default()
+        .and_then(|mut v| v.pop());
+    let close = asked
+        .as_ref()
+        .map(|q| vectors.nearest(q, most, CLOSE_ENOUGH))
+        .unwrap_or_default();
+    (close, asked)
 }
 
 #[cfg(test)]
