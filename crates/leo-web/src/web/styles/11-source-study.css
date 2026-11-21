@@ -76,13 +76,11 @@
 .ask-float:hover { border-color: var(--line); color: var(--text); }
 .ask-float button { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 8px; border: 0; border-radius: var(--r-pill); background: none; color: inherit; font: inherit; cursor: pointer; }
 .ask-float button:hover { background: var(--tint); color: var(--accent); }
-.ask-float kbd { font: inherit; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
 .ask-long { display: none; margin: 0; padding: 0 9px; font-size: var(--fs-xs); font-weight: 500; color: var(--muted); }
 .ask-float[data-long] .ask-long { display: block; }
 .ask-float.beside .ask-long { padding: 6px 10px 4px; }
 .ask-float.beside { flex-direction: column; align-items: stretch; height: auto; padding: 4px; border-radius: var(--r-md); box-shadow: var(--shadow-pop); }
 .ask-float.beside button { justify-content: flex-start; height: 30px; padding: 0 10px; border-radius: var(--r-sm); }
-.ask-float.beside kbd { margin-left: auto; padding-left: 12px; }
 .add-preview { max-height: 240px; overflow: auto; overscroll-behavior: contain; margin: 4px 0 12px; padding: 10px 14px; border-radius: var(--r-md); background: var(--surface-2); font-size: var(--fs-base); }
 .add-where { display: flex; margin: 0 8px 10px; }
 .add-where .segmented, .cal-views .segmented, .model-filters .segmented { flex: none; margin: 0; }
