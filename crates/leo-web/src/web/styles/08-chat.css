@@ -125,7 +125,7 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 .ask-card { border-left: 3px solid var(--accent); }
 .ask-q { font-weight: 650; font-size: var(--fs-base); line-height: 1.45; }
 .ask-options, .quiz-options { display: flex; flex-direction: column; gap: 6px; }
-.ask-option, .quiz-option { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; font-size: var(--fs-base); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 12px; cursor: pointer; transition: border-color var(--t-press), background var(--t-press); }
+.ask-option, .quiz-option { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; font: inherit; font-size: var(--fs-base); color: var(--text); background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md); padding: 9px 12px; cursor: pointer; transition: border-color var(--t-press), background var(--t-press); }
 .ask-option:hover:not(:disabled), .quiz-option:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
 .ask-option:disabled, .quiz-option:disabled { cursor: default; }
 .ask-option.chosen { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
@@ -134,7 +134,7 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 .quiz-q { font-size: var(--fs-base); font-weight: 600; }
 .quiz-q p { margin: 0; }
 .quiz-blank { display: inline-block; width: 4.5em; border-bottom: 2px solid var(--accent); margin: 0 3px; transform: translateY(-3px); }
-.quiz-letter { flex: none; width: 24px; height: 24px; border-radius: var(--r-pill); display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 700; background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
+.quiz-letter { flex: none; width: 24px; height: 24px; border-radius: var(--r-pill); display: grid; place-items: center; font-size: var(--fs-xs); font-weight: 500; background: var(--surface); border: 1px solid var(--line); color: var(--muted); }
 .quiz-option.right { --chalk: var(--chalk-good); }
 .quiz-option.wrong { --chalk: var(--chalk-bad); }
 .quiz-option:is(.right, .wrong), .quiz-option:is(.right, .wrong) .quiz-letter { border-color: var(--chalk); }
