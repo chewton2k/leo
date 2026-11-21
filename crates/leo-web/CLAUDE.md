@@ -403,7 +403,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   light at rest, full ink on hover, so a wrapped link gets a stroke per line); quotes
   are in ink and Newsreader (`--felix-letters`, 1.06 em) with no fill, beside a pencil bracket (the folder-guide
   stroke with 10 px hooks, ink 38%), also while open (2026-11-21, the user's call); tables lose grid lines and the
-  header fill, every other body row sits on `--wash`, and each `th::after` draws the
+  header fill (everywhere `.prose th` is a 0.92 em medium-weight label in ink with no fill, 2026-11-21, the user's call), every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The title row's chips
   (`.margin-mode`) sit 16 px apart with 14 px icons and 4/8 padding, and the two Felix chips
