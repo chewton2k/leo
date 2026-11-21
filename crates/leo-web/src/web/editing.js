@@ -260,7 +260,7 @@
 
   const PREFIX = new RegExp(String.raw`^(\s*)(#{1,6}\s+|>\s?|(?:${MARKER})\s+(?:\[[ xX]\]\s+)?)?`);
   const TAG = /^<\/?u>/;
-  const EMBED = /^!\[\[[^\]|[]+(?:\|[^\]]*)?\]\]/;
+  const EMBED = /^!\[\[(?!\s*(?:data:image\/svg\+xml[;,]|[a-z][a-z0-9+.-]*:|\/\/))[^\]|[]+(?:\|[^\]]*)?\]\]/i;
   const DRAWN = /^\s*<?(?:data:image\/svg\+xml[;,]|(?![a-z][a-z0-9+.-]*:|\/\/)\S)/i;
 
   function hiddenHead(raw, isItem) {

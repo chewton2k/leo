@@ -901,7 +901,10 @@
     function pill() {
       const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
       const paused = show && s.view.state === 'paused';
-      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label: `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` } : null }));
+      const label = show ? `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` : '';
+      if (label === (s.pilled || '')) return;
+      s.pilled = label;
+      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label } : null }));
     }
 
     async function refresh() {

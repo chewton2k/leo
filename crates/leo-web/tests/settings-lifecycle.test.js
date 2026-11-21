@@ -72,6 +72,14 @@ test('the note menu keeps every note tool, with Read through and Share as second
   context.noteMenu({});
   assert.equal(shown[2].find((row) => row.text === 'Stop reading through').next, undefined);
   assert.ok(shown[0].at(-1).danger);
+  let loads = 0;
+  Object.assign(context, { marginPrefs: null, marginLoadPrefs: () => loads++ });
+  Object.assign(marginPage, { through: null });
+  context.noteMenu({});
+  const idle = shown[3].findIndex((row) => row.text === 'Read through');
+  assert.equal(shown[3][idle].off, true);
+  assert.match(shown[3][idle + 1].note, /did not load/);
+  assert.equal(loads, 1);
 });
 
 test('Codex and Claude Code models list newest release first, then by power', () => {

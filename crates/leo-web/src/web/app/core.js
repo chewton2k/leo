@@ -1077,7 +1077,9 @@ function noteFind() {
     at = found ? (((at + step) % found) + found) % found : 0;
     bar.querySelector('.hint').textContent = found ? `${at + 1} of ${found}` : input.value ? 'No matches' : '';
   };
+  let typing;
   const close = () => {
+    clearTimeout(typing);
     bar.remove();
     clearSearchHighlight();
     if (from?.isConnected) from.focus({ preventScroll: true });
@@ -1085,7 +1087,8 @@ function noteFind() {
   };
   input.addEventListener('input', () => {
     at = 0;
-    show(0);
+    clearTimeout(typing);
+    typing = setTimeout(show, 120, 0);
   });
   bar.addEventListener('keydown', (e) => {
     if (e.isComposing) return;
@@ -1094,6 +1097,7 @@ function noteFind() {
       close();
     } else if (e.key === 'Enter' && e.target === input) {
       e.preventDefault();
+      clearTimeout(typing);
       show(e.shiftKey ? -1 : 1);
     }
   });

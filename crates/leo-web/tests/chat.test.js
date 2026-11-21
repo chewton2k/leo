@@ -1858,7 +1858,15 @@ test('a marked quiz offers Visualize, asking with the selection toolbar\'s words
   }
   assert.match(html, /<div class="quiz-next">.*data-chat="quiz-why"[^>]*>Ask Felix why<\/button><button type="button" class="btn plain sm" data-chat="quiz-draw">Visualize<\/button><\/div>/);
   const said = /const VISUALIZE = '([^']+)';/.exec(source)[1];
-  assert.match(source, /what === 'quiz-draw'\) \{\n\s+send\(VISUALIZE\);/);
+  const from = source.indexOf("    panel.addEventListener('click', (e) => {");
+  const listener = source.slice(from, source.indexOf('\n    });\n', from) + 8);
+  const sent = [];
+  const clicks = {};
+  const button = { dataset: { chat: 'quiz-draw' } };
+  const clicked = vm.createContext({ panel: { addEventListener: (type, run) => { clicks[type] = run; } }, VISUALIZE: said, awake() {}, attachMenu() {}, accessMenu() {}, send: (text) => sent.push(text) });
+  vm.runInContext(listener, clicked);
+  clicks.click({ target: { closest: (query) => (query === '[data-chat]' ? button : null) }, preventDefault() {} });
+  assert.deepEqual(sent, [said], 'Visualize sends the words the selection toolbar sends');
   assert.equal(said, /draw: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'))[1]);
   const seeing = /SEE_WORDS: \[&str; \d+\] = \[([^\]]+)\]/.exec(fs.readFileSync(path.join(__dirname, '../src/drawing.rs'), 'utf8'))[1].match(/"(\w+)"/g).map((w) => w.slice(1, -1));
   assert.ok(said.toLowerCase().split(/\W+/).some((w) => seeing.includes(w)), 'the server knows the user asked to see something');

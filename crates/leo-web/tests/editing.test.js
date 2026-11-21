@@ -537,6 +537,9 @@ test('a picture is one place for the caret, so both of its sides can be reached'
   assert.equal(ed.rawOffset('![[a.png|200]] t', shown), 14);
   assert.equal(ed.rawOffset('![d](data:image/svg+xml;utf8,%3Csvg%3E) z', `${shown} `), 40);
   assert.equal(ed.rawOffset('![x](https://e.com/a.png) t', 'x t'), 27, 'a picture leo does not draw stays its text');
+  const outside = '![[https://x/a.png]] t';
+  assert.equal(ed.rawOffset(outside, '![[https://x/a.png]] t'), outside.length, 'an outside embed is shown as its text');
+  assert.equal(ed.rawOffset(outside, '!'), 1);
 });
 
 test('Enter after a picture in a checkbox item starts an empty checkbox below it', () => {

@@ -1472,9 +1472,22 @@
           offset = range.startOffset;
         }
       }
-      for (const pic of el.querySelectorAll('img.note-img')) {
-        const box = pic.getBoundingClientRect();
-        if (y >= box.top && y <= box.bottom) ({ node, offset } = beside(pic, x > box.left + box.width / 2 ? 1 : 0));
+      if (!(node && node.nodeType === 3 && el.contains(node))) {
+        let near = null;
+        let gap = Infinity;
+        for (const pic of el.querySelectorAll('img.note-img')) {
+          const box = pic.getBoundingClientRect();
+          if (y < box.top || y > box.bottom) continue;
+          const away = x < box.left ? box.left - x : Math.max(0, x - box.right);
+          if (away < gap) {
+            gap = away;
+            near = pic;
+          }
+        }
+        if (near) {
+          const box = near.getBoundingClientRect();
+          ({ node, offset } = beside(near, x > box.left + box.width / 2 ? 1 : 0));
+        }
       }
       if (!node || !el.contains(node)) return null;
       const range = document.createRange();

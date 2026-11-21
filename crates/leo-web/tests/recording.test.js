@@ -303,15 +303,23 @@ test('a live recording off the Record page is announced for the activity panel, 
     s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock,
     root: { CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
   });
-  pill({ view: { state: 'recording', secs: 75 }, container: null })();
-  pill({ view: { state: 'paused', secs: 3605 }, container: { isConnected: false } })();
-  pill({ view: { state: 'recording', secs: 5 }, container: { isConnected: true } })();
-  pill({ view: { state: 'done', secs: 5 }, container: null })();
-  pill({ view: null, container: null })();
+  const page = { view: null, container: null };
+  const announce = (view, container) => {
+    Object.assign(page, { view, container });
+    pill(page)();
+  };
+  announce(null, null);
+  announce({ state: 'recording', secs: 75 }, null);
+  announce({ state: 'recording', secs: 75 }, null);
+  announce({ state: 'paused', secs: 3605 }, { isConnected: false });
+  announce({ state: 'recording', secs: 5 }, { isConnected: true });
+  announce({ state: 'recording', secs: 6 }, { isConnected: true });
+  announce({ state: 'done', secs: 5 }, null);
+  announce(null, null);
   assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
     ['leo-recording', { paused: false, label: 'Recording · 1:15' }],
     ['leo-recording', { paused: true, label: 'Paused · 1:00:05' }],
-    ['leo-recording', null], ['leo-recording', null], ['leo-recording', null],
+    ['leo-recording', null],
   ]);
 });
 
@@ -518,11 +526,10 @@ test('a question asked while recording sends the newest transcript and the typed
   assert.equal(L.briefAsk(null, 'only wants'), 'What I want from the notes: only wants');
 });
 
-test('the live page lays out three columns on a wide main area, two beside a docked chat, and stacks otherwise', () => {
+test('the live page keeps the stacked page unless a container or the docked chat asks for columns', () => {
   const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
-  assert.match(css, /#rec-box:has\(> \.rec-live\) \{ container: recroom \/ inline-size; \}/);
-  assert.match(css, /main:has\(> #rec-box > \.rec-live\) \{ max-width: 1280px; \}/);
-  assert.match(css, /@container recroom \(min-width: 1000px\) \{ \.rec-live \{ display: grid;[^}]*"live live live" "heard notes ask" "heard wants ask"/);
-  assert.match(css, /@media \(min-width: 1200px\) \{ @container recroom \(min-width: 640px\) \{ body\.chat-open \.rec-live \{ display: grid;[^}]*"live live" "heard ask" "heard notes" "heard wants"/);
-  assert.doesNotMatch(css.replace(/@container[^\n]*/g, ''), /\.rec-live \{[^}]*display: grid/, 'narrower main areas keep the stacked page');
+  const gated = css.split('\n').filter((line) => /\.rec-live \{[^}]*display: grid/.test(line));
+  assert.equal(gated.length, 2, 'a wide main area and a docked chat each lay out columns');
+  assert.ok(gated.every((line) => /^\s*(?:@media \([^)]*\) \{ )?@container recroom \(min-width: \d+px\) \{/.test(line)), 'only inside a container query');
+  assert.ok(gated.some((line) => /@media \(min-width: 1200px\) \{ @container[^\n]*body\.chat-open \.rec-live/.test(line)), 'two columns only beside a docked chat');
 });

@@ -2803,7 +2803,8 @@ test.describe('recording', () => {
     await page.locator('#rec-heard > summary').click();
     await expect(page.locator('#rec-transcript')).toBeHidden();
     expect(await page.evaluate(() => localStorage.getItem('leo-rec-heard'))).toBe('shut');
-    await page.waitForTimeout(1500);
+    await page.waitForResponse((r) => r.url().endsWith('/api/record/rec-1') && r.request().method() === 'GET');
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     await expect(page.locator('#rec-heard')).not.toHaveAttribute('open', '');
     await expect(page.locator('#rec-wave')).toBeVisible();
     await expect(page.locator('#rec-hear')).toHaveText('Hearing sound', { timeout: 8000 });
@@ -2871,7 +2872,8 @@ test.describe('recording', () => {
     expect(Math.abs(notes.y - ask.y)).toBeLessThan(2);
     expect(top.y).toBeLessThan(heard.y);
     expect(top.width).toBeGreaterThan(ask.x + ask.width - heard.x - 2);
-    await page.waitForTimeout(1500);
+    await page.waitForResponse((r) => r.url().endsWith('/api/record/rec-1') && r.request().method() === 'GET');
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     expect(await page.evaluate(() => window.__heard === document.querySelector('#rec-transcript') && window.__heard.isConnected)).toBe(true);
     await page.setViewportSize({ width: 900, height: 1000 });
     const [stackedNotes, stackedAsk] = [await box('.rec-notepad'), await box('#rec-ask')];
@@ -5641,6 +5643,22 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.locator('#doc img.note-img').dblclick();
   await expect(page.locator('#doc img.note-img')).toHaveClass(/picked/);
   await expect(page.locator('#doc textarea')).toHaveCount(0);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('clicking text beside a picture puts the caret in the text, not beside the picture', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the click is a mouse click');
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Beside ${Date.now().toString(36)}`, body: `Figure ![Box](data:image/svg+xml;utf8,${svg}) shows the loop` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto(`/#/n/${note.id}`);
+  const line = page.locator('#doc .blk').first();
+  await expect(line.locator('img.note-img')).toBeVisible();
+  const box = await line.boundingBox();
+  await page.mouse.click(box.x + 1, box.y + box.height / 2);
+  await expect(page.locator('#doc textarea')).toBeVisible();
+  await page.keyboard.type('X');
+  await expect.poll(body, { timeout: 5000 }).toMatch(/^XFigure !\[Box\]/);
   await page.request.delete(`/api/notes/${note.id}`);
 });
 

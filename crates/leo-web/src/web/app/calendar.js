@@ -519,6 +519,7 @@ function calStep(step) {
 }
 
 function calGo() {
+  cal.more = '';
   drawCalendar();
   if (cal.loadedFor !== `${cal.view} ${calWindow().from}`) loadSchedule(seq);
 }
@@ -548,11 +549,13 @@ document.addEventListener('keydown', (e) => {
       calDragCancel();
       return;
     }
-    if (cal.more) {
+    if (cal.more && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
       e.preventDefault();
       e.stopImmediatePropagation();
+      const day = cal.more;
       cal.more = '';
       drawCalendar();
+      $(`.cal-cell[data-day="${day}"] .cal-more`)?.focus({ preventScroll: true });
       return;
     }
     if (cal.peek && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
