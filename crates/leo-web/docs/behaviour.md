@@ -48,7 +48,7 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
   no-writing-AI reply and Keeping could not be opened show a drawing too (an unplugged
   cord, a pen with no ink, a broken pencil; 2026-11-15). Counts: `.badge`. Small
   sentence-case section labels share one rule (`.source-label`,
-  `.quick-due-head`, `.chat-history-group`, `.pick-head`) and end in the note rule's
+  `.quick-due-head`, `.chat-history-group`, `.pick-head`, `.settings-group-title`) and end in the note rule's
   pencil stroke.
 - Loaders (2026-11-15): wherever `skeleton()` stands in for a list (search, board,
   settings, Keeping, Trash, Health, plan), its cards hold faint pencil lines that draw

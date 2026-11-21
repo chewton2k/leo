@@ -88,8 +88,8 @@ body.chat-open .quick-perch { display: none; }
 .side-row:hover { background: var(--wash); color: var(--text); }
 .side-row.on { background: var(--accent-soft); color: var(--text); }
 .side-note.open { color: var(--text); }
-.source-label, .quick-due-head, .chat-history-group, .pick-head { display: flex; align-items: center; font-size: var(--fs-xs); font-weight: 650; color: var(--faint); }
-:is(.source-label, .quick-due-head, .chat-history-group, .pick-head)::after { content: ''; flex: 1 1 0; min-width: 0; margin: 0 0 0 8px; background: currentColor; opacity: .75; -webkit-mask-size: max(100%, 544px) 100%; mask-size: max(100%, 544px) 100%; }
+.source-label, .quick-due-head, .chat-history-group, .pick-head, .settings-group-title { display: flex; align-items: center; font-size: var(--fs-xs); font-weight: 650; color: var(--faint); }
+:is(.source-label, .quick-due-head, .chat-history-group, .pick-head, .settings-group-title)::after { content: ''; flex: 1 1 0; min-width: 0; margin: 0 0 0 8px; background: currentColor; opacity: .75; -webkit-mask-size: max(100%, 544px) 100%; mask-size: max(100%, 544px) 100%; }
 .side-group { display: flex; align-items: center; gap: 2px; margin: 0 0 6px; }
 .side-group .side-new { flex: 1; min-width: 0; }
 .side-group .side-add { width: 30px; height: 30px; }

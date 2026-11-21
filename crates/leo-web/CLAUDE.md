@@ -250,8 +250,8 @@ Decided: one app, window only (2026-10-31).
   on the first day (no notes, no tasks) while it is open (≥1000 px, not `side-mini`). Titles stay in the app's sans
   (2026-11-15, the user's call); counts `.badge`; small faint
   sentence-case labels share one rule (`.source-label`, `.quick-due-head`,
-  `.chat-history-group`, `.pick-head`), ending in the note rule's pencil stroke
-  (`::after`, same mask, a plain 1 px line in print and forced colours).
+  `.chat-history-group`, `.pick-head`, `.settings-group-title`; Settings joined 2026-11-21, the user's call; its stroke is hidden when the nav becomes pills), ending in the note rule's pencil stroke
+  (`::after`, same mask, a plain 1 px line in print and forced colours). The current board tab (`.kanban-tab.on::after`) borrows the same stroke.
 - Kept on purpose: the model picker, the margin-mode menu and chat.js's attach
   and access menus (they move through `leoMotion`).
 - The leo mark (`#leo-mark`) is the one working mark (2026-11-15): it breathes
