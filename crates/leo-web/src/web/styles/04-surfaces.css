@@ -166,7 +166,7 @@
 @media (forced-colors: active) { .proposal-marked ins { text-decoration: underline; } }
 .proposal-body { max-height: 220px; overflow: auto; overscroll-behavior: contain; font-size: var(--fs-sm); border-left: 3px solid var(--line); padding-left: 10px; }
 .proposal-buttons { display: flex; gap: 8px; }
-.msg-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-top: 6px; }
+.msg-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin-top: 8px; }
 .msg-meta { margin-left: auto; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; cursor: default; }
 .msg-act { font: inherit; font-size: var(--fs-xs); color: var(--muted); background: none; border: 0; border-radius: var(--r-tile); padding: 3px 6px; cursor: pointer; }
 .msg-act:hover { color: var(--accent); }
