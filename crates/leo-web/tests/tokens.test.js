@@ -210,9 +210,11 @@ test('Felix blue is one plain token per theme, readable on the page and ground, 
     '.margin-note[data-id="draft"] .margin-reply',
     '.margin-waiting .margin-drop, .margin-mark.reading .margin-drop',
     '.msg-step-busy',
+    '.msg-who',
     '.msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(p, h1, h2, h3, h4, h5, h6)::after, .msg.pending > .prose:not(:has(.typing)):not(:has(~ .prose)) > :last-child:is(ul, ol) > li:last-child::after',
     '.proposal-wait',
     '.side-reading',
+    '.study-idea.now .study-ring',
   ]);
 });
 

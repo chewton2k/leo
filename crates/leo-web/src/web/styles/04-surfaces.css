@@ -146,9 +146,10 @@
 .msg-step-times { color: var(--muted); font-size: .92em; font-variant-numeric: tabular-nums; }
 .msg-step ul { margin: 2px 0 4px 20px; padding: 0; list-style: none; }
 .msg-step li { padding: 1px 0; color: var(--text); }
-.msg-step-busy { width: 14px; height: 14px; flex: none; color: var(--felix); }
+.msg-step-busy { width: 14px; height: 14px; flex: none; vertical-align: middle; color: var(--felix); }
 @media (prefers-reduced-motion: no-preference) { .msg-step-busy { animation: margin-breathe 1.6s ease-in-out infinite alternate; } }
-.msg-status .msg-step { font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); }
+.msg-status .msg-step { display: block; line-height: 22px; font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); }
+.msg-status .msg-step > * + * { margin-left: 6px; }
 .msg-trace > summary > .pencil-tick { width: 13px; height: 13px; }
 .msg-trace-took { color: var(--faint); font-variant-numeric: tabular-nums; }
 .proposal { margin: 10px 0 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); display: grid; gap: 6px; }

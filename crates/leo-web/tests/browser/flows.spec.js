@@ -5414,6 +5414,64 @@ test('Felix shows one live step, then one line, and marks an answer from outside
   await expect(answer.locator('.msg-outside')).toHaveText('Not from your notes');
 });
 
+test('status line: the working blot sits on the middle of the words beside it', async ({ page }) => {
+  await page.addInitScript(() => {
+    const real = window.fetch.bind(window);
+    window.fetch = (url, options) => {
+      if (String(url) !== '/api/chat') return real(url, options);
+      const body = new ReadableStream({
+        async start(stream) {
+          stream.enqueue(new TextEncoder().encode(`${JSON.stringify({ step: 'Searched your notes for “heaps”', tool: 'search_notes', found: [] })}\n`));
+          await new Promise((done) => setTimeout(done, 4000));
+          stream.enqueue(new TextEncoder().encode(`${JSON.stringify({ done: true })}\n`));
+          stream.close();
+        },
+      });
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'content-type': 'application/x-ndjson' } }));
+    };
+  });
+  await page.goto('/');
+  await page.locator('#chat-toggle').click();
+  await page.locator('#chat-input').fill('what is a heap?');
+  await page.locator('#chat-input').press('Enter');
+  const step = page.locator('.msg.leo .msg-status .msg-step');
+  await expect(step).toHaveText('Searching your notes for “heaps”…');
+  const off = await step.evaluate((el) => {
+    const blot = el.querySelector('.msg-step-busy').getBoundingClientRect();
+    const probe = document.createElement('i');
+    probe.style.cssText = 'display: inline-block; width: 0; height: 1ex; vertical-align: baseline';
+    el.querySelector('span').append(probe);
+    const ex = probe.getBoundingClientRect();
+    probe.remove();
+    return Math.abs((blot.top + blot.bottom) / 2 - (ex.top + ex.bottom) / 2);
+  });
+  expect(off, 'the blot centre is the centre of the lower-case letters').toBeLessThanOrEqual(1);
+});
+
+test('felix accent: his replies carry the leo mark and his name in his blue, and buttons stay ink', async ({ page }) => {
+  await page.route('**/api/chat', (route) => route.fulfill({ contentType: 'application/x-ndjson', body: `${JSON.stringify({ t: 'A heap keeps the smallest on top.' })}\n${JSON.stringify({ done: true })}\n` }));
+  await page.goto('/');
+  await page.locator('#chat-toggle').click();
+  await page.locator('#chat-input').fill('what is a heap?');
+  await page.locator('#chat-input').press('Enter');
+  const answer = page.locator('.msg.leo').last();
+  await expect(answer.locator('.prose')).toHaveText('A heap keeps the smallest on top.');
+  const head = answer.locator('.msg-who');
+  await expect(head).toHaveText('Felix');
+  await expect(head.locator('svg use')).toHaveAttribute('href', '#leo-mark');
+  const colours = await answer.evaluate((el) => {
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--felix)';
+    el.append(probe);
+    const felix = getComputedStyle(probe).color;
+    probe.remove();
+    return { felix, head: getComputedStyle(el.querySelector('.msg-who')).color, words: getComputedStyle(el.querySelector('.prose')).color, act: getComputedStyle(el.querySelector('.msg-act')).color };
+  });
+  expect(colours.head, 'the head is in Felix blue').toBe(colours.felix);
+  expect(colours.words, 'his words stay ink').not.toBe(colours.felix);
+  expect(colours.act, 'his buttons stay ink').not.toBe(colours.felix);
+});
+
 test('an opened trace stays open through the next reply, and a failed read is not counted', async ({ page }) => {
   const reply = (lines) => lines.map((l) => JSON.stringify(l)).join('\n') + '\n';
   await page.route('**/api/chat', (route) => route.fulfill({ contentType: 'application/x-ndjson', body: reply([

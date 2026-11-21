@@ -1738,3 +1738,96 @@ test('an attached file of any size is sent as one streamed PUT of its blob and n
   assert.deepEqual(notices, []);
   assert.equal(doc.id, 'doc-1');
 });
+
+test('a chat drawing is inked on first insert and stays inked when the reply is redrawn', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const records = [];
+  class N {
+    constructor(tag, attrs = {}, kids = []) {
+      Object.assign(this, { nodeType: 1, localName: tag, tagName: tag.toUpperCase(), isConnected: true, parentElement: null, childNodes: [], attrs: new Map(Object.entries(attrs)) });
+      this.append(...kids);
+      const data = (k) => `data-${String(k)}`;
+      this.dataset = new Proxy({}, { get: (o, k) => this.attrs.get(data(k)), has: (o, k) => this.attrs.has(data(k)), set: (o, k, v) => (this.setAttribute(data(k), v), true), deleteProperty: (o, k) => this.attrs.delete(data(k)) || true });
+      this.classList = { contains: (c) => (this.getAttribute('class') || '').split(' ').includes(c), add: (c) => this.setAttribute('class', `${this.getAttribute('class') || ''} ${c}`.trim()) };
+    }
+    get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); }
+    get children() { return this.childNodes; }
+    get textContent() { return ''; }
+    get outerHTML() { return `<${this.localName}${this.attributes.map((a) => ` ${a.name}="${a.value}"`).join('')}>${this.childNodes.map((n) => n.outerHTML).join('')}</${this.localName}>`; }
+    set src(v) { this.setAttribute('src', v); }
+    getAttribute(n) { return this.attrs.has(n) ? this.attrs.get(n) : null; }
+    hasAttribute(n) { return this.attrs.has(n); }
+    removeAttribute(n) { this.attrs.delete(n); }
+    setAttribute(n, v) {
+      this.attrs.set(n, String(v));
+      if (n === 'src') records.push({ type: 'attributes', target: this, addedNodes: [] });
+    }
+    append(...kids) {
+      for (const k of kids) {
+        k.parentElement = this;
+        this.childNodes.push(k);
+        records.push({ type: 'childList', addedNodes: [k] });
+      }
+    }
+    closest() { return null; }
+    matches(sel) { return sel === 'figure.drawing > img' && this.localName === 'img' && this.parentElement.classList.contains('drawing'); }
+    querySelector(sel) { return this.childNodes.find((k) => k.localName === sel) || null; }
+    querySelectorAll(sel) { return this.childNodes.flatMap((k) => [...(k.matches(sel) ? [k] : []), ...k.querySelectorAll(sel)]); }
+  }
+  let observe;
+  const context = vm.createContext({
+    window: { leoTheme: { onChange() {}, dark: () => true } },
+    document: { body: {}, documentElement: {}, addEventListener() {}, querySelectorAll: () => [] },
+    MutationObserver: class { constructor(fn) { observe = fn; } observe() {} },
+    DOMParser: class { parseFromString() { return { documentElement: new N('svg', { viewBox: '0 0 320 80' }, [new N('path', { stroke: 'var(--text)' })]), getElementsByTagName: () => [] }; } },
+    XMLSerializer: class { serializeToString(el) { return el.outerHTML; } },
+    getComputedStyle: () => ({ getPropertyValue: (name) => (name === '--text' ? '#e9e7e2' : '') }),
+    setTimeout: () => 0,
+    clearTimeout() {},
+  });
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/diagrams.js'), 'utf8'), context);
+  const raw = `data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg viewBox="0 0 320 80"><path stroke="var(--text)"></path></svg>')}`;
+  const reply = () => new N('div', { class: 'prose' }, [new N('figure', { class: 'drawing' }, [new N('img', { src: raw, alt: '' })])]);
+  const prose = reply();
+  const [fig] = prose.childNodes;
+  const [img] = fig.childNodes;
+  const inked = () => {
+    const src = decodeURIComponent(img.getAttribute('src'));
+    return fig.classList.contains('inked') && src.includes('stroke="#e9e7e2"') && !src.includes('var(--');
+  };
+  records.length = 0;
+  observe([{ type: 'childList', addedNodes: [prose] }]);
+  assert.ok(inked(), 'the first insert is inked');
+  const fresh = reply();
+  records.length = 0;
+  C.settle(prose, fresh);
+  assert.ok(!inked(), 'a redraw puts the raw drawing back');
+  observe(records.splice(0));
+  assert.ok(inked(), 'and the drawing is inked again before it paints');
+  observe(records.splice(0));
+  assert.equal(records.length, 0, 'inking it again does not loop');
+});
+
+test('a marked quiz offers Visualize, asking with the selection toolbar\'s words', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const code = source.slice(source.indexOf('    function quizCard('), source.indexOf('    const checking = new WeakSet()'));
+  const context = vm.createContext({ ...C, escape: esc, state: { drafts: {} }, checking: new WeakSet(), thinkingOpen: new WeakSet(), markedAt: new WeakMap(), inline: (t) => esc(t), render: (t) => esc(t), cite: (t) => t, hintsOf: () => [], quizMark: () => '', sureText: () => '' });
+  vm.runInContext(`${code}\n;globalThis.__card = quizCard;`, context);
+  const q = { kind: 'multiple_choice', question: 'Which?', options: ['A', 'B'], answer: 'A', explain: 'Because.', given: 'A', correct: true, held: true };
+  let html;
+  for (let tries = 0; tries < 40 && html === undefined; tries++) {
+    try { html = context.__card(q, 0, 0, false, []); }
+    catch (e) { if (e.name !== 'ReferenceError') throw e; context[e.message.split(' ')[0]] = ''; }
+  }
+  assert.match(html, /<div class="quiz-next">.*data-chat="quiz-why"[^>]*>Ask Felix why<\/button><button type="button" class="btn plain sm" data-chat="quiz-draw">Visualize<\/button><\/div>/);
+  const said = /const VISUALIZE = '([^']+)';/.exec(source)[1];
+  assert.match(source, /what === 'quiz-draw'\) \{\n\s+send\(VISUALIZE\);/);
+  assert.equal(said, /draw: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'))[1]);
+  const seeing = /SEE_WORDS: \[&str; \d+\] = \[([^\]]+)\]/.exec(fs.readFileSync(path.join(__dirname, '../src/drawing.rs'), 'utf8'))[1].match(/"(\w+)"/g).map((w) => w.slice(1, -1));
+  assert.ok(said.toLowerCase().split(/\W+/).some((w) => seeing.includes(w)), 'the server knows the user asked to see something');
+});

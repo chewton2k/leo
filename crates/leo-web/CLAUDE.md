@@ -270,7 +270,11 @@ Decided: one app, window only (2026-10-31).
   (`path.pencil`), the caret after a
   streaming reply (`.msg.pending`) and the dot on his button
   (`#chat-toggle.working`, synced with the chat body's `aria-busy`), the chat's
-  working blot (`.msg-step-busy`), the first 600 ms of what he just made
+  working blot (`.msg-step-busy`), the head on his replies (`.msg-who`: the leo
+  mark and "Felix" in his voice, not on a reply that follows another of his) and
+  the ring of the idea being asked in the study strip (`.study-idea.now
+  .study-ring`, not under forced colours) (2026-11-21, the user's call; the quiz
+  card's heading `.quiz-kind` takes his voice, not his blue), the first 600 ms of what he just made
   (`inkLand(id, true)`), and while he
   waits on you: "Waiting for you" with its dot (`.proposal-wait`) on the latest
   reply's proposals until Apply or Dismiss (no coloured edge), the Ask Felix box in the
@@ -279,7 +283,7 @@ Decided: one app, window only (2026-10-31).
   dot after the open note's explorer row while he reads along (`.side-reading`,
   from `marginPage.reading`; margin-notes.js redraws the explorer when a read
   starts and ends; 2026-11-15). Never links,
-  buttons, selection, tags or text.
+  buttons, selection, tags or text (his name in the head excepted).
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
   rest, `--shadow-pop` for menus, toasts, sheets and the open note in Marks, with no

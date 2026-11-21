@@ -107,6 +107,7 @@
   const VERDICT_WITHIN = 240;
   const QUIZ_MARK_MS = 160;
   const BLOT = '<svg class="msg-step-busy" role="img" aria-label="working"><use href="#leo-mark"/></svg>';
+  const VISUALIZE = 'Draw this.';
   const DELETE_MARK = '<svg class="proposal-loop" width="11" height="12" viewBox="0 0 11 12" aria-hidden="true"><path d="M0.5 8.1 Q5.2 7.6 7.6 4.6 Q9.4 1.9 7.2 1.3 Q4.9 1.1 5.6 4.6 Q6.4 8.4 10.2 10.6"/></svg>';
   const STUDY_MARKS = {
     rings: ['M9 2.3 Q14.9 2.6 15.4 8.7 Q15.2 15.2 8.8 15.5 Q2.6 15.2 2.4 9.1 Q2.7 3.2 9.6 2.4', 'M9.2 2.4 Q15.3 2.9 15.3 9.2 Q14.8 15.4 8.7 15.3 Q2.5 14.9 2.6 8.8 Q2.9 2.6 9.8 2.6', 'M8.8 2.5 Q15.1 2.4 15.5 9 Q15.4 15.1 9.2 15.6 Q2.4 15.4 2.3 8.9 Q2.4 2.9 9.4 2.3'],
@@ -2097,7 +2098,8 @@
       const since = m.pending ? working.get(m) : 0;
       if (since) tick();
       const clock = since ? `<div class="msg-note msg-clock" data-since="${since}" role="timer">${workingFor(since)}</div>` : '';
-      return `<div class="msg leo${m.pending ? ' pending' : ''}" data-i="${i}">${badge}${body}${quizzes}${asks}${offers}${clock}${error}${from}${keep}</div>`;
+      const who = state.messages[i - 1]?.role === 'assistant' ? '' : '<div class="msg-who"><svg aria-hidden="true"><use href="#leo-mark"/></svg>Felix</div>';
+      return `<div class="msg leo${m.pending ? ' pending' : ''}" data-i="${i}">${who}${badge}${body}${quizzes}${asks}${offers}${clock}${error}${from}${keep}</div>`;
     }
 
     function onNote() {
@@ -2316,7 +2318,7 @@
       const verdict = judged ? `<div class="quiz-verdict">${q.correct ? 'Right' : 'Not quite'}</div>` : '';
       const feedback = judged && q.feedback ? `<div class="quiz-explain prose">${cite(render(q.feedback), sources, escape)}</div>` : '';
       const why = `${verdict}${feedback}${judged && q.explain && !(q.feedback && q.kind !== 'multiple_choice') ? `<div class="quiz-explain">${cite(inline(q.explain), sources, escape)}</div>` : ''}`;
-      const onward = q.held && marked && !marking ? `<div class="quiz-next"><button type="button" class="btn primary sm" data-chat="quiz-next" ${where}${state.busy ? ' disabled' : ''}>Next question</button>${reply ? '' : `<button type="button" class="btn plain sm" data-chat="quiz-why" ${where}${state.busy ? ' disabled' : ''}>Ask Felix ${q.correct ? 'why' : 'to explain'}</button>`}</div>` : '';
+      const onward = q.held && marked && !marking ? `<div class="quiz-next"><button type="button" class="btn primary sm" data-chat="quiz-next" ${where}${state.busy ? ' disabled' : ''}>Next question</button>${reply ? '' : `<button type="button" class="btn plain sm" data-chat="quiz-why" ${where}${state.busy ? ' disabled' : ''}>Ask Felix ${q.correct ? 'why' : 'to explain'}</button>`}<button type="button" class="btn plain sm" data-chat="quiz-draw"${state.busy ? ' disabled' : ''}>Visualize</button></div>` : '';
       const said = reply
         ? (grade(reply.text || '').text
           ? `<div class="quiz-reply prose">${cite(render(grade(reply.text).text), reply.sources || sources, escape, reply.files)}</div>`
@@ -3230,6 +3232,8 @@
         if (q) answerQuiz(Number(el.dataset.i), Number(el.dataset.k), q.options[Number(el.dataset.o)]);
       } else if (what === 'quiz-next' || what === 'quiz-why') {
         continueQuiz(Number(el.dataset.i), Number(el.dataset.k), what === 'quiz-why');
+      } else if (what === 'quiz-draw') {
+        send(VISUALIZE);
       } else if (what === 'quiz-think') {
         const q = state.messages[Number(el.dataset.i)]?.quizzes?.[Number(el.dataset.k)];
         if (!q) return;
