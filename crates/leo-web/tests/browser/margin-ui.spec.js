@@ -314,8 +314,8 @@ test('hovering an underlined passage lights its margin note', async ({ page }) =
   const card = page.locator('.margin-note');
   await expect(card).toBeVisible();
   await expect(card).not.toHaveAttribute('data-active', '');
-  const line = await page.locator('.margin-ink .squiggle').first().boundingBox();
-  await page.mouse.move(line.x + line.width / 2, line.y - 6);
+  const passage = await page.locator('.margin-ink .wash').first().boundingBox();
+  await page.mouse.move(passage.x + passage.width / 2, passage.y + passage.height / 2);
   await expect(card).toHaveAttribute('data-active', '');
   await expect.poll(() => card.evaluate((el) => getComputedStyle(el).backgroundColor)).not.toBe('rgba(0, 0, 0, 0)');
   await page.mouse.move(5, 5);

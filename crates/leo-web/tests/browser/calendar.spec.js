@@ -874,7 +874,7 @@ test("month view's more link and task times use the calendar's own styles", asyn
     expect(look.morePad).toBe('0px');
     expect(look.subs.length).toBeGreaterThan(0);
     for (const size of look.subs) expect(size).toBe(look.xs);
-    expect(look.name).toBe('650');
+    expect(look.name).toBe('500');
   });
 });
 

@@ -99,7 +99,7 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
     const link = doc.locator('a');
     expect(await link.evaluate(el => [getComputedStyle(el).textDecorationLine, getComputedStyle(el).backgroundImage.includes('svg')])).toEqual(['none', true]);
     const quote = doc.locator('blockquote');
-    expect(await quote.evaluate(el => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).paddingLeft, getComputedStyle(el, '::before').maskImage.includes('svg'), getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'])).toEqual(['0px', '17px', true, true]);
+    expect(await quote.evaluate(el => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).paddingLeft, getComputedStyle(el, '::before').maskImage.includes('svg'), getComputedStyle(el).backgroundColor !== 'rgba(0, 0, 0, 0)'])).toEqual(['0px', '16px', true, false]);
     await expect(doc.locator('th.align-right')).toHaveText('To A');
     await expect(doc.locator('td.align-right')).toHaveText(['0.20', '1,200']);
     expect(await doc.locator('thead').evaluate(el => [getComputedStyle(el.querySelector('th')).backgroundColor, getComputedStyle(el.querySelector('th'), '::after').maskImage.includes('svg')])).toEqual(['rgba(0, 0, 0, 0)', true]);

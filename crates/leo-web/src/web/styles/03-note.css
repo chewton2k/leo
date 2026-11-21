@@ -212,6 +212,7 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .margin-changed { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--text); }
 .margin-problem { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
 .margin-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; padding-top: 8px; }
+.margin-acts > button { min-height: 28px; }
 .margin-add { font-size: var(--fs-xs); font-weight: var(--fw-medium); line-height: 1.3; padding: 4px 8px; border: 0; border-radius: var(--r-tile); background: var(--surface-2); color: var(--accent); }
 .margin-add:hover { background: color-mix(in srgb, var(--text) 8%, var(--surface-2)); }
 .margin-revisit { position: absolute; left: 0; top: 0; height: 5px; box-sizing: border-box; padding: 0; border: 0; border-bottom: 1px dotted color-mix(in srgb, var(--text) 20%, transparent); border-radius: 0; background: none; cursor: pointer; transition: border-color var(--t-fade) ease-out; }

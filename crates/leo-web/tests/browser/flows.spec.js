@@ -4410,7 +4410,8 @@ test.describe('passages', () => {
     expect(reads[0].blocks).toEqual(['Then login just checks if it matches, I think']);
     await expect(area).toBeFocused();
     await expect(page.locator('.margin-ink .squiggle')).toHaveCount(1);
-    await expect(page.locator('.margin-ink .tether')).toHaveCount(0);
+    await expect(page.locator('.margin-ink .tether')).toHaveClass(/\brest\b/);
+    await expect(page.locator('.margin-ink .tether')).not.toHaveClass(/\bon\b/);
     expect(await page.locator('.margin-ink .squiggle').getAttribute('d')).not.toMatch(/ q| C/);
     await expect(page.locator('.margin-note .margin-felix')).toContainText('In plain text?');
     const delays = await page.locator('.ink-word').evaluateAll((words) => words.map((word) => parseFloat(word.style.animationDelay)));

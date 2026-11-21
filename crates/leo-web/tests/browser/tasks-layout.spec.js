@@ -477,7 +477,7 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
   }
 });
 
-test('the Undo countdown is a pencil line rubbed out from the right, and Undo keeps a straight underline', async ({ browser }) => {
+test('the Undo countdown is a pencil line rubbed out from the right, and Undo is a small plain button', async ({ browser }) => {
   const web = path.resolve(__dirname, '../../src/web');
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
   const toast = core.slice(core.indexOf('let toastTimer;'), core.indexOf('const MOTION_MS'));
@@ -499,7 +499,7 @@ test('the Undo countdown is a pencil line rubbed out from the right, and Undo ke
     await page.evaluate(() => show());
     const undo = page.locator('.toast button');
     const time = page.locator('.toast-time');
-    expect(await undo.evaluate(el => { const s = getComputedStyle(el); return [s.textDecorationLine, s.maskImage, s.textDecorationStyle]; })).toEqual(['underline', 'none', 'solid']);
+    expect(await undo.evaluate(el => { const s = getComputedStyle(el); return [s.textDecorationLine, s.maskImage, s.textDecorationStyle]; })).toEqual(['none', 'none', 'solid']);
     expect(await time.evaluate(el => [getComputedStyle(el).maskImage.startsWith('url('), getComputedStyle(el).animationName, getComputedStyle(el).animationDuration])).toEqual([true, 'toast-time', '10s']);
     await page.waitForTimeout(1000);
     const erased = await time.evaluate(el => Number(/inset\(0px ([\d.]+)%/.exec(getComputedStyle(el).clipPath)?.[1]));

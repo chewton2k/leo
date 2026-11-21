@@ -26,6 +26,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
   const fixtureScript = `const $=(selector,root=document)=>root.querySelector(selector);
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const enc=encodeURIComponent;
+    const plural=(n,word,many=word+"s")=>n+" "+(n===1?word:many);
     class Locked extends Error {}
     ${icons}
     ${motion}
