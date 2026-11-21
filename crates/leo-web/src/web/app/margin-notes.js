@@ -773,6 +773,8 @@ function marginDropThread(id) {
   if (marginPage.focus === id) marginPage.focus = null;
 }
 
+const marginReplies = (t) => Math.max(0, (t.messages || []).length - 1);
+
 function marginMark(t) {
   let mark = marginPage.marks.get(t.id);
   if (!mark) {
@@ -781,7 +783,7 @@ function marginMark(t) {
     mark.className = 'margin-mark';
     mark.dataset.id = t.id;
     mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”`);
-    mark.innerHTML = t.id === 'reading' ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : '<span class="margin-anchor" aria-hidden="true"><svg><use href="#leo-mark"/></svg></span>';
+    mark.innerHTML = t.id === 'reading' ? '<svg class="margin-drop" aria-hidden="true"><use href="#leo-mark"/></svg>' : '<span class="margin-anchor" aria-hidden="true"><svg><use href="#leo-mark"/></svg></span><span class="margin-count" aria-hidden="true"></span>';
     if (t.id === 'reading') {
       mark.classList.add('reading');
       mark.tabIndex = -1;
@@ -1142,6 +1144,7 @@ function marginSlots(placed, columns) {
     leoDoc.insertAt(point, slot);
     slots.set(id, slot);
   }
+  for (const { t } of placed) slots.get(t.id)?.toggleAttribute('data-more', marginReplies(t) > 0);
   return slots;
 }
 
@@ -1185,7 +1188,13 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
   }
   for (const { t, rects } of boxes) {
     const mark = marginMark(t);
-    mark.toggleAttribute('data-more', (t.messages || []).length > 1);
+    const replies = marginReplies(t);
+    mark.toggleAttribute('data-more', replies > 0);
+    const count = $('.margin-count', mark);
+    if (count) {
+      count.textContent = replies > 9 ? '9+' : replies || '';
+      mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”${replies ? `, ${plural(replies, 'reply', 'replies')}` : ''}`);
+    }
     const size = mark.offsetWidth;
     const slot = slots.get(t.id)?.getBoundingClientRect();
     let x, y;

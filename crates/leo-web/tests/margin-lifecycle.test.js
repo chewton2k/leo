@@ -918,6 +918,7 @@ function paragraph(text) {
   class Box extends Bit {
     constructor(name = '') { super(); this.nodeType = 1; this.className = name; this.kids = []; this.dataset = {}; this.classList = { contains: (c) => this.className.split(' ').includes(c) }; }
     setAttribute() {}
+    toggleAttribute() {}
     closest(sel) { for (let at = this; at; at = at.parent) if (at.classList?.contains(sel.slice(1))) return at; return null; }
     querySelectorAll(sel) { return this.kids.flatMap((kid) => (kid.kids ? [...(kid.classList.contains(sel.slice(1)) ? [kid] : []), ...kid.querySelectorAll(sel)] : [])); }
     querySelector(sel) { const id = sel.match(/data-id="([^"]+)"/)?.[1]; return this.querySelectorAll('.margin-slot').find((slot) => slot.dataset.id === id) || null; }

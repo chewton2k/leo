@@ -1159,14 +1159,18 @@ test('every open thread offers the chat fallback, pin and chat close the action 
   }, { threads: [THREADS.short] });
 });
 
-test('a closed thread with replies says how many more and marks-only shows a ring', async ({ browser }) => {
+test('a closed thread with replies says how many more and marks-only shows the count beside the blot', async ({ browser }) => {
   const two = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it.' }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Salt it too.' }] };
   await fixture(browser, async page => {
     await expect(page.locator('.margin-note[data-id="t1"] .margin-foot')).toHaveText('2 replies');
     await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Salt it too.');
   }, { threads: [two] });
   await fixture(browser, async page => {
-    await expect(page.locator('.margin-mark[data-id="t1"]')).toHaveAttribute('data-more', '');
+    const mark = page.locator('.margin-mark[data-id="t1"]');
+    await expect(mark).toHaveAttribute('data-more', '');
+    await expect(mark.locator('.margin-count')).toHaveText('2');
+    await expect(mark).toHaveAttribute('aria-label', /, 2 replies$/);
+    await expect(page.locator('.margin-slot[data-id="t1"]')).toHaveAttribute('data-more', '');
   }, { threads: [two], layout: 'marks' });
 });
 

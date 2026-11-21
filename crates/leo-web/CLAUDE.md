@@ -796,7 +796,9 @@ Felix (2026-10-19).
   layout's room (`ROOM_BOTH` 992 px, `ROOM_RIGHT` 928 px of columns) it becomes marks,
   never one side (2026-11-16, the user's call). It never moves every note right to make them wider. A closed note
   in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
-  are a 13 px ink blot just after the passage's last word, never over the text: `marginSlots`
+  are a 13 px ink blot just after the passage's last word, never over the text (a thread with replies
+  shows their count beside the blot, `9+` past nine, in the mark's aria-label too, and its slot is
+  32 px wide, 2026-11-21, the user's call): `marginSlots`
   puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
   the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
   editor or a code, table or maths block) before anything is measured, and the blot sits on
