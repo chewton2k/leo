@@ -1799,7 +1799,7 @@ are listed newest release first, then most capable first (the Rust list stays
 cheapest-first: `models.first()` is the quick model); Ollama models largest
 first. Felix activity is a dashboard (period switch, stat tiles, tokens-per-day
 bars scaled to `faNiceMax` with three labelled gridlines and dates under the bars,
-model and purpose donuts, Running now, and the chosen period's timing, failures
+model and purpose as ranked rows with thin share bars (2026-11-21, the user's call: no donut), Running now, and the chosen period's timing, failures
 and tools under a closed More detail; 24 hours shows hourly bars, 2026-11-09). Models are coloured by maker (2026-11-08, the user's call: `faFamily`, a
 name with `:` is local first, then GPT, then Claude; `--fam-openai|claude|local-1..3`,
 per-theme ramps at 3:1 or more; a fourth model of one maker and Other are hatched);

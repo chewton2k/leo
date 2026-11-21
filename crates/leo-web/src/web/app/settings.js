@@ -569,7 +569,6 @@ function pickLetters(el) {
 let felixActivity = { span: 30, day: null, pin: null, ranks: null, view: null, processes: null, busy: false, roll: false, drawn: false, timer: 0, watching: false, watch: null };
 const faBound = new WeakSet();
 const FA_HEIGHT = 118;
-const FA_RING = 2 * Math.PI * 52;
 const FA_NEUTRAL = 'color-mix(in srgb, var(--text) 45%, transparent)';
 
 function faToday(hourly) {
@@ -661,20 +660,7 @@ function faReadout(i) {
   return `<div class="fa-rh"><b>${esc(faBarName(bar, period.length === 90))}</b> · ${head}</div><div class="fa-rm">${parts}</div>`;
 }
 
-function faDonut(kind, slices, total, label) {
-  let at = 0;
-  const arcs = slices.map((slice, i) => {
-    const arc = slice.value / total * FA_RING;
-    const length = Math.max(0, arc - (arc < 3 ? 0 : 2));
-    const ring = `<circle class="fa-slice${felixActivity.pin && felixActivity.pin.d === kind && felixActivity.pin.i === i ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" cx="60" cy="60" r="52" fill="none" stroke="${slice.colour}" stroke-width="12" stroke-dasharray="${length.toFixed(2)} ${(FA_RING - length).toFixed(2)}" stroke-dashoffset="${(-at).toFixed(2)}" transform="rotate(-90 60 60)"/>`;
-    at += arc;
-    return ring;
-  }).join('');
-  const pinned = felixActivity.pin && felixActivity.pin.d === kind ? slices[felixActivity.pin.i] : null;
-  const shown = pinned ? { big: faCompact(pinned.value), small: kind === 'm' ? faModelName(pinned.name) : faKindLabel(pinned.name) } : { big: faCompact(total), small: label };
-  return `<div class="fa-ring${pinned ? ' hl' : ''}"><svg width="120" height="120" viewBox="0 0 120 120" aria-hidden="true"><mask id="fa-mask-${kind}"><circle class="fa-sweep" cx="60" cy="60" r="52" fill="none" stroke="#fff" stroke-width="16" stroke-dasharray="${FA_RING.toFixed(2)} ${FA_RING.toFixed(2)}" transform="rotate(-90 60 60)"/></mask><g mask="url(#fa-mask-${kind})">${arcs}</g></svg><div class="fa-centre" data-big="${esc(faCompact(total))}" data-small="${esc(label)}"><b>${esc(shown.big)}</b><span>${esc(shown.small)}</span></div></div>`;
-}
-function faPanel(kind, title, items, unit, label) {
+function faPanel(kind, title, items, unit) {
   const total = items.reduce((sum, item) => sum + item.value, 0);
   const name = (item) => (kind === 'm' ? faModelName(item.name) : faKindLabel(item.name));
   const cost = (item) => `<span class="fa-lg-c" title="At API prices">${esc(faCost(item))}</span>`;
@@ -685,9 +671,9 @@ function faPanel(kind, title, items, unit, label) {
     const rows = items.map((item, i) => {
       const on = felixActivity.pin && felixActivity.pin.d === kind && felixActivity.pin.i === i;
       const calls = kind === 'm' ? `<span class="fa-lg-r">${faCompact(item.calls)} req</span>` : '';
-      return `<button type="button" class="fa-lg${kind === 'k' ? ' k' : ''}${on ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" data-big="${esc(faCompact(item.value))}" data-small="${esc(name(item))}" aria-pressed="${on}"><i style="background:${item.colour}"></i><span class="fa-lg-n" title="${esc(name(item))}">${esc(name(item))}</span><span class="fa-lg-v" title="${faExact(item.value)}">${faCompact(item.value)}</span>${calls}${cost(item)}<span class="fa-lg-s">${faShare(item.value, total)}</span></button>`;
+      return `<button type="button" class="fa-lg${kind === 'k' ? ' k' : ''}${on ? ' on' : ''}" data-fa-d="${kind}" data-fa-i="${i}" aria-pressed="${on}"><i style="background:${item.colour}"></i><span class="fa-lg-n" title="${esc(name(item))}">${esc(name(item))}</span><span class="fa-lg-v" title="${faExact(item.value)}">${faCompact(item.value)}</span>${calls}${cost(item)}<span class="fa-lg-s">${faShare(item.value, total)}</span><span class="fa-lg-bar" style="--w:${(item.value / total * 100).toFixed(1)}%;--c:${item.colour}"></span></button>`;
     }).join('');
-    body = `<div class="fa-dp">${faDonut(kind, items, total, label)}<div class="fa-legend">${rows}</div></div>`;
+    body = `<div class="fa-legend">${rows}</div>`;
   }
   return `<div class="fa-panel" data-fa-d="${kind}"><div class="fa-h">${title}</div>${body}</div>`;
 }
@@ -725,7 +711,7 @@ function faPeriod(period, ranks, span) {
     <div class="fa-readout">${faReadout(at)}</div></div>` : '';
   const models = faSlices(period.models.map((row) => ({ ...row, value: row.tokens })), ranks);
   const kinds = period.kinds.filter((row) => row.calls > 0).map((row) => ({ ...row, value: row.calls, colour: faKindColour(row.name) }));
-  return `${stats}${chart}<div class="fa-donuts">${faPanel('m', 'Tokens by model', models, 'tokens', 'tokens')}${faPanel('k', 'Requests by kind', kinds, 'requests', 'requests')}</div>`;
+  return `${stats}${chart}<div class="fa-panels">${faPanel('m', 'Tokens by model', models, 'tokens')}${faPanel('k', 'Requests by kind', kinds, 'requests')}</div>`;
 }
 
 function faProcessIcon(name) {
@@ -805,19 +791,13 @@ function felixUsageCard(page) {
 
 function faHighlight(card, kind, index) {
   const panel = card.querySelector(`.fa-panel[data-fa-d="${kind}"]`);
-  if (!panel || !panel.querySelector('.fa-ring')) return;
+  if (!panel) return;
   const pin = felixActivity.pin && felixActivity.pin.d === kind ? felixActivity.pin.i : null;
   const shown = index === null ? pin : index;
-  panel.querySelector('.fa-ring').classList.toggle('hl', shown !== null);
-  for (const slice of panel.querySelectorAll('.fa-slice')) slice.classList.toggle('on', Number(slice.dataset.faI) === shown);
   for (const row of panel.querySelectorAll('.fa-lg')) {
     row.classList.toggle('on', Number(row.dataset.faI) === shown);
     row.setAttribute('aria-pressed', String(Number(row.dataset.faI) === pin));
   }
-  const centre = panel.querySelector('.fa-centre');
-  const row = shown === null ? null : panel.querySelector(`.fa-lg[data-fa-i="${shown}"]`);
-  centre.querySelector('b').textContent = row ? row.dataset.big : centre.dataset.big;
-  centre.querySelector('span').textContent = row ? row.dataset.small : centre.dataset.small;
 }
 function faEscape(e) {
   if (!felixActivity.pin) {
@@ -957,7 +937,6 @@ function playActivity(card) {
   const run = () => {
     if (felixActivity.drawn || !card.isConnected) return;
     felixActivity.drawn = true;
-    for (const sweep of card.querySelectorAll('.fa-sweep')) sweep.animate([{ strokeDashoffset: FA_RING }, { strokeDashoffset: 0 }], { duration: OPEN_MS, easing: EASE_OUT });
     card.querySelector('.fa-days').animate([{ opacity: 0 }, { opacity: 1 }], { duration: OPEN_MS, easing: EASE_OUT });
   };
   if (typeof IntersectionObserver !== 'function') return run();
