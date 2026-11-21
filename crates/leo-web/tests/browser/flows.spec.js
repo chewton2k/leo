@@ -5075,7 +5075,7 @@ test.describe('beside the note', () => {
     await expect(body, 'folded at start').toBeHidden();
     await expect(box.locator('.tasks-badge')).toHaveText(/^\d+\+?$/);
     await expect(box).toHaveAttribute('aria-label', /^Tasks: .*to do$/);
-    expect((await box.boundingBox()).width).toBeLessThan(60);
+    expect((await box.boundingBox()).width).toBeLessThan(90);
     expect(await page.evaluate(() => localStorage.getItem('leo-tasks-folded'))).toBeNull();
     await expect(page.locator('#side [data-action="tasks-toggle"]')).toHaveCount(0);
     await box.hover();
@@ -5184,7 +5184,7 @@ test.describe('beside the note', () => {
       await expect(box.locator('.tasks-badge'), hash).toHaveText(/^\d+\+?$/);
       const chip = await box.boundingBox();
       const text = await page.locator(content).boundingBox();
-      expect(chip.width, hash).toBeLessThan(60);
+      expect(chip.width, hash).toBeLessThan(90);
       expect(chip.x + chip.width <= text.x || chip.y + chip.height <= text.y || chip.x >= text.x + text.width || chip.y >= text.y + text.height, `${hash}: the chip stays off the page`).toBe(true);
       await box.hover();
       await expect(body, `${hash}: hovering opens it`).toContainText(`Reading task ${tag}`);

@@ -234,12 +234,12 @@ body.on-note main { padding-bottom: max(calc(var(--bottom) + 110px), var(--dock-
 .tasks-row.done .tasks-title { color: var(--muted); }
 .tasks-when { flex: none; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .tasks-foot { padding: 8px 16px 12px; font-size: var(--fs-sm); }
-.tasks-badge { display: none; position: absolute; top: -4px; right: -4px; min-width: 19px; height: 19px; padding: 0 5px; border-radius: var(--r-pill); background: var(--accent); color: var(--accent-text); font-size: var(--fs-xs); font-weight: 700; line-height: 19px; text-align: center; font-variant-numeric: tabular-nums; }
-.cal-stack-more::after, .chat-history-x::after, .tasks-badge::after { content: ''; position: absolute; inset: -6px; }
-.tasks-window:not(:hover, :focus-within) { align-self: flex-start; border-radius: 50%; overflow: visible; }
+.tasks-badge { display: none; font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.cal-stack-more::after, .chat-history-x::after { content: ''; position: absolute; inset: -6px; }
+.tasks-window:not(:hover, :focus-within) { align-self: flex-start; border-radius: 22px; }
 .tasks-window:not(:hover, :focus-within) :is(.tasks-body, .tasks-foot, .tasks-new, .tasks-toggle .grow) { display: none; }
-.tasks-window:not(:hover, :focus-within) .tasks-toggle { position: relative; display: grid; place-items: center; width: 44px; height: 44px; padding: 0; }
+.tasks-window:not(:hover, :focus-within) .tasks-toggle { height: 44px; padding: 0 14px 0 10px; }
 .tasks-window:not(:hover, :focus-within) .tasks-icon { width: 26px; height: 26px; }
 .tasks-window:not(:hover, :focus-within) .tasks-icon svg { width: 15px; height: 15px; }
 .tasks-window:not(:hover, :focus-within) .tasks-badge { display: block; }
-.tasks-badge.late { background: var(--danger); }
+.tasks-badge.late { color: var(--danger); }

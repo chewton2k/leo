@@ -1139,7 +1139,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   (2026-11-21, the user's call): `cal.more` holds the day, the cell raises (`.cal-pop`,
   `--shadow-lift`), the label becomes Show less, and Escape, a click outside or the label
   closes it; the day number still opens Day, and no other cell moves.
-- The Tasks card in `#dock` is folded to a badge at every start and opens only
+- The Tasks card in `#dock` is folded to a small pill (the tick and the open count as plain text, danger-coloured when something is late; 2026-11-21, the user's call) at every start and opens only
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
   not take focus). Home draws the date, one sentence
