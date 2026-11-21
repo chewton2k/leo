@@ -514,11 +514,15 @@
       .trim();
   }
 
-  function readTime(markdown) {
+  function wordCount(markdown) {
     const text = plain(markdown);
-    const words = typeof Intl === 'object' && Intl.Segmenter
+    return typeof Intl === 'object' && Intl.Segmenter
       ? [...new Intl.Segmenter('en', { granularity: 'word' }).segment(text)].filter((part) => part.isWordLike).length
       : text.split(' ').filter((word) => /[\p{L}\p{N}]/u.test(word)).length;
+  }
+
+  function readTime(markdown) {
+    const words = wordCount(markdown);
     return words ? `${Math.ceil(words / 238)} min read` : '';
   }
 
@@ -691,7 +695,7 @@
     return copyHtml(box.innerHTML);
   }
 
-  const api = { render, copyHtml, selectionCopy, plain, readTime, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -397,6 +397,8 @@ test('the read time counts words outside code at 238 a minute', () => {
   assert.equal(md.readTime('# Hello\n\n- [ ] one task\n\n```\nskip these words\n```\n\n| a | b |\n|---|---|\n| c — d |'), '1 min read');
   assert.equal(md.readTime('one\n\n```\n' + 'skip '.repeat(300) + '\n```\n'), '1 min read');
   assert.equal(md.readTime('```\n' + 'skip '.repeat(300) + '\n```'), '');
+  assert.equal(md.wordCount('# Hello\n\n```\nskip these\n```\n\none two'), 3);
+  assert.equal(md.wordCount(''), 0);
   assert.equal(md.readTime('w '.repeat(238)), '1 min read');
   assert.equal(md.readTime('w '.repeat(239)), '2 min read');
   assert.equal(md.readTime('w '.repeat(1200)), '6 min read');

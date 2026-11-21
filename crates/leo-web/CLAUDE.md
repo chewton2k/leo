@@ -407,7 +407,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
   `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
-  edit); there is no word count (2026-11-16, the user's call). It is skipped by search highlights and hidden in print. The note's
+  edit); the line has no word count (2026-11-16, the user's call), but the ⋯ menu ends
+  with one quiet footer row, the word count alone (`md.wordCount`, no read time or last
+  edit; 2026-11-21, the user's call: "maybe we just need the word count and that's it"). It is skipped by search highlights and hidden in print. The note's
   tools (transcript, Tasks, Add picture, Move to folder, Read through and Share as second
   steps, Move to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js); Read through
   (2026-11-21, the user's call: no button in the note head) lists the readers, the note's

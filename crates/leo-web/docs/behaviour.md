@@ -256,7 +256,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   edge to edge, banded rows and right-aligned number columns; code blocks show their
   language and a Copy button on hover or keyboard focus. Chat, margin notes, previews
   and board cards keep plain styling. A faint line under the title says when the
-  note was edited and its read time ("M min read"; no word count). Note rows in the explorer edited in the last 30 minutes carry a small
+  note was edited and its read time ("M min read"); the note ⋯ menu ends with the word count alone, a quiet footer row (2026-11-21, the user's call). Note rows in the explorer edited in the last 30 minutes carry a small
   dot (not when sorted by Last edited).
 
 - No editor view: `editing.js` splits the body into blocks; `doc.js` renders

@@ -207,15 +207,15 @@ body.side-mini .home-foot svg.drawn-arrow { display: none; }
 .home-ask input { font-size: var(--fs-lg); }
 .home-ask:focus-within { border-color: var(--focus); }
 .home-dictate { margin: -12px 0 24px; }
-.popup-menu, .popup-menu-gone { position: fixed; z-index: 110; min-width: 180px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; padding: 5px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow-pop); }
-:is(.popup-menu, .popup-menu-gone) button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; }
+.popup-menu, .popup-menu-gone { position: fixed; z-index: 110; min-width: 180px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; overscroll-behavior: contain; padding: 4px; border-radius: var(--r-md); background: var(--raised); box-shadow: var(--shadow-pop); }
+:is(.popup-menu, .popup-menu-gone) button { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 36px; padding: 8px 12px; border: 0; border-radius: var(--r-sm); background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); text-align: left; }
 :is(.popup-menu, .popup-menu-gone) button:disabled { opacity: .45; }
 :is(.popup-menu, .popup-menu-gone) svg { flex: none; width: 16px; height: 16px; color: var(--muted); }
 :is(.popup-menu, .popup-menu-gone) .danger, :is(.popup-menu, .popup-menu-gone) .danger svg { color: var(--danger); }
 :is(.popup-menu, .popup-menu-gone) [aria-checked] .grow { flex: 1; }
-:is(.popup-menu, .popup-menu-gone) hr { margin: 5px 12px; border: 0; border-top: 1px solid var(--line); }
+:is(.popup-menu, .popup-menu-gone) hr { margin: 4px 12px; border: 0; border-top: 1px solid var(--line); }
 :is(.popup-menu, .popup-menu-gone) p { max-width: 260px; margin: 0; padding: 6px 12px 4px; color: var(--muted); font-size: var(--fs-xs); }
-.popup-menu input { width: 100%; box-sizing: border-box; margin-bottom: 5px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-sm); }
+.popup-menu input { width: 100%; box-sizing: border-box; margin-bottom: 4px; padding: 7px 10px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text); font: inherit; font-size: var(--fs-sm); }
 .popup-menu input:focus { border-color: var(--focus); outline: none; }
 .popup-menu:has(input) { width: min(300px, calc(100vw - 16px)); box-sizing: border-box; overflow: hidden; }
 .slash-menu { width: min(260px, calc(100vw - 16px)); box-sizing: border-box; max-height: min(320px, calc(100dvh - 16px)); overscroll-behavior: contain; }

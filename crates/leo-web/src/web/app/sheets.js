@@ -641,6 +641,7 @@ function throughRow() {
 
 function noteMenu(owner) {
   const note = state.view === 'note' ? state.session?.note || {} : {};
+  const words = note.id && state.session.doc ? md.wordCount(state.session.doc.source()) : 0;
   popupMenu(owner, {
     label: 'This note',
     rows: [
@@ -652,6 +653,7 @@ function noteMenu(owner) {
       { text: 'Share', icon: ICON.share, next: shareRows() },
       { line: true },
       { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },
+      ...(words ? [{ line: true }, { note: `${words.toLocaleString()} ${words === 1 ? 'word' : 'words'}` }] : []),
     ],
   });
 }
