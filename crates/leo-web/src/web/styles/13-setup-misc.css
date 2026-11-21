@@ -335,11 +335,11 @@ body.files-over main::after {
   .settling > :nth-child(n+3), .sheet > :nth-child(n+4), .settings-section.arrive > :nth-child(n+3), .chat-main > .chat-foot, .margin-note[data-open] .margin-acts { animation-delay: 60ms; }
   .kanban-cols.settling > *, .kanban-cards.rows-in > *, .chat-history-list.rows-in > * { animation-name: fade; }
   .swap-in > :last-child { animation: fade var(--t-follow) var(--ease-arrive); }
-  .tab-wipe > .kanban-tab.on { background: linear-gradient(var(--tab-on), var(--tab-on)) no-repeat 0 0 / 100% 100%; animation: tab-wipe var(--t-follow) var(--ease-move); }
+  .tab-wipe > .kanban-tab.on::after { animation: tab-wipe var(--t-follow) var(--ease-move); }
 }
 @keyframes row-in { from { opacity: 0; transform: translateY(4px); } }
 @keyframes row-soft { from { opacity: .25; } }
-@keyframes tab-wipe { from { background-size: 0 100%; } }
+@keyframes tab-wipe { from { clip-path: inset(0 100% 0 0); } }
 .overlap-gone { position: fixed; z-index: 5; margin: 0; overflow: hidden; pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
   .btn, .icon-btn, .float-act, .rec-round, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab, .kanban-add-card, .msg-act, .choice-pick, .margin-mode { transition: scale var(--t-press) var(--ease-arrive); }
@@ -455,6 +455,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
   .choice-ring { box-shadow: none; outline: 3px solid Highlight; outline-offset: 2px; }
   .side-folder.on:has(> .side-pill), .side-note.on:has(> .side-pill) { background: Highlight; color: HighlightText; }
   .side-note.open { outline: 1px dotted CanvasText; outline-offset: -1px; }
+  .kanban-card.open { outline: 2px solid Highlight; }
   .settings-nav:has(.settings-nav-pill.placed) .settings-link.on { background: Highlight; color: HighlightText; }
   .segment-pill, .side-pill, .settings-nav-pill { display: none; }
   .side-row:hover:not(.on), .side-folder:hover:not(.on), .settings-link:hover:not(.on) { outline: 1px solid Highlight; }

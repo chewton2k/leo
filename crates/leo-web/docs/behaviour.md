@@ -1543,7 +1543,7 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   the page fills the window and never scrolls itself. One header row (`kanbanHeadHtml`)
   holds the board tabs with count badges, a + for New board, Add column and the board's
   ⋯. The open board's tab is its name: `.kanban-title` edits in place inside it, so the
-  name shows once. A tab is one click; a card dropped on a tab moves to that board, with
+  name shows once, and the current tab is marked by the pencil underline of note rules (`.kanban-tab.on::after`; 2026-11-21, the user's call). A card is hovered, and open, with a one-step tone (`--step`, no ring); the open card also keeps a 3 px ink edge on its left. A tab is one click; a card dropped on a tab moves to that board, with
   Undo. `kanbanFit` shows whole tabs only, the open board's always among them, and puts
   the rest under "n more" (`#kanban-switch`, the shared dropdown; the tabs move to `.kanban-over`,
   and while a card is dragged they all show again and the row scrolls near its ends, so
