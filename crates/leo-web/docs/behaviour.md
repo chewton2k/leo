@@ -951,6 +951,7 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
   only when given `marks`: quiz cards and file chips keep their look. The prompt (`BASE`, `REPLY_STYLE`):
   one cite per bullet, short plain sentences, no bold except a closing "Next:" line.
 - Copy, Retry and Edit (2026-11-09): every answer has Copy (Markdown, citations as links); the last answer has Retry and the last question Edit, both off while a reply streams. They take the last pair back with POST `/api/chats/{id}/drop` `{count, total}` (`chats::drop_last`, 409 unless the saved chat has `total` messages), then resend or put the text in the composer.
+  Earlier answers show their action row only on hover or keyboard focus (2026-11-21, the user's call; on touch it stays), the newest always, and an answer's Set up writing AI button always.
 - Files for Felix (`chat_files`, ≤10 per chat, text only, deleted with the
   chat), passages (Ask Felix on a selection, ⌘⇧E by default, customizable in Settings → Shortcuts; no bottom Ask button), Add to note
   (`routes/insert.rs`, version-checked, request ids dedupe double presses),
