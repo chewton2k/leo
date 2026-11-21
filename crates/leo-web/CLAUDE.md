@@ -910,7 +910,9 @@ Felix (2026-10-19).
   thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
   The ask box shows "Enter to ask · Esc to close"; a draw ask waits with "Sketching it…"
   (`MARGIN_DRAWS`). A silent read leaves a faint aria-hidden "Nothing to add." after the
-  passage for 2.6 s (`marginQuiet`). A resolved note stays faded (.45) with a "Resolved"
+  passage for 2.6 s (`marginQuiet`). Inside a margin note the stack steps by 8 px (open thread
+  indent 12 px, reply and action rows 8 px) and Add to note is a small plain button on `--surface-2`
+  with the control radius, not a pill (2026-11-21, the user's call). A resolved note stays faded (.45) with a "Resolved"
   label until the note is left (`marginPage.faded`); clicking it reopens it. A new stepped
   drawing plays once (`playDrawing`, 1.1 s a step plus 20 ms a caption character, none
   under Reduce Motion, never when its step is remembered); ↻ plays it again.
