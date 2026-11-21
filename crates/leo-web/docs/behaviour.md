@@ -1124,7 +1124,7 @@ target. Check the page sequence after loading preferences.
 - Selection: ⌘⇧E (customizable, stored per window in `leo-shortcuts`) opens a draft in the margin and asks at once, POST
   `.../margin/threads` (no read-along needed) with an empty question (`margin::UNSPOKEN`;
   only Felix's message is stored). A selection shows a small toolbar (`.ask-float`, `role=toolbar`, 2026-11-14, no
-  formatting row): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat
+  formatting row; hairline separators between its three actions and the Felix mark leading the first, 2026-11-21, the user's call): Felix this (⌘↵ / Ctrl+Enter, fixed, only while the toolbar shows and focus is not in the margin, chat
   or a sheet) and Visualize ask at once with "Respond to this passage." / "Draw this." through
   the same POST, so its guards and the chat fallback apply. With margin room (Right or Both) the toolbar opens in the
   right margin level with the selection's first line as a short vertical list (`.ask-float.beside`); otherwise it sits

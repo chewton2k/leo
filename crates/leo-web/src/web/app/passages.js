@@ -3,7 +3,7 @@ const askFloat = document.createElement('div');
 askFloat.className = 'float-act ask-float';
 askFloat.setAttribute('role', 'toolbar');
 askFloat.setAttribute('aria-label', 'Felix and this passage');
-askFloat.innerHTML = `<p class="ask-long"></p><button type="button" data-ask="this"><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><button type="button" data-ask="ask">Ask Felix</button><button type="button" data-ask="draw">Visualize</button>`;
+askFloat.innerHTML = `<p class="ask-long"></p><button type="button" data-ask="this"><svg aria-hidden="true"><use href="#leo-mark"/></svg><span>Felix this</span><kbd>${ON_MAC ? '⌘↵' : 'Ctrl+Enter'}</kbd></button><i class="ask-sep" aria-hidden="true"></i><button type="button" data-ask="ask">Ask Felix</button><i class="ask-sep" aria-hidden="true"></i><button type="button" data-ask="draw">Visualize</button>`;
 askFloat.hidden = true;
 askFloat.dataset.keepSelection = '';
 askFloat.addEventListener('mousedown', (e) => e.preventDefault());
