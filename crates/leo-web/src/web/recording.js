@@ -137,7 +137,7 @@
     const most = Math.min(rest.length, next.length);
     let keep = 0;
     while (keep < most && rest.charCodeAt(keep) === next.charCodeAt(keep)) keep++;
-    if (/\S/.test(next[keep] || '')) keep -= /\S{0,32}$/.exec(next.slice(0, keep))[0].length;
+    if (/\S/.test(next[keep] || '')) keep -= /\S{0,32}$/.exec(next.slice(Math.max(0, keep - 32), keep))[0].length;
     if (keep > 0 && /[\uD800-\uDBFF]/.test(next[keep - 1])) keep--;
     return { drop, keep, tail: next.slice(keep) };
   }
@@ -650,22 +650,23 @@
       }
     }
 
+    function graft(now, made, heard) {
+      const fresh = [...made.children];
+      if (fresh.length !== now.children.length) return false;
+      return [...now.children].every((child, i) => {
+        if (child === heard) return fresh[i].id === heard.id;
+        if (!child.contains(heard)) return child.replaceWith(fresh[i]) || true;
+        child.className = fresh[i].className;
+        return graft(child, fresh[i], heard);
+      });
+    }
+
     function paintLive(box) {
       const html = drawLive();
       const heard = box.querySelector('#rec-heard');
-      const shell = heard && heard.parentElement;
-      if (!shell || shell.parentElement !== box || !shell.classList.contains('rec-live')) {
-        box.innerHTML = html;
-        return;
-      }
       const made = root.document.createElement('div');
       made.innerHTML = html;
-      const fresh = made.firstElementChild;
-      shell.className = fresh.className;
-      const old = [...shell.children].filter((child) => child !== heard);
-      const next = [...fresh.children].filter((child) => child.id !== 'rec-heard');
-      old.forEach((child, i) => (next[i] ? child.replaceWith(next[i]) : child.remove()));
-      next.slice(old.length).forEach((child) => shell.append(child));
+      if (!heard || !graft(box, made, heard)) box.innerHTML = html;
     }
 
     function showTranscript(box) {

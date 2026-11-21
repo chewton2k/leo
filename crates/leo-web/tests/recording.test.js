@@ -394,21 +394,33 @@ test('the live transcript is patched in place: kept words stay the same node and
   assert.equal(again.text.textContent, 'Said before');
 });
 
-test('a live redraw replaces the cards around the transcript and never the transcript itself', () => {
-  const kid = (id) => ({ id });
-  const heard = kid('rec-heard');
-  const shell = { className: 'rec rec-live', classList: { contains: (c) => shell.className.split(' ').includes(c) }, children: [kid('card'), heard, kid('pad'), kid('wants')] };
-  heard.parentElement = shell;
-  shell.children.forEach((child) => {
-    child.replaceWith = (next) => { if (child === heard) throw new Error('the transcript was replaced'); shell.children[shell.children.indexOf(child)] = next; };
-    child.remove = () => { throw new Error('a card was removed'); };
-  });
-  const box = { querySelector: (at) => (at === '#rec-heard' ? heard : null), set innerHTML(v) { throw new Error('the whole page was rewritten'); } };
-  shell.parentElement = box;
-  const fresh = { className: 'rec rec-live paused', children: [kid('card'), kid('rec-heard'), kid('pad'), kid('wants')] };
-  const document = { createElement: () => ({ set innerHTML(v) { this.firstElementChild = fresh; } }) };
-  piece('paintLive', 'showTranscript', 'paintLive', { root: { document }, drawLive: () => '<div class="rec rec-live paused"></div>' })(box);
+test('a live redraw replaces the cards around the transcript, at any depth, and never the transcript itself', () => {
+  const el = (id, children = [], className = '') => {
+    const node = { id, className, children };
+    node.contains = (other) => node === other || node.children.some((child) => child.contains(other));
+    children.forEach((child) => {
+      child.replaceWith = (next) => { if (child.id === 'rec-heard') throw new Error('the transcript was replaced'); node.children[node.children.indexOf(child)] = next; };
+    });
+    return node;
+  };
+  const page = (paused) => [el('card'), el('pane', [el('side'), el('rec-heard')], paused ? 'pane paused' : 'pane'), el('pad'), el('wants')];
+  const shown = page(false);
+  const heard = shown[1].children[1];
+  const box = el('box', [el('', shown, 'rec rec-live')]);
+  box.querySelector = (at) => (at === '#rec-heard' ? heard : null);
+  Object.defineProperty(box, 'innerHTML', { set() { throw new Error('the whole page was rewritten'); } });
+  const fresh = el('', page(true), 'rec rec-live paused');
+  const document = { createElement: () => el('made', [fresh]) };
+  piece('graft', 'showTranscript', 'paintLive', { root: { document }, drawLive: () => '' })(box);
+  const shell = box.children[0];
   assert.equal(shell.className, 'rec rec-live paused');
-  assert.equal(shell.children[1], heard);
-  assert.deepEqual([0, 2, 3].map((i) => shell.children[i] === fresh.children[i]), [true, true, true]);
+  assert.equal(shell.children[1].className, 'pane paused');
+  assert.equal(shell.children[1].children[1], heard);
+  assert.deepEqual([shell.children[0], shell.children[1].children[0], shell.children[2], shell.children[3]], [fresh.children[0], fresh.children[1].children[0], fresh.children[2], fresh.children[3]]);
+  const other = el('box', [el('', [el('card')], 'rec rec-idle')]);
+  let rewritten = '';
+  other.querySelector = () => null;
+  Object.defineProperty(other, 'innerHTML', { set(v) { rewritten = v; } });
+  piece('graft', 'showTranscript', 'paintLive', { root: { document: { createElement: () => el('made', []) } }, drawLive: () => '<live>' })(other);
+  assert.equal(rewritten, '<live>', 'without a transcript yet, the live page is drawn whole');
 });
