@@ -6124,30 +6124,27 @@ test('buttons keep room from the text and sections around them', async ({ page }
 
 
 
-test('Usage opens from Settings with remaining limits inside a stable dialog', async ({ page }) => {
+test('Usage is a Settings page with remaining limits and its own refresh', async ({ page }) => {
   await page.route(/\/api\/settings(?:\/usage)?$/, route => route.fulfill({ json: {
     tasks: [{ task: 'writing', provider: 'ollama' }],
     plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true,
       limits: { five_hour: { used: .25, resets_at: Date.now() / 1000 + 3600 }, seen_at: new Date().toISOString() } }],
   } }));
   await page.goto('/#/settings');
-  await page.locator('.settings-nav [data-action="usage"]').click();
-  const dialog = page.getByRole('dialog');
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
-  await expect(dialog).toContainText('75% left');
-  await expect(dialog.locator('[data-action="use-plan"]')).toHaveCount(0);
-  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
-  await expect(dialog.getByRole('button', { name: 'Refresh', exact: true })).toBeEnabled();
-  await page.keyboard.press('Tab');
-  await expect(dialog.getByRole('button', { name: 'Refresh', exact: true })).toBeFocused();
-  await page.keyboard.press('Shift+Tab');
-  await expect(dialog.getByRole('button', { name: 'Close', exact: true })).toBeFocused();
-  await dialog.getByRole('button', { name: 'Refresh', exact: true }).click();
-  await expect(page.getByRole('dialog').getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
-  await page.getByRole('dialog').getByRole('button', { name: 'Close', exact: true }).click();
+  await page.locator('.settings-nav a[href="#/settings/usage"]').click();
+  await expect(page).toHaveURL(/#\/settings\/usage$/);
+  const plans = page.locator('.usage-plans');
+  await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
+  await expect(plans).toContainText('75% left');
+  await expect(plans.locator('[data-action="use-plan"]')).toHaveCount(0);
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  await expect(page.locator('.settings-nav [data-action="usage"]')).toBeFocused();
+  await expect(page.locator('[data-find="usage-activity"]')).toBeVisible();
+  const refresh = plans.getByRole('button', { name: 'Refresh', exact: true });
+  await expect(refresh).toBeEnabled();
+  await refresh.click();
+  await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
+  await expect(refresh).toBeEnabled();
+  await expect(refresh).toBeFocused();
 });
 
 for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'], [1280, 'marks'], [1800, 'both']]) test(`note search temporarily highlights the match without changing the note at ${width}px with ${layout} margins`, async ({ page }) => {
@@ -6177,7 +6174,7 @@ for (const [width, layout] of [[800, 'right'], [1280, 'right'], [1800, 'right'],
 test('Usage shows saved limits during refresh and keeps them after a refresh failure', async ({ page }) => {
   const saved = { tasks: [], plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true, limits: { five_hour: { used: .25 }, seen_at: new Date().toISOString() } }] };
   await page.route('**/api/settings', route => route.fulfill({ json: saved }));
-  for (const outcome of ['success', 'failure', 'closed']) {
+  for (const outcome of ['success', 'failure', 'left']) {
     let release;
     const waiting = new Promise(resolve => { release = resolve; });
     await page.route('**/api/settings/usage', async route => {
@@ -6185,27 +6182,22 @@ test('Usage shows saved limits during refresh and keeps them after a refresh fai
       if (outcome === 'failure') return route.fulfill({ status: 503, json: { error: 'Usage could not refresh. Try again in a moment.' } });
       return route.fulfill({ json: { ...saved, plans: [{ ...saved.plans[0], limits: { five_hour: { used: .6 }, seen_at: new Date().toISOString() } }] } });
     });
-    await page.goto('/#/settings');
-    await page.locator('.settings-nav [data-action="usage"]').click();
-    const dialog = page.getByRole('dialog');
-    await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
-    if (outcome === 'closed') {
-      await dialog.getByRole('button', { name: 'Close', exact: true }).click();
-      await page.keyboard.press('ControlOrMeta+k');
-      await page.locator('#quick-input').fill('Keep this query');
-    }
+    await page.goto('/#/settings/general');
+    await page.locator('.settings-nav a[href="#/settings/usage"]').click();
+    const plans = page.locator('.usage-plans');
+    await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
+    if (outcome === 'left') await page.locator('.settings-nav a[href="#/settings/general"]').click();
     const response = page.waitForResponse('**/api/settings/usage');
     release();
     await response;
-    if (outcome === 'success') await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '40');
+    if (outcome === 'success') await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '40');
     else if (outcome === 'failure') {
-      await expect(dialog.locator('.usage-error')).toHaveText('Refresh failed · showing saved usage');
-      await expect(dialog.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
+      await expect(plans.locator('.usage-error')).toHaveText('Refresh failed · showing saved usage');
+      await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
     } else {
-      await expect(page.locator('#quick-input')).toHaveValue('Keep this query');
-      await expect(page.locator('.usage-content')).toHaveCount(0);
+      await expect(page.locator('.settings-head h1')).toHaveText('General');
+      await expect(plans).toHaveCount(0);
     }
-    await page.keyboard.press('Escape');
     await page.unroute('**/api/settings/usage');
   }
 });

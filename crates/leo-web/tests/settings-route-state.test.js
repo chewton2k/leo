@@ -31,7 +31,7 @@ test('a Settings section asks only for what it shows', async () => {
   const context = {
     api: async (url) => { asked.push(url); return {}; }, seq: 0, state: {}, localStorage: { setItem() {} }, document: {}, app: {}, appPollGeneration: 0, dictationGeneration: 0,
     settingsSection: (section) => section, showTrash() {}, showKeeping() {}, scheduleAppStatus() {}, chrome() {}, $: () => ({}), settingsCrumbs: () => '', refreshPanel() {}, settingsFrame: () => '', skeleton: () => '',
-    drawSettings() {}, loadHealth: async () => {}, startSpeechPolling() {}, dictationSection: () => false, pollDictation() {}, dictateKeysSeen() {}, fail() {},
+    drawSettings() {}, loadHealth: async () => {}, refreshPlans() {}, startSpeechPolling() {}, dictationSection: () => false, pollDictation() {}, dictateKeysSeen() {}, fail() {},
   };
   vm.createContext(context);
   vm.runInContext(nav.slice(nav.indexOf('const SETTINGS_SECTIONS'), nav.indexOf('const settingsItems')), context);

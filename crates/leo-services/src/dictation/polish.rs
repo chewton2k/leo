@@ -362,6 +362,7 @@ pub fn polish(
     app: Option<&str>,
     words: &[String],
     cancelled: Arc<dyn Fn() -> bool + Send + Sync>,
+    run: impl FnOnce(Prompt, u32, bool, &dyn Fn() -> bool) -> Result<String> + Send + 'static,
 ) -> Result<String, &'static str> {
     let (quick, deadline) = match writing {
         Writing::Off => return Ok(text.to_string()),
@@ -378,9 +379,7 @@ pub fn polish(
         words,
         deadline,
         cancelled,
-        move |prompt, tokens, stop| {
-            Ok(crate::ai::dictation_outcome(prompt, tokens, quick, stop)?.value)
-        },
+        move |prompt, tokens, stop| run(prompt, tokens, quick, stop),
     )
 }
 
@@ -630,7 +629,15 @@ mod tests {
         }
         assert!(saw_stop.load(std::sync::atomic::Ordering::Acquire));
         assert_eq!(
-            polish("hello", Writing::Off, None, None, &[], never()),
+            polish(
+                "hello",
+                Writing::Off,
+                None,
+                None,
+                &[],
+                never(),
+                |_, _, _, _| { unreachable!("off never asks the writing AI") }
+            ),
             Ok("hello".into())
         );
     }

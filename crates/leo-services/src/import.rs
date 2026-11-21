@@ -1175,19 +1175,15 @@ fn said(e: anyhow::Error) -> anyhow::Error {
 pub fn import(
     uploads: &[Upload],
     wants: &str,
+    write: Write<'_>,
+    see: See<'_>,
     progress: &mut dyn FnMut(&str, usize, usize),
 ) -> Result<Imported> {
     progress("Reading the file", 0, 1);
     let material = gather(uploads)?;
     let name = uploads.first().map(|u| u.name.as_str()).unwrap_or("upload");
-    let write = |prompt: Prompt, most: u32| -> Result<String> {
-        crate::ai::chat_outcome(prompt, most)
-            .map(|outcome| outcome.value)
-            .map_err(said)
-    };
-    let see = |prompt: Prompt, images: &[Image], most: u32| {
-        crate::ai::see(prompt, images, most).map_err(said)
-    };
+    let write = |prompt: Prompt, most: u32| write(prompt, most).map_err(said);
+    let see = |prompt: Prompt, images: &[Image], most: u32| see(prompt, images, most).map_err(said);
     let budget = crate::ai::writing_budget();
     let label = label_for(uploads, &material)?;
     let (title, body) = write_note(

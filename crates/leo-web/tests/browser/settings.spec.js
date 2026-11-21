@@ -65,57 +65,55 @@ test('coding accounts show readable usage and sign-in states in both themes and 
   }
 });
 
-test('Usage keeps cached readings through refresh failure and ignores a closed sheet', async ({ page }, testInfo) => {
+test('the Usage page keeps cached readings through refresh failure and ignores a refresh that lands after leaving', async ({ page }, testInfo) => {
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
   const css = pageCss();
   const settings = read('app/settings.js');
   const plans = settings.slice(settings.indexOf('const PLAN_STALE_MS'), settings.indexOf('const THEME_LABELS'));
-  const usage = settings.slice(settings.indexOf('async function showUsage('));
-  const sheets = read('app/sheets.js');
-  const focus = sheets.slice(sheets.indexOf('function trapSheetFocus('), sheets.indexOf('const SWIPE_CLOSE'));
-  await page.setContent(`<style>${css}</style><body></body>`);
+  const usage = settings.slice(settings.indexOf('const usageRefresh'));
+  const refreshes = read('app/refresh.js');
+  const panel = refreshes.slice(refreshes.indexOf('function refreshKey('), refreshes.indexOf('\n}\n', refreshes.indexOf('function refreshPanel(')) + 3);
+  await page.setContent(`<style>${css}</style><body><main id="app"></main></body>`);
   await page.addScriptTag({ content: `
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-    const rel=()=> '10 minutes ago'; let seq=1, finishUsage, failUsage, usageCalls=0, writer='claude_code';
+    const rel=()=> '10 minutes ago'; let finishUsage, failUsage, usageCalls=0;
+    const app=document.getElementById('app');
     const cached={tasks:[{task:'writing',provider:'claude_code'}],plans:[{provider:'codex',name:'Codex',installed:true,signed_in:true,limits:{five_hour:{used:.39,resets_at:Date.now()/1000+3600},seven_day:{used:.06,resets_at:Date.now()/1000+86400},seen_at:new Date(Date.now()-600000).toISOString()}},{provider:'claude_code',name:'Claude Code',installed:true,signed_in:true,limits:{five_hour:{used:1,resets_at:Date.now()/1000+3600},seven_day:{used:.95,resets_at:Date.now()/1000+86400},seen_at:new Date().toISOString()}}]};
-    function sheet(html){const box=document.createElement('div');box.className='scrim';box.innerHTML='<div class="sheet" role="dialog" aria-modal="true">'+html+'</div>';box.addEventListener('click',e=>{if(e.target.closest('[data-action="close"]')) box.classList.add('scrim-gone');});document.body.append(box);trapSheetFocus(box);return box;}
-    const bodies=[], ICON={refresh:'<svg></svg>',close:'<svg></svg>'}, cascade=()=>{}, skeleton=(n)=>'<div class="skeleton"></div>'.repeat(n);
-    async function api(url,options){if(url==='/api/settings')return structuredClone(cached);usageCalls++;bodies.push(options&&options.body);return new Promise((resolve,reject)=>{finishUsage=resolve;failUsage=reject;});}
-    ${focus}
+    let state={view:'settings',section:'usage',settings:structuredClone(cached)};
+    const bodies=[], ICON={refresh:'<svg></svg>'};
+    async function api(url,options){usageCalls++;bodies.push(options&&options.body);return new Promise((resolve,reject)=>{finishUsage=resolve;failUsage=reject;});}
+    ${panel}
     ${plans}
     ${usage}
-    window.audit={open:showUsage,usageCalls:()=>usageCalls,bodies:()=>bodies,finish:value=>finishUsage(value),fail:()=>failUsage(new Error('offline')),writer:()=>writer};` });
+    app.addEventListener('click',e=>{if(e.target.closest('[data-action="usage-refresh"]'))refreshPlans({claude:true});});
+    window.audit={open:()=>{app.innerHTML='<div class="settings"><section class="set-card usage-plans" data-find="usage-plans">'+usagePlansInner(state.settings)+'</section></div>';refreshPlans();},leave:()=>{state={view:'settings',section:'health',settings:state.settings};},usageCalls:()=>usageCalls,bodies:()=>bodies,finish:value=>finishUsage(value),fail:()=>failUsage(new Error('offline')),writer:()=>state.settings.tasks[0]?.provider};` });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.evaluate(() => audit.open());
-  await expect(page.getByRole('heading', { name: 'Usage' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Plan limits' })).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Codex 5 hour remaining' })).toHaveAttribute('aria-valuenow', '61');
   await expect(page.getByRole('meter', { name: 'Codex 7 day remaining' })).toHaveAttribute('aria-valuenow', '94');
   await expect(page.getByRole('meter', { name: 'Claude Code 5 hour remaining' })).toHaveAttribute('aria-valuenow', '0');
   await expect(page.getByRole('meter', { name: 'Claude Code 7 day remaining' })).toHaveAttribute('aria-valuenow', '5');
   await expect(page.getByRole('button', { name: /Use|Selected for writing/ })).toHaveCount(0);
   await expect(page.getByText('Saved · Updated 10 minutes ago')).toBeVisible();
-  const sheet = page.locator('.usage-sheet');
-  expect(await sheet.evaluate(el => el.getBoundingClientRect().width)).toBeGreaterThan(900);
-  expect(await sheet.evaluate(el => el.getBoundingClientRect().width)).toBeLessThanOrEqual(960);
   await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
   await page.screenshot({path:testInfo.outputPath('usage-desktop-dark.png'),animations:'disabled'});
-  await expect.poll(() => page.evaluate(() => audit.usageCalls())).toBe(1);
+  expect(await page.evaluate(() => audit.usageCalls())).toBe(1);
   expect(await page.evaluate(() => audit.bodies())).toEqual([{}]);
-  await expect(page.getByRole('button', { name: 'Refresh' })).toBeDisabled();
-  await page.getByRole('button', { name: 'Refresh' }).dispatchEvent('click');
+  const refresh = page.getByRole('button', { name: 'Refresh' });
+  await expect(refresh).toBeDisabled();
+  await refresh.dispatchEvent('click');
   expect(await page.evaluate(() => audit.usageCalls())).toBe(1);
   await page.evaluate(() => audit.fail());
   await expect(page.getByText('Refresh failed · showing saved usage')).toBeVisible();
   await expect(page.getByText('Saved · Updated 10 minutes ago')).toBeVisible();
   await expect(page.getByRole('meter', { name: 'Codex 5 hour remaining' })).toHaveAttribute('aria-valuenow', '61');
-  expect(await page.evaluate(() => audit.writer())).toBe('claude_code');
   await page.setViewportSize({ width: 390, height: 780 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  expect(await sheet.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
+  expect(await page.locator('.usage-plans').evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true);
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await page.screenshot({path:testInfo.outputPath('usage-compact-light.png'),animations:'disabled'});
-  const refresh = page.getByRole('button', { name: 'Refresh' });
   await refresh.focus();
   await refresh.click();
   await expect(refresh).toBeDisabled();
@@ -125,17 +123,13 @@ test('Usage keeps cached readings through refresh failure and ignores a closed s
   await expect(refresh).toBeEnabled();
   await expect(refresh).toBeFocused();
   await expect(page.getByText('Refresh failed · showing saved usage')).toHaveCount(0);
-  expect(await page.evaluate(() => audit.writer())).toBe('claude_code');
-  await page.getByRole('button', { name: 'Close' }).click();
-  await page.evaluate(() => audit.open());
-  await expect(page.locator('.scrim:not(.scrim-gone)').getByRole('heading', { name: 'Usage' })).toBeVisible();
-  await expect.poll(() => page.evaluate(() => audit.usageCalls())).toBe(3);
-  const closing = page.locator('.scrim:not(.scrim-gone)');
-  const closed = await closing.elementHandle();
-  await closing.getByRole('button', { name: 'Close' }).click();
+  expect(await page.evaluate(() => audit.writer())).toBe('codex');
+  await refresh.click();
+  await page.evaluate(() => audit.leave());
   await page.evaluate(() => audit.finish({ tasks:[], plans:[{provider:'codex',name:'Late',installed:true,signed_in:true}] }));
-  expect(await closed.evaluate(el => el.classList.contains('scrim-gone') && !el.textContent.includes('Late'))).toBe(true);
-  expect(await page.evaluate(() => audit.writer())).toBe('claude_code');
+  await expect.poll(() => page.evaluate(() => audit.usageCalls())).toBe(3);
+  await expect(page.getByText('Late')).toHaveCount(0);
+  expect(await page.evaluate(() => audit.writer())).toBe('codex');
 });
 
 test('note mention picker scrolls within its list and keeps the composer caret', async ({ page }) => {
@@ -200,7 +194,7 @@ test('Settings sections keep drafts and selections across redraws in both themes
     let seq=0,state={view:'folder'};
     const esc=text=>String(text).replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
     const ICON=new Proxy({}, {get:()=>'<svg></svg>'}), chrome=()=>{}, skeleton=()=>'', svg=paths=>'<svg>'+paths+'</svg>', felix={felix:()=>''}, rel=()=>'', toast=()=>{}, fail=e=>{window.errors.push(e.message)}, saving={drafts:()=>[]};
-    window.errors=[]; window.leoChat={usageKinds:()=>[],usagePeriod:()=>({length:30,totals:{calls:0,input:0,cached:0,output:0,share:0},bars:[],models:[],kinds:[]}),usageRank:()=>({models:[],kinds:[]}),usageFold:()=>[]};
+    window.errors=[]; window.leoChat={usageKinds:()=>[],usagePeriod:()=>({length:30,totals:{calls:0,input:0,cached:0,output:0,share:0,cost:0,unpriced:0},bars:[],models:[],kinds:[]}),usageRank:()=>[]};
     const page={tasks:[]};
     let appStatusReads=0;
     async function api(url,options={}) {
@@ -708,6 +702,21 @@ test('Felix activity draws gridlines and colours bars by maker', async ({ page }
   const colours = await page.locator('.fa-day:last-child .fa-stack i').evaluateAll(els => els.map(el => getComputedStyle(el).backgroundColor));
   expect(colours).toHaveLength(2);
   expect(colours[0]).not.toBe(colours[1]);
+  const geometry = await page.evaluate(() => {
+    const centre = (el) => { const r = el.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    const bars = [...document.querySelectorAll('.fa-day')].map((bar) => centre(bar)[0]);
+    const labels = [...document.querySelectorAll('.fa-xl span')];
+    return {
+      y: [...document.querySelectorAll('.fa-grid')].map((line) => Math.abs(centre(line.querySelector('span'))[1] - (line.getBoundingClientRect().top + 0.5))),
+      x: labels.map((label) => Math.min(...bars.map((bar) => Math.abs(bar - centre(label)[0])))),
+      last: Math.abs(centre(labels.at(-1))[0] - bars.at(-1)),
+      text: labels.at(-1).textContent,
+    };
+  });
+  for (const off of geometry.y) expect(off, 'each y label sits centred on its gridline').toBeLessThan(1.5);
+  for (const off of geometry.x) expect(off, 'each x label sits centred under a bar').toBeLessThan(1);
+  expect(geometry.last, 'Today sits under the last bar').toBeLessThan(1);
+  expect(geometry.text).toBe('Today');
 });
 
 test('switch rows that sit together share one raised panel split by an inset hairline; a hint or other row starts a new panel', async ({ page }) => {

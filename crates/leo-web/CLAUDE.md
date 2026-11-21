@@ -1233,13 +1233,28 @@ a modal.
   `settings-navigation.test.js` fails on an unknown section, a duplicate id or
   an id no source draws. Routes stay `#/settings/<section>`; `#/trash` still
   works and a bare `#/settings` never reopens Trash.
-- Usage opens from Settings (a Usage row under This app, `data-action="usage"`, the
-  same sheet; 2026-11-16), not the icon rail or the phone More sheet. Ordinary Settings
-  reads never refresh coding-plan limits; POST
-  `/api/settings/usage` (`{}` Codex only, `{ "claude": true }` also Claude)
+- Usage is a Settings page (`#/settings/usage`, under This app; 2026-11-21, the user's
+  call, replacing the sheet): Plan limits on top, then Felix activity (moved from Writing
+  AI), not the icon rail or the phone More sheet. Ordinary Settings reads never refresh
+  coding-plan limits; opening the page POSTs
+  `/api/settings/usage` (`{}` Codex only, its Refresh `{ "claude": true }` also Claude)
   behind one refresh slot; a failed refresh keeps saved meters. `usage::Usage`
   keeps content-free counts, `usage_days`, `usage_calls` and `usage_tools` (90 days), never prompt or reply
   text; `/api/processes` never sends arguments to the page.
+- Every AI request carries its own `usage::Purpose` (2026-11-21, the user's call):
+  leo-host's `felix::counted` records each one (graph Connections, Combine, Margin
+  replies, Recording write-ups and drafts, Import, Pictures, Dictation); `OtherWriting`
+  stays only to read rows already stored. `USAGE_KINDS` in chat.js labels every purpose
+  (a usage.rs test reads it), and leo-host's `route_of` names every variant.
+- Charts and legends show every model and kind, never an "Other" slice (2026-11-21, the
+  user's call): kinds take `--chart-6`…`--chart-20` in `USAGE_KINDS` order, models their
+  maker's `--fam-*` shades by rank, then the same shades mixed toward `--text`; each is
+  at least 3:1 on `--tint` and `--raised` (tokens.test.js). Costs are estimates at API
+  prices (2026-11-21, the user's call): the dated `api_cents` on each model in
+  leo-services `choice.rs` (also `Spent.cost`) reach the page as `prices`; the page
+  prices each stored day by model (kind rows carry their model), cached input at the
+  cached rate, models on this computer free, any other model "no price". Shown in the
+  stat tiles and both legends as "≈ $x".
 - Keeping (`keeping.rs`, `app/keeping.js`, `/api/keep`; its daily pass also runs trash expiry and its dependents): one list (7/30/90 days,
   1 year, Forever) for Trash, Chats, Uploaded files, Recording transcripts,
   Unfinished recording audio. Shortening asks first with a count from POST

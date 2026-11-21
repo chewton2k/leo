@@ -15,8 +15,42 @@ fn route_of(purpose: leo_web::usage::Purpose) -> Route {
     match purpose {
         Purpose::MarginRead => Route::Toolless,
         Purpose::Summary | Purpose::QuickReview => Route::Quick,
-        _ => Route::Full,
+        Purpose::Answer
+        | Purpose::ToolContinuation
+        | Purpose::Retry
+        | Purpose::StudyGrading
+        | Purpose::OtherWriting
+        | Purpose::Connections
+        | Purpose::Combine
+        | Purpose::Margin
+        | Purpose::Recording
+        | Purpose::Import
+        | Purpose::Pictures
+        | Purpose::Dictation => Route::Full,
     }
+}
+
+pub fn counted<T>(
+    usage: &leo_web::usage::Usage,
+    purpose: leo_web::usage::Purpose,
+    run: impl FnOnce() -> anyhow::Result<leo_services::ai::chain::ChainOutcome<T>>,
+) -> anyhow::Result<leo_services::ai::chain::ChainOutcome<T>> {
+    let started = std::time::Instant::now();
+    let result = run();
+    let spent = result
+        .as_ref()
+        .ok()
+        .and_then(|outcome| outcome.spent.as_ref())
+        .map(|spent| leo_web::Spent {
+            model: spent.model.clone(),
+            input: spent.input,
+            output: spent.output,
+            cached: spent.cached,
+            estimated: spent.estimated,
+            ..Default::default()
+        });
+    usage.record(purpose, spent.as_ref(), started.elapsed(), result.is_err());
+    result
 }
 
 pub fn writer(
@@ -29,7 +63,7 @@ pub fn writer(
             system: system.into(),
             user: user.into(),
         };
-        let result = match route_of(purpose) {
+        counted(&usage, purpose, || match route_of(purpose) {
             Route::Toolless => leo_core::children::with_stop(
                 leo_core::children::Stop {
                     deadline: Some(started + leo_web::margin::READ_LIMIT),
@@ -39,21 +73,9 @@ pub fn writer(
             ),
             Route::Quick => leo_services::ai::quick_outcome(prompt, most),
             Route::Full => leo_services::ai::chat_outcome(prompt, most),
-        };
-        let spent = result
-            .as_ref()
-            .ok()
-            .and_then(|outcome| outcome.spent.as_ref())
-            .map(|spent| leo_web::Spent {
-                model: spent.model.clone(),
-                input: spent.input,
-                output: spent.output,
-                cached: spent.cached,
-                estimated: spent.estimated,
-                ..Default::default()
-            });
-        usage.record(purpose, spent.as_ref(), started.elapsed(), result.is_err());
-        result.map(|outcome| outcome.value).map_err(said)
+        })
+        .map(|outcome| outcome.value)
+        .map_err(said)
     })
 }
 
@@ -132,9 +154,9 @@ impl leo_web::Conversation for Talk {
     }
 }
 
-pub fn seer() -> leo_web::captions::Seer {
+pub fn seer(usage: Arc<leo_web::usage::Usage>) -> leo_web::captions::Seer {
     Arc::new(
-        |system: &str, user: &str, pictures: Vec<leo_web::captions::Picture>| {
+        move |system: &str, user: &str, pictures: Vec<leo_web::captions::Picture>| {
             let images: Vec<leo_services::ai::provider::Image> = pictures
                 .into_iter()
                 .map(|p| leo_services::ai::provider::Image {
@@ -142,14 +164,14 @@ pub fn seer() -> leo_web::captions::Seer {
                     bytes: p.bytes,
                 })
                 .collect();
-            leo_services::ai::see(
-                leo_services::ai::chat::Prompt {
-                    system: system.to_string(),
-                    user: user.to_string(),
-                },
-                &images,
-                1_500,
-            )
+            let prompt = leo_services::ai::chat::Prompt {
+                system: system.to_string(),
+                user: user.to_string(),
+            };
+            counted(&usage, leo_web::usage::Purpose::Pictures, || {
+                leo_services::ai::see(prompt, &images, 1_500)
+            })
+            .map(|outcome| outcome.value)
         },
     )
 }
@@ -207,8 +229,39 @@ mod route_tests {
         assert_eq!(route_of(Purpose::MarginRead), Route::Toolless);
         assert_eq!(route_of(Purpose::QuickReview), Route::Quick);
         assert_eq!(route_of(Purpose::Summary), Route::Quick);
-        assert_eq!(route_of(Purpose::OtherWriting), Route::Full);
-        assert_eq!(route_of(Purpose::Answer), Route::Full);
+        for full in [
+            Purpose::Answer,
+            Purpose::ToolContinuation,
+            Purpose::Retry,
+            Purpose::StudyGrading,
+            Purpose::OtherWriting,
+            Purpose::Connections,
+            Purpose::Combine,
+            Purpose::Margin,
+            Purpose::Recording,
+            Purpose::Import,
+            Purpose::Pictures,
+            Purpose::Dictation,
+        ] {
+            assert_eq!(route_of(full), Route::Full, "{full:?}");
+        }
+    }
+
+    #[test]
+    fn a_counted_call_is_recorded_under_its_purpose() {
+        let usage = leo_web::usage::Usage::default();
+        let answered = counted(&usage, Purpose::Import, || {
+            Ok(leo_services::ai::chain::ChainOutcome {
+                value: "notes",
+                provider: "codex".into(),
+                fallbacks: Vec::new(),
+                spent: None,
+            })
+        });
+        assert_eq!(answered.unwrap().value, "notes");
+        let failed = counted::<()>(&usage, Purpose::Dictation, || anyhow::bail!("offline"));
+        assert!(failed.is_err());
+        assert_eq!(usage.line(), "2 AI requests · 0 tokens");
     }
 
     #[test]

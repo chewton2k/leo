@@ -1031,7 +1031,7 @@ const PLANS = '<div class="coding-plans">' + ['codex', 'claude_code'].map((provi
 test.describe('usage tones', () => {
   for (const scheme of ['light', 'dark']) {
     test(`${scheme}: Codex and Claude keep their own tones and the second row has no rule`, async ({ browser }) => {
-      await plain(browser, `<div class="scrim"><div class="sheet usage-sheet">${PLANS}</div></div>`, async (page) => {
+      await plain(browser, `<section class="set-card usage-plans">${PLANS}</section>`, async (page) => {
         const tone = (provider) => page.locator(`[data-provider="${provider}"] .plan-meter i`).first().evaluate((el) => {
           const pixel = document.createElement('canvas').getContext('2d', { willReadFrequently: true });
           pixel.canvas.width = pixel.canvas.height = 1;
@@ -1044,7 +1044,7 @@ test.describe('usage tones', () => {
         const codex = await tone('codex');
         expect(claude.r).toBeGreaterThan(claude.b + 8);
         expect(claude.spread).toBeGreaterThan(8);
-        const text = await page.locator('.usage-sheet').evaluate((el) => getComputedStyle(el).color);
+        const text = await page.locator('.usage-plans').evaluate((el) => getComputedStyle(el).color);
         const fill = await page.locator('[data-provider="codex"] .plan-meter i').first().evaluate((el) => getComputedStyle(el).backgroundColor);
         expect(fill).not.toBe(text);
         expect(Math.abs(claude.r - codex.r) + Math.abs(claude.b - codex.b)).toBeGreaterThan(12);

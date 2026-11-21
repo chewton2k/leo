@@ -407,7 +407,7 @@
     return 'under $0.0001';
   }
 
-  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Conversation summaries', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along' };
+  const USAGE_KINDS = { answer: 'Answers', tool_continuation: 'After tool reads', retry: 'Recovery attempts', study_grading: 'Study grading checks', summary: 'Chat memory', other_writing: 'Other writing · graph and notes', quick_review: 'Quick checks', margin_read: 'Reading along', connections: 'Note connections', combine: 'Combining notes', margin: 'Margin replies', recording: 'Recording notes', import: 'Imported files', pictures: 'Reading pictures', dictation: 'Dictation' };
 
   function usageCount(value) {
     const n = Number(value);
@@ -435,23 +435,29 @@
     return new Date(Date.UTC(y, m - 1, d, Number(hour) - offset)).toISOString().slice(0, 13).replace('T', ' ');
   }
 
-  function usagePeriod(days, span, today) {
+  function usagePeriod(days, span, today, price) {
     const length = [1, 7, 30, 90].includes(span) ? span : 30;
     const units = length === 1 ? 24 : length;
     const ok = (length === 1 ? /^\d{4}-\d{2}-\d{2} \d{2}$/ : /^\d{4}-\d{2}-\d{2}$/).test(String(today)) && !Number.isNaN(Date.parse(String(today).slice(0, 10)));
     const first = ok ? usageBack(units - 1, today) : '';
     const pick = (list, allowed) => (Array.isArray(list) ? list : []).filter((row) => ok && row && typeof row.day === 'string' && typeof row.name === 'string' && row.day >= first && row.day <= today && allowed(row.name)).map((row) => {
       const input = usageCount(row.input);
-      return { day: row.day, name: row.name, calls: usageCount(row.calls), input, cached: Math.min(input, usageCount(row.cached)), output: usageCount(row.output) };
+      const cached = Math.min(input, usageCount(row.cached));
+      const output = usageCount(row.output);
+      const rates = price ? price(typeof row.model === 'string' ? row.model : row.name) : null;
+      const cost = rates ? ((input - cached) * rates[0] + cached * rates[1] + output * rates[2]) / 1e6 : null;
+      return { day: row.day, name: row.name, calls: usageCount(row.calls), input, cached, output, cost };
     });
     const models = pick(days && days.models, () => true);
     const kinds = pick(days && days.kinds, (name) => Object.hasOwn(USAGE_KINDS, name));
-    const totals = { calls: 0, input: 0, cached: 0, output: 0, share: 0 };
+    const totals = { calls: 0, input: 0, cached: 0, output: 0, share: 0, cost: 0, unpriced: 0 };
     for (const row of models) {
       totals.calls += row.calls;
       totals.input += row.input;
       totals.cached += row.cached;
       totals.output += row.output;
+      if (row.cost === null) totals.unpriced += row.input + row.output;
+      else totals.cost += row.cost;
     }
     totals.share = totals.input ? totals.cached / totals.input : 0;
     const size = length === 90 ? 7 : 1;
@@ -475,11 +481,13 @@
     const group = (rows, measures) => {
       const sums = new Map();
       for (const row of rows) {
-        const held = sums.get(row.name) || { name: row.name, calls: 0, input: 0, output: 0, tokens: 0 };
+        const held = sums.get(row.name) || { name: row.name, calls: 0, input: 0, output: 0, tokens: 0, cost: 0, unpriced: 0 };
         held.calls += row.calls;
         held.input += row.input;
         held.output += row.output;
         held.tokens += row.input + row.output;
+        if (row.cost === null) held.unpriced += row.input + row.output;
+        else held.cost += row.cost;
         sums.set(row.name, held);
       }
       return [...sums.values()].sort((a, b) => b[measures] - a[measures] || (a.name < b.name ? -1 : 1));
@@ -488,21 +496,8 @@
   }
 
   function usageRank(days, today) {
-    const week = usagePeriod(days, 7, today);
-    const all = usagePeriod(days, 90, today);
-    const order = (key, list, ofWeek) => {
-      const recent = new Map(ofWeek.map((row) => [row.name, row[key]]));
-      return list.slice().sort((a, b) => (recent.get(b.name) || 0) - (recent.get(a.name) || 0) || b[key] - a[key] || (a.name < b.name ? -1 : 1)).map((row) => row.name);
-    };
-    return { models: order('tokens', all.models, week.models), kinds: order('calls', all.kinds, week.kinds) };
-  }
-
-  function usageFold(items, keep) {
-    const rows = items.filter((item) => item.value > 0);
-    const shown = rows.filter((item) => keep.includes(item.name)).sort((a, b) => b.value - a.value).map((item) => ({ ...item, rank: keep.indexOf(item.name) }));
-    const rest = rows.filter((item) => !keep.includes(item.name));
-    if (rest.length) shown.push({ name: 'Other', other: true, rank: -1, value: rest.reduce((sum, item) => sum + item.value, 0), calls: rest.reduce((sum, item) => sum + (item.calls || 0), 0) });
-    return shown;
+    const recent = new Map(usagePeriod(days, 7, today).models.map((row) => [row.name, row.tokens]));
+    return usagePeriod(days, 90, today).models.sort((a, b) => (recent.get(b.name) || 0) - (recent.get(a.name) || 0) || b.tokens - a.tokens || (a.name < b.name ? -1 : 1)).map((row) => row.name);
   }
 
   function spentLabel(spent) {
@@ -3571,5 +3566,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, usageKinds, usagePeriod, usageRank, usageFold, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, money, USAGE_KINDS, usageKinds, usagePeriod, usageRank, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -561,13 +561,13 @@ test('the note tools live in one menu beside the Felix chips, and there is no fl
   await expect(page.locator('#crumbs')).toHaveCSS('visibility', 'hidden');
 });
 
-test('the Usage sheet icon buttons name themselves on hover', async ({ page }) => {
+test('the Usage page refresh button names itself on hover', async ({ page }) => {
   await page.goto('/#/settings');
-  await expect(page.locator('#side [data-action="usage"]'), 'Usage lives in Settings, not the rail').toHaveCount(0);
-  await page.locator('.settings-nav [data-action="usage"]').click();
-  const tools = page.locator('.usage-tools .icon-btn');
-  await expect(tools).toHaveCount(2);
-  for (const button of await tools.all()) expect(await button.getAttribute('title')).toBe(await button.getAttribute('aria-label'));
+  await expect(page.locator('#side a[href="#/settings/usage"]'), 'Usage lives in Settings, not the rail').toHaveCount(0);
+  await page.locator('.settings-nav a[href="#/settings/usage"]').click();
+  const refresh = page.locator('.usage-plans [data-action="usage-refresh"]');
+  await expect(refresh).toHaveCount(1);
+  expect(await refresh.getAttribute('title')).toBe(await refresh.getAttribute('aria-label'));
 });
 
 test('Felix only bobs while his panel is open', async ({ page }) => {

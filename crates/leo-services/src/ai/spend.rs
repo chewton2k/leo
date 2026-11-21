@@ -17,48 +17,7 @@ pub struct Answered {
     pub cached: u64,
 }
 
-pub fn cache_read_share(provider: &str, model: &str) -> f64 {
-    let model = model.to_lowercase();
-    match provider {
-        "anthropic"
-            if model.contains("fable-5-1")
-                || model.contains("fable-5-2")
-                || model.contains("mythos-5-1") =>
-        {
-            0.025
-        }
-        "anthropic" if model.contains("opus-5-5") || model.contains("sonnet-5-5") => 0.05,
-        "anthropic" | "openai" => 0.1,
-        "gemini" | "xai" => 0.25,
-        _ => 1.0,
-    }
-}
-
 pub const CACHE_WRITE_SHARE: f64 = 1.25;
-
-pub fn rates(price: &str) -> Option<(f64, f64)> {
-    if !price.contains('$') {
-        return price.trim_start().starts_with("free").then_some((0.0, 0.0));
-    }
-    let mut input = None;
-    let mut output = None;
-    for piece in price.split('$').skip(1) {
-        let number: String = piece
-            .chars()
-            .take_while(|c| c.is_ascii_digit() || *c == '.')
-            .collect();
-        let Ok(value) = number.parse::<f64>() else {
-            continue;
-        };
-        let rest = piece[number.len()..].trim_start();
-        if rest.starts_with("in") && input.is_none() {
-            input = Some(value);
-        } else if rest.starts_with("out") && output.is_none() {
-            output = Some(value);
-        }
-    }
-    Some((input?, output?))
-}
 
 pub fn answered(cfg: &Config, provider: &str, spent: Spent) -> Answered {
     let pc = cfg.provider(provider);
@@ -85,15 +44,18 @@ pub fn answered(cfg: &Config, provider: &str, spent: Spent) -> Answered {
         spent
             .model
             .as_deref()
-            .and_then(|model| choice.filter(|c| !c.local()).and_then(|c| c.price(model)))
-            .and_then(rates)
-            .map(|(input, output)| {
-                let read = cache_read_share(provider, spent.model.as_deref().unwrap_or(""));
+            .and_then(|model| {
+                choice
+                    .filter(|c| !c.local())
+                    .and_then(|c| c.models.iter().find(|m| m.id == model))
+            })
+            .map(|m| {
+                let [input, read, output] = m.api_cents.map(|cents| f64::from(cents) / 100.0);
                 let cached = spent.cached.min(spent.input);
                 let written = spent.cache_written.min(spent.input - cached);
                 let fresh = spent.input - cached - written;
                 (fresh as f64 * input
-                    + cached as f64 * input * read
+                    + cached as f64 * read
                     + written as f64 * input * CACHE_WRITE_SHARE
                     + spent.output as f64 * output)
                     / 1_000_000.0
@@ -116,22 +78,6 @@ pub fn answered(cfg: &Config, provider: &str, spent: Spent) -> Answered {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn prices_are_read_from_the_model_list() {
-        assert_eq!(rates("$2 in, $10 out per 1M tokens"), Some((2.0, 10.0)));
-        assert_eq!(
-            rates("free tier, then $0.25 in, $1.50 out per 1M tokens"),
-            Some((0.25, 1.5))
-        );
-        assert_eq!(rates("free, with daily limits"), Some((0.0, 0.0)));
-        assert_eq!(rates("free"), Some((0.0, 0.0)));
-        assert_eq!(rates("included in your Claude plan"), None);
-        assert_eq!(
-            rates("$0.10 in, $0.50 out per 1M tokens (more above 100K-token prompts)"),
-            Some((0.1, 0.5))
-        );
-    }
 
     fn spent(model: &str, input: u64, output: u64) -> Spent {
         Spent {
@@ -198,15 +144,28 @@ mod tests {
         );
         assert_eq!((cached.cached, cached.input), (800_000, 1_000_000));
         assert_eq!(cached.cost, None);
-        for (provider, model, expected) in [
-            ("openai", "gpt-5", 0.1),
-            ("anthropic", "claude-sonnet-5-5", 0.05),
-            ("anthropic", "claude-fable-5-1", 0.025),
-            ("anthropic", "claude-fable-5-2", 0.025),
-            ("gemini", "gemini-3.8-flash", 0.25),
-            ("openrouter", "x", 1.0),
-        ] {
-            assert!((cache_read_share(provider, model) - expected).abs() < 1e-9);
-        }
+    }
+
+    #[test]
+    fn a_metered_answer_is_priced_from_the_model_table() {
+        let mut cfg = Config::default();
+        cfg.providers.get_mut("claude_code").unwrap().kind = Some(ProviderKind::Openai);
+        let metered = answered(
+            &cfg,
+            "claude_code",
+            Spent {
+                cached: 800_000,
+                cache_written: 100_000,
+                ..spent("claude-opus-5-5", 1_000_000, 100_000)
+            },
+        );
+        assert!(!metered.plan && !metered.local);
+        let cost = metered.cost.unwrap();
+        let expected =
+            (100_000.0 * 4.0 + 800_000.0 * 0.20 + 100_000.0 * 4.0 * 1.25 + 100_000.0 * 20.0)
+                / 1_000_000.0;
+        assert!((cost - expected).abs() < 1e-9, "{cost}");
+        let unknown = answered(&cfg, "claude_code", spent("claude-opus-9", 10, 10));
+        assert_eq!(unknown.cost, None);
     }
 }

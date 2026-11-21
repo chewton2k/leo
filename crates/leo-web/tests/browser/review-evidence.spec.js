@@ -763,10 +763,8 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
   for (const [width, height] of WIDTHS) for (const scheme of SCHEMES) {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ colorScheme: scheme });
-    await page.goto('/#/settings');
-    await expect(page.locator('#app')).not.toBeEmpty();
-    await page.locator('.settings-nav [data-action="usage"]').click();
-    await expect(page.locator('.usage-sheet .coding-plan')).toHaveCount(2);
+    await page.goto('/#/settings/usage');
+    await expect(page.locator('.usage-plans .coding-plan')).toHaveCount(2);
     await settle(page);
     const colors = await page.evaluate(() => {
       const pixel = (value) => {
@@ -779,7 +777,7 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
         return [...context.getImageData(0, 0, 1, 1).data].slice(0, 3);
       };
       const read = (provider) => {
-        const fill = document.querySelectorAll(`.usage-sheet .coding-plan[data-provider="${provider}"] .plan-meter i`)[1];
+        const fill = document.querySelectorAll(`.usage-plans .coding-plan[data-provider="${provider}"] .plan-meter i`)[1];
         const meter = fill.parentElement;
         return { fill: pixel(getComputedStyle(fill).backgroundColor), height: meter.getBoundingClientRect().height, tone: getComputedStyle(fill.closest('.coding-plan')).getPropertyValue('--plan-tone').trim() };
       };
@@ -793,8 +791,6 @@ test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider col
     expect(colors.claude.tone, 'the provider tone token is applied').not.toBe('');
     expect(colors.codex.height, 'the Usage meter geometry is unchanged').toBe(width <= 560 ? 26 : 32);
     await still(page, `r12-usage-${width}-${scheme}`);
-    await page.locator('.usage-sheet [data-action="close"]').click();
-    await expect(page.locator('.usage-sheet')).toHaveCount(0);
   }
   await page.emulateMedia({ colorScheme: 'light' });
   record('R12', { ...env(page), fixture: 'real page and CSS; /api/settings plans and /api/settings/usage answered with deterministic readings (Codex 61/94%, Claude 5/60%)', tones });

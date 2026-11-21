@@ -17,6 +17,7 @@ const SETTINGS_SECTIONS = [
   ] },
   { group: 'This app', items: [
     ['health', 'Health', 'pulse', 'Check that recording, dictation and AI are ready.'],
+    ['usage', 'Usage', 'usage', 'Plan limits, and what the writing AI did for you.'],
     ['updates', 'Updates & about', 'update', 'Keep leo up to date.'],
   ] },
 ];
@@ -48,7 +49,6 @@ const SETTINGS_INDEX = [
   { section: 'writing', id: 'writing-model', label: 'Writing AI model', keywords: 'effort price cost thinking' },
   { section: 'writing', id: 'writing-key', label: 'API key', keywords: 'secret token credential password' },
   { section: 'writing', id: 'writing-test', label: 'Test the AI', keywords: 'check connection working try' },
-  { section: 'writing', id: 'writing-activity', label: 'Felix activity', keywords: 'usage tokens cache requests tools calls timing processes running codex claude' },
   { section: 'felix', id: 'felix-new-notes', label: 'New notes start', keywords: 'felix reads along read along when you ask margin mode privacy' },
   { section: 'felix', id: 'felix-persona', label: 'Who reads your notes', keywords: 'felix persona personas reader critic encourager style tone custom your own margin' },
   { section: 'felix', id: 'felix-where', label: 'Where notes appear', keywords: 'felix margin both right marks only layout' },
@@ -65,6 +65,8 @@ const SETTINGS_INDEX = [
   { section: 'keeping', id: 'keeping-export', label: 'Export notes', keywords: 'zip download backup uploads chats trash storage disk' },
   { section: 'keeping', id: 'keeping-restore', label: 'Restore tasks', keywords: 'import tasks json bring back old computer' },
   { section: 'trash', id: 'trash-notes', label: 'Trash', keywords: 'deleted notes restore empty bin recover' },
+  { section: 'usage', id: 'usage-plans', label: 'Plan limits', keywords: 'usage codex claude chatgpt subscription limits weekly refresh' },
+  { section: 'usage', id: 'usage-activity', label: 'Felix activity', keywords: 'usage tokens cache requests tools calls timing processes running codex claude cost price dollars' },
   { section: 'health', id: 'health-checks', label: 'Health checks', keywords: 'doctor microphone permissions accessibility ready problems fix' },
   { section: 'updates', id: 'updates-check', label: 'Check for updates', keywords: 'new version download install restart' },
   { section: 'updates', id: 'updates-automatic', label: 'Check for updates automatically', keywords: 'hourly startup' },
@@ -78,6 +80,7 @@ const SETTINGS_ICON_PATHS = {
   wave: '<path d="M4 10v4M8 7v10M12 4v16M16 8v8M20 10.5v3"/>',
   pen: '<path d="M4 20h4L18.5 9.5a2.8 2.8 0 0 0-4-4L4 16v4z"/><path d="M13 7l4 4"/>',
   pulse: '<path d="M3 12h4l2.5-6 5 12 2.5-6h4"/>',
+  usage: '<path d="M4 19V9m8 10V5m8 14v-7"/>',
   update: '<circle cx="12" cy="12" r="9"/><path d="M12 7.5v8M8.5 12.5l3.5 3.5 3.5-3.5"/>',
 };
 const settingsItems = () => SETTINGS_SECTIONS.flatMap((group) => group.items);
@@ -221,7 +224,7 @@ function settingsFrame(section, content) {
   } else settingsPillFrom = null;
   settingsDrawn = section;
   const [, title, , about] = settingsItems().find(([id]) => id === section) || settingsItems()[0];
-  const nav = SETTINGS_SECTIONS.map((group) => `<div class="settings-group"><div class="settings-group-title">${esc(group.group)}</div>${group.items.map(([id, label, icon]) => `<a class="settings-link${id === section ? ' on' : ''}" href="#/settings/${id}"${id === section ? ' aria-current="page"' : ''}>${settingsIcon(icon)}<span>${esc(label)}</span></a>`).join('')}${group.group === 'This app' ? `<button type="button" class="settings-link" data-action="usage">${svg('<path d="M4 19V9m8 10V5m8 14v-7"/>')}<span>Usage</span></button>` : ''}</div>`).join('');
+  const nav = SETTINGS_SECTIONS.map((group) => `<div class="settings-group"><div class="settings-group-title">${esc(group.group)}</div>${group.items.map(([id, label, icon]) => `<a class="settings-link${id === section ? ' on' : ''}" href="#/settings/${id}"${id === section ? ' aria-current="page"' : ''}>${settingsIcon(icon)}<span>${esc(label)}</span></a>`).join('')}</div>`).join('');
   const found = settingsResults();
   const search = `<div class="settings-search" role="search">${svg('<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>')}<input id="settings-search" type="text" role="combobox" aria-label="Search settings" aria-autocomplete="list" aria-expanded="${found.open}"${found.open ? ` aria-controls="settings-listbox" aria-activedescendant="${found.active}"` : ''} placeholder="Search settings" autocomplete="off" spellcheck="false" value="${esc(settingsFind.query)}"></div>`;
   // Callers assign the frame to the page right away; once they have, place the current

@@ -897,7 +897,7 @@ async fn written(
         );
         let spent = reply.as_ref().ok().and_then(|r| r.spent.clone());
         usage.record(
-            Purpose::OtherWriting,
+            Purpose::Margin,
             spent.as_ref(),
             started.elapsed(),
             reply.is_err(),

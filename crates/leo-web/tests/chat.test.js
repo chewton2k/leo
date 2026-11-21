@@ -835,7 +835,7 @@ const USAGE_DAYS = {
 
 test('a usage period adds up tokens, states the cache share and drops garbage', () => {
   const week = C.usagePeriod(USAGE_DAYS, 7, '2026-11-07');
-  assert.deepEqual(week.totals, { calls: 6, input: 1300, cached: 1050, output: 70, share: 1050 / 1300 });
+  assert.deepEqual(week.totals, { calls: 6, input: 1300, cached: 1050, output: 70, share: 1050 / 1300, cost: 0, unpriced: 1370 });
   assert.deepEqual(week.models.map((m) => [m.name, m.tokens]), [['big', 1040], ['small', 330], ['', 0], ['<b>', 0]]);
   assert.deepEqual(week.kinds.map((k) => [k.name, k.calls]), [['answer', 3], ['margin_read', 2]]);
   assert.equal(week.bars.length, 7);
@@ -864,7 +864,7 @@ test('a 24 hour period has one bar per hour and crosses midnight', () => {
   assert.equal(day.bars[0].from, '2026-11-06 03');
   assert.equal(day.bars[23].to, '2026-11-07 02');
   assert.equal(day.bars[22].calls, 2);
-  assert.deepEqual(day.totals, { calls: 3, input: 110, cached: 50, output: 11, share: 50 / 110 });
+  assert.deepEqual(day.totals, { calls: 3, input: 110, cached: 50, output: 11, share: 50 / 110, cost: 0, unpriced: 121 });
   assert.deepEqual(day.kinds.map((k) => [k.name, k.calls]), [['answer', 2]]);
   assert.deepEqual(C.usagePeriod(hours, 1, '2026-11-07').bars, []);
 });
@@ -881,20 +881,37 @@ test('an empty or unreadable usage period is empty and never throws', () => {
   assert.equal(C.usagePeriod(USAGE_DAYS, 12, '2026-11-07').length, 30);
 });
 
-test('colours go to the models in use this week first, and the rest fold into Other', () => {
+test('colours go to the models in use this week first, then the rest by size', () => {
   const days = { models: [
     { day: '2026-11-07', name: 'now', calls: 1, input: 10, cached: 0, output: 0 },
     { day: '2026-10-01', name: 'then', calls: 1, input: 9000, cached: 0, output: 0 },
     { day: '2026-10-02', name: 'more', calls: 1, input: 500, cached: 0, output: 0 },
     { day: '2026-10-03', name: 'least', calls: 1, input: 1, cached: 0, output: 0 },
   ], kinds: [] };
-  const ranked = C.usageRank(days, '2026-11-07');
-  assert.deepEqual(ranked.models, ['now', 'then', 'more', 'least']);
-  const items = C.usagePeriod(days, 90, '2026-11-07').models.map((m) => ({ name: m.name, value: m.tokens, calls: m.calls }));
-  const folded = C.usageFold(items, ranked.models.slice(0, 3));
-  assert.deepEqual(folded.map((s) => [s.name, s.rank, s.value]), [['then', 1, 9000], ['more', 2, 500], ['now', 0, 10], ['Other', -1, 1]]);
-  assert.equal(folded[3].calls, 1);
-  assert.deepEqual(C.usageFold([{ name: 'x', value: 0 }], ['x']), []);
+  assert.deepEqual([...C.usageRank(days, '2026-11-07')], ['now', 'then', 'more', 'least']);
+});
+
+test('a period prices each model and kind at its own rates and keeps what has no price apart', () => {
+  const days = {
+    models: [
+      { day: '2026-11-07', name: 'big', calls: 2, input: 1000000, cached: 400000, output: 100000 },
+      { day: '2026-11-07', name: 'mystery', calls: 1, input: 500, cached: 0, output: 20 },
+    ],
+    kinds: [
+      { day: '2026-11-07', name: 'answer', model: 'big', calls: 2, input: 1000000, cached: 400000, output: 100000 },
+      { day: '2026-11-07', name: 'import', model: 'mystery', calls: 1, input: 500, cached: 0, output: 20 },
+    ],
+  };
+  const price = (model) => (model === 'big' ? [2, 0.1, 10] : null);
+  const week = C.usagePeriod(days, 7, '2026-11-07', price);
+  const big = (600000 * 2 + 400000 * 0.1 + 100000 * 10) / 1e6;
+  assert.ok(Math.abs(week.totals.cost - big) < 1e-9);
+  assert.equal(week.totals.unpriced, 520);
+  assert.deepEqual(week.models.map((m) => [m.name, m.unpriced]), [['big', 0], ['mystery', 520]]);
+  assert.ok(Math.abs(week.kinds.find((k) => k.name === 'answer').cost - big) < 1e-9);
+  assert.equal(week.kinds.find((k) => k.name === 'import').cost, 0);
+  assert.equal(week.kinds.find((k) => k.name === 'import').unpriced, 520);
+  assert.equal(C.usagePeriod(days, 7, '2026-11-07').totals.unpriced, 1100520);
 });
 
 test('usage kinds keep counts as numbers and refuse arbitrary labels', () => {

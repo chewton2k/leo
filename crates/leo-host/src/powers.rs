@@ -57,11 +57,16 @@ pub fn powers() -> leo_web::Powers {
     let usage = std::sync::Arc::new(leo_web::usage::Usage::default());
     let writer = crate::felix::writer(
         std::sync::Arc::clone(&usage),
-        leo_web::usage::Purpose::OtherWriting,
+        leo_web::usage::Purpose::Connections,
     );
     let streamer = streamer_of(leo_services::ai::chat_streaming);
     let light_chat = streamer_of(leo_services::ai::quick_streaming);
     let toolless_chat = streamer_of(leo_services::ai::toolless_streaming);
+    let (imports, read, read_to) = (
+        std::sync::Arc::clone(&usage),
+        std::sync::Arc::clone(&usage),
+        std::sync::Arc::clone(&usage),
+    );
     leo_web::Powers {
         writer: Some(writer),
         quick: Some(crate::felix::writer(
@@ -76,7 +81,7 @@ pub fn powers() -> leo_web::Powers {
             std::sync::Arc::clone(&usage),
             leo_web::usage::Purpose::Summary,
         )),
-        usage,
+        usage: std::sync::Arc::clone(&usage),
         chat: Some(streamer),
         light_chat: Some(light_chat),
         lighter: Some(std::sync::Arc::new(leo_services::ai::lighter_model_exists)),
@@ -85,9 +90,9 @@ pub fn powers() -> leo_web::Powers {
         app_settings: None,
         settings: Some(std::sync::Arc::new(crate::settings::WebSettings)),
         importer: Some(std::sync::Arc::new(
-            |files: Vec<leo_web::UploadFile>,
-             wants: &str,
-             progress: &mut dyn FnMut(&str, usize, usize)| {
+            move |files: Vec<leo_web::UploadFile>,
+                  wants: &str,
+                  progress: &mut dyn FnMut(&str, usize, usize)| {
                 let uploads: Vec<leo_services::import::Upload> = files
                     .into_iter()
                     .map(|f| leo_services::import::Upload {
@@ -97,7 +102,23 @@ pub fn powers() -> leo_web::Powers {
                         path: f.path,
                     })
                     .collect();
-                let made = leo_services::import::import(&uploads, wants, progress)?;
+                let made = leo_services::import::import(
+                    &uploads,
+                    wants,
+                    &|prompt, most| {
+                        crate::felix::counted(&imports, leo_web::usage::Purpose::Import, || {
+                            leo_services::ai::chat_outcome(prompt, most)
+                        })
+                        .map(|outcome| outcome.value)
+                    },
+                    &|prompt, images, most| {
+                        crate::felix::counted(&imports, leo_web::usage::Purpose::Import, || {
+                            leo_services::ai::see(prompt, images, most)
+                        })
+                        .map(|outcome| outcome.value)
+                    },
+                    progress,
+                )?;
                 Ok(leo_web::Made {
                     title: made.title,
                     body: made.body,
@@ -116,14 +137,14 @@ pub fn powers() -> leo_web::Powers {
         )),
         speech: Some(std::sync::Arc::new(crate::speech::Speech)),
         ollama: Some(std::sync::Arc::new(crate::settings::WebSettings)),
-        listener: Some(crate::record::listener()),
-        regenerator: Some(crate::record::regenerator()),
+        listener: Some(crate::record::listener(std::sync::Arc::clone(&usage))),
+        regenerator: Some(crate::record::regenerator(std::sync::Arc::clone(&usage))),
         calendar_access: Some(std::sync::Arc::new(crate::settings::WebSettings)),
         housekeeper: Some(std::sync::Arc::new(crate::housekeeping::Housekeeping)),
         room: Some(std::sync::Arc::new(leo_services::ai::felix_room)),
         context: Some(std::sync::Arc::new(leo_services::ai::felix_context)),
         reader: Some(std::sync::Arc::new(
-            |file: leo_web::UploadFile, progress: &mut dyn FnMut(&str)| {
+            move |file: leo_web::UploadFile, progress: &mut dyn FnMut(&str)| {
                 leo_services::import::read_for_chat(
                     &leo_services::import::Upload {
                         name: file.name,
@@ -132,24 +153,32 @@ pub fn powers() -> leo_web::Powers {
                         path: file.path,
                     },
                     &|prompt, images, most| {
-                        leo_services::ai::see(prompt, images, most).map_err(crate::felix::said)
+                        crate::felix::counted(&read, leo_web::usage::Purpose::Pictures, || {
+                            leo_services::ai::see(prompt, images, most)
+                        })
+                        .map(|outcome| outcome.value)
+                        .map_err(crate::felix::said)
                     },
                     progress,
                 )
             },
         )),
         reader_to: Some(std::sync::Arc::new(
-            |path: &std::path::Path,
-             name: &str,
-             mime: &str,
-             progress: &mut dyn FnMut(&str),
-             out: &mut dyn std::io::Write| {
+            move |path: &std::path::Path,
+                  name: &str,
+                  mime: &str,
+                  progress: &mut dyn FnMut(&str),
+                  out: &mut dyn std::io::Write| {
                 leo_services::import::read_to(
                     path,
                     name,
                     mime,
                     &|prompt, images, most| {
-                        leo_services::ai::see(prompt, images, most).map_err(crate::felix::said)
+                        crate::felix::counted(&read_to, leo_web::usage::Purpose::Pictures, || {
+                            leo_services::ai::see(prompt, images, most)
+                        })
+                        .map(|outcome| outcome.value)
+                        .map_err(crate::felix::said)
                     },
                     progress,
                     out,
@@ -157,7 +186,7 @@ pub fn powers() -> leo_web::Powers {
             },
         )),
         converse: Some(crate::felix::converser()),
-        seer: Some(crate::felix::seer()),
+        seer: Some(crate::felix::seer(std::sync::Arc::clone(&usage))),
         meaning: Some(crate::felix::meaning()),
     }
 }

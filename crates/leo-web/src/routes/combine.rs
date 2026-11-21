@@ -168,8 +168,8 @@ pub(crate) async fn start(
         Some(expected.max(500.0)),
     );
     let writer: crate::Writer = match (&ticket, state.chat.clone()) {
-        (Some(t), Some(stream)) => {
-            let meter = std::sync::Arc::clone(&t.meter);
+        (_, Some(stream)) => {
+            let meter = ticket.as_ref().map(|t| std::sync::Arc::clone(&t.meter));
             let usage = std::sync::Arc::clone(&state.usage);
             let stop = std::sync::Arc::clone(&run.stopped);
             std::sync::Arc::new(move |system: &str, user: &str, most: u32| {
@@ -178,12 +178,12 @@ pub(crate) async fn start(
                     system,
                     user,
                     most,
-                    &mut |piece| meter.add(piece),
-                    &mut || meter.restart(),
+                    &mut |piece| meter.iter().for_each(|m| m.add(piece)),
+                    &mut || meter.iter().for_each(|m| m.restart()),
                     &|| stop.load(std::sync::atomic::Ordering::SeqCst),
                 );
                 usage.record(
-                    crate::usage::Purpose::OtherWriting,
+                    crate::usage::Purpose::Combine,
                     reply.as_ref().ok().and_then(|r| r.spent.as_ref()),
                     started.elapsed(),
                     reply.is_err(),

@@ -63,43 +63,26 @@
 .plan-window > .hint { grid-column: 2; font-size: var(--fs-xs); color: var(--muted); text-align: right; }
 .plan-meter { height: 18px; border-radius: var(--r-xs); overflow: hidden; background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in srgb, var(--plan-tone) 12%, transparent) 3px 4px); }
 .plan-meter i { display: block; height: 100%; border-radius: inherit; background: color-mix(in srgb, var(--plan-tone) 48%, var(--surface)); transition: width var(--t-follow) var(--ease-arrive); }
-:is(.scrim, .scrim-gone):has(.task-new, .usage-sheet) { container: sheetroom / inline-size; }
-:is(.scrim, .scrim-gone):has(.usage-sheet) { padding: 16px; }
-:is(.scrim, .scrim-gone) :is(.sheet, .sheet-gone).usage-sheet { width: min(960px, 100%); max-width: 960px; min-height: min(540px, calc(100vh - 32px)); max-height: calc(100vh - 32px); padding: 20px 24px; border-radius: 18px; }
-.usage-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; max-width: 800px; margin: 0 auto 20px; }
-.usage-head h3 { margin: 0 !important; font-size: var(--fs-xl) !important; font-weight: 650; }
-:is(.sheet, .sheet-gone) .usage-sub { margin: 2px 0 0; font-size: var(--fs-sm); color: var(--muted); }
-.usage-tools { display: flex; align-items: center; gap: 4px; }
-.usage-tools .icon-btn { width: 34px; height: 34px; border-radius: var(--r-tile); color: var(--muted); }
-.usage-tools .icon-btn:hover:not(:disabled) { color: var(--text); }
-.usage-tools .icon-btn svg { width: 18px; height: 18px; }
-.usage-tools .activity-spin { width: 16px; height: 16px; }
-.usage-sheet .usage-content { max-width: 800px; margin: 0 auto; }
-.coding-plan > .skeleton { --sk-base: var(--surface-2); }
-.coding-plan > .skeleton:first-child { width: 34%; height: 22px; margin: 0 0 10px; padding: 0 10px; }
-.coding-plan > .skeleton:first-child > svg + svg, .coding-plan > .skeleton + .skeleton > svg:nth-child(3) { display: none; }
-.coding-plan > .skeleton + .skeleton { height: 56px; margin: 0; border-radius: var(--r-tile); }
-.coding-plan > .skeleton + .skeleton + .skeleton { margin-top: 8px; }
-.usage-sheet .coding-plans { gap: 28px; }
-.usage-sheet .coding-plan header { margin-bottom: 10px; }
-.usage-sheet .coding-plan h4 { font-size: var(--fs-md); font-weight: 600; }
+:is(.scrim, .scrim-gone):has(.task-new) { container: sheetroom / inline-size; }
+.usage-plans .coding-plans { gap: 28px; }
+.usage-plans .coding-plan header { margin-bottom: 10px; }
+.usage-plans .coding-plan h4 { font-size: var(--fs-md); font-weight: 600; }
 .plan-title { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; min-width: 0; }
 .plan-updated { font-size: var(--fs-xs); }
-.usage-sheet .plan-window { grid-template-columns: 180px minmax(0, 1fr); gap: 0 20px; margin: 0; padding: 12px 16px; background: transparent; border-radius: 0; }
-.usage-sheet .plan-metric { grid-row: 1; grid-column: 1; gap: 2px; }
-.usage-sheet .plan-metric > span { color: var(--text); font-size: var(--fs-sm); }
-.usage-sheet .plan-metric strong { font-size: 29px; font-weight: 650; letter-spacing: -1px; line-height: 1.12; }
-.usage-sheet .plan-metric strong small { font-size: var(--fs-xs); font-weight: 400; letter-spacing: 0; color: var(--muted); }
-.usage-sheet .plan-track { position: relative; grid-column: 2; grid-row: 1; min-width: 0; }
-.usage-sheet .plan-meter { height: 32px; border-radius: var(--r-sm); background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--plan-tone) 22%, transparent) 5px 6px); }
-.usage-sheet .plan-meter.unavailable { background: var(--tint); }
-.usage-sheet .plan-track > .hint { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); margin: 0; padding: 2px 5px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--raised) 88%, transparent); color: var(--text); font-size: var(--fs-xs); line-height: 1.25; white-space: nowrap; }
-.usage-sheet .plan-metric strong.plan-none { font-size: 16px; font-weight: 500; letter-spacing: 0; line-height: 32px; color: var(--muted); }
-.usage-sheet .usage-note { margin: 16px 0 0; text-align: center; font-size: var(--fs-xs); }
+.usage-plans .plan-window { grid-template-columns: 180px minmax(0, 1fr); gap: 0 20px; margin: 0; padding: 12px 16px; background: transparent; border-radius: 0; }
+.usage-plans .plan-metric { grid-row: 1; grid-column: 1; gap: 2px; }
+.usage-plans .plan-metric > span { color: var(--text); font-size: var(--fs-sm); }
+.usage-plans .plan-metric strong { font-size: 29px; font-weight: 650; letter-spacing: -1px; line-height: 1.12; }
+.usage-plans .plan-metric strong small { font-size: var(--fs-xs); font-weight: 400; letter-spacing: 0; color: var(--muted); }
+.usage-plans .plan-track { position: relative; grid-column: 2; grid-row: 1; min-width: 0; }
+.usage-plans .plan-meter { height: 32px; border-radius: var(--r-sm); background: repeating-linear-gradient(135deg, transparent 0 5px, color-mix(in srgb, var(--plan-tone) 22%, transparent) 5px 6px); }
+.usage-plans .plan-meter.unavailable { background: var(--tint); }
+.usage-plans .plan-track > .hint { position: absolute; top: 50%; right: 6px; transform: translateY(-50%); margin: 0; padding: 2px 5px; border-radius: var(--r-xs); background: color-mix(in srgb, var(--raised) 88%, transparent); color: var(--text); font-size: var(--fs-xs); line-height: 1.25; white-space: nowrap; }
+.usage-plans .plan-metric strong.plan-none { font-size: 16px; font-weight: 500; letter-spacing: 0; line-height: 32px; color: var(--muted); }
+.usage-plans .usage-note { margin: 16px 0 0; text-align: center; font-size: var(--fs-xs); }
 
-@media (max-width: 560px) { :is(.scrim, .scrim-gone):has(.usage-sheet) { padding: 8px; } :is(.scrim, .scrim-gone) :is(.sheet, .sheet-gone).usage-sheet { padding: 18px 12px; min-height: min(540px, calc(100vh - 16px)); max-height: calc(100vh - 16px); } .usage-sheet .plan-window { grid-template-columns: 92px minmax(0, 1fr); gap: 0 10px; padding: 10px 4px; }
-.usage-head { margin-bottom: 14px; }
-.usage-sheet .plan-metric strong { font-size: 21px; letter-spacing: -.5px; } .usage-sheet .plan-metric > span { font-size: var(--fs-xs); } .usage-sheet .plan-meter { height: 26px; } .usage-sheet .plan-metric strong.plan-none { font-size: var(--fs-base); } }
+@media (max-width: 560px) { .usage-plans .plan-window { grid-template-columns: 92px minmax(0, 1fr); gap: 0 10px; padding: 10px 4px; }
+.usage-plans .plan-metric strong { font-size: 21px; letter-spacing: -.5px; } .usage-plans .plan-metric > span { font-size: var(--fs-xs); } .usage-plans .plan-meter { height: 26px; } .usage-plans .plan-metric strong.plan-none { font-size: var(--fs-base); } }
 @media (max-width: 480px) { .plan-window { grid-template-columns: 85px minmax(0, 1fr); gap: 4px 12px; padding: 12px; } .plan-metric strong { font-size: 18px; } }
 @media (prefers-reduced-motion: reduce) { .plan-meter i { transition: none; } }
 .doc-tail { min-height: 40vh; cursor: text; }

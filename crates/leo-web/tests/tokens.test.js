@@ -81,6 +81,17 @@ test('the remapped tokens are plain hex or rgba, never color-mix, so Mermaid can
   }
 });
 
+test('every model and kind colour on the Usage page stands out from its card in every theme', () => {
+  const names = [...Array(15)].map((_, i) => `--chart-${i + 6}`)
+    .concat([1, 2, 3, 4, 5, 6, 7].map((n) => `--fam-openai-${n}`), [1, 2, 3, 4].map((n) => `--fam-claude-${n}`), [1, 2, 3].map((n) => `--fam-local-${n}`));
+  for (const [name, rule] of Object.entries(themes)) {
+    const t = tokens(rule);
+    for (const key of names) {
+      for (const under of ['--tint', '--raised']) assert.ok(contrast(rgb(t[key]), rgb(t[under])) >= 3, `${name}: ${key} on ${under} is ${contrast(rgb(t[key]), rgb(t[under])).toFixed(2)}`);
+    }
+  }
+});
+
 test('ink, focus and highlight pairs keep their WCAG contrast in every theme', () => {
   for (const [name, rule] of Object.entries(themes)) {
     const t = tokens(rule);

@@ -1054,6 +1054,8 @@ fn reusable(bytes: &[u8], key: &str) -> Option<Written> {
 pub fn write_up(
     dir: &Path,
     existing: Option<&str>,
+    chat: &(dyn Fn(crate::ai::chat::Prompt, u32) -> anyhow::Result<crate::ai::chain::ChainOutcome<String>>
+          + Sync),
     progress: &(dyn Fn(usize, usize) + Sync),
 ) -> anyhow::Result<Written> {
     let session = Session::open(dir)?;
@@ -1095,7 +1097,7 @@ pub fn write_up(
         drafts_for(&session, &assembled.parts, existing).as_ref(),
         &fallback,
         &|prompt, max| {
-            crate::ai::chat_outcome(
+            chat(
                 crate::ai::long::with_profile(prompt, &session.manifest.profile),
                 max,
             )
