@@ -158,7 +158,6 @@
 .rec-transcript { min-height: 96px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; margin-top: 12px; padding-top: 12px; font-size: var(--fs-md); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rec-latest { margin-top: 8px; }
 .rec-ask .chat-starters { margin-top: 10px; }
-.rec-ask .starter { animation-delay: 0s; }
 .rec-idle .rec-ask { margin: 0 4px 12px; }
 .rec-idle .rec-ask .hint { margin: 0; }
 main:has(> #rec-box > .rec-live) { max-width: 1280px; }

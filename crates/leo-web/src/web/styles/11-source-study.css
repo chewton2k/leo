@@ -129,7 +129,7 @@
 .chat.perched :is(.chat-body, .chat-hello, .chat-below) { display: contents; }
 .chat.perched :is(.chat-hello-lead, .chat-review, .chat-foot, .chat-starters, .chat-ask) { box-sizing: border-box; width: 100%; max-width: 560px; align-self: center; }
 .chat.perched .chat-foot { padding: 0; }
-.chat.perched .chat-starters { margin-top: 14px; gap: 6px; padding: 0 2px; }
+.chat.perched .chat-starters { margin-top: 14px; padding: 0 2px; }
 @media (max-width: 599px) { .chat.perched .chat-main { padding-left: 18px; padding-right: 18px; } }
 .chat.slim.perched .chat-main { padding-left: 18px; padding-right: 18px; }
 .chat.slim .chat-hello-lead, .chat.slim .chat-review, .chat.slim .chat-refs, .chat.slim.perched .chat-review { padding-right: 0; }

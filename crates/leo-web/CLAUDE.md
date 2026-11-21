@@ -1006,7 +1006,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   1280 px. At 1000 px or more the live card spans the top over three columns, transcript |
   Your notes + What you want | Ask Felix; beside the docked chat (`body.chat-open` at 1200 px
   windows and up, the same breakpoint as the dock) at 640 px or more, two columns with Ask Felix above Your notes; narrower, the cards stack with Ask
-  Felix under Your notes. The questions are chat `.starter` chips (`FELIX_ASKS`): before
+  Felix under Your notes. The questions are chat `.starter` rows (`FELIX_ASKS`, listed like Felix's starters since 2026-11-21): before
   Start, shown once an event is chosen or What you want is filled, What should I listen
   for? and What should I ask? attach the event and the want (`briefAsk`); while recording,
   What did I just miss?, Sum up so far and What should I ask next? attach the typed points
