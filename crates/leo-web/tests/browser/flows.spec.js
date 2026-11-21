@@ -5640,21 +5640,19 @@ test('a click or a double-click on a picture outlines it once and opens no edito
   await page.request.delete(`/api/notes/${note.id}`);
 });
 
-test('in a checkbox item a click on either half of a picture puts the caret on that side, and Enter after it starts a checkbox', async ({ page }) => {
+test('in a checkbox item a click on a picture selects it, a click beside it puts the caret after it, and Enter there starts a checkbox', async ({ page }) => {
   const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
   const note = await (await page.request.post('/api/notes', { data: { title: `Boxed ${Date.now().toString(36)}`, body: `- [ ] ![Box](data:image/svg+xml;utf8,${svg})` } })).json();
   await page.goto(`/#/n/${note.id}`);
   const img = page.locator('#doc img.note-img');
   const area = page.locator('#doc textarea');
   await expect(img).toBeVisible();
-  const left = await img.boundingBox();
-  await page.mouse.click(left.x + left.width / 4, left.y + left.height / 2);
-  await expect(area).toHaveValue(/^!\[Box\]\(data:image/);
-  expect(await area.evaluate((el) => el.selectionStart)).toBe(0);
-  await page.keyboard.press('Escape');
-  await expect(img).toBeVisible();
+  await img.click();
+  await expect(img).toHaveClass(/picked/);
+  await expect(page.locator('.pic-handle')).toBeVisible();
+  await expect(area).toHaveCount(0);
   const right = await img.boundingBox();
-  await page.mouse.click(right.x + right.width * 3 / 4, right.y + right.height / 2);
+  await page.mouse.click(right.x + right.width + 40, right.y + right.height / 2);
   await expect(area).toHaveValue(/^!\[Box\]\(data:image/);
   expect(await area.evaluate((el) => el.selectionStart === el.value.length)).toBe(true);
   await page.keyboard.press('Enter');

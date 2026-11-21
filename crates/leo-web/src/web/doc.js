@@ -1472,10 +1472,9 @@
           offset = range.startOffset;
         }
       }
-      const pic = document.elementFromPoint(x, y)?.closest('img.note-img');
-      if (pic && el.contains(pic)) {
+      for (const pic of el.querySelectorAll('img.note-img')) {
         const box = pic.getBoundingClientRect();
-        ({ node, offset } = beside(pic, x > box.left + box.width / 2 ? 1 : 0));
+        if (y >= box.top && y <= box.bottom) ({ node, offset } = beside(pic, x > box.left + box.width / 2 ? 1 : 0));
       }
       if (!node || !el.contains(node)) return null;
       const range = document.createRange();
@@ -1792,7 +1791,7 @@
         return;
       }
       const pic = e.target.closest('img.note-img');
-      if (pic && !pic.closest('.editing, .task-item') && !e.shiftKey) {
+      if (pic && !pic.closest('.editing') && !e.shiftKey) {
         e.preventDefault();
         frame(pic);
         return;
@@ -1864,7 +1863,7 @@
         editLine(lines.length - 1, 'end', false);
         return;
       }
-      const lone = !e.shiftKey && !pic && lonePicture(blk);
+      const lone = !e.shiftKey && !blk.querySelector('li') && lonePicture(blk);
       if (lone) {
         frame(lone);
         return;
