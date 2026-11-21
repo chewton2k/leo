@@ -66,7 +66,7 @@ pub(crate) const APP_JS: &str = concat!(
 );
 pub(crate) const MARKDOWN_JS: &str = include_str!("../web/markdown.js");
 const MERMAID_JS: &str = include_str!("../web/vendor/mermaid.min.js");
-pub(crate) const MERMAID_PATH: &str = "/vendor/mermaid-11.4.1.js";
+pub(crate) const MERMAID_PATH: &str = "/vendor/mermaid-11.17.2.js";
 pub(crate) const EDITING_JS: &str = include_str!("../web/editing.js");
 pub(crate) const SAVING_JS: &str = include_str!("../web/saving.js");
 pub(crate) const DOC_JS: &str = include_str!("../web/doc.js");

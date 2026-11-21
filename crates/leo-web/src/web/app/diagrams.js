@@ -1,4 +1,4 @@
-const MERMAID_URL = '/vendor/mermaid-11.4.1.js';
+const MERMAID_URL = '/vendor/mermaid-11.17.2.js';
 const DIAGRAMS_KEPT = 60;
 const DIAGRAM_WAITING = 'figure.diagram:not([data-drawn])';
 const DRAWING_IMAGE = 'figure.drawing > img';

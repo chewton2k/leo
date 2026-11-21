@@ -85,7 +85,7 @@ directory with `keep()` just to pass its path to a fixture.
   chat-save, import, picture, preferences and dictation routes keep their own limits.
 - Page CSP: no inline JS (`script-src 'self'`), `data:` images, `frame-src
   'self'` (original viewer), `font-src 'self'` (KaTeX and the bundled
-  fonts). Mermaid 11.4.1, KaTeX 0.16.11, CodeMirror parsers and the latin
+  fonts). Mermaid 11.17.2, KaTeX 0.16.11, CodeMirror parsers and the latin
   variable fonts Instrument Sans (note titles and text, `--writing-font`, roman and italic) and
   Newsreader (Felix's margin voice, `--voice`, roman and italic; SIL OFL,
   @fontsource-variable 5.3.0) are vendored under `web/vendor/` (served
