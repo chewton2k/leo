@@ -156,6 +156,8 @@
 .rec-round:hover > svg, .rec-round:hover > .rec-square { filter: brightness(.96); }
 .rec-square { width: 11px; height: 11px; border-radius: var(--r-xs); background: currentColor; }
 .rec-transcript { min-height: 96px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; margin-top: 12px; padding-top: 12px; font-size: var(--fs-md); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.rec-latest { margin-top: 8px; }
+@media (prefers-reduced-motion: no-preference) { .rec-new { animation: fade var(--t-open) var(--ease-arrive); } }
 .rec-compose { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .rec-compose textarea { font-size: var(--fs-md); line-height: 1.5; min-height: 84px; resize: vertical; overflow-wrap: anywhere; }
 .rec-compose-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }

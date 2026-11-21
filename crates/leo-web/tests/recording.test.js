@@ -314,3 +314,101 @@ test('a live recording off the Record page is announced for the activity panel, 
     ['leo-recording', null], ['leo-recording', null], ['leo-recording', null],
   ]);
 });
+
+test('a new transcript keeps the shown words and replaces only the changed tail', () => {
+  const merged = (shown, next) => {
+    const m = L.tailMerge(shown, next);
+    assert.equal(shown.slice(m.drop, m.drop + m.keep) + m.tail, next);
+    return m;
+  };
+  assert.deepEqual(merged('', 'Hello there'), { drop: 0, keep: 0, tail: 'Hello there' });
+  assert.deepEqual(merged('Today we cover', 'Today we cover graphs'), { drop: 0, keep: 14, tail: ' graphs' });
+  assert.deepEqual(merged('Today we cover grafs and', 'Today we cover graphs and trees'), { drop: 0, keep: 15, tail: 'graphs and trees' });
+  assert.deepEqual(merged('Today we cover graphs', 'Today we cover'), { drop: 0, keep: 14, tail: '' });
+  assert.deepEqual(merged('same', 'same'), { drop: 0, keep: 4, tail: '' });
+  const long = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const trimmed = merged(long, `${long.slice(30)} more`);
+  assert.equal(trimmed.drop, 30);
+  assert.equal(trimmed.keep, long.length - 30);
+  const both = merged(`${long} tale`, `${long.slice(50)} tail end`);
+  assert.equal(both.drop, 50);
+  assert.equal(both.tail, 'tail end');
+  assert.deepEqual(merged('nothing alike', 'Something else entirely'), { drop: 0, keep: 0, tail: 'Something else entirely' });
+  assert.equal(merged('we laughed \u{1F600}', 'we laughed \u{1F601}').keep, 11);
+  assert.equal(merged('a'.repeat(100), 'a'.repeat(100) + 'b').keep, 100 - 32);
+});
+
+function fakeTranscript() {
+  const text = { kids: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0, wired: 0 };
+  const own = (node) => Object.assign(node, { remove() { text.kids.splice(text.kids.indexOf(node), 1); } });
+  const textNode = (data) => own({ nodeType: 3, firstChild: null, data, get textContent() { return this.data; }, deleteData(at, count) { this.data = this.data.slice(0, at) + this.data.slice(at + count); } });
+  Object.defineProperties(text, {
+    firstChild: { get: () => text.kids[0] || null },
+    lastChild: { get: () => text.kids[text.kids.length - 1] || null },
+    textContent: { get: () => text.kids.map((k) => k.textContent).join(''), set: (v) => { text.kids = v ? [textNode(v)] : []; } },
+    innerHTML: { set: (v) => { text.kids = [own({ hint: v, textContent: '' })]; } },
+  });
+  text.append = (node) => text.kids.push(node);
+  text.addEventListener = () => text.wired++;
+  const document = {
+    createTextNode: textNode,
+    createElement: () => own({ firstChild: null, get textContent() { return this.firstChild.data; }, set textContent(v) { this.firstChild = { data: v, deleteData(at, count) { this.data = this.data.slice(0, at) + this.data.slice(at + count); } }; } }),
+  };
+  const heard = { addEventListener: () => text.wired++ };
+  const latest = { hidden: true, addEventListener: () => text.wired++ };
+  const box = { querySelector: (at) => ({ '#rec-transcript': text, '#rec-heard': heard, '#rec-latest': latest })[at] };
+  return { text, latest, box, document };
+}
+
+test('the live transcript is patched in place: kept words stay the same node and only new words fade in', () => {
+  const { text, latest, box, document } = fakeTranscript();
+  const s = { view: { state: 'recording', transcript: '' }, follow: true };
+  const said = 'We started with the outline of the course and what the exam will ask about.';
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document }, tailMerge: L.tailMerge });
+  show(box);
+  assert.ok(text.kids[0].hint.includes('Listening'));
+  s.view.transcript = `${said} Today we cover graphs`;
+  show(box);
+  const first = text.kids[0];
+  assert.equal(first.className, 'rec-new', 'the first words after Listening fade in');
+  s.view.transcript = `${said} Today we cover graphs and treez`;
+  show(box);
+  s.view.transcript = `${said} Today we cover graphs and trees today`;
+  show(box);
+  assert.equal(text.textContent, s.view.transcript);
+  assert.equal(text.kids[0], first);
+  assert.deepEqual(text.kids.slice(1).map((k) => [k.className, k.textContent]), [['rec-new', ' and '], ['rec-new', 'trees today']]);
+  s.view.transcript = s.view.transcript.slice(30) + ' more';
+  show(box);
+  assert.equal(text.textContent, s.view.transcript, 'a trimmed head is dropped from the front');
+  assert.equal(text.kids[0], first);
+  assert.equal(text.wired, 3, 'listeners are added once, when the transcript is made');
+  assert.equal(latest.hidden, true);
+  s.follow = false;
+  s.view.transcript += ' again';
+  show(box);
+  assert.equal(latest.hidden, false, 'a reader scrolled up is offered Back to latest');
+  const again = fakeTranscript();
+  piece('showTranscript', 'draw', 'showTranscript', { s: { view: { state: 'recording', transcript: 'Said before' } }, root: { document: again.document }, tailMerge: L.tailMerge })(again.box);
+  assert.equal(again.text.kids[0].nodeType, 3, 'what was already said arrives without a fade');
+  assert.equal(again.text.textContent, 'Said before');
+});
+
+test('a live redraw replaces the cards around the transcript and never the transcript itself', () => {
+  const kid = (id) => ({ id });
+  const heard = kid('rec-heard');
+  const shell = { className: 'rec rec-live', classList: { contains: (c) => shell.className.split(' ').includes(c) }, children: [kid('card'), heard, kid('pad'), kid('wants')] };
+  heard.parentElement = shell;
+  shell.children.forEach((child) => {
+    child.replaceWith = (next) => { if (child === heard) throw new Error('the transcript was replaced'); shell.children[shell.children.indexOf(child)] = next; };
+    child.remove = () => { throw new Error('a card was removed'); };
+  });
+  const box = { querySelector: (at) => (at === '#rec-heard' ? heard : null), set innerHTML(v) { throw new Error('the whole page was rewritten'); } };
+  shell.parentElement = box;
+  const fresh = { className: 'rec rec-live paused', children: [kid('card'), kid('rec-heard'), kid('pad'), kid('wants')] };
+  const document = { createElement: () => ({ set innerHTML(v) { this.firstElementChild = fresh; } }) };
+  piece('paintLive', 'showTranscript', 'paintLive', { root: { document }, drawLive: () => '<div class="rec rec-live paused"></div>' })(box);
+  assert.equal(shell.className, 'rec rec-live paused');
+  assert.equal(shell.children[1], heard);
+  assert.deepEqual([0, 2, 3].map((i) => shell.children[i] === fresh.children[i]), [true, true, true]);
+});

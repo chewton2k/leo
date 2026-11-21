@@ -983,6 +983,15 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   updater installation through the durable save. Recovery lists only what the
   `Housekeeper` lists (`pending_page`, every unfinished recording newest first; recover
   and Delete look one up with `pending_recording`); a recovery job carries its session id.
+- Live transcript (2026-11-21, the user's call): the 1 s poll redraws the live page
+  around `#rec-heard` (`paintLive` swaps the other cards; the transcript node is never
+  rebuilt), and `showTranscript` patches it with `tailMerge(shown, next)`: a trimmed head
+  (`keep_tail`) is dropped from the front, the stable prefix stays, and only the changed
+  tail (backed up to its word) is replaced, so selection and scroll survive. New words are
+  a `.rec-new` span (`fade`, `--t-open`, none under reduced motion); text already said when
+  the node is made arrives plain. Scrolled up, the view stays put and Back to latest
+  (`#rec-latest`) scrolls down and resumes following. `aria-live="off"`: the node now
+  persists, so polite would read every update.
 - Label speakers (2026-11-16, the user's call: per recording, for meetings,
   not lectures): a switch under the note fields, off by default, remembered as
   `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and

@@ -1317,6 +1317,14 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
 
 - Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so in the live card with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
 
+- Live transcript (2026-11-21, the user's call): every second only the new words are
+  added to What's being heard; the words already shown stay put, so a selection and the
+  scroll position survive the poll. When recognition rewrites its last words, only that
+  changed tail is replaced; when the transcript's start is trimmed (the last 200,000
+  characters are kept), the trimmed words leave the top. New words fade in briefly (not with
+  reduced motion). Scrolled up, the view stays where it is and Back to latest returns to the
+  newest words and follows them again.
+
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while
   recording instead of a browser screen picker. The existing snapshot endpoint
   timestamps and retains it, derives MIME from bytes and optionally reads its

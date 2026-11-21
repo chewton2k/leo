@@ -129,6 +129,19 @@
     return points.map(([at, text], k) => [first + k, at, text]);
   }
 
+  function tailMerge(shown, next) {
+    const probe = next.slice(0, 64);
+    const found = next.startsWith(shown.slice(0, probe.length)) ? 0 : shown.indexOf(probe);
+    const drop = found > 0 ? found : 0;
+    const rest = shown.slice(drop);
+    const most = Math.min(rest.length, next.length);
+    let keep = 0;
+    while (keep < most && rest.charCodeAt(keep) === next.charCodeAt(keep)) keep++;
+    if (/\S/.test(next[keep] || '')) keep -= /\S{0,32}$/.exec(next.slice(0, keep))[0].length;
+    if (keep > 0 && /[\uD800-\uDBFF]/.test(next[keep - 1])) keep--;
+    return { drop, keep, tail: next.slice(keep) };
+  }
+
   function unsavedLine(n, more) {
     if (more) return `${n} or more recordings weren't saved`;
     return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
@@ -485,7 +498,6 @@
     function drawLive() {
       const v = s.view;
       const paused = v.state === 'paused';
-      const transcript = v.transcript ? esc(v.transcript) : `<span class="hint">${paused ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
       const listed = earlierFirst(s.earlier, placed(v));
       const more = listed.length && listed[0][0] > 0 ? '<button type="button" class="btn plain sm" data-action="rec-earlier">Show earlier points</button>' : '';
       const points = listed.length ? `${more}<ul class="rec-points">${listed.map(([, at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
@@ -506,7 +518,8 @@
         </section>
         <details class="set-card rec-heard" id="rec-heard"${s.showHeard ? ' open' : ''}>
           <summary><span class="grow"><b>What’s being heard</b><span class="cal-sub">The live transcript</span></span>${icons.chevron}</summary>
-          <div class="rec-transcript" id="rec-transcript" aria-live="polite">${transcript}</div>
+          <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
+          <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
         </details>
         <section class="set-card rec-notepad">
           <header><h3>Your notes</h3></header><p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>
@@ -637,6 +650,85 @@
       }
     }
 
+    function paintLive(box) {
+      const html = drawLive();
+      const heard = box.querySelector('#rec-heard');
+      const shell = heard && heard.parentElement;
+      if (!shell || shell.parentElement !== box || !shell.classList.contains('rec-live')) {
+        box.innerHTML = html;
+        return;
+      }
+      const made = root.document.createElement('div');
+      made.innerHTML = html;
+      const fresh = made.firstElementChild;
+      shell.className = fresh.className;
+      const old = [...shell.children].filter((child) => child !== heard);
+      const next = [...fresh.children].filter((child) => child.id !== 'rec-heard');
+      old.forEach((child, i) => (next[i] ? child.replaceWith(next[i]) : child.remove()));
+      next.slice(old.length).forEach((child) => shell.append(child));
+    }
+
+    function showTranscript(box) {
+      const text = box.querySelector('#rec-transcript');
+      if (!text) return;
+      const heard = box.querySelector('#rec-heard');
+      const latest = box.querySelector('#rec-latest');
+      const fresh = s.shownIn !== text;
+      if (fresh) {
+        Object.assign(s, { shownIn: text, shownText: '', follow: true });
+        heard.addEventListener('toggle', () => {
+          s.showHeard = heard.open;
+          try {
+            root.localStorage.setItem('leo-rec-heard', heard.open ? 'open' : 'shut');
+          } catch (e) {}
+          if (!heard.open) return;
+          s.follow = true;
+          latest.hidden = true;
+          text.scrollTop = text.scrollHeight;
+        });
+        text.addEventListener('scroll', () => {
+          s.follow = text.scrollTop + text.clientHeight >= text.scrollHeight - 24;
+          latest.hidden = s.follow;
+        });
+        latest.addEventListener('click', () => {
+          s.follow = true;
+          latest.hidden = true;
+          text.focus({ preventScroll: true });
+          text.scrollTop = text.scrollHeight;
+        });
+      }
+      const next = s.view.transcript || '';
+      const shown = s.shownText;
+      s.shownText = next;
+      if (!next) {
+        text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
+        return;
+      }
+      if (!shown) text.textContent = '';
+      const { drop, keep, tail } = tailMerge(shown, next);
+      const height = text.scrollHeight;
+      let left = drop;
+      while (left > 0 && text.firstChild) {
+        const node = text.firstChild;
+        const size = node.textContent.length;
+        if (size > left) (node.firstChild || node).deleteData(0, left);
+        else node.remove();
+        left -= Math.min(size, left);
+      }
+      if (drop && !s.follow) text.scrollTop -= height - text.scrollHeight;
+      let size = shown.length - drop;
+      while (size > keep && text.lastChild) {
+        const node = text.lastChild;
+        const part = node.textContent.length;
+        if (size - part >= keep) node.remove();
+        else (node.firstChild || node).deleteData(part - (size - keep), size - keep);
+        size = Math.max(keep, size - part);
+      }
+      if (tail) text.append(fresh ? root.document.createTextNode(tail) : Object.assign(root.document.createElement('span'), { className: 'rec-new', textContent: tail }));
+      if (s.follow) text.scrollTop = text.scrollHeight;
+      latest.hidden = s.follow;
+    }
+
     function draw() {
       const box = s.container;
       if (!box || !box.isConnected) return;
@@ -645,8 +737,6 @@
       const keep = typed ? { value: typed.value, focused: root.document.activeElement === typed, start: typed.selectionStart, end: typed.selectionEnd } : null;
       const wantsBox = box.querySelector('#rec-wants-live');
       const wantsKeep = wantsBox && root.document.activeElement === wantsBox ? { start: wantsBox.selectionStart, end: wantsBox.selectionEnd } : null;
-      const old = box.querySelector('#rec-transcript');
-      if (old) s.follow = old.scrollTop + old.clientHeight >= old.scrollHeight - 24;
       const form = idleForm(box);
       const motion = root.leoMotion;
       const page = !v || v.state === 'done' ? 'idle' : live(v) ? 'live' : v.state === 'writing' ? 'writing' : 'failed';
@@ -658,7 +748,7 @@
       const paint = () => {
         if (page === 'idle') box.innerHTML = drawIdle(folders, here, form && form.kind);
         else if (page === 'live') {
-          box.innerHTML = drawLive();
+          paintLive(box);
           s.heard = '';
           paintWaveNow();
         }
@@ -668,17 +758,7 @@
       if (paused && motion) motion.iconSwap(box, paint, '.rec-round.plain svg');
       else paint();
       if (moved) motion?.cascade(box, 'settling');
-      const heard = box.querySelector('#rec-heard');
-      if (heard) {
-        heard.addEventListener('toggle', () => {
-          s.showHeard = heard.open;
-          try {
-            root.localStorage.setItem('leo-rec-heard', heard.open ? 'open' : 'shut');
-          } catch (e) {}
-          const text = heard.querySelector('#rec-transcript');
-          if (heard.open && text) text.scrollTop = text.scrollHeight;
-        });
-      }
+      if (page === 'live') showTranscript(box);
       const wantsArea = box.querySelector('#rec-wants-live');
       if (wantsArea) {
         if (wantsKeep) {
@@ -727,8 +807,6 @@
         });
       }
       const dir=box.querySelector('#rec-dir');
-      const text = box.querySelector('#rec-transcript');
-      if (text && s.follow) text.scrollTop = text.scrollHeight;
     }
 
     async function saveWants() {
@@ -897,5 +975,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);
