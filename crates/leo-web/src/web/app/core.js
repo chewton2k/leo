@@ -541,23 +541,26 @@ let navigationRequest = 0;
 function clearSearchHighlight() {
   clearTimeout(searchHighlightTimer);
   CSS.highlights?.delete('leo-search');
+  CSS.highlights?.delete('leo-found');
 }
 
-function highlightSearch(root, query) {
+function highlightSearch(root, query, at) {
+  const find = at !== undefined;
   clearSearchHighlight();
   if (!CSS.highlights || typeof Highlight === 'undefined') return false;
-  const words = Array.from(String(query || '')).slice(0, 2000).join('').split(/\s+/).map(word => word.replace(/^#/, '')).filter(Boolean).slice(0, 20);
+  const most = find ? Infinity : SEARCH_HIGHLIGHT_MOST;
+  const words = find ? [String(query || '')].filter(Boolean) : Array.from(String(query || '')).slice(0, 2000).join('').split(/\s+/).map(word => word.replace(/^#/, '')).filter(Boolean).slice(0, 20);
   if (!words.length) return false;
   const pattern = new RegExp(words.map(word => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'gi');
   const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const ranges = [];
   let node;
   let seen = 0;
-  while (ranges.length < SEARCH_HIGHLIGHT_MOST && seen++ < SEARCH_HIGHLIGHT_NODES && (node = walk.nextNode())) {
+  while (ranges.length < most && (find || seen++ < SEARCH_HIGHLIGHT_NODES) && (node = walk.nextNode())) {
     if (node.parentElement.closest('textarea, script, style, .katex-mathml, .note-facts')) continue;
     pattern.lastIndex = 0;
     let match;
-    while (ranges.length < SEARCH_HIGHLIGHT_MOST && (match = pattern.exec(node.textContent))) {
+    while (ranges.length < most && (match = pattern.exec(node.textContent))) {
       const range = document.createRange();
       range.setStart(node, match.index);
       range.setEnd(node, match.index + match[0].length);
@@ -565,10 +568,18 @@ function highlightSearch(root, query) {
     }
   }
   if (!ranges.length) return false;
-  CSS.highlights.set('leo-search', new Highlight(...ranges));
-  const first = ranges[0];
+  const paint = new Highlight(...ranges.slice(0, SEARCH_HIGHLIGHT_MOST));
+  for (const range of ranges.slice(SEARCH_HIGHLIGHT_MOST)) paint.add(range);
+  CSS.highlights.set('leo-search', paint);
+  const first = ranges[find ? ((at % ranges.length) + ranges.length) % ranges.length : 0];
+  if (find) {
+    const now = new Highlight(first);
+    now.priority = 1;
+    CSS.highlights.set('leo-found', now);
+  }
   const rect = first.getBoundingClientRect();
   if (rect.top < 80 || rect.bottom > window.innerHeight) window.scrollBy({ top: (rect.top + rect.bottom - window.innerHeight) / 2, behavior: 'instant' });
+  if (find) return ranges.length;
   searchHighlightTimer = setTimeout(clearSearchHighlight, SEARCH_HIGHLIGHT_MS);
   return true;
 }
@@ -1042,4 +1053,61 @@ window.addEventListener('beforeprint', () => {
 });
 window.addEventListener('afterprint', () => {
   document.body.querySelectorAll('[data-print-off]').forEach((el) => el.removeAttribute('data-print-off'));
+});
+
+function noteFind() {
+  const doc = state.session.doc;
+  const had = $('.note-find input');
+  if (had) {
+    had.focus();
+    had.select();
+    return;
+  }
+  const from = document.activeElement;
+  const line = doc.isEditing() ? doc.caretLine() : null;
+  const bar = document.createElement('div');
+  bar.className = 'note-find';
+  bar.innerHTML = `<div role="search"><label class="field">${ICON.search}<input placeholder="Find in note" aria-label="Find in note" autocomplete="off" spellcheck="false" enterkeyhint="search"></label><span class="hint" role="status"></span><button type="button" class="icon-btn" data-step="-1" aria-label="Previous match" title="Previous match">${ICON.chevron}</button><button type="button" class="icon-btn" data-step="1" aria-label="Next match" title="Next match">${ICON.chevron}</button><button type="button" class="icon-btn" aria-label="Close find" title="Close">${ICON.close}</button></div>`;
+  app.querySelector('article.note').prepend(bar);
+  const input = bar.querySelector('input');
+  let at = 0;
+  const show = (step) => {
+    doc.stop();
+    const found = highlightSearch($('#doc'), input.value, at + step);
+    at = found ? (((at + step) % found) + found) % found : 0;
+    bar.querySelector('.hint').textContent = found ? `${at + 1} of ${found}` : input.value ? 'No matches' : '';
+  };
+  const close = () => {
+    bar.remove();
+    clearSearchHighlight();
+    if (from?.isConnected) from.focus({ preventScroll: true });
+    else if (line !== null) doc.editAt(line);
+  };
+  input.addEventListener('input', () => {
+    at = 0;
+    show(0);
+  });
+  bar.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'Escape') {
+      e.stopPropagation();
+      close();
+    } else if (e.key === 'Enter' && e.target === input) {
+      e.preventDefault();
+      show(e.shiftKey ? -1 : 1);
+    }
+  });
+  bar.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) e.preventDefault();
+  });
+  bar.addEventListener('click', (e) => {
+    const button = e.target.closest('button');
+    if (button) button.dataset.step ? show(Number(button.dataset.step)) : close();
+  });
+  input.focus();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.isComposing || chordOf(e) !== `${ON_MAC ? 'cmd' : 'ctrl'}+f` || state.view !== 'note' || !state.session?.doc || $('.scrim') || Object.keys(SHORTCUTS).some((name) => pressed(e, name))) return;
+  e.preventDefault();
+  noteFind();
 });

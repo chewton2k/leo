@@ -375,7 +375,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `NOTE_ICONS`), underline only as the exact `<u>…</u>` pair (every other tag
   stays text), picture widths Obsidian-style (`![alt|400](path)`,
   `![[file|400]]`, 16–4000 px). Nesting and list styles change only the page,
-  never the file.
+  never the file. A click or a double-click on a picture frames it and never opens its
+  Markdown (2026-11-21, the user's call; Shift-click or a double-click beside it does). A
+  picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js); in a checkbox
+  item a click on its left or right half puts the caret before or after it.
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
   without it, byte-identical): a column whose body cells are all numbers (%, a
@@ -474,7 +477,12 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   shortcut) and New folder share one row (`.side-group`, still the top-level drop
   target and root context menu, their icons on one level), there is no Folders label,
   and folders show no note count (the count is in the row's title).
-- Quick Leo opens with Cmd/Ctrl+K only (Cmd/Ctrl+F removed 2026-11-09); Cmd/Ctrl+N
+- Cmd/Ctrl+F on a note page opens find in note (2026-11-21, the user's call; nothing
+  new on other pages): `noteFind` in `core.js` puts a `.note-find` bar in the note and
+  searches `#doc` (Enter and Shift+Enter step, Esc closes and gives focus back, reopening
+  the line editor it closed); `highlightSearch(root, query, at)` matches the phrase with
+  no cap or timer and paints the current match as `leo-found`; F is in `SHORTCUT_RESERVED`.
+- Quick Leo opens with Cmd/Ctrl+K only; Cmd/Ctrl+N
   makes a note in the current folder, never inside a sheet, an inline edit, while
   composing or when locked. These two and Ask Felix (Cmd/Ctrl+Shift+E) are the
   defaults of three customizable page shortcuts (Settings → Shortcuts): `SHORTCUTS`

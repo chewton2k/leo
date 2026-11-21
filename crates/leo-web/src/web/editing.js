@@ -260,6 +260,8 @@
 
   const PREFIX = new RegExp(String.raw`^(\s*)(#{1,6}\s+|>\s?|(?:${MARKER})\s+(?:\[[ xX]\]\s+)?)?`);
   const TAG = /^<\/?u>/;
+  const EMBED = /^!\[\[[^\]|[]+(?:\|[^\]]*)?\]\]/;
+  const DRAWN = /^\s*<?(?:data:image\/svg\+xml[;,]|(?![a-z][a-z0-9+.-]*:|\/\/)\S)/i;
 
   function hiddenHead(raw, isItem) {
     const found = raw.match(PREFIX);
@@ -269,15 +271,20 @@
   function visibleIndices(raw, isItem) {
     const out = [];
     const prefix = hiddenHead(raw, isItem);
+    let first = -1;
     let i = prefix;
     while (i < raw.length) {
       const c = raw[i];
+      const embed = c === '!' && raw.slice(i).match(EMBED);
       if (c === '[' || (c === '!' && raw[i + 1] === '[')) {
         const open = c === '!' ? i + 1 : i;
         const close = raw.indexOf('](', open);
-        const end = close >= 0 ? raw.indexOf(')', close) : -1;
-        if (close >= 0 && end >= 0) {
-          for (let k = open + 1; k < close; k++) out.push(k);
+        const end = embed ? i + embed[0].length - 1 : close >= 0 ? raw.indexOf(')', close) : -1;
+        if (embed || (close >= 0 && end >= 0)) {
+          if (embed || (c === '!' && DRAWN.test(raw.slice(close + 2, end)))) {
+            if (!out.length) first = i;
+            out.push(end);
+          } else for (let k = open + 1; k < close; k++) out.push(k);
           i = end + 1;
           continue;
         }
@@ -295,13 +302,13 @@
       out.push(i);
       i++;
     }
-    return { prefix, out };
+    return { prefix, out, first: first < 0 ? out[0] : first };
   }
 
   function rawOffset(raw, visiblePrefix, isItem = true) {
-    const { prefix, out } = visibleIndices(raw, isItem);
+    const { prefix, out, first } = visibleIndices(raw, isItem);
     const k = visiblePrefix.length;
-    if (k === 0) return out.length ? out[0] : prefix;
+    if (k === 0) return out.length ? first : prefix;
     if (k >= out.length) return raw.length;
     return out[k - 1] + 1;
   }

@@ -888,12 +888,12 @@
       const raw = lines.slice(block.start, block.end).join('\n');
       const inside = at - lineStart(block.start);
       const texts = [];
-      const walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT);
+      const walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
       let node;
-      while ((node = walker.nextNode())) texts.push(node);
+      while ((node = walker.nextNode())) if (node.nodeType === 3 || node.matches('img.note-img')) texts.push(node);
       const whole = { node: blk, offset: inside > 0 ? blk.childNodes.length : 0 };
       if (block.kind !== 'line' || !raw.trim() || !texts.length) return whole;
-      const total = texts.reduce((n, text) => n + text.data.replace(/\u200b/g, '').length, 0);
+      const total = texts.reduce((n, text) => n + (text.nodeType === 1 ? 1 : text.data.replace(/\u200b/g, '').length), 0);
       const isItem = ed.listed(lines, block.start);
       let low = 0;
       let high = total;
@@ -904,6 +904,11 @@
       }
       let seen = 0;
       for (const text of texts) {
+        if (text.nodeType === 1) {
+          if (seen >= low) return beside(text, 0);
+          seen++;
+          continue;
+        }
         let offset = 0;
         for (const ch of text.data) {
           if (ch !== '\u200b') {
@@ -914,7 +919,17 @@
         }
       }
       const last = texts[texts.length - 1];
-      return { node: last, offset: last.data.length };
+      return last.nodeType === 1 ? beside(last, 1) : { node: last, offset: last.data.length };
+    }
+
+    function beside(img, after) {
+      return { node: img.parentNode, offset: [...img.parentNode.childNodes].indexOf(img) + after };
+    }
+
+    function shownBefore(blk, range) {
+      let pictures = 0;
+      for (const img of blk.querySelectorAll('img.note-img')) if (range.intersectsNode(img)) pictures++;
+      return range.toString().replace(/\u200b/g, '') + '\ufffc'.repeat(pictures);
     }
 
     function selectSpan(from, to) {
@@ -1011,7 +1026,7 @@
         range.setStart(blk, 0);
         try {
           range.setEnd(node, offset);
-          inside = ed.rawOffset(raw, range.toString().replace(/\u200b/g, ''), ed.listed(lines, start));
+          inside = ed.rawOffset(raw, shownBefore(blk, range), ed.listed(lines, start));
         } catch (e) {
           inside = side === 'start' ? 0 : raw.length;
         }
@@ -1449,6 +1464,11 @@
           offset = range.startOffset;
         }
       }
+      const pic = document.elementFromPoint(x, y)?.closest('img.note-img');
+      if (pic && el.contains(pic)) {
+        const box = pic.getBoundingClientRect();
+        ({ node, offset } = beside(pic, x > box.left + box.width / 2 ? 1 : 0));
+      }
       if (!node || !el.contains(node)) return null;
       const range = document.createRange();
       range.setStart(el, 0);
@@ -1457,7 +1477,7 @@
       } catch (e) {
         return null;
       }
-      return range.toString().replace(/\u200b/g, '');
+      return shownBefore(el, range);
     }
 
     let pressed = false;
@@ -1729,8 +1749,12 @@
       return pictures.length === 1 && pictures[0].naturalWidth ? pictures[0] : null;
     }
 
+    container.addEventListener('mousedown', (e) => {
+      if (e.detail > 1 && e.target.closest('img.note-img')) e.preventDefault();
+    });
+
     container.addEventListener('dblclick', (e) => {
-      const img = e.target.closest('img.note-img') || lonePicture(e.target);
+      const img = !e.target.closest('img.note-img') && lonePicture(e.target);
       if (!img || img.closest('.editing')) return;
       const blk = img.closest('.blk');
       unframe();
@@ -1760,7 +1784,7 @@
         return;
       }
       const pic = e.target.closest('img.note-img');
-      if (pic && !pic.closest('.editing') && !e.shiftKey) {
+      if (pic && !pic.closest('.editing, .task-item') && !e.shiftKey) {
         e.preventDefault();
         frame(pic);
         return;
@@ -1832,7 +1856,7 @@
         editLine(lines.length - 1, 'end', false);
         return;
       }
-      const lone = !e.shiftKey && lonePicture(blk);
+      const lone = !e.shiftKey && !pic && lonePicture(blk);
       if (lone) {
         frame(lone);
         return;
@@ -2070,6 +2094,7 @@
       },
       editStart: () => editLine(0, 'start'),
       editEnd: () => editLine(lines.length - 1, 'end'),
+      editAt: (line) => editLine(line, 'end'),
     };
   }
 

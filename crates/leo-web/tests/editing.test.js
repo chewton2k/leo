@@ -525,6 +525,28 @@ test('a tap lands on the same spot in the raw text', () => {
   assert.equal(ed.rawOffset('[😀](https://x.y) after', '😀 af'), '[😀](https://x.y) af'.length);
 });
 
+test('a picture is one place for the caret, so both of its sides can be reached', () => {
+  const shown = '\ufffc';
+  const task = '- [ ] ![Box](a.png)';
+  assert.equal(ed.rawOffset(task, ''), 6);
+  assert.equal(ed.rawOffset(task, shown), task.length);
+  assert.equal(ed.rawOffset('a ![x|400](u.png) b', 'a '), 2);
+  assert.equal(ed.rawOffset('a ![x|400](u.png) b', `a ${shown}`), 17);
+  assert.equal(ed.rawOffset('a ![x|400](u.png) b', `a ${shown} `), 18);
+  assert.equal(ed.rawOffset('![[a.png|200]] t', ''), 0);
+  assert.equal(ed.rawOffset('![[a.png|200]] t', shown), 14);
+  assert.equal(ed.rawOffset('![d](data:image/svg+xml;utf8,%3Csvg%3E) z', `${shown} `), 40);
+  assert.equal(ed.rawOffset('![x](https://e.com/a.png) t', 'x t'), 27, 'a picture leo does not draw stays its text');
+});
+
+test('Enter after a picture in a checkbox item starts an empty checkbox below it', () => {
+  const task = '- [ ] ![Box](a.png)';
+  const at = ed.rawOffset(task, '\ufffc');
+  const next = ed.continueLine(task.slice(0, at), []);
+  assert.deepEqual([task.slice(0, at), next.prefix + task.slice(at)], [task, '- [ ] ']);
+  assert.equal(next.exit, false);
+});
+
 let failed = 0;
 test('a \\[ block and a \\begin{aligned} block are each one block to edit', () => {
   const lines = ['Intro', '\\[', 'x^2', '\\]', '\\begin{aligned}', 'a &= b', '\\end{aligned}', 'After'];

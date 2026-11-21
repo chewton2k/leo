@@ -5,6 +5,17 @@
 .pic-size { position: absolute; left: 6px; top: 6px; padding: 2px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--text) 75%, transparent); color: var(--bg); font-size: var(--fs-xs); font-weight: 650; font-variant-numeric: tabular-nums; }
 .pic-handle { position: absolute; right: -9px; bottom: -9px; width: 18px; height: 18px; padding: 0; border: 2px solid var(--surface); border-radius: 50%; background: var(--accent); cursor: nwse-resize; pointer-events: auto; touch-action: none; box-shadow: var(--shadow); }
 .pic-handle:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+::highlight(leo-found) { background: var(--text); color: var(--bg); }
+@media (forced-colors: active) { ::highlight(leo-found) { background: Highlight; color: HighlightText; } }
+.note-find { position: sticky; top: calc(var(--bar-height) + 8px); z-index: 4; height: 0; display: flex; justify-content: flex-end; align-items: flex-start; }
+.note-find > div { max-width: 100%; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow); }
+.note-find .field { flex: 1 1 200px; min-width: 60px; }
+.note-find .field input { padding: 6px 0; font-size: var(--fs-sm); }
+.note-find .hint { min-width: 64px; padding: 0 6px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.note-find .icon-btn { width: 30px; height: 30px; }
+.note-find .icon-btn svg { width: 16px; height: 16px; }
+.note-find [data-step="-1"] svg { rotate: -90deg; }
+.note-find [data-step="1"] svg { rotate: 90deg; }
 .doc .blk { min-height: 1.72em; cursor: text; border-radius: var(--r-sm); }
 .doc .blk > :first-child { margin-top: 0; }
 .doc .blk > :last-child { margin-bottom: 0; }
@@ -251,7 +262,7 @@ label.trash-row { cursor: pointer; }
   html { scrollbar-gutter: auto !important; }
   body { --side: 0px !important; --right: 0px !important; --top: 0px !important; --bottom: 0px !important; }
   html, body { background: #fff; color: #1c1c1a; padding: 0 !important; margin: 0; font-size: 11pt; line-height: 1.55; }
-  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .actions, .select-bar, .dock, .tasks-window, .page-bar, .source-pane, .ask-float, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
+  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .actions, .select-bar, .dock, .tasks-window, .page-bar, .source-pane, .ask-float, .note-find, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
   body.files-over main::after { display: none !important; }
   main, body.on-note main { max-width: none !important; width: auto !important; padding: 0 !important; margin: 0 !important; }
   .note-head h1, #title { margin: 0 0 10pt; padding-bottom: 6pt; font-size: 22pt; line-height: 1.2; }

@@ -988,7 +988,7 @@ document.addEventListener('change', (e) => {
 });
 
 const shortcutRec = { name: '', on: false, held: '', hint: '', bad: false };
-const SHORTCUT_RESERVED = { q: 'quit', w: 'closing the window', r: 'reload', c: 'copy', v: 'paste', x: 'cut', z: 'undo', y: 'redo', a: 'select all', s: 'save', b: 'bold', i: 'italic', u: 'underline', p: 'print', h: 'hiding leo', m: 'minimizing', ',': 'settings' };
+const SHORTCUT_RESERVED = { q: 'quit', w: 'closing the window', r: 'reload', c: 'copy', v: 'paste', x: 'cut', z: 'undo', y: 'redo', a: 'select all', s: 'save', f: 'find in note', b: 'bold', i: 'italic', u: 'underline', p: 'print', h: 'hiding leo', m: 'minimizing', ',': 'settings' };
 function shortcutRow(name, find) {
   const mine = shortcutRec.name === name, on = mine && shortcutRec.on, label = SHORTCUTS[name][0];
   const hint = on ? 'Esc to cancel' : mine ? shortcutRec.hint : '';
