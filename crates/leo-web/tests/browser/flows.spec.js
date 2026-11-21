@@ -6195,7 +6195,7 @@ test('Usage shows saved limits during refresh and keeps them after a refresh fai
       await expect(plans.locator('.usage-error')).toHaveText('Refresh failed · showing saved usage');
       await expect(plans.getByRole('meter').first()).toHaveAttribute('aria-valuenow', '75');
     } else {
-      await expect(page.locator('.settings-head h1')).toHaveText('General');
+      await expect(page.locator('#app .settings-head h1')).toHaveText('General');
       await expect(plans).toHaveCount(0);
     }
     await page.unroute('**/api/settings/usage');
