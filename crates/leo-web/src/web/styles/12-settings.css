@@ -276,7 +276,7 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-stack { width: 100%; max-width: 28px; min-height: 2px; display: flex; flex-direction: column-reverse; gap: 2px; border-radius: var(--r-xs) 4px 0 0; }
 .fa-stack i { display: block; }
 .fa-stack i:last-child { border-radius: var(--r-xs) 4px 0 0; }
-.fa-day.on .fa-stack { outline: 1.5px solid var(--text); outline-offset: 1px; border-radius: var(--r-xs) 4px 0 0; }
+.fa-day:not(.on) .fa-stack { opacity: .45; }
 .fa-xl { position: absolute; left: 36px; right: 0; bottom: 0; height: 16px; font-size: var(--fs-xs); color: var(--muted); }
 .fa-xl span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
 .fa-readout { line-height: 1.4; height: 48px; margin-top: 6px; padding-top: 6px; font-size: var(--fs-sm); color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
@@ -294,7 +294,7 @@ button.choice-pick .felix { cursor: inherit; }
 @container dp (min-width: 480px) { .fa-dp { flex-direction: row; align-items: center; gap: 20px; } }
 .fa-ring { position: relative; width: 120px; height: 120px; flex: none; }
 .fa-slice { pointer-events: stroke; }
-@media (prefers-reduced-motion: no-preference) { .fa-slice { transition: opacity var(--t-press) linear, stroke-width var(--t-press) linear; } .fa-lg { transition: background-color var(--t-press) linear; } }
+@media (prefers-reduced-motion: no-preference) { .fa-stack { transition: opacity var(--t-press) linear; } .fa-lg { transition: background-color var(--t-press) linear; } }
 .fa-ring.hl .fa-slice { opacity: .28; }
 .fa-ring.hl .fa-slice.on { opacity: 1; }
 .fa-centre { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; text-align: center; }
