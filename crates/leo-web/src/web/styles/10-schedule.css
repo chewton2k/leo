@@ -217,7 +217,7 @@ body.on-note main { padding-bottom: max(calc(var(--bottom) + 110px), var(--dock-
 .tasks-window[hidden] { display: none; }
 @media (max-width: 599px) { .tasks-window { display: none; } }
 .tasks-head { display: flex; align-items: center; }
-.tasks-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; padding: 11px 6px 11px 14px; font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
+.tasks-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 12px 8px 12px 16px; font-size: var(--fs-sm); font-weight: 650; color: var(--text); }
 .tasks-toggle .grow { flex: 1; min-width: 0; }
 .tasks-count { margin-left: 4px; font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
 .tasks-icon { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); flex: none; }
@@ -225,8 +225,8 @@ body.on-note main { padding-bottom: max(calc(var(--bottom) + 110px), var(--dock-
 .tasks-icon.late { background: color-mix(in srgb, var(--hue-red) 18%, transparent); color: var(--hue-red); }
 .tasks-new { width: 32px; height: 32px; margin-right: 6px; }
 .tasks-new svg { width: 16px; height: 16px; }
-.tasks-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 6px; }
-.tasks-group { margin: 8px 8px 2px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
+.tasks-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px 8px; }
+.tasks-group { margin: 8px 8px 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
 .tasks-group.late { color: var(--hue-red); }
 .tasks-row { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 8px; border-radius: var(--r-tile); }
 .tasks-row:hover { background: var(--tint); }
