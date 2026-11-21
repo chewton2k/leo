@@ -853,11 +853,11 @@ function bindActivity(card) {
   });
   card.addEventListener('focusin', (e) => {
     const hit = lens(e);
-    if (hit && hit.matches('.fa-lg')) faHighlight(card, hit.dataset.faD, Number(hit.dataset.faI));
+    if (hit) faHighlight(card, hit.dataset.faD, Number(hit.dataset.faI));
   });
   card.addEventListener('focusout', (e) => {
     const hit = lens(e);
-    if (hit && hit.matches('.fa-lg')) faHighlight(card, hit.dataset.faD, null);
+    if (hit) faHighlight(card, hit.dataset.faD, null);
   });
   card.addEventListener('click', (e) => {
     const row = e.target.closest('.fa-lg');
