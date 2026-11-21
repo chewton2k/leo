@@ -153,7 +153,7 @@
 .margin-felix .diagram-art svg { max-height: 320px; }
 @media (prefers-reduced-motion: reduce) { .margin-more { transition: none; } }
 .margin-reply { position: relative; margin-top: 9px; }
-.margin-reply textarea { display: block; width: 100%; max-height: 140px; margin: 0; padding: 0 28px 0 0; border: 0; outline: 0; resize: none; overflow-y: auto; background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 20px; }
+.margin-reply textarea { display: block; width: 100%; max-height: 140px; margin: 0; padding: 0 28px 0 0; border: 0; outline: 0; resize: none; overflow-y: auto; overscroll-behavior: contain; background: none; color: var(--text); font: inherit; font-size: var(--fs-sm); line-height: 20px; }
 .margin-send { position: absolute; right: 0; bottom: 0; width: 24px; height: 24px; padding: 0; border: 0; border-radius: var(--r-sm); background: none; color: var(--accent); display: grid; place-items: center; cursor: pointer; }
 .margin-send:disabled { color: var(--faint); opacity: .6; cursor: default; }
 .margin-send svg { width: 16px; height: 16px; }

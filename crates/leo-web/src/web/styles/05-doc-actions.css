@@ -202,7 +202,7 @@ label.trash-row { cursor: pointer; }
 .scrim-gone { pointer-events: none; animation: fade-out var(--t-open-out) var(--ease-exit) forwards; }
 .scrim-gone .sheet-gone { animation: sink var(--t-open-out) var(--ease-exit) forwards; }
 :is(.sheet, .sheet-gone) {
-  width: 100%; max-width: 520px; max-height: 80vh; overflow-y: auto; background: var(--surface);
+  width: 100%; max-width: 520px; max-height: 80vh; overflow-y: auto; overscroll-behavior: contain; background: var(--surface);
   border-radius: 22px 22px 0 0; padding: 8px 8px calc(var(--bottom) + 12px); animation: rise var(--t-open) var(--ease-arrive);
 }
 @media (min-width: 600px) { :is(.sheet, .sheet-gone) > .grip { display: none; } }

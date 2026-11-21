@@ -11,7 +11,7 @@
 .sched-check { flex: none; width: 18px; height: 18px; margin: 0; }
 .sched-preview { padding: 10px 12px; border-radius: var(--r-md); background: var(--surface-2); }
 .sched-preview p { margin: 2px 0 10px; }
-.sched-about { font-size: var(--fs-base); line-height: 1.55; color: var(--text); max-height: min(50vh, 420px); overflow: auto; overflow-wrap: anywhere; margin: 12px 0 4px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); }
+.sched-about { font-size: var(--fs-base); line-height: 1.55; color: var(--text); max-height: min(50vh, 420px); overflow: auto; overscroll-behavior: contain; overflow-wrap: anywhere; margin: 12px 0 4px; padding: 12px 14px; border-radius: var(--r-md); background: var(--surface-2); }
 .sched-about ul, .sched-about ol { margin: 6px 0; padding-left: 22px; }
 .sched-about p { margin: 0 0 8px; }
 .sched-about a { color: var(--accent); }
@@ -73,7 +73,7 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-dayhead.today b { position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; font-size: var(--fs-sm); font-weight: var(--fw-bold); }
 .cal-dayhead:hover b { text-decoration: underline; text-underline-offset: 3px; }
 .cal-allday-label { align-self: start; padding: 8px 8px 0 0; font-size: var(--fs-xs); color: var(--muted); text-align: right; }
-.cal-allday-grid { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); grid-template-rows: repeat(var(--rows), 48px); gap: 2px 0; padding: 4px 0; min-height: 30px; max-height: 108px; overflow-y: auto; }
+.cal-allday-grid { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); grid-template-rows: repeat(var(--rows), 48px); gap: 2px 0; padding: 4px 0; min-height: 30px; max-height: 108px; overflow-y: auto; overscroll-behavior: contain; }
 .cal-allday-cell { border-left: 1px solid var(--cal-line); margin: -4px 0; }
 .cal-allday-cell.drop-on, .cal-cell.drop-on { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .cal-allday-grid .cal-item { margin: 0 3px; height: 46px; }
