@@ -2144,14 +2144,25 @@ pub(crate) async fn chat_reply(
         studying,
         access,
     });
-    let light = asked_lightly && {
+    let light = asked_lightly != Some(false) && {
         let view = state.clone();
         let chat = warm_chat.clone();
+        let message = body
+            .messages
+            .last()
+            .map_or_else(String::new, |t| t.text.clone());
         tokio::task::spawn_blocking(move || {
-            let stays_full = chat.is_some_and(|id| view.warm.light(&id) == Some(false));
-            !stays_full
-                && crate::margin::prefs(&view.chats).auto_model
+            crate::margin::prefs(&view.chats).auto_model
                 && view.lighter.as_ref().is_some_and(|exists| exists())
+                && crate::routing::choose(
+                    asked_lightly,
+                    chat.and_then(|id| view.warm.light(&id)),
+                    || {
+                        view.meaning
+                            .as_ref()
+                            .is_some_and(|meaning| crate::routing::leans_light(meaning, &message))
+                    },
+                )
         })
         .await
         .unwrap_or(false)

@@ -664,10 +664,18 @@ read (root CLAUDE.md, 2026-11-17).
   `.study-mark` circles with the same chalk check and × paths and
   `--chalk-break` mask, a heavier ring on the idea being asked; forced colours
   draw them in CanvasText without the mask.
-- Routing (`routing::light`): only obvious cases (short lookups and greetings,
-  no attachments, files, selection, study or Auto access, ≤6 turns) go to the
-  quick tier, other languages stay on the chosen model; a chat moves up once when needed, never down while warm
-  (`Slot::light`); a failing light writer gives way on the last try, so `Auto`
+- Routing (`routing::light`, widened 2026-11-21, the user's call): short lookups,
+  greetings and small formatting edits (turn/convert/make into a checkbox, bullet,
+  heading, list or table, fix typos, rename, bold, sort, tidy; the edit rule alone
+  passes with a selection) go to the quick tier; study, teaching, quizzes,
+  analysis, why/how, comparisons, plans, summaries, other note changes,
+  attachments, files, Auto access and >6 turns stay on the chosen model, and so do
+  other languages. A plain English question the rules cannot place asks the local
+  meaning model (`routing::leans_light`: cosine to centroids of 40 light and 40
+  full examples, built once in the background, light only past `MARGIN`) and only
+  when it is already in memory (`meaning(&[], true)`); not loaded, an error or a
+  close call keeps the chosen model. No AI call routes. A chat moves up once when needed, never down while warm
+  (`routing::choose`, `Slot::light`); a failing light writer gives way on the last try, so `Auto`
   names who really answered. `Prefs.auto_model` turns it off.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
