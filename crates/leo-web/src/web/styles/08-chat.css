@@ -106,7 +106,7 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 :root[data-theme="dark"] .starter.on { border-color: var(--accent); }
 @keyframes starter-in { from { opacity: 0; transform: translateY(4px); } }
 .msg.user { align-self: flex-end; max-width: 86%; }
-.msg.user .bubble { background: var(--surface-2); color: var(--text); padding: 8px 12px; border-radius: 12px; font-size: var(--fs-base); line-height: 1.4; overflow-wrap: anywhere; }
+.msg.user .bubble { background: var(--surface-2); color: var(--text); padding: 8px 12px; border-radius: var(--r-xl); font-size: var(--fs-base); line-height: 1.4; overflow-wrap: anywhere; }
 .msg.leo { align-self: stretch; }
 @media (hover: hover) { .msg.leo:not(:nth-last-child(1 of .msg.leo), :hover, :focus-within) > .msg-acts:not(:has(.btn)) { opacity: 0; } }
 .msg-who { margin-bottom: 4px; font-family: var(--felix-letters); font-size: var(--fs-sm); line-height: 22px; color: var(--felix); }
