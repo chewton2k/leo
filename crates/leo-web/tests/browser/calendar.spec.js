@@ -825,7 +825,23 @@ test('larger month tasks keep every preview and the more action inside their day
     await page.evaluate(() => drawCalendar());
     expect(await page.locator('.cal-month-grid').evaluate(grid => grid.scrollTop)).toBe(40);
 
+    const next = page.locator('.cal-cell[data-day="2026-11-06"]');
+    const [before, nextBefore] = [await cell.boundingBox(), await next.boundingBox()];
+    for (const close of [() => page.keyboard.press('Escape'), () => page.locator('.cal-month-names').click(), () => cell.getByRole('button', { name: 'Show less' }).click()]) {
+      await cell.getByRole('button', { name: '3 more' }).click();
+      await expect(cell).toHaveClass(/open/);
+      await expect(cell.locator('.cal-pop .cal-item')).toHaveCount(6);
+      await expect(cell.getByRole('button', { name: 'Show less' })).toBeFocused();
+      expect(await cell.boundingBox()).toEqual(before);
+      expect(await next.boundingBox()).toEqual(nextBefore);
+      expect(await cell.locator('.cal-pop').evaluate((pop) => getComputedStyle(pop).boxShadow)).not.toBe('none');
+      await expect(page.locator('.cal-dayhead')).toHaveCount(0);
+      await close();
+      await expect(cell).not.toHaveClass(/open/);
+      await expect(cell.locator('.cal-pop')).toHaveCount(0);
+    }
     await cell.getByRole('button', { name: '3 more' }).click();
+    await cell.locator('.cal-num').click();
     await expect(page.locator('.cal-dayhead')).toHaveCount(1);
     await expect(page.locator('.cal-item[data-kind="task"]')).toHaveCount(5);
   });

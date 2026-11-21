@@ -2842,12 +2842,13 @@ test.describe('recording', () => {
     await expect(page.locator('[data-action="rec-pause"]')).toHaveText('Pause');
 
     await page.keyboard.press('Escape');
-    await expect(page.locator('#rec-pill')).toContainText('Recording');
-    await page.locator('#rec-pill').click();
+    const pill = page.locator('#activity .activity-row', { hasText: 'Recording' });
+    await expect(pill).toContainText(/Recording · \d+:\d\d/);
+    await pill.click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     await page.locator('[data-action="rec-stop"]').click();
     await expect(page).toHaveURL(new RegExp(`#/n/${made.id}$`), { timeout: 8000 });
-    await expect(page.locator('#rec-pill')).toHaveCount(0);
+    await expect(pill).toHaveCount(0);
   });
 
   test('a recording finished while away shows up in the open folder, without a refresh', async ({ page, context }) => {
@@ -4054,7 +4055,7 @@ test('PDF export leaves out the tasks panel and every overlay, with the same ful
     await page.goto(`/#/n/${note.id}`);
     await page.reload();
     await expect(page.locator('#title, .note-head h1').first()).toContainText(`Print ${tag}`);
-    await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
+    await expect(page.locator('#tasks-window'), 'note pages carry the Tasks panel').toBeVisible();
     await page.emulateMedia({ media: 'print' });
     expect(await covering(), `${width}px`).toEqual([]);
     const shape = await layout();
@@ -5137,7 +5138,7 @@ test.describe('beside the note', () => {
     await expect(page.locator('#home-today')).toHaveCount(0);
   });
 
-  test('tasks window folds while reading and stays off note pages', async ({ page }) => {
+  test('tasks window folds while reading, also on note pages', async ({ page }) => {
     test.skip(test.info().project.name !== 'desktop', 'the panel is for wider screens');
     const tag = `${test.info().project.name}-${Date.now().toString(36)}`;
     await page.request.post('/api/tasks', { data: { title: `Reading task ${tag}`, date: new Date().toLocaleDateString('en-CA') } });
@@ -5146,12 +5147,7 @@ test.describe('beside the note', () => {
     const box = page.locator('#dock #tasks-window');
     const body = box.locator('.tasks-body');
     await page.reload();
-    for (const hash of [`#/n/${note.id}`, '#/new']) {
-      await page.goto(`/${hash}`);
-      await expect(page.locator('#doc'), hash).toBeVisible();
-      await expect(box, `${hash}: note pages carry no Tasks panel`).toBeHidden();
-    }
-    for (const [hash, content] of [['#/record', '#rec-box']]) {
+    for (const [hash, content] of [[`#/n/${note.id}`, '#doc'], ['#/new', '#doc'], ['#/record', '#rec-box']]) {
       await page.goto(`/${hash}`);
       await expect(page.locator(content), hash).toBeVisible();
       await expect(box, hash).toBeVisible();
@@ -5491,8 +5487,7 @@ test('the Tasks panel keeps its own size through page changes and refreshes', as
   for (const hash of [`#/n/${note.id}`, '#/search/steady', '#/record', `#/n/${note.id}`, '#/settings']) {
     await page.evaluate((h) => { location.hash = h; }, hash);
     await page.waitForTimeout(150);
-    if (hash.startsWith('#/n/')) await expect(panel, 'note pages carry no Tasks panel').toBeHidden();
-    else await steady();
+    await steady();
   }
   for (const task of tasks) await page.request.delete(`/api/tasks/${task.id}`);
   await page.request.delete(`/api/notes/${note.id}`);
@@ -5803,18 +5798,21 @@ test('Quick Leo finds folders and past chats and opens them', async ({ page }) =
   await expect(page.locator('.msg.leo').last()).toContainText('A heap keeps the smallest on top.');
 });
 
-test('a long note reads to its end with no Tasks panel over it on short and tall screens', async ({ page }) => {
+test('a long note reads to its end with the Tasks panel clear of its text on short and tall screens', async ({ page }) => {
   const task = await (await page.request.post('/api/tasks', { data: { title: 'Task beside reading' } })).json();
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long reading', body: ('Reading paragraph.\n\n').repeat(100) } })).json();
   await page.setViewportSize({ width: 1280, height: 600 });
   await page.goto('/#/n/' + note.id);
   await expect(page.locator('#doc')).toContainText('Reading paragraph.');
   const panel = page.locator('#tasks-window');
-  await expect(panel).toBeHidden();
-  await page.setViewportSize({ width: 1280, height: 900 });
-  await expect(panel).toBeHidden();
-  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
-  await expect(page.locator('#doc .blk').last()).toBeInViewport();
+  for (const height of [600, 900]) {
+    await page.setViewportSize({ width: 1280, height });
+    await expect(panel).toBeVisible();
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(page.locator('#doc .blk').last()).toBeInViewport();
+    const [text, dock] = await Promise.all([page.locator('#doc .blk').last().boundingBox(), panel.boundingBox()]);
+    expect(text.y + text.height <= dock.y || text.x + text.width <= dock.x || text.x >= dock.x + dock.width, `${height}px: the panel stays off the last line`).toBe(true);
+  }
   await page.request.delete('/api/tasks/' + task.id);
   await page.request.delete('/api/notes/' + note.id);
 });

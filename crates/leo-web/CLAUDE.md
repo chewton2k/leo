@@ -402,7 +402,12 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   used only by Read through; 400 `persona` "That reader is gone." when unknown) and leaves the
   note's own reader alone; while a read runs the row
   is "Stop reading through", and it is off for an unsaved note;
-  there is no floating note toolbar, and the Tasks card is hidden on note pages. The
+  there is no floating note toolbar. `#dock` (the Tasks card and the background-activity
+  panel, so a finished combine's Review stays reachable) shows on note pages again
+  (2026-11-21, the user's call); the page reserves bottom room for it (`--dock-room`,
+  set by `fitTasksWindow` from the dock's height, read by `body.on-note main`). A live
+  recording off the Record page is the first row of that panel (`pill()` in
+  recording.js fires `leo-recording`; there is no floating pill). The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
   spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
   zero-height sticky overlay holding only Felix's button, at the same spot as on every other
@@ -1066,7 +1071,10 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   keeps a default span (`CAL_DUE_MIN`, 78 min). Under an hour a block takes `inline`:
   title, time on one line. Today is a pencil ring (`calRing`, inline SVG, one of
   `CAL_RINGS` by day of month, inside the old 26/24 px circle) in the mini
-  calendar, week header and month.
+  calendar, week header and month. A month cell's "N more" opens that day in place
+  (2026-11-21, the user's call): `cal.more` holds the day, the cell raises (`.cal-pop`,
+  `--shadow-lift`), the label becomes Show less, and Escape, a click outside or the label
+  closes it; the day number still opens Day, and no other cell moves.
 - The Tasks card in `#dock` is folded to a badge at every start and opens only
   while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do

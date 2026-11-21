@@ -185,7 +185,8 @@ async function route(arrived = false) {
   await render();
 }
 
-const activity = { tasks: [], timer: 0, folded: false, route: '', seen: new Map() };
+const activity = { tasks: [], timer: 0, folded: false, route: '', seen: new Map(), live: null };
+window.addEventListener('leo-recording', (e) => { activity.live = e.detail; drawActivity(); });
 
 function hiddenHere(task) {
   if (task.kind === 'recording') return activity.route === 'record';
@@ -203,11 +204,12 @@ function drawActivity() {
     dock().appendChild(box);
   }
   const shown = activity.tasks.filter((t) => !hiddenHere(t));
-  box.hidden = !shown.length;
-  if (!shown.length) return;
+  const count = shown.length + (activity.live ? 1 : 0);
+  box.hidden = !count;
+  if (!count) return;
   box.classList.toggle('folded', activity.folded);
   const now = Date.now();
-  const rows = shown
+  const rows = (activity.live ? `<button class="activity-row${activity.live.paused ? ' paused' : ''}" data-action="record"><span class="activity-label"><span class="rec-dot"></span>${esc(activity.live.label)}</span></button>` : '') + shown
     .map((t) => {
       const seen = activity.seen.get(t.label) || { since: now, step: `${t.done}/${t.total}`, stepSince: now, steps: [] };
       if (seen.step !== `${t.done}/${t.total}`) {
@@ -227,8 +229,8 @@ function drawActivity() {
       </button>`;
     })
     .join('');
-  const settled = shown.every((t) => t.ready);
-  const said = settled ? (shown.length === 1 ? 'Ready in the background' : `${shown.length} ready in the background`) : shown.length === 1 ? 'Working in the background' : `${shown.length} things in the background`;
+  const settled = !activity.live && shown.every((t) => t.ready);
+  const said = settled ? (count === 1 ? 'Ready in the background' : `${count} ready in the background`) : count === 1 ? 'Working in the background' : `${count} things in the background`;
   const head = `<button class="activity-head" data-action="activity-fold" aria-expanded="${!activity.folded}">${settled ? '' : '<span class="activity-spin"></span>'}<span class="grow">${said}</span><span class="activity-fold">${activity.folded ? 'Show' : 'Hide'}</span></button>`;
   refreshPanel(box, `<span class="said" role="status">${esc(said)}</span>${head}${activity.folded ? '' : rows}`);
 }

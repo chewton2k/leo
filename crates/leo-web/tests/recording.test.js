@@ -295,3 +295,22 @@ test('earlier points go before the shown ones, once', () => {
   ]);
   assert.deepEqual(L.earlierFirst([], shown), shown);
 });
+
+test('a live recording off the Record page is announced for the activity panel, and not on it', () => {
+  const heard = [];
+  const from = recordingSource.indexOf('    function pill(');
+  const pill = (s) => require('node:vm').runInNewContext(`(function(){${recordingSource.slice(from, recordingSource.indexOf('    async function refresh(', from))} return pill;})()`, {
+    s, live: (view) => ['starting', 'recording', 'paused'].includes(view.state), clock: L.clock,
+    root: { CustomEvent: class { constructor(name, init) { this.name = name; this.detail = init.detail; } }, dispatchEvent: (event) => heard.push(event) },
+  });
+  pill({ view: { state: 'recording', secs: 75 }, container: null })();
+  pill({ view: { state: 'paused', secs: 3605 }, container: { isConnected: false } })();
+  pill({ view: { state: 'recording', secs: 5 }, container: { isConnected: true } })();
+  pill({ view: { state: 'done', secs: 5 }, container: null })();
+  pill({ view: null, container: null })();
+  assert.deepEqual(JSON.parse(JSON.stringify(heard.map((event) => [event.name, event.detail]))), [
+    ['leo-recording', { paused: false, label: 'Recording · 1:15' }],
+    ['leo-recording', { paused: true, label: 'Paused · 1:00:05' }],
+    ['leo-recording', null], ['leo-recording', null], ['leo-recording', null],
+  ]);
+});

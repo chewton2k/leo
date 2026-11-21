@@ -479,7 +479,7 @@ test('the Tasks window leaves every outline tick reachable and the preview sits 
   const note = await (await page.request.post('/api/notes', { data: { title: 'Outline over tasks', body } })).json();
   await page.goto(`/#/n/${note.id}`);
   await page.reload();
-  await expect(page.locator('#tasks-window'), 'note pages carry no Tasks panel').toBeHidden();
+  await expect(page.locator('#tasks-window'), 'note pages carry the Tasks panel').toBeVisible();
   await expect(page.locator('.outline-ticks span')).toHaveCount(12);
   await quiet(page);
   const hits = await page.evaluate(() => [...document.querySelectorAll('.outline-ticks span')].map((tick) => {
@@ -549,7 +549,7 @@ test('the note tools live in one menu beside the Felix chips, and there is no fl
   const note = await (await page.request.post('/api/notes', { data: { title: 'Note menu', body: 'Hello.' } })).json();
   await page.goto(`/#/n/${note.id}`);
   await expect(page.locator('nav.actions')).toHaveCount(0);
-  await expect(page.locator('.dock')).toBeHidden();
+  await expect(page.locator('.dock')).toHaveCSS('display', 'flex');
   const more = page.locator('.note-meta #note-more');
   await expect(more).toHaveAccessibleName('More for this note');
   await more.click();

@@ -180,10 +180,9 @@
 .rec-error-details p { font-size: var(--fs-sm); line-height: 1.6; overflow-wrap: anywhere; margin: 12px 0 0; }
 .rec-done-card h3 { margin: 0; }
 .rec-done-card .upload-bar { width: min(320px, 80%); margin: 0; }
-.rec-pill { position: fixed; top: calc(var(--top) + 64px); left: var(--mid); transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--r-pill); background: var(--raised); color: var(--text); font-weight: 650; font-size: var(--fs-base); box-shadow: var(--shadow); font-variant-numeric: tabular-nums; cursor: pointer; }
-.rec-pill .rec-dot { animation: rec-pulse 1.4s ease-in-out infinite; }
-.rec-pill.paused .rec-dot { background: var(--hue-amber); animation: none; }
-@media (prefers-reduced-motion: reduce) { .rec-live .rec-clock .rec-dot, .rec-pill .rec-dot { animation: none; } }
+.activity-row .rec-dot { margin-right: 8px; vertical-align: middle; animation: rec-pulse 1.4s ease-in-out infinite; }
+.activity-row.paused .rec-dot { background: var(--hue-amber); animation: none; }
+@media (prefers-reduced-motion: reduce) { .rec-live .rec-clock .rec-dot, .activity-row .rec-dot { animation: none; } }
 .upload-drop { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 4px 8px 10px; padding: 26px 14px 20px; border: 2px dashed var(--line); border-radius: var(--r-lg); color: var(--muted); text-align: center; cursor: pointer; font-size: var(--fs-base); }
 .upload-drop svg { width: 26px; height: 26px; color: var(--accent); }
 .upload-drop.over, .upload-drop:hover { border-color: var(--accent); color: var(--accent); }

@@ -768,21 +768,9 @@
 
 
     function pill() {
-      let el = root.document.getElementById('rec-pill');
       const show = s.view && live(s.view) && !(s.container && s.container.isConnected);
-      if (!show) {
-        if (el) el.remove();
-        return;
-      }
-      if (!el) {
-        el = root.document.createElement('button');
-        el.id = 'rec-pill';
-        el.className = 'rec-pill';
-        el.dataset.action = 'record';
-        root.document.body.appendChild(el);
-      }
-      el.classList.toggle('paused', s.view.state === 'paused');
-      el.innerHTML = `<span class="rec-dot"></span>${s.view.state === 'paused' ? 'Paused' : 'Recording'} ${clock(s.view.secs)}`;
+      const paused = show && s.view.state === 'paused';
+      root.dispatchEvent(new root.CustomEvent('leo-recording', { detail: show ? { paused, label: `${paused ? 'Paused' : 'Recording'} · ${clock(s.view.secs)}` } : null }));
     }
 
     async function refresh() {

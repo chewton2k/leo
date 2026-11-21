@@ -48,6 +48,13 @@ const actions = {
     if (el.dataset.to) calSetView(el.dataset.to);
     calGo();
   },
+  'cal-more': (el) => {
+    cal.more = cal.more === el.dataset.day ? '' : el.dataset.day;
+    drawCalendar();
+    const cell = $(`.cal-cell[data-day="${el.dataset.day}"]`);
+    cell?.querySelector(cal.more ? '.cal-pop .cal-more' : '.cal-more')?.focus({ preventScroll: true });
+    cell?.querySelector('.cal-pop')?.scrollIntoView({ block: 'nearest' });
+  },
   'home-day': (el) => {
     cal.selected = el.dataset.id;
     go('#/calendar');

@@ -1,5 +1,5 @@
 const S = window.leoSchedule;
-const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, peek: null, scrolled: '', suppressClick: false };
+const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, peek: null, more: '', scrolled: '', suppressClick: false };
 const CAL_TRAY_ROWS = 50;
 const CAL_DONE_KEY = 'leo-calendar-hide-done';
 const CAL_VIEW_KEY = 'leo-calendar-view';
@@ -419,13 +419,17 @@ function calMonth(days, plan, today) {
     const d = S.fromKey(key);
     const day = plan.byDay.get(key) || { allDay: [], timed: [] };
     const items = [...day.allDay, ...day.timed].filter(calShown);
-    const shown = items.slice(0, CAL_MONTH_CHIPS).map((item) => {
+    const chip = (item) => {
       const time = item.type === 'event' ? (item.event.all_day ? '' : calTime(S.spanOn(item, key).start)) : item.task.time ? calTime(S.minutesOf(item.task.time)) : '';
       return calChip(item, key, { sub: time });
-    }).join('');
-    const more = items.length > CAL_MONTH_CHIPS ? `<button type="button" class="link-btn cal-more" data-action="cal-pick" data-day="${key}" data-to="day">${items.length - CAL_MONTH_CHIPS} more</button>` : '';
-    const cls = `${d.getMonth() === month ? '' : ' out'}${key === today ? ' today' : ''}`;
-    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}${key === today ? calRing(key) : ''}</button>${shown}${more}</div>`;
+    };
+    const shown = items.slice(0, CAL_MONTH_CHIPS).map(chip).join('');
+    const over = items.length > CAL_MONTH_CHIPS;
+    const open = over && cal.more === key;
+    const more = over ? `<button type="button" class="link-btn cal-more" data-action="cal-more" data-day="${key}" aria-expanded="false">${items.length - CAL_MONTH_CHIPS} more</button>` : '';
+    const pop = open ? `<div class="cal-pop">${items.map(chip).join('')}<button type="button" class="link-btn cal-more" data-action="cal-more" data-day="${key}" aria-expanded="true">Show less</button></div>` : '';
+    const cls = `${d.getMonth() === month ? '' : ' out'}${key === today ? ' today' : ''}${open ? ' open' : ''}`;
+    return `<div class="cal-cell${cls}" data-day="${key}"><button type="button" class="cal-num" data-action="cal-pick" data-day="${key}" data-to="day" aria-label="${esc(d.toLocaleDateString(calLocale(), { weekday: 'long', month: 'long', day: 'numeric' }))}">${d.getDate()}${key === today ? calRing(key) : ''}</button>${shown}${more}${pop}</div>`;
   }).join('');
   return `<div class="cal-month"><div class="cal-month-names">${names}</div><div class="cal-month-grid">${cells}</div></div>`;
 }
@@ -542,6 +546,13 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       e.stopImmediatePropagation();
       calDragCancel();
+      return;
+    }
+    if (cal.more) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cal.more = '';
+      drawCalendar();
       return;
     }
     if (cal.peek && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
@@ -942,6 +953,12 @@ document.addEventListener('pointercancel', (e) => {
 
 app.addEventListener('lostpointercapture', (e) => {
   if (cal.drag?.live && e.pointerId === cal.drag.pointer) Promise.resolve(calDrop()).catch(fail);
+});
+
+document.addEventListener('click', (e) => {
+  if (!cal.more || e.target.closest('.cal-cell.open, .cal-more')) return;
+  cal.more = '';
+  setTimeout(drawCalendar);
 });
 
 document.addEventListener('click', (e) => {
@@ -1953,8 +1970,7 @@ function fitTasksWindow() {
   if (rail.length) room = Math.min(room, Math.floor(box.bottom - Math.max(...rail.map((r) => r.bottom)) - 12));
   if (Number.isFinite(room)) tasksBox.style.setProperty('--tasks-room', `${Math.max(TASKS_LEAST_ROOM, room)}px`);
   else tasksBox.style.removeProperty('--tasks-room');
-  if (over) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
-  else document.body.style.removeProperty('--dock-room');
+  if (!tasksBox.matches(':hover, :focus-within')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
 }
 
 new MutationObserver(fitTasksWindow).observe(app, { childList: true });
@@ -1964,6 +1980,7 @@ new MutationObserver(() => {
   railFit = requestAnimationFrame(() => { railFit = 0; fitTasksWindow(); });
 }).observe(app, { childList: true, subtree: true });
 window.addEventListener('resize', fitTasksWindow);
+new ResizeObserver(fitTasksWindow).observe(dock());
 
 async function loadTasksWindow() {
   clearTimeout(tasksWin.timer);
