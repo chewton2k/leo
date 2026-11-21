@@ -81,6 +81,7 @@ async function calendarFixture(browser, run, { width = 1360, height = 900, view 
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
     ${core.slice(core.indexOf('const moving'), core.indexOf('function rel('))}
     ${read('app/motion.js')}
+    ${read('app/popup-menu.js')}
     ${read('app/settings-navigation.js')}
     ${page}
     const actions={${calActions}'task-delete':el=>deleteTask(el.dataset.id),'task-new':el=>newTaskSheet(el.dataset.day||null),close:()=>closeSheet()};
@@ -891,5 +892,20 @@ test('a sideways deadline resize at the scroll edge still preserves its absent e
     await dragTo(page, from, { x: from.x + 12, y: from.y });
     expect((await task(page, 'task-lab')).end).toBe(null);
     expect(await patches(page, 'task-lab')).toHaveLength(0);
+  });
+});
+
+test('a click outside the side peek closes it and returns focus, and another item switches it', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const side = page.locator('#cal-side.peek');
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await expect(side.locator('#cal-peek-title')).toHaveValue('Lab report');
+    await side.locator('#cal-peek-title').click();
+    await expect(side).toHaveCount(1);
+    await page.locator('.cal-item[data-id="task-study"] .cal-open').click();
+    await expect(side.locator('#cal-peek-title')).toHaveValue('Study group');
+    await page.locator('.cal-name').click();
+    await expect(side).toHaveCount(0);
+    await expect(page.locator('.cal-item[data-id="task-study"] .cal-open')).toBeFocused();
   });
 });

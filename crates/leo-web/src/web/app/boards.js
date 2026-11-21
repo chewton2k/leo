@@ -1232,6 +1232,11 @@ document.addEventListener('click', (e) => {
   e.stopImmediatePropagation();
 }, true);
 
+closeOnOutsidePress('#kanban-panel, .kanban-card', async () => {
+  const open = state.view === 'boards' && kanban.panel;
+  return open && await kanbanLeavePanel(false) && app.querySelector(`.kanban-card[data-card="${CSS.escape(open.id)}"]`);
+});
+
 document.addEventListener('keydown', (e) => {
   if (state.view !== 'boards') return;
   if (kanban.drag?.live && e.key === 'Escape') {

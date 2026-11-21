@@ -967,6 +967,13 @@ document.addEventListener('click', (e) => {
   e.stopImmediatePropagation();
 }, true);
 
+closeOnOutsidePress('#cal-side, .cal-item, .cal-tray-row', () => {
+  if (state.view !== 'calendar' || !cal.peek) return null;
+  const { id, on } = cal.peek;
+  calClosePeek();
+  return app.querySelector(`.cal-open[data-id="${CSS.escape(id)}"]${on ? `[data-on="${CSS.escape(on)}"]` : ''}`);
+});
+
 function calOpenPeek(kind, id, on = null) {
   const side = $('#cal-side');
   if (!side) return;

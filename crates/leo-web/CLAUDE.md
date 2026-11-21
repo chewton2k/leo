@@ -226,7 +226,11 @@ Decided: one app, window only (2026-10-31).
   Reduced Motion; Undo keeps a plain straight underline. Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). Clicking its owner again closes it, as does a click
-  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. `sheet()` focuses the first control and
+  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. Side
+  panels opened from a card or row (the card panel, the calendar peek) close on a click outside
+  through `closeOnOutsidePress(inside, leave)` in `popup-menu.js` (2026-11-21, the user's call):
+  it acts on the click after a primary press outside the panel, its opener, menus, sheets and toasts,
+  so drags and presses begun inside never close, and `leave` is the panel's own Escape path. `sheet()` focuses the first control and
   traps Tab. Rename uses `inlineEdit` over the tree row; New folder opens a real
   row in place (`sideMakingOpen`: `side.making` draws a keyed `.side-making` row at the
   top of its parent, opening over `MOTION_MS` and folding back on Esc, none under
@@ -1190,7 +1194,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 - `description` stays plain Markdown. Leaving the card panel settles every field;
   a failed save keeps the
   panel, address and text, so a 400 never costs text; Discard (shown with the refusal) is the only way
-  out that drops it. A board fetched after a change is dropped if a write began
+  out that drops it. A click outside the panel leaves it the same way (2026-11-21, the user's
+  call), so a failed save keeps it open. A board fetched after a change is dropped if a write began
   meanwhile.
   A card move (keyboard, status menu), a priority, a delete and ticking a task done apply and redraw
   first, then save; a failed save puts the card, chip or tick back and shows the error toast.

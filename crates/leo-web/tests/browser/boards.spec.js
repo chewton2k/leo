@@ -1142,3 +1142,51 @@ test('a card whose whole description cannot be read says so and is left as it wa
     expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe(whole);
   });
 });
+
+test('a click outside the card panel closes it, a click on another card switches it, and menus inside keep it', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const panel = page.locator('#kanban-panel');
+    await page.locator('[data-card="cessay0001"]').click();
+    await expect(panel).toBeVisible();
+    await page.mouse.click(5, 5);
+    await expect(panel).toBeHidden();
+    await expect(page.locator('[data-card="cessay0001"]')).toBeFocused();
+
+    await page.locator('[data-card="cessay0001"]').click();
+    await page.locator('[data-card="cread00001"]').click();
+    await expect(panel).toBeVisible();
+    await expect(page.locator('#kanban-card-title')).toHaveValue('Read chapter 3');
+
+    const details = page.locator('#kanban-card-description');
+    const menu = page.locator('.popup-menu[aria-label="Link a note"]');
+    await details.click();
+    await page.keyboard.type('See @');
+    await expect(menu.getByRole('option')).toHaveCount(2);
+    await menu.getByRole('option').first().click();
+    await expect(panel).toBeVisible();
+    await expect(details.locator('textarea.line-edit')).toHaveValue('See [[Calculus notes]]');
+    await page.locator('#kanban-card-sub').click();
+    await expect(panel).toBeVisible();
+    await page.mouse.click(5, 5);
+    await expect(panel).toBeHidden();
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('See [[Calculus notes]]');
+  });
+});
+
+test('a click outside keeps the card panel and its text when the save fails', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const panel = page.locator('#kanban-panel');
+    await page.locator('[data-card="cread00001"]').click();
+    await page.locator('#kanban-card-description').click();
+    await page.keyboard.type('Keep me');
+    await page.evaluate(() => { window.rearm = setInterval(() => { if (!window.failNext) window.failNext = 'Leo could not save the card.'; }, 1); });
+    await page.mouse.click(5, 5);
+    await expect(page.locator('#kanban-card-problem')).toHaveText('Leo could not save the card.');
+    await expect(panel).toBeVisible();
+    await expect(page.locator('#kanban-card-description')).toHaveText('Keep me');
+    await page.evaluate(() => { clearInterval(window.rearm); window.failNext = null; });
+    await page.mouse.click(5, 5);
+    await expect(panel).toBeHidden();
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Keep me');
+  });
+});

@@ -1430,7 +1430,8 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are
-  read-only. Colors follow the event title (`--hue-0..7`) and task kind
+  read-only. A click outside the peek closes it as Escape does, and a click on another item switches it
+  (2026-11-21, the user's call). Colors follow the event title (`--hue-0..7`) and task kind
   (`TASK_TONES`). "Hide completed" is remembered (`leo-calendar-hide-done`).
   Add to Google Calendar opens Google's prefilled page (no sign-in).
   Creation tolerates two minutes of pointer rounding only near drawn hour lines,
@@ -1567,6 +1568,9 @@ Board tabs show only their names (2026-11-16); columns keep their card counts.
   ignores the card's earlier pending moves and returns the card to its place). When the page is under 800 px wide
   (Felix or the explorer beside it) an open card panel takes the whole page and the board is hidden
   (container query on `#app`), so no sliver of it shows.
+  A click outside the panel closes it through the same leave as Escape and Close (2026-11-21, the user's call):
+  a failed save keeps it open, a click on another card switches it, and menus, sheets and the note list
+  inside it are not outside. Focus returns to the card when it fell to the page.
   The card on the board still previews the raw text.
 
 - Dragging is pointer events, not HTML drag and drop: mouse/pen lift past 5 px,
