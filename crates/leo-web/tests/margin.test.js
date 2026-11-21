@@ -215,10 +215,11 @@ test('layout: a chosen layout never falls back to one side, only to marks', () =
   assert.equal(M.arrangement({ width: M.ROOM_BOTH - 1, setting: 'right' }), 'right');
 });
 
-test('layout: marks only by choice, full width or with Felix open', () => {
+test('layout: marks only by choice or full width, with Felix open the room left decides', () => {
   assert.equal(M.arrangement({ width: 1600, setting: 'marks' }), 'marks');
   assert.equal(M.arrangement({ width: 1600, noteWidth: 'full' }), 'marks');
-  assert.equal(M.arrangement({ width: 1600, panel: true }), 'marks');
+  assert.equal(M.arrangement({ width: 1600 - 520 }), 'both');
+  assert.equal(M.arrangement({ width: 1100 - 520 }), 'marks');
 });
 
 test('width: notes fill the room beside the column, 240 to 360 px on one side and 180 to 360 on both', () => {
@@ -241,7 +242,6 @@ test('width: Both keeps notes on both sides whenever both fit, too narrow stays 
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT, setting: 'right' }), 'right');
   assert.equal(M.arrangement({ width: M.ROOM_RIGHT - 1, setting: 'right' }), 'marks');
   assert.equal(M.arrangement({ width: 1600, noteWidth: 'full' }), 'marks');
-  assert.equal(M.arrangement({ width: 1600, panel: true }), 'marks');
 });
 
 test('width: notes never squeeze the column below its least width', () => {
@@ -375,7 +375,6 @@ test('a dragged page width stops where the chosen margins still fit', () => {
   assert.equal(M.mostColumn({ width: M.ROOM_RIGHT - 1, setting: 'right' }), Infinity);
   assert.equal(M.mostColumn({ width, setting: 'marks' }), Infinity);
   assert.equal(M.mostColumn({ width, setting: 'both', noteWidth: 'full' }), Infinity);
-  assert.equal(M.mostColumn({ width, setting: 'right', panel: true }), Infinity);
 });
 
 const copies = 'alpha one. beta gamma. delta two. beta gamma. epsilon three.';

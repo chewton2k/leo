@@ -633,6 +633,40 @@ test('a read-through whose note is left draws nothing', async () => {
   assert.equal(h.state.through, null);
 });
 
+test('a reader chosen for Read through is saved for the note first, then the read starts', async () => {
+  const h = through();
+  const run = h.context.marginThroughClick('critic');
+  await h.answer({});
+  for (let i = 0; i < 3; i++) await h.answer({ notes: [] });
+  await run;
+  assert.equal(JSON.stringify(h.calls[0]), JSON.stringify(['/api/notes/a/margin', { persona: 'critic' }]));
+  assert.equal(h.state.persona, 'critic');
+  assert.equal(h.calls.length, 4);
+});
+
+test('a reader that cannot be saved starts no read, and the current reader needs no save', async () => {
+  const h = through();
+  const run = h.context.marginThroughClick('critic');
+  await new Promise(setImmediate);
+  h.waiting.shift().reject(new Error('x'));
+  await run;
+  assert.equal(h.state.persona, 'reader');
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.state.through, null);
+  const same = through();
+  const again = same.context.marginThroughClick('reader');
+  for (let i = 0; i < 3; i++) await same.answer({ notes: [] });
+  await again;
+  assert.ok(same.calls.every(([url]) => url.endsWith('/analyze')));
+});
+
+test('Read through does nothing on a note that is not saved yet', async () => {
+  const h = through();
+  h.state.s.note = {};
+  await h.context.marginThroughClick();
+  assert.equal(h.calls.length, 0);
+});
+
 test('Stop aborts the in-flight part at once and keeps and reveals what earlier parts saved', async () => {
   const h = through();
   const run = h.context.marginThroughClick();
@@ -760,7 +794,6 @@ test('the persona chip names Felix once and the mode chip follows it without a p
   const els = Object.fromEntries(['mode', 'mode-menu', 'mode-label', 'persona', 'persona-menu', 'persona-icon', 'persona-label'].map((id) => [`#margin-${id}`, fake()]));
   els['#margin-mode-icon'] = { dataset: {}, innerHTML: '' };
   h.context.$ = (sel) => els[sel] || null;
-  h.context.marginThroughControl = () => {};
   h.context.iconSwap = (icon, paint) => paint();
   vm.runInContext("marginPrefs = { personas: [{ id: 'reader', name: 'Reader', icon: 'book', details: 'Plain.' }, { id: 'critic', name: 'Critic', icon: 'target', details: 'Hard.' }] }", h.context);
   for (const [mode, persona, label, name, tip] of [['along', 'critic', 'Reads along', 'Felix as Critic', /^Felix reads changes/], ['ask', 'reader', 'When you ask', 'Felix as Reader', /^Select a passage/]]) {
@@ -827,7 +860,6 @@ test('read through shows the server sentence for a missing writing AI and passes
   const sentence = "leo can't write yet: no writing AI is chosen.";
   for (const [message, say] of [[sentence, sentence], ['private provider detail', FAILED]]) {
     const h = harness();
-    h.context.marginThroughControl = () => {};
     h.context.marginSetStatus = (text) => { h.state.status = text; };
     const run = { started: Date.now(), stop: false, added: [], abort: new AbortController() };
     const part = { blocks: ['A changed paragraph long enough to read.'], from: 0, to: 1 };
@@ -979,7 +1011,9 @@ function foldHarness(...threads) {
   const columns = { dataset: {}, clientWidth: 800, appendChild() {} };
   h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : sel === '.note-columns' ? columns : sel === '#doc' ? {} : null);
   let observed;
+  const watch = { watched: null, ended: false };
   h.context.ResizeObserver = h.context.window.ResizeObserver = class { constructor(fn) { observed = fn; } observe() {} disconnect() {} };
+  h.context.MutationObserver = h.context.window.MutationObserver = class { constructor(fn) { watch.fn = fn; } observe(el, options) { watch.watched = options; } disconnect() { watch.ended = true; } };
   h.context.marginLayout = () => 'both';
   h.context.document.createElement = () => ({ setAttribute() {}, addEventListener() {}, firstChild: {}, parentElement: columns });
   h.context.marginMount({ note: {}, doc: { source: () => '' } }, 0);
@@ -992,8 +1026,20 @@ function foldHarness(...threads) {
     h.state.els.set(t.id, { hidden: false, inert: false, offsetHeight: 50, area: { value: '' }, hasAttribute: (name) => name === 'data-inline', contains: () => false, animate: block.animate, remove() {} });
     h.state.roomy.set(t.id, block);
   }
-  return { ...h, runs, draws, block, observe: () => observed(), el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
+  return { ...h, runs, draws, block, watch, observe: () => observed(), el: (id) => h.state.els.get(id), finish: async () => { for (const r of runs) r.finish(); await new Promise(setImmediate); } };
 }
+
+test('a block the doc replaces, as when its line editor closes, redraws so the blot gets its slot back', () => {
+  const h = foldHarness();
+  let redraws = 0;
+  h.context.marginRedraw = () => redraws++;
+  assert.deepEqual({ ...h.watch.watched }, { childList: true });
+  h.watch.fn();
+  assert.equal(redraws, 1);
+  h.state.layer = { remove() {} };
+  h.context.marginLeave();
+  assert.equal(h.watch.ended, true);
+});
 
 test('unpinning a pinned card folds it, stays drawn open while it folds, then redraws and frees it', async () => {
   const t = { id: 't1', quote: 'q', pinned: true };

@@ -280,11 +280,6 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .margin-mode-icon { display: inline-grid; place-items: center; flex: none; }
 .margin-mode-icon svg { width: 13px; height: 13px; }
 .margin-mode:hover { background: var(--tint); color: var(--text); }
-.margin-through { background: var(--tint); }
-.margin-through:hover { background: color-mix(in srgb, var(--text) 10%, var(--tint)); }
-.margin-through .margin-mode-icon svg { opacity: 1; }
-.margin-through .dot { fill: var(--accent); stroke: none; }
-.margin-through[aria-disabled="true"] { color: var(--faint); cursor: default; }
 @media (pointer: coarse) { .note-meta .margin-mode { min-height: 32px; } }
 .choice-diagram .d-page { fill: var(--raised); }
 .choice-diagram .d-felix { stroke: var(--faint); stroke-width: 2; stroke-linecap: round; fill: none; }

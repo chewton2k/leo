@@ -395,8 +395,11 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
   `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
   edit); there is no word count (2026-11-16, the user's call). It is skipped by search highlights and hidden in print. The note's
-  tools (transcript, Tasks, Add picture, Move to folder, Share as a second step, Move
-  to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js) after Read through;
+  tools (transcript, Tasks, Add picture, Move to folder, Read through and Share as second
+  steps, Move to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js); Read through
+  (2026-11-21, the user's call: no button in the note head) lists the readers, the note's
+  own checked; picking one saves it for the note, then reads once; while a read runs the row
+  is "Stop reading through", and it is off for an unsaved note;
   there is no floating note toolbar, and the Tasks card is hidden on note pages. The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's
   spacer). On note pages at 1000 px and up the bar takes no room (2026-11-16): it is a
@@ -748,8 +751,13 @@ Felix (2026-10-19).
   clip and the room over `OPEN_MS` only when the user opens it (not on load or a layout
   change) and folds away over `OPEN_MS × EXIT_SHARE` before it closes (`marginFoldAway`,
   tracked by thread, inert while leaving, still drawn open until the fold ends:
-  `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn(noteWidth, panel)`
-  is the widest column the chosen margins allow (Infinity when they are marks).
+  `marginIsOpen`), none under `stillMotion()`. `marginKit.mostColumn` is the
+  widest column the chosen margins allow (Infinity when they are marks). With Felix's panel open
+  (2026-11-21, the user's call) the room left decides, never the panel itself: notes stay beside a
+  wide window and become marks in a narrow one (`marginCovered` takes off what an overlaid panel
+  covers; a docked one already narrows `.note-columns`). A block the doc replaces (its line editor
+  closing) redraws at once (`marginPage.watch`, a childList observer on `#doc`), so a passage's slot
+  is back before its blot is drawn.
 - Deletes: a trashed note keeps its threads; deleting from the trash removes them
   (`forget_notes`) and its reading place, task details, recording sources and original uploads
   (`dependents::clear`), and so do trash expiry and the hourly sweep of notes gone

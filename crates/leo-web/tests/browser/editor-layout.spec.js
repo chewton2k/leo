@@ -1770,7 +1770,7 @@ test('every kind of formatting is typed with the keyboard and stays plain Markdo
 test('a new note focuses the title first, the reading controls come before it, and Tab leaves it for the body', async ({ page }) => {
   await signIn(page, '#/new');
   await expect(page.locator('#title')).toBeFocused();
-  expect(await page.evaluate(() => ['#margin-persona', '#margin-mode', '#margin-through'].map((id) => Boolean(document.querySelector(id).compareDocumentPosition(document.querySelector('#title')) & Node.DOCUMENT_POSITION_FOLLOWING)))).toEqual([true, true, true]);
+  expect(await page.evaluate(() => ['#margin-persona', '#margin-mode'].map((id) => Boolean(document.querySelector(id).compareDocumentPosition(document.querySelector('#title')) & Node.DOCUMENT_POSITION_FOLLOWING)))).toEqual([true, true]);
   await page.keyboard.type('Reading order');
   await page.keyboard.press('Tab');
   await expect(page.locator('#doc .line-edit')).toBeFocused();

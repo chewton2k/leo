@@ -630,6 +630,13 @@ function shareMenu(owner) {
   popupMenu(owner, { label: 'Share', rows: shareRows() });
 }
 
+function throughRow() {
+  if (marginPage.through) return { text: 'Stop reading through', icon: ICON.close, run: () => marginThroughClick() };
+  const personas = marginPrefs?.personas || [];
+  const off = !marginPage.s?.note.id || marginPage.changing || !personas.length;
+  return { text: 'Read through', icon: ICON.readThrough, off, next: personas.map((p) => ({ text: p.name, icon: PERSONA_ICON[p.icon] || PERSONA_ICON.book, checked: p.id === marginPage.persona, run: () => marginThroughClick(p.id) })) };
+}
+
 function noteMenu(owner) {
   const note = state.view === 'note' ? state.session?.note || {} : {};
   popupMenu(owner, {
@@ -639,6 +646,7 @@ function noteMenu(owner) {
       ...(note.id ? [{ text: 'Tasks', icon: ICON.calendar, run: () => noteTasksSheet() }] : []),
       { text: 'Add picture', icon: ICON.image, run: () => choosePictures() },
       { text: 'Move to folder', icon: ICON.move, run: () => moveSheet(owner) },
+      throughRow(),
       { text: 'Share', icon: ICON.share, next: shareRows() },
       { line: true },
       { text: 'Move to trash', icon: ICON.trash, danger: true, run: () => trashNote() },

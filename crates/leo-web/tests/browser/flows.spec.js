@@ -4458,7 +4458,9 @@ test.describe('passages', () => {
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#margin-mode')).toHaveText('When you ask');
     expect(analyzed).toBe(0);
-    await page.getByRole('button', { name: 'Read through' }).click();
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Read through' }).click();
+    await page.getByRole('menuitemradio', { name: /^Reader/ }).click();
     await expect(page.locator('.margin-note .margin-felix')).toContainText('In plain text?', { timeout: 12000 });
     await expect(page.locator('.toast')).toContainText('Felix added 1 margin note');
     await page.locator('.toast').getByRole('button', { name: 'Undo' }).click();
@@ -4472,14 +4474,14 @@ test.describe('passages', () => {
     const note = await (await page.request.post('/api/notes', { data: { title: 'Stopped note', body: 'Then login just checks if it matches, I think' } })).json();
     await page.route('**/margin/analyze', () => {});
     await page.goto(`/#/n/${note.id}`);
-    const through = page.locator('#margin-through');
-    await through.click();
-    await expect(through).toHaveText('Stop');
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Read through' }).click();
+    await page.getByRole('menuitemradio', { name: /^Reader/ }).click();
     await expect(page.locator('#margin-status')).toContainText('Reading through');
     await page.waitForTimeout(500);
-    await through.click();
-    await expect(through).toHaveText('Read through', { timeout: 2000 });
-    await expect(page.locator('#margin-status')).not.toContainText('Reading through');
+    await page.locator('#note-more').click();
+    await page.getByRole('menuitem', { name: 'Stop reading through' }).click();
+    await expect(page.locator('#margin-status')).not.toContainText('Reading through', { timeout: 2000 });
     await expect(page.locator('.margin-note')).toHaveCount(0);
   });
 

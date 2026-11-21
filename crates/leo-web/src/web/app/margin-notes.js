@@ -48,7 +48,7 @@ const MARGIN_AREA_MAX = 140;
 const CARD_TOP = 14;
 const CARD_GAP = 10;
 const CARD_TAIL = 4;
-const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
+const marginPage = { faded: new Map(), drafted: new Map(), resolved: [], revisits: new Map(), gone: [], adding: new Set(), reopening: new Set(), again: false, s: null, mode: 'ask', threads: [], layer: null, svg: null, els: new Map(), paths: new Map(), marks: new Map(), rects: new Map(), open: null, hover: null, focus: null, draft: null, thinking: new Map(), wanted: null, arriving: new Set(), timer: 0, reading: false, through: null, faceTimer: 0, status: '', brief: false, statusTimer: 0, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], nextRead: 0, observer: null, watch: null, frame: 0, roomy: new Map(), tethers: new Map(), markers: new Map(), newest: null, folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), anchorTimer: 0, finds: new Map(), drawn: null, drawnAt: 0, settle: 0 };
 let marginPrefs = null;
 
 function marginRemembered() {
@@ -70,15 +70,20 @@ function marginSetting() {
   return marginPrefs?.layout || marginRemembered() || 'both';
 }
 
+function marginCovered() {
+  const panel = chat.isOpen() && $('.chat');
+  return panel ? Math.max(0, panel.offsetWidth - parseFloat(getComputedStyle(document.body).paddingRight)) : 0;
+}
+
 function marginMostColumn(width) {
-  return marginKit.mostColumn({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  return marginKit.mostColumn({ width: width - marginCovered(), setting: marginSetting(), noteWidth: window.leoTheme.noteWidth() });
 }
 
 function marginLayout(columns) {
   const max = getComputedStyle($('article.note', columns)).maxWidth;
   const column = max.endsWith('px') ? parseFloat(max) : Infinity;
-  const width = columns.clientWidth;
-  const layout = marginKit.arrangement({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth(), panel: chat.isOpen() });
+  const width = columns.clientWidth - marginCovered();
+  const layout = marginKit.arrangement({ width, setting: marginSetting(), noteWidth: window.leoTheme.noteWidth() });
   const size = `${marginKit.marginWidth({ width, column, layout })}px`;
   if (columns.style.getPropertyValue('--margin-w') !== size) columns.style.setProperty('--margin-w', size);
   return layout;
@@ -107,6 +112,8 @@ function marginLeave() {
   marginPage.personaSlide?.cancel();
   marginPage.observer?.disconnect();
   marginPage.observer = null;
+  marginPage.watch?.disconnect();
+  marginPage.watch = null;
   for (const slot of marginPage.layer?.parentElement?.querySelectorAll?.('.margin-slot') || []) slot.remove();
   marginPage.layer?.remove();
   Object.assign(marginPage, { faded: new Map(), drafted: new Map(), loaded: false, s: null, mode: 'ask', threads: [], resolved: [], gone: [], layer: null, svg: null, open: null, hover: null, focus: null, draft: null, reading: false, through: null, status: '', brief: false, statusToken: null, readingAt: null, readingSpan: null, readingEl: null, sides: {}, persona: 'reader', saved: null, instructions: '', personaToken: null, wantedPersona: null, personaSlide: null, slide: null, pointer: 0, changing: false, baseline: [], roomy: new Map(), tethers: new Map(), folds: new Map(), unfolds: new Set(), unfold: null, moved: [], anchoring: new Set(), finds: new Map(), drawn: null, drawnAt: 0 });
@@ -141,6 +148,10 @@ async function marginMount(s, mine) {
     marginPage.observer = new ResizeObserver(() => marginPage.folds.size || marginPage.unfolds.size || marginRedraw());
     marginPage.observer.observe(columns);
     marginPage.observer.observe($('#doc'));
+  }
+  if (window.MutationObserver) {
+    marginPage.watch = new MutationObserver(() => marginRedraw());
+    marginPage.watch.observe($('#doc'), { childList: true });
   }
   if (s.note.id) return marginLoad(s, () => mine === seq);
   const prefs = await marginLoadPrefs();
@@ -350,7 +361,6 @@ function marginControl() {
     if (icon.dataset.along) iconSwap(icon, paint);
     else paint();
   }
-  marginThroughControl();
   $('#margin-mode-label').textContent = along ? 'Reads along' : 'When you ask';
   button.title = along ? 'Felix reads changes after a pause. The text goes to your writing AI.' : `Select a passage, then choose Ask Felix or press ${marginAskKeys()}.`;
   for (const option of menu.querySelectorAll('[data-margin-mode]')) {
@@ -533,7 +543,7 @@ function marginNow(t) {
   return felixSaid ? felixSaid.text : '';
 }
 
-const INK_SKIP = 'pre, code, figure, svg, a, .see-larger, .katex, [class*="math"], [class*="diagram"], [class*="mermaid"]';
+const INK_SKIP = 'pre, code, figure, svg, a, .katex, [class*="math"], [class*="diagram"], [class*="mermaid"]';
 
 function inkNodes(root) {
   const nodes = [];
@@ -570,7 +580,6 @@ function marginAnswer(line, text, arriving = false) {
     line.classList.add('prose');
     line.innerHTML = html;
     if (arriving) for (const fig of line.querySelectorAll('figure.drawing')) fig.dataset.play = '';
-    if (/<figure class="(diagram|drawing)/.test(html)) line.insertAdjacentHTML('beforeend', '<button type="button" class="see-larger" data-action="diagram-expand" data-reply="here">See it larger</button>');
   } else {
     line.textContent = text;
   }
@@ -2050,7 +2059,6 @@ async function marginRead(s) {
   }
 }
 
-const THROUGH_TIP = 'Felix reads the whole note and leaves margin notes. The text goes to your writing AI.';
 const THROUGH_MOST = 12;
 const THROUGH_STOP_GRACE_MS = 400;
 const THROUGH_STAGGER_MS = 80;
@@ -2063,34 +2071,9 @@ const THROUGH_SAYS = {
   changed: 'This note changed while Felix was reading. Read through again.',
 };
 
-function marginThroughControl() {
-  const button = $('#margin-through');
+async function marginThroughClick(persona) {
   const s = marginPage.s;
-  if (!button || !s) return;
-  if (!button.dataset.ready) {
-    button.dataset.ready = '1';
-    button.addEventListener('click', () => marginThroughClick().catch(fail));
-  }
-  const running = Boolean(marginPage.through);
-  const icon = $('#margin-through-icon');
-  if (icon && icon.dataset.running !== String(running)) {
-    const paint = () => { icon.innerHTML = running ? ICON.close : ICON.readThrough; icon.dataset.running = String(running); };
-    if (icon.dataset.running) iconSwap(icon, paint);
-    else paint();
-  }
-  const label = $('#margin-through-label');
-  if (label) label.textContent = running ? 'Stop' : 'Read through';
-  const off = !s.note.id || marginPage.changing;
-  if (running) button.setAttribute('aria-busy', 'true');
-  else button.removeAttribute('aria-busy');
-  button.setAttribute('aria-disabled', String(off));
-  button.title = off ? 'Felix can read this note once it is saved.' : THROUGH_TIP;
-}
-
-async function marginThroughClick() {
-  const s = marginPage.s;
-  const button = $('#margin-through');
-  if (!s || button?.getAttribute('aria-disabled') === 'true') return;
+  if (!s?.note.id) return;
   const run = marginPage.through;
   if (run) {
     if (Date.now() - run.started >= THROUGH_STOP_GRACE_MS) {
@@ -2100,6 +2083,10 @@ async function marginThroughClick() {
     return;
   }
   if (chat.isBusy()) return marginSetStatus(THROUGH_SAYS.felix);
+  if (persona && persona !== marginPage.persona) {
+    await marginChangePersona(persona, false);
+    if (marginPage.s !== s || marginPage.persona !== persona) return;
+  }
   const { parts, spread } = marginKit.passes(s.doc.source(), marginPage.threads.map((t) => t.quote));
   if (!parts.length) return marginSetStatus('Write a few lines first, then read through.');
   await marginThrough(s, parts, spread);
@@ -2196,7 +2183,6 @@ function marginThroughUndo(s, added) {
 async function marginThrough(s, parts, spread) {
   const run = { started: Date.now(), stop: false, added: [], abort: new AbortController() };
   marginPage.through = run;
-  marginThroughControl();
   let say = '';
   try {
     for (let i = 0; i < parts.length && !run.stop && run.added.length < THROUGH_MOST; i++) {
@@ -2212,8 +2198,7 @@ async function marginThrough(s, parts, spread) {
     if (marginPage.through === run) marginPage.through = null;
     if (marginPage.s === s) {
       s.doc.glow();
-      marginThroughControl();
-    }
+        }
   }
   if (marginPage.s !== s) return;
   const count = run.added.length;

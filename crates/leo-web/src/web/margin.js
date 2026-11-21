@@ -169,13 +169,13 @@
     return Math.floor((width - column - TICK_GUTTER - END_GUTTER) / sides) - MARGIN_GAP;
   }
 
-  function arrangement({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
-    if (setting === 'marks' || noteWidth === 'full' || panel) return 'marks';
+  function arrangement({ width, setting = 'both', noteWidth = 'wide' }) {
+    if (setting === 'marks' || noteWidth === 'full') return 'marks';
     return width < (setting === 'both' ? ROOM_BOTH : ROOM_RIGHT) ? 'marks' : setting;
   }
 
-  function mostColumn({ width, setting = 'both', noteWidth = 'wide', panel = false }) {
-    if (arrangement({ width, setting, noteWidth, panel }) === 'marks') return Infinity;
+  function mostColumn({ width, setting = 'both', noteWidth = 'wide' }) {
+    if (arrangement({ width, setting, noteWidth }) === 'marks') return Infinity;
     const both = setting === 'both';
     return width - TICK_GUTTER - END_GUTTER - (both ? 2 : 1) * ((both ? LEAST_SHARED : MARGIN_WIDTH) + MARGIN_GAP);
   }
