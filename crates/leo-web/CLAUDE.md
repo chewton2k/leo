@@ -297,7 +297,8 @@ Decided: one app, window only (2026-10-31).
   step off the board's tone with a 1px inset edge (they vanish otherwise).
   Neighbouring Settings switch rows share one `--raised` panel with `--shadow`,
   split by a `--line` hairline inset 14 px; a hint or another kind of row starts
-  a new panel; forced colours restore the row border (2026-11-15).
+  a new panel; forced colours restore the row border (2026-11-15). One switch size everywhere, 36×22 with an 18 px knob
+  (2026-11-21, the user's call); the quiz toggle no longer overrides it.
 
 Decided: reuse components throughout (2026-11-06).
 
