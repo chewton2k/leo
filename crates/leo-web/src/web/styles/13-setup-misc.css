@@ -442,7 +442,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 @media (forced-colors: active) {
   .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
   .rec-card { border: 0; }
-  .fa-stack i, .fa-meter i, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i, .kanban-col-head::before { forced-color-adjust: none; }
+  .fa-stack i, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i, .kanban-col-head::before { forced-color-adjust: none; }
   .settings-section .segmented { border: 1px solid CanvasText; }
   .chat { border-left: 1px solid CanvasText; }
   .settings-nav { border-right: 1px solid CanvasText; }

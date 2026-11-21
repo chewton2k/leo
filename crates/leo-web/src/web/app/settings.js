@@ -716,7 +716,7 @@ function faPeriod(period, ranks, span) {
   const stats = `<div class="fa-stats"><div class="fa-top"><div class="fa-tile fa-hero"><span class="fa-lab">Requests</span><b title="${faExact(t.calls)}">${faCompact(t.calls)}</b></div><span class="fa-cap">in the ${faSpanName(span)}</span></div>
     <div class="fa-tile"><span class="fa-lab">Tokens in</span><b title="${faExact(t.input)}">${faCompact(t.input)}</b></div>
     <div class="fa-tile"><span class="fa-lab">Tokens out</span><b title="${faExact(t.output)}">${faCompact(t.output)}</b></div>
-    <div class="fa-tile"><span class="fa-lab">From cache</span><b>${Math.round(t.share * 100)}%</b><span class="fa-meter"><i style="width:${Math.round(t.share * 100)}%"></i></span></div>
+    <div class="fa-tile"><span class="fa-lab">From cache</span><b>${Math.round(t.share * 100)}%</b></div>
     <div class="fa-tile"><span class="fa-lab">At API prices</span><b>${esc(faCost(t))}</b>${t.unpriced ? `<span class="fa-lab">${faCompact(t.unpriced)} tokens with no price</span>` : ''}</div></div>`;
   const per = hourly ? 'Tokens per hour' : 'Tokens per day';
   const chart = bars.length ? `<div class="fa-block"><div class="fa-h">${per}</div>

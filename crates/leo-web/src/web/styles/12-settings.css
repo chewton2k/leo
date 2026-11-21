@@ -259,12 +259,10 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-top { display: contents; }
 .fa-cap { display: none; }
 @container (max-width: 559px) { .fa-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } .fa-top { grid-column: 1 / -1; display: flex; align-items: flex-end; gap: 12px; } .fa-top .fa-hero { flex: none; padding-right: 22px; } .fa-cap { display: block; font-size: var(--fs-sm); color: var(--muted); padding-bottom: 12px; } }
-.fa-tile { background: var(--raised); border-radius: var(--r-tile); padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; box-shadow: inset 0 0 0 1px var(--line); }
+.fa-tile { background: var(--raised); border-radius: var(--r-tile); padding: 12px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .fa-lab { font-size: var(--fs-sm); color: var(--muted); }
-.fa-tile b { font-variant-numeric: tabular-nums; font-size: var(--fs-lg); font-weight: 600; letter-spacing: -.01em; }
-.fa-tile.fa-hero b { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
-.fa-meter { height: 4px; border-radius: var(--r-xs); background: var(--line); margin-top: 6px; overflow: hidden; }
-.fa-meter i { display: block; height: 100%; background: var(--text); opacity: .75; border-radius: var(--r-xs); }
+.fa-tile b { font-variant-numeric: tabular-nums; font-size: var(--fs-lg); font-weight: 500; letter-spacing: -.01em; }
+.fa-tile.fa-hero b { font-size: 28px; line-height: 1.15; }
 .fa-block { margin-bottom: 20px; }
 .fa-h { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 10px; }
 .fa-chart { position: relative; padding: 0 0 22px 36px; outline: 0; border-radius: var(--r-tile); container: chartc / inline-size; }
