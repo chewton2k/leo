@@ -2069,6 +2069,7 @@ const THROUGH_SAYS = {
   felix: 'Felix is answering in chat. Try again when he’s done.',
   busy: 'Felix is already reading. Try again in a moment.',
   changed: 'This note changed while Felix was reading. Read through again.',
+  persona: 'That reader is gone. Pick another.',
 };
 
 async function marginThroughClick(persona) {
@@ -2083,13 +2084,9 @@ async function marginThroughClick(persona) {
     return;
   }
   if (chat.isBusy()) return marginSetStatus(THROUGH_SAYS.felix);
-  if (persona && persona !== marginPage.persona) {
-    await marginChangePersona(persona, false);
-    if (marginPage.s !== s || marginPage.persona !== persona) return;
-  }
   const { parts, spread } = marginKit.passes(s.doc.source(), marginPage.threads.map((t) => t.quote));
   if (!parts.length) return marginSetStatus('Write a few lines first, then read through.');
-  await marginThrough(s, parts, spread);
+  await marginThrough(s, parts, spread, persona);
 }
 
 async function marginThroughPart(s, run, part, label) {
@@ -2107,7 +2104,7 @@ async function marginThroughPart(s, run, part, label) {
       s.doc.glow(part.from, part.to);
       let got;
       try {
-        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone, changed: marginChanged(s) } });
+        got = await api(`/api/notes/${enc(s.note.id)}/margin/analyze`, { method: 'POST', signal: run.abort.signal, body: { version: s.note.version, blocks, most: Math.min(3, THROUGH_MOST - run.added.length), gone: marginPage.gone, changed: marginChanged(s), ...(run.persona && { persona: run.persona }) } });
       } finally {
         s.doc.glow();
       }
@@ -2117,6 +2114,10 @@ async function marginThroughPart(s, run, part, label) {
       if (marginPage.s !== s) return { gone: true };
       if (run.stop) return { notes: [] };
       const why = e.data?.why;
+      if (why === 'persona') {
+        marginPrefs = null;
+        await marginLoadPrefs();
+      }
       if (e.status === 409 && !why && !stale++) continue;
       if (why === 'busy' && busy++ < 3) {
         await new Promise((resolve) => setTimeout(resolve, READ_PAUSE.regular));
@@ -2180,8 +2181,8 @@ function marginThroughUndo(s, added) {
   };
 }
 
-async function marginThrough(s, parts, spread) {
-  const run = { started: Date.now(), stop: false, added: [], abort: new AbortController() };
+async function marginThrough(s, parts, spread, persona) {
+  const run = { started: Date.now(), stop: false, added: [], abort: new AbortController(), persona };
   marginPage.through = run;
   let say = '';
   try {

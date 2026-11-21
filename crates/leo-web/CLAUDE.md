@@ -398,7 +398,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   tools (transcript, Tasks, Add picture, Move to folder, Read through and Share as second
   steps, Move to trash) are one ⋯ menu (`#note-more`, `noteMenu` in sheets.js); Read through
   (2026-11-21, the user's call: no button in the note head) lists the readers, the note's
-  own checked; picking one saves it for the note, then reads once; while a read runs the row
+  own checked; picking one runs one pass in that reader's voice (`persona` in the analyze body,
+  used only by Read through; 400 `persona` "That reader is gone." when unknown) and leaves the
+  note's own reader alone; while a read runs the row
   is "Stop reading through", and it is off for an unsaved note;
   there is no floating note toolbar, and the Tasks card is hidden on note pages. The
   top bar shows no breadcrumbs on any page (`.crumbs` is kept invisible as the bar's

@@ -633,31 +633,31 @@ test('a read-through whose note is left draws nothing', async () => {
   assert.equal(h.state.through, null);
 });
 
-test('a reader chosen for Read through is saved for the note first, then the read starts', async () => {
+test('a chosen reader goes in every part body, leaves the note’s own reader alone and stays out when none is chosen', async () => {
   const h = through();
   const run = h.context.marginThroughClick('critic');
-  await h.answer({});
   for (let i = 0; i < 3; i++) await h.answer({ notes: [] });
   await run;
-  assert.equal(JSON.stringify(h.calls[0]), JSON.stringify(['/api/notes/a/margin', { persona: 'critic' }]));
-  assert.equal(h.state.persona, 'critic');
-  assert.equal(h.calls.length, 4);
+  assert.equal(h.calls.length, 3);
+  assert.ok(h.calls.every(([, body]) => body.persona === 'critic'));
+  assert.equal(h.state.persona, 'reader');
+  const plain = through();
+  const again = plain.context.marginThroughClick();
+  for (let i = 0; i < 3; i++) await plain.answer({ notes: [] });
+  await again;
+  assert.ok(plain.calls.every(([, body]) => !('persona' in body)));
 });
 
-test('a reader that cannot be saved starts no read, and the current reader needs no save', async () => {
+test('a reader that is gone says so and reloads the readers', async () => {
   const h = through();
-  const run = h.context.marginThroughClick('critic');
+  const run = h.context.marginThroughClick('gone');
   await new Promise(setImmediate);
-  h.waiting.shift().reject(new Error('x'));
+  h.waiting.shift().reject(Object.assign(new Error('x'), { status: 400, data: { why: 'persona' } }));
+  await new Promise(setImmediate);
+  h.waiting.shift().resolve({ layout: 'both', personas: [] });
   await run;
-  assert.equal(h.state.persona, 'reader');
-  assert.equal(h.calls.length, 1);
-  assert.equal(h.state.through, null);
-  const same = through();
-  const again = same.context.marginThroughClick('reader');
-  for (let i = 0; i < 3; i++) await same.answer({ notes: [] });
-  await again;
-  assert.ok(same.calls.every(([url]) => url.endsWith('/analyze')));
+  assert.equal(h.state.status, 'That reader is gone. Pick another.');
+  assert.equal(h.calls.at(-1)[0], '/api/margin');
 });
 
 test('Read through does nothing on a note that is not saved yet', async () => {
