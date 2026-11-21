@@ -253,7 +253,7 @@ button.choice-pick .felix { cursor: inherit; }
 .settings > div[id]:not([class]) { display: contents; }
 .set-card { background: var(--tint); border-radius: var(--radius); padding: 16px 18px; }
 .set-card .btn.plain, .set-card .set-input, .set-card .set-row select, .set-card .set-key-form input, .set-card .select-menu-button, .set-card .picker-button { background: var(--raised); }
-.fa-card > header { flex-wrap: wrap; margin-bottom: 6px; }
+.fa-card > header { flex-wrap: wrap; margin-bottom: 8px; }
 @container (max-width: 420px) { .fa-card > header .segmented { flex: 1 0 100%; margin-left: 0; } }
 .fa-stats { display: grid; grid-template-columns: 1.35fr 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 20px; }
 .fa-top { display: contents; }
@@ -264,8 +264,8 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-tile b { font-variant-numeric: tabular-nums; font-size: var(--fs-lg); font-weight: 500; letter-spacing: -.01em; }
 .fa-tile.fa-hero b { font-size: 28px; line-height: 1.15; }
 .fa-block { margin-bottom: 20px; }
-.fa-h { font-size: var(--fs-sm); font-weight: 600; margin-bottom: 10px; }
-.fa-chart { position: relative; padding: 0 0 22px 36px; outline: 0; border-radius: var(--r-tile); container: chartc / inline-size; }
+.fa-h { font-size: var(--fs-sm); font-weight: 500; margin-bottom: 8px; }
+.fa-chart { position: relative; padding: 0 0 24px 36px; outline: 0; border-radius: var(--r-tile); container: chartc / inline-size; }
 @container chartc (max-width: 419px) { .fa-stack { gap: 0; } }
 .fa-chart:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .fa-grid { position: absolute; left: 36px; right: 0; height: 0; border-top: 1px solid var(--line); }
@@ -279,11 +279,11 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-day:not(.on) .fa-stack { opacity: .45; }
 .fa-xl { position: absolute; left: 36px; right: 0; bottom: 0; height: 16px; font-size: var(--fs-xs); color: var(--muted); }
 .fa-xl span { position: absolute; transform: translateX(-50%); white-space: nowrap; }
-.fa-readout { line-height: 1.4; height: 48px; margin-top: 6px; padding-top: 6px; font-size: var(--fs-sm); color: var(--muted); display: flex; flex-direction: column; gap: 3px; }
+.fa-readout { line-height: 1.4; height: 48px; margin-top: 8px; padding-top: 4px; font-size: var(--fs-sm); color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
 @container (max-width: 519px) { .fa-readout { height: 70px; } }
 .fa-readout b { color: var(--text); font-weight: 600; }
-.fa-rm { display: flex; flex-wrap: wrap; gap: 3px 12px; max-height: calc(2.8em + 7px); overflow: hidden; }
-.fa-rm span { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; min-width: 0; max-width: 100%; padding-bottom: 2px; }
+.fa-rm { display: flex; flex-wrap: wrap; gap: 4px 12px; max-height: calc(2.8em + 7px); overflow: hidden; }
+.fa-rm span { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; min-width: 0; max-width: 100%; padding-bottom: 2px; }
 .fa-rm b { flex: none; }
 .fa-rn { font-style: normal; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 @container (min-width: 520px) { .fa-rm { flex-wrap: nowrap; } }
@@ -304,7 +304,7 @@ button.choice-pick .felix { cursor: inherit; }
 .fa-one b { font-weight: 600; min-width: 0; }
 .fa-one span { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .fa-kinds { display: flex; flex-direction: column; }
-.fa-kind { display: grid; grid-template-columns: 120px minmax(0, 1fr) 64px; grid-template-areas: "n bar c" ". note note"; gap: 2px 14px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); font-size: var(--fs-base); }
+.fa-kind { display: grid; grid-template-columns: 120px minmax(0, 1fr) 64px; grid-template-areas: "n bar c" ". note note"; gap: 4px 16px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: var(--fs-base); }
 .fa-kind:first-child { border-top: 0; }
 .fa-kn { grid-area: n; min-width: 0; }
 .fa-kb { grid-area: bar; display: flex; align-items: center; gap: 12px; min-width: 0; }
