@@ -452,7 +452,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
   .choice-ring { box-shadow: none; outline: 3px solid Highlight; outline-offset: 2px; }
   .side-folder.on:has(> .side-pill), .side-note.on:has(> .side-pill) { background: Highlight; color: HighlightText; }
   .side-note.open { outline: 1px dotted CanvasText; outline-offset: -1px; }
-  .kanban-card.open { outline: 2px solid Highlight; }
+  .kanban-card.open { border-color: Highlight; border-left-width: 4px; }
   .settings-nav:has(.settings-nav-pill.placed) .settings-link.on { background: Highlight; color: HighlightText; }
   .segment-pill, .side-pill, .settings-nav-pill { display: none; }
   .side-row:hover:not(.on), .side-folder:hover:not(.on), .settings-link:hover:not(.on) { outline: 1px solid Highlight; }

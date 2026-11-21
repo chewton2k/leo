@@ -134,7 +134,7 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-cell { position: relative; display: flex; flex-direction: column; gap: 2px; min-width: 0; min-height: 0; padding: 4px; border-left: 1px solid var(--cal-line); border-bottom: 1px solid var(--cal-line); overflow: hidden; cursor: cell; }
 .cal-cell:nth-child(7n + 1) { border-left: 0; }
 .cal-cell.out .cal-num { color: var(--faint); }
-.cal-cell.out > .cal-item { opacity: .7; }
+.cal-cell.out > .cal-item:not(.lifted) { opacity: .7; }
 .cal-cell.out > .cal-item .cal-sub { color: var(--text); }
 .cal-num { align-self: flex-start; min-width: 24px; height: 24px; padding: 0 6px; border: 0; border-radius: var(--r-pill); background: none; font: inherit; font-size: var(--fs-xs); font-weight: 600; color: var(--text); cursor: pointer; font-variant-numeric: tabular-nums; }
 .cal-num:hover { background: var(--surface-2); }
@@ -171,7 +171,7 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-ring path.inking { stroke-dasharray: 1; animation: pencil-draw 300ms var(--ease-pencil) both; }
 .cal-tray-list h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
 .cal-tray-list h2.late { color: var(--danger); }
-.cal-count { font-variant-numeric: tabular-nums; color: var(--faint); font-size: var(--fs-xs); }
+.cal-count { font-variant-numeric: tabular-nums; font-weight: 400; color: var(--faint); }
 .cal-tray-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: var(--fs-sm); }
 .cal-tray-row + .cal-tray-row { box-shadow: 0 -1px 0 color-mix(in srgb, var(--text) 8%, transparent); }
 .cal-tray-row[data-drag] { cursor: grab; }

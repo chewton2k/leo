@@ -108,7 +108,7 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
 - Overlap: `overlapOut(el)` clones the old state on the body (`ghostOf`, shared with the sheet close)
   and fades it over 140 ms while the new state arrives. The clone keeps its classes, so a test that
   looks up by class right after a change scopes to `#app`.
-- Colour: selection colour arrives with the thumb (`.segment`, `.switch`) or as a wipe (`.tab-wipe`);
+- Colour: selection colour arrives with the thumb (`.segment`, `.switch`) or as a wipe (`.tab-wipe`, now the board tab's underline);
   never on hover. `iconSwap(host, change, part)` crossfades one icon into another with blur and scale.
 - Rubber band: `rubber(over, reach)` and `pastEdge(at, low, high)` resist a pull past a limit without
   overshoot (sheet swipe upward, pane and chat grips, board and calendar ghosts past the page).

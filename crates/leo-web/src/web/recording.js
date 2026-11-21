@@ -535,7 +535,7 @@
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       return `<div class="rec rec-live${paused ? ' paused' : ''}">
         <section class="set-card rec-live-card">
-          <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${v.source === 'screen' ? icons.screen : icons.mic}${kind}</span></div>
+          <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind === 'Screen' ? icons.screen : icons.mic}${kind}</span></div>
           <div class="rec-clock"><span id="rec-time">${clock(v.secs)}</span></div>
           <div class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></div><p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, micDenied(v.source)))}</p>${micDenied(v.source) ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}
           ${controls}
