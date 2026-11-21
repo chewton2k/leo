@@ -97,7 +97,7 @@
 .set-notice { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0 4px; padding: 8px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--hue-amber) 12%, var(--raised)); font-size: var(--fs-sm); line-height: 1.4; color: var(--text); }
 .set-notice svg { flex: none; width: 15px; height: 15px; margin-top: 1px; color: var(--hue-amber); }
 @media (max-width: 520px) { .set-row:not(.column) { flex-direction: column; align-items: stretch; gap: 6px; } .set-label { width: auto; } .set-row:not(.column):has(> .switch) { flex-direction: row; align-items: center; } .set-row > .segmented { flex: none; max-width: none; margin-left: 0; } .set-line:has(> .set-shortcut) { flex-direction: column; align-items: stretch; } .set-shortcut { justify-content: flex-start; } .set-shortcut .shortcut-field { flex: 1 1 160px; } }
-.rec { display: flex; flex-direction: column; gap: 14px; margin: 0 0 120px; }
+.rec { display: flex; flex-direction: column; gap: 16px; margin: 0 0 120px; }
 .rec .section-title { margin-bottom: -4px; }
 .rec-card { display: flex; flex-direction: column; padding: 0; background: none; }
 .rec-card .choice-pick { background: var(--tint); }
@@ -116,11 +116,11 @@
 .rec-recover-row { display: flex; align-items: center; gap: 12px; padding: 12px 0 4px; color: var(--text); }
 .rec-recover-row .sub { display: block; margin-top: 2px; }
 .rec-recover-row svg:first-child { width: 18px; height: 18px; color: var(--accent); }
-.rec-start { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px 0 2px; margin-top: 4px; }
-.rec-go { width: 72px; height: 72px; border-radius: 50%; border: 4px solid color-mix(in srgb, var(--text) 18%, transparent); background: none; display: grid; place-items: center; cursor: pointer; padding: 0; transition: transform var(--t-press); }
-.rec-go:hover { transform: scale(1.04); }
+.rec-start { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 0 4px; margin-top: 4px; }
+.rec-go { width: 72px; height: 72px; border-radius: 50%; border: 4px solid color-mix(in srgb, var(--text) 18%, transparent); background: none; display: grid; place-items: center; cursor: pointer; padding: 0; }
+.rec-go:hover:not(:disabled) .rec-go-dot { background: color-mix(in srgb, var(--danger) 86%, #000); }
 .rec-go-dot { width: 54px; height: 54px; border-radius: 50%; background: var(--danger); }
-.rec-go:disabled { opacity: .5; cursor: default; transform: none; }
+.rec-go:disabled { opacity: .5; cursor: default; }
 .rec-start-label { font-size: var(--fs-sm); font-weight: 600; color: var(--muted); }
 .rec-tip { text-align: center; margin: 0 12px; line-height: 1.5; }
 .rec-start .rec-start-label + .rec-tip { margin-top: -2px; }
@@ -132,19 +132,20 @@
 .rec-live .rec-state .rec-dot { animation: rec-pulse 1.4s ease-in-out infinite; }
 .rec-live.paused .rec-state .rec-dot { background: var(--hue-amber); animation: none; }
 @keyframes rec-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .35; transform: scale(.8); } }
-.rec-meta { font-size: var(--fs-xs); color: var(--muted); padding: 3px 10px; border-radius: var(--r-pill); background: var(--surface-2); }
+.rec-meta { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--muted); }
+.rec-meta svg { width: 14px; height: 14px; flex: none; }
 .rec-clock { text-align: center; font-variant-numeric: tabular-nums; }
-.rec-clock #rec-time { font-size: 48px; font-weight: 700; letter-spacing: -.02em; }
+.rec-clock #rec-time { font-size: 48px; font-weight: 500; }
 .rec-wave-box { --wave-on: var(--danger); --wave-off: color-mix(in srgb, var(--text) 18%, transparent); position: relative; margin: 0 -18px; }
 .rec-wave-box::before, .rec-wave-box::after { content: ""; position: absolute; top: 0; bottom: 0; width: 28px; pointer-events: none; z-index: 1; }
 .rec-wave-box::before { left: 0; background: linear-gradient(90deg, var(--tint), transparent); }
 .rec-wave-box::after { right: 0; background: linear-gradient(270deg, var(--tint), transparent); }
 .rec-live.paused .rec-wave-box { --wave-on: var(--faint); }
 .rec-wave { display: block; width: 100%; height: 72px; }
-.rec-hear { margin: 0; display: flex; align-items: center; justify-content: center; gap: 7px; font-size: var(--fs-sm); color: var(--muted); }
+.rec-hear { margin: 0; display: flex; align-items: center; justify-content: center; gap: 8px; font-size: var(--fs-sm); color: var(--muted); }
 .rec-hear::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .rec-hear.sound { color: var(--text); }
-.rec-hear.sound::before { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); }
+.rec-hear.sound::before { background: var(--good); }
 .rec-hear.silent { color: var(--hue-amber); }
 .rec-hear.silent::before { background: var(--hue-amber); }
 .rec-buttons { display: flex; justify-content: center; gap: 28px; padding: 6px 0 2px; }
@@ -342,14 +343,12 @@ body.files-over main::after {
 @keyframes tab-wipe { from { clip-path: inset(0 100% 0 0); } }
 .overlap-gone { position: fixed; z-index: 5; margin: 0; overflow: hidden; pointer-events: none; }
 @media (prefers-reduced-motion: no-preference) {
-  .btn, .icon-btn, .float-act, .rec-round, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab, .kanban-add-card, .msg-act, .choice-pick, .margin-mode { transition: scale var(--t-press) var(--ease-arrive); }
+  .btn, .icon-btn, .float-act, .rec-round, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab, .kanban-add-card, .msg-act, .choice-pick, .margin-mode, .rec-go { transition: scale var(--t-press) var(--ease-arrive); }
   .select-menu-button { transition: border-color var(--t-press) ease, box-shadow var(--t-press) ease, scale var(--t-press) var(--ease-arrive); }
   .ask-option, .quiz-option { transition: border-color var(--t-press), background var(--t-press), scale var(--t-press) var(--ease-arrive); }
-  .rec-go { transition: transform var(--t-press), scale var(--t-press) var(--ease-arrive); }
   .segment { transition: color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
   .switch { transition: background-color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
   :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
-  .rec-go:active:not(:disabled) { transform: none; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
