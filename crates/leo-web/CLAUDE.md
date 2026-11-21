@@ -394,7 +394,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   currency sign, a sign and thousands commas allowed) takes `align-right` unless the
   Markdown aligned it; a fenced block becomes `<div class="code" data-lang>` around
   the `<pre>` with an icon-only `.code-copy` button (no text nodes; the label is
-  `::before { content: attr(data-lang) }`, the code starts below both). Copy shows on
+  `::before { content: attr(data-lang) }` in the block's top-right corner, in the pre's own top padding, so the code starts at the top with no band for it, 2026-11-21, the user's call). Copy shows on
   hover and `:focus-visible`, takes its own keys, copies `pre code` text only, never
   opens the block, says the result in the hidden `#code-said` status region and shows
   `.pencil-tick.writing` with aria-label "Copied" for 1.2 s. `#doc` styles: links take

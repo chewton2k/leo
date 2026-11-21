@@ -122,8 +122,8 @@ test('the note page marks links, quotes, tables and code in pencil, Copy copies 
       const button = el.querySelector('.code-copy').getBoundingClientRect();
       const range = document.createRange();
       range.selectNodeContents(el.querySelector('pre code'));
-      return range.getClientRects()[0].top >= button.bottom;
-    }), 'no code sits under the label or Copy').toBe(true);
+      return [range.getClientRects()[0].top - el.getBoundingClientRect().top < 24, range.getClientRects()[0].right <= button.left];
+    }), 'the code starts at the top of the block and short code clears Copy').toEqual([true, true]);
     const source = await page.evaluate(() => window.doc.source());
     await copy.focus();
     await page.keyboard.press('Enter');

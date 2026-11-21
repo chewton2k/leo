@@ -263,8 +263,8 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 .prose pre { background: var(--code-bg); border-radius: var(--r-md); padding: 14px 16px; overflow-x: auto; overscroll-behavior-x: contain; }
 .prose pre code { background: none; padding: 0; font-size: calc(13.5px * var(--read)); line-height: 1.55; }
 #doc .code { position: relative; }
-#doc .code > pre { margin: 0; padding-top: 34px; }
-#doc .code[data-lang]::before { content: attr(data-lang); position: absolute; top: 9px; right: 14px; font: var(--fs-xs)/18px ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; color: var(--faint); pointer-events: none; }
+#doc .code > pre { margin: 0; }
+#doc .code[data-lang]::before { content: attr(data-lang); position: absolute; top: 4px; right: 14px; font: var(--fs-xs)/14px ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; color: var(--faint); pointer-events: none; }
 #doc .code:is(:hover, :has(.code-copy:focus-visible, .code-copy.copied))::before { visibility: hidden; }
 #doc .code-copy { position: absolute; top: 6px; right: 8px; width: 28px; height: 28px; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); opacity: 0; cursor: pointer; }
 #doc .code:hover .code-copy, #doc .code-copy:is(:focus-visible, .copied) { opacity: 1; }
@@ -273,7 +273,7 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 #doc .code-copy svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 #doc .code-copy.copied svg { display: none; }
 #doc .code-copy .pencil-tick { color: var(--text); }
-@media print { #doc .code::before, #doc .code-copy { display: none; } #doc .code > pre { padding-top: 8pt; } }
+@media print { #doc .code::before, #doc .code-copy { display: none; } }
 .prose blockquote { margin: 1em 0; padding: 4px 16px; border-left: 3px solid color-mix(in srgb, var(--text) 22%, transparent); }
 .prose blockquote, #doc .blk-quote .line-edit { font-family: var(--felix-letters); font-size: 1.06em; }
 #doc blockquote { position: relative; border-left: 0; }
