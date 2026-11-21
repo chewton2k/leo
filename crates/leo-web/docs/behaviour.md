@@ -143,8 +143,8 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   Cmd/Ctrl+N makes a note in the current folder (never inside a sheet, an inline
   edit, while composing or when locked). Both are customizable in Settings →
   Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
-  New folder, icons level and no Folders label (2026-11-16); folders show no note count
-  and one sort button's menu holds the sort, its order and open tasks only. New folder
+  New folder, icons level and no Folders label (2026-11-16); each folder row ends with its quiet note count and note rows
+  carry no icon (2026-11-21, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
   opens a row in place that slides the rows below down. The explorer
   also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar

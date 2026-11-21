@@ -484,7 +484,10 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   The explorer is kept simple (2026-11-16, the user's call): New note (with its
   shortcut) and New folder share one row (`.side-group`, still the top-level drop
   target and root context menu, their icons on one level), there is no Folders label,
-  and folders show no note count (the count is in the row's title).
+  each folder row ends with its quiet note count (`.side-count`, 2026-11-21, the
+  user's call) and note rows carry no icon, their labels keeping the folders' column. Rows
+  are 32 px with an 8 px icon gap and a 16 px indent per level, and the current row keeps
+  its weight: the pill alone marks it.
 - Cmd/Ctrl+F on a note page opens find in note (2026-11-21, the user's call; nothing
   new on other pages): `noteFind` in `core.js` puts a `.note-find` bar in the note and
   searches `#doc` (Enter and Shift+Enter step, Esc closes and gives focus back, reopening

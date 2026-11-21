@@ -219,9 +219,10 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
     expect(box.width).toBeGreaterThanOrEqual(24);
     expect(box.height).toBeGreaterThanOrEqual(24);
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
-    const folderIcon = await page.locator('.side-tree .side-row[data-dir="Course"] svg').boundingBox();
-    const noteIcon = await page.locator('.side-tree .side-note').first().locator('svg').boundingBox();
-    expect(Math.abs(noteIcon.x - folderIcon.x - 14)).toBeLessThanOrEqual(14);
+    const folderLabel = await page.locator('.side-tree .side-row[data-dir="Course"] .side-label').boundingBox();
+    const noteLabel = await page.locator('.side-tree .side-note').first().locator('.side-label').boundingBox();
+    await expect(page.locator('.side-tree .side-note').first().locator('svg')).toHaveCount(0);
+    expect(Math.abs(noteLabel.x - folderLabel.x - 16)).toBeLessThanOrEqual(1);
     const guide = await page.locator('.side-kids[data-kids="Course"]').evaluate(el => { const s = getComputedStyle(el, '::before'); return { mask: s.maskImage || s.webkitMaskImage, width: s.width }; });
     expect(guide.mask.match(/url\(/g)).toHaveLength(2);
     expect(guide.width).toBe('10px');
@@ -993,7 +994,7 @@ test('New note and New folder share one row with their icons level, notes edited
     expect(row.label, 'no Folders label').toBe(false);
     expect(row.sameRow).toBe(true);
     expect(Math.abs(row.note - row.folder), 'the two icons sit on one level').toBeLessThan(0.6);
-    await expect(page.locator('.side-folder .side-count'), 'folders show no note count').toHaveCount(0);
+    await expect(page.locator('.side-folder .side-count').first(), 'folders with notes show their count').toHaveText(/^\d+$/);
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
     await expect(page.locator('.side-note[data-id="course-note"]')).toBeVisible();
     await page.evaluate(() => {
