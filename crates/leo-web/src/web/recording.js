@@ -142,6 +142,30 @@
     return { drop, keep, tail: next.slice(keep) };
   }
 
+  const MOST_ASK = 8000;
+  const FELIX_ASKS = {
+    before: ['What should I listen for?', 'What should I ask?'],
+    live: ['What did I just miss?', 'Sum up so far', 'What should I ask next?'],
+  };
+
+  function askChips(stage, esc) {
+    return FELIX_ASKS[stage].map((q) => `<button type="button" class="starter" data-rec-ask="${esc(q)}">${esc(q)}</button>`).join('');
+  }
+
+  function newest(text, most) {
+    const tail = text.length > most ? text.slice(text.length - most) : text;
+    return /^[\uDC00-\uDFFF]/.test(tail) ? tail.slice(1) : tail;
+  }
+
+  function liveAsk(points, transcript) {
+    const typed = points.length ? `My points so far:\n${newest(points.map((p) => `- ${p}`).join('\n'), 2000)}\n\n` : '';
+    return `${typed}The newest part of the transcript:\n${newest(transcript || '', MOST_ASK - typed.length - 40) || '(nothing heard yet)'}`;
+  }
+
+  function briefAsk(event, wants) {
+    return [event && `Calendar event: ${event.title} (${whenOf(event)})${event.context ? `\n${event.context}` : ''}`, wants && `What I want from the notes: ${wants}`].filter(Boolean).join('\n\n');
+  }
+
   function unsavedLine(n, more) {
     if (more) return `${n} or more recordings weren't saved`;
     return n === 1 ? "1 recording wasn't saved" : `${n} recordings weren't saved`;
@@ -486,6 +510,7 @@
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
+          <div class="rec-ask" id="rec-ask"${s.event !== null ? '' : ' hidden'}><p class="hint">Ask Felix before you start</p><div class="chat-starters">${askChips('before', esc)}</div></div>
           <div class="rec-start">
             <button class="rec-go" data-action="rec-start" aria-label="Start recording" ${ov.available === false ? 'disabled' : ''}><span class="rec-go-dot"></span></button>
             <span class="rec-start-label">Start recording</span>
@@ -516,7 +541,7 @@
           ${controls}
           ${warnings}
         </section>
-        <details class="set-card rec-heard" id="rec-heard"${s.showHeard ? ' open' : ''}>
+        <details class="set-card rec-heard" id="rec-heard" data-keep${s.showHeard ? ' open' : ''}>
           <summary><span class="grow"><b>What’s being heard</b><span class="cal-sub">The live transcript</span></span>${icons.chevron}</summary>
           <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
           <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
@@ -526,6 +551,7 @@
           ${points}
           <div class="rec-point rec-compose"><textarea id="rec-point-text" class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm" data-action="rec-point">Add point</button></div></div>
         </section>
+        <section class="set-card rec-ask" id="rec-ask" data-keep><header><h3>Ask Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div></section>
         <section class="set-card rec-wants-card">
           <header><h3>What you want from the notes</h3><span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></header>
           <p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p>
@@ -650,23 +676,41 @@
       }
     }
 
-    function graft(now, made, heard) {
+    function graft(now, made, kept) {
       const fresh = [...made.children];
       if (fresh.length !== now.children.length) return false;
       return [...now.children].every((child, i) => {
-        if (child === heard) return fresh[i].id === heard.id;
-        if (!child.contains(heard)) return child.replaceWith(fresh[i]) || true;
+        if (kept.includes(child)) return fresh[i].id === child.id;
+        if (!kept.some((k) => child.contains(k))) return child.replaceWith(fresh[i]) || true;
         child.className = fresh[i].className;
-        return graft(child, fresh[i], heard);
+        return graft(child, fresh[i], kept);
       });
     }
 
     function paintLive(box) {
       const html = drawLive();
-      const heard = box.querySelector('#rec-heard');
+      const kept = [...box.querySelectorAll('[data-keep]')];
       const made = root.document.createElement('div');
       made.innerHTML = html;
-      if (!heard || !graft(box, made, heard)) box.innerHTML = html;
+      if (!kept.length || !graft(box, made, kept)) box.innerHTML = html;
+    }
+
+    function syncAsk(box) {
+      const ask = box.querySelector('.rec-idle #rec-ask');
+      const wants = box.querySelector('#rec-wants');
+      if (ask) ask.hidden = s.event === null && !(wants && wants.value.trim());
+    }
+
+    function askFelix(question) {
+      const chat = deps.chat && deps.chat();
+      if (!chat) return;
+      if (chat.isBusy()) return toast('Felix is still answering. Try again in a moment.', { bad: true });
+      const v = s.view;
+      const events = (s.calendar && s.calendar.events) || [];
+      const wants = s.container && s.container.querySelector('#rec-wants');
+      const text = live(v) ? liveAsk(earlierFirst(s.earlier, placed(v)).map(([, , said]) => said), v.transcript) : briefAsk(s.event !== null ? events[s.event] : null, wants ? wants.value.trim() : '');
+      chat.attachSelection({ note: '', title: 'Live recording', text });
+      chat.askNew(question);
     }
 
     function showTranscript(box) {
@@ -803,7 +847,10 @@
       redrawSpeakers(box);
       if (box.querySelector('#rec-speakers-box')) speakerModel(box);
       pickKind(box, false);
-      box.querySelectorAll('input[name="rec-kind"]').forEach((radio) => radio.addEventListener('change', () => pickKind(box, true)));
+      box.querySelectorAll('input[name="rec-kind"]').forEach((radio) => radio.addEventListener('change', () => { pickKind(box, true); syncAsk(box); }));
+      syncAsk(box);
+      const idleWants = box.querySelector('.rec-idle #rec-wants');
+      if (idleWants) idleWants.addEventListener('input', () => syncAsk(box));
       const event=box.querySelector('#rec-event');
       if (event) {
         event.addEventListener('change', () => {
@@ -867,6 +914,11 @@
         s.view = null;
       }
     }
+
+    root.document.addEventListener('click', (event) => {
+      const button = event.target && event.target.closest && event.target.closest('[data-rec-ask]');
+      if (button && s.container && s.container.contains(button)) askFelix(button.dataset.recAsk);
+    });
 
     let pasting = false;
     root.document.addEventListener('paste', (event) => {
@@ -981,5 +1033,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

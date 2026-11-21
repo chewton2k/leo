@@ -172,7 +172,7 @@ function idle(checks, platform, denied = false) {
   return piece('drawIdle', 'drawLive', 'drawIdle', {
     s: { overview: { available: true, checks }, calendar: null, event: null },
     esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '', speakersRow: () => '',
-    preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
+    askChips: L.askChips, preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
   })([], '');
 }
 
@@ -208,7 +208,7 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
   const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
     s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -438,20 +438,21 @@ test('a long recording keeps a handful of transcript nodes, and never folds unde
   assert.equal(text.textContent, s.view.transcript);
 });
 
-test('a live redraw replaces the cards around the transcript, at any depth, and never the transcript itself', () => {
+test('a live redraw replaces the cards around the transcript and Felix\'s questions, at any depth, and never those two', () => {
   const el = (id, children = [], className = '') => {
     const node = { id, className, children };
     node.contains = (other) => node === other || node.children.some((child) => child.contains(other));
     children.forEach((child) => {
-      child.replaceWith = (next) => { if (child.id === 'rec-heard') throw new Error('the transcript was replaced'); node.children[node.children.indexOf(child)] = next; };
+      child.replaceWith = (next) => { if (['rec-heard', 'rec-ask'].includes(child.id)) throw new Error(`${child.id} was replaced`); node.children[node.children.indexOf(child)] = next; };
     });
     return node;
   };
-  const page = (paused) => [el('card'), el('pane', [el('side'), el('rec-heard')], paused ? 'pane paused' : 'pane'), el('pad'), el('wants')];
+  const page = (paused) => [el('card'), el('pane', [el('side'), el('rec-heard')], paused ? 'pane paused' : 'pane'), el('pad'), el('rec-ask'), el('wants')];
   const shown = page(false);
   const heard = shown[1].children[1];
+  const ask = shown[3];
   const box = el('box', [el('', shown, 'rec rec-live')]);
-  box.querySelector = (at) => (at === '#rec-heard' ? heard : null);
+  box.querySelectorAll = (at) => (at === '[data-keep]' ? [heard, ask] : []);
   Object.defineProperty(box, 'innerHTML', { set() { throw new Error('the whole page was rewritten'); } });
   const fresh = el('', page(true), 'rec rec-live paused');
   const document = { createElement: () => el('made', [fresh]) };
@@ -460,11 +461,68 @@ test('a live redraw replaces the cards around the transcript, at any depth, and 
   assert.equal(shell.className, 'rec rec-live paused');
   assert.equal(shell.children[1].className, 'pane paused');
   assert.equal(shell.children[1].children[1], heard);
-  assert.deepEqual([shell.children[0], shell.children[1].children[0], shell.children[2], shell.children[3]], [fresh.children[0], fresh.children[1].children[0], fresh.children[2], fresh.children[3]]);
+  assert.equal(shell.children[3], ask);
+  assert.deepEqual([shell.children[0], shell.children[1].children[0], shell.children[2], shell.children[4]], [fresh.children[0], fresh.children[1].children[0], fresh.children[2], fresh.children[4]]);
   const other = el('box', [el('', [el('card')], 'rec rec-idle')]);
   let rewritten = '';
-  other.querySelector = () => null;
+  other.querySelectorAll = () => [];
   Object.defineProperty(other, 'innerHTML', { set(v) { rewritten = v; } });
   piece('graft', 'showTranscript', 'paintLive', { root: { document: { createElement: () => el('made', []) } }, drawLive: () => '<live>' })(other);
   assert.equal(rewritten, '<live>', 'without a transcript yet, the live page is drawn whole');
+});
+
+test('Felix\'s questions follow the stage: before Start, while recording, and on a recorded note', () => {
+  assert.deepEqual(L.FELIX_ASKS.before, ['What should I listen for?', 'What should I ask?']);
+  assert.deepEqual(L.FELIX_ASKS.live, ['What did I just miss?', 'Sum up so far', 'What should I ask next?']);
+  assert.equal((L.askChips('live', esc).match(/class="starter" data-rec-ask=/g) || []).length, 3);
+  const chips = idle({ speech: true, writing: true }, 'macos');
+  assert.match(chips, /<div class="rec-ask" id="rec-ask" hidden>.*What should I listen for\?/s, 'hidden until an event is chosen or a want is typed');
+  const s = { event: null };
+  const ask = { hidden: false };
+  const wants = { value: '' };
+  const sync = piece('syncAsk', 'askFelix', 'syncAsk', { s });
+  const box = { querySelector: (at) => ({ '.rec-idle #rec-ask': ask, '#rec-wants': wants })[at] };
+  sync(box);
+  assert.equal(ask.hidden, true);
+  wants.value = 'the exam topics';
+  sync(box);
+  assert.equal(ask.hidden, false);
+  wants.value = '';
+  s.event = 0;
+  sync(box);
+  assert.equal(ask.hidden, false);
+  const live = piece('drawLive', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
+    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
+  })();
+  assert.match(live, /rec-notepad.*<section class="set-card rec-ask" id="rec-ask" data-keep>.*What did I just miss\?.*rec-wants-card/s, 'the questions sit under Your notes');
+  assert.match(live, /id="rec-heard" data-keep/);
+});
+
+test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {
+  const said = 'x'.repeat(250000) + ' the newest words';
+  const text = L.liveAsk(['first point', 'second point'], said);
+  assert.ok(text.length <= L.MOST_ASK, `${text.length}`);
+  assert.ok(Array.from(text).length <= 8000);
+  assert.match(text, /^My points so far:\n- first point\n- second point\n\nThe newest part of the transcript:\n/);
+  assert.ok(text.endsWith(' the newest words'), 'the tail is sent, not the head');
+  const many = L.liveAsk(Array.from({ length: 2000 }, (_, i) => `point ${i}`), said);
+  assert.ok(many.length <= L.MOST_ASK);
+  assert.match(many, /- point 1999\n\nThe newest part/);
+  const emoji = L.liveAsk([], '\u{1F600}'.repeat(5000));
+  assert.ok(emoji.length <= L.MOST_ASK);
+  assert.doesNotMatch(emoji, /\n[\uDC00-\uDFFF]/, 'never starts inside a surrogate pair');
+  assert.match(L.liveAsk([], ''), /nothing heard yet/);
+  const brief = L.briefAsk({ title: 'Design sync', start: '2026-11-21T15:00:00Z', end: '2026-11-21T16:00:00Z', context: 'Agenda: launch' }, 'decisions only');
+  assert.match(brief, /^Calendar event: Design sync \(.*\)\nAgenda: launch\n\nWhat I want from the notes: decisions only$/);
+  assert.equal(L.briefAsk(null, 'only wants'), 'What I want from the notes: only wants');
+});
+
+test('the live page lays out three columns on a wide main area, two beside a docked chat, and stacks otherwise', () => {
+  const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
+  assert.match(css, /#rec-box:has\(> \.rec-live\) \{ container: recroom \/ inline-size; \}/);
+  assert.match(css, /main:has\(> #rec-box > \.rec-live\) \{ max-width: 1280px; \}/);
+  assert.match(css, /@container recroom \(min-width: 1000px\) \{ body:not\(\.chat-open\) \.rec-live \{ display: grid;[^}]*"live live live" "heard notes ask" "heard wants ask"/);
+  assert.match(css, /@container recroom \(min-width: 640px\) \{ body\.chat-open \.rec-live \{ display: grid;[^}]*"live live" "heard ask" "heard notes" "heard wants"/);
+  assert.doesNotMatch(css.replace(/@container[^\n]*/g, ''), /\.rec-live \{[^}]*display: grid/, 'narrower main areas keep the stacked page');
 });

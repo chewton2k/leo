@@ -1323,7 +1323,20 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   changed tail is replaced; when the transcript's start is trimmed (the last 200,000
   characters are kept), the trimmed words leave the top. New words fade in briefly (not with
   reduced motion). Scrolled up, the view stays where it is and Back to latest returns to the
-  newest words and follows them again.
+  newest words and follows them again. Each new word is folded back into the plain text
+  once its fade ends, so a long recording keeps a few nodes.
+
+- Live layout and Felix's questions (2026-11-21, the user's call): on a wide window (main
+  area 1000 px or more) the live recording shows the clock, wave and Pause/Stop across the
+  top, then three columns: What's being heard | Your notes and What you want | Ask Felix.
+  With Felix's chat docked open, two columns, with Ask Felix above Your notes; narrower,
+  the cards stack as before with Ask Felix under Your notes. Start and the live controls
+  stay red. Ask Felix offers chat-starter chips that open Felix's chat with a passage
+  attached: before Start, once an event is chosen or What you want is filled, What should
+  I listen for? and What should I ask? (the event and the want); while recording, What did
+  I just miss?, Sum up so far and What should I ask next? (your points and the newest
+  8,000 characters of the transcript). On a note made from a recording, Felix's starters
+  add What was decided?, What are the open questions? and Action items as tasks.
 
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while
   recording instead of a browser screen picker. The existing snapshot endpoint

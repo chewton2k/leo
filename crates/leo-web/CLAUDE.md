@@ -427,7 +427,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   page, and the chip row starts one bar's height below it (`--bar-height` + 8 px), an empty
   band above the note. There is no Back button anywhere (2026-11-16, the user's call); Escape
   goes back. Felix's chat starters are Teach me this note step by step, Quiz me on this
-  note and Make me a 3-day review plan. A selection over `MOST_ASKED` shows "Select
+  note and Make me a 3-day review plan; on a note made from a recording (`recorded`, passed
+  to `setContext`) also What was decided?, What are the open questions? and Action items as
+  tasks (2026-11-21, the user's call). A selection over `MOST_ASKED` shows "Select
   less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `Note::toggle_checkbox`; `MARKER` is the one list-marker definition and
@@ -991,7 +993,20 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes; text already said when
   the node is made arrives plain. Scrolled up, the view stays put and Back to latest
   (`#rec-latest`) scrolls down and resumes following. `aria-live="off"`: the node now
-  persists, so polite would read every update.
+  persists, so polite would read every update. Every `[data-keep]` node (the transcript
+  and Felix's questions) survives the redraw the same way.
+- Live layout and Felix's questions (2026-11-21, the user's call; Start and the live
+  controls stay red): `#rec-box` is the `recroom` container while live and `main` widens to
+  1280 px. At 1000 px or more the live card spans the top over three columns, transcript |
+  Your notes + What you want | Ask Felix; beside the docked chat (`body.chat-open`) at 640 px
+  or more, two columns with Ask Felix above Your notes; narrower, the cards stack with Ask
+  Felix under Your notes. The questions are chat `.starter` chips (`FELIX_ASKS`): before
+  Start, shown once an event is chosen or What you want is filled, What should I listen
+  for? and What should I ask? attach the event and the want (`briefAsk`); while recording,
+  What did I just miss?, Sum up so far and What should I ask next? attach the typed points
+  and the newest transcript (`liveAsk`, at most `MOST_ASK` 8,000 characters, the tail,
+  since the server's `clip` keeps a passage's head). Each opens Felix's chat through
+  `attachSelection({note: '', title: 'Live recording', text})` and `askNew` (`deps.chat`).
 - Label speakers (2026-11-16, the user's call: per recording, for meetings,
   not lectures): a switch under the note fields, off by default, remembered as
   `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and

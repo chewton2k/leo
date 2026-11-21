@@ -2851,6 +2851,33 @@ test.describe('recording', () => {
     await expect(pill).toHaveCount(0);
   });
 
+  test('a wide window lays the live recording out in three columns and keeps the transcript node across polls', async ({ page }) => {
+    await page.setViewportSize({ width: 1700, height: 1000 });
+    stubRecorder(page, { noteId: null });
+    await page.goto('/');
+    await control(page, 'record').click();
+    await expect(page.locator('#rec-ask')).toBeHidden();
+    await page.locator('#rec-wants').fill('Focus on BFS');
+    await expect(page.locator('#rec-ask .starter')).toHaveText(['What should I listen for?', 'What should I ask?']);
+    await page.locator('[data-action="rec-start"]').click();
+    await expect(page.locator('#rec-transcript')).toContainText('breadth first search');
+    await expect(page.locator('#rec-ask .starter')).toHaveText(['What did I just miss?', 'Sum up so far', 'What should I ask next?']);
+    await page.evaluate(() => { window.__heard = document.querySelector('#rec-transcript'); });
+    const box = async (at) => page.locator(at).boundingBox();
+    const [top, heard, notes, ask] = [await box('.rec-live-card'), await box('#rec-heard'), await box('.rec-notepad'), await box('#rec-ask')];
+    expect(heard.x).toBeLessThan(notes.x);
+    expect(notes.x).toBeLessThan(ask.x);
+    expect(Math.abs(heard.y - notes.y)).toBeLessThan(2);
+    expect(Math.abs(notes.y - ask.y)).toBeLessThan(2);
+    expect(top.y).toBeLessThan(heard.y);
+    expect(top.width).toBeGreaterThan(ask.x + ask.width - heard.x - 2);
+    await page.waitForTimeout(1500);
+    expect(await page.evaluate(() => window.__heard === document.querySelector('#rec-transcript') && window.__heard.isConnected)).toBe(true);
+    await page.setViewportSize({ width: 900, height: 1000 });
+    const [stackedNotes, stackedAsk] = [await box('.rec-notepad'), await box('#rec-ask')];
+    expect(stackedAsk.y).toBeGreaterThan(stackedNotes.y + stackedNotes.height - 2);
+  });
+
   test('a recording finished while away shows up in the open folder, without a refresh', async ({ page, context }) => {
     const title = `Recorded later ${test.info().project.name} ${test.info().repeatEachIndex}`;
     const seen = stubRecorder(page, { noteId: null });

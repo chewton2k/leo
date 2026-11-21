@@ -157,6 +157,19 @@
 .rec-square { width: 11px; height: 11px; border-radius: var(--r-xs); background: currentColor; }
 .rec-transcript { min-height: 96px; max-height: 46vh; overflow-y: auto; overscroll-behavior: contain; overflow-anchor: none; margin-top: 12px; padding-top: 12px; font-size: var(--fs-md); line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 .rec-latest { margin-top: 8px; }
+.rec-ask .chat-starters { margin-top: 10px; }
+.rec-ask .starter { animation-delay: 0s; }
+.rec-idle .rec-ask { margin: 0 4px 12px; }
+.rec-idle .rec-ask .hint { margin: 0; }
+main:has(> #rec-box > .rec-live) { max-width: 1280px; }
+#rec-box:has(> .rec-live) { container: recroom / inline-size; }
+.rec-live > .rec-live-card { grid-area: live; }
+.rec-live > .rec-heard { grid-area: heard; }
+.rec-live > .rec-notepad { grid-area: notes; }
+.rec-live > .rec-ask { grid-area: ask; }
+.rec-live > .rec-wants-card { grid-area: wants; }
+@container recroom (min-width: 1000px) { body:not(.chat-open) .rec-live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "live live live" "heard notes ask" "heard wants ask"; grid-template-rows: auto auto 1fr; align-items: start; } }
+@container recroom (min-width: 640px) { body.chat-open .rec-live { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "live live" "heard ask" "heard notes" "heard wants"; grid-template-rows: auto auto auto 1fr; align-items: start; } }
 @media (prefers-reduced-motion: no-preference) { .rec-new { animation: fade var(--t-open) var(--ease-arrive); } }
 .rec-compose { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .rec-compose textarea { font-size: var(--fs-md); line-height: 1.5; min-height: 84px; resize: vertical; overflow-wrap: anywhere; }

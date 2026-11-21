@@ -30,6 +30,9 @@
     { text: 'Teach me this note step by step', needs: 'note', ask: 'Which note should I teach you?' },
     { text: 'Quiz me on this note', needs: 'note', ask: 'Which note should the quiz cover?' },
     { text: 'Make me a 3-day review plan', needs: 'classes', ask: 'Which classes should the plan cover?' },
+    { text: 'What was decided?', needs: 'recorded', ask: 'Which recording should I read?' },
+    { text: 'What are the open questions?', needs: 'recorded', ask: 'Which recording should I read?' },
+    { text: 'Action items as tasks', needs: 'recorded', ask: 'Which recording should I read?' },
   ];
   const SURE = { sure: 'Sure', think: 'Think so', guess: 'Guessing' };
   const sureOf = (percent) => (percent >= 75 ? 'sure' : percent >= 40 ? 'think' : 'guess');
@@ -2126,7 +2129,7 @@
       const next = document.createElement('div');
       if (!state.messages.length) {
         const unread = Boolean(state.context) && state.dropped === state.context.id;
-        next.innerHTML = `<div class="chat-starters">${STARTERS.map((s, i) => unread && s.needs === 'note' ? '' : `<button class="starter${state.asking && state.asking.starter === s ? ' on' : ''}" data-chat="starter" data-i="${i}">${escape(s.text)}</button>`).join('')}</div>${asking()}`;
+        next.innerHTML = `<div class="chat-starters">${STARTERS.map((s, i) => (unread && s.needs !== 'classes') || (s.needs === 'recorded' && !state.context?.recorded) ? '' : `<button class="starter${state.asking && state.asking.starter === s ? ' on' : ''}" data-chat="starter" data-i="${i}">${escape(s.text)}</button>`).join('')}</div>${asking()}`;
       }
       settle($('#chat-below'), next);
     }
@@ -3555,8 +3558,8 @@
       },
       send,
       setContext(ctx) {
-        const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '' } : null;
-        if ((next && next.id) === (state.context && state.context.id) && (!next || next.title === state.context.title)) return;
+        const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '', recorded: Boolean(ctx.recorded) } : null;
+        if ((next && next.id) === (state.context && state.context.id) && (!next || (next.title === state.context.title && next.recorded === state.context.recorded))) return;
         state.context = next;
         if (state.open) {
           drawContext();

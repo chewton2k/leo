@@ -160,6 +160,13 @@ test('a starter that needs classes names the ones picked', () => {
   for (const s of C.STARTERS) assert.ok(s.ask, `${s.text} asks when nothing is open`);
 });
 
+test('a note made from a recording adds three starters about the meeting', () => {
+  assert.deepEqual(C.STARTERS.filter((s) => s.needs === 'recorded').map((s) => s.text), ['What was decided?', 'What are the open questions?', 'Action items as tasks']);
+  const source = require('node:fs').readFileSync(require.resolve('../src/web/chat.js'), 'utf8');
+  assert.match(source, /s\.needs === 'recorded' && !state\.context\?\.recorded\) \? ''/, 'shown only when the open note was recorded');
+  assert.match(source, /recorded: Boolean\(ctx\.recorded\)/);
+});
+
 test('splitFiles keeps files already sent out of the box for the next message', () => {
   const docs = [{ id: 'a', name: 'week3.txt' }, { id: 'b', name: 'week4.txt' }, { id: 'c', name: 'old.pdf' }];
   const messages = [
