@@ -522,7 +522,7 @@ test('the live page lays out three columns on a wide main area, two beside a doc
   const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
   assert.match(css, /#rec-box:has\(> \.rec-live\) \{ container: recroom \/ inline-size; \}/);
   assert.match(css, /main:has\(> #rec-box > \.rec-live\) \{ max-width: 1280px; \}/);
-  assert.match(css, /@container recroom \(min-width: 1000px\) \{ body:not\(\.chat-open\) \.rec-live \{ display: grid;[^}]*"live live live" "heard notes ask" "heard wants ask"/);
-  assert.match(css, /@container recroom \(min-width: 640px\) \{ body\.chat-open \.rec-live \{ display: grid;[^}]*"live live" "heard ask" "heard notes" "heard wants"/);
+  assert.match(css, /@container recroom \(min-width: 1000px\) \{ \.rec-live \{ display: grid;[^}]*"live live live" "heard notes ask" "heard wants ask"/);
+  assert.match(css, /@media \(min-width: 1200px\) \{ @container recroom \(min-width: 640px\) \{ body\.chat-open \.rec-live \{ display: grid;[^}]*"live live" "heard ask" "heard notes" "heard wants"/);
   assert.doesNotMatch(css.replace(/@container[^\n]*/g, ''), /\.rec-live \{[^}]*display: grid/, 'narrower main areas keep the stacked page');
 });

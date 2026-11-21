@@ -168,8 +168,8 @@ main:has(> #rec-box > .rec-live) { max-width: 1280px; }
 .rec-live > .rec-notepad { grid-area: notes; }
 .rec-live > .rec-ask { grid-area: ask; }
 .rec-live > .rec-wants-card { grid-area: wants; }
-@container recroom (min-width: 1000px) { body:not(.chat-open) .rec-live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "live live live" "heard notes ask" "heard wants ask"; grid-template-rows: auto auto 1fr; align-items: start; } }
-@container recroom (min-width: 640px) { body.chat-open .rec-live { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "live live" "heard ask" "heard notes" "heard wants"; grid-template-rows: auto auto auto 1fr; align-items: start; } }
+@container recroom (min-width: 1000px) { .rec-live { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); grid-template-areas: "live live live" "heard notes ask" "heard wants ask"; grid-template-rows: auto auto 1fr; align-items: start; } }
+@media (min-width: 1200px) { @container recroom (min-width: 640px) { body.chat-open .rec-live { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-areas: "live live" "heard ask" "heard notes" "heard wants"; grid-template-rows: auto auto auto 1fr; align-items: start; } } }
 @media (prefers-reduced-motion: no-preference) { .rec-new { animation: fade var(--t-open) var(--ease-arrive); } }
 .rec-compose { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .rec-compose textarea { font-size: var(--fs-md); line-height: 1.5; min-height: 84px; resize: vertical; overflow-wrap: anywhere; }

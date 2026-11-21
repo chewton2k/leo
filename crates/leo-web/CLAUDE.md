@@ -998,8 +998,8 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
 - Live layout and Felix's questions (2026-11-21, the user's call; Start and the live
   controls stay red): `#rec-box` is the `recroom` container while live and `main` widens to
   1280 px. At 1000 px or more the live card spans the top over three columns, transcript |
-  Your notes + What you want | Ask Felix; beside the docked chat (`body.chat-open`) at 640 px
-  or more, two columns with Ask Felix above Your notes; narrower, the cards stack with Ask
+  Your notes + What you want | Ask Felix; beside the docked chat (`body.chat-open` at 1200 px
+  windows and up, the same breakpoint as the dock) at 640 px or more, two columns with Ask Felix above Your notes; narrower, the cards stack with Ask
   Felix under Your notes. The questions are chat `.starter` chips (`FELIX_ASKS`): before
   Start, shown once an event is chosen or What you want is filled, What should I listen
   for? and What should I ask? attach the event and the want (`briefAsk`); while recording,
