@@ -649,6 +649,83 @@ async function kanbanLoadWhole(card, alive) {
   return true;
 }
 
+function kanbanMention(host) {
+  let box = null, area = null, rows = [], at = 0, ask = 0, timer = 0;
+  const current = () => area?.isConnected ? window.leoChat.mentionAt(area.value, area.selectionStart) : null;
+  const close = () => {
+    clearTimeout(timer);
+    ask++;
+    area?.removeAttribute('aria-activedescendant');
+    if (!box) return;
+    const gone = box;
+    box = null;
+    for (const named of gone.querySelectorAll('[id]')) named.removeAttribute('id');
+    gone.inert = true;
+    gone.className = 'popup-menu-gone slash-menu';
+    fold(gone, () => gone.remove());
+  };
+  const draw = () => {
+    const first = !box;
+    if (first) {
+      box = document.createElement('div');
+      box.className = 'popup-menu slash-menu';
+      box.setAttribute('role', 'listbox');
+      box.setAttribute('aria-label', 'Link a note');
+      box.addEventListener('mousedown', (e) => e.preventDefault());
+      box.addEventListener('click', (e) => {
+        const row = e.target.closest('[data-row]');
+        if (row) pick(Number(row.dataset.row));
+      });
+      document.body.appendChild(box);
+    }
+    box.innerHTML = rows.length ? rows.map((n, i) => `<button type="button" tabindex="-1" role="option" id="kanban-mention-${i}" data-row="${i}" aria-selected="${i === at}">${ICON.note}<span class="grow">${esc(n.title)}</span></button>`).join('') : popupRow({ note: 'Nothing matches' });
+    const bounds = area.getBoundingClientRect();
+    box.style.left = `${Math.max(8, Math.min(bounds.left, innerWidth - box.offsetWidth - 8))}px`;
+    box.style.top = `${bounds.bottom + 4 + box.offsetHeight > innerHeight - 8 ? Math.max(8, bounds.top - box.offsetHeight - 4) : bounds.bottom + 4}px`;
+    if (first) unfold(box, area);
+    if (rows.length) area.setAttribute('aria-activedescendant', `kanban-mention-${at}`);
+    else area.removeAttribute('aria-activedescendant');
+  };
+  const find = (query) => {
+    clearTimeout(timer);
+    const mine = ++ask;
+    timer = setTimeout(async () => {
+      let found = [];
+      try { found = await api(query ? `/api/search?q=${enc(query)}&brief=true&limit=8` : '/api/notes?limit=8&brief=true'); } catch (e) { found = []; }
+      if (mine !== ask) return;
+      rows = found.filter((n) => n.title && !/[[\]|#]/.test(n.title));
+      at = 0;
+      draw();
+    }, 120);
+  };
+  const pick = (i) => {
+    const m = current();
+    const note = rows[i];
+    close();
+    if (!m || !note) return;
+    area.setRangeText(`[[${note.title}]]`, m.start, area.selectionStart, 'end');
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+  host.addEventListener('input', (e) => {
+    if (!e.isTrusted || e.isComposing || !e.target.matches('textarea')) return;
+    area = e.target;
+    const m = current();
+    if (m) find(m.query); else close();
+  });
+  host.addEventListener('keydown', (e) => {
+    const nav = ['ArrowDown', 'ArrowUp', 'Enter', 'Tab'].includes(e.key);
+    if (!box || e.target !== area || e.isComposing || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey || (e.key !== 'Escape' && !nav)) return;
+    if (e.key === 'Escape') close();
+    else if (!rows.length) return close();
+    else if (e.key === 'Enter' || e.key === 'Tab') pick(at);
+    else { at = (at + (e.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length; draw(); }
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+  host.addEventListener('focusout', close);
+  return close;
+}
+
 // A card opens beside the board, like a note: edits save as you type and the board stays
 // in view, so the next card is one click away.
 async function kanbanCardPanel(id) {
@@ -683,6 +760,7 @@ async function kanbanCardPanel(id) {
   const title = $('#kanban-card-title', box);
   const sub = $('#kanban-card-sub', box);
   const description = $('#kanban-card-description', box);
+  const closeMention = kanbanMention(description);
   const status = $('#kanban-card-column', box);
   const saved = $('#kanban-card-saved', box);
   const problem = $('#kanban-card-problem', box);
@@ -749,6 +827,7 @@ async function kanbanCardPanel(id) {
   };
   const end = () => {
     closed = true;
+    closeMention();
     doc?.stop();
     for (const name of names) if (timers[name]) save(name).catch(fail);
     doc?.destroy();

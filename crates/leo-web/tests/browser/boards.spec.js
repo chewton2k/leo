@@ -39,7 +39,8 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       cards:[
         {id:'cessay0001',board:'bwork00001',column:'ktodo00001',title:'Write essay',subheading:'History · due soon',description:'Outline first',priority:'high'},
         {id:'cread00001',board:'bwork00001',column:'ktodo00001',title:'Read chapter 3',subheading:'',description:'',priority:''},
-        {id:'cemail0001',board:'bwork00001',column:'kdoing0001',title:'Email tutor <b>now</b>',subheading:'',description:'',priority:'low'}]};
+        {id:'cemail0001',board:'bwork00001',column:'kdoing0001',title:'Email tutor <b>now</b>',subheading:'',description:'',priority:'low'}],
+      notes:[{id:'ncalc00001',title:'Calculus notes',directory:''},{id:'nhist00001',title:'History essay',directory:'History'},{id:'nodd000001',title:'Odd [title]',directory:''}]};
     let made=0;
     const gone={};
     const ranked=board=>db.cards.filter(c=>c.board===board).map((c,i)=>{const text=Array.from(c.description);return {...c,description:text.slice(0,240).join(''),description_more:text.length>240,rank:i+1};});
@@ -72,6 +73,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/move$/))){const card=db.cards.find(c=>c.id===m[1]);const from=db.boards.find(b=>b.id===card.board);if(body.board&&body.board!==card.board){const to=db.boards.find(b=>b.id===body.board);const name=from.columns.find(c=>c.id===card.column)?.name;card.board=to.id;card.column=body.column||(to.columns.find(c=>c.name===name)||to.columns[0]).id;}else if(body.column)card.column=body.column;place(card,'after' in body?body.after:undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)\\/undelete$/))){const card=window.goneCards[m[1]];place(card,undefined);return {...card,rank:0};}
       if((m=url.match(/^\\/api\\/cards\\/([^/]+)$/))){const card=db.cards.find(c=>c.id===m[1]);if(method==='GET'){if(window.failCardRead){const e=new Error('Leo could not open the card.');e.status=500;throw e;}return {...card,rank:0};}if(method==='DELETE'){(window.goneCards||(window.goneCards={}))[card.id]=card;db.cards=db.cards.filter(c=>c!==card);return {...card,rank:0};}Object.assign(card,body);return {...card,rank:0};}
+      if(url.startsWith('/api/notes?')||url.startsWith('/api/search?')){const q=(new URLSearchParams(url.split('?')[1]).get('q')||'').toLowerCase();return db.notes.filter(n=>n.title.toLowerCase().includes(q)).map(n=>({...n}));}
       throw new Error('No fake for '+method+' '+url);
     }
     ${core.slice(core.indexOf('const MOTION_MS'), core.indexOf('function stillMotion'))}
@@ -82,9 +84,12 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     ${read('markdown.js')}
     ${read('editing.js')}
     ${read('doc.js')}
+    ${read('chat.js')}
     const leoDoc=window.leoDoc;
+    const SEARCH_STEP=60;const noteHash=id=>'#/n/'+enc(id);
+    ${sheets.slice(sheets.indexOf('async function openTitle('), sheets.indexOf('function openSearch('))}
     ${read('app/boards.js')}
-    const actions={'kanban-new-board':()=>kanbanNewBoard(),'kanban-board-menu':kanbanBoardMenu,'kanban-column-menu':kanbanColumnMenu,'kanban-add-card':el=>kanbanComposer(el.dataset.col),'kanban-add-column':()=>kanbanAddColumn(),'kanban-open-card':el=>kanbanCardPanel(el.dataset.card),close:()=>closeSheet()};
+    const actions={'kanban-new-board':()=>kanbanNewBoard(),'kanban-board-menu':kanbanBoardMenu,'kanban-column-menu':kanbanColumnMenu,'kanban-add-card':el=>kanbanComposer(el.dataset.col),'kanban-add-column':()=>kanbanAddColumn(),'kanban-open-card':el=>kanbanCardPanel(el.dataset.card),close:()=>closeSheet(),'open-title':el=>openTitle(el.dataset.title||'')};
     document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(!el||!actions[el.dataset.action])return;e.preventDefault();Promise.resolve(actions[el.dataset.action](el)).catch(fail);});
     ${escapeCapture}
     document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('.scrim'))closeSheet();});
@@ -405,6 +410,35 @@ test('a card\'s details render as Markdown like a note, toggle checkboxes, edit 
     await page.keyboard.type('Notes');
     await page.locator('#kanban-panel [data-kanban="close"]').click();
     await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Notes');
+  });
+});
+
+test('typing @ in a card description offers notes, Escape closes the list first, and the picked note is a link that opens it', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    await page.locator('[data-card="cread00001"]').click();
+    const details = page.locator('#kanban-card-description');
+    const menu = page.locator('.popup-menu[aria-label="Link a note"]');
+    await details.click();
+    await page.keyboard.type('See @');
+    await expect(menu.getByRole('option')).toHaveText(['Calculus notes', 'History essay']);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(details.locator('textarea.line-edit')).toBeFocused();
+    await expect(details.locator('textarea.line-edit')).toHaveValue('See @');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('@');
+    await expect(menu.getByRole('option')).toHaveCount(2);
+    await page.keyboard.press('ArrowDown');
+    await expect(menu.getByRole('option').nth(1)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('Enter');
+    await expect(menu).toHaveCount(0);
+    await expect(details.locator('textarea.line-edit')).toHaveValue('See [[History essay]]');
+    await page.keyboard.press('Escape');
+    await expect(details.locator('a.wiki-link')).toHaveText('History essay');
+    await expect.poll(() => page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('See [[History essay]]');
+    await details.locator('a.wiki-link').click();
+    await expect(page.locator('#elsewhere')).toBeVisible();
+    expect(await page.evaluate(() => location.hash)).toBe('#/n/nhist00001');
   });
 });
 
