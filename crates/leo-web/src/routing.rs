@@ -62,7 +62,7 @@ const THEIRS: [&str; 18] = [
     "today",
     "tomorrow",
 ];
-const THOUGHT: [&str; 37] = [
+const THOUGHT: [&str; 33] = [
     "why",
     "explain",
     "tell",
@@ -72,9 +72,7 @@ const THOUGHT: [&str; 37] = [
     "quiz",
     "practice",
     "practise",
-    "compar",
-    "analy",
-    "review",
+    "compare",
     "prove",
     "solve",
     "derive",
@@ -98,9 +96,9 @@ const THOUGHT: [&str; 37] = [
     "error",
     "bug",
     "contradict",
-    "essay",
-    "lesson",
 ];
+const WEIGHED: [&str; 3] = ["compar", "analy", "review"];
+const REFERS: [&str; 8] = ["this", "these", "that", "those", "it", "them", "into", "to"];
 const CHANGES: [&str; 17] = [
     "fix", "change", "edit", "update", "move", "delete", "remove", "replace", "rename", "create",
     "make", "add", "merge", "combine", "restore", "pin", "trash",
@@ -280,14 +278,16 @@ pub fn light(asked: &Asked<'_>) -> Option<bool> {
             .iter()
             .any(|word| stems.iter().any(|stem| word.starts_with(stem)))
     };
-    let thoughtful = has(&THOUGHT) || words.contains(&"how");
+    let thoughtful = has(&THOUGHT) || has(&WEIGHED) || words.contains(&"how");
     let first = words
         .iter()
         .find(|word| !POLITE.contains(word))
         .copied()
         .unwrap_or("");
-    let edit =
-        first == "rename" || (EDITS.contains(&first) && words.iter().any(|w| FORMS.contains(w)));
+    let edit = first == "rename"
+        || (EDITS.contains(&first)
+            && words.iter().any(|w| FORMS.contains(w))
+            && words.iter().any(|w| REFERS.contains(w)));
     if edit && !thoughtful {
         return Some(true);
     }
@@ -416,7 +416,11 @@ mod tests {
             "make this a heading",
             "please bold the key terms in this list",
             "can you sort this list alphabetically",
-            "tidy up the formatting",
+            "tidy up the formatting of this note",
+            "when is my essay due",
+            "find my essay",
+            "open my lesson 4 note",
+            "show my review notes",
         ] {
             assert_eq!(light(&plainly(message)), Some(true), "{message}");
         }
@@ -430,6 +434,9 @@ mod tests {
             "quiz me on chapter 3",
             "summarize all my bio notes",
             "make a table comparing glycolysis and the krebs cycle",
+            "make a table of the key ideas in my history notes",
+            "make a list of the causes of world war one",
+            "analyse this list",
             "turn my lecture notes into a study guide",
             "how should I structure my lab report",
             "what is the difference between glycolysis and the krebs cycle?",

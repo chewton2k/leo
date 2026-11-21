@@ -665,9 +665,9 @@ read (root CLAUDE.md, 2026-11-17).
   `--chalk-break` mask, a heavier ring on the idea being asked; forced colours
   draw them in CanvasText without the mask.
 - Routing (`routing::light`, widened 2026-11-21, the user's call): short lookups,
-  greetings and small formatting edits (turn/convert/make into a checkbox, bullet,
-  heading, list or table, fix typos, rename, bold, sort, tidy; the edit rule alone
-  passes with a selection) go to the quick tier; study, teaching, quizzes,
+  greetings and small formatting edits of something named (turn/convert/make this
+  into a checkbox, bullet, heading, list or table, fix typos, rename, bold, sort,
+  tidy; the edit rule alone passes with a selection) go to the quick tier; study, teaching, quizzes,
   analysis, why/how, comparisons, plans, summaries, other note changes,
   attachments, files, Auto access and >6 turns stay on the chosen model, and so do
   other languages. A plain English question the rules cannot place asks the local

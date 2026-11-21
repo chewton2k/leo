@@ -507,7 +507,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "needs the downloaded model: the app fetches it when it opens"]
+    #[ignore = "needs the downloaded model and candle, gemm and tokenizers built at opt-level 3"]
     fn a_short_message_embeds_within_fifty_milliseconds_once_loaded() {
         let model = Model::load(&dir()).unwrap();
         model.embed(&[format!("{QUERY}warm up")]).unwrap();
