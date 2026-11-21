@@ -156,7 +156,11 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   Felix about “…”, Search every note for “…”, Add “…” to tasks (to today’s tasks, or
   to tasks for its day and time) and Start a note called “…”, the verb in
   `--muted` (`.quick-verb`) and the words in ink, with only ↵ on the right; note,
-  folder, chat and place rows keep their name and kind. It
+  folder, chat and place rows keep their name, with where they live as the hint (a note's
+  folder path, a folder's parent, "Chat · Tuesday"). When both kinds are present the rows
+  fall in two groups, Notes and Do (`.quick-due-head`), the group of the best match first,
+  and a one-line key footer (`.quick-foot`: ↑↓ move, ↵ open, esc close) ends the sheet
+  (2026-11-21, the user's call). It
   drops in from the top on desktop. Escape is always `preventDefault`ed in a
   capture listener, so it closes sheets and never leaves macOS full screen. It works like Spotlight
   (2026-10-19, the user's call): no title, modes or buttons, near the top of

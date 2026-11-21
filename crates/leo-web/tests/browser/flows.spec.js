@@ -5981,14 +5981,16 @@ test('Quick Leo finds folders and past chats and opens them', async ({ page }) =
   const input = box.locator('#quick-input');
   await input.fill(folder);
   const top = box.locator('.quick-row.on');
-  await expect(top).toContainText('Folder in Classes');
+  await expect(top.locator('.quick-hint')).toHaveText('Classes');
+  await expect(box.locator('.quick-due-head')).toHaveText(['Notes', 'Do']);
+  await expect(box.locator('.quick-foot')).toContainText('esc close');
   await input.press('Enter');
   await expect(page).toHaveURL(/\/(?:#\/)?$/);
   await expect(page.locator('#side .side-row[data-action="open-folder"][data-dir="Classes/' + folder + '"]')).toBeVisible();
   await expect(page.locator('#side .side-row[data-action="open-folder"][data-dir="Classes/' + folder + '"]')).toHaveAttribute('aria-current', 'page');
   await page.keyboard.press('ControlOrMeta+k');
   await input.fill(`Heap talk ${tag}`);
-  const talk = box.locator('.quick-row', { hasText: 'Past chat' });
+  const talk = box.locator('.quick-row', { hasText: 'Chat ·' });
   await expect(talk).toContainText(`Heap talk ${tag}`);
   await talk.click();
   await expect(page.locator('aside.chat')).toBeVisible();
