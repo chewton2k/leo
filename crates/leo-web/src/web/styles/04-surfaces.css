@@ -194,8 +194,8 @@ body.side-mini .empty svg.drawn-arrow { display: none; }
 @media (max-width: 999px) { .empty svg.drawn-arrow { display: none; } }
 .chat-history-none svg.drawn { width: 72px; height: 55px; margin: 0 0 6px -10px; }
 svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
-.empty h3 { color: var(--text); margin: 10px 0 4px; font-size: var(--fs-md); font-weight: var(--fw-semibold); text-wrap: balance; }
-.empty p { margin: 0; font-size: var(--fs-sm); text-wrap: pretty; }
+.empty h3 { color: var(--text); margin: 12px 0 4px; font-size: var(--fs-md); font-weight: var(--fw-medium); text-wrap: balance; }
+.empty p { max-width: 36ch; margin: 0 auto; font-size: var(--fs-sm); text-wrap: pretty; }
 .empty .btn { margin: 16px 4px 0; }
 .empty .btn svg { width: 16px; height: 16px; color: currentColor; }
 .empty .btn.plain { color: var(--text); }

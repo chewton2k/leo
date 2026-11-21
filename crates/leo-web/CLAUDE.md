@@ -239,7 +239,8 @@ Decided: one app, window only (2026-10-31).
   would dip below `--raised`); separators inset 12 px; a faint keycap
   (`.popup-rows kbd`, `aria-hidden`) only where a real shortcut acts: New note
   when its folder is ⌘N's folder and no sheet is open (2026-11-15).
-- Empty pages `empty(icon, title, text)`; an empty state with nothing to do yet
+- Empty pages `empty(icon, title, text)` (title at 500, text held to 36 characters a line,
+  2026-11-21, the user's call); an empty state with nothing to do yet
   (Trash, Boards, calendar Tasks, Chats, Search no-results, home) takes one
   single-stroke line drawing from `DRAWN` (app/core.js; `fill="none"`,
   `currentColor`, shown in `--muted`, no colour) in place of the icon; chat.js
