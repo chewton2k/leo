@@ -4374,7 +4374,7 @@ test.describe('passages', () => {
     const thread = { id: 'stub-thread', note: note.id, quote: 'just checks if it matches', prefix: 'Then login ', suffix: ', I think', status: 'open', source: 'read', messages: [said('felix', `In plain text? If this table leaks, every account goes. ${'Hash it first. '.repeat(20)}`)], created_at: '2026-11-04T10:00:00Z', updated_at: '2026-11-04T10:00:00Z' };
     await page.route('**/margin/read', async (route) => {
       reads.push(route.request().postDataJSON());
-      await new Promise((done) => setTimeout(done, 700));
+      await new Promise((done) => setTimeout(done, 2500));
       await route.fulfill({ json: { note: thread } });
     });
     await page.route('**/margin/threads/stub-thread/reply', (route) => route.fulfill({ json: { ...thread, messages: [...thread.messages, said('you', 'So hash it?'), said('felix', 'Yes. Argon2id, then verify at login.')] } }));
@@ -5654,8 +5654,17 @@ test('clicking text beside a picture puts the caret in the text, not beside the 
   await page.goto(`/#/n/${note.id}`);
   const line = page.locator('#doc .blk').first();
   await expect(line.locator('img.note-img')).toBeVisible();
-  const box = await line.boundingBox();
-  await page.mouse.click(box.x + 1, box.y + box.height / 2);
+  const word = await line.evaluate((el) => {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let text = walker.nextNode();
+    while (text && !text.data.trim()) text = walker.nextNode();
+    const range = document.createRange();
+    range.setStart(text, text.data.indexOf('F'));
+    range.setEnd(text, text.data.indexOf('F') + 1);
+    const { x, y, height } = range.getBoundingClientRect();
+    return { x, y, height };
+  });
+  await page.mouse.click(word.x + 1, word.y + word.height / 2);
   await expect(page.locator('#doc textarea')).toBeVisible();
   await page.keyboard.type('X');
   await expect.poll(body, { timeout: 5000 }).toMatch(/^XFigure !\[Box\]/);

@@ -902,7 +902,7 @@ test('a click outside the side peek closes it and returns focus, and another ite
     await expect(side.locator('#cal-peek-title')).toHaveValue('Lab report');
     await side.locator('#cal-peek-title').click();
     await expect(side).toHaveCount(1);
-    await page.locator('.cal-item[data-id="task-study"] .cal-open').click();
+    await page.locator('.cal-item[data-id="task-study"] .cal-title').click();
     await expect(side.locator('#cal-peek-title')).toHaveValue('Study group');
     await page.locator('.cal-name').click();
     await expect(side).toHaveCount(0);
