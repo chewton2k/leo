@@ -397,13 +397,9 @@ test('compact margin anchors stay outside the passage and open real persisted re
   expect(anchor.y + anchor.height / 2).toBeGreaterThan(paragraph.y);
   expect(anchor.y + anchor.height / 2).toBeLessThan(paragraph.y + paragraph.height);
   const stroke = page.locator('.margin-ink .squiggle');
-  const dashes = await stroke.evaluateAll(lines => lines.map(el => {
-    const length = el.getTotalLength();
-    const units = el.hasAttribute('pathLength') ? el.pathLength.baseVal.value : length;
-    return parseFloat(getComputedStyle(el).strokeDasharray) * length / units;
-  }));
-  expect(dashes.length).toBeGreaterThan(0);
-  for (const dash of dashes) expect(dash).toBeLessThanOrEqual(2);
+  const widths = await stroke.evaluateAll(lines => lines.map(el => parseFloat(getComputedStyle(el).strokeWidth)));
+  expect(widths.length).toBeGreaterThan(0);
+  for (const width of widths) expect(width).toBe(20);
   await mark.click();
   await expect(page.locator('.margin-note .margin-felix')).toContainText(thread.messages.at(-1).text);
   await expect(page.locator('.margin-reply textarea')).toBeFocused();

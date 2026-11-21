@@ -75,7 +75,7 @@
 .margin-layer > * { pointer-events: auto; }
 .margin-ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none !important; }
 .margin-ink path { fill: none; stroke-linecap: round; }
-.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 48%, transparent); stroke-width: 1; stroke-dasharray: 1 3; transition: opacity var(--t-fade) ease-out; }
+.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: 20px; stroke-linecap: butt; transform: translateY(-12px); transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid { stroke: var(--accent); stroke-width: 1.5; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.wash { fill: var(--accent); stroke: none; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid.on { opacity: 1; }
@@ -292,7 +292,7 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
   .margin-ink path, .margin-anchor, .margin-mode > svg:last-child, .margin-note, .margin-waiting, .margin-revisit, .margin-quiet { transition: none; }
 }
 @media (forced-colors: active) {
-  .margin-ink path.squiggle { stroke: CanvasText; }
+  .margin-ink path.squiggle { stroke: CanvasText; stroke-width: 1px; stroke-dasharray: 1 3; stroke-linecap: round; transform: none; }
   .margin-note[data-inline] { outline: 1px solid CanvasText; }
   .margin-revisit { border-bottom-color: CanvasText; }
   .margin-ink path.solid { stroke: Highlight; }

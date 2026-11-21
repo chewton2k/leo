@@ -1215,12 +1215,12 @@ target. Check the page sequence after loading preferences.
   last confirmed value on failure. Its own menu class keeps generic select-menu
   click and close handlers from dismissing it. Each note remains a labelled article with an
   accessible margin toggle. Passage anchors use a separate gutter dot, never a
-  mascot on the text. Straight dotted underlines reveal in about 500 ms; there is
+  mascot on the text. A soft ink wash behind the passage (12% ink, 20 px thick, `path.squiggle`) reveals in about 500 ms; there is
   no default tether (only a lit note draws one). Hovering a passage washes its margin note with the passage's accent (`.margin-note[data-active]`). Reduced Motion stills the reveal and word arrivals.
 - Open replies have no card surface or boxed textarea outline. Their retained
   controls expand/collapse over 240 ms, become inert/aria-hidden on close and snap
   under Reduced Motion. Diagram size changes relayout the bounded thread stack.
-- Arrival keeps the dotted stroke pattern fixed and clips each line left to right
+- Arrival clips each line of the wash left to right
   over a shared 500 ms budget. Open, hover and keyboard focus use a solid accent
   underline and wash. The comment has no mascot; compact layouts reserve the full
   24 px (44 px touch) anchor gutter before the first comment arrives.
