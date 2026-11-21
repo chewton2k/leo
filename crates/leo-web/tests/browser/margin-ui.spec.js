@@ -790,9 +790,11 @@ test('a resolved note stays faded with a Resolved label until it is reopened', a
   await expect(thread.locator('.margin-resolved-label')).toHaveText('Resolved');
   await page.mouse.move(5, 5);
   await page.evaluate(() => document.activeElement?.blur());
-  await expect(thread).toHaveCSS('opacity', '0.45');
+  await expect(thread).toHaveCSS('opacity', '1');
+  await expect(thread.locator('.margin-felix')).toHaveCSS('-webkit-line-clamp', '1');
   await thread.locator('.margin-toggle').click({ force: true });
   await expect(thread).not.toHaveAttribute('data-resolved', /.+/);
+  await expect(thread.locator('.margin-resolved-label')).toHaveCount(0);
   await expect(thread).toHaveAttribute('data-open', '');
 });
 

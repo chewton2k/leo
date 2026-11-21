@@ -9,6 +9,18 @@ require('../src/web/chat.js');
 const docContext = { document: { addEventListener() {} }, leoMarkdown: {}, leoEditing: {} };
 docContext.window = docContext;
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/doc.js'), 'utf8'), vm.createContext(docContext));
+test('the Resolved label and the folded look exist only for resolved notes that are not open', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/web/app/margin-notes.js'), 'utf8');
+  assert.equal(source.split('margin-resolved-label').length - 1, 1);
+  assert.match(source, /if \(!open\) \{\n      if \(resolved\) said\.insertAdjacentHTML\('beforeend', '<div class="margin-resolved-label">Resolved<\/div>'\);/);
+  assert.match(source, /if \(resolved\) el\.dataset\.resolved = t\.id;\n  else delete el\.dataset\.resolved;/);
+  const css = fs.readFileSync(path.join(__dirname, '../src/web/styles/03-note.css'), 'utf8');
+  const folds = css.split('\n').filter((line) => /-webkit-line-clamp: 1|\.margin-foot \{ display: none/.test(line) && line.includes('margin-note'));
+  assert.ok(folds.length >= 2);
+  for (const line of folds) assert.ok(line.startsWith('.margin-note[data-resolved]:not([data-open]) '), line);
+  assert.doesNotMatch(css, /\.margin-note\[data-resolved\]\s*\{[^}]*opacity: \.45/);
+});
+
 const FAILED = "Felix could not read your note just now. Try again in a moment.";
 
 function harness() {

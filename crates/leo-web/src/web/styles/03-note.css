@@ -135,9 +135,11 @@
 .margin-note[data-side="left"]:not([data-open]) .margin-foot { justify-content: flex-end; }
 .margin-quiet { position: absolute; left: 0; top: 0; display: flex; align-items: center; white-space: nowrap; pointer-events: none; font-family: var(--felix-letters); font-style: italic; font-size: var(--fs-sm); color: var(--faint); animation: fade .3s var(--ease-arrive) both; transition: opacity .5s var(--ease-exit); }
 .margin-quiet.leaving { opacity: 0; }
-.margin-note[data-resolved] { opacity: .45; }
-.margin-note[data-resolved]:hover, .margin-note[data-resolved]:focus-within { opacity: .7; }
-.margin-resolved-label { font-size: var(--fs-xs); color: var(--faint); }
+.margin-note[data-resolved]:not([data-open]) { opacity: 1; }
+.margin-note[data-resolved]:not([data-open]) .margin-felix { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 1; overflow: hidden; color: var(--muted); font-size: calc(13px * var(--read)); }
+.margin-note[data-resolved]:not([data-open]) :is(.margin-cut, .margin-over) { mask-image: none; }
+.margin-note[data-resolved]:not([data-open]) .margin-foot { display: none; }
+.margin-resolved-label { font-size: var(--fs-xs); color: var(--muted); }
 .margin-hint { margin: 4px 0 0; font-size: var(--fs-xs); color: var(--muted); }
 .margin-foot { display: flex; align-items: center; gap: 4px; font-size: var(--fs-xs); color: var(--muted); }
 .margin-long { margin: 8px 0 0; font-size: var(--fs-xs); line-height: 1.5; color: var(--muted); }
