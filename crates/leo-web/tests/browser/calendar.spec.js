@@ -824,6 +824,7 @@ test('larger month tasks keep every preview and the more action inside their day
     await page.locator('.cal-month-grid').evaluate(grid => { grid.scrollTop = 40; });
     await page.evaluate(() => drawCalendar());
     expect(await page.locator('.cal-month-grid').evaluate(grid => grid.scrollTop)).toBe(40);
+    await page.locator('.cal-month-grid').evaluate(grid => { grid.scrollTop = 0; });
 
     const next = page.locator('.cal-cell[data-day="2026-11-06"]');
     const [before, nextBefore] = [await cell.boundingBox(), await next.boundingBox()];
