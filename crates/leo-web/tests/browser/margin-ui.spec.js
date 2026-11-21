@@ -205,7 +205,7 @@ test('selected note text is painted as its own text only, clipped to the note, a
   await expect.poll(painted).toBeNull();
 });
 
-test('the Felix bar opens in the margin beside a selection when there is room, and under its last word when not', async ({ page }) => {
+test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
   await page.setViewportSize({ width: 1600, height: 900 });
@@ -229,7 +229,7 @@ test('the Felix bar opens in the margin beside a selection when there is room, a
   expect(await pickText(page, 'Three short')).toBe(true);
   await expect(menu).toBeVisible();
   const word = await page.locator('#doc .blk', { hasText: 'Three short' }).boundingBox();
-  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves under the new selection on the next frame').toBeGreaterThan(word.y);
+  await expect.poll(async () => (await menu.boundingBox()).y, 'the bar moves above the new selection on the next frame').toBeLessThan(word.y);
   expect((await menu.boundingBox()).x).toBeLessThan(word.x + 400);
 });
 

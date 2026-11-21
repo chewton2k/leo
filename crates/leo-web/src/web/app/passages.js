@@ -26,7 +26,8 @@ function placeFloat(el, point) {
   const area = doc.getBoundingClientRect();
   const left = Math.max(area.left, Math.min(point.x - width / 2, area.right - width));
   el.style.left = `${Math.max(8, left)}px`;
-  el.style.top = `${Math.min(point.y + 6, window.innerHeight - el.offsetHeight - 12)}px`;
+  const above = point.top - el.offsetHeight - 8;
+  el.style.top = `${above >= readingTop() ? above : Math.min(point.y + 6, window.innerHeight - el.offsetHeight - 12)}px`;
   return true;
 }
 

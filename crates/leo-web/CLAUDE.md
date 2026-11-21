@@ -888,7 +888,8 @@ Felix (2026-10-19).
   anchors. The selection toolbar (`passages.js`) has Felix this
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
-  selection when the layout has one (`.ask-float.beside`), else under its last word.
+  selection when the layout has one (`.ask-float.beside`), else above the selection (below
+  its last word when there is no room above; 2026-11-21, the user's call).
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
