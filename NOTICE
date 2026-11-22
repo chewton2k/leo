@@ -84,6 +84,19 @@ The everyday-word list in Recent dictations (crates/leo-web/src/web/app/dictatio
 
 --------------------------------------------------------------------------------
 
+Yogurt
+https://github.com/FrigadeHQ/yogurt
+Copyright (c) 2026 Frigade
+MIT License (same terms as above)
+Reference revision: 6bc00c18239a90a0dd5f1a592630002bde5b672b
+
+Leo's call speaker names (crates/leo-core/src/call_names/, crates/leo-desktop/src/call_names.rs)
+follow app/src/main/callNames/ (attribute.ts, parse.ts, index.ts), the call-watch
+readers in app/native/yogurt-mac/main.swift and app/native/yogurt-system/src/wincalls.rs,
+including Zoom's interface words by language and Meet's talking-tile class.
+
+--------------------------------------------------------------------------------
+
 Instrument Sans and Newsreader (crates/leo-web/src/web/vendor/fonts/)
 
 Instrument Sans: Copyright 2022 The Instrument Sans Project Authors

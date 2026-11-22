@@ -145,6 +145,7 @@ pub struct Piece {
     pub pcm: Vec<f32>,
     pub start: u64,
     pub onset: u64,
+    pub offset: u64,
 }
 
 impl std::ops::Deref for Piece {
@@ -285,11 +286,21 @@ impl Chunker {
             seconds(cut)
         );
         let start = self.start;
-        let onset = match self.frame_samples {
-            0 => start,
-            frame => (start / frame..cut.div_ceil(frame).min(self.probs.len()))
-                .find(|&i| self.probs[i] >= SILERO_VAD_THRESHOLD)
-                .map_or(start, |i| (i * frame).max(start)),
+        let (onset, offset) = match self.frame_samples {
+            0 => (start, cut),
+            frame => {
+                let mut frames = start / frame..cut.div_ceil(frame).min(self.probs.len());
+                let speech = |i: &usize| self.probs[*i] >= SILERO_VAD_THRESHOLD;
+                (
+                    frames
+                        .clone()
+                        .find(speech)
+                        .map_or(start, |i| (i * frame).max(start)),
+                    frames
+                        .rfind(speech)
+                        .map_or(cut, |i| ((i + 1) * frame).clamp(start, cut)),
+                )
+            }
         };
         let pcm = self.pending.drain(..cut - start).collect();
         self.start = cut;
@@ -297,6 +308,7 @@ impl Chunker {
             pcm,
             start: start as u64,
             onset: onset as u64,
+            offset: offset as u64,
         }
     }
 }
@@ -553,7 +565,7 @@ mod tests {
     }
 
     #[test]
-    fn a_piece_is_stamped_at_its_first_speech() {
+    fn a_piece_is_stamped_at_its_first_and_last_speech() {
         let pcm = clip(&probs_with_pauses(60.0, &[(0.0, 20.0), (35.0, 36.0)]));
         let (mut chunker, _) = chunker();
         let mut pieces = chunker.push(&pcm[..]);
@@ -561,6 +573,8 @@ mod tests {
         assert_eq!(cuts(&pieces), vec![35.5]);
         assert_eq!(pieces[0].start, 0);
         assert_eq!(pieces[0].onset, s(20.0) as u64);
+        assert!(pieces[0].offset.abs_diff(s(35.0) as u64) <= FRAME as u64);
+        assert_eq!(pieces[1].offset, pcm.len() as u64);
         assert_eq!(pieces[1].start, pieces[0].len() as u64);
         assert_eq!(
             pieces[1].onset,

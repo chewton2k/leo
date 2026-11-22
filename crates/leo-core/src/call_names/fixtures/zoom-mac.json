@@ -1,0 +1,38 @@
+[
+  {
+    "title": "Zoom Meeting",
+    "id": "zm.meeting.window.main",
+    "tree": {
+      "role": "AXWindow",
+      "title": "Zoom Meeting",
+      "children": [
+        {
+          "role": "AXTabGroup",
+          "description": "Gallery view",
+          "children": [
+            { "role": "AXTabGroup", "description": "Rowan Ellery, Computer audio unmuted, Video off, Active speaker" },
+            { "role": "AXTabGroup", "description": "Tamsin Okafor, Computer audio muted, Video on" },
+            { "role": "AXTabGroup", "description": "Juno Halvorsen (Host), Computer audio unmuted, Video off, Pinned" }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "children": [
+            { "role": "AXButton", "description": "Mute my audio" },
+            { "role": "AXButton", "title": "Leave" },
+            { "role": "AXStaticText", "value": "Talking points for the quarter" }
+          ]
+        },
+        {
+          "role": "AXOutline",
+          "description": "Participants list",
+          "children": [
+            { "role": "AXRow", "children": [{ "role": "AXCell", "children": [{ "role": "AXStaticText", "value": "Juno Halvorsen (Host, me)" }] }] },
+            { "role": "AXRow", "children": [{ "role": "AXStaticText", "value": "Rowan Ellery" }] },
+            { "role": "AXRow", "children": [{ "role": "AXStaticText", "value": "Tamsin Okafor (Guest)" }] }
+          ]
+        }
+      ]
+    }
+  }
+]

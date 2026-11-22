@@ -79,7 +79,39 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
+
+Call names (2026-11-22): `Request.names` (the Others track only; `None` in
+`powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
+thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
+the reader does not read while paused. Each reading's start, less `LAG_SECS`
+(0.75) on the wall clock, is mapped to the track's recorded time from the loop's
+`tick(recorded_secs, paused)` anchor; a reading from before the latest pause
+change (an epoch counter) or said before the latest resume is dropped. A reading names someone only when exactly one person other than the user is
+marked speaking, and in Zoom (which does not mark the user's own tile) only once
+the user's name is known; the one-other-person shortcut needs the participant
+count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at
+most `HOLD_SECS` 2 s; unreadable or unclear readings end a run) and every name
+marked as the user's (`me`), appended to the session's `call-names.jsonl`
+(`paths::open_append`: a regular file, never through a link or a pipe; a missing
+newline at its end is added first, a torn row is read from its last `{`, and rows
+that could not be written are retried); an open run is checkpointed at every
+reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
+signals the watcher before capture stops and waits at most 1 s for it. Each read gets an `Ask`: a
+deadline (`MOST_READ`, 2 s for the whole poll, checked between native calls), the
+stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
+for a browser, the window title), which every later read and a restarted reader
+keep; `call_names::pick` binds only when exactly one app (one window, for a
+browser) shows a call tree, and a bound call that is gone reads as unreadable, so
+its lines stay unnamed. One reader is alive at a time in the whole process (a lock
+held for its life): a reader is started again only after its thread has ended (at
+most `MOST_RESTARTS`, 20), and one quiet for `QUIET` (5 s) is traced, never joined
+by a second; problems go to the trace once each, never names.
+`archive` names each turn from its spoken interval, less each later part's 1 s
+lead-in (`Timeline::name`: more than half the line, or a zero-length line's start;
+an older row without an end runs to the next row); leo-host's `labelled` keeps a
+name and replaces only the plain track label, so the call merge never joins
+two people.
 
 Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
 omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the

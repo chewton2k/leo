@@ -1,5 +1,6 @@
 mod app_settings;
 mod audio_feedback;
+mod call_names;
 mod clipboard;
 mod dictation;
 mod input;
@@ -233,6 +234,10 @@ fn set_up(
     let dictation = dictation::Dictation::new(app.handle().clone())?;
     let app_settings = app_settings::AppSettings::new(app.handle().clone(), dictation.clone())?;
     let mut powers = leo_host::powers();
+    powers.listener = Some(leo_host::listener(
+        powers.usage.clone(),
+        call_names::readers(),
+    ));
     let _ = dictation.usage.set(powers.usage.clone());
     powers.dictation = Some(dictation.clone());
     powers.app_settings = Some(app_settings.clone());

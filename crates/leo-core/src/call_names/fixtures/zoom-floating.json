@@ -1,0 +1,13 @@
+[
+  {
+    "title": "zoom floating video window",
+    "id": "",
+    "tree": {
+      "role": "AXWindow",
+      "children": [
+        { "role": "AXStaticText", "value": "Talking: Tamsin Okafor" },
+        { "role": "AXButton", "description": "Stop share" }
+      ]
+    }
+  }
+]
