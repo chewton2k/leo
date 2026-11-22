@@ -608,3 +608,35 @@ fn long_text_is_clipped_on_a_character_boundary() {
     assert_eq!(clip(&long).unwrap().chars().count(), MOST_TEXT);
     assert_eq!(clip("   "), None);
 }
+
+#[test]
+fn overlapping_rows_count_their_time_once_and_a_long_run_across_the_start_is_found() {
+    let run = |from: f64, to: f64, who: &str| Mark::Run {
+        from,
+        to,
+        who: who.into(),
+    };
+    let rolled = Timeline::from_marks([
+        run(0.0, 10.0, "Rowan Ellery"),
+        run(5.0, 10.0, "Rowan Ellery"),
+        run(10.0, 16.0, "Tamsin Okafor"),
+    ]);
+    assert_eq!(rolled.name_over(&[(0.0, 20.0)]), None);
+    assert_eq!(
+        rolled.name_over(&[(0.0, 8.0), (4.0, 9.0)]).as_deref(),
+        Some("Rowan Ellery")
+    );
+    assert_eq!(
+        rolled.name_over(&[(0.0, 6.0), (0.0, 6.0), (10.0, 16.0)]),
+        None,
+        "a span listed twice counts once"
+    );
+    let long = Timeline::from_marks([
+        run(0.0, 30.0, "Rowan Ellery"),
+        run(1.0, 2.0, "Tamsin Okafor"),
+        run(3.0, 4.0, "Tamsin Okafor"),
+        run(5.0, 6.0, "Tamsin Okafor"),
+    ]);
+    assert_eq!(long.name(20.0, 25.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(long.name(22.0, 22.0).as_deref(), Some("Rowan Ellery"));
+}

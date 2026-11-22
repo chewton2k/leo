@@ -111,7 +111,9 @@ by a second; problems go to the trace once each, never names.
 (`Timeline::name`: more than half the line, or a zero-length line's start;
 an older row without an end runs to the next row), and each told-apart voice from
 the turn rows spoken inside its span (`Timeline::name_over`; the whole span when
-none are); leo-host's `labelled` keeps a name and replaces only the plain
+none are; every row or run that crosses the span's start counts, found through the
+longest one's length, and the spans and each name's runs are unioned first, so rows
+that overlap at a part's roll count once); leo-host's `labelled` keeps a name and replaces only the plain
 track label or a `Speaker N` voice, so two people never share a line.
 `Names { readers, own }` carries the computer account's full name (`own`, from
 leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run

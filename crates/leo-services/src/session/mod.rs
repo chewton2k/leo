@@ -1131,13 +1131,13 @@ impl Session {
                 .collect::<Vec<_>>()
         });
         if let Some(spoken) = self.labels(assembled) {
-            let said: Vec<(u64, u64)> = lines.iter().flatten().map(|(span, _)| *span).collect();
+            let mut said: Vec<(u64, u64)> = lines.iter().flatten().map(|(span, _)| *span).collect();
+            said.sort_unstable();
+            let longest = said.iter().map(|(from, to)| to - from).max().unwrap_or(0);
             return spoken
                 .into_iter()
                 .map(|s| {
-                    let first = said
-                        .partition_point(|(from, _)| *from < s.start_ms)
-                        .saturating_sub(1);
+                    let first = said.partition_point(|(from, _)| from + longest < s.start_ms);
                     let mut over: Vec<(f64, f64)> = said[first..]
                         .iter()
                         .take_while(|(from, _)| *from < s.end_ms)

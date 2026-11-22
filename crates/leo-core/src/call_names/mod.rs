@@ -140,6 +140,7 @@ pub struct Timeline {
     own: Option<String>,
     open: Option<(f64, String)>,
     last: Option<f64>,
+    longest: f64,
 }
 
 pub(crate) fn norm(name: &str) -> String {
@@ -180,6 +181,11 @@ impl Timeline {
             }
         }
         timeline.runs.sort_by(|a, b| a.0.total_cmp(&b.0));
+        timeline.longest = timeline
+            .runs
+            .iter()
+            .map(|(from, to, _)| to - from)
+            .fold(0.0, f64::max);
         timeline
     }
 
@@ -275,6 +281,7 @@ impl Timeline {
             return None;
         }
         self.runs.push((from, to, who.clone()));
+        self.longest = self.longest.max(to - from);
         Some(Mark::Run { from, to, who })
     }
 
@@ -282,10 +289,15 @@ impl Timeline {
         self.close(f64::INFINITY)
     }
 
+    fn from_reaching(&self, start: f64) -> &[(f64, f64, String)] {
+        let reach = start - self.longest;
+        &self.runs[self.runs.partition_point(|(from, _, _)| *from < reach)..]
+    }
+
     pub fn name(&self, start: f64, end: f64) -> Option<String> {
-        let first = self.runs.partition_point(|(_, to, _)| *to <= start);
         if end <= start {
-            return self.runs[first..]
+            return self
+                .from_reaching(start)
                 .iter()
                 .take_while(|(from, _, _)| *from <= start)
                 .find(|(_, to, who)| start < *to && !self.is_me(who))
@@ -295,34 +307,54 @@ impl Timeline {
     }
 
     pub fn name_over(&self, spans: &[(f64, f64)]) -> Option<String> {
-        let mut time: Vec<(String, String, f64)> = Vec::new();
-        let mut whole = 0.0;
-        for &(start, end) in spans.iter().filter(|(start, end)| end > start) {
-            whole += end - start;
-            let first = self.runs.partition_point(|(_, to, _)| *to <= start);
-            for (from, to, who) in self.runs[first..].iter() {
-                if *from >= end {
-                    break;
-                }
-                if self.is_me(who) {
+        let spans = union(
+            spans
+                .iter()
+                .copied()
+                .filter(|(start, end)| end > start)
+                .collect(),
+        );
+        let whole = measure(&spans);
+        let mut time: Vec<(String, String, Vec<(f64, f64)>)> = Vec::new();
+        for &(start, end) in &spans {
+            for (from, to, who) in self
+                .from_reaching(start)
+                .iter()
+                .take_while(|(from, _, _)| *from < end)
+            {
+                if *to <= start || self.is_me(who) {
                     continue;
                 }
-                let overlap = to.min(end) - from.max(start);
-                if overlap <= 0.0 {
-                    continue;
-                }
+                let clipped = (from.max(start), to.min(end));
                 let key = norm(who);
                 match time.iter_mut().find(|(k, _, _)| *k == key) {
-                    Some(entry) => entry.2 += overlap,
-                    None => time.push((key, who.clone(), overlap)),
+                    Some(entry) => entry.2.push(clipped),
+                    None => time.push((key, who.clone(), vec![clipped])),
                 }
             }
         }
         time.into_iter()
-            .max_by(|a, b| a.2.total_cmp(&b.2))
-            .filter(|(_, _, spent)| *spent > 0.5 * whole)
-            .map(|(_, who, _)| who)
+            .map(|(_, who, spoken)| (who, measure(&union(spoken))))
+            .max_by(|a, b| a.1.total_cmp(&b.1))
+            .filter(|(_, spent)| *spent > 0.5 * whole)
+            .map(|(who, _)| who)
     }
+}
+
+fn union(mut spans: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    spans.sort_by(|a, b| a.0.total_cmp(&b.0));
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(spans.len());
+    for (from, to) in spans {
+        match out.last_mut() {
+            Some(last) if from <= last.1 => last.1 = last.1.max(to),
+            _ => out.push((from, to)),
+        }
+    }
+    out
+}
+
+fn measure(spans: &[(f64, f64)]) -> f64 {
+    spans.iter().map(|(from, to)| to - from).sum()
 }
 
 pub(crate) fn unique(names: &[String]) -> Vec<String> {
