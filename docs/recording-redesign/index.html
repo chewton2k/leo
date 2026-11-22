@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Record page mockups</title>
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/01-tokens.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/02-base.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/03-note.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/04-surfaces.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/05-doc-actions.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/06-felix.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/07-side-popup.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/08-chat.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/09-kanban.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/10-schedule.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/11-source-study.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/12-settings.css">
+<link rel="stylesheet" href="../../crates/leo-web/src/web/styles/13-setup-misc.css">
+<style>
+@font-face { font-family: "Instrument Sans"; font-style: normal; font-weight: 400 700; src: url(../../crates/leo-web/src/web/vendor/fonts/instrument-sans-latin-wght-normal.woff2) format("woff2"); }
+@font-face { font-family: "Instrument Sans"; font-style: italic; font-weight: 400 700; src: url(../../crates/leo-web/src/web/vendor/fonts/instrument-sans-latin-wght-italic.woff2) format("woff2"); }
+@font-face { font-family: "Newsreader"; font-style: normal; font-weight: 200 800; src: url(../../crates/leo-web/src/web/vendor/fonts/newsreader-latin-opsz-normal.woff2) format("woff2"); }
+@font-face { font-family: "Newsreader"; font-style: italic; font-weight: 200 800; src: url(../../crates/leo-web/src/web/vendor/fonts/newsreader-latin-opsz-italic.woff2) format("woff2"); }
+
+:root { --red: #e0261b; }
+body { --side: 0px; padding-left: 0; background: var(--ground); user-select: text; }
+body::before, body::after { content: none; }
+.mockpage { max-width: 1440px; margin: 0 auto; padding: 40px 24px 120px; }
+.intro h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -.01em; }
+.intro p { margin: 8px 0 0; max-width: 72ch; color: var(--muted); }
+.jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+.jump a { color: var(--text); text-decoration: none; }
+.jump a:hover .chip { color: var(--text); }
+
+.mock { margin-top: 56px; scroll-margin-top: 16px; }
+.mock-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; }
+.mock-head h2 { margin: 0; font-size: 20px; font-weight: 500; }
+.mock-head p { margin: 4px 0 0; max-width: 72ch; color: var(--muted); font-size: var(--fs-md); }
+.screen .segmented { flex: none; }
+.mock-head .segmented { flex: none; width: 420px; max-width: 100%; margin: 0; }
+
+.pics { display: grid; gap: 16px; margin-top: 16px; }
+.pics[data-view="side"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pics:not([data-view="side"]) > .pic { grid-area: 1 / 1; }
+.pics:not([data-view="side"])[data-show="before"] > .after,
+.pics:not([data-view="side"])[data-show="after"] > .before { visibility: hidden; }
+.pic { margin: 0; min-width: 0; cursor: pointer; border-radius: var(--r-panel); }
+.pic:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
+.pic figcaption { display: flex; justify-content: space-between; margin: 0 2px 6px; font-size: var(--fs-xs); color: var(--muted); }
+.pic figcaption b { font-weight: 500; color: var(--text); }
+.frame { position: relative; overflow: hidden; border-radius: var(--r-panel); background: var(--page); box-shadow: var(--shadow); }
+.screen { position: absolute; top: 0; left: 0; width: 1200px; padding: 28px 40px 40px; transform-origin: 0 0; pointer-events: none; }
+.marks { position: absolute; inset: 0; pointer-events: none; }
+.mark { position: absolute; border: 2px solid var(--red); border-radius: 6px; }
+.mark b { position: absolute; top: -11px; left: -11px; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px; background: var(--red); color: #fff; font: 600 12px/22px var(--note-font); text-align: center; }
+.changes { margin: 12px 0 0; padding: 0 0 0 4px; list-style: none; counter-reset: change; columns: 2 360px; column-gap: 32px; font-size: var(--fs-md); }
+.changes li { counter-increment: change; break-inside: avoid; display: flex; gap: 8px; padding: 4px 0; }
+.changes li::before { content: counter(change) "."; flex: none; min-width: 20px; color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
+
+/* Mock screens: leo's real classes, plus only what the new layouts need */
+.screen .rec { margin: 0; }
+.screen .rec-wrap { container: recroom / inline-size; }
+.screen .rec-live { gap: 16px; }
+.mock-wave { display: block; width: 100%; height: 72px; color: var(--danger); }
+.mock-wave.small { width: 120px; height: 24px; }
+.mock-wave.mid { height: 40px; }
+.mock-wave path { stroke: currentColor; stroke-width: 3; stroke-linecap: round; }
+.mock-wave path.off { stroke: color-mix(in srgb, var(--text) 18%, transparent); }
+.heard { margin: 0; font-size: var(--fs-md); line-height: 1.6; }
+.heard .fresh { color: var(--faint); }
+.row { display: flex; align-items: center; gap: 12px; }
+.grow { flex: 1; min-width: 0; }
+.title-row { display: flex; align-items: flex-start; gap: 16px; }
+.title-row .note-head h1 { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chips .chip { padding: 4px 10px; font-size: var(--fs-sm); }
+.chips .chip svg { width: 14px; height: 14px; }
+.recbar { display: inline-flex; align-items: center; gap: 12px; padding: 6px 6px 6px 14px; border-radius: var(--r-pill); background: var(--raised); box-shadow: var(--shadow); white-space: nowrap; }
+.recbar .time { font-variant-numeric: tabular-nums; font-weight: 500; }
+.recbar .btn { min-height: 32px; }
+.recbar .stopper { display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; min-height: 32px; border: 0; border-radius: var(--r-pill); background: var(--danger); color: var(--accent-text); font-size: var(--fs-sm); font-weight: 500; }
+.recbar .stopper i { width: 10px; height: 10px; border-radius: 2px; background: currentColor; }
+.recbar .pauser { width: 32px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2); }
+.recbar .pauser svg { width: 14px; height: 14px; }
+.tabs-row { display: flex; align-items: center; gap: 4px; margin: 20px 0 0; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.tabs-row .kanban-tab { font-size: var(--fs-md); }
+.tabs-row .count { color: var(--faint); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.two { display: grid; gap: 24px; }
+.pointlist { margin: 0; padding: 0; list-style: none; }
+.pointlist li { display: flex; gap: 16px; padding: 8px 0; font-size: var(--fs-md); }
+.pointlist .rec-at { min-width: 44px; }
+.writing { font-family: var(--writing-font); font-size: 17px; line-height: 1.65; }
+.caret-line { display: flex; gap: 16px; padding: 8px 0; color: var(--faint); font-size: var(--fs-md); }
+.caret-line::after { content: ""; width: 2px; height: 22px; background: var(--text); }
+.turns { display: flex; flex-direction: column; gap: 16px; }
+.turn-who { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); font-weight: 500; }
+.turn-who time { font-weight: 400; color: var(--faint); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--faint); }
+.dot.you { background: var(--text); }
+.dot.s1 { background: var(--hue-0); }
+.dot.s2 { background: var(--hue-1); }
+.dot.s3 { background: var(--hue-4); }
+.turn p { margin: 4px 0 0 16px; font-size: var(--fs-md); line-height: 1.6; }
+.turn .typed { display: inline-flex; gap: 6px; margin: 6px 0 0 16px; padding: 4px 10px; border-radius: var(--r-tile); background: var(--wash); font-size: var(--fs-sm); }
+.speaker-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.speaker { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--surface-2); font-size: var(--fs-sm); }
+.speaker small { color: var(--faint); font-size: var(--fs-xs); }
+.speaker input { width: 110px; border: 0; border-bottom: 1px solid var(--focus); background: none; padding: 0; font-size: var(--fs-sm); outline: 0; }
+.panel-felix { display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--r-panel); background: var(--ground); }
+.panel-felix .msg-who { display: flex; align-items: center; gap: 8px; font-family: var(--voice); color: var(--felix); }
+.panel-felix .compose { display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 10px 12px; border-radius: var(--r-panel); background: var(--raised); box-shadow: var(--shadow); color: var(--faint); font-size: var(--fs-md); }
+.margin-card { padding: 10px 12px; border-radius: var(--r-tile); background: var(--raised); box-shadow: var(--shadow); font-family: var(--voice); font-size: 15px; line-height: 1.5; }
+.margin-card .who { display: block; margin-bottom: 4px; font-family: var(--note-font); font-size: var(--fs-xs); color: var(--felix); }
+.passage { text-decoration: underline; text-decoration-color: var(--felix); text-underline-offset: 4px; }
+.progress-line { display: flex; align-items: center; gap: 12px; margin-top: 14px; padding: 10px 14px; border-radius: var(--r-tile); background: var(--tint); font-size: var(--fs-sm); }
+.progress-line .upload-bar { flex: 1; margin: 0; }
+.folded { display: flex; align-items: center; gap: 8px; color: var(--faint); font-size: var(--fs-sm); }
+.wants-line { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; font-size: var(--fs-sm); color: var(--muted); }
+.wants-line b { font-weight: 500; color: var(--text); }
+.bottom-bar { display: flex; justify-content: center; margin-top: 24px; }
+.raw-line { margin: 0; padding: 4px 0; font-size: var(--fs-md); line-height: 1.6; }
+.raw-line b { font-weight: 400; color: var(--muted); }
+.echo-fold { display: inline-flex; align-items: center; gap: 8px; margin-left: 16px; padding: 4px 10px; border-radius: var(--r-pill); background: var(--wash); color: var(--muted); font-size: var(--fs-sm); }
+
+.compare-table { width: 100%; margin-top: 16px; border-collapse: collapse; font-size: var(--fs-md); background: var(--raised); border-radius: var(--r-panel); box-shadow: var(--shadow); overflow: hidden; }
+.compare-table th, .compare-table td { padding: 12px 16px; text-align: left; vertical-align: top; }
+.compare-table th { font-weight: 500; color: var(--muted); font-size: var(--fs-sm); background: var(--tint); }
+.compare-table tr + tr td { border-top: 1px solid var(--line); }
+.fixes { margin: 16px 0 0; padding-left: 20px; max-width: 80ch; }
+.fixes li { margin: 8px 0; }
+.fixes li b { font-weight: 500; }
+@media (max-width: 760px) {
+  .pics[data-view="side"] { grid-template-columns: minmax(0, 1fr); }
+  .compare-table { display: block; overflow-x: auto; }
+}
+</style>
+</head>
+<body>
+<div class="mockpage">
+  <header class="intro">
+    <h1>Record page mockups</h1>
+    <p>Eight directions for the Record page, drawn with leo's own stylesheet. Each card shows today's page beside one idea. Red boxes on the after picture mark every change, numbered to the list under the card. Click a picture to flip between before and after.</p>
+    <nav class="jump" aria-label="Directions">
+      <a href="#a"><span class="chip">A · Three tabs</span></a>
+      <a href="#b"><span class="chip">B · Notepad first</span></a>
+      <a href="#c"><span class="chip">C · Who said what</span></a>
+      <a href="#d"><span class="chip">D · One compact card</span></a>
+      <a href="#e"><span class="chip">E · Felix in the margin</span></a>
+      <a href="#f"><span class="chip">F · Before you start</span></a>
+      <a href="#g"><span class="chip">G · While notes are written</span></a>
+      <a href="#h"><span class="chip">H · Speakers after recording</span></a>
+      <a href="#speakers"><span class="chip">Speaker comparison</span></a>
+    </nav>
+  </header>
+
+  <!-- A -->
+  <section class="mock" id="a">
+    <div class="mock-head"><div><h2>A · One page, three tabs</h2><p>The recording looks like the note it becomes: title, chips, then tabs for your notes, the transcript and what you want. Felix answers in his own panel.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="live"></figure>
+      <figure class="pic after"><div class="screen">
+        <div class="title-row">
+          <div class="grow" data-change="Title and chips from the note page: the recording already looks like its note">
+            <div class="note-head"><h1>Capstone sync</h1></div>
+            <div class="chips"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Today 2:00 PM</span><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Capstone</span><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Microphone</span></div>
+          </div>
+          <div class="recbar" data-change="Recorder card (48 px clock, 72 px wave, round buttons) → one bar: dot, time, wave, Pause, Stop"><span class="rec-dot"></span><span class="time">12:48</span><svg class="mock-wave small" data-bars="24"></svg><button class="pauser" aria-label="Pause"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button><button class="stopper"><i></i>Stop and save</button></div>
+        </div>
+        <div class="two" style="grid-template-columns: minmax(0, 1fr) 340px; margin-top: 8px;">
+          <div>
+            <div class="tabs-row" data-change="Four cards → three tabs: Your notes, Transcript, What you want"><span class="kanban-tab on">Your notes <span class="count">3</span></span><span class="kanban-tab">Transcript</span><span class="kanban-tab">What you want</span></div>
+            <div data-change="Your notes take the whole column instead of a third">
+              <ul class="pointlist" style="margin-top: 8px;"><li><span class="rec-at">2:14</span><span>Maya: demo moves to Thursday</span></li><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li><li><span class="rec-at">11:02</span><span>Budget: keep under $400 for the sensors</span></li></ul>
+              <div class="rec-point rec-compose"><textarea class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm">Add point</button></div></div>
+            </div>
+          </div>
+          <aside class="panel-felix" data-change="Ask Felix card → Felix's own docked panel, same three questions">
+            <span class="msg-who"><svg width="14" height="14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="currentColor"/></svg>Felix</span>
+            <div class="chat-starters"><button class="starter">What did I just miss?</button><button class="starter">Sum up so far</button><button class="starter">What should I ask next?</button></div>
+            <div class="compose">Ask about this recording</div>
+          </aside>
+        </div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- B -->
+  <section class="mock" id="b">
+    <div class="mock-head"><div><h2>B · Notepad first</h2><p>You write the page; leo listens. Your notes are the page in the note font, the transcript runs in a narrow column, and the controls sit in one bar at the bottom.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="live"></figure>
+      <figure class="pic after"><div class="screen">
+        <div class="note-head"><h1>Capstone sync</h1></div>
+        <div class="wants-line" data-change="What you want card → one line under the title, with Edit"><b>You want</b> the decisions and who does what <button class="btn plain sm">Edit</button></div>
+        <div class="two" style="grid-template-columns: minmax(0, 1fr) 360px; margin-top: 16px; gap: 40px;">
+          <div class="writing" data-change="Notes become the page, in the note font; times sit in the gutter">
+            <ul class="pointlist"><li><span class="rec-at">2:14</span><span>Demo moves to Thursday</span></li><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li><li><span class="rec-at">11:02</span><span>Budget under $400 for the sensors</span></li></ul>
+            <div class="caret-line"><span class="rec-at">12:48</span></div>
+            <div style="height: 120px"></div>
+          </div>
+          <div data-change="Transcript → a narrow column beside the notes, newest at the bottom">
+            <p class="source-label" style="margin: 0 0 8px;">Transcript</p>
+            <p class="heard">…so if the sensors arrive Monday we can still demo on Thursday. Sam, can you send the survey numbers before then? <span class="fresh">I think we keep the budget under four hundred</span></p>
+          </div>
+        </div>
+        <div class="bottom-bar"><div class="recbar" data-change="Clock, wave, Pause, Stop and Ask Felix → one bar at the bottom"><span class="rec-dot"></span><span class="time">12:48</span><svg class="mock-wave small" data-bars="24"></svg><button class="btn plain sm">Ask Felix</button><button class="pauser" aria-label="Pause"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button><button class="stopper"><i></i>Stop and save</button></div></div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- C -->
+  <section class="mock" id="c">
+    <div class="mock-head"><div><h2>C · Who said what</h2><p>The transcript is the centre of the page, grouped into turns. Each voice gets a tone dot and a name you can change once for every line.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="live"></figure>
+      <figure class="pic after"><div class="screen">
+        <div class="row"><div class="note-head grow"><h1>Capstone sync</h1></div><div class="recbar"><span class="rec-dot"></span><span class="time">12:48</span><svg class="mock-wave small" data-bars="24"></svg><button class="pauser" aria-label="Pause"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button><button class="stopper"><i></i>Stop and save</button></div></div>
+        <div class="speaker-row" style="margin-top: 16px;" data-change="A row of speakers: tap a name to rename it everywhere (Speaker 2 → Sam)"><span class="speaker"><span class="dot you"></span>You <small>4 min</small></span><span class="speaker"><span class="dot s1"></span>Maya <small>6 min</small></span><span class="speaker"><span class="dot s2"></span><input value="Sam" aria-label="Rename Speaker 2"> <small>2 min</small></span></div>
+        <div class="two" style="grid-template-columns: minmax(0, 1fr) 340px; margin-top: 20px; gap: 40px;">
+          <div class="turns">
+            <div class="turn" data-change="Lines group into turns: name and time once per turn, colour only on the dot"><div class="turn-who"><span class="dot s1"></span>Maya <time>11:40</time></div><p>If the sensors arrive Monday we can still demo on Thursday.</p><p>I'd rather not move it again.</p></div>
+            <div class="turn"><div class="turn-who"><span class="dot you"></span>You <time>12:05</time></div><p>Agreed. Sam, can you send the survey numbers before then?</p><span class="typed" data-change="Points you type appear in the transcript at their time">Your point · Ask Sam for the survey numbers</span></div>
+            <div class="turn"><div class="turn-who"><span class="dot s2"></span>Sam <time>12:31</time></div><p>Yes, tonight. <span class="heard fresh" style="display: inline" data-change="Words still being heard are lighter until they settle">I think we keep the budget under four hundred</span></p></div>
+          </div>
+          <div class="rec-notepad set-card"><header><h3>Your notes</h3></header><ul class="pointlist"><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li></ul><div class="rec-point rec-compose"><textarea class="set-input" rows="2" placeholder="Type a point and press Enter"></textarea></div></div>
+        </div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- D -->
+  <section class="mock" id="d">
+    <div class="mock-head"><div><h2>D · One compact card</h2><p>Today's pieces, kept, in one card that fits a small window. A segmented control switches between your notes, the transcript and Felix.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="live"></figure>
+      <figure class="pic after"><div class="screen">
+        <section class="set-card" style="max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px;">
+          <div class="row" data-change="Clock 48 → 28 px and the controls beside it, not under it">
+            <span class="rec-state"><span class="rec-dot"></span>Recording</span><span class="grow" style="font-size: 28px; font-weight: 500; font-variant-numeric: tabular-nums;">12:48</span>
+            <button class="pauser" style="width: 40px; height: 40px; display: grid; place-items: center; border: 0; border-radius: 50%; background: var(--surface-2);" aria-label="Pause"><svg width="14" height="14" viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button>
+            <span class="recbar" style="box-shadow: none; padding: 0; background: none;"><button class="stopper"><i></i>Stop and save</button></span>
+          </div>
+          <svg class="mock-wave mid" data-bars="90" data-change="Wave 72 → 40 px"></svg>
+          <div class="segmented" style="--count: 3; --at: 0; max-width: none; margin: 0;" data-change="Three cards → one segmented control: Your notes, Transcript, Ask Felix"><span class="segment-pill"></span><button class="segment on"><span>Your notes</span></button><button class="segment"><span>Transcript</span></button><button class="segment"><span>Ask Felix</span></button></div>
+          <div>
+            <div class="wants-line" style="margin: 0 0 4px;" data-change="What you want moves into Your notes as one line"><b>You want</b> the decisions and who does what <button class="btn plain sm">Edit</button></div>
+            <ul class="pointlist"><li><span class="rec-at">2:14</span><span>Demo moves to Thursday</span></li><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li></ul>
+            <div class="rec-point rec-compose"><textarea class="set-input" rows="2" placeholder="Type a point and press Enter"></textarea></div>
+          </div>
+        </section>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- E -->
+  <section class="mock" id="e">
+    <div class="mock-head"><div><h2>E · Felix in the margin</h2><p>Leo's own idea, not the reference app's: Felix reads along the live transcript the way he reads a note, and leaves short margin notes on what matters.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="live"></figure>
+      <figure class="pic after"><div class="screen">
+        <div class="row"><div class="note-head grow"><h1>Capstone sync</h1></div><div class="recbar"><span class="rec-dot"></span><span class="time">12:48</span><svg class="mock-wave small" data-bars="24"></svg><button class="pauser" aria-label="Pause"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg></button><button class="stopper"><i></i>Stop and save</button></div></div>
+        <div class="two" style="grid-template-columns: 280px minmax(0, 1fr) 280px; margin-top: 24px; gap: 32px;">
+          <div class="rec-notepad" data-change="Your notes → a quiet left column"><p class="source-label" style="margin: 0 0 4px;">Your notes</p><ul class="pointlist"><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li><li><span class="rec-at">11:02</span><span>Budget under $400</span></li></ul><div class="rec-compose"><textarea class="set-input" rows="2" placeholder="Type a point"></textarea></div></div>
+          <div class="writing" data-change="Transcript set like a note, in the note font">
+            <p style="margin: 0 0 16px;">We looked at the timeline again. <span class="passage" data-change="Felix underlines the passage his note is about">If the sensors arrive Monday we can still demo on Thursday</span>, and nobody wants to move it again.</p>
+            <p style="margin: 0;">Sam will send the survey numbers tonight. <span class="heard fresh" style="display: inline; font-size: inherit;">I think we keep the budget under four hundred</span></p>
+          </div>
+          <div class="margin-card" data-change="Ask Felix card → Felix's margin note beside the passage, with a one-tap task">
+            <span class="who">Felix</span>That's a decision with a date. Add "Demo Thursday" as a task?
+            <div style="margin-top: 8px; display: flex; gap: 8px;"><button class="btn plain sm">Add task</button><button class="btn plain sm">Dismiss</button></div>
+          </div>
+        </div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- F -->
+  <section class="mock" id="f">
+    <div class="mock-head"><div><h2>F · Before you start</h2><p>The start screen gets the title first, smaller kind choices and the same red Start, so the page you set up is the page you record on.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="idle"></figure>
+      <figure class="pic after"><div class="screen">
+        <div style="max-width: 720px; margin: 0 auto;">
+          <div class="note-head" data-change="Title first, like a note: 'Untitled recording' until you type"><h1 class="blank" data-placeholder="Untitled recording"></h1></div>
+          <div class="chips" data-change="Event and folder → chips under the title"><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg>Capstone sync, 2:00 PM</span><span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>Capstone</span></div>
+          <div class="segmented" style="--count: 3; --at: 0; max-width: none; margin: 24px 0 0;" data-change="What to record: three picture cards → a segmented control"><span class="segment-pill"></span><button class="segment on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Microphone</span></button><button class="segment"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><span>Screen</span></button><button class="segment"><span>Call</span></button></div>
+          <label class="field field-area" style="margin-top: 16px;"><textarea rows="2" placeholder="What do you want from it? e.g. the main ideas, step by step">The decisions and who does what</textarea></label>
+          <label class="set-row rec-speakers" style="margin-top: 12px;"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span><input type="checkbox" class="switch" role="switch" checked></label>
+          <div class="rec-start" data-change="Start stays red, with Felix's question under it instead of a separate block above"><button class="rec-go" aria-label="Start recording"><span class="rec-go-dot"></span></button><span class="rec-start-label">Start recording</span><div class="chat-starters" style="width: 320px;"><button class="starter">What should I listen for?</button></div></div>
+        </div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- G -->
+  <section class="mock" id="g">
+    <div class="mock-head"><div><h2>G · While the notes are written</h2><p>After Stop the page stays. Your notes and the transcript stay readable while Felix writes, and a third tab fills in when he is done.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="writing"></figure>
+      <figure class="pic after"><div class="screen">
+        <div class="note-head"><h1>Capstone sync</h1></div>
+        <div class="progress-line" data-change="Felix and the progress card → one line under the title"><svg width="16" height="16" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6" fill="var(--text)"/></svg><span>Writing the notes · 2/5</span><div class="upload-bar" role="progressbar"><i style="width: 46%"></i></div><button class="btn plain sm" data-change="Finish with what is transcribed so far stays, as a plain button in that line">Finish now</button></div>
+        <div class="tabs-row" data-change="Tabs stay: Your notes and Transcript open now, Notes fills in when written"><span class="kanban-tab" style="opacity: .5;">Notes</span><span class="kanban-tab on">Your notes <span class="count">3</span></span><span class="kanban-tab">Transcript</span></div>
+        <ul class="pointlist" style="margin-top: 8px;" data-change="What you typed stays on screen, still editable"><li><span class="rec-at">2:14</span><span>Maya: demo moves to Thursday</span></li><li><span class="rec-at">6:40</span><span>Ask Sam for the survey numbers</span></li><li><span class="rec-at">11:02</span><span>Budget: keep under $400 for the sensors</span></li></ul>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <!-- H -->
+  <section class="mock" id="h">
+    <div class="mock-head"><div><h2>H · Speakers after recording</h2><p>The fixes from the speaker comparison below, on the saved transcript: names once per turn, the Others track split by voice, rename once, and echo lines folded away.</p></div></div>
+    <div class="pics"><figure class="pic before" data-from="speakers"></figure>
+      <figure class="pic after"><div class="screen">
+        <div style="max-width: 820px;">
+          <h3 style="margin: 0; font-weight: 500;">Transcript</h3>
+          <div class="speaker-row" style="margin-top: 12px;" data-change="A speaker row; rename once: Others 1 → Maya renames every line"><span class="speaker"><span class="dot you"></span>You</span><span class="speaker"><span class="dot s1"></span>Maya <small>was Others 1</small></span><span class="speaker"><span class="dot s2"></span>Others 2 <button class="btn plain sm">Name</button></span></div>
+          <div class="turns" style="margin-top: 20px;">
+            <div class="turn" data-change="'[Others]' on every line → a name and time once per turn"><div class="turn-who"><span class="dot s1"></span>Maya <time>11:40</time></div><p>If the sensors arrive Monday we can still demo on Thursday. I'd rather not move it again.</p></div>
+            <div class="turn"><div class="turn-who"><span class="dot you"></span>You <time>12:05</time></div><p>Agreed. Can you send the survey numbers before then?</p><span class="echo-fold" data-change="Lines the microphone heard from the speakers fold into one 'Hidden: 2 echo lines'">Hidden: 2 echo lines · Show</span></div>
+            <div class="turn" data-change="The Others track is split by voice: a second person becomes Others 2"><div class="turn-who"><span class="dot s2"></span>Others 2 <time>12:31</time></div><p>Yes, tonight.</p></div>
+          </div>
+        </div>
+      </div></figure>
+    </div>
+    <ol class="changes"></ol>
+  </section>
+
+  <section class="mock" id="speakers">
+    <div class="mock-head"><div><h2>Speakers: leo and the reference app</h2><p>How each one decides who said what, from their code, and what leo could take.</p></div></div>
+    <table class="compare-table">
+      <thead><tr><th>Case</th><th>leo today</th><th>The reference app</th></tr></thead>
+      <tbody>
+        <tr><td>Calls</td><td>Two native tracks, saved as <b>You</b> and <b>Others</b>. Label speakers is forced off for calls.</td><td>Two tracks too, You and Them. Them gets a real name when the call app (Zoom, Teams, Meet) shows one person talking for most of a line, read from its accessibility tree about twice a second; else Them. Never guessed.</td></tr>
+        <tr><td>One microphone, several people</td><td>Optional Sortformer pass after Stop: <b>Speaker 1, 2…</b> per run, 86–91% right on meeting tests.</td><td>No voice separation: the microphone is always You.</td></tr>
+        <tr><td>Echo (no headphones)</td><td>No filter; a headset warning before Start.</td><td>Compares loudness of the mic and the call track over 2 s windows; a steady lag means echo, and those mic lines are hidden.</td></tr>
+        <tr><td>Display</td><td><code>[Speaker N]</code> before each line; no names, no colours.</td><td>Lines grouped into turns (same voice, under 30 s apart), a name once per turn, a colour per named speaker, kept in first-seen order.</td></tr>
+        <tr><td>Live</td><td>Speaker labels only after Stop.</td><td>Names arrive with each final line; live words show lighter and fade in.</td></tr>
+        <tr><td>Renaming</td><td>Edit each line by hand in the transcript sheet.</td><td>Names come from the call app; no rename step needed on calls.</td></tr>
+      </tbody>
+    </table>
+    <ol class="fixes">
+      <li><b>Turns, not prefixes.</b> Show a name and time once per turn in the transcript sheet and the live column; keep <code>[Speaker N]</code> only in the saved text.</li>
+      <li><b>Rename once.</b> A speaker row in the transcript sheet: renaming Speaker 1 rewrites every line for that recording through the existing change batch.</li>
+      <li><b>Split Others on calls.</b> Run the existing Sortformer pass on the Others track only, so a three-person call gives You, Others 1 and Others 2.</li>
+      <li><b>Echo filter.</b> Without headphones the mic hears the call. Compare the two tracks' loudness over short windows and fold matching mic lines away, instead of only warning about headsets.</li>
+      <li><b>Names from the call app (later).</b> leo already asks for Accessibility for dictation; reading who the call app shows talking would name Others without guessing. Bigger work, per app.</li>
+      <li><b>Tone dots.</b> One dot per speaker in leo's tones, colour only on the dot, in first-seen order so numbers never shift.</li>
+    </ol>
+  </section>
+</div>
+
+<template id="t-live">
+  <div class="rec-wrap"><div class="rec rec-live">
+    <section class="set-card rec-live-card">
+      <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span>Recording</span></span><span class="rec-meta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Microphone</span></div>
+      <div class="rec-clock"><span id="rec-time">12:48</span></div>
+      <svg class="mock-wave" data-bars="160"></svg>
+      <p class="rec-hear sound">Hearing sound</p>
+      <div class="rec-buttons"><button class="rec-round plain"><svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg><span>Pause</span></button><button class="rec-round stop rec-stop"><span class="rec-square"></span><span>Stop and save</span></button></div>
+    </section>
+    <details class="set-card rec-heard" open><summary><span class="grow"><b>What’s being heard</b><span class="cal-sub">The live transcript</span></span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></summary>
+      <div class="rec-transcript">…so if the sensors arrive Monday we can still demo on Thursday. I'd rather not move it again. Agreed. Sam, can you send the survey numbers before then? Yes, tonight. I think we keep the budget under four hundred</div></details>
+    <section class="set-card rec-notepad"><header><h3>Your notes</h3></header><p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>
+      <ul class="rec-points"><li><span class="rec-at">2:14</span><span class="rec-point-said">Maya: demo moves to Thursday</span></li><li><span class="rec-at">6:40</span><span class="rec-point-said">Ask Sam for the survey numbers</span></li><li><span class="rec-at">11:02</span><span class="rec-point-said">Budget: keep under $400 for the sensors</span></li></ul>
+      <div class="rec-point rec-compose"><textarea class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm">Add point</button></div></div></section>
+    <section class="set-card rec-ask"><header><h3>Ask Felix</h3></header><div class="chat-starters"><button class="starter">What did I just miss?</button><button class="starter">Sum up so far</button><button class="starter">What should I ask next?</button></div></section>
+    <section class="set-card rec-wants-card"><header><h3>What you want from the notes</h3><span class="rec-wants-state">Saved</span></header><p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p><textarea class="set-input rec-wants" rows="2">The decisions and who does what</textarea></section>
+  </div></div>
+</template>
+
+<template id="t-idle">
+  <div class="rec rec-idle" style="max-width: 720px; margin: 0 auto;">
+    <div class="section-title">Record</div>
+    <section class="set-card rec-card">
+      <div class="choice-cards rec-kinds" role="radiogroup" style="--count: 3; --at: 0;"><span class="choice-ring"></span>
+        <label class="choice-pick on"><span class="choice-diagram"><svg viewBox="0 0 120 52"><svg x="12" y="18" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><path class="d-wave" d="M36 24v4M41 21.5v9M46 19v14M51 22.5v7M56 20.5v11M61 18v16M66 21.5v9M71 23.5v5M76 21v10M81 19.5v13M86 22.5v7M91 24v4M96 21.5v9M101 20v12M106 23v6"/></svg></span><input type="radio" checked><span class="choice-title">Microphone</span><span class="choice-about">A lecture, meeting or your voice</span></label>
+        <label class="choice-pick"><span class="choice-diagram"><svg viewBox="0 0 120 52"><svg x="12" y="18" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg><path class="d-wave" d="M36 24v4M41 21.5v9M46 19v14M51 22.5v7M56 20.5v11M61 18v16M66 21.5v9M71 23.5v5M76 21v10M81 19.5v13M86 22.5v7M91 24v4M96 21.5v9M101 20v12M106 23v6"/></svg></span><input type="radio"><span class="choice-title">Screen</span><span class="choice-about">Records what this computer plays</span></label>
+        <label class="choice-pick"><span class="choice-diagram"><svg viewBox="0 0 120 52"><path class="d-wave" d="M36 14v4M41 11.5v9M46 9v14M51 12.5v7M56 10.5v11M61 8v16M66 11.5v9M71 13.5v5M76 11v10M81 9.5v13M86 12.5v7M91 14v4M96 11.5v9M101 10v12M106 13v6M36 34v4M41 31.5v9M46 29v14M51 32.5v7M56 30.5v11M61 28v16M66 31.5v9M71 33.5v5M76 31v10M81 29.5v13M86 32.5v7M91 34v4M96 31.5v9M101 30v12M106 33v6"/></svg></span><input type="radio"><span class="choice-title">Call</span><span class="choice-about">You and others, on two tracks</span></label>
+      </div>
+      <div class="note-fields">
+        <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg><span class="select-control"><select><option>Capstone</option></select></span></div>
+        <div class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span class="select-control"><select><option>Today 2:00 PM · Capstone sync</option></select></span></div>
+        <p class="hint rec-event-note">The AI gets this event’s description, place and who was invited.</p>
+        <p class="note-fields-optional">Optional</p>
+        <label class="field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5"/></svg><input value="Capstone sync"></label>
+        <label class="field field-area"><textarea rows="2">The decisions and who does what</textarea></label>
+      </div>
+      <div><label class="set-row rec-speakers"><span class="grow">Label speakers<span class="set-desc">For meetings: the transcript says who said what. Leave it off for lectures.</span></span><input type="checkbox" class="switch" role="switch" checked></label></div>
+      <div class="rec-ask"><p class="hint">Ask Felix before you start</p><div class="chat-starters"><button class="starter">What should I listen for?</button><button class="starter">What should I ask?</button></div></div>
+      <div class="rec-start"><button class="rec-go" aria-label="Start recording"><span class="rec-go-dot"></span></button><span class="rec-start-label">Start recording</span><p class="hint rec-tip">Keeps recording if you close the window. Open leo from the menu bar to return.</p></div>
+    </section>
+  </div>
+</template>
+
+<template id="t-writing">
+  <div class="rec rec-writing" style="max-width: 720px; margin: 0 auto;">
+    <div class="section-title">Record</div>
+    <section class="set-card rec-done-card"><svg width="72" height="72" viewBox="0 0 16 16" shape-rendering="crispEdges"><rect x="3" y="4" width="10" height="9" fill="#b4cfe7"/><rect x="5" y="7" width="2" height="2" fill="#19191b"/><rect x="9" y="7" width="2" height="2" fill="#19191b"/></svg><h3>Writing the notes 2/5</h3>
+      <div class="upload-bar" role="progressbar"><i style="width: 46%"></i></div>
+      <p class="hint">Writing for 0:38 · 12:48 recorded. You can leave this page; the note appears in its folder when it is ready.</p>
+      <button class="btn plain sm">Finish with what is transcribed so far</button>
+    </section>
+  </div>
+</template>
+
+<template id="t-speakers">
+  <div style="max-width: 820px;">
+    <h3 style="margin: 0; font-weight: 500;">Transcript</h3>
+    <p class="hint" style="margin: 4px 0 16px;">Capstone sync · Call · 12:48</p>
+    <p class="raw-line"><b>[Others]</b> If the sensors arrive Monday we can still demo on Thursday.</p>
+    <p class="raw-line"><b>[Others]</b> I'd rather not move it again.</p>
+    <p class="raw-line"><b>[You]</b> Agreed. Can you send the survey numbers before then?</p>
+    <p class="raw-line"><b>[You]</b> If the sensors arrive Monday we can</p>
+    <p class="raw-line"><b>[You]</b> still demo on Thursday</p>
+    <p class="raw-line"><b>[Others]</b> Yes, tonight.</p>
+  </div>
+</template>
+
+<script>
+(() => {
+  const VIEWS = [['side', 'Side by side'], ['before', 'Before'], ['after', 'After'], ['flip', 'Flip']];
+
+  // One state per card: `view` is the control's choice, `show` which picture a single view shows.
+  function choose(state, picked) {
+    if (picked === 'side') return { view: 'side', show: state.show };
+    if (picked === 'flip') return { view: 'flip', show: state.view === 'flip' ? other(state.show) : state.show };
+    return { view: picked, show: picked };
+  }
+  function clicked(state, which) {
+    return { view: 'flip', show: state.view === 'side' ? other(which) : other(state.show) };
+  }
+  const other = (show) => (show === 'before' ? 'after' : 'before');
+
+  console.assert(choose({ view: 'side', show: 'after' }, 'flip').show === 'after', 'flip from side keeps the picture');
+  console.assert(choose({ view: 'flip', show: 'after' }, 'flip').show === 'before', 'flip again swaps');
+  console.assert(choose({ view: 'flip', show: 'after' }, 'before').show === 'before', 'Before shows before');
+  console.assert(clicked({ view: 'side', show: 'after' }, 'before').show === 'after', 'click in side shows the other picture');
+  console.assert(clicked({ view: 'after', show: 'after' }, 'after').view === 'flip', 'click turns on Flip');
+
+  function wave(svg) {
+    const n = Number(svg.dataset.bars);
+    let paths = '';
+    for (let i = 0; i < n; i++) {
+      const h = 6 + Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.31)) * 40;
+      paths += `<path class="${i > n * 0.82 ? 'off' : ''}" d="M${i * 6 + 3} ${36 - h / 2}v${h}"/>`;
+    }
+    svg.setAttribute('viewBox', `0 0 ${n * 6} 72`);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.innerHTML = paths;
+  }
+
+  function fit(card) {
+    const frames = [...card.querySelectorAll('.frame')];
+    let tallest = 0;
+    for (const frame of frames) {
+      const screen = frame.querySelector('.screen');
+      const z = frame.clientWidth / screen.offsetWidth;
+      screen.style.transform = `scale(${z})`;
+      tallest = Math.max(tallest, screen.offsetHeight * z);
+    }
+    for (const frame of frames) frame.style.height = `${Math.ceil(tallest)}px`;
+    const frame = card.querySelector('.after .frame');
+    const box = frame.getBoundingClientRect();
+    const marks = frame.querySelector('.marks');
+    marks.innerHTML = '';
+    if (!box.width) return;
+    card.querySelectorAll('.after [data-change]').forEach((el, i) => {
+      const r = el.getBoundingClientRect();
+      const m = document.createElement('span');
+      m.className = 'mark';
+      m.style.cssText = `left:${r.left - box.left - 4}px;top:${r.top - box.top - 4}px;width:${r.width + 8}px;height:${r.height + 8}px`;
+      m.innerHTML = `<b>${i + 1}</b>`;
+      marks.append(m);
+    });
+  }
+
+  function apply(card, state) {
+    card.state = state;
+    const pics = card.querySelector('.pics');
+    pics.dataset.view = state.view;
+    pics.dataset.show = state.show;
+    const at = VIEWS.findIndex(([v]) => v === state.view);
+    const seg = card.querySelector('.segmented.compare');
+    seg.style.setProperty('--at', at);
+    seg.querySelectorAll('.segment').forEach((b, i) => { b.classList.toggle('on', i === at); b.setAttribute('aria-pressed', String(i === at)); });
+    card.querySelectorAll('.pic').forEach((pic) => {
+      const mine = pic.classList.contains('before') ? 'before' : 'after';
+      pic.setAttribute('aria-label', `${mine === 'before' ? 'Before' : 'After'}: click to flip to ${other(mine)}`);
+    });
+    requestAnimationFrame(() => fit(card));
+  }
+
+  for (const card of document.querySelectorAll('.mock:has(.pics)')) {
+    const before = card.querySelector('.pic.before');
+    before.innerHTML = `<div class="screen">${document.getElementById(`t-${before.dataset.from}`).innerHTML}</div>`;
+    for (const pic of card.querySelectorAll('.pic')) {
+      const screen = pic.querySelector('.screen');
+      screen.inert = true;
+      const mine = pic.classList.contains('before') ? 'Before' : 'After';
+      pic.innerHTML = `<figcaption><b>${mine}</b><span>${mine === 'Before' ? 'Today' : 'Idea'}</span></figcaption><div class="frame"><div class="marks"></div></div>`;
+      pic.querySelector('.frame').prepend(screen);
+      pic.tabIndex = 0;
+      pic.setAttribute('role', 'button');
+      const go = () => apply(card, clicked(card.state, mine.toLowerCase()));
+      pic.addEventListener('click', go);
+      pic.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go(); } });
+    }
+    card.querySelectorAll('svg.mock-wave').forEach(wave);
+    const seg = document.createElement('div');
+    seg.className = 'segmented compare';
+    seg.setAttribute('role', 'group');
+    seg.setAttribute('aria-label', 'Compare');
+    seg.style.setProperty('--count', VIEWS.length);
+    seg.innerHTML = '<span class="segment-pill" aria-hidden="true"></span>' + VIEWS.map(([v, t]) => `<button type="button" class="segment" data-view="${v}"><span>${t}</span></button>`).join('');
+    seg.addEventListener('click', (e) => { const b = e.target.closest('.segment'); if (b) apply(card, choose(card.state, b.dataset.view)); });
+    card.querySelector('.mock-head').append(seg);
+    const changes = [...card.querySelectorAll('.after [data-change]')];
+    card.querySelector('.changes').innerHTML = changes.map((el) => `<li>${el.dataset.change.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('');
+    apply(card, { view: 'side', show: 'after' });
+    console.assert(card.querySelectorAll('.changes li').length === changes.length && changes.length > 0, `${card.id}: every change is listed`);
+    let width = 0;
+    new ResizeObserver(([entry]) => {
+      if (entry.contentRect.width === width) return;
+      width = entry.contentRect.width;
+      fit(card);
+    }).observe(card.querySelector('.pics'));
+  }
+  document.fonts.ready.then(() => document.querySelectorAll('.mock:has(.pics)').forEach(fit));
+})();
+</script>
+</body>
+</html>
