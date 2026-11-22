@@ -212,6 +212,13 @@ pub(crate) fn trace_to(dir: &Path, stage: &str, detail: &str) {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum TurnRow {
+    Spoken(u64, u64, String),
+    Started(u64, String),
+}
+
 pub fn turns_name(index: u32) -> String {
     format!("seg-{index:05}.turns.json")
 }
@@ -958,7 +965,7 @@ impl Session {
         self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
     }
 
-    fn turns(&self, assembled: &Assembled) -> Option<Vec<Vec<(u64, String)>>> {
+    fn turns(&self, assembled: &Assembled) -> Option<Vec<Vec<(u64, Option<u64>, String)>>> {
         if !self.manifest.turns {
             return None;
         }
@@ -967,7 +974,15 @@ impl Session {
             .iter()
             .map(|p| {
                 let bytes = std::fs::read(self.dir.join(turns_name(p.index))).ok()?;
-                serde_json::from_slice(&bytes).ok()
+                let rows: Vec<TurnRow> = serde_json::from_slice(&bytes).ok()?;
+                Some(
+                    rows.into_iter()
+                        .map(|row| match row {
+                            TurnRow::Spoken(from, to, text) => (from, Some(to), text),
+                            TurnRow::Started(from, text) => (from, None, text),
+                        })
+                        .collect(),
+                )
             })
             .collect()
     }
@@ -1058,18 +1073,24 @@ impl Session {
                         .zip(turns)
                         .flat_map(|(p, entries)| {
                             let end = end_of(p);
-                            let starts: Vec<u64> = entries
-                                .iter()
-                                .map(|(ms, _)| p.start_secs * 1000 + ms)
-                                .collect();
+                            let base = p.start_secs * 1000;
+                            let lead = if p.index > 0 { OVERLAP_SECS * 1000 } else { 0 };
+                            let starts: Vec<u64> =
+                                entries.iter().map(|(ms, _, _)| base + ms).collect();
                             let names = &names;
                             entries
                                 .into_iter()
                                 .enumerate()
-                                .map(move |(i, (_, text))| {
+                                .map(move |(i, (ms, spoken_to, text))| {
                                     let from = starts[i];
-                                    let to =
-                                        starts.get(i + 1).copied().unwrap_or(end * 1000).max(from);
+                                    let said = (base + ms).saturating_sub(lead);
+                                    let said_to = match spoken_to {
+                                        Some(to) => (base + to).saturating_sub(lead),
+                                        None => starts
+                                            .get(i + 1)
+                                            .map_or(end * 1000, |next| next.saturating_sub(lead)),
+                                    }
+                                    .max(said);
                                     leo_core::recording::Passage {
                                         start_secs: from / 1000,
                                         end_secs: starts
@@ -1081,7 +1102,10 @@ impl Session {
                                         speaker: names
                                             .as_ref()
                                             .and_then(|t| {
-                                                t.name(from as f64 / 1000.0, to as f64 / 1000.0)
+                                                t.name(
+                                                    said as f64 / 1000.0,
+                                                    said_to as f64 / 1000.0,
+                                                )
                                             })
                                             .unwrap_or_else(|| speaker.into()),
                                     }
@@ -2003,6 +2027,38 @@ mod tests {
             .map(|p| p.speaker)
             .collect();
         assert_eq!(speakers, ["Rowan Ellery", "Microphone", "Microphone"]);
+    }
+
+    #[test]
+    fn a_short_line_before_a_long_silence_keeps_its_name_and_later_parts_skip_their_lead() {
+        let (s, _tmp) = call_track(&["", "Hi. Later."]);
+        std::fs::write(s.dir.join(turns_name(0)), "[]").unwrap();
+        std::fs::write(
+            s.dir.join(turns_name(1)),
+            r#"[[1500,2500,"Hi."],[22500,23500,"Later."]]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            s.dir.join(leo_core::call_names::FILE),
+            concat!(
+                "{\"from\":300.4,\"to\":301.6,\"who\":\"Rowan Ellery\"}\n",
+                "{\"from\":321.4,\"to\":322.6,\"who\":\"Tamsin Okafor\"}\n",
+            ),
+        )
+        .unwrap();
+        let lines: Vec<(u64, String)> = s
+            .archive()
+            .passages
+            .into_iter()
+            .map(|p| (p.start_secs, p.speaker))
+            .collect();
+        assert_eq!(
+            lines,
+            [
+                (301, "Rowan Ellery".to_string()),
+                (322, "Tamsin Okafor".to_string())
+            ]
+        );
     }
 
     #[test]

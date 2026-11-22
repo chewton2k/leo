@@ -79,7 +79,7 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
 Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 `powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
@@ -92,8 +92,9 @@ marked as the user's (`me`), appended to the session's `call-names.jsonl` as
 they close, so recovery keeps them. A reader quiet for `QUIET` (5 s) is replaced
 (generation counter; the old thread exits after its read), at most
 `MOST_RESTARTS` (20); problems go to the trace once each, never names.
-`archive` names each turn from its millisecond times (`Timeline::name`: more than
-half the line, or a zero-length line's start); leo-host's `labelled` keeps a
+`archive` names each turn from its spoken interval, less each later part's 1 s
+lead-in (`Timeline::name`: more than half the line, or a zero-length line's start;
+an older row without an end runs to the next row); leo-host's `labelled` keeps a
 name and replaces only the plain track label, so the call merge never joins
 two people.
 

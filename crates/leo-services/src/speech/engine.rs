@@ -18,7 +18,7 @@ pub const STOPPED: &str = "Transcription stopped. Your recorded audio is kept.";
 pub const STOPPING: &str = "The speech engine is stopping. Reopen Leo to transcribe again.";
 pub const BUSY: &str = "The speech engine is busy.";
 
-type Timed = Vec<(u64, String)>;
+type Timed = Vec<(u64, u64, String)>;
 
 const QUEUED: usize = 8;
 const SHADERS_MARKER: &str = leo_core::paths::own::SHADERS_READY;
@@ -641,7 +641,7 @@ fn ms(samples: u64) -> u64 {
     samples * 1000 / super::constants::WHISPER_SAMPLE_RATE as u64
 }
 
-fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, onset_ms: u64) -> Timed {
+fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, speech: (u64, u64)) -> Timed {
     if filtered == transcript.text
         && transcript.timestamp_kind != TimestampKind::None
         && !transcript.segments.is_empty()
@@ -649,14 +649,18 @@ fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, onset_ms: u6
         transcript
             .segments
             .iter()
-            .map(|segment| (start_ms + segment.t0_ms.max(0) as u64, segment.text.trim()))
-            .filter(|(_, text)| !text.is_empty())
-            .map(|(at, text)| (at, text.to_string()))
+            .map(|segment| {
+                let from = segment.t0_ms.max(0) as u64;
+                let to = (segment.t1_ms.max(0) as u64).max(from);
+                (start_ms + from, start_ms + to, segment.text.trim())
+            })
+            .filter(|(_, _, text)| !text.is_empty())
+            .map(|(from, to, text)| (from, to, text.to_string()))
             .collect()
     } else if filtered.trim().is_empty() {
         Vec::new()
     } else {
-        vec![(onset_ms, filtered.to_string())]
+        vec![(speech.0, speech.1.max(speech.0), filtered.to_string())]
     }
 }
 
@@ -887,7 +891,7 @@ fn run(
         let result = (|| -> Result<()> {
             load(&supervisor, &mut model, &job.selected.path)?;
             if let Some(chunk) = job.chunks.pop_front() {
-                let (start, onset) = (ms(chunk.start), ms(chunk.onset));
+                let (start, onset, offset) = (ms(chunk.start), ms(chunk.onset), ms(chunk.offset));
                 let pcm = if job.priority == Priority::Dictation {
                     padded(chunk.pcm)
                 } else {
@@ -912,7 +916,8 @@ fn run(
                     *lock(&serving) = false;
                     let heard = heard?;
                     let filtered = without_echo(heard.text.clone(), &echo);
-                    job.timed.extend(timed_of(&heard, &filtered, start, onset));
+                    job.timed
+                        .extend(timed_of(&heard, &filtered, start, (onset, offset)));
                     job.text.push(filtered);
                 }
             }
@@ -958,6 +963,7 @@ mod audio_level_tests {
                     pcm: pcm.to_vec(),
                     start: 0,
                     onset: 0,
+                    offset: 0,
                 })
                 .collect())
         };
@@ -1085,6 +1091,7 @@ mod audio_level_tests {
             .iter()
             .map(|t0_ms| transcribe_cpp::Segment {
                 t0_ms: *t0_ms,
+                t1_ms: *t0_ms + 1_500,
                 text: format!(" turn at {t0_ms} "),
                 ..Default::default()
             })
@@ -1104,14 +1111,14 @@ mod audio_level_tests {
     #[test]
     fn quick_turns_inside_one_piece_stay_in_order() {
         let heard = spoken(TimestampKind::Segment, &[0, 5_000, 10_000, 15_000]);
-        let timed = timed_of(&heard, &heard.text, 60_000, 61_000);
+        let timed = timed_of(&heard, &heard.text, 60_000, (61_000, 76_000));
         assert_eq!(
             timed,
             [
-                (60_000, "turn at 0".to_string()),
-                (65_000, "turn at 5000".to_string()),
-                (70_000, "turn at 10000".to_string()),
-                (75_000, "turn at 15000".to_string()),
+                (60_000, 61_500, "turn at 0".to_string()),
+                (65_000, 66_500, "turn at 5000".to_string()),
+                (70_000, 71_500, "turn at 10000".to_string()),
+                (75_000, 76_500, "turn at 15000".to_string()),
             ]
         );
     }
@@ -1120,8 +1127,8 @@ mod audio_level_tests {
     fn a_model_without_times_falls_back_to_the_piece_onset() {
         let heard = spoken(TimestampKind::None, &[0, 5_000]);
         assert_eq!(
-            timed_of(&heard, &heard.text, 60_000, 64_000),
-            [(64_000, heard.text.clone())]
+            timed_of(&heard, &heard.text, 60_000, (64_000, 66_000)),
+            [(64_000, 66_000, heard.text.clone())]
         );
     }
 
@@ -1129,10 +1136,10 @@ mod audio_level_tests {
     fn an_echo_filtered_piece_keeps_one_entry() {
         let heard = spoken(TimestampKind::Segment, &[0, 5_000]);
         assert_eq!(
-            timed_of(&heard, "turn at 5000", 60_000, 62_000),
-            [(62_000, "turn at 5000".to_string())]
+            timed_of(&heard, "turn at 5000", 60_000, (62_000, 63_000)),
+            [(62_000, 63_000, "turn at 5000".to_string())]
         );
-        assert!(timed_of(&heard, "", 60_000, 62_000).is_empty());
+        assert!(timed_of(&heard, "", 60_000, (62_000, 63_000)).is_empty());
     }
 }
 

@@ -96,7 +96,7 @@ pub fn transcribe_segment() -> TranscribeFn {
             Some(file) => crate::ai::transcribe_turns(path)
                 .and_then(|timed| {
                     leo_core::paths::write_atomic(&file, &serde_json::to_string(&timed)?)?;
-                    let texts: Vec<&str> = timed.iter().map(|(_, text)| text.as_str()).collect();
+                    let texts: Vec<&str> = timed.iter().map(|(_, _, text)| text.as_str()).collect();
                     Ok(crate::ai::chain::ChainOutcome {
                         value: crate::speech::chunking::join_transcripts(&texts),
                         provider: "local speech with times".into(),
