@@ -138,7 +138,16 @@ async function sourceMatch(source, at) {
   if (changedSources().length) return toast('Save your fixes first.');
   await loadSourcePage(source, { passages: Number(at), points: 0 }, Number(at) > 0 ? [{ passages: 0, points: 0 }] : []);
   const row = document.querySelector(`[data-passage="${at}"]`);
-  if (row) row.scrollIntoView({ block: 'center' });
+  if (!row) return;
+  showEcho(row.closest && row.closest('.echo-lines'));
+  row.scrollIntoView({ block: 'center' });
+}
+
+function showEcho(lines) {
+  if (!lines || !lines.hidden) return;
+  lines.hidden = false;
+  const fold = lines.previousElementSibling;
+  if (fold && fold.classList.contains('echo-fold')) fold.remove();
 }
 
 function sourceClock(secs) {
@@ -163,7 +172,7 @@ function sourceItems(items) {
     }
     flush();
     if (item.point) out.push(`<p class="typed-point"><span class="typed-label">Your point · </span>${sourceSpan('point', item.point)}</p>`);
-    else out.push(`<p class="echo-fold">Hidden: ${plural(item.echo.length, 'echo line')} · <button type="button" class="facts-link" data-echo-show>Show</button></p><p class="spoken echo-lines" hidden>${item.echo.map((row) => sourceSpan('passage', row)).join(' ')}</p>`);
+    else out.push(`<p class="echo-fold">Hidden: ${plural(item.echo.length, 'echo line')} · <button type="button" class="facts-link" data-echo-show>Show</button></p><p class="spoken echo-lines" hidden><span class="typed-label">${esc(item.who || 'Microphone')} · echo · </span>${item.echo.map((row) => sourceSpan('passage', row)).join(' ')}</p>`);
   }
   flush();
   return out.join('');
@@ -276,11 +285,7 @@ function drawRecordingSources(query = '') {
   };
   box.onclick = (e) => {
     const show = e.target.closest && e.target.closest('[data-echo-show]');
-    if (show) {
-      const fold = show.closest('.echo-fold');
-      fold.nextElementSibling.hidden = false;
-      fold.remove();
-    }
+    if (show) showEcho(show.closest('.echo-fold').nextElementSibling);
     const name = e.target.closest && e.target.closest('.speaker-name');
     if (name) renameSpeakerField(name);
   };

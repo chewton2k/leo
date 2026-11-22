@@ -98,10 +98,26 @@ function screen(eng) {
     ui.open = true;
     ui.sheets += 1;
     ui.html = html;
-    ui.areas = [...html.matchAll(/<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => ({
-      kind: m[1], seq: Number(m[2]), textContent: unescape(m[3]), dataset: { [m[1]]: m[2] }, scrolled: 0,
-      addEventListener() {}, scrollIntoView() { this.scrolled += 1; },
-    }));
+    const folds = new Map();
+    const foldOf = (at) => {
+      const opened = html.lastIndexOf('<p class="spoken echo-lines" hidden>', at);
+      if (opened < 0 || html.lastIndexOf('</p>', at) > opened) return null;
+      if (!folds.has(opened)) {
+        const lines = { hidden: true, previousElementSibling: { classList: { contains: (c) => c === 'echo-fold' }, remove() { lines.unfolded = true; } } };
+        folds.set(opened, lines);
+      }
+      return folds.get(opened);
+    };
+    ui.folds = folds;
+    ui.areas = [...html.matchAll(/<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => {
+      const fold = foldOf(m.index);
+      return {
+        kind: m[1], seq: Number(m[2]), textContent: unescape(m[3]), dataset: { [m[1]]: m[2] }, scrolled: 0,
+        addEventListener() {},
+        closest: (selector) => (selector === '.echo-lines' ? fold : null),
+        scrollIntoView() { this.scrolled += 1; this.shownWhenScrolled = !fold || !fold.hidden; },
+      };
+    });
     ui.rows = [...html.matchAll(/<div class="source-row (?:turn|minute)" data-text="([^"]*)">/g)].map((m) => ({ dataset: { text: unescape(m[1]) }, hidden: false }));
     ui.query = field(unescape((html.match(/<input id="source-query" value="([^"]*)"/) || [, ''])[1]));
     const pick = html.includes('id="source-pick"');
@@ -370,8 +386,22 @@ test('a meeting shows one turn per speaker with a tone dot, the typed point at i
   const point = ui.html.indexOf('Your point · ');
   assert.ok(first < point && point < ui.html.indexOf('>sure<'), 'the point sits inside the first turn, after the line before it');
   assert.ok(ui.html.includes('Hidden: 2 echo lines · '));
+  assert.ok(ui.html.includes('<p class="spoken echo-lines" hidden><span class="typed-label">Speaker 1 · echo · </span>'), 'shown echo is labelled as the microphone side, not the turn it sits in');
   assert.ok(ui.html.includes('aria-label="Rename Speaker 2"'));
   assert.match(ui.facts, /^Transcript · 0:29 · /);
+});
+
+test('a match inside folded echo lines opens the fold before it is scrolled to', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  await ui.context.sourceMatch('rec-cccccccc', '5');
+  const row = ui.areas.find((a) => a.kind === 'passage' && a.seq === 5);
+  assert.equal(row.scrolled, 1);
+  assert.equal(row.shownWhenScrolled, true);
+  const fold = row.closest('.echo-lines');
+  assert.equal(fold.hidden, false);
+  assert.equal(fold.unfolded, true);
 });
 
 test('renaming a speaker sends the rename with the revision and reloads the same page', async () => {

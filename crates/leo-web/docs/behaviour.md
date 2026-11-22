@@ -1355,7 +1355,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   speaker row and one turn per speaker (a tone dot in the order they were first heard, You in
   ink, the name and time once per turn); a lecture shows a paragraph a minute with its time;
   typed points sit at their time as "Your point · …"; echo lines fold into "Hidden: N echo
-  lines · Show". Tapping a speaker's name renames that speaker on every line of that recording
+  lines · Show", shown as "You · echo · …" (their own track's name, never the turn they sit
+  in), and a Found match inside a fold opens it before scrolling there. Tapping a speaker's name renames that speaker on every line of that recording
   (the note's text is not rewritten; typing a name another speaker has asks "Merge A into
   B?" and merges only on Merge). Lines are fixed in
   place and saved with Save fixes; paging, Earlier/Later, the pick list for several recordings,

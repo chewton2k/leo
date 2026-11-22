@@ -578,6 +578,7 @@ test('a meeting groups lines into turns and folds echo lines without starting a 
   assert.deepEqual(flow.groups.map((g) => [g.speaker, g.at]), [['You', 0], ['Others', 9], ['You', 20]]);
   assert.deepEqual(flow.groups[0].items.map((i) => Object.keys(i)[0]), ['passage', 'passage', 'point'], 'a point comes after the line said at the same second');
   assert.deepEqual(flow.groups[1].items.map((i) => (i.echo ? i.echo.map(([seq]) => seq) : i.passage[0])), [3, [4, 5], 6]);
+  assert.equal(flow.groups[1].items[1].who, 'You', 'a fold inside the other side\'s turn keeps the microphone side as its speaker');
 });
 
 test('a lecture makes one paragraph a minute and a missing echo field counts as not echo', () => {

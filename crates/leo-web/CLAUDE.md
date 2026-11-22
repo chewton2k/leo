@@ -1086,7 +1086,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   (recording.js) groups a page: with speakers (`speakersOf(head.speakers)`, not `Microphone`,
   `Computer audio` or empty) one turn per run of a speaker (tone dot, name, time once), else a
   paragraph a minute with its time; typed points sit at their time as "Your point · …"; a run of
-  passages with `echo: true` (missing is false) folds into "Hidden: N echo lines · Show". Tones
+  passages with `echo: true` (missing is false) folds into "Hidden: N echo lines · Show"; the fold keeps its own speaker (`who`) and shows it as "You · echo", and `sourceMatch` opens a fold (`showEcho`) before scrolling to a match inside it. Tones
   come from `head.speakers` order (`toneOf`: You in ink, others `--hue-0`, `-1`, `-4`, …), so
   paging never recolours. Each line is a `contenteditable="plaintext-only"` `.source-text` span;
   it pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`, 512 KB of each kind a

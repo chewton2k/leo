@@ -177,7 +177,7 @@
       if (!group || (!echo && group.key !== key)) open(row.at, meeting ? p.speaker || '' : '', key);
       const last = group.items[group.items.length - 1];
       if (echo && last && last.echo) last.echo.push(row.passage);
-      else group.items.push(echo ? { echo: [row.passage] } : { passage: row.passage });
+      else group.items.push(echo ? { echo: [row.passage], who: p.speaker || '' } : { passage: row.passage });
     }
     return { meeting, groups };
   }
