@@ -309,14 +309,14 @@ body::before, body::after { content: none; }
 
   <!-- H -->
   <section class="mock" id="h">
-    <div class="mock-head"><div><h2>H · Speakers after recording</h2><p>The fixes from the speaker comparison below, on the saved transcript: names once per turn, the Others track split by voice, rename once, and echo lines folded away.</p></div></div>
+    <div class="mock-head"><div><h2>H · Speakers after recording</h2><p>The fixes from the speaker comparison below, on the transcript sheet of a call. Today the sheet shows time and text only; who spoke is saved but not shown.</p></div></div>
     <div class="pics"><figure class="pic before" data-from="speakers"></figure>
       <figure class="pic after"><div class="screen">
         <div style="max-width: 820px;">
           <h3 style="margin: 0; font-weight: 500;">Transcript</h3>
           <div class="speaker-row" style="margin-top: 12px;" data-change="A speaker row; rename once: Others 1 → Maya renames every line"><span class="speaker"><span class="dot you"></span>You</span><span class="speaker"><span class="dot s1"></span>Maya <small>was Others 1</small></span><span class="speaker"><span class="dot s2"></span>Others 2 <button class="btn plain sm">Name</button></span></div>
           <div class="turns" style="margin-top: 20px;">
-            <div class="turn" data-change="'[Others]' on every line → a name and time once per turn"><div class="turn-who"><span class="dot s1"></span>Maya <time>11:40</time></div><p>If the sensors arrive Monday we can still demo on Thursday. I'd rather not move it again.</p></div>
+            <div class="turn" data-change="Who spoke is saved with each line but never shown → a name and time once per turn"><div class="turn-who"><span class="dot s1"></span>Maya <time>11:40</time></div><p>If the sensors arrive Monday we can still demo on Thursday. I'd rather not move it again.</p></div>
             <div class="turn"><div class="turn-who"><span class="dot you"></span>You <time>12:05</time></div><p>Agreed. Can you send the survey numbers before then?</p><span class="echo-fold" data-change="Lines the microphone heard from the speakers fold into one 'Hidden: 2 echo lines'">Hidden: 2 echo lines · Show</span></div>
             <div class="turn" data-change="The Others track is split by voice: a second person becomes Others 2"><div class="turn-who"><span class="dot s2"></span>Others 2 <time>12:31</time></div><p>Yes, tonight.</p></div>
           </div>
@@ -331,19 +331,19 @@ body::before, body::after { content: none; }
     <table class="compare-table">
       <thead><tr><th>Case</th><th>leo today</th><th>The reference app</th></tr></thead>
       <tbody>
-        <tr><td>Calls</td><td>Two native tracks, saved as <b>You</b> and <b>Others</b>. Label speakers is forced off for calls.</td><td>Two tracks too, You and Them. Them gets a real name when the call app (Zoom, Teams, Meet) shows one person talking for most of a line, read from its accessibility tree about twice a second; else Them. Never guessed.</td></tr>
+        <tr><td>Calls</td><td>Two native tracks, saved as <b>You</b> and <b>Others</b> on each line. Label speakers is forced off for calls (<code>record::start</code>).</td><td>Two tracks too, You and Them. Them gets a real name when the call app (Zoom, Teams, Meet) shows one person talking for most of a line, read from its accessibility tree about twice a second; else Them. Never guessed.</td></tr>
         <tr><td>One microphone, several people</td><td>Optional Sortformer pass after Stop: <b>Speaker 1, 2…</b> per run, 86–91% right on meeting tests.</td><td>No voice separation: the microphone is always You.</td></tr>
-        <tr><td>Echo (no headphones)</td><td>No filter; a headset warning before Start.</td><td>Compares loudness of the mic and the call track over 2 s windows; a steady lag means echo, and those mic lines are hidden.</td></tr>
-        <tr><td>Display</td><td><code>[Speaker N]</code> before each line; no names, no colours.</td><td>Lines grouped into turns (same voice, under 30 s apart), a name once per turn, a colour per named speaker, kept in first-seen order.</td></tr>
+        <tr><td>Echo (no headphones)</td><td>None found: no echo or voice-processing step in capture. (The headset warning before Start is about recording what the computer plays, not echo.)</td><td>Compares loudness of the mic and the call track over 2 s windows; a steady lag means echo, and those mic lines are hidden.</td></tr>
+        <tr><td>Display</td><td>The transcript sheet shows time and text only; the saved speaker (You, Others, Speaker N) is not drawn. The text the writing AI reads gets <code>[Speaker N]</code> prefixes, and Felix's transcript tool shows the name.</td><td>Lines grouped into turns (same voice, under 30 s apart), a name once per turn, a colour per named speaker, kept in first-seen order.</td></tr>
         <tr><td>Live</td><td>Speaker labels only after Stop.</td><td>Names arrive with each final line; live words show lighter and fade in.</td></tr>
-        <tr><td>Renaming</td><td>Edit each line by hand in the transcript sheet.</td><td>Names come from the call app; no rename step needed on calls.</td></tr>
+        <tr><td>Renaming</td><td>No way to name a speaker.</td><td>No speaker rename found; names come from the call app. Attendees are a separate list on the meeting, with name suggestions.</td></tr>
       </tbody>
     </table>
     <ol class="fixes">
-      <li><b>Turns, not prefixes.</b> Show a name and time once per turn in the transcript sheet and the live column; keep <code>[Speaker N]</code> only in the saved text.</li>
+      <li><b>Show who spoke.</b> The sheet already has the speaker on every line; draw a name and time once per turn there and in the live column.</li>
       <li><b>Rename once.</b> A speaker row in the transcript sheet: renaming Speaker 1 rewrites every line for that recording through the existing change batch.</li>
-      <li><b>Split Others on calls.</b> Run the existing Sortformer pass on the Others track only, so a three-person call gives You, Others 1 and Others 2.</li>
-      <li><b>Echo filter.</b> Without headphones the mic hears the call. Compare the two tracks' loudness over short windows and fold matching mic lines away, instead of only warning about headsets.</li>
+      <li><b>Split Others on calls.</b> Run the existing Sortformer pass on the Others track only, so a three-person call gives You, Others 1 and Others 2. This reverses the 2026-11-16 call (labels never on call tracks), so it needs your yes.</li>
+      <li><b>Echo filter.</b> Without headphones the microphone also hears the call, so the other side can appear twice, once as You. Compare the two tracks' loudness over short windows and fold matching You lines away.</li>
       <li><b>Names from the call app (later).</b> leo already asks for Accessibility for dictation; reading who the call app shows talking would name Others without guessing. Bigger work, per app.</li>
       <li><b>Tone dots.</b> One dot per speaker in leo's tones, colour only on the dot, in first-seen order so numbers never shift.</li>
     </ol>
@@ -408,12 +408,7 @@ body::before, body::after { content: none; }
   <div style="max-width: 820px;">
     <h3 style="margin: 0; font-weight: 500;">Transcript</h3>
     <p class="hint" style="margin: 4px 0 16px;">Capstone sync · Call · 12:48</p>
-    <p class="raw-line"><b>[Others]</b> If the sensors arrive Monday we can still demo on Thursday.</p>
-    <p class="raw-line"><b>[Others]</b> I'd rather not move it again.</p>
-    <p class="raw-line"><b>[You]</b> Agreed. Can you send the survey numbers before then?</p>
-    <p class="raw-line"><b>[You]</b> If the sensors arrive Monday we can</p>
-    <p class="raw-line"><b>[You]</b> still demo on Thursday</p>
-    <p class="raw-line"><b>[Others]</b> Yes, tonight.</p>
+    <section class="recording-source"><div class="source-row"><span class="rec-at">11:40</span><textarea class="source-text" rows="1">If the sensors arrive Monday we can still demo on Thursday.</textarea></div><div class="source-row"><span class="rec-at">11:46</span><textarea class="source-text" rows="1">I'd rather not move it again.</textarea></div><div class="source-row"><span class="rec-at">12:05</span><textarea class="source-text" rows="1">Agreed. Can you send the survey numbers before then?</textarea></div><div class="source-row"><span class="rec-at">12:09</span><textarea class="source-text" rows="1">If the sensors arrive Monday we can still demo on Thursday</textarea></div><div class="source-row"><span class="rec-at">12:31</span><textarea class="source-text" rows="1">Yes, tonight.</textarea></div></section>
   </div>
 </template>
 
@@ -517,7 +512,7 @@ body::before, body::after { content: none; }
     card.querySelector('.mock-head').append(seg);
     const changes = [...card.querySelectorAll('.after [data-change]')];
     card.querySelector('.changes').innerHTML = changes.map((el) => `<li>${el.dataset.change.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</li>`).join('');
-    apply(card, { view: 'side', show: 'after' });
+    apply(card, { view: 'flip', show: 'after' });
     console.assert(card.querySelectorAll('.changes li').length === changes.length && changes.length > 0, `${card.id}: every change is listed`);
     let width = 0;
     new ResizeObserver(([entry]) => {
