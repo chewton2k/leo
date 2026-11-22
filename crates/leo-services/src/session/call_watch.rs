@@ -6,8 +6,17 @@ use std::time::{Duration, Instant};
 
 use leo_core::call_names::{self, Look, Mark, Readers, Timeline};
 
-type Anchor = Arc<Mutex<Option<(Instant, f64, bool)>>>;
-type Heard = (u32, Instant, Look);
+#[derive(Debug, Clone, Copy)]
+struct Moment {
+    at: Instant,
+    secs: f64,
+    paused: bool,
+    resumed: Instant,
+    epoch: u32,
+}
+
+type Anchor = Arc<Mutex<Option<Moment>>>;
+type Heard = (u32, u32, Instant, Look);
 
 const STOP_WAIT: Duration = Duration::from_secs(1);
 
@@ -49,7 +58,7 @@ impl Watch {
 
     pub fn tick(&self, recorded_secs: f64, paused: bool) {
         if let Ok(mut anchor) = self.anchor.lock() {
-            *anchor = Some((Instant::now(), recorded_secs, paused));
+            *anchor = Some(moved(*anchor, Instant::now(), recorded_secs, paused));
         }
     }
 }
@@ -63,26 +72,49 @@ impl Drop for Watch {
     }
 }
 
-fn recorded_at(anchor: &Anchor, at: Instant) -> Option<f64> {
-    let (then, secs, paused) = (*anchor.lock().ok()?)?;
-    if paused {
+fn moved(last: Option<Moment>, now: Instant, secs: f64, paused: bool) -> Moment {
+    match last {
+        Some(last) if last.paused == paused => Moment {
+            at: now,
+            secs,
+            ..last
+        },
+        last => Moment {
+            at: now,
+            secs,
+            paused,
+            resumed: now,
+            epoch: last.map_or(0, |last| last.epoch + 1),
+        },
+    }
+}
+
+fn now_of(anchor: &Anchor) -> Option<Moment> {
+    *anchor.lock().ok()?
+}
+
+fn recorded_at(moment: Moment, read: Instant, epoch: u32, lag: Duration) -> Option<f64> {
+    let said = read.checked_sub(lag)?;
+    if moment.paused || moment.epoch != epoch || said < moment.resumed {
         return None;
     }
-    Some(match at.checked_duration_since(then) {
-        Some(after) => secs + after.as_secs_f64(),
-        None => secs - then.duration_since(at).as_secs_f64(),
+    Some(match said.checked_duration_since(moment.at) {
+        Some(after) => moment.secs + after.as_secs_f64(),
+        None => moment.secs - moment.at.duration_since(said).as_secs_f64(),
     })
 }
 
 fn spawn_reader(
     readers: &Readers,
+    anchor: &Anchor,
     generation: &Arc<AtomicU32>,
     stop: &Arc<AtomicBool>,
     tx: &Sender<Heard>,
     every: Duration,
 ) {
-    let (readers, generation, stop, tx) = (
+    let (readers, anchor, generation, stop, tx) = (
         readers.clone(),
+        anchor.clone(),
         generation.clone(),
         stop.clone(),
         tx.clone(),
@@ -93,9 +125,13 @@ fn spawn_reader(
         .spawn(move || {
             let mut reader = readers();
             while !stop.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == mine {
+                let Some(epoch) = now_of(&anchor).filter(|m| !m.paused).map(|m| m.epoch) else {
+                    std::thread::sleep(every);
+                    continue;
+                };
                 let at = Instant::now();
                 let look = reader.read();
-                if tx.send((mine, at, look)).is_err() {
+                if tx.send((mine, epoch, at, look)).is_err() {
                     break;
                 }
                 let took = at.elapsed();
@@ -178,16 +214,17 @@ fn watch(
     quiet: Duration,
 ) {
     let mut sidecar = Sidecar::new(dir);
+    let lag = Duration::from_secs_f64(call_names::LAG_SECS);
     let generation = Arc::new(AtomicU32::new(0));
     let (tx, rx) = mpsc::channel();
-    spawn_reader(&readers, &generation, stop, &tx, every);
+    spawn_reader(&readers, anchor, &generation, stop, &tx, every);
     let mut timeline = Timeline::default();
     let mut heard_at = Instant::now();
     let mut restarts = 0;
     let mut told: Vec<String> = Vec::new();
     while !stop.load(Ordering::Relaxed) {
         match rx.recv_timeout(every) {
-            Ok((from, at, look)) if from == generation.load(Ordering::Relaxed) => {
+            Ok((from, epoch, at, look)) if from == generation.load(Ordering::Relaxed) => {
                 heard_at = Instant::now();
                 if let Look::Unreadable(why) = &look {
                     if !told.contains(why) {
@@ -199,12 +236,9 @@ fn watch(
                         told.push(why.clone());
                     }
                 }
-                if let Some(secs) = recorded_at(anchor, at) {
+                if let Some(secs) = now_of(anchor).and_then(|m| recorded_at(m, at, epoch, lag)) {
                     let reading = call_names::read(&look);
-                    sidecar.write(
-                        dir,
-                        timeline.heard(secs - call_names::LAG_SECS, reading.as_ref()),
-                    );
+                    sidecar.write(dir, timeline.heard(secs, reading.as_ref()));
                 }
             }
             Ok(_) | Err(RecvTimeoutError::Timeout) => {}
@@ -218,7 +252,7 @@ fn watch(
                 "call-names",
                 "the call reader went quiet; started it again",
             );
-            spawn_reader(&readers, &generation, stop, &tx, every);
+            spawn_reader(&readers, anchor, &generation, stop, &tx, every);
             heard_at = Instant::now();
         }
     }
@@ -292,10 +326,14 @@ mod tests {
             Duration::from_secs(5),
         );
         watch.tick(100.0, false);
-        std::thread::sleep(Duration::from_millis(300));
+        std::thread::sleep(Duration::from_millis(1_100));
         drop(watch);
         let timeline = named(temp.path());
-        assert_eq!(timeline.name(99.3, 99.5).as_deref(), Some("Rowan Ellery"));
+        assert_eq!(
+            timeline.name(100.05, 100.2).as_deref(),
+            Some("Rowan Ellery")
+        );
+        assert_eq!(timeline.name(99.0, 99.9), None);
         assert_eq!(timeline.name(10.0, 20.0), None);
     }
 
@@ -312,8 +350,28 @@ mod tests {
         watch.tick(100.0, true);
         std::thread::sleep(Duration::from_millis(200));
         drop(watch);
-        assert!(calls.load(Ordering::Relaxed) > 0);
+        assert_eq!(calls.load(Ordering::Relaxed), 0);
         assert!(!temp.path().join(call_names::FILE).exists());
+    }
+
+    #[test]
+    fn a_reading_is_placed_by_when_it_was_said_and_never_across_a_pause() {
+        let lag = Duration::from_millis(750);
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let running = moved(None, at(0), 0.0, false);
+        let later = moved(Some(running), at(10_000), 10.0, false);
+        assert_eq!(later.epoch, running.epoch);
+        let mapped = recorded_at(later, at(9_000), later.epoch, lag).unwrap();
+        assert!((mapped - 8.25).abs() < 1e-6);
+        assert_eq!(recorded_at(running, at(500), running.epoch, lag), None);
+        let paused = moved(Some(later), at(11_000), 11.0, true);
+        assert_eq!(recorded_at(paused, at(10_900), later.epoch, lag), None);
+        let resumed = moved(Some(paused), at(60_000), 11.0, false);
+        assert_eq!(recorded_at(resumed, at(10_900), later.epoch, lag), None);
+        assert_eq!(recorded_at(resumed, at(60_400), resumed.epoch, lag), None);
+        let after = recorded_at(resumed, at(61_000), resumed.epoch, lag).unwrap();
+        assert!((after - 11.25).abs() < 1e-6);
     }
 
     #[cfg(unix)]
@@ -344,7 +402,7 @@ mod tests {
                 Duration::from_secs(5),
             );
             watch.tick(100.0, false);
-            std::thread::sleep(Duration::from_millis(200));
+            std::thread::sleep(Duration::from_millis(1_000));
             let stopping = Instant::now();
             drop(watch);
             assert!(stopping.elapsed() < STOP_WAIT);
@@ -390,11 +448,11 @@ mod tests {
             Duration::from_millis(150),
         );
         watch.tick(50.0, false);
-        std::thread::sleep(Duration::from_millis(500));
+        std::thread::sleep(Duration::from_millis(1_200));
         drop(watch);
         assert!(made.load(Ordering::Relaxed) >= 2);
         let trace = std::fs::read_to_string(temp.path().join("trace.jsonl")).unwrap();
         assert!(trace.contains("went quiet"));
-        assert!(named(temp.path()).name(49.5, 49.7).is_some());
+        assert!(named(temp.path()).name(50.1, 50.3).is_some());
     }
 }

@@ -84,9 +84,10 @@ Call tracks (`Manifest.turns`) keep the speech model's segment start and end tim
 Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 `powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
 thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
-each reading is stamped in the track's recorded time from the loop's
-`tick(recorded_secs, paused)` anchor, dropped while paused, less `LAG_SECS`
-(0.75). A reading names someone only when exactly one person other than the user is
+the reader does not read while paused. Each reading's start, less `LAG_SECS`
+(0.75) on the wall clock, is mapped to the track's recorded time from the loop's
+`tick(recorded_secs, paused)` anchor; a reading from before the latest pause
+change (an epoch counter) or said before the latest resume is dropped. A reading names someone only when exactly one person other than the user is
 marked speaking, and in Zoom (which does not mark the user's own tile) only once
 the user's name is known; the one-other-person shortcut needs the participant
 count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at
