@@ -255,6 +255,7 @@ function drawRecordingSources(query = '') {
     clearTimeout(sourceSearch);
     sourceSearch = setTimeout(async () => {
       const page = sourcePage;
+      if (!page) return;
       const mine = seq;
       const q = $('#source-query') ? $('#source-query').value : '';
       const answer = await fetchSources(page.note, q, page.page.head.id, page.page.at).catch(() => null);
