@@ -21,6 +21,7 @@ fn look(app: &str, json: &str) -> Look {
     Look::Call {
         app: app.into(),
         windows: windows(json),
+        seat: Seat::default(),
     }
 }
 
@@ -96,6 +97,8 @@ fn meet_reads_named_tiles_and_the_talking_class_only() {
     assert_eq!(read.speaking, ["Pim Castell"]);
     assert_eq!(read.participants, ["Pim Castell", "Oriel Danvers", "You"]);
     assert_eq!(read.me.as_deref(), Some("You"));
+    let list = windows(include_str!("fixtures/meet-chrome.json"));
+    assert!(list.iter().any(|w| is_call_tree(&w.tree)));
 }
 
 #[test]
@@ -182,6 +185,47 @@ fn call_windows_are_told_apart_by_title() {
     assert!(call_window(Kind::Zoom, "", "zm.meeting.window.main"));
     assert!(call_window(Kind::Zoom, "Zoom Webinar", ""));
     assert!(!call_window(Kind::Zoom, "Zoom Workplace", ""));
+}
+
+#[test]
+fn the_call_chosen_first_stays_the_one_read() {
+    let seen = |pid: u32, app: &str, title: &str, call: bool| Seen {
+        pid,
+        app: app.into(),
+        title: title.into(),
+        call,
+    };
+    let start = [
+        seen(7, "com.google.Chrome", "Meet - abc-defg-hij", true),
+        seen(7, "com.google.Chrome", "Meet the team - Docs", false),
+        seen(9, "us.zoom.xos", "Zoom Workplace", false),
+    ];
+    let (seat, at) = pick(None, &start).unwrap();
+    assert_eq!(at, [0]);
+    assert_eq!(seat.title.as_deref(), Some("Meet - abc-defg-hij"));
+    let other = [
+        seen(7, "com.google.Chrome", "Meet - xyz-wxyz-xyz", true),
+        seen(9, "us.zoom.xos", "Zoom Meeting", true),
+    ];
+    assert_eq!(pick(Some(&seat), &other), Err("the call window closed"));
+    let back = [
+        seen(7, "com.google.Chrome", "Meet - xyz-wxyz-xyz", true),
+        seen(7, "com.google.Chrome", "Meet - abc-defg-hij", false),
+    ];
+    assert_eq!(pick(Some(&seat), &back).unwrap().1, [1]);
+    assert_eq!(pick(None, &other), Err("more than one call is open"));
+    let two_tabs = [
+        seen(7, "com.google.Chrome", "Meet - abc-defg-hij", true),
+        seen(7, "com.google.Chrome", "Meet - xyz-wxyz-xyz", true),
+    ];
+    assert_eq!(pick(None, &two_tabs), Err("more than one call is open"));
+    let zoom = [
+        seen(9, "us.zoom.xos", "Zoom Meeting", true),
+        seen(9, "us.zoom.xos", "zoom floating video window", false),
+    ];
+    let (seat, at) = pick(None, &zoom).unwrap();
+    assert_eq!((seat.title, at), (None, vec![0, 1]));
+    assert_eq!(pick(None, &start[1..]), Err("no call window is open"));
 }
 
 #[test]

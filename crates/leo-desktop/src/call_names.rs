@@ -23,12 +23,13 @@ pub fn readers() -> Option<Readers> {
 mod mac {
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
+    use std::time::Instant;
 
     use leo_core::call_names::{
-        self as names, Kind, Look, Node, Reader, Window, BROWSERS, MOST_WINDOWS, TEAMS_APPS,
-        ZOOM_APPS,
+        self as names, Ask, Kind, Look, Node, Reader, Seat, Seen, Window, BROWSERS, MOST_WINDOWS,
+        TEAMS_APPS, ZOOM_APPS,
     };
-    use objc2_app_kit::{NSRunningApplication, NSWorkspace};
+    use objc2_app_kit::NSRunningApplication;
     use objc2_foundation::NSString;
 
     type Ref = *const c_void;
@@ -92,6 +93,7 @@ mod mac {
     }
 
     const UTF8: u32 = 0x0800_0100;
+    const TIMEOUT: f32 = 0.3;
     const KEYS: [&str; 8] = [
         "AXRole",
         "AXSubrole",
@@ -165,6 +167,7 @@ mod mac {
     }
 
     fn attribute(element: Ref, name: &str) -> Owned {
+        unsafe { AXUIElementSetMessagingTimeout(element, TIMEOUT) };
         let key = cf_string(name);
         let mut value = null();
         if unsafe { AXUIElementCopyAttributeValue(element, key.0, &mut value) } != 0 {
@@ -176,6 +179,7 @@ mod mac {
     fn set(element: Ref, name: &str, on: bool) {
         let key = cf_string(name);
         unsafe {
+            AXUIElementSetMessagingTimeout(element, TIMEOUT);
             let value = if on { kCFBooleanTrue } else { kCFBooleanFalse };
             AXUIElementSetAttributeValue(element, key.0, value);
         }
@@ -185,6 +189,21 @@ mod mac {
         keys: Owned,
         asked: Vec<i32>,
         enhanced: Vec<i32>,
+    }
+
+    struct Found {
+        _app: Owned,
+        _windows: Owned,
+        pid: i32,
+        id: &'static str,
+        kind: Kind,
+    }
+
+    struct Candidate {
+        found: usize,
+        window: Ref,
+        title: String,
+        ident: String,
     }
 
     impl Mac {
@@ -213,8 +232,10 @@ mod mac {
             budget: &mut usize,
             most_depth: usize,
             zoom: bool,
+            until: Instant,
         ) -> Node {
             *budget = budget.saturating_sub(1);
+            unsafe { AXUIElementSetMessagingTimeout(element, TIMEOUT) };
             let mut values = null();
             let copied = unsafe {
                 AXUIElementCopyMultipleAttributeValues(element, self.keys.0, 0, &mut values)
@@ -248,11 +269,11 @@ mod mac {
                 return node;
             }
             for child in items(at(7)) {
-                if *budget == 0 {
+                if *budget == 0 || Instant::now() >= until {
                     break;
                 }
                 node.children
-                    .push(self.copy(child, depth + 1, budget, most_depth, zoom));
+                    .push(self.copy(child, depth + 1, budget, most_depth, zoom, until));
             }
             node
         }
@@ -270,15 +291,13 @@ mod mac {
             }
         }
 
-        fn running() -> Vec<(i32, &'static str)> {
-            let front = NSWorkspace::sharedWorkspace()
-                .frontmostApplication()
-                .map(|app| app.processIdentifier());
-            let mut running: Vec<(i32, &'static str)> = ZOOM_APPS
+        fn running(seat: Option<&Seat>) -> Vec<(i32, &'static str)> {
+            ZOOM_APPS
                 .iter()
                 .chain(TEAMS_APPS)
                 .chain(BROWSERS)
                 .filter(|id| !id.ends_with(".exe"))
+                .filter(|id| seat.is_none_or(|seat| seat.app == **id))
                 .flat_map(|id| {
                     NSRunningApplication::runningApplicationsWithBundleIdentifier(
                         &NSString::from_str(id),
@@ -287,22 +306,45 @@ mod mac {
                     .map(|app| (app.processIdentifier(), *id))
                     .collect::<Vec<_>>()
                 })
-                .collect();
-            running.sort_by_key(|(pid, _)| Some(*pid) != front);
-            running
+                .filter(|(pid, _)| seat.is_none_or(|seat| seat.pid == *pid as u32))
+                .collect()
+        }
+
+        fn tree(&self, window: Ref, kind: Kind, budget: &mut usize, until: Instant) -> Node {
+            let zoom = kind == Kind::Zoom;
+            let mut most = if zoom { (*budget).min(1500) } else { *budget };
+            let before = most;
+            let node = self.copy(
+                window,
+                0,
+                &mut most,
+                if zoom { 14 } else { 40 },
+                zoom,
+                until,
+            );
+            *budget -= before - most;
+            node
         }
     }
 
     impl Reader for Mac {
-        fn read(&mut self) -> Look {
+        fn read(&mut self, ask: &Ask) -> Look {
             if !crate::permissions::accessibility() {
                 return Look::Unreadable("no Accessibility permission".into());
             }
-            let running = Self::running();
+            let running = Self::running(ask.seat);
             if running.is_empty() {
-                return Look::Unreadable("no call app is open".into());
+                return Look::Unreadable(match ask.seat {
+                    Some(_) => "the call window closed".into(),
+                    None => "no call app is open".into(),
+                });
             }
+            let mut found: Vec<Found> = Vec::new();
+            let mut candidates: Vec<Candidate> = Vec::new();
             for (pid, id) in running {
+                if ask.over() {
+                    return Look::Unreadable(names::SLOW.into());
+                }
                 let Some(kind) = names::app_kind(id) else {
                     continue;
                 };
@@ -310,50 +352,86 @@ mod mac {
                 if app.0.is_null() {
                     continue;
                 }
-                unsafe { AXUIElementSetMessagingTimeout(app.0, 0.3) };
                 let chromium = CHROMIUM.contains(&id);
                 if chromium && kind == Kind::Teams {
                     self.ask(app.0, pid, false);
                 }
-                let list = attribute(app.0, "AXWindows");
-                let found: Vec<(Ref, String, String)> = items(list.0)
+                let windows = attribute(app.0, "AXWindows");
+                let mine: Vec<Candidate> = items(windows.0)
                     .into_iter()
-                    .map(|w| {
-                        let title = text_of(attribute(w, "AXTitle").0).unwrap_or_default();
-                        let ident = text_of(attribute(w, "AXIdentifier").0).unwrap_or_default();
-                        (w, title, ident)
+                    .map(|w| Candidate {
+                        found: found.len(),
+                        window: w,
+                        title: text_of(attribute(w, "AXTitle").0).unwrap_or_default(),
+                        ident: text_of(attribute(w, "AXIdentifier").0).unwrap_or_default(),
                     })
-                    .filter(|(_, title, ident)| names::call_window(kind, title, ident))
+                    .filter(|c| names::call_window(kind, &c.title, &c.ident))
                     .take(MOST_WINDOWS)
                     .collect();
-                if found.is_empty() {
+                if mine.is_empty() {
                     continue;
                 }
                 if chromium && kind != Kind::Teams {
                     self.ask(app.0, pid, true);
-                    for (w, _, _) in &found {
-                        set(*w, "AXManualAccessibility", true);
+                    for c in &mine {
+                        set(c.window, "AXManualAccessibility", true);
                     }
                 }
-                let zoom = kind == Kind::Zoom;
-                let (most_depth, mut budget) = if zoom { (14, 1500) } else { (40, 4000) };
-                let windows: Vec<Window> = found
-                    .into_iter()
-                    .map(|(w, title, id)| Window {
-                        tree: self.copy(w, 0, &mut budget, most_depth, zoom),
-                        title,
-                        id,
-                    })
-                    .collect();
-                if kind == Kind::Teams && !windows.iter().any(|w| names::is_call_tree(&w.tree)) {
-                    continue;
-                }
-                return Look::Call {
-                    app: id.to_owned(),
-                    windows,
-                };
+                candidates.extend(mine);
+                found.push(Found {
+                    _app: app,
+                    _windows: windows,
+                    pid,
+                    id,
+                    kind,
+                });
             }
-            Look::Unreadable("no call window is open".into())
+            let mut budget = 4000;
+            let mut trees: Vec<Option<Node>> = Vec::new();
+            if ask.seat.is_none() {
+                for c in &candidates {
+                    let tree = self.tree(c.window, found[c.found].kind, &mut budget, ask.until);
+                    trees.push(Some(tree));
+                }
+            }
+            let seen: Vec<Seen> = candidates
+                .iter()
+                .enumerate()
+                .map(|(i, c)| Seen {
+                    pid: found[c.found].pid as u32,
+                    app: found[c.found].id.to_owned(),
+                    title: c.title.clone(),
+                    call: trees
+                        .get(i)
+                        .and_then(Option::as_ref)
+                        .is_some_and(names::is_call_tree),
+                })
+                .collect();
+            let (seat, at) = match names::pick(ask.seat, &seen) {
+                Ok(picked) => picked,
+                Err(why) => return Look::Unreadable(why.into()),
+            };
+            let mut windows = Vec::new();
+            for i in at {
+                let c = &candidates[i];
+                let tree = match trees.get_mut(i).and_then(Option::take) {
+                    Some(tree) => tree,
+                    None => self.tree(c.window, found[c.found].kind, &mut budget, ask.until),
+                };
+                windows.push(Window {
+                    title: c.title.clone(),
+                    id: c.ident.clone(),
+                    tree,
+                });
+            }
+            if ask.over() {
+                return Look::Unreadable(names::SLOW.into());
+            }
+            Look::Call {
+                app: seat.app.clone(),
+                windows,
+                seat,
+            }
         }
     }
 
@@ -371,7 +449,11 @@ mod mac {
 
 #[cfg(windows)]
 mod win {
-    use leo_core::call_names::{self as names, Kind, Look, Node, Reader, Window, MOST_WINDOWS};
+    use std::time::Instant;
+
+    use leo_core::call_names::{
+        self as names, Ask, Look, Node, Reader, Seen, Window, MOST_WINDOWS,
+    };
     use windows::core::{Interface, BOOL};
     use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
     use windows::Win32::System::Com::{
@@ -488,7 +570,12 @@ mod win {
         }
     }
 
-    fn node(element: &IUIAutomationElement, depth: usize, budget: &mut usize) -> Node {
+    fn node(
+        element: &IUIAutomationElement,
+        depth: usize,
+        budget: &mut usize,
+        until: Instant,
+    ) -> Node {
         *budget = budget.saturating_sub(1);
         unsafe {
             let title = element
@@ -529,11 +616,12 @@ mod win {
             }
             if let Ok(children) = element.GetCachedChildren() {
                 for i in 0..children.Length().unwrap_or(0) {
-                    if *budget == 0 {
+                    if *budget == 0 || Instant::now() >= until {
                         break;
                     }
                     if let Ok(child) = children.GetElement(i) {
-                        node.children.push(self::node(&child, depth + 1, budget));
+                        node.children
+                            .push(self::node(&child, depth + 1, budget, until));
                     }
                 }
             }
@@ -577,7 +665,7 @@ mod win {
     }
 
     impl Reader for Win {
-        fn read(&mut self) -> Look {
+        fn read(&mut self, ask: &Ask) -> Look {
             let Some(uia) = &self.uia else {
                 return Look::Unreadable("UI Automation is not available".into());
             };
@@ -587,15 +675,17 @@ mod win {
             {
                 return Look::Unreadable("could not list windows".into());
             }
-            let mut seen = false;
-            let mut app: Option<String> = None;
-            let mut windows = Vec::new();
-            let mut budget = BUDGET;
+            let mut seen_app = false;
+            let mut seen: Vec<Seen> = Vec::new();
+            let mut handles: Vec<HWND> = Vec::new();
             let mut names_of: Vec<(u32, Option<String>)> = Vec::new();
             for hwnd in list {
                 let mut pid = 0;
                 unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
                 if pid == 0 || pid == std::process::id() {
+                    continue;
+                }
+                if ask.seat.is_some_and(|seat| seat.pid != pid) {
                     continue;
                 }
                 let program = match names_of.iter().find(|(p, _)| *p == pid) {
@@ -612,35 +702,66 @@ mod win {
                 let Some(kind) = names::app_kind(&program) else {
                     continue;
                 };
-                seen = true;
-                if windows.len() == MOST_WINDOWS || app.as_ref().is_some_and(|a| *a != program) {
-                    continue;
-                }
+                seen_app = true;
                 let title = title(hwnd);
-                if !names::call_window(kind, &title, "") {
+                let shown = seen.iter().filter(|s| s.pid == pid).count();
+                if shown == MOST_WINDOWS || !names::call_window(kind, &title, "") {
                     continue;
                 }
-                let Ok(element) =
-                    (unsafe { uia.uia.ElementFromHandleBuildCache(hwnd, &uia.request) })
-                else {
-                    continue;
-                };
-                let tree = node(&element, 0, &mut budget);
-                if kind == Kind::Teams && !names::is_call_tree(&tree) {
-                    continue;
-                }
-                app = Some(program);
-                windows.push(Window {
+                seen.push(Seen {
+                    pid,
+                    app: program,
                     title,
-                    id: String::new(),
-                    tree,
+                    call: false,
                 });
+                handles.push(hwnd);
             }
-            match app {
-                Some(app) => Look::Call { app, windows },
-                None if seen => Look::Unreadable("no call window is open".into()),
-                None => Look::Unreadable("no call app is open".into()),
+            let mut budget = BUDGET;
+            let mut trees: Vec<Option<Node>> = Vec::new();
+            if ask.seat.is_none() {
+                for (i, hwnd) in handles.iter().enumerate() {
+                    if ask.over() {
+                        return Look::Unreadable(names::SLOW.into());
+                    }
+                    let tree = window_tree(uia, *hwnd, &mut budget, ask.until);
+                    seen[i].call = tree.as_ref().is_some_and(names::is_call_tree);
+                    trees.push(tree);
+                }
+            }
+            let (seat, at) = match names::pick(ask.seat, &seen) {
+                Ok(picked) => picked,
+                Err(_) if !seen_app && ask.seat.is_none() => {
+                    return Look::Unreadable("no call app is open".into())
+                }
+                Err(why) => return Look::Unreadable(why.into()),
+            };
+            let mut windows = Vec::new();
+            for i in at {
+                let tree = match trees.get_mut(i).and_then(Option::take) {
+                    Some(tree) => Some(tree),
+                    None => window_tree(uia, handles[i], &mut budget, ask.until),
+                };
+                if let Some(tree) = tree {
+                    windows.push(Window {
+                        title: seen[i].title.clone(),
+                        id: String::new(),
+                        tree,
+                    });
+                }
+            }
+            if ask.over() {
+                return Look::Unreadable(names::SLOW.into());
+            }
+            Look::Call {
+                app: seat.app.clone(),
+                windows,
+                seat,
             }
         }
+    }
+
+    fn window_tree(uia: &Uia, hwnd: HWND, budget: &mut usize, until: Instant) -> Option<Node> {
+        let element = unsafe { uia.uia.ElementFromHandleBuildCache(hwnd, &uia.request) }.ok()?;
+        Some(node(&element, 0, budget, until))
     }
 }

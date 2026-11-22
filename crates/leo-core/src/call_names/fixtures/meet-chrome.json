@@ -10,6 +10,7 @@
      "role": "AXWebArea",
      "title": "Meet - abc-defg-hij",
      "children": [
+      { "role": "AXButton", "description": "Leave call" },
       {
        "role": "AXGroup",
        "children": [

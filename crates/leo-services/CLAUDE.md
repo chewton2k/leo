@@ -97,9 +97,16 @@ marked as the user's (`me`), appended to the session's `call-names.jsonl`
 newline at its end is added first, a torn row is read from its last `{`, and rows
 that could not be written are retried); an open run is checkpointed at every
 reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
-signals the watcher before capture stops and waits at most 1 s for it. A reader quiet for `QUIET` (5 s) is replaced
-(generation counter; the old thread exits after its read), at most
-`MOST_RESTARTS` (20); problems go to the trace once each, never names.
+signals the watcher before capture stops and waits at most 1 s for it. Each read gets an `Ask`: a
+deadline (`MOST_READ`, 2 s for the whole poll, checked between native calls), the
+stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
+for a browser, the window title), which every later read and a restarted reader
+keep; `call_names::pick` binds only when exactly one app (one window, for a
+browser) shows a call tree, and a bound call that is gone reads as unreadable, so
+its lines stay unnamed. One reader is alive at a time in the whole process (a lock
+held for its life): a reader is started again only after its thread has ended (at
+most `MOST_RESTARTS`, 20), and one quiet for `QUIET` (5 s) is traced, never joined
+by a second; problems go to the trace once each, never names.
 `archive` names each turn from its spoken interval, less each later part's 1 s
 lead-in (`Timeline::name`: more than half the line, or a zero-length line's start;
 an older row without an end runs to the next row); leo-host's `labelled` keeps a

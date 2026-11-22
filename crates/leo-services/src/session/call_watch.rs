@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock, TryLockError};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use leo_core::call_names::{self, Look, Mark, Readers, Timeline};
+use leo_core::call_names::{self, Ask, Look, Mark, Readers, Seat, Timeline};
 
 #[derive(Debug, Clone, Copy)]
 struct Moment {
@@ -16,9 +17,20 @@ struct Moment {
 }
 
 type Anchor = Arc<Mutex<Option<Moment>>>;
-type Heard = (u32, u32, Instant, Look);
+type Seated = Arc<Mutex<Option<Seat>>>;
+type Alive = Arc<Mutex<()>>;
+type Heard = (u32, Instant, Look);
 
 const STOP_WAIT: Duration = Duration::from_secs(1);
+
+static ALIVE: OnceLock<Alive> = OnceLock::new();
+
+#[derive(Clone)]
+struct Pace {
+    every: Duration,
+    quiet: Duration,
+    alive: Alive,
+}
 
 pub struct Watch {
     anchor: Anchor,
@@ -28,10 +40,15 @@ pub struct Watch {
 
 impl Watch {
     pub fn start(readers: Readers, dir: PathBuf) -> Self {
-        Self::start_with(readers, dir, call_names::EVERY, call_names::QUIET)
+        let pace = Pace {
+            every: call_names::EVERY,
+            quiet: call_names::QUIET,
+            alive: ALIVE.get_or_init(Alive::default).clone(),
+        };
+        Self::start_with(readers, dir, pace)
     }
 
-    fn start_with(readers: Readers, dir: PathBuf, every: Duration, quiet: Duration) -> Self {
+    fn start_with(readers: Readers, dir: PathBuf, pace: Pace) -> Self {
         let anchor: Anchor = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
         let (done_tx, done) = mpsc::channel();
@@ -40,7 +57,7 @@ impl Watch {
             std::thread::Builder::new()
                 .name("call-names".into())
                 .spawn(move || {
-                    watch(readers, &dir, &anchor, &stop, every, quiet);
+                    watch(readers, &dir, &anchor, &stop, &pace);
                     let _ = done_tx.send(());
                 })
                 .is_ok()
@@ -107,37 +124,58 @@ fn recorded_at(moment: Moment, read: Instant, epoch: u32, lag: Duration) -> Opti
 fn spawn_reader(
     readers: &Readers,
     anchor: &Anchor,
-    generation: &Arc<AtomicU32>,
+    seat: &Seated,
     stop: &Arc<AtomicBool>,
     tx: &Sender<Heard>,
-    every: Duration,
-) {
-    let (readers, anchor, generation, stop, tx) = (
+    pace: &Pace,
+) -> Option<JoinHandle<()>> {
+    let (readers, anchor, seat, stop, tx, pace) = (
         readers.clone(),
         anchor.clone(),
-        generation.clone(),
+        seat.clone(),
         stop.clone(),
         tx.clone(),
+        pace.clone(),
     );
-    let mine = generation.load(Ordering::Relaxed);
-    let _ = std::thread::Builder::new()
+    std::thread::Builder::new()
         .name("call-reader".into())
         .spawn(move || {
+            let _alive = loop {
+                if stop.load(Ordering::Relaxed) {
+                    return;
+                }
+                match pace.alive.try_lock() {
+                    Ok(alive) => break alive,
+                    Err(TryLockError::Poisoned(alive)) => break alive.into_inner(),
+                    Err(TryLockError::WouldBlock) => std::thread::sleep(pace.every),
+                }
+            };
             let mut reader = readers();
-            while !stop.load(Ordering::Relaxed) && generation.load(Ordering::Relaxed) == mine {
+            while !stop.load(Ordering::Relaxed) {
                 let Some(epoch) = now_of(&anchor).filter(|m| !m.paused).map(|m| m.epoch) else {
-                    std::thread::sleep(every);
+                    std::thread::sleep(pace.every);
                     continue;
                 };
+                let bound = seat.lock().ok().and_then(|seat| seat.clone());
                 let at = Instant::now();
-                let look = reader.read();
-                if tx.send((mine, epoch, at, look)).is_err() {
+                let look = reader.read(&Ask {
+                    until: at + call_names::MOST_READ,
+                    stop: &stop,
+                    seat: bound.as_ref(),
+                });
+                if let (None, Look::Call { seat: found, .. }) = (&bound, &look) {
+                    if let Ok(mut seat) = seat.lock() {
+                        seat.get_or_insert_with(|| found.clone());
+                    }
+                }
+                if tx.send((epoch, at, look)).is_err() {
                     break;
                 }
                 let took = at.elapsed();
-                std::thread::sleep(every.max(took * 2).saturating_sub(took));
+                std::thread::sleep(pace.every.max(took * 2).saturating_sub(took));
             }
-        });
+        })
+        .ok()
 }
 
 struct Sidecar {
@@ -205,27 +243,22 @@ impl Sidecar {
     }
 }
 
-fn watch(
-    readers: Readers,
-    dir: &Path,
-    anchor: &Anchor,
-    stop: &Arc<AtomicBool>,
-    every: Duration,
-    quiet: Duration,
-) {
+fn watch(readers: Readers, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace: &Pace) {
     let mut sidecar = Sidecar::new(dir);
     let lag = Duration::from_secs_f64(call_names::LAG_SECS);
-    let generation = Arc::new(AtomicU32::new(0));
+    let seat: Seated = Arc::default();
     let (tx, rx) = mpsc::channel();
-    spawn_reader(&readers, anchor, &generation, stop, &tx, every);
+    let mut reader = spawn_reader(&readers, anchor, &seat, stop, &tx, pace);
     let mut timeline = Timeline::default();
     let mut heard_at = Instant::now();
     let mut restarts = 0;
+    let mut stuck = false;
     let mut told: Vec<String> = Vec::new();
     while !stop.load(Ordering::Relaxed) {
-        match rx.recv_timeout(every) {
-            Ok((from, epoch, at, look)) if from == generation.load(Ordering::Relaxed) => {
+        match rx.recv_timeout(pace.every) {
+            Ok((epoch, at, look)) => {
                 heard_at = Instant::now();
+                stuck = false;
                 if let Look::Unreadable(why) = &look {
                     if !told.contains(why) {
                         super::trace_to(
@@ -241,19 +274,26 @@ fn watch(
                     sidecar.write(dir, timeline.heard(secs, reading.as_ref()));
                 }
             }
-            Ok(_) | Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break,
         }
-        if heard_at.elapsed() > quiet && restarts < call_names::MOST_RESTARTS {
+        let ended = reader.as_ref().is_none_or(JoinHandle::is_finished);
+        if ended && restarts < call_names::MOST_RESTARTS && !stop.load(Ordering::Relaxed) {
             restarts += 1;
-            generation.fetch_add(1, Ordering::Relaxed);
             super::trace_to(
                 dir,
                 "call-names",
-                "the call reader went quiet; started it again",
+                "the call reader stopped; started it again",
             );
-            spawn_reader(&readers, anchor, &generation, stop, &tx, every);
+            reader = spawn_reader(&readers, anchor, &seat, stop, &tx, pace);
             heard_at = Instant::now();
+        } else if !ended && !stuck && heard_at.elapsed() > pace.quiet {
+            stuck = true;
+            super::trace_to(
+                dir,
+                "call-names",
+                "the call app stopped answering; its lines stay unnamed until it does",
+            );
         }
     }
     sidecar.write(dir, timeline.end());
@@ -263,20 +303,49 @@ fn watch(
 mod tests {
     use super::*;
     use leo_core::call_names::{Node, Reader, Window};
+    use std::sync::atomic::AtomicU32;
+
+    #[derive(Clone, Copy, PartialEq)]
+    enum Acts {
+        Well,
+        PanicsOnce,
+        Sticks,
+    }
+
+    #[derive(Default)]
+    struct Counts {
+        calls: AtomicU32,
+        made: AtomicU32,
+        alive: AtomicU32,
+        most: AtomicU32,
+        seats: Mutex<Vec<Option<Seat>>>,
+    }
 
     struct Fake {
-        calls: Arc<AtomicU32>,
-        hang_first: bool,
+        counts: Arc<Counts>,
+        acts: Acts,
     }
 
     impl Reader for Fake {
-        fn read(&mut self) -> Look {
-            let n = self.calls.fetch_add(1, Ordering::Relaxed);
-            if self.hang_first && n == 0 {
-                std::thread::sleep(Duration::from_millis(600));
+        fn read(&mut self, ask: &Ask) -> Look {
+            let n = self.counts.calls.fetch_add(1, Ordering::Relaxed);
+            self.counts.seats.lock().unwrap().push(ask.seat.cloned());
+            match self.acts {
+                Acts::Sticks => {
+                    while !ask.stop.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+                Acts::PanicsOnce if n == 1 => panic!("the call app went away"),
+                _ => {}
             }
             Look::Call {
                 app: "us.zoom.xos".into(),
+                seat: Seat {
+                    pid: 41,
+                    app: "us.zoom.xos".into(),
+                    title: None,
+                },
                 windows: vec![Window {
                     title: "Zoom Meeting".into(),
                     id: String::new(),
@@ -300,15 +369,32 @@ mod tests {
         }
     }
 
-    fn readers(calls: &Arc<AtomicU32>, made: &Arc<AtomicU32>, hang_first: bool) -> Readers {
-        let (calls, made) = (calls.clone(), made.clone());
+    impl Drop for Fake {
+        fn drop(&mut self) {
+            self.counts.alive.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    fn readers(counts: &Arc<Counts>, acts: Acts) -> Readers {
+        let counts = counts.clone();
         Arc::new(move || {
-            let first = made.fetch_add(1, Ordering::Relaxed) == 0;
+            let first = counts.made.fetch_add(1, Ordering::Relaxed) == 0;
+            let alive = counts.alive.fetch_add(1, Ordering::Relaxed) + 1;
+            counts.most.fetch_max(alive, Ordering::Relaxed);
             Box::new(Fake {
-                calls: calls.clone(),
-                hang_first: hang_first && first,
+                counts: counts.clone(),
+                acts: if first { acts } else { Acts::Well },
             }) as Box<dyn Reader>
         })
+    }
+
+    fn watching(counts: &Arc<Counts>, acts: Acts, dir: &Path, quiet: Duration) -> Watch {
+        let pace = Pace {
+            every: Duration::from_millis(20),
+            quiet,
+            alive: Alive::default(),
+        };
+        Watch::start_with(readers(counts, acts), dir.to_path_buf(), pace)
     }
 
     fn named(dir: &Path) -> Timeline {
@@ -318,13 +404,8 @@ mod tests {
     #[test]
     fn readings_land_in_recording_time_and_are_kept_in_the_session() {
         let temp = tempfile::tempdir().unwrap();
-        let (calls, made) = (Arc::default(), Arc::default());
-        let watch = Watch::start_with(
-            readers(&calls, &made, false),
-            temp.path().to_path_buf(),
-            Duration::from_millis(20),
-            Duration::from_secs(5),
-        );
+        let counts = Arc::default();
+        let watch = watching(&counts, Acts::Well, temp.path(), Duration::from_secs(5));
         watch.tick(100.0, false);
         std::thread::sleep(Duration::from_millis(1_100));
         drop(watch);
@@ -340,17 +421,12 @@ mod tests {
     #[test]
     fn nothing_is_kept_while_paused() {
         let temp = tempfile::tempdir().unwrap();
-        let (calls, made) = (Arc::default(), Arc::default());
-        let watch = Watch::start_with(
-            readers(&calls, &made, false),
-            temp.path().to_path_buf(),
-            Duration::from_millis(20),
-            Duration::from_secs(5),
-        );
+        let counts: Arc<Counts> = Arc::default();
+        let watch = watching(&counts, Acts::Well, temp.path(), Duration::from_secs(5));
         watch.tick(100.0, true);
         std::thread::sleep(Duration::from_millis(200));
         drop(watch);
-        assert_eq!(calls.load(Ordering::Relaxed), 0);
+        assert_eq!(counts.calls.load(Ordering::Relaxed), 0);
         assert!(!temp.path().join(call_names::FILE).exists());
     }
 
@@ -394,13 +470,8 @@ mod tests {
         .unwrap();
         assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
         for dir in [&dir, &piped] {
-            let (calls, made) = (Arc::default(), Arc::default());
-            let watch = Watch::start_with(
-                readers(&calls, &made, false),
-                dir.clone(),
-                Duration::from_millis(20),
-                Duration::from_secs(5),
-            );
+            let counts = Arc::default();
+            let watch = watching(&counts, Acts::Well, dir, Duration::from_secs(5));
             watch.tick(100.0, false);
             std::thread::sleep(Duration::from_millis(1_000));
             let stopping = Instant::now();
@@ -438,21 +509,82 @@ mod tests {
     }
 
     #[test]
-    fn a_quiet_reader_is_started_again() {
+    fn a_reader_that_ended_is_started_again_and_keeps_the_call_it_chose() {
         let temp = tempfile::tempdir().unwrap();
-        let (calls, made) = (Arc::default(), Arc::default());
-        let watch = Watch::start_with(
-            readers(&calls, &made, true),
-            temp.path().to_path_buf(),
-            Duration::from_millis(20),
+        let counts: Arc<Counts> = Arc::default();
+        let watch = watching(
+            &counts,
+            Acts::PanicsOnce,
+            temp.path(),
             Duration::from_millis(150),
         );
         watch.tick(50.0, false);
         std::thread::sleep(Duration::from_millis(1_200));
         drop(watch);
-        assert!(made.load(Ordering::Relaxed) >= 2);
+        assert_eq!(counts.made.load(Ordering::Relaxed), 2);
+        assert_eq!(counts.most.load(Ordering::Relaxed), 1);
+        let seats = counts.seats.lock().unwrap().clone();
+        assert_eq!(seats[0], None);
+        assert!(seats[1..]
+            .iter()
+            .all(|s| s.as_ref().is_some_and(|s| s.pid == 41)));
         let trace = std::fs::read_to_string(temp.path().join("trace.jsonl")).unwrap();
-        assert!(trace.contains("went quiet"));
+        assert!(trace.contains("started it again"));
         assert!(named(temp.path()).name(50.1, 50.3).is_some());
+    }
+
+    #[test]
+    fn a_stuck_reader_is_never_joined_by_a_second_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let counts: Arc<Counts> = Arc::default();
+        let watch = watching(
+            &counts,
+            Acts::Sticks,
+            temp.path(),
+            Duration::from_millis(100),
+        );
+        watch.tick(50.0, false);
+        std::thread::sleep(Duration::from_millis(500));
+        drop(watch);
+        assert_eq!(counts.made.load(Ordering::Relaxed), 1);
+        let trace = std::fs::read_to_string(temp.path().join("trace.jsonl")).unwrap();
+        assert!(trace.contains("stopped answering"));
+        let waited = Instant::now();
+        while counts.alive.load(Ordering::Relaxed) > 0 && waited.elapsed() < STOP_WAIT {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(counts.alive.load(Ordering::Relaxed), 0);
+    }
+
+    #[test]
+    fn a_new_reader_waits_until_the_last_one_has_gone() {
+        let counts: Arc<Counts> = Arc::default();
+        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+        let alive = Alive::default();
+        let pace = |quiet| Pace {
+            every: Duration::from_millis(20),
+            quiet,
+            alive: alive.clone(),
+        };
+        let stuck = Watch::start_with(
+            readers(&counts, Acts::Sticks),
+            first.path().to_path_buf(),
+            pace(Duration::from_secs(5)),
+        );
+        stuck.tick(10.0, false);
+        std::thread::sleep(Duration::from_millis(100));
+        let next = Watch::start_with(
+            readers(&counts, Acts::Well),
+            second.path().to_path_buf(),
+            pace(Duration::from_secs(5)),
+        );
+        next.tick(10.0, false);
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(counts.made.load(Ordering::Relaxed), 1);
+        drop(stuck);
+        std::thread::sleep(Duration::from_millis(300));
+        drop(next);
+        assert_eq!(counts.made.load(Ordering::Relaxed), 2);
+        assert_eq!(counts.most.load(Ordering::Relaxed), 1);
     }
 }

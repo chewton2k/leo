@@ -41,6 +41,64 @@ pub fn app_kind(app: &str) -> Option<Kind> {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Seat {
+    pub pid: u32,
+    pub app: String,
+    pub title: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Seen {
+    pub pid: u32,
+    pub app: String,
+    pub title: String,
+    pub call: bool,
+}
+
+fn browser(app: &str) -> bool {
+    BROWSERS.iter().any(|id| id.eq_ignore_ascii_case(app))
+}
+
+pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'static str> {
+    let same = |s: &Seen, pid: u32, app: &str| s.pid == pid && s.app == app;
+    if let Some(seat) = seat {
+        let at: Vec<usize> = (0..seen.len())
+            .filter(|&i| {
+                same(&seen[i], seat.pid, &seat.app)
+                    && seat.title.as_ref().is_none_or(|t| *t == seen[i].title)
+            })
+            .collect();
+        if at.is_empty() {
+            return Err("the call window closed");
+        }
+        return Ok((seat.clone(), at));
+    }
+    let calls: Vec<usize> = (0..seen.len()).filter(|&i| seen[i].call).collect();
+    let Some(&first) = calls.first() else {
+        return Err("no call window is open");
+    };
+    let one = &seen[first];
+    let alone = calls.iter().all(|&i| same(&seen[i], one.pid, &one.app));
+    if !alone || (browser(&one.app) && calls.len() > 1) {
+        return Err("more than one call is open");
+    }
+    let title = browser(&one.app).then(|| one.title.clone());
+    let at = (0..seen.len())
+        .filter(|&i| {
+            same(&seen[i], one.pid, &one.app) && title.as_ref().is_none_or(|t| *t == seen[i].title)
+        })
+        .collect();
+    Ok((
+        Seat {
+            pid: one.pid,
+            app: one.app.clone(),
+            title,
+        },
+        at,
+    ))
+}
+
 fn teams_title(title: &str) -> bool {
     title.contains("Microsoft Teams")
         || title

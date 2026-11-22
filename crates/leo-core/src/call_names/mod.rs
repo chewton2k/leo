@@ -2,14 +2,17 @@ mod apps;
 mod parse;
 
 use serde::{Deserialize, Serialize};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 pub use apps::{
-    app_kind, call_window, is_call_tree, kind_of, Kind, BROWSERS, TEAMS_APPS, ZOOM_APPS,
+    app_kind, call_window, is_call_tree, kind_of, pick, Kind, Seat, Seen, BROWSERS, TEAMS_APPS,
+    ZOOM_APPS,
 };
 pub use parse::read_windows;
 
 pub const EVERY: Duration = Duration::from_millis(400);
+pub const MOST_READ: Duration = Duration::from_secs(2);
 pub const QUIET: Duration = Duration::from_secs(5);
 pub const MOST_RESTARTS: u32 = 20;
 pub const LAG_SECS: f64 = 0.75;
@@ -41,12 +44,30 @@ pub struct Window {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Look {
-    Call { app: String, windows: Vec<Window> },
+    Call {
+        app: String,
+        windows: Vec<Window>,
+        seat: Seat,
+    },
     Unreadable(String),
 }
 
+pub struct Ask<'a> {
+    pub until: Instant,
+    pub stop: &'a AtomicBool,
+    pub seat: Option<&'a Seat>,
+}
+
+impl Ask<'_> {
+    pub fn over(&self) -> bool {
+        self.stop.load(Ordering::Relaxed) || Instant::now() >= self.until
+    }
+}
+
+pub const SLOW: &str = "the call app answered too slowly";
+
 pub trait Reader {
-    fn read(&mut self) -> Look;
+    fn read(&mut self, ask: &Ask) -> Look;
 }
 
 pub type Readers = std::sync::Arc<dyn Fn() -> Box<dyn Reader> + Send + Sync>;
@@ -61,7 +82,7 @@ pub struct Reading {
 }
 
 pub fn read(look: &Look) -> Option<Reading> {
-    let Look::Call { app, windows } = look else {
+    let Look::Call { app, windows, .. } = look else {
         return None;
     };
     let kind = kind_of(app, windows)?;
