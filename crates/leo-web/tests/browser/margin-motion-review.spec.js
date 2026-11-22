@@ -60,6 +60,10 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     ${read('app/margin-notes.js')}
     window.start=async()=>{
       app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
+      const layout=$('.note-layout');
+      const wide=()=>layout.toggleAttribute('data-wide',layout.clientWidth>=900);
+      wide();
+      new ResizeObserver(wide).observe(layout);
       const s={note:{id:'n1',version:'v1',title:'Test'},title:$('#title'),edit:{}};
       s.doc=leoDoc.mount($('#doc'),{source:${JSON.stringify(source)},onChange(){},placeholder:''});
       state.session=s;window.session=s;

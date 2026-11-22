@@ -553,10 +553,10 @@ repair message for Settings. `activation.rs` implements hold, tap and the
 and state updates after acquiring their state lock, so cancel wins stale work.
 
 `dictation/text.rs` applies custom-word fuzzy/phonetic (an internal soundex port) matching at 0.18 before
-language-aware filler rules (on by default), with Unicode-safe punctuation and
+language-aware filler rules (always on; the setting was removed on 2026-11-21), with Unicode-safe punctuation and
 capitalization, then writes clock times only when marked (`230 pm` → `2:30 pm`;
 an AM radio dial like `1050 AM` is the accepted casualty): a bare `230` may be
-a quantity, so context is left to the AI step. With fillers on it also drops a
+a quantity, so context is left to the AI step. The filler rules also drop a
 "you know" between commas or at a clause edge and "scratch that" with the sentence before
 it, never "like". `polish.rs` is the optional AI writing step (`Writing`: off
 by default, `quick` = `ai::quick_outcome`, the cheapest model and effort on the
