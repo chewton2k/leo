@@ -476,7 +476,10 @@ mod tests {
         let counts = Arc::default();
         let watch = watching(&counts, Acts::Well, temp.path(), Duration::from_secs(5));
         watch.tick(100.0, false);
-        std::thread::sleep(Duration::from_millis(1_500));
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while named(temp.path()).name(100.05, 100.2).is_none() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
         drop(watch);
         let timeline = named(temp.path());
         assert_eq!(
