@@ -113,7 +113,10 @@ impl Timeline {
         for mark in marks {
             match mark {
                 Mark::Run { from, to, who } if from.is_finite() && to > from => {
-                    timeline.runs.push((from, to, who))
+                    match timeline.runs.last_mut() {
+                        Some(last) if last.0 == from && last.2 == who => last.1 = last.1.max(to),
+                        _ => timeline.runs.push((from, to, who)),
+                    }
                 }
                 Mark::Me { me } => {
                     timeline.learn(&me);
@@ -126,7 +129,12 @@ impl Timeline {
     }
 
     pub fn parse(text: &str) -> Self {
-        Self::from_marks(text.lines().filter_map(|l| serde_json::from_str(l).ok()))
+        Self::from_marks(text.lines().filter_map(|line| {
+            serde_json::from_str(line).ok().or_else(|| {
+                line.rfind('{')
+                    .and_then(|at| serde_json::from_str(&line[at..]).ok())
+            })
+        }))
     }
 
     fn is_me(&self, name: &str) -> bool {
@@ -188,7 +196,15 @@ impl Timeline {
             (Some((_, open)), Some(who), Some(last)) => open == who && at - last <= HOLD_SECS,
             _ => false,
         };
-        if !goes_on {
+        if goes_on {
+            if let Some((from, who)) = &self.open {
+                marks.push(Mark::Run {
+                    from: *from,
+                    to: at,
+                    who: who.clone(),
+                });
+            }
+        } else {
             marks.extend(self.close(at));
             self.open = who.map(|who| (at, who));
         }

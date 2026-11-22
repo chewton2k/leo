@@ -197,6 +197,12 @@ pub fn open_regular(path: &std::path::Path) -> std::io::Result<std::fs::File> {
     open_regular_with(path, options)
 }
 
+pub fn open_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).create(true).append(true);
+    open_regular_with(path, options)
+}
+
 pub(crate) fn open_regular_with(
     path: &std::path::Path,
     mut options: std::fs::OpenOptions,

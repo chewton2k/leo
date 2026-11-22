@@ -91,8 +91,12 @@ marked speaking, and in Zoom (which does not mark the user's own tile) only once
 the user's name is known; the one-other-person shortcut needs the participant
 count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at
 most `HOLD_SECS` 2 s; unreadable or unclear readings end a run) and every name
-marked as the user's (`me`), appended to the session's `call-names.jsonl` as
-they close, so recovery keeps them. A reader quiet for `QUIET` (5 s) is replaced
+marked as the user's (`me`), appended to the session's `call-names.jsonl`
+(`paths::open_append`: a regular file, never through a link or a pipe; a missing
+newline at its end is added first, a torn row is read from its last `{`, and rows
+that could not be written are retried); an open run is checkpointed at every
+reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
+signals the watcher before capture stops and waits at most 1 s for it. A reader quiet for `QUIET` (5 s) is replaced
 (generation counter; the old thread exits after its read), at most
 `MOST_RESTARTS` (20); problems go to the trace once each, never names.
 `archive` names each turn from its spoken interval, less each later part's 1 s

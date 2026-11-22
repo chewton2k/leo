@@ -426,6 +426,37 @@ fn marks_written_while_recording_give_the_same_names_when_read_back() {
 }
 
 #[test]
+fn a_run_still_open_when_leo_stops_is_kept_up_to_its_last_reading() {
+    let mut t = Timeline::default();
+    let mut text = String::new();
+    for (at, r) in every(0.0, 6.0, Some(reading(&["Rowan Ellery"], GROUP, None))) {
+        for mark in t.heard(at, r.as_ref()) {
+            text += &(serde_json::to_string(&mark).unwrap() + "\n");
+        }
+    }
+    let crashed = Timeline::parse(&text);
+    assert_eq!(crashed.name(0.5, 5.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(crashed.name(0.0, 0.4).as_deref(), Some("Rowan Ellery"));
+    let closed = t.end().unwrap();
+    text += &(serde_json::to_string(&closed).unwrap() + "\n");
+    let whole = Timeline::parse(&text);
+    assert_eq!(whole.name(4.0, 7.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(whole.name(0.0, 4.0), t.name(0.0, 4.0));
+}
+
+#[test]
+fn a_torn_last_line_does_not_lose_the_row_written_after_it() {
+    let text = concat!(
+        "{\"from\":1.0,\"to\":3.0,\"who\":\"Rowan Ellery\"}\n",
+        "{\"from\":4.0,\"to\"",
+        "{\"from\":5.0,\"to\":8.0,\"who\":\"Tamsin Okafor\"}\n",
+    );
+    let t = Timeline::parse(text);
+    assert_eq!(t.name(1.0, 3.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(t.name(5.0, 8.0).as_deref(), Some("Tamsin Okafor"));
+}
+
+#[test]
 fn readings_out_of_order_are_ignored() {
     let mut t = Timeline::default();
     t.heard(5.0, Some(&reading(&["Rowan Ellery"], GROUP, None)));

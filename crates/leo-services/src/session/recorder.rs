@@ -985,7 +985,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             "{problem} What was recorded is being saved."
         )));
     }
-    drop(watch);
+    if let Some(watch) = &watch {
+        watch.stop();
+    }
     final_points(&mut session, controls, emit);
     match capture.stop_with_stats() {
         Ok((samples, _)) => {
@@ -993,6 +995,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         }
         Err(e) => emit(Event::Warning(e.to_string())),
     }
+    drop(watch);
     finish(
         session,
         transcriber,
