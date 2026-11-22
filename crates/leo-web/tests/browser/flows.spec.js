@@ -5087,10 +5087,17 @@ test.describe('beside the note', () => {
     await expect(page.locator('#side [data-action="tasks-toggle"]')).toHaveCount(0);
     await box.hover();
     await expect(body, 'hovering opens the panel').toContainText(`Panel task ${tag}`);
+    await expect(box).toHaveClass(/\bopen\b/);
+    await page.mouse.move(640, 300);
+    await box.hover();
+    await expect(box, 'coming back while it folds opens it again').toHaveClass(/\bopen\b/);
+    await expect(body).toBeVisible();
+    await expect.poll(() => box.evaluate((el) => el.getAnimations().length), 'the reveal finishes').toBe(0);
     await body.hover();
     await expect(body, 'it stays open while the pointer is over it').toBeVisible();
     await page.mouse.move(640, 300);
     await expect(body, 'leaving folds it again').toBeHidden();
+    await expect(box).not.toHaveClass(/\bopen\b/);
     const spot = await box.boundingBox();
     await page.mouse.click(spot.x + spot.width / 2, spot.y + spot.height / 2);
     await expect(body).toBeVisible();
@@ -5109,8 +5116,28 @@ test.describe('beside the note', () => {
     await page.reload();
     await expect(box).toBeVisible();
     await expect(body, 'folded again after a reload').toBeHidden();
-    await page.goto('/#/calendar');
+    await box.hover();
+    await expect(box).toHaveClass(/\bopen\b/);
+    await page.evaluate(() => { location.hash = '#/calendar'; });
     await expect(page.locator('#tasks-window')).toBeHidden();
+    await expect(box, 'a card hidden while open folds').not.toHaveClass(/\bopen\b/);
+  });
+
+  test('the note layout switches to its wide form at 900 px of room and back as the window changes', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'wide layouts are for desktop windows');
+    const note = await (await page.request.post('/api/notes', { data: { title: 'Wide switch', body: '## One\n\nWords.' } })).json();
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await page.goto(`/#/n/${note.id}`);
+    const layout = page.locator('.note-layout');
+    await expect(layout, 'set before the note is drawn').toHaveAttribute('data-wide', '');
+    expect(await layout.evaluate((el) => el.clientWidth)).toBeGreaterThanOrEqual(900);
+    await page.setViewportSize({ width: 900, height: 900 });
+    await expect(layout).not.toHaveAttribute('data-wide', '');
+    expect(await layout.evaluate((el) => el.clientWidth)).toBeLessThan(900);
+    await expect(page.locator('.page-marks')).toBeHidden();
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await expect(layout).toHaveAttribute('data-wide', '');
+    await expect(page.locator('.note-outline .outline-ticks')).toBeVisible();
   });
 
   test('a narrow window keeps a toggleable explorer beside the rail', async ({ page }) => {
