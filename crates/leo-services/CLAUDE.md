@@ -121,7 +121,8 @@ Call echo (2026-11-22, the owner's call; `session/echo.rs`): without headphones 
 microphone hears the call. Call tracks keep `seg-NNNNN.levels` (one dB byte per
 10 ms, written before the part is transcribed; missing means silence). Once both
 tracks finish, `echo::marks` compares the envelopes in 2 s windows where both
-carry sound, lags ±2 s: a window is confident at correlation ≥ 0.6, steady when
+carry sound (6 dB over each track's idle level, its 10th percentile, at least
+30 dB), lags ±2 s: a window is confident at correlation ≥ 0.6, steady when
 two others within 20 s agree within 20 ms; echo exists only when steady windows
 are ≥ 20% of shared windows (headphones: none, nothing marked). Each You line is
 judged on its own span at the nearest steady lag: ≥ 70% of its sound within 6 dB

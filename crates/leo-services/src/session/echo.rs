@@ -7,6 +7,8 @@ const BLOCK: usize = (wav::RATE as u64 * BLOCK_MS / 1000) as usize;
 const WINDOW: i64 = 200;
 const MOST_LAG: i64 = 200;
 const FLOOR: u8 = 30;
+const ABOVE_IDLE: f32 = 6.0;
+const IDLE_SHARE: usize = 10;
 const ACTIVE: usize = 50;
 const CONFIDENT: f32 = 0.6;
 const LEAST_SPREAD: f32 = 3.0;
@@ -47,6 +49,7 @@ pub fn write_levels(audio: &Path, to: &Path) -> anyhow::Result<()> {
 pub struct Leak {
     steady: Vec<(i64, i64)>,
     gain: f32,
+    floors: (f32, f32),
 }
 
 impl Leak {
@@ -82,8 +85,24 @@ fn pearson(a: &[f32], b: &[f32]) -> f32 {
     ab / (aa * bb).sqrt()
 }
 
-fn active(levels: &[f32]) -> usize {
-    levels.iter().filter(|&&l| l >= FLOOR as f32).count()
+fn active(levels: &[f32], floor: f32) -> usize {
+    levels.iter().filter(|&&l| l >= floor).count()
+}
+
+fn floor_of(levels: &mut dyn FnMut(i64) -> u8, blocks: i64) -> f32 {
+    let mut counts = [0usize; 256];
+    for t in 0..blocks {
+        counts[levels(t) as usize] += 1;
+    }
+    let total: usize = counts[1..].iter().sum();
+    let mut seen = 0;
+    for (level, n) in counts.iter().enumerate().skip(1) {
+        seen += n;
+        if seen * IDLE_SHARE >= total {
+            return (level as f32 + ABOVE_IDLE).max(FLOOR as f32);
+        }
+    }
+    FLOOR as f32
 }
 
 pub fn leak(
@@ -91,6 +110,7 @@ pub fn leak(
     far: &mut dyn FnMut(i64) -> u8,
     blocks: i64,
 ) -> Option<Leak> {
+    let floors = (floor_of(mic, blocks), floor_of(far, blocks));
     let mut windows: Vec<(i64, i64, f32)> = Vec::new();
     let mut heard = 0usize;
     let mut start = 0;
@@ -100,7 +120,9 @@ pub fn leak(
             .map(|t| far(t) as f32)
             .collect();
         let at = MOST_LAG as usize;
-        if active(&near) >= ACTIVE && active(&other[at..at + WINDOW as usize]) >= ACTIVE {
+        if active(&near, floors.0) >= ACTIVE
+            && active(&other[at..at + WINDOW as usize], floors.1) >= ACTIVE
+        {
             heard += 1;
             let (corr, lag) = (-MOST_LAG..=MOST_LAG)
                 .map(|lag| {
@@ -116,7 +138,7 @@ pub fn leak(
                 let both: Vec<f32> = near
                     .iter()
                     .zip(&other[from..from + WINDOW as usize])
-                    .filter(|(m, f)| **m >= FLOOR as f32 && **f >= FLOOR as f32)
+                    .filter(|(m, f)| **m >= floors.0 && **f >= floors.1)
                     .map(|(m, f)| m - f)
                     .collect();
                 if !both.is_empty() {
@@ -149,6 +171,7 @@ pub fn leak(
     Some(Leak {
         steady: steady.iter().map(|w| (w.0, w.1)).collect(),
         gain: gains[gains.len() / 2],
+        floors,
     })
 }
 
@@ -162,7 +185,8 @@ pub fn is_echo(
     let lag = leak.lag_near((from + to) / 2);
     let near: Vec<f32> = (from..to).map(|t| mic(t) as f32).collect();
     let other: Vec<f32> = (from..to).map(|t| far(t - lag) as f32).collect();
-    let heard = active(&near);
+    let (mic_floor, far_floor) = leak.floors;
+    let heard = active(&near, mic_floor);
     if heard < LEAST_LINE {
         return false;
     }
@@ -170,7 +194,7 @@ pub fn is_echo(
         .iter()
         .zip(&other)
         .filter(|(m, f)| {
-            **m >= FLOOR as f32 && **f >= FLOOR as f32 && **m <= **f + leak.gain + ABOVE_LEAK
+            **m >= mic_floor && **f >= far_floor && **m <= **f + leak.gain + ABOVE_LEAK
         })
         .count();
     copies as f32 >= COPY_SHARE * heard as f32 && pearson(&near, &other) >= LINE_CORR
@@ -292,8 +316,8 @@ mod tests {
         out
     }
 
-    fn quiet(blocks: i64) -> Vec<u8> {
-        (0..blocks).map(|t| 12 + (t * 7 % 5) as u8).collect()
+    fn quiet(blocks: i64, idle: u8) -> Vec<u8> {
+        (0..blocks).map(|t| idle + (t * 7 % 6) as u8).collect()
     }
 
     fn far_turn(t: i64) -> bool {
@@ -326,22 +350,26 @@ mod tests {
     }
 
     fn turns(lag_at: impl Fn(i64) -> i64, headphones: bool) -> Call {
+        room(lag_at, headphones, 12, 25)
+    }
+
+    fn room(lag_at: impl Fn(i64) -> i64, headphones: bool, idle: u8, drop: u8) -> Call {
         let talk = speech(1, LENGTH);
         let far: Vec<u8> = (0..LENGTH)
             .map(|t| if far_turn(t) { talk[t as usize] } else { 11 })
             .collect();
         let own = speech(2, LENGTH);
-        let noise = quiet(LENGTH);
+        let noise = quiet(LENGTH, idle);
         let mic = (0..LENGTH)
             .map(|t| {
                 if !far_turn(t) {
-                    return own[t as usize];
+                    return own[t as usize].max(noise[t as usize]);
                 }
                 let source = t - lag_at(t);
                 let leaked = if headphones || source < 0 {
                     0
                 } else {
-                    far[source as usize].saturating_sub(25)
+                    far[source as usize].saturating_sub(drop)
                 };
                 leaked.max(noise[t as usize])
             })
@@ -363,6 +391,21 @@ mod tests {
                 "turn {turn}"
             );
         }
+    }
+
+    #[test]
+    fn a_noisy_microphone_still_tells_its_echo_from_your_own_lines() {
+        let call = room(|_| 18, false, 33, 18);
+        let leak = call.leak().expect("the far side reaches the microphone");
+        for turn in 0..LENGTH / TURN {
+            let (from, to) = (turn * TURN + 18, (turn + 1) * TURN);
+            assert_eq!(
+                call.echo(&leak, from, to),
+                far_turn(turn * TURN),
+                "turn {turn}"
+            );
+        }
+        assert_eq!(room(|_| 18, true, 33, 18).leak(), None);
     }
 
     #[test]
