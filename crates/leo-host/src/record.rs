@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
+use leo_core::call_names::Readers;
 use leo_services::ai::chat::Jotted;
 use leo_services::session::capture::Source;
 use leo_services::session::recorder::{self, Controls, Event, Request};
@@ -11,16 +12,21 @@ use leo_web::record::{Heard, Listener, Listening, Recorded};
 
 type Usage = Arc<leo_web::usage::Usage>;
 
-pub fn listener(usage: Usage) -> Listener {
-    Arc::new(move |listening, heard| listen(&usage, listening, heard))
+pub fn listener(usage: Usage, names: Option<Readers>) -> Listener {
+    Arc::new(move |listening, heard| listen(&usage, names.as_ref(), listening, heard))
 }
 
-fn listen(usage: &Usage, listening: Listening, heard: &mut dyn FnMut(Heard)) -> Result<Recorded> {
+fn listen(
+    usage: &Usage,
+    names: Option<&Readers>,
+    listening: Listening,
+    heard: &mut dyn FnMut(Heard),
+) -> Result<Recorded> {
     if listening.recover.is_some() {
         return recover(usage, listening, heard);
     }
     if listening.call {
-        return listen_call(usage, listening, heard);
+        return listen_call(usage, names, listening, heard);
     }
     let Listening {
         preview,
@@ -72,6 +78,7 @@ fn listen(usage: &Usage, listening: Listening, heard: &mut dyn FnMut(Heard)) -> 
             input,
             draft: draft_fn(usage),
             turns: false,
+            names: None,
         },
         &controls,
         &|event| {
@@ -273,6 +280,7 @@ fn parts_of_archive(source: &leo_core::recording::Archive) -> Parts {
 
 fn listen_call(
     usage: &Usage,
+    names: Option<&Readers>,
     listening: Listening,
     heard: &mut dyn FnMut(Heard),
 ) -> Result<Recorded> {
@@ -319,6 +327,7 @@ fn listen_call(
                 wants: wants.clone(),
             };
             let points = points.clone();
+            let names = names.filter(|_| speaker == "Others").cloned();
             scope.spawn(move || {
                 recorder::record(
                     Request {
@@ -331,6 +340,7 @@ fn listen_call(
                         input,
                         draft: None,
                         turns: true,
+                        names,
                     },
                     &controls,
                     &|event| {
@@ -463,7 +473,7 @@ fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Ar
         source
             .passages
             .extend(archive.passages.into_iter().map(|p| {
-                let mut p = labelled(speaker, p);
+                let mut p = labelled(speaker, session.label(), p);
                 p.start_secs += offset;
                 p.end_secs += offset;
                 p
@@ -497,9 +507,10 @@ fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Ar
 
 fn labelled(
     speaker: &str,
+    plain: &str,
     mut passage: leo_core::recording::Passage,
 ) -> leo_core::recording::Passage {
-    if !speaker.is_empty() {
+    if !speaker.is_empty() && passage.speaker == plain {
         passage.speaker = speaker.into();
     }
     passage
@@ -768,8 +779,22 @@ mod tests {
             text: "hello".into(),
             speaker: "Microphone".into(),
         };
-        assert_eq!(super::labelled("", passage.clone()).speaker, "Microphone");
-        assert_eq!(super::labelled("You", passage).speaker, "You");
+        assert_eq!(
+            super::labelled("", "Microphone", passage.clone()).speaker,
+            "Microphone"
+        );
+        assert_eq!(
+            super::labelled("You", "Microphone", passage.clone()).speaker,
+            "You"
+        );
+        let named = leo_core::recording::Passage {
+            speaker: "Rowan Ellery".into(),
+            ..passage
+        };
+        assert_eq!(
+            super::labelled("Others", "Computer audio", named).speaker,
+            "Rowan Ellery"
+        );
     }
 
     #[test]

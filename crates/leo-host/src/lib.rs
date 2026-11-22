@@ -8,6 +8,7 @@ mod speech;
 
 pub use housekeeping::Housekeeping;
 pub use powers::powers;
+pub use record::listener;
 pub use settings::WebSettings;
 
 pub fn stop_writing() {
