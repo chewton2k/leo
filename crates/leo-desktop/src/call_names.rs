@@ -94,12 +94,11 @@ mod mac {
 
     const UTF8: u32 = 0x0800_0100;
     const TIMEOUT: f32 = 0.3;
-    const KEYS: [&str; 8] = [
+    const KEYS: [&str; 7] = [
         "AXRole",
         "AXSubrole",
         "AXDescription",
         "AXTitle",
-        "AXValue",
         "AXIdentifier",
         "AXDOMClassList",
         "AXChildren",
@@ -112,7 +111,6 @@ mod mac {
         "com.microsoft.teams2",
         "com.microsoft.teams",
     ];
-    const TYPED: &[&str] = &["AXTextField", "AXTextArea", "AXComboBox"];
 
     struct Owned(Ref);
 
@@ -248,13 +246,13 @@ mod mac {
                 subrole: text_of(at(1)),
                 description: text_of(at(2)),
                 title: text_of(at(3)),
-                value: if TYPED.contains(&role.as_str()) {
-                    None
+                value: if names::keeps_value(&role) {
+                    text_of(attribute(element, "AXValue").0)
                 } else {
-                    text_of(at(4))
+                    None
                 },
-                id: text_of(at(5)),
-                classes: items(at(6))
+                id: text_of(at(4)),
+                classes: items(at(5))
                     .into_iter()
                     .filter_map(text_of)
                     .take(20)
@@ -268,7 +266,7 @@ mod mac {
             if tile || depth >= most_depth {
                 return node;
             }
-            for child in items(at(7)) {
+            for child in items(at(6)) {
                 if *budget == 0 || Instant::now() >= until {
                     break;
                 }
@@ -465,8 +463,8 @@ mod win {
         PROCESS_QUERY_LIMITED_INFORMATION,
     };
     use windows::Win32::UI::Accessibility::{
-        AutomationElementMode_None, CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2,
-        IUIAutomationCacheRequest, IUIAutomationElement, TreeScope_Subtree,
+        CUIAutomation, CUIAutomation8, IUIAutomation, IUIAutomation2, IUIAutomationCacheRequest,
+        IUIAutomationElement, IUIAutomationTreeWalker, TreeScope_Element,
         UIA_AutomationIdPropertyId, UIA_ClassNamePropertyId, UIA_ControlTypePropertyId,
         UIA_HelpTextPropertyId, UIA_NamePropertyId,
     };
@@ -481,6 +479,7 @@ mod win {
     struct Uia {
         uia: IUIAutomation,
         request: IUIAutomationCacheRequest,
+        walker: IUIAutomationTreeWalker,
     }
 
     pub struct Win {
@@ -509,10 +508,13 @@ mod win {
             ] {
                 request.AddProperty(property)?;
             }
-            request.SetTreeScope(TreeScope_Subtree)?;
-            request.SetTreeFilter(&uia.RawViewCondition()?)?;
-            request.SetAutomationElementMode(AutomationElementMode_None)?;
-            Ok(Uia { uia, request })
+            request.SetTreeScope(TreeScope_Element)?;
+            let walker = uia.RawViewWalker()?;
+            Ok(Uia {
+                uia,
+                request,
+                walker,
+            })
         }
     }
 
@@ -571,6 +573,7 @@ mod win {
     }
 
     fn node(
+        uia: &Uia,
         element: &IUIAutomationElement,
         depth: usize,
         budget: &mut usize,
@@ -614,16 +617,20 @@ mod win {
             if depth >= MOST_DEPTH || *budget == 0 {
                 return node;
             }
-            if let Ok(children) = element.GetCachedChildren() {
-                for i in 0..children.Length().unwrap_or(0) {
-                    if *budget == 0 || Instant::now() >= until {
-                        break;
-                    }
-                    if let Ok(child) = children.GetElement(i) {
-                        node.children
-                            .push(self::node(&child, depth + 1, budget, until));
-                    }
+            let mut child = uia
+                .walker
+                .GetFirstChildElementBuildCache(element, &uia.request)
+                .ok();
+            while let Some(next) = child {
+                if *budget == 0 || Instant::now() >= until {
+                    break;
                 }
+                node.children
+                    .push(self::node(uia, &next, depth + 1, budget, until));
+                child = uia
+                    .walker
+                    .GetNextSiblingElementBuildCache(&next, &uia.request)
+                    .ok();
             }
             node
         }
@@ -762,6 +769,6 @@ mod win {
 
     fn window_tree(uia: &Uia, hwnd: HWND, budget: &mut usize, until: Instant) -> Option<Node> {
         let element = unsafe { uia.uia.ElementFromHandleBuildCache(hwnd, &uia.request) }.ok()?;
-        Some(node(&element, 0, budget, until))
+        Some(node(uia, &element, 0, budget, until))
     }
 }

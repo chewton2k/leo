@@ -89,6 +89,10 @@ pub fn read(look: &Look) -> Option<Reading> {
     Some(read_windows(kind, windows))
 }
 
+pub fn keeps_value(role: &str) -> bool {
+    parse::TEXTS.contains(&role)
+}
+
 pub fn clip(text: &str) -> Option<String> {
     let text = text.trim();
     if text.is_empty() {

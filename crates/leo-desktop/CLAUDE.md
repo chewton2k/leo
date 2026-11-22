@@ -121,11 +121,14 @@ read; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
 every element before it is messaged, 4,000 elements a read, a Zoom window at most
 1,500 to depth 14, others to depth 40, the read's deadline checked between
-elements, text clipped to 300 characters, never the value of a text field);
+elements, text clipped to 300 characters, `AXValue` asked only of static text
+(`call_names::keeps_value`), so a text field's value is never read);
 Chromium apps get `AXManualAccessibility`, Meet browsers `AXEnhancedUserInterface`
 too, turned off when the reader drops. Windows enumerates top-level windows and
-copies call windows with a cached UI Automation request (raw view, 1.5 s
-timeouts, Name/HelpText/AutomationId/ClassName only). Teams windows count only
+walks call windows one element at a time with the raw view tree walker, each
+element fetched with its Name/HelpText/AutomationId/ClassName cached (1.5 s
+timeouts per call), the 4,000-element budget and the read's deadline checked
+before every next element. Teams windows count only
 with a call control. Only CI compiles the Windows reader; neither is tested against a real call.
 
 The `leo-app` entry checks `speech::is_worker_invocation` before Tauri and

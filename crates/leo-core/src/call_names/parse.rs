@@ -2,7 +2,7 @@ use super::apps::has_word;
 use super::{norm, unique, Kind, Node, Reading, Window};
 
 const TILES: &[&str] = &["AXTabGroup", "TabItem"];
-const TEXTS: &[&str] = &["AXStaticText", "Text"];
+pub(crate) const TEXTS: &[&str] = &["AXStaticText", "Text"];
 const ROWS: &[&str] = &["AXRow", "AXCell", "ListItem", "DataItem", "TreeItem"];
 const LISTS: &[&str] = &[
     "AXOutline",

@@ -512,6 +512,21 @@ fn readings_out_of_order_are_ignored() {
 }
 
 #[test]
+fn only_static_text_has_its_value_read() {
+    assert!(keeps_value("AXStaticText"));
+    for typed in [
+        "AXTextField",
+        "AXTextArea",
+        "AXComboBox",
+        "AXSecureTextField",
+        "AXButton",
+        "AXRow",
+    ] {
+        assert!(!keeps_value(typed), "{typed}");
+    }
+}
+
+#[test]
 fn long_text_is_clipped_on_a_character_boundary() {
     let long = "é".repeat(MOST_TEXT + 5);
     assert_eq!(clip(&long).unwrap().chars().count(), MOST_TEXT);
