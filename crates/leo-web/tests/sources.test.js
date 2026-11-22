@@ -134,6 +134,7 @@ function screen(eng) {
     querySelectorAll(selector) {
       return selector === '[data-passage],[data-point]' ? ui.areas : selector === '.source-row' ? ui.rows : [];
     },
+    querySelector: (selector) => ({ selector }),
     addEventListener() {},
   };
   const facts = { set innerHTML(html) { ui.facts = html; } };
@@ -146,16 +147,18 @@ function screen(eng) {
     const map = { '#source-query': ui.query, '#source-pick': ui.pick, '#source-found': ui.found, '#source-passages': ui.passages, '#regenerate-wants': ui.wants, '.source-none': ui.none };
     return map[selector] || null;
   };
+  ui.chips = [];
   const document = {
     activeElement: null,
     getElementById: () => null,
+    querySelectorAll: (selector) => (selector === '[data-action="view-original"]' ? ui.chips : []),
     querySelector(selector) {
       const m = selector.match(/^\[data-(passage|point)="(\d+)"\]$/);
       return m ? ui.areas.find((a) => a.kind === m[1] && a.seq === Number(m[2])) || null : find(selector);
     },
   };
   const context = {
-    seq: 1, document, window: { leoRecording: globalThis.leoRecording, scrollTo() {} }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
+    seq: 1, document, window: { leoRecording: globalThis.leoRecording, scrollY: 0, scrollTo(x, y) { ui.scrolled = [x, y]; } }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
     plural: (n, word) => `${n} ${n === 1 ? word : `${word}s`}`,
     $: (selector) => find(selector),
     api: eng.api,
@@ -173,9 +176,12 @@ function screen(eng) {
     setTimeout: (fn) => ui.timers.push({ fn, live: true }),
     clearTimeout: (id) => { if (ui.timers[id - 1]) ui.timers[id - 1].live = false; },
     TextEncoder,
+    fillTextFile: async (box) => { ui.filled = box; },
   };
+  const uploads = read('uploads.js');
+  const fileAside = uploads.slice(uploads.indexOf('async function openFileAside('), uploads.indexOf('async function fillTextFile('));
   vm.createContext(context);
-  vm.runInContext(`${read('sources.js')}\nthis.page = () => sourcePage;`, context);
+  vm.runInContext(`${read('sources.js')}\n${fileAside}\nthis.page = () => sourcePage;`, context);
   ui.context = context;
   ui.type = async (text) => {
     ui.query.value = text;
@@ -402,6 +408,35 @@ test('a match inside folded echo lines opens the fold before it is scrolled to',
   const fold = row.closest('.echo-lines');
   assert.equal(fold.hidden, false);
   assert.equal(fold.unfolded, true);
+});
+
+test('Back to note puts the page where it was and focus on the original, for a PDF, a picture and a text file, and after a redraw', async () => {
+  const chip = (name) => ({ isConnected: true, dataset: { action: 'view-original', name }, focused: 0, focus() { this.focused += 1; } });
+  for (const [kind, name] of [['pdf', 'slides.pdf'], ['image', 'board.png'], ['text', 'notes.md']]) {
+    const ui = screen(engine(recordings(), 50));
+    const opener = chip(name);
+    ui.context.document.activeElement = opener;
+    ui.context.window.scrollY = 640;
+    await ui.context.openFileAside(`/api/notes/n1/originals/${name}`, kind, name, null);
+    assert.ok(ui.layout.classes.has('aside-open'), kind);
+    assert.deepEqual(ui.scrolled, [0, 0], kind);
+    ui.context.closeAside();
+    assert.ok(!ui.layout.classes.has('aside-open'), kind);
+    assert.deepEqual(ui.scrolled, [0, 640], kind);
+    assert.equal(opener.focused, 1, kind);
+
+    ui.context.document.activeElement = opener;
+    await ui.context.openFileAside(`/api/notes/n1/originals/${name}`, kind, name, null);
+    const held = ui.context.holdAside('n1');
+    opener.isConnected = false;
+    const drawn = chip(name);
+    ui.chips = [chip('other.pdf'), drawn];
+    ui.context.restoreAside(held);
+    ui.context.closeAside();
+    assert.deepEqual(ui.scrolled, [0, 640], `${kind} after a redraw`);
+    assert.equal(drawn.focused, 1, `${kind} after a redraw`);
+    assert.equal(opener.focused, 1, `${kind} after a redraw`);
+  }
 });
 
 test('renaming a speaker sends the rename with the revision and reloads the same page', async () => {

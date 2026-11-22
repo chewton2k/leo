@@ -1080,7 +1080,9 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   call; the side pane is gone): `openAside` (sources.js) sets `.note-layout.aside-open`, which hides
   `#doc`, the margin, outline, related and `#note-facts` and shows `#note-aside` with its own facts
   line `#note-aside-facts` (the doc stays mounted; `closeAside` redraws the margin). The title stays;
-  Back to note or Escape returns (refused with "Save your fixes first." while a fix is unsaved).
+  Back to note or Escape returns (refused with "Save your fixes first." while a fix is unsaved) to
+  the scroll position and focus it opened from; after a redraw, focus goes to the same element by id
+  or to the same original's chip (`focusAgain`).
   Transcript: facts "Transcript · <duration> · Back to note" (the duration once the last page is
   shown); Find in transcript (the server's matches and the page's row filter); `transcriptFlow`
   (recording.js) groups a page: with speakers (`speakersOf(head.speakers)`, not `Microphone`,

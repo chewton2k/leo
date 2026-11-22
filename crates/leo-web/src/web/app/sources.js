@@ -50,7 +50,15 @@ function closeAside() {
   asideReturn = null;
   if (!back) return;
   window.scrollTo(0, back.top);
-  if (back.focus && back.focus.isConnected && back.focus !== document.body) back.focus({ preventScroll: true });
+  const focus = focusAgain(back.focus);
+  if (focus && focus !== document.body) focus.focus({ preventScroll: true });
+}
+
+function focusAgain(focus) {
+  if (!focus || focus.isConnected) return focus;
+  if (focus.id) return document.getElementById(focus.id);
+  const name = focus.dataset && focus.dataset.action === 'view-original' ? focus.dataset.name : null;
+  return name ? [...document.querySelectorAll('[data-action="view-original"]')].find((el) => el.dataset.name === name) || null : null;
 }
 
 const backLink = '<button type="button" class="facts-link" data-action="note-back">Back to note</button>';
