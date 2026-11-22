@@ -773,10 +773,12 @@
     }
 
     const noteLayout = container.closest('.note-layout');
+    const layoutWide = () => noteLayout && noteLayout.toggleAttribute('data-wide', noteLayout.getBoundingClientRect().width >= OUTLINE_WIDE);
+    const layoutWatch = noteLayout && root.ResizeObserver ? new ResizeObserver(() => requestAnimationFrame(layoutWide)) : null;
     if (noteLayout) {
-      const wide = () => noteLayout.toggleAttribute('data-wide', noteLayout.getBoundingClientRect().width >= OUTLINE_WIDE);
-      wide();
-      if (root.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(wide)).observe(noteLayout);
+      layoutWide();
+      root.addEventListener('resize', layoutWide);
+      layoutWatch?.observe(noteLayout);
     }
 
     function blockAtLine(line) {
@@ -1967,6 +1969,8 @@
         }
         root.removeEventListener('scroll', outlineScroll);
         root.removeEventListener('resize', outlineScroll);
+        root.removeEventListener('resize', layoutWide);
+        layoutWatch?.disconnect();
         document.removeEventListener('selectionchange', onSelectionChange);
         clearTimeout(release);
         document.removeEventListener('pointerup', onPointerUp);

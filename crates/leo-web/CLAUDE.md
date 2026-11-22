@@ -567,8 +567,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
 - Resizing stays cheap on long notes (2026-11-21, measured in WebKit on a 200 KB note):
   `.note-layout` is not a size container (a container query re-resolved every note element's
   style on each width change); it keeps the same containment through `contain`, and `leoDoc.mount`
-  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn and a frame
-  after each ResizeObserver report (toggling inside the callback resized `body` under the page bar's
+  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn, on each window
+  `resize` and a frame after each ResizeObserver report (toggling inside the callback resized `body` under the page bar's
   observer, a ResizeObserver loop error in WebKit), read through
   `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
   (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
