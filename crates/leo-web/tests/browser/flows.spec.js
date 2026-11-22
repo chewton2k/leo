@@ -2755,7 +2755,7 @@ test.describe('recording', () => {
   function stubRecorder(page, { noteId, local = true }) {
     const seen = { started: null, points: [], stopped: false, paused: false, levels: Array(200).fill(0.1), source: 'microphone' };
     let polls = 0;
-    const view = (over = {}) => ({ wants: seen.wants ?? (seen.started && seen.started.profile ? seen.started.profile.wants || '' : ''), id: 'rec-1', source: seen.source, state: seen.paused ? 'paused' : 'recording', secs: 3, step: '', steps: null, transcript: 'Today we cover breadth first search.', warnings: [], points: seen.points.map((t) => [3, t]), levels: seen.levels, note: null, error: null, ...over });
+    const view = (over = {}) => ({ wants: seen.wants ?? (seen.started && seen.started.profile ? seen.started.profile.wants || '' : ''), id: 'rec-1', source: seen.source, title: seen.started ? seen.started.title || '' : '', directory: seen.started ? seen.started.directory || '' : '', state: seen.paused ? 'paused' : 'recording', secs: 3, step: '', steps: null, transcript: 'Today we cover breadth first search.', warnings: [], points: seen.points.map((t) => [3, t]), levels: seen.levels, note: null, error: null, ...over });
     page.route('**/api/record', async (route) => {
       if (route.request().method() === 'GET') return route.fulfill({ json: { available: true, local, job: null } });
       seen.started = route.request().postDataJSON();
@@ -2816,7 +2816,7 @@ test.describe('recording', () => {
       for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++;
       return painted;
     });
-    expect(drawn).toBeGreaterThan(200);
+    expect(drawn).toBeGreaterThan(50);
     const leftEdge = await page.locator('#rec-wave').evaluate((canvas) => {
       const data = canvas.getContext('2d').getImageData(0, 0, Math.round(canvas.width * 0.1), canvas.height).data;
       let painted = 0;

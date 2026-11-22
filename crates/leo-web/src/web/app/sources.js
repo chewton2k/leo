@@ -15,11 +15,14 @@ function asideOpen() {
   return Boolean($('.note-layout.aside-open'));
 }
 
+let asideReturn = null;
+
 function openAside(kind, facts, body) {
   const layout = $('.note-layout');
   const box = $('#note-aside');
   if (!layout || !box) return null;
   const arriving = !layout.classList.contains('aside-open');
+  if (arriving) asideReturn = { focus: document.activeElement, top: window.scrollY };
   layout.classList.add('aside-open');
   layout.dataset.aside = kind;
   $('#note-aside-facts').innerHTML = facts;
@@ -41,8 +44,11 @@ function closeAside() {
   $('#note-aside-facts').innerHTML = '';
   sourcePage = null;
   if (typeof marginDraw === 'function') marginDraw();
-  const title = $('#title');
-  if (title) title.focus({ preventScroll: true });
+  const back = asideReturn;
+  asideReturn = null;
+  if (!back) return;
+  window.scrollTo(0, back.top);
+  if (back.focus && back.focus.isConnected && back.focus !== document.body) back.focus({ preventScroll: true });
 }
 
 const backLink = '<button type="button" class="facts-link" data-action="note-back">Back to note</button>';
@@ -225,13 +231,13 @@ function drawRecordingSources(query = '') {
     filter();
     find();
   });
-  box.addEventListener('keydown', (e) => {
+  box.onkeydown = (e) => {
     if (e.key === 'Enter' && e.target.matches && e.target.matches('.source-text')) {
       e.preventDefault();
       e.target.blur();
     }
-  });
-  box.addEventListener('click', (e) => {
+  };
+  box.onclick = (e) => {
     const show = e.target.closest && e.target.closest('[data-echo-show]');
     if (show) {
       const fold = show.closest('.echo-fold');
@@ -240,7 +246,7 @@ function drawRecordingSources(query = '') {
     }
     const name = e.target.closest && e.target.closest('.speaker-name');
     if (name) renameSpeakerField(name);
-  });
+  };
   if (many) $('#source-pick', box).addEventListener('change', (e) => sourcePick(e.target.value).catch(fail));
   filter();
   if (focus) {
@@ -278,6 +284,7 @@ function renameSpeakerField(button) {
 
 async function renameSpeaker(from, to) {
   if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
+  if (window.leoRecording.NOT_SPEAKERS.includes(to)) throw Object.assign(new Error(`“${to}” names a recording, not a speaker. Choose another name.`), { shown: true });
   const page = sourcePage;
   const mine = seq;
   const { head } = page.page;
@@ -362,6 +369,8 @@ async function regenerateSource() {
       <div class="prose combine-preview">${md.render(preview.body)}</div>
       ${sheetButtons(['Use this version', 'data-action="source-apply"'], { cancel: 'Back', action: 'source-back' })}`);
     $('.sheet', box).classList.add('source-sheet');
+    button.disabled = false;
+    button.textContent = 'Write the note again';
   } catch (e) {
     if (button.isConnected) {
       button.disabled = false;

@@ -266,11 +266,11 @@ function readingAnchor() {
 }
 
 window.addEventListener('scroll', () => {
-  if (state.view !== 'note' || !reading.id || !reading.user || Date.now() < reading.quietUntil) return;
+  if (state.view !== 'note' || !reading.id || !reading.user || Date.now() < reading.quietUntil || asideOpen()) return;
   clearTimeout(reading.timer);
   const id = reading.id;
   reading.timer = setTimeout(() => {
-    if (state.view !== 'note' || reading.id !== id) return;
+    if (state.view !== 'note' || reading.id !== id || asideOpen()) return;
     const anchor = window.scrollY < 40 ? { line: 0, text: '', dy: 0 } : readingAnchor();
     if (anchor) api(`/api/notes/${enc(id)}/reading`, { method: 'PUT', body: { anchor } }).catch(() => {});
   }, READ_SAVE_MS);

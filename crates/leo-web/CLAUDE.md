@@ -1043,7 +1043,9 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   persists, so polite would read every update. The `[data-keep]` nodes are the transcript
   panel `#rec-heard`, the tab list `#rec-tabs` (its count and selection are set in place by
   `syncTabs`, so keyboard focus stays) and Felix's column. The live string is untimed, one
-  track at a time for calls, so it stays plain text; turns are drawn only for a saved transcript.
+  track at a time for calls, and a microphone recording's speaker labels exist only once it is
+  saved, so the Transcript tab stays plain text, also after Stop; turns are drawn only for a
+  saved transcript.
 - Record page (2026-11-22, the owner's call: lectures and meetings share it; speaker UI only
   where speaker data exists; Start and the live controls stay red). Before Start: the title
   field first (`#rec-title`, note-title type, "Untitled recording"), then the event and folder
