@@ -297,7 +297,7 @@ impl Timeline {
         self.close(f64::INFINITY)
     }
 
-    fn from_reaching(&self, start: f64) -> &[(f64, f64, String)] {
+    fn reaching(&self, start: f64) -> &[(f64, f64, String)] {
         let reach = start - self.longest;
         &self.runs[self.runs.partition_point(|(from, _, _)| *from < reach)..]
     }
@@ -305,7 +305,7 @@ impl Timeline {
     pub fn name(&self, start: f64, end: f64) -> Option<String> {
         if end <= start {
             return self
-                .from_reaching(start)
+                .reaching(start)
                 .iter()
                 .take_while(|(from, _, _)| *from <= start)
                 .find(|(_, to, who)| start < *to && !self.is_me(who))
@@ -323,10 +323,10 @@ impl Timeline {
                 .collect(),
         );
         let whole = measure(&spans);
-        let mut time: Vec<(String, String, Vec<(f64, f64)>)> = Vec::new();
+        let mut time: Vec<(String, String, Spans)> = Vec::new();
         for &(start, end) in &spans {
             for (from, to, who) in self
-                .from_reaching(start)
+                .reaching(start)
                 .iter()
                 .take_while(|(from, _, _)| *from < end)
             {
@@ -349,7 +349,9 @@ impl Timeline {
     }
 }
 
-fn union(mut spans: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+type Spans = Vec<(f64, f64)>;
+
+fn union(mut spans: Spans) -> Spans {
     spans.sort_by(|a, b| a.0.total_cmp(&b.0));
     let mut out: Vec<(f64, f64)> = Vec::with_capacity(spans.len());
     for (from, to) in spans {
