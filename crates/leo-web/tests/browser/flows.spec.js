@@ -2965,7 +2965,7 @@ test.describe('recording', () => {
     expect(seen.started.source).toBe('nativecall');
   });
 
-  test('Label speakers is chosen per recording, remembered, hidden for calls and sent with Start once its model is ready', async ({ page }) => {
+  test('Label speakers is chosen per recording, remembered, shown for calls and sent with Start once its model is ready', async ({ page }) => {
     const seen = stubRecorder(page, { noteId: 'x', local: false });
     let model = { id: 'diar', size: 139310336, bytes: 0, verified: false, progress: null };
     await page.route('**/api/speech', (route) => route.fulfill({ json: { models: [], speakers: model } }));
@@ -2980,9 +2980,7 @@ test.describe('recording', () => {
     await expect(page.locator('#rec-speakers'), 'the choice is remembered').toBeChecked();
     await expect(page.locator('#rec-speakers-model')).toHaveCount(0);
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
-    await expect(page.locator('#rec-speakers-box'), 'calls already label You and Others').toBeHidden();
-    await page.locator('.rec-kinds .choice-pick', { hasText: 'Microphone' }).click();
-    await expect(page.locator('#rec-speakers-box')).toBeVisible();
+    await expect(page.locator('#rec-speakers-box'), 'calls tell the other voices apart').toBeVisible();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();
     expect(seen.started.profile.speakers).toBe(true);

@@ -627,8 +627,6 @@
       if (headset) headset.hidden = !picked || picked.value === 'microphone';
       const wants = box.querySelector('#rec-wants');
       if (fill && call && wants && !wants.value.trim()) wants.value = MEETING_WANTS;
-      const speakers = box.querySelector('#rec-speakers-box');
-      if (speakers) speakers.hidden = call;
       const group = box.querySelector('.rec-kinds');
       if (group) syncChoiceCards(group);
     }

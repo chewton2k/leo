@@ -81,8 +81,11 @@ sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
 Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
-Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
-never for call tracks; omitted from JSON when off, so old cache keys hold):
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
+omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the
+owner's call, only the Others track gets it, You is always You, and leo-host's
+`merged` names its voices Others 1, Others 2… by first appearance, only on lines
+still plain "Others": a name from the call app wins):
 `Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
 drafting is off. In `recorder::finish`, once every part is done,
 `label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
@@ -113,6 +116,29 @@ on a pinned, checksummed AMI excerpt: right speaker ≥ 80%, speech with text
 left out) at most 5 points above the same model's plain transcript. Words kept
 against the plain path is only printed: Whisper's plain 5-minute parts can run
 long (whisper-large-v3: 706 words where most models give about 575).
+
+Call echo (2026-11-22, the owner's call; `session/echo.rs`): without headphones the
+microphone hears the call. Call tracks keep `seg-NNNNN.levels` (one dB byte per
+10 ms, written before the part is transcribed; missing means silence). Once both
+tracks finish, `echo::marks` compares the envelopes in 2 s windows where both
+carry sound (6 dB over each track's idle level, its 10th percentile, at least
+30 dB), lags ±2 s: a window is confident at correlation ≥ 0.6, steady when
+two others within 20 s agree within 20 ms (a sorted scan of the neighbours, not
+all pairs); echo exists only when steady windows are ≥ 20% of shared windows
+(headphones: none, nothing marked). Each You line is judged on its own span (its
+onset to the next line's onset, so silence is not counted, only sound) at the
+nearest steady lag, with the leak's level the median of the steady windows within
+20 s (a later volume change is followed). A sound block (10 ms, at least the
+track's floor) is a copy when the other side is at or above its floor (the
+loudest within 20 ms of the lag) and the block is no more than 6 dB over the
+leak's level; the line is echo only when at most 5% of its sound blocks are not
+copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
+line of yours before or under an echo is never hidden; under 0.5 s of sound stays
+unmarked. Lines are never marked when the search is cut short (finish now), and a
+part with a transcript whose levels file is missing or cut short is traced and
+never marked. Marked lines keep their text with `Passage.echo` (omitted when
+false); the writing AI skips them, the join never fuses echo with real speech.
+Envelopes are read a part at a time.
 
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
 re-transcribe from `settled_at`, at most

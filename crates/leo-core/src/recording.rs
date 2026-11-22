@@ -35,6 +35,8 @@ pub struct Passage {
     pub text: String,
     #[serde(default)]
     pub speaker: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub echo: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1309,6 +1311,21 @@ mod tests {
     }
 
     #[test]
+    fn echo_is_off_by_default_and_leaves_old_passages_byte_identical() {
+        let old = r#"{"start_secs":1,"end_secs":2,"text":"t","speaker":"You"}"#;
+        let passage: Passage = serde_json::from_str(old).unwrap();
+        assert!(!passage.echo);
+        assert_eq!(serde_json::to_string(&passage).unwrap(), old);
+        let echoed = Passage {
+            echo: true,
+            ..passage
+        };
+        let written = serde_json::to_string(&echoed).unwrap();
+        assert!(written.ends_with(r#","echo":true}"#));
+        assert_eq!(serde_json::from_str::<Passage>(&written).unwrap(), echoed);
+    }
+
+    #[test]
     fn what_the_user_wants_is_trimmed_and_kept_whole() {
         let p = Profile {
             context: " Design review ".into(),
@@ -1463,6 +1480,7 @@ mod tests {
                     end_secs: at + 5,
                     text: (*text).into(),
                     speaker: (*speaker).into(),
+                    echo: false,
                 })
                 .collect(),
             points: vec![],
@@ -1500,6 +1518,7 @@ mod tests {
                 end_secs: n + 1,
                 text: format!("{n} {text}"),
                 speaker: if n % 2 == 0 { "A" } else { "B" }.into(),
+                echo: false,
             };
             serde_json::to_writer(&mut out, &p).unwrap();
         }
@@ -2311,6 +2330,7 @@ mod tests {
                 end_secs: n + 1,
                 text: "é".repeat(size / 2),
                 speaker: String::new(),
+                echo: false,
             });
             if next() % 3 == 0 {
                 source
@@ -2565,6 +2585,7 @@ mod tests {
                         end_secs: n + 1,
                         text: format!("{n} {big}"),
                         speaker: String::new(),
+                        echo: false,
                     }),
                     std::iter::once(typed(3, "typed")),
                 )
@@ -2585,6 +2606,7 @@ mod tests {
                             end_secs: i + 1,
                             text: format!("{i} {big}"),
                             speaker: String::new(),
+                            echo: false,
                         }),
                         std::iter::empty(),
                     )

@@ -2400,6 +2400,9 @@ impl Desk {
             let read = sources.rows(
                 source,
                 |_, p| {
+                    if p.echo {
+                        return Ok(true);
+                    }
                     let who = if named && !p.speaker.is_empty() {
                         format!("{}: ", p.speaker)
                     } else {

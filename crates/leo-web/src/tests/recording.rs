@@ -159,12 +159,8 @@ fn screen_recordings_are_marked_as_screen_audio() {
 }
 
 #[test]
-fn speaker_labels_ride_the_start_request_and_calls_never_get_them() {
-    for (source, expected) in [
-        ("microphone", true),
-        ("screen", true),
-        ("nativecall", false),
-    ] {
+fn speaker_labels_ride_the_start_request_for_every_source() {
+    for (source, expected) in [("microphone", true), ("screen", true), ("nativecall", true)] {
         let (mut state, _d, _ids) = state_with(&[]);
         let seen: Arc<Mutex<Option<bool>>> = Default::default();
         let saw = Arc::clone(&seen);
@@ -345,6 +341,7 @@ fn a_recording_whose_notes_were_not_written_says_so_until_they_are() {
                     end_secs: 5,
                     text: "what was said".into(),
                     speaker: String::new(),
+                    echo: false,
                 }],
                 points: vec![],
                 context: String::new(),
@@ -599,6 +596,7 @@ fn recover_saved_into(
                     end_secs: 600,
                     text: "the part that failed before".into(),
                     speaker: String::new(),
+                    echo: false,
                 }],
                 points: vec![],
                 context: String::new(),
@@ -1070,6 +1068,7 @@ fn one_side(id: String, speaker: &str, text: &str) -> leo_core::recording::Archi
             end_secs: 5,
             text: text.into(),
             speaker: speaker.into(),
+            echo: false,
         }],
         points: vec![],
         context: String::new(),
@@ -1490,6 +1489,7 @@ fn spoken(id: &str, text: &str) -> leo_core::recording::Archive {
             end_secs: 5,
             text: text.into(),
             speaker: String::new(),
+            echo: false,
         }],
         points: vec![leo_core::recording::Point {
             at_secs: 2,
@@ -1593,6 +1593,7 @@ fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
         end_secs: 9,
         text: "untouched".into(),
         speaker: String::new(),
+        echo: false,
     });
     leo_core::recording::save(&notes, &ids[0], &source).unwrap();
     let put = |body: serde_json::Value| {
