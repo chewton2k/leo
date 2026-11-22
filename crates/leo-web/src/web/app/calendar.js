@@ -1980,6 +1980,7 @@ function drawTasksWindow() {
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
   const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
   tasksBox.hidden = !open || here || state.view === 'locked';
+  tasksSync();
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
   const focus = tasksFocus(tasksBox);
@@ -1997,7 +1998,6 @@ function drawTasksWindow() {
 }
 
 function fitTasksWindow() {
-  tasksSync();
   const first = app.querySelector('.cards > .card');
   const box = tasksBox.hidden ? null : dock().getBoundingClientRect();
   const card = first && box && box.width ? first.getBoundingClientRect() : null;

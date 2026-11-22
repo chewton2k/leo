@@ -84,7 +84,6 @@
 .felix.squint .felix-eyes { opacity: 0; }
 .felix.squint .felix-squeeze { opacity: 1; animation: felix-shake .14s ease-in-out .25s 5; }
 .felix.squint .felix-sweat { animation: felix-drip 1.5s ease-in 1; }
-@media (prefers-reduced-motion: reduce) { .felix:is(.hug, .squint) .felix-body, .felix:is(.hug, .squint) .felix-arm, .felix.hug .felix-heart, .felix.squint :is(.felix-sweat, .felix-squeeze) { animation: none; } }
 .felix .felix-monster, .felix .felix-rawr { opacity: 0; }
 .felix .felix-monster .felix-horns rect { fill: #f3e2b3; }
 .felix .felix-monster .felix-spikes rect { fill: #4b318f; }

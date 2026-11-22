@@ -325,8 +325,7 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   `window.leoMotion` (absent in some fixtures: every call has a plain fallback);
   doc.js reads the curve from the CSS token.
 - Press: pressables scale to .97 with the individual `scale` property (one
-  grouped rule at the end of the styles), never draggable rows, `.actions`
-  tooltips or disabled controls.
+  grouped rule at the end of the styles), never draggable rows or disabled controls.
 - Knobs `knobStretch(el, pseudo)` (12% along the travel, on `scale`, ends at 1).
   Popovers `unfold(menu, from)` / `fold(menu, then)` (`popEdge` origin, start at
   .95, clip reveal; reversing mid-run starts from the live clip, opacity and
@@ -567,8 +566,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   reserved before the first heading or comment exists.
 - Resizing stays cheap on long notes (2026-11-21, measured in WebKit on a 200 KB note):
   `.note-layout` is not a size container (a container query re-resolved every note element's
-  style on each width change); it keeps the same containment through `contain`, and doc.js sets
-  `data-wide` (≥ `OUTLINE_WIDE`, 900 px) once at mount and from its ResizeObserver, read through
+  style on each width change); it keeps the same containment through `contain`, and `leoDoc.mount`
+  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn and from a ResizeObserver, read through
   `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
   (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
   pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
@@ -928,7 +927,7 @@ Felix (2026-10-19).
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
   a note on the right whenever the right is free at its height (`marginKit.sides`).
-  Margin icon buttons show the `.actions` tooltip (their aria-label), no `title`.
+  Margin icon buttons show the shared tooltip (their aria-label, `::after`), no `title`; the floating note toolbar's `.actions` rules are gone.
   Felix this on such a passage only opens it (Visualize still asks in it). The open
   thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
   The ask box shows "Enter to ask · Esc to close"; a draw ask waits with "Sketching it…"

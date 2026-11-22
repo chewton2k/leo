@@ -74,7 +74,7 @@ scripted animation is skipped under `stillMotion()`; CSS motion sits under
   helpers through `window.leoMotion` (set in motion.js, absent in some fixtures, so each
   call has a plain fallback); doc.js reads the curve from the CSS token.
 - Press: everything pressable scales to .97 with the individual `scale` property (one grouped
-  rule at the end of the style block), never draggable rows, `.actions` tooltips or disabled controls.
+  rule at the end of the style block), never draggable rows or disabled controls.
 - Knobs: `knobStretch(el, pseudo)` stretches 12% along the travel, peaking mid-move, on `scale`, so
   the position transition is untouched and it ends at exactly 1 (switch, segmented pill, choice ring).
 - Popovers: `unfold(menu, from)` / `fold(menu, then)`. `from` is the trigger element or a pointer
