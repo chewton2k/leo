@@ -336,7 +336,7 @@ function renameSpeakerField(button) {
 async function renameSpeaker(from, to) {
   if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
   if (window.leoRecording.NOT_SPEAKERS.includes(to)) throw Object.assign(new Error(`“${to}” names a recording, not a speaker. Choose another name.`), { shown: true });
-  const into = (sourcePage.page.head.speakers || []).find((name) => name !== from && name.toLowerCase() === to.toLowerCase());
+  const into = ['you', 'others'].includes(to.toLowerCase()) ? null : (sourcePage.page.head.speakers || []).find((name) => name !== from && name.toLowerCase() === to.toLowerCase());
   if (!into) return saveSpeaker(from, to, false);
   confirmSheet({ title: `Merge ${esc(from)} into ${esc(into)}?`, text: `Every line marked ${esc(from)} in this recording is marked ${esc(into)} instead.`, yes: 'Merge', action: 'speaker-merge', data: ` data-from="${esc(from)}" data-into="${esc(into)}"`, danger: false });
 }
