@@ -28,7 +28,7 @@ pub enum Writing {
     Selected,
 }
 const SETTINGS_BYTES: usize = 64 * 1024 * 1024;
-const RETIRED: &[&str] = &["closed_microphone", "trailing_space", "enter"];
+const RETIRED: &[&str] = &["closed_microphone", "trailing_space", "enter", "fillers"];
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Settings {
@@ -36,7 +36,6 @@ pub struct Settings {
     pub mode: Mode,
     pub microphone: Option<String>,
     pub custom_words: Vec<String>,
-    pub fillers: bool,
     pub sounds: bool,
     pub popup: Popup,
     pub top: bool,
@@ -54,7 +53,6 @@ impl Default for Settings {
             mode: Mode::Both,
             microphone: None,
             custom_words: Vec::new(),
-            fillers: true,
             sounds: false,
             popup: Popup::Live,
             top: false,
@@ -201,12 +199,12 @@ mod recovery_tests {
         .unwrap();
         let settings = super::Settings::load(&path).unwrap();
         assert_eq!(settings.shortcut, "fn");
-        assert!(!settings.fillers);
         settings.save(&path).unwrap();
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(
             !saved.contains("closed_microphone")
                 && !saved.contains("trailing_space")
+                && !saved.contains("fillers")
                 && !saved.contains("\"enter\"")
         );
     }

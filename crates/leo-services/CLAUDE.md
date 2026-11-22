@@ -451,11 +451,12 @@ language.
 `dictation/text.rs`: custom words match fuzzily/phonetically at 0.18 (phonetic
 is an internal soundex port of the old `natural` crate, golden-tested in
 `soundex_codes_match_the_natural_crate_it_replaced`), then language-aware filler
-rules (on by default; patterns compiled once per language and custom list,
+rules (always on, no setting since 2026-11-21, the user's call; a saved `fillers`
+is dropped on load like the other retired options; patterns compiled once per language and custom list,
 `filler_patterns`), Unicode-safe punctuation and capitalization, clock times only
-when marked (`230 pm` → `2:30 pm`; a bare `230` is left to the AI). Fillers on
+when marked (`230 pm` → `2:30 pm`; a bare `230` is left to the AI). Filler rules
 also drop "you know" at a clause edge and "scratch that" with its sentence (the
-next word is capitalized), never "like"; stutter collapse needs fillers on. The
+next word is capitalized), never "like"; stutters always collapse. The
 filler language comes from a `whatlang` guess (`TextDetected`: confidence ≥ 0.9
 and ≥ 20 characters) before the model's language. Custom-word matching has
 guards (hyphens, plurals/possessives, casing); quoted text, code and URLs are
