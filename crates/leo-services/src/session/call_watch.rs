@@ -22,6 +22,7 @@ type Alive = Arc<Mutex<()>>;
 type Heard = (u32, Instant, Look);
 
 const STOP_WAIT: Duration = Duration::from_secs(1);
+const STEP: Duration = Duration::from_millis(50);
 
 static ALIVE: OnceLock<Alive> = OnceLock::new();
 
@@ -121,6 +122,17 @@ fn recorded_at(moment: Moment, read: Instant, epoch: u32, lag: Duration) -> Opti
     })
 }
 
+fn rest(stop: &AtomicBool, wait: Duration) {
+    let until = Instant::now() + wait;
+    while !stop.load(Ordering::Relaxed) {
+        let left = until.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return;
+        }
+        std::thread::sleep(left.min(STEP));
+    }
+}
+
 fn spawn_reader(
     readers: &Readers,
     anchor: &Anchor,
@@ -172,7 +184,7 @@ fn spawn_reader(
                     break;
                 }
                 let took = at.elapsed();
-                std::thread::sleep(pace.every.max(took * 2).saturating_sub(took));
+                rest(&stop, pace.every.max(took * 2).saturating_sub(took));
             }
         })
         .ok()
