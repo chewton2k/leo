@@ -212,6 +212,8 @@ pub(crate) fn trace_to(dir: &Path, stage: &str, detail: &str) {
     }
 }
 
+type Turns = Vec<(u64, Option<u64>, String)>;
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum TurnRow {
@@ -965,7 +967,7 @@ impl Session {
         self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
     }
 
-    fn turns(&self, assembled: &Assembled) -> Option<Vec<Vec<(u64, Option<u64>, String)>>> {
+    fn turns(&self, assembled: &Assembled) -> Option<Vec<Turns>> {
         if !self.manifest.turns {
             return None;
         }
