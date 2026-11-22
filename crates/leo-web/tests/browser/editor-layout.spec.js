@@ -19,6 +19,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   ${passages.slice(passages.indexOf('const KEEP_SELECTION'), passages.indexOf("document.addEventListener('keydown'"))}` : ''}
   ${remember ? `const $ = selector => document.querySelector(selector), enc = encodeURIComponent;
     const seq = 1, citedLines = null, state = {view:'note',session:{doc:window.doc}};
+    const asideOpen = () => false;
     async function api(url, options = {}) {
       if (options.method === 'PUT') localStorage.setItem('fixture-reading', JSON.stringify(options.body.anchor));
       return {anchor:audit.anchor()};

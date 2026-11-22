@@ -135,7 +135,7 @@
 .rec-chips .chip svg { width: 14px; height: 14px; flex: none; }
 .rec-chip .select-control { position: relative; display: inline-flex; min-width: 0; }
 .rec-chip select { border: 0; padding: 0; background: none; color: inherit; font: inherit; }
-.rec-chip .select-menu-button { min-height: 0; padding: 0; gap: 4px; border: 0; background: none; color: inherit; font: inherit; }
+.rec-chip .select-menu-button { min-height: 0; padding: 0 4px 0 0; gap: 4px; border: 0; background: none; color: inherit; font: inherit; }
 .rec-chip .select-menu-button:hover, .rec-chip .select-menu-button[aria-expanded="true"] { border: 0; box-shadow: none; color: var(--text); }
 .rec-chip .select-menu-button:focus-visible { box-shadow: none; outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
 .rec-chip .select-menu-button svg { width: 12px; height: 12px; }
