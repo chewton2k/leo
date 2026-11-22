@@ -235,6 +235,8 @@ pub enum Refused {
     Stale,
     NoRow,
     Taken,
+    Empty,
+    Reserved,
 }
 
 impl std::fmt::Display for Refused {
@@ -243,6 +245,10 @@ impl std::fmt::Display for Refused {
             Refused::Stale => "This transcript was changed since it was opened",
             Refused::NoRow => "That line is not in this transcript",
             Refused::Taken => "Another speaker in this recording already has that name",
+            Refused::Empty => "A speaker needs a name",
+            Refused::Reserved => {
+                "That name is one leo gives a recording's own sound. Choose another name"
+            }
         })
     }
 }
@@ -1006,6 +1012,22 @@ pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change
     rewrite(notes, note, id, revision, changes, None)
 }
 
+const TRACK_NAMES: [&str; 4] = ["Microphone", "Computer audio", "You", "Others"];
+
+pub fn speaker_name(to: &str) -> std::result::Result<&str, Refused> {
+    let to = to.trim();
+    if to.is_empty() {
+        return Err(Refused::Empty);
+    }
+    if TRACK_NAMES
+        .iter()
+        .any(|t| t.to_lowercase() == to.to_lowercase())
+    {
+        return Err(Refused::Reserved);
+    }
+    Ok(to)
+}
+
 pub fn rename_speaker(
     notes: &Path,
     note: &str,
@@ -1022,7 +1044,16 @@ pub fn rename_speaker(
     if from.is_empty() || !old.speakers.iter().any(|s| s == from) {
         return Err(Refused::NoRow.into());
     }
-    if to.is_empty() || old.speakers.iter().any(|s| s == to && s != from) {
+    if to == from {
+        return Ok(old);
+    }
+    let to = speaker_name(to)?;
+    let lower = to.to_lowercase();
+    if old
+        .speakers
+        .iter()
+        .any(|s| s != from && s.to_lowercase() == lower)
+    {
         return Err(Refused::Taken.into());
     }
     rewrite(notes, note, id, revision, &[], Some((from, to)))
@@ -2380,6 +2411,55 @@ mod tests {
             said,
             [("Ana", "one"), ("Speaker 2", "two"), ("Ana", "three")]
         );
+    }
+
+    #[test]
+    fn a_speaker_name_must_be_new_and_not_a_recording_track() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names2",
+                &[(0, "Speaker 1", "one"), (5, "Speaker 2", "two")],
+            ),
+        )
+        .unwrap();
+        let refused = |to: &str| {
+            rename_speaker(&notes, "note-0001", "rec-names2", 1, "Speaker 1", to)
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap()
+        };
+        assert_eq!(refused(""), Refused::Empty);
+        assert_eq!(refused("  \t "), Refused::Empty);
+        for name in ["Microphone", "computer AUDIO", "You", "others"] {
+            assert_eq!(refused(name), Refused::Reserved, "{name}");
+        }
+        assert_eq!(refused("speaker 2"), Refused::Taken);
+        assert_eq!(refused(" SPEAKER 2 "), Refused::Taken);
+        let same = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names2",
+            1,
+            "Speaker 1",
+            " Speaker 1 ",
+        )
+        .unwrap();
+        assert_eq!(same.revision, 1, "no revision for a rename to itself");
+        assert_eq!(head(&notes, "note-0001", "rec-names2").unwrap().revision, 1);
+        let case = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names2",
+            1,
+            "Speaker 1",
+            "speaker 1x",
+        )
+        .unwrap();
+        assert_eq!(case.revision, 2);
     }
 
     #[test]

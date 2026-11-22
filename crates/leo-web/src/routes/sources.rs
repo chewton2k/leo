@@ -209,6 +209,13 @@ pub(crate) async fn edit_sources(
     Path(id): Path<String>,
     Json(body): Json<Fix>,
 ) -> Response {
+    if let Some(rename) = &body.rename {
+        if rename.to.trim() != rename.from {
+            if let Err(refused) = recording::speaker_name(&rename.to) {
+                return error(StatusCode::UNPROCESSABLE_ENTITY, format!("{refused}."));
+            }
+        }
+    }
     let Ok(editing) = state.source_writing.clone().try_lock_owned() else {
         return error(
             StatusCode::CONFLICT,
@@ -232,7 +239,11 @@ pub(crate) async fn edit_sources(
             match e.downcast_ref::<recording::Refused>() {
                 Some(recording::Refused::Stale) => StatusCode::CONFLICT,
                 Some(recording::Refused::NoRow) => StatusCode::BAD_REQUEST,
-                Some(recording::Refused::Taken) => StatusCode::UNPROCESSABLE_ENTITY,
+                Some(
+                    recording::Refused::Taken
+                    | recording::Refused::Empty
+                    | recording::Refused::Reserved,
+                ) => StatusCode::UNPROCESSABLE_ENTITY,
                 None if e
                     .downcast_ref::<std::io::Error>()
                     .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
