@@ -1072,7 +1072,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() && speakersReady() }, picked);
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: speakersOn() && speakersReady() }, picked);
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }
