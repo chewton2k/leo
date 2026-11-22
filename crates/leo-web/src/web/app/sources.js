@@ -1,6 +1,7 @@
 let sourcePage;
 let generatedPreview;
 let sourceSearch;
+let fileAside = null;
 
 function sourceAt(source, cursor) {
   const at = (v) => (v === null || v === undefined ? 'end' : v);
@@ -11,7 +12,92 @@ async function fetchSources(note, query, source, cursor) {
   return api(`/api/notes/${enc(note)}/recording?q=${enc(query)}${sourceAt(source, cursor)}`);
 }
 
+function asideOpen() {
+  return Boolean($('.note-layout.aside-open'));
+}
+
+let asideReturn = null;
+
+function openAside(kind, facts, body) {
+  const layout = $('.note-layout');
+  const box = $('#note-aside');
+  if (!layout || !box) return null;
+  const arriving = !layout.classList.contains('aside-open');
+  if (arriving) asideReturn = { focus: document.activeElement, top: window.scrollY };
+  layout.classList.add('aside-open');
+  layout.dataset.aside = kind;
+  $('#note-aside-facts').innerHTML = facts;
+  box.innerHTML = body;
+  if (arriving) {
+    window.scrollTo(0, 0);
+    arriveOnPage(box);
+  }
+  return box;
+}
+
+function closeAside() {
+  const layout = $('.note-layout');
+  if (!layout || !layout.classList.contains('aside-open')) return;
+  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
+  layout.classList.remove('aside-open');
+  delete layout.dataset.aside;
+  $('#note-aside').innerHTML = '';
+  $('#note-aside-facts').innerHTML = '';
+  sourcePage = null;
+  fileAside = null;
+  if (typeof marginDraw === 'function') marginDraw();
+  const back = asideReturn;
+  asideReturn = null;
+  if (!back) return;
+  window.scrollTo(0, back.top);
+  const focus = focusAgain(back.focus);
+  if (focus && focus !== document.body) focus.focus({ preventScroll: true });
+}
+
+function focusAgain(focus) {
+  if (!focus || focus.isConnected) return focus;
+  if (focus.id) return document.getElementById(focus.id);
+  const name = focus.dataset && focus.dataset.action === 'view-original' ? focus.dataset.name : null;
+  return name ? [...document.querySelectorAll('[data-action="view-original"]')].find((el) => el.dataset.name === name) || null : null;
+}
+
+const backLink = '<button type="button" class="facts-link" data-action="note-back">Back to note</button>';
+
+function transcriptOpen() {
+  const layout = $('.note-layout');
+  return Boolean(layout && layout.dataset.aside === 'transcript' && sourcePage);
+}
+
+function holdAside(id) {
+  if (!asideOpen()) return null;
+  const kind = $('.note-layout').dataset.aside;
+  if (kind === 'file' && fileAside) return { kind, file: fileAside, back: asideReturn };
+  if (kind === 'transcript' && sourcePage && sourcePage.note === id) {
+    const wants = $('#regenerate-wants');
+    return { kind, fixes: changedSources(), wants: wants ? wants.value : null, back: asideReturn };
+  }
+  return null;
+}
+
+function restoreAside(held) {
+  if (!held) return;
+  if (held.kind === 'file') {
+    const { url, kind, name, page } = held.file;
+    openFileAside(url, kind, name, page).catch(fail);
+    asideReturn = held.back;
+    return;
+  }
+  drawRecordingSources();
+  asideReturn = held.back;
+  held.fixes.forEach((fix) => {
+    const box = document.querySelector(`[data-${fix.kind}="${fix.seq}"]`);
+    if (box) box.textContent = fix.text;
+  });
+  if (held.wants !== null && $('#regenerate-wants')) $('#regenerate-wants').value = held.wants;
+}
+
 async function showRecordingSources(query = '') {
+  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
   const mine = seq;
   const s = await ready();
   if (!s || !s.note.id) return;
@@ -32,7 +118,7 @@ async function loadSourcePage(source, cursor, back) {
   sourcePage = { ...page, ...answer, back };
   drawRecordingSources();
   const list = $('#source-passages');
-  if (list) list.scrollTop = 0;
+  if (list) list.scrollIntoView({ block: 'start' });
 }
 
 async function sourceEarlier() {
@@ -60,22 +146,66 @@ async function sourceMatch(source, at) {
   if (changedSources().length) return toast('Save your fixes first.');
   await loadSourcePage(source, { passages: Number(at), points: 0 }, Number(at) > 0 ? [{ passages: 0, points: 0 }] : []);
   const row = document.querySelector(`[data-passage="${at}"]`);
-  if (row) row.scrollIntoView({ block: 'center' });
+  if (!row) return;
+  showEcho(row.closest && row.closest('.echo-lines'));
+  row.scrollIntoView({ block: 'center' });
+}
+
+function showEcho(lines) {
+  if (!lines || !lines.hidden) return;
+  lines.hidden = false;
+  const fold = lines.previousElementSibling;
+  if (fold && fold.classList.contains('echo-fold')) fold.remove();
 }
 
 function sourceClock(secs) {
   return window.leoRecording.clock(secs);
 }
 
-function sourceRows(rows, kind) {
-  return rows
-    .map(([at, p]) => {
-      const text = p.text || '';
-      const time = kind === 'passage' ? p.start_secs : p.at_secs;
-      const lines = Math.min(8, Math.max(1, Math.ceil(text.length / 80)));
-      return `<div class="source-row" data-text="${esc(text.toLowerCase())}"><span class="rec-at">${sourceClock(time)}</span><textarea class="source-text" data-${kind}="${at}" rows="${lines}" spellcheck="true">${esc(text)}</textarea></div>`;
-    })
-    .join('');
+function sourceSpan(kind, [at, p]) {
+  return `<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-${kind}="${at}">${esc(p.text || '')}</span>`;
+}
+
+function sourceItems(items) {
+  let run = [];
+  const out = [];
+  const flush = () => {
+    if (run.length) out.push(`<p class="spoken">${run.join(' ')}</p>`);
+    run = [];
+  };
+  for (const item of items) {
+    if (item.passage) {
+      run.push(sourceSpan('passage', item.passage));
+      continue;
+    }
+    flush();
+    if (item.point) out.push(`<p class="typed-point"><span class="typed-label">Your point · </span>${sourceSpan('point', item.point)}</p>`);
+    else out.push(`<p class="echo-fold">Hidden: ${plural(item.echo.length, 'echo line')} · <button type="button" class="facts-link" data-echo-show>Show</button></p><p class="spoken echo-lines" hidden><span class="typed-label">${esc(item.who || 'Microphone')} · echo · </span>${item.echo.map((row) => sourceSpan('passage', row)).join(' ')}</p>`);
+  }
+  flush();
+  return out.join('');
+}
+
+function sourceRows(page) {
+  const R = window.leoRecording;
+  const { speakers } = page.head;
+  const { meeting, groups } = R.transcriptFlow(page.passages, page.points, speakers);
+  return groups.map((g) => {
+    const text = esc(g.items.flatMap((i) => (i.echo ? i.echo : [i.passage || i.point])).map(([, p]) => p.text || '').join(' ').toLowerCase());
+    const said = sourceItems(g.items);
+    if (meeting) {
+      const who = g.speaker ? `<div class="turn-who"><span class="tone-dot" style="--tone: ${R.toneOf(speakers, g.speaker)}"></span><span class="turn-name">${esc(g.speaker)}</span><span class="rec-at">${sourceClock(g.at)}</span></div>` : '';
+      return `<div class="source-row turn" data-text="${text}">${who}${said}</div>`;
+    }
+    return `<div class="source-row minute" data-text="${text}"><span class="rec-at">${sourceClock(g.at)}</span><div class="minute-said">${said}</div></div>`;
+  }).join('');
+}
+
+function speakerRow(head) {
+  const R = window.leoRecording;
+  const names = R.speakersOf(head.speakers);
+  if (!names.length) return '';
+  return `<div class="speaker-row" aria-label="Speakers">${names.map((name) => `<span class="speaker-pill"><span class="tone-dot" style="--tone: ${R.toneOf(head.speakers, name)}"></span><button type="button" class="speaker-name" data-speaker="${esc(name)}" aria-label="Rename ${esc(name)}" title="Rename ${esc(name)}">${esc(name)}</button></span>`).join('')}</div>`;
 }
 
 function sourceDetails(source) {
@@ -98,9 +228,14 @@ function sourceMatches(page) {
     .join('')}`;
 }
 
+function sourceLength(page) {
+  if (page.next || !page.passages.length) return '';
+  return ` · ${sourceClock(Math.max(...page.passages.map(([, p]) => p.end_secs || 0)))}`;
+}
+
 function drawRecordingSources(query = '') {
   const active = document.activeElement;
-  const focus = active && active.closest('.source-sheet') ? { id: active.id, passage: active.dataset.passage, point: active.dataset.point, start: active.selectionStart, end: active.selectionEnd } : null;
+  const focus = active && active.closest && active.closest('#note-aside') ? { id: active.id, passage: active.dataset.passage, point: active.dataset.point } : null;
   query = query || ($('#source-query') && $('#source-query').value) || '';
   const typedWants = $('#regenerate-wants') ? $('#regenerate-wants').value : null;
   const page = sourcePage;
@@ -108,28 +243,22 @@ function drawRecordingSources(query = '') {
   const many = page.list.length > 1;
   const current = page.list.findIndex((s) => s.id === head.id);
   const pick = many ? `<label class="select-control"><select id="source-pick" aria-label="Recording">${page.list.map((s, i) => `<option value="${esc(s.id)}"${s.id === head.id ? ' selected' : ''}>${esc(sourceLabel(s, i))}</option>`).join('')}</select>${ICON.chevron}</label>` : '';
-  const points = page.page.points.length ? `<div class="source-label">Your points</div>${sourceRows(page.page.points, 'point')}` : '';
   const paging = page.back.length || page.page.next ? `<div class="source-paging">${page.back.length ? '<button type="button" class="btn plain" data-action="source-earlier">Earlier</button>' : ''}${page.page.next ? '<button type="button" class="btn plain" data-action="source-later">Later</button>' : ''}</div>` : '';
-  const body = `<section class="recording-source">${many ? `<div class="source-label">${esc(sourceLabel(head, current))}</div>` : ''}${sourceRows(page.page.passages, 'passage')}${points}${sourceDetails(head)}</section>${paging}`;
-  const box = sheet(`<h3>Transcript</h3>
-    <p>What was said, with times. Fix a misheard word and save; writing the note again uses your fixes.</p>
+  const box = openAside('transcript', `Transcript${sourceLength(page.page)} · ${backLink}`, `<div class="note-transcript">
     ${pick}
-    <label class="field">${ICON.search}<input id="source-query" value="${esc(query)}" placeholder="Find a word, name or phrase" autocomplete="off"></label>
+    <label class="field">${ICON.search}<input id="source-query" value="${esc(query)}" placeholder="Find in transcript" aria-label="Find in transcript" autocomplete="off"></label>
     <div id="source-found">${sourceMatches(page)}</div>
-    <div id="source-passages" class="source-list">${body}<p class="hint source-none" hidden>Nothing on this page matches.</p></div>
+    ${speakerRow(head)}
+    <div id="source-passages" class="source-list transcript-flow">${sourceRows(page.page)}<p class="hint source-none" hidden>Nothing on this page matches.</p></div>
+    ${paging}
+    ${sourceDetails(head)}
     <label class="source-wants"><span>What you want from the note</span><textarea id="regenerate-wants" class="set-input" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(page.wants || '')}</textarea></label>
     <p class="set-desc" id="regenerate-wants-hint"${Array.from((typedWants !== null ? typedWants : page.wants || '').trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
-    ${sheetButtons(['Write the note again', 'data-action="source-regenerate"'], { cancel: 'Close', middle: '<button type="button" class="btn plain" data-action="source-save">Save fixes</button>' })}`);
-  $('.sheet', box).classList.add('source-sheet');
+    <p class="hint">Fix a misheard word and save; writing the note again uses your fixes.</p>
+    <div class="buttons source-buttons"><button type="button" class="btn plain" data-action="source-save">Save fixes</button><button type="button" class="btn primary" data-action="source-regenerate">Write the note again</button></div>
+  </div>`);
+  if (!box) return;
   if (typedWants !== null) $('#regenerate-wants', box).value = typedWants;
-  const grow = (area) => {
-    area.style.height = 'auto';
-    area.style.height = `${area.scrollHeight + 2}px`;
-  };
-  box.querySelectorAll('.source-text').forEach((area) => {
-    grow(area);
-    area.addEventListener('input', () => grow(area));
-  });
   const filter = () => {
     const q = $('#source-query', box).value.toLowerCase().trim();
     let shown = 0;
@@ -143,6 +272,7 @@ function drawRecordingSources(query = '') {
     clearTimeout(sourceSearch);
     sourceSearch = setTimeout(async () => {
       const page = sourcePage;
+      if (!page) return;
       const mine = seq;
       const q = $('#source-query') ? $('#source-query').value : '';
       const answer = await fetchSources(page.note, q, page.page.head.id, page.page.at).catch(() => null);
@@ -155,15 +285,81 @@ function drawRecordingSources(query = '') {
     filter();
     find();
   });
+  box.onkeydown = (e) => {
+    if (e.key === 'Enter' && e.target.matches && e.target.matches('.source-text')) {
+      e.preventDefault();
+      e.target.blur();
+    }
+  };
+  box.onclick = (e) => {
+    const show = e.target.closest && e.target.closest('[data-echo-show]');
+    if (show) showEcho(show.closest('.echo-fold').nextElementSibling);
+    const name = e.target.closest && e.target.closest('.speaker-name');
+    if (name) renameSpeakerField(name);
+  };
   if (many) $('#source-pick', box).addEventListener('change', (e) => sourcePick(e.target.value).catch(fail));
   filter();
   if (focus) {
     const field = focus.id ? document.getElementById(focus.id) : [...box.querySelectorAll('[data-passage],[data-point]')].find((x) => x.dataset.passage === focus.passage && x.dataset.point === focus.point);
-    if (field) {
-      field.focus({ preventScroll: true });
-      if (focus.start !== null && typeof field.setSelectionRange === 'function') field.setSelectionRange(focus.start, focus.end);
-    }
+    if (field) field.focus({ preventScroll: true });
   }
+}
+
+function renameSpeakerField(button) {
+  const from = button.dataset.speaker;
+  const input = document.createElement('input');
+  input.className = 'speaker-input';
+  input.value = from;
+  input.setAttribute('aria-label', `New name for ${from}`);
+  input.size = Math.max(6, from.length + 2);
+  button.replaceWith(input);
+  input.focus();
+  input.select();
+  let done = false;
+  const finish = (save) => {
+    if (done) return;
+    done = true;
+    const to = input.value.trim();
+    const back = () => { if (input.isConnected) input.replaceWith(button); };
+    if (save && to && to !== from) renameSpeaker(from, to).then(back, (e) => { fail(e); back(); });
+    else back();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      finish(true);
+    } else if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+async function renameSpeaker(from, to) {
+  if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
+  if (window.leoRecording.NOT_SPEAKERS.includes(to)) throw Object.assign(new Error(`“${to}” names a recording, not a speaker. Choose another name.`), { shown: true });
+  const into = ['you', 'others'].includes(to.toLowerCase()) ? null : (sourcePage.page.head.speakers || []).find((name) => name !== from && name.toLowerCase() === to.toLowerCase());
+  if (!into) return saveSpeaker(from, to, false);
+  confirmSheet({ title: `Merge ${esc(from)} into ${esc(into)}?`, text: `Every line marked ${esc(from)} in this recording is marked ${esc(into)} instead.`, yes: 'Merge', action: 'speaker-merge', data: ` data-from="${esc(from)}" data-into="${esc(into)}"`, danger: false });
+}
+
+function mergeSpeaker(from, into) {
+  return saveSpeaker(from, into, true);
+}
+
+async function saveSpeaker(from, to, merge) {
+  if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
+  const page = sourcePage;
+  const mine = seq;
+  const { head } = page.page;
+  try {
+    const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: head.id, base: head.revision, rename: merge ? { from, to, merge: true } : { from, to } } });
+    head.revision = saved.revision;
+  } catch (e) {
+    if (e.status === 409) throw new Error('This recording changed while you were renaming. Close the transcript and open it again.');
+    throw e;
+  }
+  if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
+  await loadSourcePage(head.id, page.page.at, page.back);
+  toast(merge ? `${from} is now part of ${to} in this recording.` : `${from} is now ${to} in this recording.`);
 }
 
 function changedSources() {
@@ -172,7 +368,8 @@ function changedSources() {
     rows
       .map(([at, p]) => {
         const box = document.querySelector(`[data-${kind}="${at}"]`);
-        return box && box.value !== p.text ? { kind, seq: at, text: box.value } : null;
+        const text = box ? box.textContent : null;
+        return box && text !== p.text ? { kind, seq: at, text } : null;
       })
       .filter(Boolean);
   return [...changed(page.passages, 'passage'), ...changed(page.points, 'point')];
@@ -234,6 +431,8 @@ async function regenerateSource() {
       <div class="prose combine-preview">${md.render(preview.body)}</div>
       ${sheetButtons(['Use this version', 'data-action="source-apply"'], { cancel: 'Back', action: 'source-back' })}`);
     $('.sheet', box).classList.add('source-sheet');
+    button.disabled = false;
+    button.textContent = 'Write the note again';
   } catch (e) {
     if (button.isConnected) {
       button.disabled = false;

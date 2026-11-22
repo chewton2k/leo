@@ -917,7 +917,6 @@
 
   const CHAT_LEAVE_MS = 160;
   const PERMISSION_MS = 5000;
-  const HISTORY_SIDE_WIDTH = 560;
 
   const retiredPractice = (p) => typeof p?.kind === 'string' && p.kind.includes('interview');
 
@@ -1216,7 +1215,7 @@
     const sourceNarrow = () => {
       if (panel.hidden) return false;
       const width = panel.getBoundingClientRect().width;
-      return (document.body.classList.contains('with-source') && width < HISTORY_SIDE_WIDTH) || width < HISTORY_OVERLAY_WIDTH;
+      return width < HISTORY_OVERLAY_WIDTH;
     };
     const HISTORY_LEAST_WIDTH = 190;
     const HISTORY_MOST_WIDTH = 360;

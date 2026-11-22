@@ -35,6 +35,18 @@ pub struct Passage {
     pub text: String,
     #[serde(default)]
     pub speaker: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub echo: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<Turn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Turn {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub track: String,
+    pub part: u32,
+    pub ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -234,6 +246,9 @@ pub struct Change {
 pub enum Refused {
     Stale,
     NoRow,
+    Taken,
+    Empty,
+    Reserved,
 }
 
 impl std::fmt::Display for Refused {
@@ -241,6 +256,11 @@ impl std::fmt::Display for Refused {
         f.write_str(match self {
             Refused::Stale => "This transcript was changed since it was opened",
             Refused::NoRow => "That line is not in this transcript",
+            Refused::Taken => "Another speaker in this recording already has that name",
+            Refused::Empty => "A speaker needs a name",
+            Refused::Reserved => {
+                "That name is one leo gives a recording's own sound. Choose another name"
+            }
         })
     }
 }
@@ -1001,6 +1021,88 @@ pub fn each_point(
 }
 
 pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change]) -> Result<Head> {
+    rewrite(notes, note, id, revision, changes, None)
+}
+
+const TRACK_NAMES: [&str; 4] = ["Microphone", "Computer audio", "You", "Others"];
+
+pub fn speaker_name(to: &str) -> std::result::Result<&str, Refused> {
+    let to = to.trim();
+    if to.is_empty() {
+        return Err(Refused::Empty);
+    }
+    if TRACK_NAMES
+        .iter()
+        .any(|t| t.to_lowercase() == to.to_lowercase())
+    {
+        return Err(Refused::Reserved);
+    }
+    Ok(to)
+}
+
+pub fn rename_speaker(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    from: &str,
+    to: &str,
+) -> Result<Head> {
+    let to = to.trim();
+    let old = head(notes, note, id)?;
+    if old.revision != revision {
+        return Err(Refused::Stale.into());
+    }
+    if from.is_empty() || !old.speakers.iter().any(|s| s == from) {
+        return Err(Refused::NoRow.into());
+    }
+    if to == from {
+        return Ok(old);
+    }
+    let to = speaker_name(to)?;
+    let lower = to.to_lowercase();
+    if old
+        .speakers
+        .iter()
+        .any(|s| s != from && s.to_lowercase() == lower)
+    {
+        return Err(Refused::Taken.into());
+    }
+    rewrite(notes, note, id, revision, &[], Some((from, to)))
+}
+
+pub fn merge_speaker(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    from: &str,
+    into: &str,
+) -> Result<Head> {
+    let old = head(notes, note, id)?;
+    if old.revision != revision {
+        return Err(Refused::Stale.into());
+    }
+    let lower = speaker_name(into)?.to_lowercase();
+    let into = old
+        .speakers
+        .iter()
+        .find(|s| *s != from && s.to_lowercase() == lower)
+        .ok_or(Refused::NoRow)?;
+    if from.is_empty() || !old.speakers.iter().any(|s| s == from) {
+        return Err(Refused::NoRow.into());
+    }
+    rewrite(notes, note, id, revision, &[], Some((from, into)))
+}
+
+fn rewrite(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    changes: &[Change],
+    rename: Option<(&str, &str)>,
+) -> Result<Head> {
     let dir = folder(notes, note)?;
     let old = head(notes, note, id)?;
     if old.revision != revision {
@@ -1024,6 +1126,9 @@ pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change
             |seq, mut p| {
                 if let Some(text) = said.remove(&seq) {
                     p.text = text.to_string();
+                }
+                if let Some((_, to)) = rename.filter(|(from, _)| p.speaker == *from) {
+                    p.speaker = to.to_string();
                 }
                 pout.passage(seq, &p).map(|()| true)
             },
@@ -1055,7 +1160,11 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         Ok(old) if old.id == leftover.id => old,
         _ => return save(notes, note, leftover),
     };
+    let shift = (leftover.started - old.started).num_seconds();
+    let moved = |at: u64| at.saturating_add_signed(shift);
     let mut said = std::collections::HashSet::new();
+    let mut heard = std::collections::HashSet::new();
+    let mut whole: Vec<(u64, u64, String, String)> = Vec::new();
     let mut typed = std::collections::HashSet::new();
     let (mut last_passage, mut last_point) = (0u64, 0u64);
     rows(
@@ -1063,7 +1172,12 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         note,
         &old,
         |seq, p| {
-            said.insert(key(p.start_secs, &p.text));
+            if p.turns.is_empty() {
+                said.insert(key(p.start_secs, &p.text));
+                whole.push((p.start_secs, p.end_secs, p.speaker, p.text));
+            } else {
+                heard.extend(p.turns);
+            }
             last_passage = last_passage.max(seq);
             Ok(true)
         },
@@ -1073,15 +1187,38 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
             Ok(true)
         },
     )?;
-    let mut passages: Vec<&Passage> = leftover
+    whole.sort_by_key(|w| w.0);
+    let longest = whole.iter().map(|w| w.1 - w.0).max().unwrap_or(0);
+    let within = |p: &Passage| {
+        let text = p.text.trim();
+        let to = whole.partition_point(|w| w.0 <= p.start_secs);
+        let from = whole.partition_point(|w| w.0 < p.start_secs.saturating_sub(longest));
+        !text.is_empty()
+            && whole[from..to]
+                .iter()
+                .any(|w| p.end_secs <= w.1 && w.2 == p.speaker && w.3.contains(text))
+    };
+    let mut passages: Vec<Passage> = leftover
         .passages
         .iter()
-        .filter(|p| !said.contains(&key(p.start_secs, &p.text)))
+        .map(|p| Passage {
+            start_secs: moved(p.start_secs),
+            end_secs: moved(p.end_secs),
+            ..p.clone()
+        })
+        .filter(|p| {
+            let known = !p.turns.is_empty() && p.turns.iter().all(|t| heard.contains(t));
+            !known && !said.contains(&key(p.start_secs, &p.text)) && !within(p)
+        })
         .collect();
     passages.sort_by_key(|p| p.start_secs);
-    let mut points: Vec<&Point> = leftover
+    let mut points: Vec<Point> = leftover
         .points
         .iter()
+        .map(|p| Point {
+            at_secs: moved(p.at_secs),
+            text: p.text.clone(),
+        })
         .filter(|p| !typed.contains(&key(p.at_secs, &p.text)))
         .collect();
     points.sort_by_key(|p| p.at_secs);
@@ -1107,7 +1244,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
     new.revision = next_revision(old.revision)?;
     let backup = old.revision == 0;
     commit(&dir, Some(&old), &mut new, backup, |pout, qout| {
-        let mut adding = passages.into_iter().peekable();
+        let mut adding = passages.iter().peekable();
         let mut seq = last_passage;
         let mut put_passages = |pout: &mut Out, before: Option<u64>| -> Result<()> {
             while let Some(p) = adding.next_if(|p| before.is_none_or(|at| p.start_secs < at)) {
@@ -1116,7 +1253,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
             }
             Ok(())
         };
-        let mut jotting = points.into_iter().peekable();
+        let mut jotting = points.iter().peekable();
         let mut jot = last_point;
         let mut put_points = |qout: &mut Out, before: Option<u64>| -> Result<()> {
             while let Some(p) = jotting.next_if(|p| before.is_none_or(|at| p.at_secs < at)) {
@@ -1309,6 +1446,21 @@ mod tests {
     }
 
     #[test]
+    fn echo_is_off_by_default_and_leaves_old_passages_byte_identical() {
+        let old = r#"{"start_secs":1,"end_secs":2,"text":"t","speaker":"You"}"#;
+        let passage: Passage = serde_json::from_str(old).unwrap();
+        assert!(!passage.echo);
+        assert_eq!(serde_json::to_string(&passage).unwrap(), old);
+        let echoed = Passage {
+            echo: true,
+            ..passage
+        };
+        let written = serde_json::to_string(&echoed).unwrap();
+        assert!(written.ends_with(r#","echo":true}"#));
+        assert_eq!(serde_json::from_str::<Passage>(&written).unwrap(), echoed);
+    }
+
+    #[test]
     fn what_the_user_wants_is_trimmed_and_kept_whole() {
         let p = Profile {
             context: " Design review ".into(),
@@ -1463,6 +1615,8 @@ mod tests {
                     end_secs: at + 5,
                     text: (*text).into(),
                     speaker: (*speaker).into(),
+                    echo: false,
+                    turns: Vec::new(),
                 })
                 .collect(),
             points: vec![],
@@ -1500,6 +1654,8 @@ mod tests {
                 end_secs: n + 1,
                 text: format!("{n} {text}"),
                 speaker: if n % 2 == 0 { "A" } else { "B" }.into(),
+                echo: false,
+                turns: Vec::new(),
             };
             serde_json::to_writer(&mut out, &p).unwrap();
         }
@@ -1650,6 +1806,122 @@ mod tests {
         );
         merge_into(&notes, "note-0002", &others).unwrap();
         assert_eq!(whole(&notes, "note-0002")[0].passages, others.passages);
+    }
+
+    #[test]
+    fn a_recovered_track_adds_only_turns_it_has_not_saved_and_keeps_a_rename() {
+        let turn = |track: &str, part: u32, ms: u64| Turn {
+            track: track.into(),
+            part,
+            ms,
+        };
+        let row = |at: u64, to: u64, speaker: &str, text: &str, turns: Vec<Turn>| Passage {
+            start_secs: at,
+            end_secs: to,
+            text: text.into(),
+            speaker: speaker.into(),
+            echo: false,
+            turns,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let mut saved = spoken("call-0003", &[]);
+        saved.passages = vec![
+            row(3, 7, "Others", "first", vec![turn("Others", 0, 3_000)]),
+            row(8, 12, "You", "mine", vec![turn("You", 0, 8_000)]),
+            row(14, 18, "Others", "second", vec![turn("Others", 0, 14_000)]),
+        ];
+        save(&notes, "note-0001", &saved).unwrap();
+        let revision = list(&notes, "note-0001").unwrap()[0].revision;
+        rename_speaker(
+            &notes,
+            "note-0001",
+            "call-0003",
+            revision,
+            "Others",
+            "Rowan Ellery",
+        )
+        .unwrap();
+        let mut recovered = spoken("call-0003", &[]);
+        recovered.started = saved.started + chrono::Duration::seconds(2);
+        recovered.passages = vec![
+            row(1, 5, "Others", "first", vec![turn("Others", 0, 3_000)]),
+            row(12, 16, "Others", "second", vec![turn("Others", 0, 14_000)]),
+            row(308, 312, "Others", "late", vec![turn("Others", 1, 310_000)]),
+        ];
+        merge_into(&notes, "note-0001", &recovered).unwrap();
+        merge_into(&notes, "note-0001", &recovered).unwrap();
+        let kept: Vec<(u64, String, String)> = whole(&notes, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.start_secs, p.speaker.clone(), p.text.clone()))
+            .collect();
+        let at = |at: u64, who: &str, text: &str| (at, who.to_string(), text.to_string());
+        assert_eq!(
+            kept,
+            [
+                at(3, "Rowan Ellery", "first"),
+                at(8, "You", "mine"),
+                at(14, "Rowan Ellery", "second"),
+                at(310, "Others", "late"),
+            ]
+        );
+
+        let older = temp.path().join("older");
+        let mut joined = spoken("call-0003", &[]);
+        joined.started = saved.started;
+        joined.passages = vec![row(3, 18, "Others", "first second", Vec::new())];
+        save(&older, "note-0001", &joined).unwrap();
+        merge_into(&older, "note-0001", &recovered).unwrap();
+        let kept: Vec<(u64, String)> = whole(&older, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.start_secs, p.text.clone()))
+            .collect();
+        assert_eq!(
+            kept,
+            [(3, "first second".to_string()), (310, "late".to_string())],
+            "a transcript saved before turns were kept loses no line and gains no copy"
+        );
+
+        let spoken_over = temp.path().join("spoken-over");
+        let mut mine = spoken("call-0003", &[]);
+        mine.started = saved.started;
+        mine.passages = vec![row(0, 290, "You", "so first I think yeah late", Vec::new())];
+        save(&spoken_over, "note-0001", &mine).unwrap();
+        let mut same_second = spoken("call-0003", &[]);
+        same_second.started = saved.started;
+        same_second.passages = vec![row(310, 314, "You", "late", vec![turn("You", 1, 310_000)])];
+        save(&older, "note-0002", &same_second).unwrap();
+        merge_into(&older, "note-0002", &recovered).unwrap();
+        merge_into(&spoken_over, "note-0001", &recovered).unwrap();
+        let said = |notes: &Path, note: &str| -> Vec<String> {
+            whole(notes, note)[0]
+                .passages
+                .iter()
+                .map(|p| format!("{}@{} {}", p.speaker, p.start_secs, p.text))
+                .collect()
+        };
+        assert_eq!(
+            said(&spoken_over, "note-0001"),
+            [
+                "You@0 so first I think yeah late",
+                "Others@3 first",
+                "Others@14 second",
+                "Others@310 late"
+            ],
+            "the other side's words inside a stored line of yours are new speech"
+        );
+        assert_eq!(
+            said(&older, "note-0002"),
+            [
+                "Others@3 first",
+                "Others@14 second",
+                "You@310 late",
+                "Others@310 late"
+            ],
+            "a stored turn with the same second and words is a different turn"
+        );
     }
 
     #[test]
@@ -2289,6 +2561,198 @@ mod tests {
     }
 
     #[test]
+    fn renaming_a_speaker_changes_every_line_of_that_speaker_and_keeps_the_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names1",
+                &[
+                    (0, "Speaker 1", "one"),
+                    (5, "Speaker 2", "two"),
+                    (9, "Speaker 1", "three"),
+                ],
+            ),
+        )
+        .unwrap();
+        let rename = |revision, from: &str, to: &str| {
+            rename_speaker(&notes, "note-0001", "rec-names1", revision, from, to)
+        };
+        assert_eq!(
+            rename(1, "Speaker 1", "Speaker 2")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::Taken
+        );
+        assert_eq!(
+            rename(1, "Speaker 9", "Ana")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::NoRow
+        );
+        assert_eq!(
+            rename(0, "Speaker 1", "Ana")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::Stale
+        );
+        let head = rename(1, "Speaker 1", " Ana ").unwrap();
+        assert_eq!(head.revision, 2);
+        assert_eq!(head.speakers, ["Ana", "Speaker 2"]);
+        let page = page(&notes, "note-0001", "rec-names1", Cursor::START).unwrap();
+        let said: Vec<_> = page
+            .passages
+            .iter()
+            .map(|(_, p)| (p.speaker.as_str(), p.text.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [("Ana", "one"), ("Speaker 2", "two"), ("Ana", "three")]
+        );
+    }
+
+    #[test]
+    fn a_speaker_name_must_be_new_and_not_a_recording_track() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names2",
+                &[(0, "Speaker 1", "one"), (5, "Speaker 2", "two")],
+            ),
+        )
+        .unwrap();
+        let refused = |to: &str| {
+            rename_speaker(&notes, "note-0001", "rec-names2", 1, "Speaker 1", to)
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap()
+        };
+        assert_eq!(refused(""), Refused::Empty);
+        assert_eq!(refused("  \t "), Refused::Empty);
+        for name in ["Microphone", "computer AUDIO", "You", "others"] {
+            assert_eq!(refused(name), Refused::Reserved, "{name}");
+        }
+        assert_eq!(refused("speaker 2"), Refused::Taken);
+        assert_eq!(refused(" SPEAKER 2 "), Refused::Taken);
+        let same = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names2",
+            1,
+            "Speaker 1",
+            " Speaker 1 ",
+        )
+        .unwrap();
+        assert_eq!(same.revision, 1, "no revision for a rename to itself");
+        assert_eq!(head(&notes, "note-0001", "rec-names2").unwrap().revision, 1);
+        let case = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names2",
+            1,
+            "Speaker 1",
+            "speaker 1x",
+        )
+        .unwrap();
+        assert_eq!(case.revision, 2);
+    }
+
+    #[test]
+    fn a_call_voice_is_renamed_only_when_no_two_speakers_would_merge() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names3",
+                &[
+                    (0, "You", "hi"),
+                    (5, "Others 1", "one"),
+                    (9, "Others 2", "two"),
+                ],
+            ),
+        )
+        .unwrap();
+        let rename =
+            |to: &str| rename_speaker(&notes, "note-0001", "rec-names3", 1, "Others 1", to);
+        let refused = |to: &str| rename(to).unwrap_err().downcast::<Refused>().unwrap();
+        assert_eq!(refused("Others 2"), Refused::Taken);
+        assert_eq!(refused(" OTHERS 2 "), Refused::Taken);
+        assert_eq!(refused("you"), Refused::Reserved);
+        assert_eq!(refused("Others"), Refused::Reserved);
+        assert_eq!(rename("Others 3").unwrap().revision, 2);
+    }
+
+    #[test]
+    fn a_voice_merges_into_a_name_it_shares_only_when_asked() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names4",
+                &[
+                    (0, "Rowan Ellery", "one"),
+                    (5, "Others 2", "two"),
+                    (9, "Others 3", "three"),
+                ],
+            ),
+        )
+        .unwrap();
+        let refused = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names4",
+            1,
+            "Others 2",
+            "Rowan Ellery",
+        )
+        .unwrap_err()
+        .downcast::<Refused>()
+        .unwrap();
+        assert_eq!(refused, Refused::Taken);
+        let merge = |revision, from: &str, into: &str| {
+            merge_speaker(&notes, "note-0001", "rec-names4", revision, from, into)
+                .map_err(|e| e.downcast::<Refused>().unwrap())
+        };
+        assert_eq!(
+            merge(0, "Others 2", "Rowan Ellery").unwrap_err(),
+            Refused::Stale
+        );
+        assert_eq!(merge(1, "Others 2", "Tamsin").unwrap_err(), Refused::NoRow);
+        assert_eq!(
+            merge(1, "Others 9", "Rowan Ellery").unwrap_err(),
+            Refused::NoRow
+        );
+        let head = merge(1, "Others 2", " rowan ELLERY ").unwrap();
+        assert_eq!(head.revision, 2);
+        assert_eq!(head.speakers, ["Rowan Ellery", "Others 3"]);
+        let said: Vec<(String, String)> = whole(&notes, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.speaker.clone(), p.text.clone()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                ("Rowan Ellery".to_string(), "one".to_string()),
+                ("Rowan Ellery".to_string(), "two".to_string()),
+                ("Others 3".to_string(), "three".to_string()),
+            ]
+        );
+    }
+
+    #[test]
     fn pages_cover_every_passage_exactly_once() {
         let temp = tempfile::tempdir().unwrap();
         let notes = temp.path().join("notes");
@@ -2311,6 +2775,8 @@ mod tests {
                 end_secs: n + 1,
                 text: "é".repeat(size / 2),
                 speaker: String::new(),
+                echo: false,
+                turns: Vec::new(),
             });
             if next() % 3 == 0 {
                 source
@@ -2565,6 +3031,8 @@ mod tests {
                         end_secs: n + 1,
                         text: format!("{n} {big}"),
                         speaker: String::new(),
+                        echo: false,
+                        turns: Vec::new(),
                     }),
                     std::iter::once(typed(3, "typed")),
                 )
@@ -2585,6 +3053,8 @@ mod tests {
                             end_secs: i + 1,
                             text: format!("{i} {big}"),
                             speaker: String::new(),
+                            echo: false,
+                            turns: Vec::new(),
                         }),
                         std::iter::empty(),
                     )

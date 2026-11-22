@@ -78,10 +78,14 @@ globalThis.document?.addEventListener('input', (e) => {
   if (typeof updateReadHint === 'function') updateReadHint(e.target.closest?.('[data-reads]'));
 });
 
-function noteFields({ id, folders, here, reads, before = '' }) {
-  const options = ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
+function folderOptions(folders, here) {
+  return ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
+}
+
+function noteFields({ id, folders, here, reads }) {
+  const options = folderOptions(folders, here);
   return `<div class="note-fields">
-    <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>${before}
+    <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>
     <p class="note-fields-optional">Optional</p>
     <label class="field">${ICON.note}<input id="${id}-title" placeholder="Title" aria-label="Title (optional)" autocomplete="off"></label>
     <label class="field field-area"><textarea id="${id}-wants" rows="2"${reads ? ` data-reads="${reads}"` : ''} aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>${reads ? `\n    <p class="set-desc" id="${id}-wants-hint" hidden>Felix reads the first ${reads.toLocaleString('en')} characters of this.</p>` : ''}
@@ -392,8 +396,12 @@ function viewKind(name) {
 async function viewOriginal(id, name, page = null) {
   const kind = viewKind(name);
   if (!kind) return;
-  if (state.view === 'note' && state.session && state.session.note.id === id && sourceFits()) return openSource(id, name, page);
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
+  if (state.view === 'note' && state.session && state.session.note.id === id) {
+    if ($('.note-layout').dataset.aside === 'transcript' && changedSources().length) return toast('Save your fixes first.');
+    sourcePage = null;
+    return openFileAside(url, kind, name, page);
+  }
   const tab = kind === 'text' ? '' : `<a class="btn sm plain" href="${url}?view=1" target="_blank" rel="noopener">Open in a new tab</a>`;
   const links = `<a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a>${tab}`;
   if (kind === 'image') {
@@ -409,6 +417,17 @@ async function viewOriginal(id, name, page = null) {
   if (kind === 'text') {
     await fillTextFile(scrim.querySelector('.viewer-text'), url, name);
   }
+}
+
+async function openFileAside(url, kind, name, page) {
+  fileAside = { url, kind, name, page };
+  const body = kind === 'pdf'
+    ? `<iframe class="aside-frame" src="${url}?view=1${page ? `#page=${Number(page)}` : ''}" title="${esc(name)}"></iframe>`
+    : kind === 'image'
+      ? `<img class="aside-img" src="${url}?view=1" alt="${esc(name)}">`
+      : '<div class="prose aside-text">Loading…</div>';
+  const box = openAside('file', `<span class="aside-name" title="${esc(name)}">${esc(name)}</span> · <a class="facts-link" href="${url}" download="${esc(name)}">Download</a> · ${backLink}`, body);
+  if (box && kind === 'text') await fillTextFile(box.querySelector('.aside-text'), url, name);
 }
 
 async function fillTextFile(box, url, name) {

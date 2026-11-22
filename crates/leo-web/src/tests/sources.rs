@@ -9,6 +9,8 @@ fn source(id: &str) -> leo_core::recording::Archive {
             end_secs: 30,
             text: "Dijkstra finds shortest paths".into(),
             speaker: "Microphone".into(),
+            echo: false,
+            turns: Vec::new(),
         }],
         points: vec![leo_core::recording::Point {
             at_secs: 5,
@@ -201,4 +203,37 @@ fn a_long_brief_is_kept_whole_when_a_note_is_written_again() {
         assert_eq!(answer.status(), StatusCode::OK);
     }
     assert_eq!(*asked.lock().unwrap(), [long.clone(), long]);
+}
+
+#[test]
+fn a_voice_merges_into_a_name_it_shares_only_when_the_page_asks_for_a_merge() {
+    let (state, _d, ids) = state_with(&[("Call", "")]);
+    let id = ids[0].clone();
+    store_now(&state, |store| {
+        let mut kept = source("session-5678");
+        kept.passages[0].speaker = "Rowan Ellery".into();
+        let mut voice = kept.passages[0].clone();
+        voice.speaker = "Others 2".into();
+        voice.start_secs = 40;
+        kept.passages.push(voice);
+        leo_core::recording::save(&store.notes_dir, &id, &kept).unwrap();
+        Ok(())
+    })
+    .unwrap();
+    let put = |merge: bool| {
+        run(sources::edit_sources(
+            State(state.clone()),
+            Path(id.clone()),
+            Json(
+                serde_json::from_value(serde_json::json!({"source":"session-5678","base":1,"rename":{"from":"Others 2","to":"Rowan Ellery","merge":merge}}))
+                    .unwrap(),
+            ),
+        ))
+    };
+    assert_eq!(put(false).status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let merged = put(true);
+    assert_eq!(merged.status(), StatusCode::OK);
+    let saved = json_of(merged);
+    assert_eq!(saved["speakers"], serde_json::json!(["Rowan Ellery"]));
+    assert_eq!(saved["revision"], 2);
 }

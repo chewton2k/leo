@@ -28,7 +28,7 @@ the two disagree, CLAUDE.md wins and this file should be corrected. Dates and
 - Text fields: `.field` (icon-led box, sheets and the note field group) or `.set-input`
   (Settings rows and label-above forms).
 - Folder, Title and What do you want: `noteFields()` (uploads.js), used by the upload
-  sheet and the Record page.
+  sheet; the Record page draws the same folder list (`folderOptions`) as a chip.
 - Confirmations: `confirmSheet({ title, text, yes, action, data, danger, cancel })`
   (sheets.js) for permanent losses. Moving a note or folder to the trash asks nothing and
   offers Undo for 10 s. The time left is a pencil line under the toast (`.toast-time`, the
@@ -197,11 +197,11 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   `sidebar.spec.js` measures all three states.
 
 - Layout variables on `body`: `--side` (sidebar, 0 under 1000 px), `--right`
-  (Felix and/or the original pane), `--mid`. Fixed things (toolbar, select
+  (Felix), `--mid`. Fixed things (toolbar, select
   bar, toasts, FABs, `#dock`, the map) use them so nothing covers anything.
-  While Felix or an original file is open beside the page (at least 240 px from the left),
+  While Felix is open beside the page (at least 240 px from the left),
   the window's own scrollbar is hidden (`html.page-bar-on`) and `.page-bar`
-  (core.js) draws one at the left edge of Felix (and the original pane), so
+  (core.js) draws one at the left edge of Felix, so
   the notes' scrollbar sits beside the notes; the page still scrolls the
   window, so reading positions and paging are unchanged.
 
@@ -463,12 +463,11 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   individual notes. Folder labels and chevrons toggle their children; note rows
   open notes directly. The selected folder scopes New note, Record and imports;
   the bar shows no breadcrumbs. The explorer narrows
-  below 1200 px to leave room for notes, originals and Felix. Its right edge is a
+  below 1200 px to leave room for notes and Felix. Its right edge is a
   keyboard-accessible resize handle; `leo-side-width` remembers the expanded
   width while the 52 px rail stays fixed. `pane-resize.js` shares bounded sizing,
   32/96 px arrow steps, Home/double-click reset and drag cleanup with Felix's
-  Chats divider (`leo-chat-history-width`), Felix's width grip (`leo-chat-width`) and the
-  original-file grip (`leo-source-width`), both docked right (dragged left or ArrowLeft
+  Chats divider (`leo-chat-history-width`) and Felix's width grip (`leo-chat-width`), docked right (dragged left or ArrowLeft
   widens; End goes to the widest; Home and double-click reset); the width is saved on
   release; shrinking a window clamps the visible
   width without replacing the saved preference. Overlay chat lists have no grip. Crossing the overlay width while resizing swaps modes under `.chat.mode-switch` (no transition), so the list never slides over the chat (2026-11-08).
@@ -563,7 +562,7 @@ keeping wheel, touch and keyboard scrolling available. The outline gutter is
 reserved before a heading exists, so adding or removing
 the first heading never shifts or narrows the writing column. A narrow pane or
 phone reserves a fixed disclosure row; its expanded outline overlays the note.
-Outline toggles and original-file open/close controls focus explicitly so
+Outline toggles focus explicitly so
 WKWebView preserves keyboard focus when their markup changes.
 Heading jumps scroll smoothly (instantly with Reduced Motion), keeping the URL and reading-position flow; typing refreshes only the
 outline after a pause, preserving the editor and caret. A width observer refits
@@ -1253,8 +1252,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   switch, the folder, and Title and What do you want under one "Optional" caption.
   The only other line, that photos and scans need a writing AI that can see images,
   appears only while a picture is picked (the page cannot tell which AI sees).
-  Folder, Title and What do you want come from `noteFields` (uploads.js), the same
-  helper the Record page uses (passed to the recorder as a dependency).
+  Folder, Title and What do you want come from `noteFields` (uploads.js); the Record
+  page takes only its folder list (`folderOptions`, passed to the recorder as a dependency).
 
 - Uploads: POST `/api/import` runs the `Importer` on a thread; "What do you
   want from it?" goes in `<what_the_user_wants>`. Several files make a note
@@ -1282,17 +1281,14 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   to the sheet with every file. Originals are kept in
   `<data>/attachments/<note-id>/` (never synced); figures from pptx/docx/PDF
   are offered to the AI per part (`leo_services::figures`); every figure the AI does not place
-  goes under More figures at the end of the note. Originals open in
-  `#source-pane` beside the note on desktop (1000px and wider), with Felix
-  always to its right. Both panes share the available width instead of falling
-  back to a popup when chat is open. The original divider supports dragging,
-  Arrow keys and Home/End; resize limits leave room for notes and chat. File
-  switching keeps drafts/carets intact, close releases the iframe and returns
-  focus, and a sequence guard ignores late loads. A narrow Felix pane folds its
-  history into the existing Chats/Back controls without clearing the draft or
-  changing the saved history preference automatically. Phones use the existing viewer
-  sheet above chat (PDF iframe, zoomable pictures, rendered text); an already open
-  desktop pane becomes full width when the window narrows. Chat state is retained.
+  goes under More figures at the end of the note. Originals open in the note's
+  place (2026-11-22, the owner's call, replacing the side pane): the title stays, the body
+  becomes the PDF (at its cited page), picture or text at the note's width, and the line under
+  the title reads "<name> · Download · Back to note"; Back to note or Escape returns to the note
+  with its scroll and focus, and another file chip switches the file. Off the note (a Felix
+  citation elsewhere) the viewer sheet opens as before (PDF iframe, zoomable pictures, rendered
+  text). A narrow Felix pane folds its history into the existing Chats/Back controls without
+  clearing the draft or changing the saved history preference automatically.
 
 - Recording (`record.rs`, `recording.js`): new microphone/screen/call captures
   run in Rust through the listener. `nativecall` is the native dual-track
@@ -1313,37 +1309,59 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   `done` view carries `writer_failed` (toast with Set up writing AI) and leo.db
   `writeup_pending` marks the note (GET note `writeup_pending`, a `.set-card` notice
   under the meta line) until "Use this version" saves a written note (PATCH `written: true`; Undo restores the mark); it is forgotten and swept like `margin_personas`.
-  The idle page (2026-11-06) shows Microphone, Screen and Call as one row of
-  `.choice-pick` cards with a track diagram each (one waveform, or two for Call)
-  over the same `rec-kind` radios; then `noteFields({ id: 'rec' })`, the upload
-  sheet's group of icon-led `.field`s (Folder as the shared select menu, the calendar
-  event picker beside it when a calendar is connected, then Title and What do you
-  want under one "Optional" caption; ids `#rec-dir`, `#rec-title`, `#rec-wants`), the
-  calendar hint as one linked line, and the "keeps recording if you close the window"
-  tip under Start.
+  The idle page (2026-11-22, the owner's call) starts with the title, like a note's
+  ("Untitled recording", `#rec-title`), then the calendar event (when a calendar is connected)
+  and the folder as chips that open the shared select menu (`#rec-event`, `#rec-dir`), then
+  Microphone, Screen and Call as one row of `.choice-pick` cards with a track diagram each
+  (one waveform, or two for Call) over the same `rec-kind` radios, What do you want
+  (`#rec-wants`), Label speakers (not for Call), the calendar hint as one linked line, the red
+  Start with the "keeps recording if you close the window" tip, and Felix's before-start
+  questions under it.
 
-- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so in the live card with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
+- Record warns before Start (`/api/record` `checks` from `Housekeeper::checks`: `speech`, `writing`, `headset`, each cheap, never opening the microphone): quiet `.set-note` lines with links above Start, which stays enabled; the headset line shows only for Call. A denied microphone (`desktopApp.permissions`, passed to recording.js as `deps.desktop`) says so under the live title with Open System Settings; Call fills an empty "What do you want" with `MEETING_WANTS`.
 
 - Live transcript (2026-11-21, the user's call): every second only the new words are
-  added to What's being heard; the words already shown stay put, so a selection and the
+  added to the Transcript tab; the words already shown stay put, so a selection and the
   scroll position survive the poll. When recognition rewrites its last words, only that
   changed tail is replaced; when the transcript's start is trimmed (the last 200,000
   characters are kept), the trimmed words leave the top. New words fade in briefly (not with
   reduced motion). Scrolled up, the view stays where it is and Back to latest returns to the
   newest words and follows them again. Each new word is folded back into the plain text
-  once its fade ends, so a long recording keeps a few nodes.
+  once its fade ends, so a long recording keeps a few nodes. The live words carry no times
+  (a call shows one side at a time, and speaker labels come only after Stop), so the live
+  tab stays plain text; turns and times show on the saved note's transcript.
 
-- Live layout and Felix's questions (2026-11-21, the user's call): on a wide window (main
-  area 1000 px or more) the live recording shows the clock, wave and Pause/Stop across the
-  top, then three columns: What's being heard | Your notes and What you want | Ask Felix.
-  With Felix's chat docked open, two columns, with Ask Felix above Your notes; narrower,
-  the cards stack as before with Ask Felix under Your notes. Start and the live controls
-  stay red. Ask Felix offers chat-starter chips that open Felix's chat with a passage
-  attached: before Start, once an event is chosen or What you want is filled, What should
-  I listen for? and What should I ask? (the event and the want); while recording, What did
-  I just miss?, Sum up so far and What should I ask next? (your points and the newest
-  8,000 characters of the transcript). On a note made from a recording, Felix's starters
-  add What was decided?, What are the open questions? and Action items as tasks.
+- Live page (2026-11-22, the owner's call): the recording looks like the note it becomes.
+  The header holds the title, chips for the event time, folder and kind, the hearing line
+  and, on the right, one recorder bar (pulsing red dot, clock, a small wave, Pause, red Stop
+  and save). Under it, tabs Your notes (with its count, open first) · Transcript · What you
+  want; the open tab survives each poll and keyboard focus stays on it (arrow keys, Home and
+  End move between tabs). Felix's three questions sit in a narrow column beside the tabs
+  (a recording area of 820 px or more), under them when narrower. After Stop the page stays:
+  no bar, one line under the title with the leo mark, "Writing the notes · <step>", the
+  progress bar and Finish now; tabs Notes (until written) · Your notes · Transcript, both
+  readable; the saved note opens as before. A failed recording keeps its own card. The
+  questions open Felix's chat with a passage attached: before Start, once an event is chosen
+  or What you want is filled, What should I listen for? and What should I ask? (the event and
+  the want); while recording, What did I just miss?, Sum up so far and What should I ask
+  next? (your points and the newest 8,000 characters of the transcript). On a note made from
+  a recording, Felix's starters add What was decided?, What are the open questions? and
+  Action items as tasks.
+
+- A recorded note's transcript (2026-11-22, the owner's call): the line under the title reads
+  "Edited … · N min read · Transcript". Transcript swaps the note body in place for the
+  transcript (the title stays; the line reads "Transcript · <length> · Back to note"; Escape
+  also goes back). Find in transcript searches every recording of the note; a meeting shows a
+  speaker row and one turn per speaker (a tone dot in the order they were first heard, You in
+  ink, the name and time once per turn); a lecture shows a paragraph a minute with its time;
+  typed points sit at their time as "Your point · …"; echo lines fold into "Hidden: N echo
+  lines · Show", shown as "You · echo · …" (their own track's name, never the turn they sit
+  in), and a Found match inside a fold opens it before scrolling there. Tapping a speaker's name renames that speaker on every line of that recording
+  (the note's text is not rewritten; typing a name another speaker has asks "Merge A into
+  B?" and merges only on Merge). Lines are fixed in
+  place and saved with Save fixes; paging, Earlier/Later, the pick list for several recordings,
+  What you want and Write the note again work as on the old sheet. The ⋯ menu's Show
+  transcript opens the same view with the selected text as the search.
 
 - Screenshots (the user's call): paste a PNG/JPEG/GIF/WebP into Your notes while
   recording instead of a browser screen picker. The existing snapshot endpoint
@@ -1353,7 +1371,7 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
 
 - Share (2026-11-09): the note's share button opens a `popupMenu`: Copy as Markdown (`# Title`, blank line, body; clipboard), Save .md file (a Blob `a[download]`, which the desktop's `on_download` saves to Downloads; no route) and Export as PDF (below). When the note has open margin notes, Share also offers Export as PDF with Felix's notes: each passage gets a small number and Felix's notes follow the text, numbered, with the title in the footer. Resolved and dismissed notes never print; a plain Export as PDF never includes them (2026-11-15).
 - PDF export (Share → PDF, or the browser's print): print CSS hides every
-  fixed overlay (dock, tasks, source pane, toasts, chat, FABs…), zeroes the
+  fixed overlay (dock, tasks, toasts, chat, FABs…), zeroes the
   layout variables and the scrollbar gutter, and uses fixed `@page` margins
   (22/24/24 mm), so the PDF is the same on any screen; `beforeprint` also
   marks anything else `position: fixed` with `data-print-off`.
@@ -1792,7 +1810,7 @@ search results replace the chips while searching. Keeping rows share one 150 px
 select width and stack under 500 px of card content.
 
 Owner decisions, 2026-11-07 (small-display pass): Felix's starters are a list of rows with a chevron, no outline (2026-11-21, the user's call); the Chats list becomes an
-overlay below a 490 px panel (560 px with an original open), and `.chat.slim`
+overlay below a 490 px panel, and `.chat.slim`
 (chat column under 440 px) trims padding and keeps Felix's lane only beside the
 row directly above the composer. Writing AI providers are logo cards
 (`choiceCards` with an icon, scoped `.providers`); Codex and Claude Code models

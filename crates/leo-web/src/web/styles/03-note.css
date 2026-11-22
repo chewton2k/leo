@@ -1,4 +1,4 @@
-.note-layout { contain: inline-size layout style; --side: initial; --right: initial; --mid: initial; --explorer-w: initial; --chat-w: initial; --source-w: initial; --source-chat-w: initial; --source-room: initial; --source-size: initial; --dock-room: initial; }
+.note-layout { contain: inline-size layout style; --side: initial; --right: initial; --mid: initial; --explorer-w: initial; --chat-w: initial; --dock-room: initial; }
 .note-columns { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: 48px auto; }
 .note-columns > .note { position: relative; grid-area: 2 / 1; min-width: 0; width: 100%; max-width: var(--note-width); margin-inline: auto; }
 .page-marks { position: absolute; left: 0; right: 0; top: 0; height: 0; z-index: 3; }

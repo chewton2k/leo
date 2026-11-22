@@ -113,6 +113,29 @@ a test, or leave it unset to see the user's own data.
 - Capability `default`: remote `http://127.0.0.1:*`/`localhost:*`, core
   defaults, window dragging and double-click maximize.
 
+Call names (`call_names.rs`, 2026-11-22): `names()` (the readers and, on macOS,
+`NSFullUserName`, on Windows `GetUserNameExW(NameDisplay)`, or the user part of
+`NameSamCompatible` when an account has no display name, else none, as the user's
+own name, a veto only) is handed to
+`leo_host::listener`. Each read lists the running call apps' call-titled windows;
+until a call is bound it copies them all and `call_names::pick` binds the one app
+(or browser window) that shows a call (`call_names::shows_call`: a call control,
+or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
+control), after which only that pid (and title) is
+read; front-most order plays no part. macOS reads through Accessibility (no
+permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
+every element before it is messaged, 4,000 elements a read, a Zoom window at most
+1,500 to depth 14, others to depth 40, the read's deadline checked between
+elements, text clipped to 300 characters, `AXValue` asked only of static text
+(`call_names::keeps_value`), so a text field's value is never read);
+Chromium apps get `AXManualAccessibility`, Meet browsers `AXEnhancedUserInterface`
+too, turned off when the reader drops. Windows enumerates top-level windows and
+walks call windows one element at a time with the raw view tree walker, each
+element fetched with its Name/HelpText/AutomationId/ClassName cached (1.5 s
+timeouts per call), the 4,000-element budget and the read's deadline checked
+before every next element. Teams windows count only
+with a call control. Only CI compiles the Windows reader; neither is tested against a real call.
+
 The `leo-app` entry checks `speech::is_worker_invocation` before Tauri and
 single-instance startup; native speech runs only in that child process.
 Info.plist declares microphone and computer-audio capture uses. Recording

@@ -220,11 +220,24 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   in NOTICE); the self-correction rules are leo's own. Robustness details:
   leo-desktop, leo-services and leo-web CLAUDE.md "Dictation".
 - Recording is captured in Rust, including two native tracks for calls; hiding
-  the window cannot stop it. Microphone and screen recordings can label who
-  spoke (Record page switch, per recording; leo-services CLAUDE.md "Speaker
-  labels"). App Nap is held while recording. Missing models
+  the window cannot stop it. Recordings can label who spoke (Record page
+  switch, per recording; on a call only the Others track, as Others 1, 2…;
+  a call app's name wins; 2026-11-22, the owner's call; leo-services CLAUDE.md
+  "Speaker labels"). A call's You lines that are the other side's echo are
+  marked `echo` (leo-services CLAUDE.md "Call echo"). App Nap is held while recording. Missing models
   leave audio pending and recoverable; the app can resume native sessions.
   Screenshots are pasted into the Record page with their timestamp.
+- Call speaker names (2026-11-22): while a Call records, the Others track reads
+  the call app's window every 400 ms (`leo_core::call_names`: Zoom, Teams, Meet
+  in a browser; macOS Accessibility, Windows UI Automation, in-process readers in
+  `leo-desktop/src/call_names.rs` handed down through `leo_host::listener`),
+  bound to the one call it finds first. A line of the other side is named only
+  when one person other than the user was marked talking for more than half of
+  its spoken span, or the call has exactly one other person by the count the app
+  shows; anything else stays "Others". Never guessed, never the user's own name (as the call app marks it, or the computer account's full name), nothing leaves the
+  computer (the account's full name only vetoes; the one-other-person rule needs
+  the call app's own marker of the user); tests use fixtures and fake readers. The name lands in `speaker`.
+  Credited in NOTICE (its name appears only there).
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
   described by their scripts and workflow, and uninstall retains the existing

@@ -38,7 +38,7 @@ function engine(rows, size = 2) {
   const hooks = { failPut: null };
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const head = (r, trace) => ({
-    id: r.id, started: r.started, context: '', wants: r.wants, warnings: [], speakers: [], passages: r.passages.length, points: r.points.length, revision: r.revision,
+    id: r.id, started: r.started, context: '', wants: r.wants, warnings: [], speakers: r.speakers || [], passages: r.passages.length, points: r.points.length, revision: r.revision,
     ...(r.from ? { from: r.from } : {}), ...(trace ? { trace: [] } : {}),
   });
   const take = (list, from) => {
@@ -56,7 +56,11 @@ function engine(rows, size = 2) {
       if (hooks.failPut && hooks.failPut(body)) throw Object.assign(new Error(hooks.failPutSays || 'leo answered 500.'), { status: hooks.failPutStatus || 500 });
       const r = rows.find((x) => x.id === body.source);
       if (body.base !== r.revision) throw Object.assign(new Error('Could not save original notes'), { status: 409 });
-      for (const c of body.changes) {
+      if (body.rename) {
+        for (const [, passage] of r.passages) if (passage.speaker === body.rename.from) passage.speaker = body.rename.to;
+        r.speakers = r.speakers.map((name) => (name === body.rename.from ? body.rename.to : name));
+      }
+      for (const c of body.changes || []) {
         const row = (c.kind === 'passage' ? r.passages : r.points).find(([seq]) => seq === c.seq);
         if (!row) throw Object.assign(new Error('Could not save original notes'), { status: 400 });
         row[1].text = c.text;
@@ -87,52 +91,83 @@ function engine(rows, size = 2) {
 }
 
 function screen(eng) {
-  const ui = { open: false, areas: [], rows: [], toasts: [], timers: [], sheets: 0 };
+  const ui = { open: false, areas: [], rows: [], toasts: [], timers: [], sheets: 0, facts: '' };
   const field = (value) => ({ value, listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; } });
+  const layout = { dataset: {}, classes: new Set(), classList: { add(c) { layout.classes.add(c); }, remove(c) { layout.classes.delete(c); }, contains: (c) => layout.classes.has(c) } };
   const draw = (html) => {
     ui.open = true;
     ui.sheets += 1;
     ui.html = html;
-    ui.areas = [...html.matchAll(/<textarea class="source-text" data-(passage|point)="(\d+)"[^>]*>([\s\S]*?)<\/textarea>/g)].map((m) => ({
-      kind: m[1], seq: Number(m[2]), value: unescape(m[3]), dataset: { [m[1]]: m[2] }, style: {}, scrollHeight: 0, scrolled: 0,
-      addEventListener() {}, scrollIntoView() { this.scrolled += 1; },
-    }));
-    ui.rows = [...html.matchAll(/<div class="source-row" data-text="([^"]*)">/g)].map((m) => ({ dataset: { text: unescape(m[1]) }, hidden: false }));
+    const folds = new Map();
+    const foldOf = (at) => {
+      const opened = html.lastIndexOf('<p class="spoken echo-lines" hidden>', at);
+      if (opened < 0 || html.lastIndexOf('</p>', at) > opened) return null;
+      if (!folds.has(opened)) {
+        const lines = { hidden: true, previousElementSibling: { classList: { contains: (c) => c === 'echo-fold' }, remove() { lines.unfolded = true; } } };
+        folds.set(opened, lines);
+      }
+      return folds.get(opened);
+    };
+    ui.folds = folds;
+    ui.areas = [...html.matchAll(/<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => {
+      const fold = foldOf(m.index);
+      return {
+        kind: m[1], seq: Number(m[2]), textContent: unescape(m[3]), dataset: { [m[1]]: m[2] }, scrolled: 0,
+        addEventListener() {},
+        closest: (selector) => (selector === '.echo-lines' ? fold : null),
+        scrollIntoView() { this.scrolled += 1; this.shownWhenScrolled = !fold || !fold.hidden; },
+      };
+    });
+    ui.rows = [...html.matchAll(/<div class="source-row (?:turn|minute)" data-text="([^"]*)">/g)].map((m) => ({ dataset: { text: unescape(m[1]) }, hidden: false }));
     ui.query = field(unescape((html.match(/<input id="source-query" value="([^"]*)"/) || [, ''])[1]));
     const pick = html.includes('id="source-pick"');
     ui.pick = pick ? field((html.match(/<option value="([^"]*)" selected>/) || [, ''])[1]) : null;
     ui.wants = field(unescape((html.match(/<textarea id="regenerate-wants"[^>]*>([\s\S]*?)<\/textarea>/) || [, ''])[1]));
-    ui.found = { innerHTML: html.slice(html.indexOf('<div id="source-found">') + 23, html.indexOf('</div>\n    <div id="source-passages"')) };
-    ui.passages = { scrollTop: 40 };
+    const from = html.indexOf('<div id="source-found">') + 23;
+    ui.found = { innerHTML: html.slice(from, html.indexOf('\n', from)).replace(/<\/div>$/, '') };
+    ui.passages = { scrollIntoView(where) { ui.scrolledTo = where; } };
     ui.none = { hidden: true };
-    return {
-      querySelectorAll(selector) {
-        return selector === '.source-text' || selector === '[data-passage],[data-point]' ? ui.areas : selector === '.source-row' ? ui.rows : [];
-      },
-    };
   };
+  ui.layout = layout;
+  const aside = {
+    set innerHTML(html) { if (html) draw(html); else ui.open = false; },
+    querySelectorAll(selector) {
+      return selector === '[data-passage],[data-point]' ? ui.areas : selector === '.source-row' ? ui.rows : [];
+    },
+    querySelector: (selector) => ({ selector }),
+    addEventListener() {},
+  };
+  const facts = { set innerHTML(html) { ui.facts = html; } };
   const find = (selector) => {
-    if (selector === '.sheet') return { classList: { add() {} } };
+    if (selector === '.note-layout') return layout;
+    if (selector === '.note-layout.aside-open') return layout.classes.has('aside-open') ? layout : null;
+    if (selector === '#note-aside') return aside;
+    if (selector === '#note-aside-facts') return facts;
     if (!ui.open) return null;
     const map = { '#source-query': ui.query, '#source-pick': ui.pick, '#source-found': ui.found, '#source-passages': ui.passages, '#regenerate-wants': ui.wants, '.source-none': ui.none };
     return map[selector] || null;
   };
+  ui.chips = [];
   const document = {
     activeElement: null,
     getElementById: () => null,
+    querySelectorAll: (selector) => (selector === '[data-action="view-original"]' ? ui.chips : []),
     querySelector(selector) {
       const m = selector.match(/^\[data-(passage|point)="(\d+)"\]$/);
       return m ? ui.areas.find((a) => a.kind === m[1] && a.seq === Number(m[2])) || null : find(selector);
     },
   };
   const context = {
-    seq: 1, document, window: { leoRecording: globalThis.leoRecording }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
+    seq: 1, document, window: { leoRecording: globalThis.leoRecording, scrollY: 0, scrollTo(x, y) { ui.scrolled = [x, y]; } }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
+    plural: (n, word) => `${n} ${n === 1 ? word : `${word}s`}`,
     $: (selector) => find(selector),
     api: eng.api,
     ready: async () => ({ note: { id: 'n1', title: 'Lecture' } }),
     toast: (message, options = {}) => ui.toasts.push({ message, bad: Boolean(options.bad) }),
     fail: (e) => ui.toasts.push({ message: e.message, bad: true }),
-    sheet: draw,
+    arriveOnPage() {},
+    sheet: () => ({ querySelector: () => null }),
+    confirmSheet: (asked) => { ui.asked = asked; },
     sheetButtons: () => '',
     settingsSwitch: () => '',
     closeSheet() {},
@@ -141,9 +176,12 @@ function screen(eng) {
     setTimeout: (fn) => ui.timers.push({ fn, live: true }),
     clearTimeout: (id) => { if (ui.timers[id - 1]) ui.timers[id - 1].live = false; },
     TextEncoder,
+    fillTextFile: async (box) => { ui.filled = box; },
   };
+  const uploads = read('uploads.js');
+  const fileAside = uploads.slice(uploads.indexOf('async function openFileAside('), uploads.indexOf('async function fillTextFile('));
   vm.createContext(context);
-  vm.runInContext(`${read('sources.js')}\nthis.page = () => sourcePage;`, context);
+  vm.runInContext(`${read('sources.js')}\n${fileAside}\nthis.page = () => sourcePage;`, context);
   ui.context = context;
   ui.type = async (text) => {
     ui.query.value = text;
@@ -155,9 +193,9 @@ function screen(eng) {
     }
   };
   ui.edit = (kind, seq, text) => {
-    ui.areas.find((a) => a.kind === kind && a.seq === seq).value = text;
+    ui.areas.find((a) => a.kind === kind && a.seq === seq).textContent = text;
   };
-  ui.shown = (kind) => ui.areas.filter((a) => a.kind === kind).map((a) => [a.seq, a.value]);
+  ui.shown = (kind) => ui.areas.filter((a) => a.kind === kind).map((a) => [a.seq, a.textContent]);
   return ui;
 }
 
@@ -277,7 +315,7 @@ test('a save refused because the revision moved keeps the fixes on the page and 
   assert.match(said.message, /changed/);
   assert.match(said.message, /still/);
   assert.equal(ui.shown('passage')[1][1], 'my fix', 'the person\'s fix is still on the page');
-  assert.equal(ui.sheets, 1, 'the sheet was not redrawn');
+  assert.equal(ui.sheets, 1, 'the transcript was not redrawn');
   assert.equal(eng.log.filter((c) => c.method === 'GET').length, 1, 'nothing was reloaded over the fix');
 });
 
@@ -321,4 +359,157 @@ test('the sheet\'s buttons run the paging functions', () => {
     assert.ok(new RegExp(`'${name}': \\([a-z]*\\) => ${call}\\(`).test(actions), name);
   }
   assert.ok(/'source-match': \(el\) => sourceMatch\(el\.dataset\.source, el\.dataset\.at\)/.test(actions));
+});
+
+function meeting() {
+  return [{
+    id: 'rec-cccccccc',
+    started: '2026-11-03T09:00:00Z',
+    revision: 1,
+    wants: '',
+    speakers: ['Speaker 1', 'Speaker 2'],
+    passages: [
+      [1, { start_secs: 0, end_secs: 4, text: 'hello all', speaker: 'Speaker 1' }],
+      [2, { start_secs: 5, end_secs: 9, text: 'next item', speaker: 'Speaker 1' }],
+      [3, { start_secs: 10, end_secs: 14, text: 'sure', speaker: 'Speaker 2' }],
+      [4, { start_secs: 15, end_secs: 19, text: 'sure', speaker: 'Speaker 1', echo: true }],
+      [5, { start_secs: 16, end_secs: 19, text: 'it echoed', speaker: 'Speaker 1', echo: true }],
+      [6, { start_secs: 20, end_secs: 29, text: 'back to me', speaker: 'Speaker 1' }],
+    ],
+    points: [[1, { at_secs: 6, text: 'my point' }]],
+  }];
+}
+
+test('a meeting shows one turn per speaker with a tone dot, the typed point at its time and echo lines folded', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  assert.equal(ui.rows.length, 3, 'three turns: Speaker 1, Speaker 2 with its echo, Speaker 1');
+  const who = [...ui.html.matchAll(/<span class="turn-name">([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.deepEqual(who, ['Speaker 1', 'Speaker 2', 'Speaker 1']);
+  assert.ok(ui.html.includes('--tone: var(--hue-0)') && ui.html.includes('--tone: var(--hue-1)'));
+  const first = ui.html.indexOf('hello all');
+  const point = ui.html.indexOf('Your point · ');
+  assert.ok(first < point && point < ui.html.indexOf('>sure<'), 'the point sits inside the first turn, after the line before it');
+  assert.ok(ui.html.includes('Hidden: 2 echo lines · '));
+  assert.ok(ui.html.includes('<p class="spoken echo-lines" hidden><span class="typed-label">Speaker 1 · echo · </span>'), 'shown echo is labelled as the microphone side, not the turn it sits in');
+  assert.ok(ui.html.includes('aria-label="Rename Speaker 2"'));
+  assert.match(ui.facts, /^Transcript · 0:29 · /);
+});
+
+test('a match inside folded echo lines opens the fold before it is scrolled to', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  await ui.context.sourceMatch('rec-cccccccc', '5');
+  const row = ui.areas.find((a) => a.kind === 'passage' && a.seq === 5);
+  assert.equal(row.scrolled, 1);
+  assert.equal(row.shownWhenScrolled, true);
+  const fold = row.closest('.echo-lines');
+  assert.equal(fold.hidden, false);
+  assert.equal(fold.unfolded, true);
+});
+
+test('Back to note puts the page where it was and focus on the original, for a PDF, a picture and a text file, and after a redraw', async () => {
+  const chip = (name) => ({ isConnected: true, dataset: { action: 'view-original', name }, focused: 0, focus() { this.focused += 1; } });
+  for (const [kind, name] of [['pdf', 'slides.pdf'], ['image', 'board.png'], ['text', 'notes.md']]) {
+    const ui = screen(engine(recordings(), 50));
+    const opener = chip(name);
+    ui.context.document.activeElement = opener;
+    ui.context.window.scrollY = 640;
+    await ui.context.openFileAside(`/api/notes/n1/originals/${name}`, kind, name, null);
+    assert.ok(ui.layout.classes.has('aside-open'), kind);
+    assert.deepEqual(ui.scrolled, [0, 0], kind);
+    ui.context.closeAside();
+    assert.ok(!ui.layout.classes.has('aside-open'), kind);
+    assert.deepEqual(ui.scrolled, [0, 640], kind);
+    assert.equal(opener.focused, 1, kind);
+
+    ui.context.document.activeElement = opener;
+    await ui.context.openFileAside(`/api/notes/n1/originals/${name}`, kind, name, null);
+    const held = ui.context.holdAside('n1');
+    opener.isConnected = false;
+    const drawn = chip(name);
+    ui.chips = [chip('other.pdf'), drawn];
+    ui.context.restoreAside(held);
+    ui.context.closeAside();
+    assert.deepEqual(ui.scrolled, [0, 640], `${kind} after a redraw`);
+    assert.equal(drawn.focused, 1, `${kind} after a redraw`);
+    assert.equal(opener.focused, 1, `${kind} after a redraw`);
+  }
+});
+
+test('renaming a speaker sends the rename with the revision and reloads the same page', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  const before = eng.log.length;
+  await ui.context.renameSpeaker('Speaker 2', 'Sam');
+  assert.deepEqual(eng.log[before].body, { source: 'rec-cccccccc', base: 1, rename: { from: 'Speaker 2', to: 'Sam' } });
+  assert.ok(ui.html.includes('<span class="turn-name">Sam</span>'));
+  assert.ok(ui.html.includes('aria-label="Rename Sam"'));
+  assert.equal(ui.context.page().page.head.revision, 2);
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Speaker 2 is now Sam in this recording.', bad: false });
+});
+
+test('renaming a voice to a name it already shares asks to merge and sends the merge only when confirmed', async () => {
+  const rows = meeting();
+  rows[0].speakers = ['Rowan Ellery', 'Others 2'];
+  for (const [, p] of rows[0].passages) p.speaker = p.speaker === 'Speaker 1' ? 'Rowan Ellery' : 'Others 2';
+  const eng = engine(rows, 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  const before = eng.log.length;
+  await ui.context.renameSpeaker('Others 2', 'rowan ellery');
+  assert.equal(eng.log.length, before, 'nothing is sent before the merge is confirmed');
+  assert.equal(ui.asked.title, 'Merge Others 2 into Rowan Ellery?');
+  assert.equal(ui.asked.action, 'speaker-merge');
+  assert.ok(ui.asked.data.includes('data-from="Others 2"') && ui.asked.data.includes('data-into="Rowan Ellery"'));
+  await ui.context.mergeSpeaker('Others 2', 'Rowan Ellery');
+  assert.deepEqual(eng.log[before].body, { source: 'rec-cccccccc', base: 1, rename: { from: 'Others 2', to: 'Rowan Ellery', merge: true } });
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Others 2 is now part of Rowan Ellery in this recording.', bad: false });
+});
+
+test('a lecture shows a paragraph a minute with its time and no speaker row', async () => {
+  const rows = [{ id: 'rec-dddddddd', started: '2026-11-04T09:00:00Z', revision: 1, wants: '', speakers: ['Microphone'], points: [],
+    passages: [[1, { start_secs: 2, end_secs: 30, text: 'first', speaker: 'Microphone' }], [2, { start_secs: 40, end_secs: 59, text: 'second', speaker: 'Microphone' }], [3, { start_secs: 61, end_secs: 80, text: 'third', speaker: 'Microphone' }]] }];
+  const ui = screen(engine(rows, 50));
+  await ui.context.showRecordingSources();
+  assert.equal(ui.rows.length, 2);
+  assert.ok(!ui.html.includes('speaker-row'));
+  assert.ok(!ui.html.includes('turn-name'));
+  assert.match(ui.html, /<span class="rec-at">0:02<\/span><div class="minute-said"><p class="spoken">[^]*first[^]*second[^]*<\/p><\/div>/);
+  assert.match(ui.html, /<span class="rec-at">1:01<\/span>/);
+});
+
+test('Later scrolls the list to its start so a tall list still moves', async () => {
+  const { ui } = await opened();
+  await ui.context.sourceLater();
+  assert.equal(ui.scrolledTo.block, 'start');
+});
+
+test('showing the transcript again with unsaved fixes refuses and asks for nothing', async () => {
+  const { eng, ui } = await opened();
+  ui.edit('passage', 1, 'my fix');
+  const before = eng.log.length;
+  await ui.context.showRecordingSources();
+  assert.equal(eng.log.length, before);
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Save your fixes first.', bad: false });
+  assert.equal(ui.shown('passage')[0][1], 'my fix');
+});
+
+test('a redraw of the same note puts the transcript back with its unsaved fixes and typed wants', async () => {
+  const { ui } = await opened();
+  ui.edit('passage', 2, 'kept fix');
+  ui.wants.value = 'typed wants';
+  const held = ui.context.holdAside('n1');
+  assert.equal(held.kind, 'transcript');
+  assert.equal(JSON.stringify(held.fixes.map((f) => [f.seq, f.text])), '[[2,"kept fix"]]');
+  ui.layout.classes.clear();
+  ui.open = false;
+  ui.context.restoreAside(held);
+  assert.equal(ui.open, true);
+  assert.deepEqual(ui.shown('passage').map(([seq, text]) => [seq, text]).filter(([seq]) => seq === 2), [[2, 'kept fix']]);
+  assert.equal(ui.wants.value, 'typed wants');
+  assert.equal(ui.context.holdAside('other'), null, 'another note\'s page is never held');
 });

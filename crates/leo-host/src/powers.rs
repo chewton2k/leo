@@ -137,7 +137,7 @@ pub fn powers() -> leo_web::Powers {
         )),
         speech: Some(std::sync::Arc::new(crate::speech::Speech)),
         ollama: Some(std::sync::Arc::new(crate::settings::WebSettings)),
-        listener: Some(crate::record::listener(std::sync::Arc::clone(&usage))),
+        listener: Some(crate::record::listener(std::sync::Arc::clone(&usage), None)),
         regenerator: Some(crate::record::regenerator(std::sync::Arc::clone(&usage))),
         calendar_access: Some(std::sync::Arc::new(crate::settings::WebSettings)),
         housekeeper: Some(std::sync::Arc::new(crate::housekeeping::Housekeeping)),

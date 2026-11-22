@@ -77,6 +77,7 @@ pub struct Request {
     pub input: Source,
     pub draft: Option<DraftFn>,
     pub turns: bool,
+    pub names: Option<leo_core::call_names::Names>,
 }
 
 pub fn transcribe_segment() -> TranscribeFn {
@@ -88,22 +89,34 @@ pub fn transcribe_segment() -> TranscribeFn {
             .filter(|s| s.manifest.turns)
             .zip(path.file_name().and_then(|name| name.to_str()))
             .and_then(|(s, name)| match session::index_of(name) {
-                Some((index, "wav")) => Some(s.dir.join(session::turns_name(index))),
+                Some((index, "wav")) => Some((s, index)),
                 _ => None,
             });
         let outcome = match turns {
-            Some(file) => crate::ai::transcribe_turns(path)
-                .and_then(|timed| {
-                    leo_core::paths::write_atomic(&file, &serde_json::to_string(&timed)?)?;
-                    let texts: Vec<&str> = timed.iter().map(|(_, text)| text.as_str()).collect();
-                    Ok(crate::ai::chain::ChainOutcome {
-                        value: crate::speech::chunking::join_transcripts(&texts),
-                        provider: "local speech with times".into(),
-                        fallbacks: Vec::new(),
-                        spent: None,
+            Some((s, index)) => {
+                if let Err(e) = session::echo::write_levels(
+                    path,
+                    &s.dir.join(session::echo::levels_name(index)),
+                ) {
+                    s.trace("echo", &format!("levels not kept: {e}"));
+                }
+                crate::ai::transcribe_turns(path)
+                    .and_then(|timed| {
+                        leo_core::paths::write_atomic(
+                            &s.dir.join(session::turns_name(index)),
+                            &serde_json::to_string(&timed)?,
+                        )?;
+                        let texts: Vec<&str> =
+                            timed.iter().map(|(_, _, text)| text.as_str()).collect();
+                        Ok(crate::ai::chain::ChainOutcome {
+                            value: crate::speech::chunking::join_transcripts(&texts),
+                            provider: "local speech with times".into(),
+                            fallbacks: Vec::new(),
+                            spent: None,
+                        })
                     })
-                })
-                .map_err(|e| e.to_string()),
+                    .map_err(|e| e.to_string())
+            }
             None => crate::ai::transcribe_outcome(path).map_err(|e| e.to_string()),
         };
         if let Some(session) = session {
@@ -710,11 +723,13 @@ fn label_speakers(
         label: "Telling speakers apart".to_string(),
         steps: None,
     });
-    let parts = session.segments().len() as u32;
+    let leads_ms: Vec<u64> = (0..session.segments().len() as u32)
+        .map(session::lead_ms)
+        .collect();
     let started = Instant::now();
     let labelled = session::speakers::label(
         &session.dir,
-        parts,
+        &leads_ms,
         session.manifest.segment_secs * 1000,
         diarize,
         transcribe,
@@ -747,7 +762,7 @@ fn label_speakers(
     if let Err(e) = session::speakers::write(&session.dir, &spoken) {
         skipped(&format!("the labels could not be saved ({e})"));
     }
-    for index in 0..parts {
+    for index in 0..leads_ms.len() as u32 {
         if session.dir.join(format!("seg-{index:05}.txt")).exists() {
             let _ = std::fs::remove_file(session.dir.join(wav::done_name(index)));
         }
@@ -834,6 +849,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         input,
         draft,
         turns,
+        names,
     } = request;
     let labelled = profile.as_ref().is_some_and(|p| p.speakers);
     let drafting = draft.is_some() && append_to.is_none() && !labelled;
@@ -868,6 +884,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     };
     emit(Event::Started("Recording".to_string()));
     crate::ai::warm_credentials();
+    let watch = names.map(|names| super::call_watch::Watch::start(names, session.dir.clone()));
 
     let (updates_tx, updates) = mpsc::channel();
     let transcriber = Transcriber::start(
@@ -913,6 +930,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             session.trace("audio-gap", &warning);
             emit(Event::Warning(warning));
             lost_up_to = lost;
+        }
+        if let Some(watch) = &watch {
+            watch.tick(capture.recorded_secs(), capture.paused());
         }
         let secs = capture.recorded_secs() as u64;
         let backlog = transcriber.backlog();
@@ -979,6 +999,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             "{problem} What was recorded is being saved."
         )));
     }
+    if let Some(watch) = &watch {
+        watch.stop();
+    }
     final_points(&mut session, controls, emit);
     match capture.stop_with_stats() {
         Ok((samples, _)) => {
@@ -986,6 +1009,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         }
         Err(e) => emit(Event::Warning(e.to_string())),
     }
+    drop(watch);
     finish(
         session,
         transcriber,

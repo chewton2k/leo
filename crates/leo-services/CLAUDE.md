@@ -79,10 +79,65 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a side's consecutive call turns within 300 s for the writing AI), so the two sides interleave turn by turn.
 
-Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
-never for call tracks; omitted from JSON when off, so old cache keys hold):
+Call names (2026-11-22): `Request.names` (the Others track only; `None` in
+`powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
+thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
+the reader does not read while paused. Each reading's start, less `LAG_SECS`
+(0.75) on the wall clock, is mapped to the track's recorded time from the loop's
+`tick(recorded_secs, paused)` anchor; a reading from before the latest pause
+change (an epoch counter) or said before the latest resume is dropped, and a
+pause change ends the open name at the recorded second it paused (`Timeline::cut`),
+so resumed audio stays unnamed until a reading made after the resume. A reading names someone only when exactly one person other than the user is
+marked speaking, and in Zoom (which does not mark the user's own tile) only once
+the user's name is known; the one-other-person shortcut needs the participant
+count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at
+most `HOLD_SECS` 2 s; unreadable or unclear readings end a run) and every name
+marked as the user's (`me`), appended to the session's `call-names.jsonl`
+(`paths::open_append`: a regular file, never through a link or a pipe; a missing
+newline at its end is added first, a torn row is read from its last `{`, and rows
+that could not be written are retried); an open run is checkpointed at every
+reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
+signals the watcher before capture stops and waits at most 1 s for it. Each read gets an `Ask`: a
+deadline (`MOST_READ`, 2 s for the whole poll, checked between native calls), the
+stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
+for a browser, the window title), which every later read and a restarted reader
+keep; `call_names::pick` binds only when exactly one app (one window, for a
+browser) shows a call tree, and a bound call that is gone reads as unreadable, so
+its lines stay unnamed. At most two reader threads are alive in the whole process
+(a counted slot held for a thread's life; 2026-11-22, the orchestrator's call), so a
+native call that hangs past its recording leaves room for the next recording's
+reader; with two hung, a new recording waits `MOST_READ` for a slot, then traces
+that names stay off until leo is opened again. Within a recording a reader is
+started again only after its thread has ended (at most `MOST_RESTARTS`, 20), and
+one quiet for `QUIET` (5 s) is traced, never joined by a second; problems go to
+the trace once each, never names.
+`archive` names each turn from its spoken interval, less its part's lead-in
+(`Timeline::name`: more than half the line, or a zero-length line's start;
+an older row without an end runs to the next row), and each told-apart voice from
+the turn rows spoken inside its span (`Timeline::name_over`; the whole span when
+none are; every row or run that crosses the span's start counts, found through the
+longest one's length, and the spans and each name's runs are unioned first, so rows
+that overlap at a part's roll count once); leo-host's `labelled` keeps a name and replaces only the plain
+track label or a `Speaker N` voice, so two people never share a line.
+`Names { readers, own }` carries the computer account's full name (`own`, from
+leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run
+of it is never kept and `name` never gives it (compared ignoring case and spaces,
+the whole name only); it is only a veto (2026-11-22, the orchestrator's call): the
+one-other-person shortcut needs the call app's own `me` marker, never the account
+name, and Zoom's unmarked-self refusal still needs `me`.
+Lead-in (`session::lead_ms`, the one rule for `speakers::label`, `archive`'s
+call names and echo levels): none for part 0, 1 s for every later part (every
+capture starts at part 0; an older manifest's unused `fresh` list is ignored and
+not written back).
+
+Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
+omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the
+owner's call, only the Others track gets it, You is always You, and leo-host's
+`merged` names its voices Others 1, Others 2… by first appearance; a voice's
+line the call app names over its span takes that name instead, and one voice
+stays "Others": a name from the call app wins):
 `Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
 drafting is off. In `recorder::finish`, once every part is done,
 `label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
@@ -113,6 +168,34 @@ on a pinned, checksummed AMI excerpt: right speaker ≥ 80%, speech with text
 left out) at most 5 points above the same model's plain transcript. Words kept
 against the plain path is only printed: Whisper's plain 5-minute parts can run
 long (whisper-large-v3: 706 words where most models give about 575).
+
+Call echo (2026-11-22, the owner's call; `session/echo.rs`): without headphones the
+microphone hears the call. Call tracks keep `seg-NNNNN.levels` (one dB byte per
+10 ms, written before the part is transcribed; outside a track's parts is
+silence). Once both
+tracks finish, `echo::marks` compares the envelopes in 2 s windows where both
+carry sound (6 dB over each track's idle level, its 10th percentile, at least
+30 dB), lags ±2 s (searched every 50 ms, then every 10 ms within 50 ms of the
+best, so a window costs 92 lags, not 401): a window is confident at correlation ≥ 0.6, steady when
+two others within 20 s agree within 20 ms (a sorted scan of the neighbours, not
+all pairs); echo exists only when steady windows are ≥ 20% of shared windows
+(headphones: none, nothing marked). Each You line is judged on its own span (its
+spoken interval, `Session::spans_ms`; an older row without an end runs to the next
+line's onset; silence is not counted, only sound) at the
+nearest steady lag, with the leak's level the median of the steady windows within
+20 s (a later volume change is followed). A sound block (10 ms, at least the
+track's floor) is a copy when the other side is at or above its floor (the
+loudest within 20 ms of the lag) and the block is no more than 6 dB over the
+leak's level; the line is echo only when at most 5% of its sound blocks are not
+copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
+line of yours before or under an echo is never hidden; under 0.5 s of sound stays
+unmarked. Lines are never marked when the search is cut short (finish now), and a
+part with a transcript whose levels file is missing or cut short is traced, and
+a line is judged only when both tracks have levels for its whole span (clamped
+to the recording's length, the other side at the line's lag), so a cut-short
+file is never read as silence. Marked lines keep their text with `Passage.echo` (omitted when
+false); the writing AI skips them, so they are never joined with real speech.
+Envelopes are read a part at a time.
 
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
 re-transcribe from `settled_at`, at most
@@ -390,11 +473,16 @@ recording stays recoverable. `recorder::resume_with_controls` exposes the finish
 control in recovery; leo-host refuses to write a note when recovery failed.
 Saving a recovered recording's sources, and the call commit, merge with an
 existing archive of the same id (`recording::merge_into`, streamed): other speakers,
-points, warnings and context are kept, and a passage already there by time and
-text keeps its stored label, so running a recovery twice changes nothing. Plain
+points, warnings and context are kept; the leftover's times are moved to the
+archive's start, a passage whose turn ids are all stored (or, for a stored line
+without ids, one at the same time and text, or inside the span and words of a
+stored line of the same speaker) keeps its stored text and label, so running a recovery twice, or
+recovering one track of a saved call, changes nothing already saved. Recovering a
+saved track turns its speaker labelling off, so its rows keep the shape they were
+saved in. Plain
 `recording::save` replaces (a new recording, `Session::commit`), so a corrected
 point never brings back its old wording; transcript corrections go through
-`recording::edit`. `recording::save_from(notes, note, head, passages, points)`
+`recording::edit` and speaker renames through `recording::rename_speaker` (2026-11-22). `recording::save_from(notes, note, head, passages, points)`
 takes iterators, so a caller holding its points in `points.jsonl` can save
 without holding them whole.
 While recording, the transcriber finds the next part by name and lists the

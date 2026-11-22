@@ -6,7 +6,7 @@ const path = require('node:path');
 const home = process.env.LEO_BROWSER_HOME || fs.mkdtempSync(path.join(os.tmpdir(), 'leo-browser-'));
 process.env.LEO_BROWSER_HOME = home;
 module.exports = defineConfig({
-  testMatch: ['draft-store.spec.js', 'flows.spec.js', 'source-layout.spec.js', 'editor-layout.spec.js', 'sidebar.spec.js', 'explorer-workspace.spec.js', 'margin-ui.spec.js', 'explorer-review.spec.js', 'margin-motion-review.spec.js', 'review-evidence.spec.js', 'routing-chat-review.spec.js', 'tasks-layout.spec.js', 'speech-models.spec.js', 'dictation.spec.js', 'settings.spec.js', 'boards.spec.js', 'calendar.spec.js', 'title-keys.spec.js', 'prefs.spec.js'],
+  testMatch: ['draft-store.spec.js', 'flows.spec.js', 'editor-layout.spec.js', 'sidebar.spec.js', 'explorer-workspace.spec.js', 'margin-ui.spec.js', 'explorer-review.spec.js', 'margin-motion-review.spec.js', 'review-evidence.spec.js', 'routing-chat-review.spec.js', 'tasks-layout.spec.js', 'speech-models.spec.js', 'dictation.spec.js', 'settings.spec.js', 'boards.spec.js', 'calendar.spec.js', 'title-keys.spec.js', 'prefs.spec.js'],
   globalTeardown: './teardown.js',
   fullyParallel: true,
   workers: 1,

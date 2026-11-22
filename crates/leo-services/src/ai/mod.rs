@@ -116,7 +116,7 @@ pub fn transcribe_outcome(audio_path: &Path) -> Result<chain::ChainOutcome<Strin
     transcribe::run(&cfg, &store, audio_path)
 }
 
-pub fn transcribe_turns(audio_path: &Path) -> Result<Vec<(u64, String)>> {
+pub fn transcribe_turns(audio_path: &Path) -> Result<Vec<(u64, u64, String)>> {
     use provider::TranscribeProvider;
     let cfg = Config::load();
     let Some(speech) = cfg.transcribe.chain.iter().find_map(|name| {

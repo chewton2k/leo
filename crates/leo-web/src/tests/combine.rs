@@ -35,6 +35,8 @@ fn transcript(id: &str) -> leo_core::recording::Archive {
             end_secs: 5,
             text: format!("said in {id}"),
             speaker: String::new(),
+            echo: false,
+            turns: Vec::new(),
         }],
         points: vec![],
         context: String::new(),

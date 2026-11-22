@@ -38,7 +38,7 @@ impl TranscribeProvider for LocalSpeech {
 }
 
 impl LocalSpeech {
-    pub fn transcribe_timed(&self, path: &Path) -> ProviderResult<Vec<(u64, String)>> {
+    pub fn transcribe_timed(&self, path: &Path) -> ProviderResult<Vec<(u64, u64, String)>> {
         read(path)
             .and_then(|(selected, pcm)| {
                 crate::speech::engine::engine().transcribe_timed(

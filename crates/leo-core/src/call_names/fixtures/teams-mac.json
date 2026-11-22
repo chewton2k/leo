@@ -1,0 +1,46 @@
+[
+  {
+    "title": "Calendar | Microsoft Teams",
+    "id": "",
+    "tree": {
+      "role": "AXWindow",
+      "children": [
+        { "role": "AXStaticText", "value": "Weekly sync with Ada Brennick, Organizer, Unmuted" },
+        { "role": "AXButton", "description": "Go to today" }
+      ]
+    }
+  },
+  {
+    "title": "Weekly sync | Microsoft Teams",
+    "id": "",
+    "tree": {
+      "role": "AXWindow",
+      "children": [
+        {
+          "role": "AXWebArea",
+          "children": [
+            { "role": "AXButton", "description": "Leave (⌘⇧H)", "id": "hangup-button" },
+            { "role": "AXButton", "description": "Unmute mic (⌘⇧M)" },
+            { "role": "AXGroup", "description": "Ada Brennick is speaking" },
+            {
+              "role": "AXOutline",
+              "description": "Participants",
+              "children": [
+                { "role": "AXRow", "description": "Ada Brennick, Organizer, Unmuted" },
+                { "role": "AXRow", "description": "Lio Marchetti (You), Presenter, Muted" },
+                { "role": "AXRow", "description": "Mara Quist, Video on" }
+              ]
+            },
+            {
+              "role": "AXList",
+              "description": "Chat",
+              "children": [
+                { "role": "AXGroup", "description": "Ezra Vale, Unmuted" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+]

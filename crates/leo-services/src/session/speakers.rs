@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
-use super::{wav, write_atomic, OVERLAP_SECS};
+use super::{wav, write_atomic};
 use crate::speech::Turn;
 
 pub const FILE: &str = "speakers.json";
@@ -147,20 +147,19 @@ impl Audio {
 
 pub fn label(
     dir: &Path,
-    parts: u32,
+    leads_ms: &[u64],
     segment_ms: u64,
     diarize: Diarize,
     transcribe: Transcribe,
     stop: &AtomicBool,
     progress: &dyn Fn(usize, usize),
 ) -> Result<Vec<Spoken>, String> {
-    let lead = OVERLAP_SECS * wav::RATE as u64;
     let mut audio = Audio {
         parts: Vec::new(),
         loaded: None,
     };
     let too_long = || "the recording is longer than two hours".to_string();
-    for index in 0..parts {
+    for (index, lead_ms) in (0u32..).zip(leads_ms) {
         let path = dir.join(wav::done_name(index));
         let bytes = std::fs::metadata(&path)
             .map_err(|_| {
@@ -172,7 +171,7 @@ pub fn label(
             })?
             .len();
         let samples = bytes.saturating_sub(wav::HEADER) / 2;
-        let skip = if index == 0 { 0 } else { lead.min(samples) };
+        let skip = (lead_ms * wav::RATE as u64 / 1000).min(samples);
         audio.parts.push((path, skip, samples - skip));
     }
     let total_ms = audio.parts.iter().map(|p| p.2).sum::<u64>() * 1000 / wav::RATE as u64;
@@ -322,6 +321,10 @@ mod tests {
         );
     }
 
+    fn rolled(parts: u32) -> Vec<u64> {
+        (0..parts).map(crate::session::lead_ms).collect()
+    }
+
     fn part(dir: &Path, index: u32, secs: u64) {
         wav::write(
             &dir.join(wav::done_name(index)),
@@ -348,7 +351,7 @@ mod tests {
         };
         let spoken = label(
             dir.path(),
-            2,
+            &rolled(2),
             4_000,
             &diarize,
             &transcribe,
@@ -373,6 +376,30 @@ mod tests {
     }
 
     #[test]
+    fn a_part_that_began_a_capture_keeps_its_first_second() {
+        let dir = tempfile::tempdir().unwrap();
+        part(dir.path(), 0, 4);
+        part(dir.path(), 1, 3);
+        let asked = RefCell::new(Vec::new());
+        let diarize = |parts: Vec<(PathBuf, u64)>| {
+            *asked.borrow_mut() = parts.iter().map(|p| p.1).collect();
+            Ok(vec![turn(0, 3_000, 1), turn(3_000, 7_000, 2)])
+        };
+        let spoken = label(
+            dir.path(),
+            &[0, 0],
+            4_000,
+            &diarize,
+            &|_: &Path| Ok("said".to_string()),
+            &AtomicBool::new(false),
+            &|_, _| {},
+        )
+        .unwrap();
+        assert_eq!(*asked.borrow(), vec![0, 0]);
+        assert_eq!(spoken.last().map(|s| s.end_ms), Some(7_000));
+    }
+
+    #[test]
     fn labelling_gives_nothing_for_one_speaker_and_fails_without_audio_or_when_stopped() {
         let dir = tempfile::tempdir().unwrap();
         part(dir.path(), 0, 2);
@@ -381,7 +408,7 @@ mod tests {
         let one = |_: Vec<(PathBuf, u64)>| Ok(vec![turn(0, 2_000, 3)]);
         assert!(label(
             dir.path(),
-            1,
+            &rolled(1),
             SEGMENT,
             &one,
             &never,
@@ -394,7 +421,7 @@ mod tests {
         let fine = |_: &Path| Ok("words".to_string());
         assert!(label(
             dir.path(),
-            1,
+            &rolled(1),
             SEGMENT,
             &two,
             &fine,
@@ -405,7 +432,7 @@ mod tests {
         let missing = |segment_ms| {
             label(
                 dir.path(),
-                2,
+                &rolled(2),
                 segment_ms,
                 &two,
                 &fine,
@@ -426,7 +453,7 @@ mod tests {
         assert_eq!(
             label(
                 dir.path(),
-                1,
+                &rolled(1),
                 SEGMENT,
                 &broken,
                 &fine,
@@ -456,7 +483,7 @@ mod tests {
         };
         let spoken = label(
             dir.path(),
-            1,
+            &rolled(1),
             SEGMENT,
             &four,
             &transcribe,
@@ -483,7 +510,7 @@ mod tests {
         let steps = RefCell::new(Vec::new());
         let spoken = label(
             dir.path(),
-            1,
+            &rolled(1),
             4_000,
             &two,
             &|_: &Path| Ok("words".to_string()),
@@ -534,7 +561,7 @@ mod tests {
         };
         let spoken = label(
             dir.path(),
-            1,
+            &rolled(1),
             SEGMENT,
             &three,
             &flaky,
@@ -556,7 +583,7 @@ mod tests {
         };
         assert!(label(
             dir.path(),
-            1,
+            &rolled(1),
             SEGMENT,
             &never,
             &flaky,
@@ -689,7 +716,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (segment, lead) = (
             300 * wav::RATE as usize,
-            (OVERLAP_SECS * wav::RATE as u64) as usize,
+            (crate::session::OVERLAP_SECS * wav::RATE as u64) as usize,
         );
         let mut parts = 0;
         for start in (0..samples.len()).step_by(segment) {
@@ -720,7 +747,7 @@ mod tests {
         let started = std::time::Instant::now();
         let spoken = label(
             dir.path(),
-            parts,
+            &rolled(parts),
             300_000,
             &|p| {
                 engine

@@ -70,6 +70,7 @@ const ELSEWHERE: &[(&str, &str)] = &[
     ("speakers.json", "recording"),
     ("points.jsonl", "recording"),
     ("trace.jsonl", "recording"),
+    ("call-names.jsonl", "recording"),
     ("lock", "recording"),
 ];
 
