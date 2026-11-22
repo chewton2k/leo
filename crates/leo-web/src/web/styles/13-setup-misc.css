@@ -348,7 +348,7 @@ body.files-over main::after {
   .ask-option, .quiz-option { transition: border-color var(--t-press), background var(--t-press), scale var(--t-press) var(--ease-arrive); }
   .segment { transition: color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
   .switch { transition: background-color var(--t-drawer) var(--ease-move), scale var(--t-press) var(--ease-arrive); }
-  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"], .actions *) { scale: .97; }
+  :is(.btn, .icon-btn, .float-act, .rec-round, .rec-go, .picker-button, .pick-chip, button.chip, .chat-send, .chat-attach, .chat-chip, .chat-access, .starter, .side-add, .side-row, .kanban-tab:not(.on), .kanban-add-card, .msg-act, .code-copy, .fa-lg, .choice-pick, .margin-mode, .select-menu-button, .ask-option, .quiz-option, .segment, .switch):active:not(:disabled, [aria-disabled="true"], [draggable="true"]) { scale: .97; }
 }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
 
@@ -368,7 +368,7 @@ body.files-over main::after {
 .source-more > summary::-webkit-details-marker { display: none; }
 .source-more > summary > svg { width: 15px; height: 15px; flex: none; }
 .source-more[open]:not(.closing) > summary > svg { transform: rotate(90deg); }
-.home-wd:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+.home-wd:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible, :where(.note-layout[data-wide]) .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
 .rec-error-details.source-more > summary { padding: 0; }
 
 .select-control { position: relative; display: flex; align-items: center; min-width: 0; flex: 1; }

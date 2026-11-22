@@ -45,6 +45,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     const flush=async()=>{};
     const showNote=async()=>{};
     const drawSide=()=>{};const sideRedrawSoon=()=>{};
+    const askFloat={hidden:true};const placeAskFloat=()=>{};
     window.leoTheme={noteWidth:()=>'wide'};
     window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[]};
     async function api(url,{method='GET',body}={}){

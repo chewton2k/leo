@@ -863,7 +863,10 @@ function marginDraw() {
   marginPage.gone = gone;
   marginPage.moved = placed.filter(({ t, at }) => at.how === 'context' && marginPage.threads.includes(t) && marginKept(t));
   const layout = marginLayout(columns);
-  if (columns.dataset.margin !== layout) columns.dataset.margin = layout;
+  if (columns.dataset.margin !== layout) {
+    columns.dataset.margin = layout;
+    if (!askFloat.hidden) placeAskFloat(true);
+  }
   const margins = layout === 'right' || layout === 'both';
   const slots = marginSlots(margins ? [] : placed, columns);
   const keep = new Set([...placed.map(({ t }) => t.id), 'reading']);

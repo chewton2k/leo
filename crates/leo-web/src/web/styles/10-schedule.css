@@ -236,10 +236,10 @@ body.on-note main { padding-bottom: max(calc(var(--bottom) + 110px), var(--dock-
 .tasks-foot { padding: 8px 16px 12px; font-size: var(--fs-sm); }
 .tasks-badge { display: none; font-size: var(--fs-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
 .cal-stack-more::after, .chat-history-x::after { content: ''; position: absolute; inset: -6px; }
-.tasks-window:not(:hover, :focus-within) { align-self: flex-start; border-radius: 22px; }
-.tasks-window:not(:hover, :focus-within) :is(.tasks-body, .tasks-foot, .tasks-new, .tasks-toggle .grow) { display: none; }
-.tasks-window:not(:hover, :focus-within) .tasks-toggle { height: 44px; padding: 0 14px 0 10px; }
-.tasks-window:not(:hover, :focus-within) .tasks-icon { width: 26px; height: 26px; }
-.tasks-window:not(:hover, :focus-within) .tasks-icon svg { width: 15px; height: 15px; }
-.tasks-window:not(:hover, :focus-within) .tasks-badge { display: block; }
+.tasks-window:not(.open) { align-self: flex-start; border-radius: 22px; }
+.tasks-window:not(.open) :is(.tasks-body, .tasks-foot, .tasks-new, .tasks-toggle .grow) { display: none; }
+.tasks-window:not(.open) .tasks-toggle { height: 44px; padding: 0 14px 0 10px; }
+.tasks-window:not(.open) .tasks-icon { width: 26px; height: 26px; }
+.tasks-window:not(.open) .tasks-icon svg { width: 15px; height: 15px; }
+.tasks-window:not(.open) .tasks-badge { display: block; }
 .tasks-badge.late { color: var(--danger); }

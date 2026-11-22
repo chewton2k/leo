@@ -1707,6 +1707,35 @@ dock().prepend(tasksBox);
 tasksBox.addEventListener('mousedown', (e) => {
   if (!e.target.closest('input, textarea, select, [contenteditable]')) e.preventDefault();
 });
+let tasksWant = false;
+let tasksRun = null;
+function tasksSync() {
+  const want = !tasksBox.hidden && tasksBox.matches(':hover, :focus-within');
+  if (want === tasksWant) return;
+  tasksWant = want;
+  const live = tasksRun && getComputedStyle(tasksBox).clipPath;
+  tasksRun?.cancel();
+  tasksRun = null;
+  if (stillMotion() || tasksBox.hidden || typeof tasksBox.animate !== 'function') {
+    tasksBox.classList.toggle('open', want);
+    return fitTasksWindow();
+  }
+  tasksBox.classList.remove('open');
+  const pill = tasksBox.getBoundingClientRect();
+  tasksBox.classList.add('open');
+  const full = tasksBox.getBoundingClientRect();
+  const edge = (gap) => (gap < 1 ? -24 : gap);
+  const shut = `inset(${edge(pill.top - full.top)}px ${edge(full.right - pill.right)}px ${edge(full.bottom - pill.bottom)}px ${edge(pill.left - full.left)}px round 22px)`;
+  const open = 'inset(-24px round 14px)';
+  tasksRun = tasksBox.animate([{ clipPath: live || (want ? shut : open) }, { clipPath: want ? open : shut }], { duration: want ? MOTION_MS : MOTION_MS * EXIT_SHARE, easing: want ? EASE_OUT : EASE_EXIT });
+  tasksRun.onfinish = () => {
+    tasksRun = null;
+    tasksBox.classList.toggle('open', want);
+    fitTasksWindow();
+  };
+}
+for (const type of ['pointerenter', 'pointerleave', 'focusin', 'focusout']) tasksBox.addEventListener(type, () => requestAnimationFrame(tasksSync));
+document.addEventListener('pointerdown', () => requestAnimationFrame(tasksSync), true);
 const TASKS_HOLD_MS = 300;
 let tasksOpened = { at: 0, x: 0, y: 0 };
 tasksBox.addEventListener('pointerenter', (e) => { tasksOpened = { at: performance.now(), x: e.clientX, y: e.clientY }; });
@@ -1951,6 +1980,7 @@ function drawTasksWindow() {
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
   const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
   tasksBox.hidden = !open || here || state.view === 'locked';
+  tasksSync();
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
   const focus = tasksFocus(tasksBox);
@@ -1980,10 +2010,10 @@ function fitTasksWindow() {
   if (rail.length) room = Math.min(room, Math.floor(box.bottom - Math.max(...rail.map((r) => r.bottom)) - 12));
   if (Number.isFinite(room)) tasksBox.style.setProperty('--tasks-room', `${Math.max(TASKS_LEAST_ROOM, room)}px`);
   else tasksBox.style.removeProperty('--tasks-room');
-  if (!tasksBox.matches(':hover, :focus-within')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
+  if (!tasksBox.classList.contains('open')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
 }
 
-new MutationObserver(fitTasksWindow).observe(app, { childList: true });
+new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow() : fitTasksWindow())).observe(app, { childList: true });
 let railFit = 0;
 new MutationObserver(() => {
   if (railFit || !(app.querySelector('.outline-ticks') || tasksBox.style.getPropertyValue('--tasks-room'))) return;

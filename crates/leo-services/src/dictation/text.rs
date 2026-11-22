@@ -504,11 +504,7 @@ fn filler_patterns(language: &OutputLanguageEvidence) -> Patterns {
         .clone()
 }
 
-pub fn remove_filler_words(text: &str, language: &OutputLanguageEvidence, enabled: bool) -> String {
-    if !enabled {
-        return text.to_string();
-    }
-
+pub fn remove_filler_words(text: &str, language: &OutputLanguageEvidence) -> String {
     let patterns = filler_patterns(language);
 
     let mut filtered = text.to_string();
@@ -562,16 +558,8 @@ pub fn clean(text: &str, settings: &super::settings::Settings, language: Option<
         (None, None) => (OutputLanguageEvidence::Unknown, None),
     };
     let fixed = apply_custom_words(text, &settings.custom_words, 0.18, language);
-    let filtered = remove_filler_words(&fixed, &evidence, settings.fillers);
-    let normalized = if settings.fillers {
-        normalize_transcription_output(&filtered)
-    } else {
-        MULTI_SPACE_PATTERN
-            .replace_all(&filtered, " ")
-            .trim()
-            .to_string()
-    };
-    clock_times(&normalized)
+    let filtered = remove_filler_words(&fixed, &evidence);
+    clock_times(&normalize_transcription_output(&filtered))
 }
 
 fn echo_normalize(s: &str) -> String {
@@ -763,7 +751,7 @@ mod tests {
 
     fn filter_transcription_output(text: &str, language: &str) -> String {
         let language = OutputLanguageEvidence::UserSelected(language.to_string());
-        let filtered = remove_filler_words(text, &language, true);
+        let filtered = remove_filler_words(text, &language);
         normalize_transcription_output(&filtered)
     }
 
@@ -979,7 +967,6 @@ mod tests {
         let filtered = remove_filler_words(
             "uhh bueno hmm creo que um ha llegado",
             &OutputLanguageEvidence::Unknown,
-            true,
         );
         assert_eq!(
             normalize_transcription_output(&filtered),
@@ -989,7 +976,6 @@ mod tests {
         let cyrillic = remove_filler_words(
             "хм я думаю ммм это работает",
             &OutputLanguageEvidence::Unknown,
-            true,
         );
         assert_eq!(
             normalize_transcription_output(&cyrillic),
@@ -1001,7 +987,7 @@ mod tests {
     fn test_filter_german_gated_fillers_require_evidence() {
         let text = "äh ich glaube ähm das passt";
 
-        let unknown = remove_filler_words(text, &OutputLanguageEvidence::Unknown, true);
+        let unknown = remove_filler_words(text, &OutputLanguageEvidence::Unknown);
         assert_eq!(normalize_transcription_output(&unknown), text);
 
         let result = filter_transcription_output(text, "de");
@@ -1020,14 +1006,12 @@ mod tests {
         let model = remove_filler_words(
             "um I think this works",
             &OutputLanguageEvidence::TextDetected("en".to_string()),
-            true,
         );
         assert_eq!(normalize_transcription_output(&model), "I think this works");
 
         let text = remove_filler_words(
             "euh je pense que ça marche",
             &OutputLanguageEvidence::TextDetected("fr".to_string()),
-            true,
         );
         assert_eq!(
             normalize_transcription_output(&text),
@@ -1131,7 +1115,7 @@ mod tests {
     #[test]
     fn spoken_asides_are_removed_only_where_they_are_asides() {
         let en = OutputLanguageEvidence::UserSelected("en".into());
-        let clean = |text: &str| remove_filler_words(text, &en, true);
+        let clean = |text: &str| remove_filler_words(text, &en);
         assert_eq!(
             clean("We ship Tuesday, you know, maybe Wednesday"),
             "We ship Tuesday, maybe Wednesday"
@@ -1172,19 +1156,14 @@ mod tests {
         ] {
             assert_eq!(clean(kept), kept);
         }
-        assert_eq!(
-            remove_filler_words("Lunch. Scratch that. Dinner.", &en, false),
-            "Lunch. Scratch that. Dinner."
-        );
     }
 
     fn words(list: &[&str]) -> Vec<String> {
         list.iter().map(|w| w.to_string()).collect()
     }
 
-    fn settings(fillers: bool, custom: &[&str]) -> crate::dictation::settings::Settings {
+    fn settings(custom: &[&str]) -> crate::dictation::settings::Settings {
         crate::dictation::settings::Settings {
-            fillers,
             custom_words: words(custom),
             ..Default::default()
         }
@@ -1298,24 +1277,22 @@ mod tests {
     fn scratch_that_keeps_the_next_sentence_capitalised() {
         let en = OutputLanguageEvidence::UserSelected("en".into());
         assert_eq!(
-            remove_filler_words("I like cats. Scratch that, dogs are better.", &en, true),
+            remove_filler_words("I like cats. Scratch that, dogs are better.", &en),
             "Dogs are better."
         );
     }
 
     #[test]
-    fn repeats_collapse_only_while_fillers_are_on() {
-        let text = "no no no that's wrong";
+    fn repeats_collapse() {
         assert_eq!(
-            clean(text, &settings(true, &[]), Some("en")),
+            clean("no no no that's wrong", &settings(&[]), Some("en")),
             "no that's wrong"
         );
-        assert_eq!(clean(text, &settings(false, &[]), Some("en")), text);
     }
 
     #[test]
     fn language_is_guessed_from_the_text_when_none_is_chosen() {
-        let s = settings(true, &[]);
+        let s = settings(&[]);
         assert_eq!(
             clean(
                 "Um, so I was thinking that we could meet on Tuesday afternoon to talk about the budget.",

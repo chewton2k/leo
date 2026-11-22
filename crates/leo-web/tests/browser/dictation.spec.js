@@ -10,7 +10,7 @@ test('dictation preferences keep drafts and caret while shortcut and history upd
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
   const keys = core.slice(core.indexOf('const SHORTCUT_KEYS'), core.indexOf('async function dictateHint'));
   const css = pageCss();
-  const initial = () => ({ settings: { shortcut: 'option+space', mode: 'both', custom_words: ['Initial'], fillers: true, popup: 'live', top: false }, microphones: ['External microphone'], shortcut: {}, recent: [{ id: 1, text: '<img src=x onerror=bad()>' }] });
+  const initial = () => ({ settings: { shortcut: 'option+space', mode: 'both', custom_words: ['Initial'], popup: 'live', top: false }, microphones: ['External microphone'], shortcut: {}, recent: [{ id: 1, text: '<img src=x onerror=bad()>' }] });
   let view = initial();
   const script = `const app=document.querySelector('#app'),$=s=>document.querySelector(s); let seq=1,state={view:'settings',section:'dictation',dictation:${JSON.stringify(view)}};
     const pulse=()=>{},cascade=()=>{},overlapOut=()=>{},ICON={chevron:''}, svg=p=>'<svg>'+p+'</svg>', fail=e=>console.error(e); const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -75,8 +75,8 @@ test('dictation preferences keep drafts and caret while shortcut and history upd
       await expect(words).toHaveValue('Charlton\n東京');
       await page.getByRole('radiogroup', { name: 'Popup position' }).getByRole('radio', { name: 'Top' }).click();
       await page.getByRole('radiogroup', { name: 'Activation' }).getByRole('radio', { name: 'Tap', exact: true }).click();
-      await page.getByRole('switch', { name: 'Remove filler words' }).uncheck();
-      await expect.poll(() => [view.settings.top, view.settings.mode, view.settings.fillers]).toEqual([true, 'tap', false]);
+      await page.getByRole('switch', { name: 'Start and stop sounds' }).check();
+      await expect.poll(() => [view.settings.top, view.settings.mode, view.settings.sounds]).toEqual([true, 'tap', true]);
       await expect(page.getByRole('radiogroup', { name: 'Popup position' }).getByRole('radio', { name: 'Top' })).toHaveAttribute('aria-checked', 'true');
       await page.getByRole('button', { name: 'Clear history', exact: true }).click();
       await expect(page.locator('#dictation-recent')).toContainText('Your dictations will appear here.');

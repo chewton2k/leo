@@ -38,9 +38,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     #[test]
-    fn defaults_are_local_and_filler_removal_is_on() {
+    fn defaults_are_local() {
         let s = Settings::default();
-        assert!(s.fillers);
         assert!(!s.sounds);
         assert_eq!(s.mode, Mode::Both);
         assert!(s.validate().is_ok());
@@ -93,11 +92,6 @@ mod tests {
             "Charlton visits 東京."
         );
         assert_eq!(text::clean("um livro", &s, Some("pt")), "um livro");
-        let s = Settings {
-            fillers: false,
-            ..s
-        };
-        assert_eq!(text::clean("Um, hello.", &s, Some("en")), "Um, hello.");
     }
 
     #[test]

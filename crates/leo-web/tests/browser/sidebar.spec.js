@@ -220,7 +220,9 @@ test('folder chevrons are at least 24 px to press, and open notes line up under 
     expect(box.height).toBeGreaterThanOrEqual(24);
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
     const folderLabel = await page.locator('.side-tree .side-row[data-dir="Course"] .side-label').boundingBox();
-    const noteLabel = await page.locator('.side-tree .side-note').first().locator('.side-label').boundingBox();
+    const ownNote = page.locator('.side-kids[data-kids="Course"] > .side-note-wrap > .side-note').first();
+    await expect(ownNote).toBeVisible();
+    const noteLabel = await ownNote.locator('.side-label').boundingBox();
     await expect(page.locator('.side-tree .side-note').first().locator('svg')).toHaveCount(0);
     expect(Math.abs(noteLabel.x - folderLabel.x - 16)).toBeLessThanOrEqual(1);
     const guide = await page.locator('.side-kids[data-kids="Course"]').evaluate(el => { const s = getComputedStyle(el, '::before'); return { mask: s.maskImage || s.webkitMaskImage, width: s.width }; });

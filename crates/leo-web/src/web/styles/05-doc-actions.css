@@ -90,37 +90,18 @@
 #doc > .doc-tail::before { content: ''; display: block; width: 40px; height: 8px; margin: 22px auto 0; background: var(--muted); -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 8'%3E%3Cpath d='M2 4.6 Q11 3.2 20 4.1 T38 3.4' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 8'%3E%3Cpath d='M2 4.6 Q11 3.2 20 4.1 T38 3.4' fill='none' stroke='%23000' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") center / contain no-repeat; }
 #doc.doc-empty > .doc-tail::before { display: none; }
 
-.actions {
-  position: fixed; left: var(--mid); transform: translateX(-50%); bottom: calc(var(--bottom) + 16px); z-index: 25;
-  display: flex; gap: 2px; padding: 5px; border-radius: var(--r-xl);
-  background: var(--raised); box-shadow: var(--shadow);
-}
-.actions button {
-  position: relative; display: grid; place-items: center; width: 44px; height: 44px;
-  border: 0; background: none; border-radius: 15px; padding: 0; color: var(--muted);
-}
-.actions button svg { width: 20px; height: 20px; color: var(--text); }
-.actions button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
-.actions button:focus-visible { outline: 2px solid var(--focus); outline-offset: -1px; }
-.actions button.danger svg { color: var(--muted); }
-.actions button.danger:is(:hover, :focus-visible) svg { color: var(--danger); }
-.actions button::after, .margin-tools button::after, .margin-acts .icon-act::after {
+.margin-tools button::after, .margin-acts .icon-act::after {
   content: attr(aria-label); position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%);
   padding: 5px 9px; border-radius: var(--r-tile); background: var(--text); color: var(--page); font-size: var(--fs-xs); font-weight: 550; line-height: 1.2; white-space: nowrap;
   opacity: 0; pointer-events: none; transition: opacity var(--t-press);
 }
-.actions button:focus-visible::after, .margin-tools button:focus-visible::after, .margin-acts .icon-act:focus-visible::after { opacity: 1; }
-@media (hover: hover) { .actions button:hover::after, .margin-tools button:hover::after, .margin-acts .icon-act:hover::after { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .actions button::after, .margin-tools button::after, .margin-acts .icon-act::after { transition: none; } }
-@media (forced-colors: active) { .actions { border: 1px solid CanvasText; } .actions button::after, .margin-tools button::after, .margin-acts .icon-act::after { border: 1px solid CanvasText; background: Canvas; color: CanvasText; } }
+.margin-tools button:focus-visible::after, .margin-acts .icon-act:focus-visible::after { opacity: 1; }
+@media (hover: hover) { .margin-tools button:hover::after, .margin-acts .icon-act:hover::after { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .margin-tools button::after, .margin-acts .icon-act::after { transition: none; } }
+@media (forced-colors: active) { .margin-tools button::after, .margin-acts .icon-act::after { border: 1px solid CanvasText; background: Canvas; color: CanvasText; } }
 .margin-tools button, .margin-acts .icon-act { position: relative; }
 .margin-tools button::after, .margin-acts .icon-act::after { left: auto; right: 0; bottom: calc(100% + 6px); transform: none; }
 
-@media (max-width: 1199px) {
-  body.chat-open .actions { left: calc(var(--side) + (100% - var(--side) - var(--chat-over, 0px)) / 2); max-width: calc(100% - var(--side) - var(--chat-over, 0px) - 12px); flex-wrap: wrap; justify-content: center; }
-  body.chat-open .actions button { flex: 1 1 30px; min-width: 30px; max-width: 44px; }
-}
-@media (max-width: 599px) { body.chat-open .actions { display: none; } }
 
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
 .field {
@@ -249,7 +230,7 @@ label.trash-row { cursor: pointer; }
   html { scrollbar-gutter: auto !important; }
   body { --side: 0px !important; --right: 0px !important; --top: 0px !important; --bottom: 0px !important; }
   html, body { background: #fff; color: #1c1c1a; padding: 0 !important; margin: 0; font-size: 11pt; line-height: 1.55; }
-  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .actions, .select-bar, .dock, .tasks-window, .page-bar, .source-pane, .ask-float, .note-find, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
+  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .select-bar, .dock, .tasks-window, .page-bar, .source-pane, .ask-float, .note-find, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
   body.files-over main::after { display: none !important; }
   main, body.on-note main { max-width: none !important; width: auto !important; padding: 0 !important; margin: 0 !important; }
   .note-head h1, #title { margin: 0 0 10pt; padding-bottom: 6pt; font-size: 22pt; line-height: 1.2; }

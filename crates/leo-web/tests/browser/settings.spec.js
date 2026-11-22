@@ -329,10 +329,11 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(page.locator('[data-dictation="mode"]')).toHaveValue('hold');
       await expect(page.getByRole('radiogroup',{name:'Activation'}).getByRole('radio',{name:'Hold',exact:true})).toHaveAttribute('aria-checked','true');
       // On/off settings are switches, never plain checkboxes.
-      const fillers=page.getByRole('switch',{name:'Remove filler words'});
-      await expect(fillers).not.toBeChecked();
-      await fillers.click();
-      await expect(fillers).toBeChecked();
+      const sounds=page.getByRole('switch',{name:'Start and stop sounds'});
+      await expect(sounds).not.toBeChecked();
+      await sounds.click();
+      await expect(sounds).toBeChecked();
+      await expect(page.locator('[data-find="dictation-fillers"]')).toHaveCount(0);
       expect(await page.locator('.settings input[type="checkbox"]:not(.switch)').count()).toBe(0);
       const words=page.locator('[data-dictation="custom_words"]');
       await words.fill('Marie Curie\n文字');
@@ -341,9 +342,9 @@ test('Settings sections keep drafts and selections across redraws in both themes
       await expect(words).toBeFocused();
       expect(await words.evaluate(el=>[el.selectionStart,el.selectionEnd])).toEqual([2,7]);
       await expect(page.locator('#dictation-shortcut-field')).toHaveCount(0);
-      const filler=page.locator('[data-find="dictation-fillers"]');
-      await expect(filler.locator('.set-desc')).toHaveText('Take out words like um and uh as you speak.');
-      await expect(filler).toHaveCSS('border-top-width','1px');
+      const soundsRow=page.locator('[data-find="dictation-sounds"]');
+      await expect(soundsRow.locator('.set-desc')).toHaveText('Play a short sound when dictation starts and stops.');
+      await expect(soundsRow).toHaveCSS('border-top-width','1px');
       await page.getByRole('link',{name:'Shortcuts',exact:true}).click();
       await expect(page.getByRole('heading',{level:1,name:'Shortcuts'})).toBeVisible();
       const dictationKeys=page.locator('[data-find="shortcut-dictation"]');

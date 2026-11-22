@@ -325,8 +325,7 @@ animation is skipped under `stillMotion()`; CSS motion sits under
   `window.leoMotion` (absent in some fixtures: every call has a plain fallback);
   doc.js reads the curve from the CSS token.
 - Press: pressables scale to .97 with the individual `scale` property (one
-  grouped rule at the end of the styles), never draggable rows, `.actions`
-  tooltips or disabled controls.
+  grouped rule at the end of the styles), never draggable rows or disabled controls.
 - Knobs `knobStretch(el, pseudo)` (12% along the travel, on `scale`, ends at 1).
   Popovers `unfold(menu, from)` / `fold(menu, then)` (`popEdge` origin, start at
   .95, clip reveal; reversing mid-run starts from the live clip, opacity and
@@ -410,8 +409,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   header fill (everywhere `.prose th` is a 0.92 em medium-weight label in ink with no fill, 2026-11-21, the user's call), every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The title row's chips
-  (`.margin-mode`) sit 16 px apart with 14 px icons and 4/8 padding, and the two Felix chips
-  (not the ⋯) carry a 1 px `--line` ring at rest (2026-11-21, the user's call). A picture whose alt text says something (not empty, not a file name, not "Pasted picture") sits in a
+  (`.margin-mode`) sit 16 px apart with 14 px icons; the two Felix chips (not the ⋯) are plain
+  text, no ring, fill or side padding, and only take the text colour on hover; the ⋯ keeps its
+  4/8 padding and hover fill (2026-11-21, the user's call: "just keep text"). A picture whose alt text says something (not empty, not a file name, not "Pasted picture") sits in a
   `.note-fig` span whose `::after` shows it as a 13 px caption on the note page (generated
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
@@ -564,6 +564,18 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
+- Resizing stays cheap on long notes (2026-11-21, measured in WebKit on a 200 KB note):
+  `.note-layout` is not a size container (a container query re-resolved every note element's
+  style on each width change); it keeps the same containment through `contain`, and `leoDoc.mount`
+  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn, on each window
+  `resize` and a frame after each ResizeObserver report (toggling inside the callback resized `body` under the page bar's
+  observer, a ResizeObserver loop error in WebKit), read through
+  `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
+  (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
+  pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
+  read them. Note prose has no `text-wrap: pretty` (WebKit re-balances every paragraph on each
+  relayout). The page-width drag writes the article's own `max-width` and commits
+  `--note-width` once on release.
 - Outline (2026-11-17, the user's call: no fixed limit on data): every heading
   (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
   (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
@@ -726,6 +738,13 @@ read (root CLAUDE.md, 2026-11-17).
   User-written ```mermaid still renders. `BASE` stays under 4,500 bytes.
 - `REPLY_STYLE` is not changed by prompt-size work. Escape belongs to the owner
   inside the page first; an open sheet always wins.
+
+- His face reacts to the pointer (2026-11-21, the user's call, beside the tap reactions `TAPS`):
+  a double click hugs him (`hugged`, click `detail` ≥ 2; `hug`: squeeze, blush, heart, a snuggle
+  sway, `HUG_MS`), and from the `HUGGED_TOO_MUCH`th hug with less than `HUG_GAP_MS` between them
+  he squints (`squint`: pixel `>_<` eyes, a sweat drop, leaning away) until he is left alone; the
+  hug wins over a transformation started by the double click's first click. Under reduced motion
+  both show the face without moving.
 
 Decided: no modes, the agent decides (2026-11-05); marking never waits for
 Felix (2026-10-19).
@@ -905,12 +924,13 @@ Felix (2026-10-19).
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else above the selection (below
-  its last word when there is no room above; 2026-11-21, the user's call).
+  its last word when there is no room above; 2026-11-21, the user's call); `marginDraw` places it
+  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone.
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
   a note on the right whenever the right is free at its height (`marginKit.sides`).
-  Margin icon buttons show the `.actions` tooltip (their aria-label), no `title`.
+  Margin icon buttons show the shared tooltip (their aria-label, `::after`), no `title`; the floating note toolbar's `.actions` rules are gone.
   Felix this on such a passage only opens it (Visualize still asks in it). The open
   thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
   The ask box shows "Enter to ask · Esc to close"; a draw ask waits with "Sketching it…"
@@ -1156,9 +1176,12 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `--shadow-lift`), the label becomes Show less, and Escape, a click outside or the label
   closes it; the day number still opens Day, and no other cell moves.
 - The Tasks card in `#dock` is folded to a small pill (the tick and the open count as plain text, danger-coloured when something is late; 2026-11-21, the user's call) at every start and opens only
-  while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
+  while hovered or holding keyboard focus (`tasksSync` sets `.open` from `:hover`/`:focus-within`;
+  opening reveals the card from the pill with a `clip-path` over `MOTION_MS`, folding shrinks it
+  back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
-  not take focus). Home draws the date, one sentence
+  not take focus). A page swap that finds it hidden with tasks loaded redraws it (the `#app` childList
+  observer), so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that

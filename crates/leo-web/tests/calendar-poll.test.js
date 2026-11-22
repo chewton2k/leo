@@ -122,7 +122,7 @@ test('the Tasks card offers Show more when there are more tasks than it holds', 
   const context = {
     tasksWin: { tasks: [{ id: 'a' }, { id: 'b' }], total: 3 }, cal: { data: null }, state: { view: 'folder' }, location: { hash: '#/n/x' },
     tasksAtHome: () => false, drawHomeToday() {}, tasksGroups: (tasks) => [['Today', tasks]], tasksFocus: () => null,
-    inkSettle() {}, refocusTasks() {}, fitTasksWindow() {}, tasksRows: () => '', tasksInked() {}, ICON: { check: '', plus: '' },
+    inkSettle() {}, refocusTasks() {}, fitTasksWindow() {}, tasksSync() {}, tasksRows: () => '', tasksInked() {}, ICON: { check: '', plus: '' },
     tasksBox: box, esc: String, TASK_GROUP_NAMES: {},
   };
   vm.createContext(context);

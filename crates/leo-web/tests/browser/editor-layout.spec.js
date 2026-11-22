@@ -1446,7 +1446,7 @@ test('heading rail stays vertically centred and its dropdown animates with reduc
     expect(await nav.evaluate(el=>el.getAnimations().length)).toBe(0);
     await page.setViewportSize({width:390,height:844});
     await page.evaluate(()=>scrollTo(0,0));
-    expect((await page.locator('.note-outline').boundingBox()).y).toBeLessThan(200);
+    await expect.poll(async()=>(await page.locator('.note-outline').boundingBox()).y,'the narrow layout applies after the resize').toBeLessThan(200);
   },{body:short});
 });
 

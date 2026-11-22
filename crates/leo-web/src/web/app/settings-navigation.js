@@ -36,7 +36,6 @@ const SETTINGS_INDEX = [
   { section: 'dictation', id: 'dictation-activation', label: 'Activation', keywords: 'hold tap press dictation shortcut' },
   { section: 'dictation', id: 'dictation-microphone', label: 'Microphone', keywords: 'dictation input device audio mic' },
   { section: 'dictation', id: 'dictation-words', label: 'Custom words', keywords: 'dictionary names terms spelling vocabulary dictation' },
-  { section: 'dictation', id: 'dictation-fillers', label: 'Remove filler words', keywords: 'um uh like dictation clean up' },
   { section: 'dictation', id: 'dictation-sounds', label: 'Start and stop sounds', keywords: 'chime beep audio dictation' },
   { section: 'dictation', id: 'dictation-ai', label: 'AI writing for dictation', keywords: 'grammar tidy rewrite lists dictation writing ai' },
   { section: 'dictation', id: 'dictation-popup', label: 'Popup', keywords: 'live minimal off overlay window position top bottom' },

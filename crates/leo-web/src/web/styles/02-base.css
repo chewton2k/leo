@@ -24,7 +24,7 @@ body {
 @media screen and (max-width: 599px) and (forced-colors: none) { body { background-image: var(--grain); } }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
-button, label, summary, [role="button"], [role="tab"], [draggable="true"], .bar, .actions, .select-bar, .activity-head, .set-label, .kanban-col-head {
+button, label, summary, [role="button"], [role="tab"], [draggable="true"], .bar, .select-bar, .activity-head, .set-label, .kanban-col-head {
   -webkit-user-select: none; user-select: none;
 }
 body { -webkit-user-select: none; user-select: none; }
