@@ -1,0 +1,22 @@
+[
+  {
+    "title": "Zoom Meeting",
+    "id": "",
+    "tree": {
+      "role": "Window",
+      "title": "Zoom Meeting",
+      "children": [
+        {
+          "role": "Pane",
+          "title": "Video",
+          "children": [
+            { "role": "TabItem", "title": "Pim Castell, Computer audio unmuted, Video on" },
+            { "role": "TabItem", "title": "Rowan Ellery, Computer audio unmuted, Video off, Active speaker" },
+            { "role": "TabItem", "title": "Oriel Danvers, Computer audio muted, Video off" }
+          ]
+        },
+        { "role": "Button", "title": "Leave" }
+      ]
+    }
+  }
+]

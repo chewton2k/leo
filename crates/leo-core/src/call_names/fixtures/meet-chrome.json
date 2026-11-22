@@ -1,0 +1,408 @@
+[
+ {
+  "title": "Meet - abc-defg-hij - Google Chrome",
+  "id": "",
+  "tree": {
+   "role": "AXWindow",
+   "title": "Meet - abc-defg-hij - Google Chrome",
+   "children": [
+    {
+     "role": "AXWebArea",
+     "title": "Meet - abc-defg-hij",
+     "children": [
+      {
+       "role": "AXGroup",
+       "children": [
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Pim Castell"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf",
+          "v5h6Xc"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Oriel Danvers"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "You"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Your camera is on."
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "10:42 AM"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "abc-defg-hij"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        },
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Plan for the launch - Google Docs"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ],
+         "classes": [
+          "dkjMxf"
+         ]
+        }
+       ]
+      },
+      {
+       "role": "AXGroup",
+       "subrole": "AXApplicationStatus",
+       "children": [
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Halden Rusk"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "role": "AXGroup",
+       "description": "In-call messages",
+       "children": [
+        {
+         "role": "AXGroup",
+         "children": [
+          {
+           "role": "AXGroup",
+           "children": [
+            {
+             "role": "AXGroup",
+             "children": [
+              {
+               "role": "AXGroup",
+               "children": [
+                {
+                 "role": "AXGroup",
+                 "children": [
+                  {
+                   "role": "AXGroup",
+                   "children": [
+                    {
+                     "role": "AXGroup",
+                     "children": [
+                      {
+                       "role": "AXStaticText",
+                       "value": "Lightsage"
+                      }
+                     ]
+                    }
+                   ]
+                  }
+                 ]
+                }
+               ]
+              }
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ }
+]
