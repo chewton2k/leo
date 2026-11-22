@@ -81,6 +81,22 @@ sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
 Call tracks (`Manifest.turns`) keep the speech model's segment times (or, for a model without times or an echo-filtered piece, the piece's speech onset) in `seg-NNNNN.turns.json`; `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
 
+Call names (2026-11-22): `Request.names` (the Others track only; `None` in
+`powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
+thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
+each reading is stamped in the track's recorded time from the loop's
+`tick(recorded_secs, paused)` anchor, dropped while paused, less `LAG_SECS`
+(0.75). `Timeline` keeps only named runs (a reading stands until the next, at
+most `HOLD_SECS` 2 s; unreadable or unclear readings end a run) and every name
+marked as the user's (`me`), appended to the session's `call-names.jsonl` as
+they close, so recovery keeps them. A reader quiet for `QUIET` (5 s) is replaced
+(generation counter; the old thread exits after its read), at most
+`MOST_RESTARTS` (20); problems go to the trace once each, never names.
+`archive` names each turn from its millisecond times (`Timeline::name`: more than
+half the line, or a zero-length line's start); leo-host's `labelled` keeps a
+name and replaces only the plain track label, so the call merge never joins
+two people.
+
 Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default,
 never for call tracks; omitted from JSON when off, so old cache keys hold):
 `Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
