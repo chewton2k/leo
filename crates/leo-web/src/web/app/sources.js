@@ -307,8 +307,9 @@ function renameSpeakerField(button) {
     if (done) return;
     done = true;
     const to = input.value.trim();
-    if (save && to && to !== from) renameSpeaker(from, to).catch((e) => { fail(e); if (input.isConnected) input.replaceWith(button); });
-    else if (input.isConnected) input.replaceWith(button);
+    const back = () => { if (input.isConnected) input.replaceWith(button); };
+    if (save && to && to !== from) renameSpeaker(from, to).then(back, (e) => { fail(e); back(); });
+    else back();
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -322,11 +323,22 @@ function renameSpeakerField(button) {
 async function renameSpeaker(from, to) {
   if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
   if (window.leoRecording.NOT_SPEAKERS.includes(to)) throw Object.assign(new Error(`“${to}” names a recording, not a speaker. Choose another name.`), { shown: true });
+  const into = (sourcePage.page.head.speakers || []).find((name) => name !== from && name.toLowerCase() === to.toLowerCase());
+  if (!into) return saveSpeaker(from, to, false);
+  confirmSheet({ title: `Merge ${esc(from)} into ${esc(into)}?`, text: `Every line marked ${esc(from)} in this recording is marked ${esc(into)} instead.`, yes: 'Merge', action: 'speaker-merge', data: ` data-from="${esc(from)}" data-into="${esc(into)}"`, danger: false });
+}
+
+function mergeSpeaker(from, into) {
+  return saveSpeaker(from, into, true);
+}
+
+async function saveSpeaker(from, to, merge) {
+  if (changedSources().length) throw Object.assign(new Error('Save your fixes first.'), { shown: true });
   const page = sourcePage;
   const mine = seq;
   const { head } = page.page;
   try {
-    const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: head.id, base: head.revision, rename: { from, to } } });
+    const saved = await api(`/api/notes/${enc(page.note)}/recording`, { method: 'PUT', body: { source: head.id, base: head.revision, rename: merge ? { from, to, merge: true } : { from, to } } });
     head.revision = saved.revision;
   } catch (e) {
     if (e.status === 409) throw new Error('This recording changed while you were renaming. Close the transcript and open it again.');
@@ -334,7 +346,7 @@ async function renameSpeaker(from, to) {
   }
   if (mine !== seq || sourcePage !== page || !$('#source-query')) return;
   await loadSourcePage(head.id, page.page.at, page.back);
-  toast(`${from} is now ${to} in this recording.`);
+  toast(merge ? `${from} is now part of ${to} in this recording.` : `${from} is now ${to} in this recording.`);
 }
 
 function changedSources() {

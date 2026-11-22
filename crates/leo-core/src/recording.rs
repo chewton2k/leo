@@ -1071,6 +1071,30 @@ pub fn rename_speaker(
     rewrite(notes, note, id, revision, &[], Some((from, to)))
 }
 
+pub fn merge_speaker(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    from: &str,
+    into: &str,
+) -> Result<Head> {
+    let old = head(notes, note, id)?;
+    if old.revision != revision {
+        return Err(Refused::Stale.into());
+    }
+    let lower = speaker_name(into)?.to_lowercase();
+    let into = old
+        .speakers
+        .iter()
+        .find(|s| *s != from && s.to_lowercase() == lower)
+        .ok_or(Refused::NoRow)?;
+    if from.is_empty() || !old.speakers.iter().any(|s| s == from) {
+        return Err(Refused::NoRow.into());
+    }
+    rewrite(notes, note, id, revision, &[], Some((from, into)))
+}
+
 fn rewrite(
     notes: &Path,
     note: &str,
@@ -2627,6 +2651,66 @@ mod tests {
         assert_eq!(refused("you"), Refused::Reserved);
         assert_eq!(refused("Others"), Refused::Reserved);
         assert_eq!(rename("Others 3").unwrap().revision, 2);
+    }
+
+    #[test]
+    fn a_voice_merges_into_a_name_it_shares_only_when_asked() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names4",
+                &[
+                    (0, "Rowan Ellery", "one"),
+                    (5, "Others 2", "two"),
+                    (9, "Others 3", "three"),
+                ],
+            ),
+        )
+        .unwrap();
+        let refused = rename_speaker(
+            &notes,
+            "note-0001",
+            "rec-names4",
+            1,
+            "Others 2",
+            "Rowan Ellery",
+        )
+        .unwrap_err()
+        .downcast::<Refused>()
+        .unwrap();
+        assert_eq!(refused, Refused::Taken);
+        let merge = |revision, from: &str, into: &str| {
+            merge_speaker(&notes, "note-0001", "rec-names4", revision, from, into)
+                .map_err(|e| e.downcast::<Refused>().unwrap())
+        };
+        assert_eq!(
+            merge(0, "Others 2", "Rowan Ellery").unwrap_err(),
+            Refused::Stale
+        );
+        assert_eq!(merge(1, "Others 2", "Tamsin").unwrap_err(), Refused::NoRow);
+        assert_eq!(
+            merge(1, "Others 9", "Rowan Ellery").unwrap_err(),
+            Refused::NoRow
+        );
+        let head = merge(1, "Others 2", " rowan ELLERY ").unwrap();
+        assert_eq!(head.revision, 2);
+        assert_eq!(head.speakers, ["Rowan Ellery", "Others 3"]);
+        let said: Vec<(String, String)> = whole(&notes, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.speaker.clone(), p.text.clone()))
+            .collect();
+        assert_eq!(
+            said,
+            [
+                ("Rowan Ellery".to_string(), "one".to_string()),
+                ("Rowan Ellery".to_string(), "two".to_string()),
+                ("Others 3".to_string(), "three".to_string()),
+            ]
+        );
     }
 
     #[test]

@@ -1094,7 +1094,7 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   open the page that holds each); a fix sends only the changed rows (`{source, base: revision,
   changes}`, batches under 1 MB); the speaker row renames a speaker for every line of that
   recording (`{source, base, rename: {from, to}}` → `recording::rename_speaker` through the same
-  revision writer; an empty name, a track name (Microphone, Computer audio, You, Others) or a name another speaker has (compared ignoring case) is 422 with its own message, so first-seen order never changes, and a rename to the same name writes nothing; the note
+  revision writer; an empty name, a track name (Microphone, Computer audio, You, Others) or a name another speaker has (compared ignoring case) is 422 with its own message, so first-seen order never changes, and a rename to the same name writes nothing; a name another speaker has instead asks "Merge A into B?" (`confirmSheet`), and only on Merge sends `rename: {from, to, merge: true}` → `recording::merge_speaker` (2026-11-22, the orchestrator's call: one voice can appear as both a call app's name and Others N), which writes the existing spelling through the same version-checked writer; the note
   text is not rewritten). What you want, Write the note again and "How this recording went" stay
   below. The ⋯ menu's Show transcript opens the same view with the selected text as the search.
   Originals: facts "<name> · Download · Back to note", the PDF (with its page), picture or text at

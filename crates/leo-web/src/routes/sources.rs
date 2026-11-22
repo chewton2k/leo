@@ -202,6 +202,8 @@ pub(crate) struct Fix {
 pub(crate) struct Rename {
     from: String,
     to: String,
+    #[serde(default)]
+    merge: bool,
 }
 
 pub(crate) async fn edit_sources(
@@ -225,6 +227,14 @@ pub(crate) async fn edit_sources(
     match outside(&state, Some(id.clone()), move |notes, _| {
         let _editing = editing;
         match &body.rename {
+            Some(rename) if rename.merge => recording::merge_speaker(
+                &notes,
+                &id,
+                &body.source,
+                body.base,
+                &rename.from,
+                &rename.to,
+            ),
             Some(rename) => recording::rename_speaker(
                 &notes,
                 &id,

@@ -1356,7 +1356,8 @@ compact anchors stay in a separate gutter, never a mascot over the passage.
   ink, the name and time once per turn); a lecture shows a paragraph a minute with its time;
   typed points sit at their time as "Your point · …"; echo lines fold into "Hidden: N echo
   lines · Show". Tapping a speaker's name renames that speaker on every line of that recording
-  (the note's text is not rewritten; a name another speaker has is refused). Lines are fixed in
+  (the note's text is not rewritten; typing a name another speaker has asks "Merge A into
+  B?" and merges only on Merge). Lines are fixed in
   place and saved with Save fixes; paging, Earlier/Later, the pick list for several recordings,
   What you want and Write the note again work as on the old sheet. The ⋯ menu's Show
   transcript opens the same view with the selected text as the search.

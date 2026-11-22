@@ -148,6 +148,7 @@ function screen(eng) {
     fail: (e) => ui.toasts.push({ message: e.message, bad: true }),
     arriveOnPage() {},
     sheet: () => ({ querySelector: () => null }),
+    confirmSheet: (asked) => { ui.asked = asked; },
     sheetButtons: () => '',
     settingsSwitch: () => '',
     closeSheet() {},
@@ -384,6 +385,24 @@ test('renaming a speaker sends the rename with the revision and reloads the same
   assert.ok(ui.html.includes('aria-label="Rename Sam"'));
   assert.equal(ui.context.page().page.head.revision, 2);
   assert.deepEqual(ui.toasts.at(-1), { message: 'Speaker 2 is now Sam in this recording.', bad: false });
+});
+
+test('renaming a voice to a name it already shares asks to merge and sends the merge only when confirmed', async () => {
+  const rows = meeting();
+  rows[0].speakers = ['Rowan Ellery', 'Others 2'];
+  for (const [, p] of rows[0].passages) p.speaker = p.speaker === 'Speaker 1' ? 'Rowan Ellery' : 'Others 2';
+  const eng = engine(rows, 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  const before = eng.log.length;
+  await ui.context.renameSpeaker('Others 2', 'rowan ellery');
+  assert.equal(eng.log.length, before, 'nothing is sent before the merge is confirmed');
+  assert.equal(ui.asked.title, 'Merge Others 2 into Rowan Ellery?');
+  assert.equal(ui.asked.action, 'speaker-merge');
+  assert.ok(ui.asked.data.includes('data-from="Others 2"') && ui.asked.data.includes('data-into="Rowan Ellery"'));
+  await ui.context.mergeSpeaker('Others 2', 'Rowan Ellery');
+  assert.deepEqual(eng.log[before].body, { source: 'rec-cccccccc', base: 1, rename: { from: 'Others 2', to: 'Rowan Ellery', merge: true } });
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Others 2 is now part of Rowan Ellery in this recording.', bad: false });
 });
 
 test('a lecture shows a paragraph a minute with its time and no speaker row', async () => {

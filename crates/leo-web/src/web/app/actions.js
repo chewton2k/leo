@@ -134,6 +134,10 @@ const actions = {
   'source-earlier': () => sourceEarlier().catch(fail),
   'source-later': () => sourceLater().catch(fail),
   'source-match': (el) => sourceMatch(el.dataset.source, el.dataset.at).catch(fail),
+  'speaker-merge': (el) => {
+    closeSheet();
+    mergeSpeaker(el.dataset.from, el.dataset.into).catch(fail);
+  },
   'source-apply': () => applyGenerated().catch(fail),
   'rec-finish': () => recorder.finishAvailable().catch(fail),
   'rec-recover': (el) => recorder.recover(el.dataset.id).catch(fail),
