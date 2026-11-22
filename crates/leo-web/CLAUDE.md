@@ -738,6 +738,13 @@ read (root CLAUDE.md, 2026-11-17).
 - `REPLY_STYLE` is not changed by prompt-size work. Escape belongs to the owner
   inside the page first; an open sheet always wins.
 
+- His face reacts to the pointer (2026-11-21, the user's call, beside the tap reactions `TAPS`):
+  a double click hugs him (`hugged`, click `detail` ≥ 2; `hug`: squeeze, blush, heart, a snuggle
+  sway, `HUG_MS`), and from the `HUGGED_TOO_MUCH`th hug with less than `HUG_GAP_MS` between them
+  he squints (`squint`: pixel `>_<` eyes, a sweat drop, leaning away) until he is left alone; the
+  hug wins over a transformation started by the double click's first click. Under reduced motion
+  both show the face without moving.
+
 Decided: no modes, the agent decides (2026-11-05); marking never waits for
 Felix (2026-10-19).
 

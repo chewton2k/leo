@@ -1432,6 +1432,12 @@ test.describe('Felix', () => {
     await page.evaluate(() => { Math.random = () => 0.5; });
     await face.click();
     await expect(face).toHaveClass(/boop|hop|spin|giggle|tickle/);
+    await face.dblclick();
+    await expect(face, 'a double click hugs him').toHaveClass(/\bhug\b/);
+    await face.dblclick();
+    await face.dblclick();
+    await expect(face, 'too many hugs and he squints').toHaveClass(/\bsquint\b/);
+    await expect(face).not.toHaveClass(/\bsquint\b/, { timeout: 4000 });
     const sizes = await face.evaluate((svg) => {
       const skin = svg.querySelector('.felix-skin');
       return [Number(skin.getAttribute('width')), Number(skin.getAttribute('height'))];

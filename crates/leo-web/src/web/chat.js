@@ -69,7 +69,7 @@
         <g class="felix-arm felix-right"><rect class="felix-arm-skin" x="39" y="18" width="5" height="6"/><g class="felix-claws"><rect x="39" y="24" width="1" height="2"/><rect x="41" y="24" width="1" height="2"/><rect x="43" y="24" width="1" height="2"/></g></g>
         <rect class="felix-skin" x="5" y="2" width="34" height="28"/>
         <g class="felix-cheeks"><rect x="8" y="21" width="4" height="2"/><rect x="24" y="21" width="4" height="2"/></g>
-        <g class="felix-gaze"><g class="felix-eyes" shape-rendering="geometricPrecision"><rect x="11" y="16" width="4" height="4"/><rect x="21" y="16" width="4" height="4"/></g></g>
+        <g class="felix-gaze"><g class="felix-eyes" shape-rendering="geometricPrecision"><rect x="11" y="16" width="4" height="4"/><rect x="21" y="16" width="4" height="4"/></g></g><g class="felix-squeeze"><rect x="11" y="16" width="2" height="1"/><rect x="13" y="17" width="2" height="2"/><rect x="11" y="19" width="2" height="1"/><rect x="23" y="16" width="2" height="1"/><rect x="21" y="17" width="2" height="2"/><rect x="23" y="19" width="2" height="1"/></g>
         <g class="felix-sweat"><rect x="34" y="5" width="2" height="2"/><rect x="33" y="7" width="4" height="3"/></g>
         <g class="felix-tool felix-tool-search"><rect class="glass" x="20" y="14" width="8" height="8"/><rect class="metal" x="20" y="12" width="8" height="2"/><rect class="metal" x="20" y="22" width="8" height="2"/><rect class="metal" x="18" y="14" width="2" height="8"/><rect class="metal" x="28" y="14" width="2" height="8"/><rect class="wood" x="30" y="23" width="2" height="2"/><rect class="wood" x="32" y="25" width="2" height="2"/><rect class="wood" x="34" y="27" width="3" height="3"/></g>
         <g class="felix-tool felix-tool-open"><rect class="paper-old" x="10" y="22" width="24" height="8"/><rect class="ink-old" x="13" y="24" width="14" height="1"/><rect class="ink-old" x="13" y="27" width="10" height="1"/><rect class="roll" x="7" y="21" width="4" height="10"/><rect class="roll" x="33" y="21" width="4" height="10"/></g>
@@ -88,6 +88,11 @@
   const TICKLED_TOO_LONG = 8;
   const STREAK_GAP_MS = 1500;
   const TRANSFORM_MS = 2800;
+  const HUG_MS = 1700;
+  const SQUINT_MS = 1500;
+  const HUGGED_TOO_MUCH = 3;
+  const HUG_GAP_MS = 4000;
+  const DOUBLE_TAP_MS = 500;
   const demonMode = () => typeof document !== 'undefined' && document.documentElement.dataset.felix === 'demon';
   const POSES = { search_notes: 'tool-search', open_note: 'tool-open', connected_notes: 'tool-map', edit_note: 'tool-edit', create_note: 'tool-create', read_document: 'tool-open', read_transcript: 'tool-open', look_at_picture: 'tool-search', calculate: 'tool-edit' };
   const poseOf = (tool) => POSES[tool] || null;
@@ -1013,7 +1018,7 @@
     }
     function mood(name, ms) {
       for (const f of faces()) {
-        f.classList.remove('dance', 'droop', 'wave', 'cheer', 'nod', 'wake', 'perk', 'monster', 'sweet', 'grow-down', ...TAPS, ...DEMON_TAPS);
+        f.classList.remove('dance', 'droop', 'wave', 'cheer', 'nod', 'wake', 'perk', 'monster', 'sweet', 'grow-down', 'hug', 'squint', ...TAPS, ...DEMON_TAPS);
         const big = name === 'monster' || name === 'sweet';
         const box = f.getBoundingClientRect();
         if (big && box.top < box.height * 2.5) f.classList.add('grow-down');
@@ -1096,6 +1101,19 @@
       if (pick === lastTap) pick = (pick + 1) % taps.length;
       lastTap = pick;
       mood(taps[pick], 900);
+    }
+
+    let hugs = 0;
+    let lastHugAt = 0;
+    function hugged() {
+      const now = Date.now();
+      if (now < transformed && now - lastTapAt > DOUBLE_TAP_MS) return;
+      transformed = 0;
+      streak = 0;
+      hugs = now - lastHugAt < HUG_GAP_MS ? hugs + 1 : 1;
+      lastHugAt = now;
+      if (hugs >= HUGGED_TOO_MUCH) mood('squint', SQUINT_MS);
+      else mood('hug', HUG_MS);
     }
 
     function gaze(e) {
@@ -3170,7 +3188,8 @@
         accessMenu(false);
       }
       if (e.target.closest('.felix') && !e.target.closest('[data-chat]')) {
-        tapped();
+        if (e.detail >= 2) hugged();
+        else tapped();
         return;
       }
       const el = e.target.closest('[data-chat]');
@@ -3570,5 +3589,5 @@
     };
   }
 
-  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, money, USAGE_KINDS, usageKinds, usagePeriod, usageRank, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
+  root.leoChat = { noAi, retiredPractice, settle, timeline, startSession, scoreSession, sessionBody, sessionSummary, linkCitations, numbered, answerLines, passageLine, historyText, modelHistory, historyRequest, checkQuiz, quizSay, hintSay, plainAnswer, QUIZ_KINDS, held, recentNotes, threadRefs, ACCESS, accessOf, nextAccess, NOTE_DRAG, spentLabel, money, USAGE_KINDS, usageKinds, usagePeriod, usageRank, traceSummary, doing, notFromNotes, fileKind, fileCard, create, felix, splitLines, grade, cite, cited, load, save, markOf, toSave, savedAs, mentionAt, addRef, groups, newId, starterWords, splitFiles, asNote, reviewPrompt, pastedNames, poseOf, STARTERS, SURE, MOST_REFS, TAPS, DEMON_TAPS, MONSTER_ONE_IN, TICKLED_TOO_LONG, HUGGED_TOO_MUCH, heldSay, sureOf, noteCard, noteExcerpt, fixedSteps, tookFor };
 })(typeof window !== 'undefined' ? window : globalThis);
