@@ -450,6 +450,7 @@ test('a live redraw replaces the cards around the transcript and Felix\'s questi
   const el = (id, children = [], className = '') => {
     const node = { id, className, children };
     node.contains = (other) => node === other || node.children.some((child) => child.contains(other));
+    node.querySelector = () => null;
     children.forEach((child) => {
       child.replaceWith = (next) => { if (['rec-heard', 'rec-ask'].includes(child.id)) throw new Error(`${child.id} was replaced`); node.children[node.children.indexOf(child)] = next; };
     });
@@ -505,6 +506,13 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
   })();
   assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?/s, 'the questions sit in Felix\'s own column beside the tabs');
   assert.match(live, /id="rec-heard" role="tabpanel" data-keep/);
+  assert.match(live, /id="rec-tab-points"/);
+  assert.match(live, /id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"/);
+  assert.match(live, /id="rec-heard" role="tabpanel" data-keep aria-labelledby="rec-tab-heard"/);
+  assert.match(live, /id="rec-wants-panel" role="tabpanel" aria-labelledby="rec-tab-wants"/);
+  assert.match(live, /id="rec-pause" data-keep data-action="rec-pause"/);
+  assert.match(live, /id="rec-stop" data-keep data-action="rec-stop"/);
+  assert.match(live, /<textarea id="rec-wants-live"[^>]*data-keep/);
   assert.match(live, /data-rec-tab="points"[^>]*aria-selected="true"[^>]*>Your notes <span class="badge" id="rec-count">0<\/span><\/button>.*data-rec-tab="heard"[^>]*>Transcript<\/button>.*data-rec-tab="wants"[^>]*>What you want<\/button>/s, 'Your notes is the first tab and open by default');
   assert.match(live, /<div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar: dot, clock, wave, Pause, Stop');
 });
@@ -577,4 +585,34 @@ test('a lecture makes one paragraph a minute and a missing echo field counts as 
   const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 60), p(4, 179)], [], ['Microphone']);
   assert.equal(flow.meeting, false);
   assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => i.passage[0])]), [[3, [1, 2]], [60, [3]], [179, [4]]]);
+});
+
+test('a lecture draws a typed point under its own minute, not under the minute before', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 130)], [[9, { at_secs: 95, text: 'point' }]], ['Microphone']);
+  assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => (i.passage || i.point)[0])]), [[3, [1, 2]], [95, [9]], [130, [3]]]);
+});
+
+test('a live redraw keeps Pause, Stop and the wants box and changes Pause in place', () => {
+  const node = (id, extra = {}) => {
+    const attrs = { 'aria-label': 'Pause', title: 'Pause' };
+    return { id, children: [], className: '', innerHTML: 'pause', value: '', setAttribute: (k, v) => { attrs[k] = v; }, getAttribute: (k) => attrs[k], attrs, contains(other) { return this === other || this.children.some((c) => c.contains(other)); }, ...extra };
+  };
+  const shown = [node('rec-pause'), node('rec-stop'), node('rec-wants-live', { value: 'typed' })];
+  const shell = node('', { children: shown, className: 'rec rec-live' });
+  const resumed = node('rec-pause', { innerHTML: 'resume' });
+  resumed.attrs['aria-label'] = 'Resume';
+  resumed.attrs.title = 'Resume';
+  const freshShell = node('', { children: [resumed, node('rec-stop'), node('rec-wants-live', { value: 'server' })], className: 'rec rec-live paused' });
+  const box = node('box', { children: [shell] });
+  box.querySelectorAll = () => shown;
+  box.querySelector = (at) => shown.find((n) => `#${n.id}` === at) || null;
+  const made = node('made', { children: [freshShell] });
+  made.querySelector = (at) => freshShell.children.find((n) => `#${n.id}` === at) || null;
+  piece('graft', 'showTranscript', 'paintLive', { root: { document: { createElement: () => made, activeElement: shown[2] } }, drawLive: () => '' })(box);
+  assert.deepEqual(shell.children, shown);
+  assert.equal(shell.className, 'rec rec-live paused');
+  assert.equal(shown[0].innerHTML, 'resume');
+  assert.equal(shown[0].attrs['aria-label'], 'Resume');
+  assert.equal(shown[2].value, 'typed', 'a focused wants box keeps what is being typed');
 });

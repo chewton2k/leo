@@ -34,7 +34,10 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     if ($('.scrim')) return closeSheet();
     if (typing && !e.target.matches('input[type="checkbox"], input[type="radio"]')) return e.target.blur();
-    if (asideOpen()) return closeAside();
+    if (asideOpen()) {
+      e.stopPropagation();
+      return closeAside();
+    }
     if (e.target === document.body && chat.isOpen()) return;
     if (state.view === 'trash' && state.selecting) {
       state.selecting = false;

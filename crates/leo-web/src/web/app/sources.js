@@ -1,6 +1,7 @@
 let sourcePage;
 let generatedPreview;
 let sourceSearch;
+let fileAside = null;
 
 function sourceAt(source, cursor) {
   const at = (v) => (v === null || v === undefined ? 'end' : v);
@@ -37,12 +38,13 @@ function openAside(kind, facts, body) {
 function closeAside() {
   const layout = $('.note-layout');
   if (!layout || !layout.classList.contains('aside-open')) return;
-  if (layout.dataset.aside === 'transcript' && sourcePage && changedSources().length) return toast('Save your fixes first.');
+  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
   layout.classList.remove('aside-open');
   delete layout.dataset.aside;
   $('#note-aside').innerHTML = '';
   $('#note-aside-facts').innerHTML = '';
   sourcePage = null;
+  fileAside = null;
   if (typeof marginDraw === 'function') marginDraw();
   const back = asideReturn;
   asideReturn = null;
@@ -53,7 +55,41 @@ function closeAside() {
 
 const backLink = '<button type="button" class="facts-link" data-action="note-back">Back to note</button>';
 
+function transcriptOpen() {
+  const layout = $('.note-layout');
+  return Boolean(layout && layout.dataset.aside === 'transcript' && sourcePage);
+}
+
+function holdAside(id) {
+  if (!asideOpen()) return null;
+  const kind = $('.note-layout').dataset.aside;
+  if (kind === 'file' && fileAside) return { kind, file: fileAside, back: asideReturn };
+  if (kind === 'transcript' && sourcePage && sourcePage.note === id) {
+    const wants = $('#regenerate-wants');
+    return { kind, fixes: changedSources(), wants: wants ? wants.value : null, back: asideReturn };
+  }
+  return null;
+}
+
+function restoreAside(held) {
+  if (!held) return;
+  if (held.kind === 'file') {
+    const { url, kind, name, page } = held.file;
+    openFileAside(url, kind, name, page).catch(fail);
+    asideReturn = held.back;
+    return;
+  }
+  drawRecordingSources();
+  asideReturn = held.back;
+  held.fixes.forEach((fix) => {
+    const box = document.querySelector(`[data-${fix.kind}="${fix.seq}"]`);
+    if (box) box.textContent = fix.text;
+  });
+  if (held.wants !== null && $('#regenerate-wants')) $('#regenerate-wants').value = held.wants;
+}
+
 async function showRecordingSources(query = '') {
+  if (transcriptOpen() && changedSources().length) return toast('Save your fixes first.');
   const mine = seq;
   const s = await ready();
   if (!s || !s.note.id) return;
@@ -74,7 +110,7 @@ async function loadSourcePage(source, cursor, back) {
   sourcePage = { ...page, ...answer, back };
   drawRecordingSources();
   const list = $('#source-passages');
-  if (list) list.scrollIntoView({ block: 'nearest' });
+  if (list) list.scrollIntoView({ block: 'start' });
 }
 
 async function sourceEarlier() {

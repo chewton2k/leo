@@ -167,7 +167,7 @@
     };
     for (const row of rows) {
       if (row.point) {
-        if (!group) open(row.at, '', meeting ? null : Math.floor(row.at / 60));
+        if (!group || (!meeting && group.key !== Math.floor(row.at / 60))) open(row.at, '', meeting ? null : Math.floor(row.at / 60));
         group.items.push({ point: row.point });
         continue;
       }
@@ -575,7 +575,7 @@
     const RESUME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>';
 
     function liveTab(tab, text, panel, on, extra = '') {
-      return `<button type="button" role="tab" class="kanban-tab${on === tab ? ' on' : ''}" data-rec-tab="${tab}" aria-controls="${panel}" aria-selected="${on === tab}" tabindex="${on === tab ? 0 : -1}">${text}${extra}</button>`;
+      return `<button type="button" role="tab" class="kanban-tab${on === tab ? ' on' : ''}" id="rec-tab-${tab}" data-rec-tab="${tab}" aria-controls="${panel}" aria-selected="${on === tab}" tabindex="${on === tab ? 0 : -1}">${text}${extra}</button>`;
     }
 
     function drawLive() {
@@ -591,15 +591,15 @@
       const event = s.liveEvent && s.liveEvent.id === v.id ? s.liveEvent.event : null;
       const chips = [event ? chip(icons.calendar, whenOf(event)) : '', chip(icons.folder, v.directory || 'Top level'), chip(kind === 'Screen' ? icons.screen : icons.mic, kind)].join('');
       const denied = micDenied(v.source);
-      const bar = writing ? '' : `<div class="rec-bar" role="group" aria-label="Recorder"><span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span><span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}" title="${paused ? 'Resume' : 'Pause'}">${paused ? RESUME_ICON : PAUSE_ICON}<span class="said">${paused ? 'Resume' : 'Pause'}</span></button><button type="button" class="rec-stop" data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+      const bar = writing ? '' : `<div class="rec-bar" role="group" aria-label="Recorder"><span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span><span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}" title="${paused ? 'Resume' : 'Pause'}">${paused ? RESUME_ICON : PAUSE_ICON}<span class="said">${paused ? 'Resume' : 'Pause'}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
       const hear = writing ? '' : `<p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, denied))}</p>${denied ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}`;
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
       const count = v.points_total ?? listed.length;
       const tabs = `<div class="rec-tabs" id="rec-tabs" role="tablist" aria-label="This recording" data-keep>${writing ? '<button type="button" role="tab" class="kanban-tab" aria-disabled="true" aria-selected="false" disabled>Notes</button>' : ''}${liveTab('points', 'Your notes', 'rec-points-panel', tab, ` <span class="badge" id="rec-count">${count}</span>`)}${liveTab('heard', 'Transcript', 'rec-heard', tab)}${writing ? '' : liveTab('wants', 'What you want', 'rec-wants-panel', tab)}</div>`;
       const compose = writing ? '' : '<div class="rec-point rec-compose"><textarea id="rec-point-text" class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm" data-action="rec-point">Add point</button></div></div>';
-      const wants = writing ? '' : `<section class="rec-panel rec-wants-card" id="rec-wants-panel" role="tabpanel"${tab === 'wants' ? '' : ' hidden'}>
+      const wants = writing ? '' : `<section class="rec-panel rec-wants-card" id="rec-wants-panel" role="tabpanel" aria-labelledby="rec-tab-wants"${tab === 'wants' ? '' : ' hidden'}>
             <p class="hint">The AI follows this when it writes the note. You can change it until you stop. <span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></p>
-            <textarea id="rec-wants-live" class="set-input rec-wants" rows="3" data-reads="4000" aria-label="What you want from the notes" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
+            <textarea id="rec-wants-live" class="set-input rec-wants" data-keep rows="3" data-reads="4000" aria-label="What you want from the notes" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
             <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
           </section>`;
       return `<div class="rec rec-live${paused ? ' paused' : ''}${writing ? ' writing' : ''}">
@@ -609,12 +609,12 @@
         <div class="rec-body">
           <div class="rec-main">
             ${tabs}
-            <section class="rec-panel rec-notepad" id="rec-points-panel" role="tabpanel"${tab === 'points' ? '' : ' hidden'}>
+            <section class="rec-panel rec-notepad" id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"${tab === 'points' ? '' : ' hidden'}>
               ${writing ? '' : '<p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>'}
               ${points || (writing ? '<p class="hint">You typed no points.</p>' : '')}
               ${compose}
             </section>
-            <section class="rec-panel rec-heard" id="rec-heard" role="tabpanel" data-keep>
+            <section class="rec-panel rec-heard" id="rec-heard" role="tabpanel" data-keep aria-labelledby="rec-tab-heard">
               <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
               <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
             </section>
@@ -751,7 +751,15 @@
       const kept = [...box.querySelectorAll('[data-keep]')];
       const made = root.document.createElement('div');
       made.innerHTML = html;
-      if (!kept.length || !graft(box, made, kept)) box.innerHTML = html;
+      const next = { pause: made.querySelector('#rec-pause'), wants: made.querySelector('#rec-wants-live') };
+      if (!kept.length || !graft(box, made, kept)) return void (box.innerHTML = html);
+      const pause = box.querySelector('#rec-pause');
+      if (pause && next.pause && pause.innerHTML !== next.pause.innerHTML) {
+        pause.innerHTML = next.pause.innerHTML;
+        ['aria-label', 'title'].forEach((name) => pause.setAttribute(name, next.pause.getAttribute(name)));
+      }
+      const wants = box.querySelector('#rec-wants-live');
+      if (wants && next.wants && wants !== root.document.activeElement && wants.value !== next.wants.value) wants.value = next.wants.value;
     }
 
     function syncAsk(box) {
@@ -888,10 +896,13 @@
       }
       const wantsArea = box.querySelector('#rec-wants-live');
       if (wantsArea) {
-        if (wantsKeep) {
+        if (wantsKeep && root.document.activeElement !== wantsArea) {
           wantsArea.focus();
           wantsArea.setSelectionRange(wantsKeep.start, wantsKeep.end);
         }
+      }
+      if (wantsArea && !wantsArea.dataset.bound) {
+        wantsArea.dataset.bound = '1';
         wantsArea.addEventListener('input', () => {
           s.wantsDraft = wantsArea.value;
           s.wantsState = '';

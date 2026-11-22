@@ -109,9 +109,10 @@ function screen(eng) {
     ui.wants = field(unescape((html.match(/<textarea id="regenerate-wants"[^>]*>([\s\S]*?)<\/textarea>/) || [, ''])[1]));
     const from = html.indexOf('<div id="source-found">') + 23;
     ui.found = { innerHTML: html.slice(from, html.indexOf('\n', from)).replace(/<\/div>$/, '') };
-    ui.passages = { scrollIntoView() {} };
+    ui.passages = { scrollIntoView(where) { ui.scrolledTo = where; } };
     ui.none = { hidden: true };
   };
+  ui.layout = layout;
   const aside = {
     set innerHTML(html) { if (html) draw(html); else ui.open = false; },
     querySelectorAll(selector) {
@@ -395,4 +396,36 @@ test('a lecture shows a paragraph a minute with its time and no speaker row', as
   assert.ok(!ui.html.includes('turn-name'));
   assert.match(ui.html, /<span class="rec-at">0:02<\/span><div class="minute-said"><p class="spoken">[^]*first[^]*second[^]*<\/p><\/div>/);
   assert.match(ui.html, /<span class="rec-at">1:01<\/span>/);
+});
+
+test('Later scrolls the list to its start so a tall list still moves', async () => {
+  const { ui } = await opened();
+  await ui.context.sourceLater();
+  assert.equal(ui.scrolledTo.block, 'start');
+});
+
+test('showing the transcript again with unsaved fixes refuses and asks for nothing', async () => {
+  const { eng, ui } = await opened();
+  ui.edit('passage', 1, 'my fix');
+  const before = eng.log.length;
+  await ui.context.showRecordingSources();
+  assert.equal(eng.log.length, before);
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Save your fixes first.', bad: false });
+  assert.equal(ui.shown('passage')[0][1], 'my fix');
+});
+
+test('a redraw of the same note puts the transcript back with its unsaved fixes and typed wants', async () => {
+  const { ui } = await opened();
+  ui.edit('passage', 2, 'kept fix');
+  ui.wants.value = 'typed wants';
+  const held = ui.context.holdAside('n1');
+  assert.equal(held.kind, 'transcript');
+  assert.equal(JSON.stringify(held.fixes.map((f) => [f.seq, f.text])), '[[2,"kept fix"]]');
+  ui.layout.classes.clear();
+  ui.open = false;
+  ui.context.restoreAside(held);
+  assert.equal(ui.open, true);
+  assert.deepEqual(ui.shown('passage').map(([seq, text]) => [seq, text]).filter(([seq]) => seq === 2), [[2, 'kept fix']]);
+  assert.equal(ui.wants.value, 'typed wants');
+  assert.equal(ui.context.holdAside('other'), null, 'another note\'s page is never held');
 });

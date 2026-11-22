@@ -420,6 +420,7 @@ async function viewOriginal(id, name, page = null) {
 }
 
 async function openFileAside(url, kind, name, page) {
+  fileAside = { url, kind, name, page };
   const body = kind === 'pdf'
     ? `<iframe class="aside-frame" src="${url}?view=1${page ? `#page=${Number(page)}` : ''}" title="${esc(name)}"></iframe>`
     : kind === 'image'

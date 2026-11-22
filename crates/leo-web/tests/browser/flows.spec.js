@@ -2953,7 +2953,7 @@ test.describe('recording', () => {
     await expect(page.locator('.rec-kinds .choice-pick', { hasText: 'Screen' })).toContainText('Records what this computer plays');
     await expect(page.locator('.rec-kinds .choice-diagram > svg')).toHaveCount(3);
     await expect(page.locator('.rec-start .rec-tip'), 'the tip sits with Start').toBeVisible();
-    await expect(page.locator('.rec-card .note-fields #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside the shared field group').toBeVisible();
+    await expect(page.locator('.rec-head .rec-chips #rec-dir ~ .select-menu-button'), 'the folder uses the shared select menu inside its chip').toBeVisible();
     await page.locator('.rec-kinds .choice-pick', { hasText: 'Call' }).click();
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('[data-action="rec-stop"]')).toBeVisible();

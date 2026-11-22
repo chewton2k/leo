@@ -119,6 +119,10 @@
 .note-layout.aside-open :is(#doc, .related, .note-outline, .margin-layer, #note-facts, .margin-instructions, .writeup-pending, .note-find, .page-marks) { display: none; }
 .note-layout.aside-open .note-aside { display: block; margin-top: 12px; }
 .note-layout.aside-open .note-aside-facts { display: block; }
+@media print {
+  .note-layout.aside-open :is(#doc, .related:not([hidden])) { display: block; }
+  .note-layout.aside-open :is(.note-aside, .note-aside-facts) { display: none; }
+}
 .facts-link { border: 0; background: none; padding: 0; font: inherit; color: var(--muted); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--muted) 45%, transparent); text-underline-offset: 3px; cursor: pointer; }
 .facts-link:hover { color: var(--text); text-decoration-color: currentColor; }
 .aside-name { color: var(--muted); }
