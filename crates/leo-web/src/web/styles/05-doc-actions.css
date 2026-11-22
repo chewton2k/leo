@@ -217,7 +217,7 @@ label.trash-row { cursor: pointer; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes sink { to { transform: translate(var(--tx, 0), 10px); opacity: 0; } }
-.picker-button svg, .rec-heard > summary > svg, .source-more > summary > svg, .callout > summary::before, .side-twist svg, .activity-fold svg { transition: transform var(--t-follow) var(--ease-arrive); }
+.picker-button svg, .source-more > summary > svg, .callout > summary::before, .side-twist svg, .activity-fold svg { transition: transform var(--t-follow) var(--ease-arrive); }
 .picker-button[aria-expanded="true"] svg { transform: rotate(-90deg); }
 .chat.chat-leaving { animation: chat-out var(--t-open-out) var(--ease-exit) forwards; pointer-events: none; }
 @keyframes chat-out { to { transform: translateX(100%); } }

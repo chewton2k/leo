@@ -2091,31 +2091,32 @@ test.describe('pictures', () => {
     }));
     fs.writeFileSync(path.join(folder, 'browser-recording-1.json'), JSON.stringify({ id: 'browser-recording-1', started: '2026-11-03T09:00:00Z', passages, points: [], context: '', wants: '', warnings: [], trace: [] }));
     await page.goto(`/#/n/${note.id}`);
-    await page.locator('#note-more').click();
-    await page.getByRole('menuitem', { name: 'Show transcript' }).click();
-    const sheet = page.locator('.source-sheet');
-    await expect(sheet.locator('h3')).toHaveText('Transcript');
+    await page.locator('#note-facts [data-action="note-sources"]').click();
+    const sheet = page.locator('#note-aside');
+    await expect(page.locator('#note-aside-facts')).toContainText('Transcript');
+    await expect(page.locator('#doc')).toBeHidden();
+    await expect(page.locator('#title')).toBeVisible();
     const rows = sheet.locator('.source-text');
-    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    await expect(rows.first()).toHaveText(/^Passage 1 /);
     const first = await rows.count();
     expect(first, 'the first page holds part of the recording').toBeGreaterThan(0);
     expect(first).toBeLessThan(12);
     await expect(sheet.locator('[data-action="source-earlier"]')).toHaveCount(0);
     await sheet.locator('[data-action="source-later"]').click();
-    await expect(rows.first()).toHaveValue(new RegExp(`^Passage ${first + 1} `));
+    await expect(rows.first()).toHaveText(new RegExp(`^Passage ${first + 1} `));
     expect(first + (await rows.count()), 'the two pages hold every passage once').toBe(12);
     await expect(sheet.locator('[data-action="source-later"]')).toHaveCount(0);
     await sheet.locator('[data-action="source-earlier"]').click();
-    await expect(rows.first()).toHaveValue(/^Passage 1 /);
+    await expect(rows.first()).toHaveText(/^Passage 1 /);
     await sheet.locator('#source-query').fill('zebrafish');
     const match = sheet.locator('.source-match');
     await expect(match).toHaveCount(1);
     await match.click();
     const fixed = rows.last();
-    await expect(fixed).toHaveValue(/Passage 12 about the zebrafish/);
+    await expect(fixed).toHaveText(/Passage 12 about the zebrafish/);
     await expect(sheet.locator('[data-action="source-earlier"]')).toBeVisible();
     await fixed.evaluate((box) => {
-      box.value = `${box.value} Fixed.`;
+      box.textContent = `${box.textContent} Fixed.`;
       box.dispatchEvent(new Event('input', { bubbles: true }));
     });
     const sent = page.waitForRequest((r) => r.method() === 'PUT' && r.url().endsWith(`/api/notes/${note.id}/recording`));
@@ -2519,33 +2520,31 @@ test.describe('advanced settings', () => {
 
     const served = page.waitForResponse((r) => r.url().includes('paper.pdf?view=1'));
     await page.locator('.chip.original', { hasText: 'paper.pdf' }).click();
-    const split = await page.evaluate(() => innerWidth >= 1000);
-    const viewer = page.locator(split ? '#source-pane' : '.sheet.viewer');
-    await expect(viewer.locator('iframe')).toHaveAttribute('src', /paper\.pdf\?view=1$/);
+    const aside = page.locator('#note-aside');
+    const facts = page.locator('#note-aside-facts');
+    await expect(aside.locator('iframe.aside-frame')).toHaveAttribute('src', /paper\.pdf\?view=1$/);
     const pdf = await served;
     expect(pdf.status()).toBe(200);
     expect(pdf.headers()['content-disposition']).toMatch(/^inline/);
     expect(pdf.headers()['x-frame-options']).toBe('SAMEORIGIN');
-    await expect(viewer.locator('a[download]')).toHaveText('Download');
-    if (split) await viewer.locator('[data-action="source-close"]').click();
-    else await page.keyboard.press('Escape');
-    await expect(viewer).toBeHidden();
+    await expect(facts).toHaveText('paper.pdf · Download · Back to note');
+    await expect(facts.locator('a[download]')).toHaveText('Download');
+    await expect(page.locator('#title')).toBeVisible();
+    await expect(page.locator('#doc')).toBeHidden();
+    await expect(page.locator('#source-pane')).toHaveCount(0);
+    await facts.locator('[data-action="note-back"]').click();
+    await expect(aside).toBeHidden();
+    await expect(page.locator('#doc')).toBeVisible();
 
     await page.locator('.chip.original', { hasText: 'board.png' }).click();
-    const img = page.locator(split ? '.source-img' : '.viewer-img');
+    const img = aside.locator('.aside-img');
     await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(2);
-    if (split) await viewer.locator('[data-action="source-close"]').click();
-    else {
-      const before = (await img.boundingBox()).width;
-      await page.locator('[data-action="viewer-zoom"][data-step="1"]').click();
-      await expect.poll(async () => (await img.boundingBox()).width).toBeGreaterThan(before * 1.4);
-      await page.mouse.click(5, 5);
-    }
-    await expect(page.locator('.sheet.viewer')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(aside).toBeHidden();
 
     await page.locator('.chip.original', { hasText: 'notes.txt' }).click();
-    await expect(page.locator(split ? '.source-text' : '.viewer-text')).toHaveText('Plain text from the upload.');
-    await viewer.locator(split ? '[data-action="source-close"]' : '[data-action="close"]').click();
+    await expect(aside.locator('.aside-text')).toHaveText('Plain text from the upload.');
+    await facts.locator('[data-action="note-back"]').click();
     await expect(page.locator('.sheet.viewer')).toHaveCount(0);
     expect(page.url()).toContain(`#/n/${note.id}`);
   });
@@ -2800,18 +2799,15 @@ test.describe('recording', () => {
     await page.locator('[data-action="rec-start"]').click();
     await expect(page.locator('#rec-transcript')).toContainText('breadth first search');
     await expect(page.locator('.rec-notepad #rec-point-text')).toBeVisible();
-    expect(await page.evaluate(() => {
-      const pad = document.querySelector('.rec-notepad');
-      const heard = document.querySelector('#rec-heard');
-      return Boolean(pad.compareDocumentPosition(heard) & Node.DOCUMENT_POSITION_PRECEDING) && heard.open;
-    })).toBe(true);
-    await expect(page.locator('#rec-transcript')).toBeVisible();
-    await page.locator('#rec-heard > summary').click();
+    await expect(page.locator('.rec-head h1')).toHaveText('Graphs');
+    await expect(page.locator('[data-rec-tab="points"]')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#rec-transcript')).toBeHidden();
-    expect(await page.evaluate(() => localStorage.getItem('leo-rec-heard'))).toBe('shut');
+    await page.locator('[data-rec-tab="heard"]').click();
+    await expect(page.locator('#rec-transcript')).toBeVisible();
+    await expect(page.locator('.rec-notepad')).toBeHidden();
     await page.waitForResponse((r) => r.url().endsWith('/api/record/rec-1') && r.request().method() === 'GET');
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-    await expect(page.locator('#rec-heard')).not.toHaveAttribute('open', '');
+    await expect(page.locator('#rec-transcript'), 'the open tab survives a poll').toBeVisible();
     await expect(page.locator('#rec-wave')).toBeVisible();
     await expect(page.locator('#rec-hear')).toHaveText('Hearing sound', { timeout: 8000 });
     const drawn = await page.locator('#rec-wave').evaluate((canvas) => {
@@ -2829,6 +2825,7 @@ test.describe('recording', () => {
     });
     expect(leftEdge, 'the wave reaches the left edge of its box').toBeGreaterThan(0);
     expect(seen.started).toEqual({ source: 'microphone', directory: '', title: 'Graphs', profile: { context: '', wants: 'Focus on BFS', speakers: false } });
+    await page.locator('[data-rec-tab="wants"]').click();
     const live = page.locator('#rec-wants-live');
     await expect(live).toHaveValue('Focus on BFS');
     await live.click();
@@ -2838,6 +2835,7 @@ test.describe('recording', () => {
     await expect(live).toBeFocused();
     await expect(page.locator('#rec-wants-state')).toContainText('Saved');
 
+    await page.locator('[data-rec-tab="points"]').click();
     await page.locator('#rec-point-text').fill('exam question on BFS');
     await page.locator('#rec-point-text').press('Enter');
     await expect(page.locator('.rec-points')).toContainText('exam question on BFS');
@@ -2858,7 +2856,7 @@ test.describe('recording', () => {
     await expect(pill).toHaveCount(0);
   });
 
-  test('a wide window lays the live recording out in three columns and keeps the transcript node across polls', async ({ page }) => {
+  test('a wide window puts Felix in a column beside the tabs and keeps the transcript node across polls', async ({ page }) => {
     await page.setViewportSize({ width: 1700, height: 1000 });
     stubRecorder(page, { noteId: null });
     await page.goto('/');
@@ -2871,19 +2869,16 @@ test.describe('recording', () => {
     await expect(page.locator('#rec-ask .starter')).toHaveText(['What did I just miss?', 'Sum up so far', 'What should I ask next?']);
     await page.evaluate(() => { window.__heard = document.querySelector('#rec-transcript'); });
     const box = async (at) => page.locator(at).boundingBox();
-    const [top, heard, notes, ask] = [await box('.rec-live-card'), await box('#rec-heard'), await box('.rec-notepad'), await box('#rec-ask')];
-    expect(heard.x).toBeLessThan(notes.x);
-    expect(notes.x).toBeLessThan(ask.x);
-    expect(Math.abs(heard.y - notes.y)).toBeLessThan(2);
-    expect(Math.abs(notes.y - ask.y)).toBeLessThan(2);
-    expect(top.y).toBeLessThan(heard.y);
-    expect(top.width).toBeGreaterThan(ask.x + ask.width - heard.x - 2);
+    const [head, main, ask] = [await box('.rec-head'), await box('.rec-main'), await box('#rec-ask')];
+    expect(main.x + main.width).toBeLessThan(ask.x);
+    expect(Math.abs(main.y - ask.y)).toBeLessThan(2);
+    expect(head.y + head.height).toBeLessThanOrEqual(main.y);
     await page.waitForResponse((r) => r.url().endsWith('/api/record/rec-1') && r.request().method() === 'GET');
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
     expect(await page.evaluate(() => window.__heard === document.querySelector('#rec-transcript') && window.__heard.isConnected)).toBe(true);
     await page.setViewportSize({ width: 900, height: 1000 });
-    const [stackedNotes, stackedAsk] = [await box('.rec-notepad'), await box('#rec-ask')];
-    expect(stackedAsk.y).toBeGreaterThan(stackedNotes.y + stackedNotes.height - 2);
+    const [stackedMain, stackedAsk] = [await box('.rec-main'), await box('#rec-ask')];
+    expect(stackedAsk.y).toBeGreaterThan(stackedMain.y + stackedMain.height - 2);
   });
 
   test('a recording finished while away shows up in the open folder, without a refresh', async ({ page, context }) => {
@@ -5043,8 +5038,8 @@ test.describe('calendar', () => {
 });
 
 test.describe('beside the note', () => {
-  test('on a wide screen an original opens beside its note and closes when you leave', async ({ page, browser }) => {
-    test.skip(test.info().project.name !== 'desktop', 'the pane needs a wide screen');
+  test('an original opens in the note\'s place at the note\'s width, and another chip switches the file', async ({ page, browser }) => {
+    test.skip(test.info().project.name !== 'desktop', 'one width is enough');
     await page.setViewportSize({ width: 1600, height: 900 });
     const note = await (await page.request.post('/api/notes', { data: { title: 'Beside the source', body: 'My notes on the paper.' } })).json();
     const folder = path.join(process.env.LEO_BROWSER_HOME, 'attachments', note.id);
@@ -5055,18 +5050,17 @@ test.describe('beside the note', () => {
     fs.writeFileSync(path.join(folder, 'paper.pdf'), await maker.pdf());
     await maker.close();
     await page.goto(`/#/n/${note.id}`);
+    const width = (await page.locator('#doc').boundingBox()).width;
     await page.locator('.chip.original', { hasText: 'notes.txt' }).click();
-    const pane = page.locator('#source-pane');
-    await expect(pane).toBeVisible();
-    await expect(pane.locator('.source-text')).toHaveText('Plain text from the upload.');
+    const aside = page.locator('#note-aside');
+    await expect(aside.locator('.aside-text')).toHaveText('Plain text from the upload.');
     await expect(page.locator('.sheet.viewer')).toHaveCount(0);
-    const paneBox = await pane.boundingBox();
-    const doc = await page.locator('#doc').boundingBox();
-    expect(doc.x + doc.width).toBeLessThanOrEqual(paneBox.x + 1);
-    await pane.locator('[data-action="source-file"]', { hasText: 'paper.pdf' }).click();
-    await expect(pane.locator('iframe.source-frame')).toHaveAttribute('src', /paper\.pdf\?view=1$/);
+    expect(Math.abs((await aside.boundingBox()).width - width)).toBeLessThan(2);
+    await page.locator('.chip.original', { hasText: 'paper.pdf' }).click();
+    await expect(aside.locator('iframe.aside-frame')).toHaveAttribute('src', /paper\.pdf\?view=1$/);
+    await expect(page.locator('#note-aside-facts')).toContainText('paper.pdf');
     await page.locator('#side [data-action="home"]').first().click();
-    await expect(pane).toBeHidden();
+    await expect(aside).toHaveCount(0);
   });
 
   test('the Tasks panel sits folded in the bottom corner, opens on hover or keyboard focus only, and stays across pages', async ({ page }) => {

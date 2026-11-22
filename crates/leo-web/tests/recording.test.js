@@ -169,9 +169,9 @@ const esc = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const icons = new Proxy({}, { get: () => '' });
 
 function idle(checks, platform, denied = false) {
-  return piece('drawIdle', 'drawLive', 'drawIdle', {
+  return piece('chip', 'drawLive', 'drawIdle', {
     s: { overview: { available: true, checks }, calendar: null, event: null },
-    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '', speakersRow: () => '',
+    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, folderOptions: () => '', kindChoices: () => '', speakersRow: () => '',
     askChips: L.askChips, preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
   })([], '');
 }
@@ -206,9 +206,9 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'microphone', false, true), 'leo can’t hear: microphone access is off.');
   assert.equal(L.hearingWords('sound', 'screen', false, true), 'Hearing sound');
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
-  const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+  const live = (denied) => piece('chip', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -404,7 +404,7 @@ test('the live transcript is patched in place: kept words stay the same node and
   show(box);
   assert.equal(text.textContent, s.view.transcript, 'a trimmed head is dropped from the front');
   assert.equal(text.kids[0], first);
-  assert.equal(text.wired, 3, 'listeners are added once, when the transcript is made');
+  assert.equal(text.wired, 2, 'listeners are added once, when the transcript is made');
   assert.equal(latest.hidden, true);
   s.follow = false;
   s.view.transcript += ' again';
@@ -499,12 +499,14 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
   s.event = 0;
   sync(box);
   assert.equal(ask.hidden, false);
-  const live = piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
+  const live = piece('chip', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
   })();
-  assert.match(live, /rec-notepad.*<section class="set-card rec-ask" id="rec-ask" data-keep>.*What did I just miss\?.*rec-wants-card/s, 'the questions sit under Your notes');
-  assert.match(live, /id="rec-heard" data-keep/);
+  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?/s, 'the questions sit in Felix\'s own column beside the tabs');
+  assert.match(live, /id="rec-heard" role="tabpanel" data-keep/);
+  assert.match(live, /data-rec-tab="points"[^>]*aria-selected="true"[^>]*>Your notes <span class="badge" id="rec-count">0<\/span><\/button>.*data-rec-tab="heard"[^>]*>Transcript<\/button>.*data-rec-tab="wants"[^>]*>What you want<\/button>/s, 'Your notes is the first tab and open by default');
+  assert.match(live, /<div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar: dot, clock, wave, Pause, Stop');
 });
 
 test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {
@@ -526,12 +528,25 @@ test('a question asked while recording sends the newest transcript and the typed
   assert.equal(L.briefAsk(null, 'only wants'), 'What I want from the notes: only wants');
 });
 
-test('the live page keeps the stacked page unless a container or the docked chat asks for columns', () => {
+test('the live page keeps one column unless its container is wide enough for Felix\'s column', () => {
   const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
-  const gated = css.split('\n').filter((line) => /\.rec-live \{[^}]*display: grid/.test(line));
-  assert.equal(gated.length, 2, 'a wide main area and a docked chat each lay out columns');
-  assert.ok(gated.every((line) => /^\s*(?:@media \([^)]*\) \{ )?@container recroom \(min-width: \d+px\) \{/.test(line)), 'only inside a container query');
-  assert.ok(gated.some((line) => /@media \(min-width: 1200px\) \{ @container[^\n]*body\.chat-open \.rec-live/.test(line)), 'two columns only beside a docked chat');
+  const columns = css.split('\n').filter((line) => /\.rec-body[^{]*\{[^}]*grid-template-columns/.test(line));
+  assert.equal(columns.length, 1);
+  assert.match(columns[0], /^@container recroom \(min-width: \d+px\) \{ \.rec-body:has\(> \.rec-felix\)/, 'only inside a container query, and only while Felix\'s column is there');
+});
+
+test('after Stop the page keeps its header and tabs, with one progress line and Finish now', () => {
+  const writing = piece('chip', 'drawFailed', 'drawLive', {
+    s: { view: { id: 'r', state: 'writing', step: 'Writing the notes', steps: [2, 5], source: 'microphone', title: 'Capstone sync', directory: 'Work', points: [[30, 'a point']], points_total: 1, warnings: [], secs: 90, transcript: 'said' }, earlier: [], wave: [], tab: 'wants', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: (v) => v.points.map(([at, text], k) => [k, at, text]), stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }), Date,
+  })();
+  assert.match(writing, /<h1>Capstone sync<\/h1>/);
+  assert.match(writing, /<use href="#leo-mark"\/><\/svg><span class="rec-progress-step">Writing the notes · 2\/5<\/span><div class="upload-bar"/);
+  assert.match(writing, /data-action="rec-finish"[^>]*>Finish now<\/button>/);
+  assert.match(writing, /aria-disabled="true"[^>]*disabled>Notes<\/button>.*data-rec-tab="points"[^>]*aria-selected="true".*data-rec-tab="heard"/s, 'Notes waits; Your notes is open since What you want is gone');
+  assert.doesNotMatch(writing, /rec-bar|rec-wants-live|rec-point-text|rec-felix/);
+  assert.match(writing, /a point/);
+  assert.match(writing, /id="rec-heard" role="tabpanel" data-keep/);
 });
 
 test('speakers take tones in the order they were first heard, You keeps ink and source labels are not speakers', () => {

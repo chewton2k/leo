@@ -482,6 +482,8 @@ fn background_work_is_listed_until_it_is_done() {
         id: "r".into(),
         session: "r".into(),
         source: record::Source::Microphone,
+        title: String::new(),
+        directory: String::new(),
         state: "writing",
         secs: 60,
         step: "Writing the notes".into(),

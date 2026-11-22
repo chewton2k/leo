@@ -107,13 +107,13 @@ test('chat history retains its delete control through confirmation and handles f
   await expect(row).toHaveCount(0);
 });
 
-for (const layout of ['desktop', 'compact', 'source']) test(`Chats history ${layout} slides without replacing content and reverses from its current frame`, async ({ page }, testInfo) => {
+for (const layout of ['desktop', 'compact', 'narrow']) test(`Chats history ${layout} slides without replacing content and reverses from its current frame`, async ({ page }, testInfo) => {
   await page.setViewportSize(layout === 'compact' ? { width: 390, height: 844 } : { width: 1600, height: 900 });
   const chats = Array.from({ length: 40 }, (_, i) => ({ id: `motion-${i}`, title: `Saved conversation ${i}`, count: 2, updated_at: new Date().toISOString() }));
   await page.route('**/api/chats', route => route.fulfill({ json: chats }));
   await page.locator('#chat-toggle').click();
-  if (layout === 'source') {
-    await page.evaluate(() => { document.body.classList.add('with-source'); document.querySelector('#chat').style.width = '420px'; });
+  if (layout === 'narrow') {
+    await page.evaluate(() => { document.querySelector('#chat').style.width = '420px'; });
     await expect(page.locator('#chat')).toHaveClass(/source-narrow/);
   }
   const toggle = page.locator('.chat-head .chat-history-toggle');

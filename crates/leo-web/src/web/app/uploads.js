@@ -78,10 +78,14 @@ globalThis.document?.addEventListener('input', (e) => {
   if (typeof updateReadHint === 'function') updateReadHint(e.target.closest?.('[data-reads]'));
 });
 
-function noteFields({ id, folders, here, reads, before = '' }) {
-  const options = ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
+function folderOptions(folders, here) {
+  return ['', ...folders].map((name) => `<option value="${esc(name)}"${name === here ? ' selected' : ''}>${esc(name ? folderLabel(name) + (name.includes('/') ? ` (${name})` : '') : 'Top level')}</option>`).join('');
+}
+
+function noteFields({ id, folders, here, reads }) {
+  const options = folderOptions(folders, here);
   return `<div class="note-fields">
-    <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>${before}
+    <div class="field">${ICON.folder}<span class="select-control"><select id="${id}-dir" aria-label="Folder">${options}</select>${ICON.chevron}</span></div>
     <p class="note-fields-optional">Optional</p>
     <label class="field">${ICON.note}<input id="${id}-title" placeholder="Title" aria-label="Title (optional)" autocomplete="off"></label>
     <label class="field field-area"><textarea id="${id}-wants" rows="2"${reads ? ` data-reads="${reads}"` : ''} aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>${reads ? `\n    <p class="set-desc" id="${id}-wants-hint" hidden>Felix reads the first ${reads.toLocaleString('en')} characters of this.</p>` : ''}

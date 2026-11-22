@@ -393,6 +393,6 @@ test('a lecture shows a paragraph a minute with its time and no speaker row', as
   assert.equal(ui.rows.length, 2);
   assert.ok(!ui.html.includes('speaker-row'));
   assert.ok(!ui.html.includes('turn-name'));
-  assert.match(ui.html, /<span class="rec-at">0:02<\/span><div class="minute-said"><p class="said">[^]*first[^]*second[^]*<\/p><\/div>/);
+  assert.match(ui.html, /<span class="rec-at">0:02<\/span><div class="minute-said"><p class="spoken">[^]*first[^]*second[^]*<\/p><\/div>/);
   assert.match(ui.html, /<span class="rec-at">1:01<\/span>/);
 });

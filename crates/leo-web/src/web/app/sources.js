@@ -111,7 +111,7 @@ function sourceItems(items) {
   let run = [];
   const out = [];
   const flush = () => {
-    if (run.length) out.push(`<p class="said">${run.join(' ')}</p>`);
+    if (run.length) out.push(`<p class="spoken">${run.join(' ')}</p>`);
     run = [];
   };
   for (const item of items) {
@@ -121,7 +121,7 @@ function sourceItems(items) {
     }
     flush();
     if (item.point) out.push(`<p class="typed-point"><span class="typed-label">Your point · </span>${sourceSpan('point', item.point)}</p>`);
-    else out.push(`<p class="echo-fold">Hidden: ${plural(item.echo.length, 'echo line')} · <button type="button" class="facts-link" data-echo-show>Show</button></p><p class="said echo-lines" hidden>${item.echo.map((row) => sourceSpan('passage', row)).join(' ')}</p>`);
+    else out.push(`<p class="echo-fold">Hidden: ${plural(item.echo.length, 'echo line')} · <button type="button" class="facts-link" data-echo-show>Show</button></p><p class="spoken echo-lines" hidden>${item.echo.map((row) => sourceSpan('passage', row)).join(' ')}</p>`);
   }
   flush();
   return out.join('');
