@@ -231,6 +231,8 @@ pub struct RecordView {
     pub id: String,
     pub session: String,
     pub source: Source,
+    pub title: String,
+    pub directory: String,
     pub state: &'static str,
     pub secs: u64,
     pub step: String,
@@ -560,6 +562,8 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
                 id: id.clone(),
                 session: body.recover.clone().unwrap_or_else(|| id.clone()),
                 source: body.source,
+                title: title.clone().unwrap_or_default(),
+                directory: directory.clone(),
                 state: if body.recover.is_some() {
                     "writing"
                 } else {
@@ -1072,6 +1076,8 @@ mod tests {
             id: "r".into(),
             session: "r".into(),
             source: Source::Microphone,
+            title: String::new(),
+            directory: String::new(),
             state: "recording",
             secs: 0,
             step: String::new(),

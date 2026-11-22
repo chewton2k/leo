@@ -200,7 +200,7 @@ svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
 .empty .btn svg { width: 16px; height: 16px; color: currentColor; }
 .empty .btn.plain { color: var(--text); }
 
-.note-head h1 { text-wrap: balance; position: relative; min-height: 1.25em; font-family: var(--writing-font); font-size: var(--fs-title); font-weight: 500; line-height: 1.25; letter-spacing: -.032em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
+.note-head h1, .rec-title { text-wrap: balance; position: relative; min-height: 1.25em; font-family: var(--writing-font); font-size: var(--fs-title); font-weight: 500; line-height: 1.25; letter-spacing: -.032em; margin: 10px 0 8px; outline: 0; overflow-wrap: anywhere; cursor: text; }
 .note-head h1.blank::before { content: attr(data-placeholder); color: var(--faint); position: absolute; left: 0; top: 0; pointer-events: none; }
 .note-facts { margin: 0 0 4px; font-size: var(--fs-sm); line-height: 20px; color: var(--faint); font-variant-numeric: tabular-nums; }
 @media print { .note-facts { display: none; } }

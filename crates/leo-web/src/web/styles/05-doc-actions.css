@@ -217,7 +217,7 @@ label.trash-row { cursor: pointer; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes fade-out { to { opacity: 0; } }
 @keyframes sink { to { transform: translate(var(--tx, 0), 10px); opacity: 0; } }
-.picker-button svg, .rec-heard > summary > svg, .source-more > summary > svg, .callout > summary::before, .side-twist svg, .activity-fold svg { transition: transform var(--t-follow) var(--ease-arrive); }
+.picker-button svg, .source-more > summary > svg, .callout > summary::before, .side-twist svg, .activity-fold svg { transition: transform var(--t-follow) var(--ease-arrive); }
 .picker-button[aria-expanded="true"] svg { transform: rotate(-90deg); }
 .chat.chat-leaving { animation: chat-out var(--t-open-out) var(--ease-exit) forwards; pointer-events: none; }
 @keyframes chat-out { to { transform: translateX(100%); } }
@@ -230,7 +230,7 @@ label.trash-row { cursor: pointer; }
   html { scrollbar-gutter: auto !important; }
   body { --side: 0px !important; --right: 0px !important; --top: 0px !important; --bottom: 0px !important; }
   html, body { background: #fff; color: #1c1c1a; padding: 0 !important; margin: 0; font-size: 11pt; line-height: 1.55; }
-  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .select-bar, .dock, .tasks-window, .page-bar, .source-pane, .ask-float, .note-find, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
+  .margin-layer, .margin-mode, .note-outline, .side, .bar, #floating, .toast, .toast-gone, .scrim, .scrim-gone, .note-meta, .note-originals, .doc-tail, .doc .blk .placeholder, .chat, .activity, .chat-resize, .pane-resize, .select-bar, .dock, .tasks-window, .page-bar, .ask-float, .note-find, .margin-instructions, .writeup-pending, .float-act, [data-print-off] { display: none !important; }
   body.files-over main::after { display: none !important; }
   main, body.on-note main { max-width: none !important; width: auto !important; padding: 0 !important; margin: 0 !important; }
   .note-head h1, #title { margin: 0 0 10pt; padding-bottom: 6pt; font-size: 22pt; line-height: 1.2; }

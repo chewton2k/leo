@@ -132,7 +132,6 @@ body.kanban-panel-on .kanban-layout { grid-template-columns: minmax(0, 1fr) min(
 .cal-peek-where span:last-child,
 .tasks-toggle .grow,
 .tasks-title,
-.source-name,
 .related-row .sub,
 .study-idea,
 .chat-compose textarea::placeholder,

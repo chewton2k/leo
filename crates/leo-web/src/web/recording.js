@@ -142,6 +142,46 @@
     return { drop, keep, tail: next.slice(keep) };
   }
 
+  const NOT_SPEAKERS = ['', 'Microphone', 'Computer audio'];
+  const TONES = ['var(--hue-0)', 'var(--hue-1)', 'var(--hue-4)', 'var(--hue-2)', 'var(--hue-5)', 'var(--hue-3)', 'var(--hue-6)', 'var(--hue-7)'];
+
+  const speakersOf = (speakers) => (speakers || []).filter((name) => !NOT_SPEAKERS.includes(name));
+
+  function toneOf(speakers, name) {
+    if (name === 'You') return 'var(--text)';
+    const i = speakersOf(speakers).filter((n) => n !== 'You').indexOf(name);
+    return i < 0 ? 'var(--faint)' : TONES[i % TONES.length];
+  }
+
+  function transcriptFlow(passages, points, speakers) {
+    const meeting = speakersOf(speakers).length > 0;
+    const rows = [
+      ...(passages || []).map((row) => ({ at: row[1].start_secs || 0, passage: row })),
+      ...(points || []).map((row) => ({ at: row[1].at_secs || 0, point: row })),
+    ].sort((a, b) => a.at - b.at || Boolean(a.point) - Boolean(b.point));
+    const groups = [];
+    let group = null;
+    const open = (at, speaker, key) => {
+      group = { at, speaker, key, items: [] };
+      groups.push(group);
+    };
+    for (const row of rows) {
+      if (row.point) {
+        if (!group || (!meeting && group.key !== Math.floor(row.at / 60))) open(row.at, '', meeting ? null : Math.floor(row.at / 60));
+        group.items.push({ point: row.point });
+        continue;
+      }
+      const p = row.passage[1];
+      const echo = p.echo === true;
+      const key = meeting ? p.speaker || '' : Math.floor(row.at / 60);
+      if (!group || (!echo && group.key !== key)) open(row.at, meeting ? p.speaker || '' : '', key);
+      const last = group.items[group.items.length - 1];
+      if (echo && last && last.echo) last.echo.push(row.passage);
+      else group.items.push(echo ? { echo: [row.passage] } : { passage: row.passage });
+    }
+    return { meeting, groups };
+  }
+
   const MOST_ASK = 8000;
   const FELIX_ASKS = {
     before: ['What should I listen for?', 'What should I ask?'],
@@ -200,7 +240,8 @@
   }
 
   function create(deps) {
-    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, noteFields, choiceCards, syncChoiceCards, bytes } = deps;
+    const { api, esc, toast, go, noteHash, felix, icons, noteReady, encodePicture, choiceCards, syncChoiceCards, bytes } = deps;
+    const folderOptions = deps.folderOptions || (() => '<option value="">Top level</option>');
     const settingsSwitch = deps.settingsSwitch || ((attrs, on) => `<input type="checkbox" class="switch" role="switch" ${attrs}${on ? ' checked' : ''}>`);
     const s = {
       view: null,
@@ -218,13 +259,8 @@
       fedUpTo: 0,
       raf: 0,
       heard: '',
-      showHeard: (() => {
-        try {
-          return root.localStorage.getItem('leo-rec-heard') !== 'shut';
-        } catch (e) {
-          return true;
-        }
-      })(),
+      tab: 'points',
+      liveEvent: null,
       earlier: [],
       wantsDraft: null,
       wantsState: '',
@@ -290,9 +326,11 @@
       pill();
     }
 
-    async function start(source, directory, title, profile) {
+    async function start(source, directory, title, profile, event) {
       const made = await api('/api/record', { method: 'POST', body: { source, directory, title, profile } });
-      s.view = { id: made.id, source, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], points_total: 0, note: null, error: null };
+      s.view = { id: made.id, source, title, directory, state: 'starting', secs: 0, step: 'Starting', steps: null, transcript: '', warnings: [], points: [], points_total: 0, note: null, error: null };
+      s.liveEvent = event ? { id: made.id, event } : null;
+      s.tab = 'points';
       s.earlier = [];
       s.wantsDraft = null;
       s.wantsState = '';
@@ -485,15 +523,23 @@
       if (back) back.focus();
     }
 
+    function chip(icon, text) {
+      return `<span class="chip">${icon}${esc(text)}</span>`;
+    }
+
+    function selectChip(icon, id, label, options) {
+      return `<span class="chip rec-chip">${icon}<span class="select-control"><select id="${id}" aria-label="${label}">${options}</select>${icons.chevron}</span></span>`;
+    }
+
     function drawIdle(folders, here, kind) {
       const ov = s.overview || {};
       const upcoming = (s.calendar && s.calendar.events) || [];
       const picked = s.event !== null ? upcoming[s.event] : null;
       const pending = ov.pending || [];
       const event = upcoming.length
-        ? `<div class="field">${icons.calendar}<span class="select-control"><select id="rec-event" aria-label="Calendar event"><option value="">No calendar event</option>${upcoming.map((e, i) => `<option value="${i}"${i === s.event ? ' selected' : ''}>${esc(whenOf(e))} · ${esc(e.title)}</option>`).join('')}</select>${icons.chevron}</span></div>
-          ${picked ? '<p class="hint rec-event-note">The AI gets this event’s description, place and who was invited.</p>' : ''}`
+        ? selectChip(icons.calendar, 'rec-event', 'Calendar event', `<option value="">No calendar event</option>${upcoming.map((e, i) => `<option value="${i}"${i === s.event ? ' selected' : ''}>${esc(whenOf(e))} · ${esc(e.title)}</option>`).join('')}`)
         : '';
+      const folder = selectChip(icons.folder, 'rec-dir', 'Folder', folderOptions(folders, here));
       const connect = s.calendar && !s.calendar.connected ? '<p class="hint rec-calendar"><a href="#/settings/calendar">Connect a calendar</a> to name recordings after your classes or meetings.</p>' : '';
       const gaps = preflight(ov.checks).map((g) => `<p class="set-note">${esc(g.text)} <a href="${g.href}">${esc(g.link)}</a></p>`).join('')
         + (micDenied('microphone') ? '<p class="set-note">leo can’t hear: microphone access is off. <button class="btn plain sm" data-action="app-command" data-app-action="microphone">' + (desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings') + '</button></p>' : '')
@@ -502,62 +548,80 @@
         ? `<div class="rec-recover">${pending.map((p) => `<div class="rec-recover-item"><div class="rec-recover-row">${icons.restore}<span class="grow">${esc(p.title || 'Interrupted recording')}<span class="sub">${esc(pendingLine(p))}</span></span></div><button type="button" class="btn plain sm" data-action="rec-recover" data-id="${esc(p.id)}">Recover</button><button type="button" class="btn plain sm" data-action="rec-discard" data-id="${esc(p.id)}" aria-label="Delete ${esc(p.title || 'interrupted recording')}">Delete</button></div>`).join('')}${ov.more ? '<button type="button" class="btn plain sm" data-action="rec-older">Show older</button>' : ''}</div>`
         : '';
       return `<div class="rec rec-idle">
-        <div class="section-title">Record</div>
         ${recover ? `<section class="set-card"><header><h3>Not saved yet</h3></header>${recover}</section>` : ''}
+        <header class="rec-head note-head"><div class="rec-head-text">
+          <input id="rec-title" class="rec-title" placeholder="Untitled recording" aria-label="Title (optional)" autocomplete="off" spellcheck="true">
+          <div class="rec-chips">${event}${folder}</div>
+          ${picked ? '<p class="hint rec-event-note">The AI gets this event’s description, place and who was invited.</p>' : ''}
+        </div></header>
         <section class="set-card rec-card">
           ${kindChoices(kind)}
-          ${noteFields({ id: 'rec', folders, here, reads: 4000, before: event })}
+          <label class="field field-area"><textarea id="rec-wants" rows="2" data-reads="4000" aria-label="What you want from it (optional)" placeholder="What do you want from it? e.g. the main ideas, step by step"></textarea></label>
+          <p class="set-desc" id="rec-wants-hint" hidden>Felix reads the first 4,000 characters of this.</p>
           <div id="rec-speakers-box">${speakersRow()}</div>
           ${connect}
           ${gaps}
-          <div class="rec-ask" id="rec-ask"${s.event !== null ? '' : ' hidden'}><p class="hint">Ask Felix before you start</p><div class="chat-starters">${askChips('before', esc)}</div></div>
           <div class="rec-start">
             <button class="rec-go" data-action="rec-start" aria-label="Start recording" ${ov.available === false ? 'disabled' : ''}><span class="rec-go-dot"></span></button>
             <span class="rec-start-label">Start recording</span>
             <p class="hint rec-tip">${esc(tipWords(desktopNow()?.platform))}</p>
+            <div class="rec-ask" id="rec-ask" hidden><div class="chat-starters">${askChips('before', esc)}</div></div>
           </div>
         </section>
       </div>`;
     }
 
+    const PAUSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>';
+    const RESUME_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>';
+
+    function liveTab(tab, text, panel, on, extra = '') {
+      return `<button type="button" role="tab" class="kanban-tab${on === tab ? ' on' : ''}" id="rec-tab-${tab}" data-rec-tab="${tab}" aria-controls="${panel}" aria-selected="${on === tab}" tabindex="${on === tab ? 0 : -1}">${text}${extra}</button>`;
+    }
+
     function drawLive() {
       const v = s.view;
+      const writing = v.state === 'writing';
       const paused = v.state === 'paused';
       const listed = earlierFirst(s.earlier, placed(v));
+      const tab = writing && s.tab === 'wants' ? 'points' : s.tab || 'points';
       const more = listed.length && listed[0][0] > 0 ? '<button type="button" class="btn plain sm" data-action="rec-earlier">Show earlier points</button>' : '';
       const points = listed.length ? `${more}<ul class="rec-points">${listed.map(([, at, text]) => `<li><span class="rec-at">${clock(at)}</span><span class="rec-point-said">${esc(text)}</span></li>`).join('')}</ul>` : '';
       const warnings = v.warnings.map((w) => `<p class="set-note warn">${esc(w)}</p>`).join('');
       const kind = v.source === 'nativecall' ? 'Call · You + Others' : v.source === 'microphone' ? 'Microphone' : 'Screen';
-      const controls = `<div class="rec-buttons">
-            <button class="rec-round plain" data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}">${paused ? '<svg viewBox="0 0 24 24"><path d="M8 5l12 7-12 7z" fill="currentColor"/></svg>' : '<svg viewBox="0 0 24 24"><rect x="6" y="5" width="4" height="14" rx="1" fill="currentColor"/><rect x="14" y="5" width="4" height="14" rx="1" fill="currentColor"/></svg>'}<span>${paused ? 'Resume' : 'Pause'}</span></button>
-            <button class="rec-round stop rec-stop" data-action="rec-stop" aria-label="Stop and save"><span class="rec-square"></span><span>Stop and save</span></button>
-          </div>`;
+      const event = s.liveEvent && s.liveEvent.id === v.id ? s.liveEvent.event : null;
+      const chips = [event ? chip(icons.calendar, whenOf(event)) : '', chip(icons.folder, v.directory || 'Top level'), chip(kind === 'Screen' ? icons.screen : icons.mic, kind)].join('');
+      const denied = micDenied(v.source);
+      const bar = writing ? '' : `<div class="rec-bar" role="group" aria-label="Recorder"><span class="rec-dot"></span><span class="said" id="rec-word">${esc(stateWord(v))}</span><span class="rec-time" id="rec-time">${clock(v.secs)}</span><span class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></span><button type="button" class="rec-pause" id="rec-pause" data-keep data-action="rec-pause" aria-label="${paused ? 'Resume' : 'Pause'}" title="${paused ? 'Resume' : 'Pause'}">${paused ? RESUME_ICON : PAUSE_ICON}<span class="said">${paused ? 'Resume' : 'Pause'}</span></button><button type="button" class="rec-stop" id="rec-stop" data-keep data-action="rec-stop"><span class="rec-square"></span>Stop and save</button></div>`;
+      const hear = writing ? '' : `<p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, denied))}</p>${denied ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}`;
       const wanted = s.wantsDraft !== null ? s.wantsDraft : v.wants || '';
-      return `<div class="rec rec-live${paused ? ' paused' : ''}">
-        <section class="set-card rec-live-card">
-          <div class="rec-live-top"><span class="rec-state"><span class="rec-dot"></span><span id="rec-word">${esc(stateWord(v))}</span></span><span class="rec-meta">${kind === 'Screen' ? icons.screen : icons.mic}${kind}</span></div>
-          <div class="rec-clock"><span id="rec-time">${clock(v.secs)}</span></div>
-          <div class="rec-wave-box"><canvas class="rec-wave" id="rec-wave" aria-hidden="true"></canvas></div><p class="rec-hear" id="rec-hear" role="status">${esc(hearingWords(hearing(s.wave, WAVE_STEP_MS), v.source, paused, micDenied(v.source)))}</p>${micDenied(v.source) ? `<button class="btn plain sm" data-action="app-command" data-app-action="microphone">${(desktopNow()?.platform === 'windows' ? 'Open Settings' : 'Open System Settings')}</button>` : ''}
-          ${controls}
-          ${warnings}
-        </section>
-        <details class="set-card rec-heard" id="rec-heard" data-keep${s.showHeard ? ' open' : ''}>
-          <summary><span class="grow"><b>What’s being heard</b><span class="cal-sub">The live transcript</span></span>${icons.chevron}</summary>
-          <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
-          <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
-        </details>
-        <section class="set-card rec-notepad">
-          <header><h3>Your notes</h3></header><p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>
-          ${points}
-          <div class="rec-point rec-compose"><textarea id="rec-point-text" class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm" data-action="rec-point">Add point</button></div></div>
-        </section>
-        <section class="set-card rec-ask" id="rec-ask" data-keep><header><h3>Ask Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div></section>
-        <section class="set-card rec-wants-card">
-          <header><h3>What you want from the notes</h3><span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></header>
-          <p class="hint">The AI follows this when it writes the note. You can change it until you stop.</p>
-          <textarea id="rec-wants-live" class="set-input rec-wants" rows="2" data-reads="4000" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
-          <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
-        </section>
+      const count = v.points_total ?? listed.length;
+      const tabs = `<div class="rec-tabs" id="rec-tabs" role="tablist" aria-label="This recording" data-keep>${writing ? '<button type="button" role="tab" class="kanban-tab" aria-disabled="true" aria-selected="false" disabled>Notes</button>' : ''}${liveTab('points', 'Your notes', 'rec-points-panel', tab, ` <span class="badge" id="rec-count">${count}</span>`)}${liveTab('heard', 'Transcript', 'rec-heard', tab)}${writing ? '' : liveTab('wants', 'What you want', 'rec-wants-panel', tab)}</div>`;
+      const compose = writing ? '' : '<div class="rec-point rec-compose"><textarea id="rec-point-text" class="set-input" rows="3" placeholder="Type a point and press Enter"></textarea><div class="rec-compose-foot"><span class="cal-sub">Shift + Enter starts a new line</span><button class="btn plain sm" data-action="rec-point">Add point</button></div></div>';
+      const wants = writing ? '' : `<section class="rec-panel rec-wants-card" id="rec-wants-panel" role="tabpanel" aria-labelledby="rec-tab-wants"${tab === 'wants' ? '' : ' hidden'}>
+            <p class="hint">The AI follows this when it writes the note. You can change it until you stop. <span class="rec-wants-state" id="rec-wants-state">${esc(s.wantsState)}</span></p>
+            <textarea id="rec-wants-live" class="set-input rec-wants" data-keep rows="3" data-reads="4000" aria-label="What you want from the notes" placeholder="For example: focus on what will be on the exam, keep it short">${esc(wanted)}</textarea>
+            <p class="set-desc" id="rec-wants-live-hint"${Array.from(wanted.trim()).length > 4000 ? '' : ' hidden'}>Felix reads the first 4,000 characters of this.</p>
+          </section>`;
+      return `<div class="rec rec-live${paused ? ' paused' : ''}${writing ? ' writing' : ''}">
+        <header class="rec-head note-head"><div class="rec-head-text"><h1>${esc(v.title || 'Untitled recording')}</h1><div class="rec-chips">${chips}</div>${hear}</div>${bar}</header>
+        ${writing ? drawWriting() : ''}
+        <div class="rec-warnings">${warnings}</div>
+        <div class="rec-body">
+          <div class="rec-main">
+            ${tabs}
+            <section class="rec-panel rec-notepad" id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"${tab === 'points' ? '' : ' hidden'}>
+              ${writing ? '' : '<p class="hint">Type points or paste screenshots; they go into the note as written and leo fills in the rest.</p>'}
+              ${points || (writing ? '<p class="hint">You typed no points.</p>' : '')}
+              ${compose}
+            </section>
+            <section class="rec-panel rec-heard" id="rec-heard" role="tabpanel" data-keep aria-labelledby="rec-tab-heard">
+              <div class="rec-transcript" id="rec-transcript" tabindex="-1" aria-live="off"></div>
+              <button type="button" class="btn plain sm rec-latest" id="rec-latest" hidden>Back to latest</button>
+            </section>
+            ${wants}
+          </div>
+          ${writing ? '' : `<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix</h3></header><div class="chat-starters">${askChips('live', esc)}</div></aside>`}
+        </div>
       </div>`;
     }
 
@@ -577,15 +641,10 @@
       const total = v.steps ? Math.max(1, v.steps[1]) : 0;
       const bar = Math.min(99, total ? ((done + (done < total ? 0.9 * creep : 0)) / total) * 100 : 60 * creep);
       const waited = Math.round((now - at.since) / 1000);
-      return `<div class="rec rec-writing">
-        <div class="section-title">Record</div>
-        <section class="set-card rec-done-card">${felix.felix(72, 'idle think')}<h3>${esc(stateWord(v) || 'Writing the notes')}</h3>
-          <div class="upload-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Math.max(6, bar))}"><i style="width:${Math.max(6, bar)}%"></i></div>
-          <p class="hint">Writing for ${clock(waited)} · ${clock(v.secs)} recorded. You can leave this page; the note appears in its folder when it is ready.</p>
-          ${v.warnings.map((w) => `<p class="set-note warn">${esc(w)}</p>`).join('')}
-          <button class="btn plain sm" data-action="rec-finish">Finish with what is transcribed so far</button>
-        </section>
-      </div>`;
+      const said = stateWord(v);
+      const words = !said || said.startsWith('Writing the notes') ? said.replace(/^Writing the notes ?/, '') : said;
+      return `<div class="rec-progress"><svg class="rec-mark" aria-hidden="true"><use href="#leo-mark"/></svg><span class="rec-progress-step">Writing the notes${words ? ` · ${esc(words)}` : ''}</span><div class="upload-bar" role="progressbar" aria-label="Writing the notes" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(Math.max(6, bar))}"><i style="width:${Math.max(6, bar)}%"></i></div><button type="button" class="btn plain sm" data-action="rec-finish" title="Finish with what is transcribed so far">Finish now</button></div>
+        <p class="hint rec-progress-hint">Writing for ${clock(waited)} · ${clock(v.secs)} recorded. You can leave this page; the note appears in its folder when it is ready.</p>`;
     }
 
     function drawFailed() {
@@ -690,7 +749,15 @@
       const kept = [...box.querySelectorAll('[data-keep]')];
       const made = root.document.createElement('div');
       made.innerHTML = html;
-      if (!kept.length || !graft(box, made, kept)) box.innerHTML = html;
+      const next = { pause: made.querySelector('#rec-pause'), wants: made.querySelector('#rec-wants-live') };
+      if (!kept.length || !graft(box, made, kept)) return void (box.innerHTML = html);
+      const pause = box.querySelector('#rec-pause');
+      if (pause && next.pause && pause.innerHTML !== next.pause.innerHTML) {
+        pause.innerHTML = next.pause.innerHTML;
+        ['aria-label', 'title'].forEach((name) => pause.setAttribute(name, next.pause.getAttribute(name)));
+      }
+      const wants = box.querySelector('#rec-wants-live');
+      if (wants && next.wants && wants !== root.document.activeElement && wants.value !== next.wants.value) wants.value = next.wants.value;
     }
 
     function syncAsk(box) {
@@ -714,21 +781,10 @@
     function showTranscript(box) {
       const text = box.querySelector('#rec-transcript');
       if (!text) return;
-      const heard = box.querySelector('#rec-heard');
       const latest = box.querySelector('#rec-latest');
       const fresh = s.shownIn !== text;
       if (fresh) {
         Object.assign(s, { shownIn: text, shownText: '', follow: true });
-        heard.addEventListener('toggle', () => {
-          s.showHeard = heard.open;
-          try {
-            root.localStorage.setItem('leo-rec-heard', heard.open ? 'open' : 'shut');
-          } catch (e) {}
-          if (!heard.open) return;
-          s.follow = true;
-          latest.hidden = true;
-          text.scrollTop = text.scrollHeight;
-        });
         text.addEventListener('scroll', () => {
           s.follow = text.scrollTop + text.clientHeight >= text.scrollHeight - 24;
           latest.hidden = s.follow;
@@ -744,7 +800,7 @@
       const shown = s.shownText;
       s.shownText = next;
       if (!next) {
-        text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : 'Listening… words appear here after a few seconds.'}</span>`;
+        text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : s.view.state === 'writing' ? 'Nothing was heard while recording.' : 'Listening… words appear here after a few seconds.'}</span>`;
         return;
       }
       const picked = root.getSelection && root.getSelection();
@@ -777,6 +833,32 @@
       latest.hidden = s.follow;
     }
 
+    function syncTabs(box) {
+      const tabs = [...box.querySelectorAll('[data-rec-tab]')];
+      if (!tabs.some((t) => t.dataset.recTab === s.tab)) s.tab = 'points';
+      const count = box.querySelector('#rec-count');
+      if (count && s.view) count.textContent = String(s.view.points_total ?? earlierFirst(s.earlier, placed(s.view)).length);
+      for (const t of tabs) {
+        const on = t.dataset.recTab === s.tab;
+        t.classList.toggle('on', on);
+        t.setAttribute('aria-selected', String(on));
+        t.tabIndex = on ? 0 : -1;
+        const panel = root.document.getElementById(t.getAttribute('aria-controls'));
+        if (panel) panel.hidden = !on;
+      }
+    }
+
+    function showTab(tab, focus) {
+      const box = s.container;
+      if (!box || !box.isConnected) return;
+      s.tab = tab;
+      syncTabs(box);
+      const picked = box.querySelector(`[data-rec-tab="${tab}"]`);
+      if (focus && picked) picked.focus();
+      const text = box.querySelector('#rec-transcript');
+      if (tab === 'heard' && text && s.follow) text.scrollTop = text.scrollHeight;
+    }
+
     function draw() {
       const box = s.container;
       if (!box || !box.isConnected) return;
@@ -790,29 +872,35 @@
       const page = !v || v.state === 'done' ? 'idle' : live(v) ? 'live' : v.state === 'writing' ? 'writing' : 'failed';
       const moved = s.page && s.page !== page;
       const paused = page === 'live' && s.paused !== undefined && s.paused !== (v.state === 'paused');
-      if (moved) motion?.overlapOut(box);
+      const flowing = (s.page === 'live' && page === 'writing') || (s.page === 'writing' && page === 'live');
+      if (moved && !flowing) motion?.overlapOut(box);
       s.page = page;
       s.paused = page === 'live' ? v.state === 'paused' : undefined;
       const paint = () => {
         if (page === 'idle') box.innerHTML = drawIdle(folders, here, form && form.kind);
-        else if (page === 'live') {
+        else if (page === 'live' || page === 'writing') {
           paintLive(box);
           s.heard = '';
-          paintWaveNow();
+          if (page === 'live') paintWaveNow();
         }
-        else if (page === 'writing') box.innerHTML = drawWriting();
         else box.innerHTML = drawFailed();
       };
-      if (paused && motion) motion.iconSwap(box, paint, '.rec-round.plain svg');
+      if (paused && motion) motion.iconSwap(box, paint, '.rec-pause svg');
       else paint();
-      if (moved) motion?.cascade(box, 'settling');
-      if (page === 'live') showTranscript(box);
+      if (moved && !flowing) motion?.cascade(box, 'settling');
+      if (page === 'live' || page === 'writing') {
+        syncTabs(box);
+        showTranscript(box);
+      }
       const wantsArea = box.querySelector('#rec-wants-live');
       if (wantsArea) {
-        if (wantsKeep) {
+        if (wantsKeep && root.document.activeElement !== wantsArea) {
           wantsArea.focus();
           wantsArea.setSelectionRange(wantsKeep.start, wantsKeep.end);
         }
+      }
+      if (wantsArea && !wantsArea.dataset.bound) {
+        wantsArea.dataset.bound = '1';
         wantsArea.addEventListener('input', () => {
           s.wantsDraft = wantsArea.value;
           s.wantsState = '';
@@ -857,7 +945,6 @@
           draw();
         });
       }
-      const dir=box.querySelector('#rec-dir');
     }
 
     async function saveWants() {
@@ -919,6 +1006,18 @@
     root.document.addEventListener('click', (event) => {
       const button = event.target && event.target.closest && event.target.closest('[data-rec-ask]');
       if (button && s.container && s.container.contains(button)) askFelix(button.dataset.recAsk);
+      const tab = event.target && event.target.closest && event.target.closest('[data-rec-tab]');
+      if (tab && s.container && s.container.contains(tab)) showTab(tab.dataset.recTab, false);
+    });
+
+    root.document.addEventListener('keydown', (event) => {
+      const tab = event.target && event.target.closest && event.target.closest('[data-rec-tab]');
+      if (!tab || !s.container || !s.container.contains(tab) || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      const tabs = [...s.container.querySelectorAll('[data-rec-tab]')];
+      const at = tabs.indexOf(tab);
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (at + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+      event.preventDefault();
+      showTab(tabs[next].dataset.recTab, true);
     });
 
     let pasting = false;
@@ -973,7 +1072,7 @@
           const dir=box.querySelector('#rec-dir').value;
           const events = (s.calendar && s.calendar.events) || [];
           const picked = s.event !== null ? events[s.event] : null;
-          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() && speakersReady() });
+          await start(source, dir, box.querySelector('#rec-title').value.trim(), { context: picked ? picked.context : '', wants: box.querySelector('#rec-wants').value.trim(), speakers: kind !== 'call' && speakersOn() && speakersReady() }, picked);
         } finally {
           if (button && button.isConnected) button.disabled = false;
         }
@@ -1034,5 +1133,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, NOT_SPEAKERS, speakersOf, toneOf, transcriptFlow, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

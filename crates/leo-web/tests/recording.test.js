@@ -169,9 +169,9 @@ const esc = (text) => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').
 const icons = new Proxy({}, { get: () => '' });
 
 function idle(checks, platform, denied = false) {
-  return piece('drawIdle', 'drawLive', 'drawIdle', {
+  return piece('chip', 'drawLive', 'drawIdle', {
     s: { overview: { available: true, checks }, calendar: null, event: null },
-    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, noteFields: () => '', kindChoices: () => '', speakersRow: () => '',
+    esc, icons, whenOf: L.whenOf, pendingLine: L.pendingLine, folderOptions: () => '', kindChoices: () => '', speakersRow: () => '',
     askChips: L.askChips, preflight: L.preflight, tipWords: L.tipWords, HEADSET: L.HEADSET, desktopNow: () => ({ platform }), micDenied: () => denied,
   })([], '');
 }
@@ -206,9 +206,9 @@ test('a denied microphone is said plainly with a way to the system settings', ()
   assert.equal(L.hearingWords('sound', 'microphone', false, true), 'leo can’t hear: microphone access is off.');
   assert.equal(L.hearingWords('sound', 'screen', false, true), 'Hearing sound');
   assert.equal(L.hearingWords('sound', 'microphone', false, false), 'Hearing sound');
-  const live = (denied) => piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
+  const live = (denied) => piece('chip', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => denied, desktopNow: () => ({ platform: 'macos' }),
   })();
   const html = live(true);
   assert.match(html, /leo can’t hear: microphone access is off\./);
@@ -404,7 +404,7 @@ test('the live transcript is patched in place: kept words stay the same node and
   show(box);
   assert.equal(text.textContent, s.view.transcript, 'a trimmed head is dropped from the front');
   assert.equal(text.kids[0], first);
-  assert.equal(text.wired, 3, 'listeners are added once, when the transcript is made');
+  assert.equal(text.wired, 2, 'listeners are added once, when the transcript is made');
   assert.equal(latest.hidden, true);
   s.follow = false;
   s.view.transcript += ' again';
@@ -450,6 +450,7 @@ test('a live redraw replaces the cards around the transcript and Felix\'s questi
   const el = (id, children = [], className = '') => {
     const node = { id, className, children };
     node.contains = (other) => node === other || node.children.some((child) => child.contains(other));
+    node.querySelector = () => null;
     children.forEach((child) => {
       child.replaceWith = (next) => { if (['rec-heard', 'rec-ask'].includes(child.id)) throw new Error(`${child.id} was replaced`); node.children[node.children.indexOf(child)] = next; };
     });
@@ -499,12 +500,21 @@ test('Felix\'s questions follow the stage: before Start, while recording, and on
   s.event = 0;
   sync(box);
   assert.equal(ask.hidden, false);
-  const live = piece('drawLive', 'drawWriting', 'drawLive', {
-    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], showHeard: true, wantsDraft: null, wantsState: '' },
-    esc, icons, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
+  const live = piece('chip', 'drawWriting', 'drawLive', {
+    s: { view: { state: 'recording', source: 'microphone', points: [], warnings: [], secs: 3, transcript: '' }, earlier: [], wave: [], tab: 'points', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: () => [], stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }),
   })();
-  assert.match(live, /rec-notepad.*<section class="set-card rec-ask" id="rec-ask" data-keep>.*What did I just miss\?.*rec-wants-card/s, 'the questions sit under Your notes');
-  assert.match(live, /id="rec-heard" data-keep/);
+  assert.match(live, /rec-notepad.*rec-wants-card.*<aside class="set-card rec-felix rec-ask" id="rec-ask" data-keep aria-label="Ask Felix"><header><h3>Felix<\/h3><\/header>.*What did I just miss\?/s, 'the questions sit in Felix\'s own column beside the tabs');
+  assert.match(live, /id="rec-heard" role="tabpanel" data-keep/);
+  assert.match(live, /id="rec-tab-points"/);
+  assert.match(live, /id="rec-points-panel" role="tabpanel" aria-labelledby="rec-tab-points"/);
+  assert.match(live, /id="rec-heard" role="tabpanel" data-keep aria-labelledby="rec-tab-heard"/);
+  assert.match(live, /id="rec-wants-panel" role="tabpanel" aria-labelledby="rec-tab-wants"/);
+  assert.match(live, /id="rec-pause" data-keep data-action="rec-pause"/);
+  assert.match(live, /id="rec-stop" data-keep data-action="rec-stop"/);
+  assert.match(live, /<textarea id="rec-wants-live"[^>]*data-keep/);
+  assert.match(live, /data-rec-tab="points"[^>]*aria-selected="true"[^>]*>Your notes <span class="badge" id="rec-count">0<\/span><\/button>.*data-rec-tab="heard"[^>]*>Transcript<\/button>.*data-rec-tab="wants"[^>]*>What you want<\/button>/s, 'Your notes is the first tab and open by default');
+  assert.match(live, /<div class="rec-bar"[^>]*><span class="rec-dot"><\/span>.*id="rec-time">0:03<\/span>.*id="rec-wave".*data-action="rec-pause".*data-action="rec-stop"/s, 'one recorder bar: dot, clock, wave, Pause, Stop');
 });
 
 test('a question asked while recording sends the newest transcript and the typed points within 8,000 characters', () => {
@@ -526,10 +536,83 @@ test('a question asked while recording sends the newest transcript and the typed
   assert.equal(L.briefAsk(null, 'only wants'), 'What I want from the notes: only wants');
 });
 
-test('the live page keeps the stacked page unless a container or the docked chat asks for columns', () => {
+test('the live page keeps one column unless its container is wide enough for Felix\'s column', () => {
   const css = require('node:fs').readFileSync(require.resolve('../src/web/styles/13-setup-misc.css'), 'utf8');
-  const gated = css.split('\n').filter((line) => /\.rec-live \{[^}]*display: grid/.test(line));
-  assert.equal(gated.length, 2, 'a wide main area and a docked chat each lay out columns');
-  assert.ok(gated.every((line) => /^\s*(?:@media \([^)]*\) \{ )?@container recroom \(min-width: \d+px\) \{/.test(line)), 'only inside a container query');
-  assert.ok(gated.some((line) => /@media \(min-width: 1200px\) \{ @container[^\n]*body\.chat-open \.rec-live/.test(line)), 'two columns only beside a docked chat');
+  const columns = css.split('\n').filter((line) => /\.rec-body[^{]*\{[^}]*grid-template-columns/.test(line));
+  assert.equal(columns.length, 1);
+  assert.match(columns[0], /^@container recroom \(min-width: \d+px\) \{ \.rec-body:has\(> \.rec-felix\)/, 'only inside a container query, and only while Felix\'s column is there');
+});
+
+test('after Stop the page keeps its header and tabs, with one progress line and Finish now', () => {
+  const writing = piece('chip', 'drawFailed', 'drawLive', {
+    s: { view: { id: 'r', state: 'writing', step: 'Writing the notes', steps: [2, 5], source: 'microphone', title: 'Capstone sync', directory: 'Work', points: [[30, 'a point']], points_total: 1, warnings: [], secs: 90, transcript: 'said' }, earlier: [], wave: [], tab: 'wants', wantsDraft: null, wantsState: '' },
+    esc, icons, whenOf: L.whenOf, askChips: L.askChips, clock: L.clock, earlierFirst: L.earlierFirst, placed: (v) => v.points.map(([at, text], k) => [k, at, text]), stateWord: L.stateWord, hearing: L.hearing, hearingWords: L.hearingWords, WAVE_STEP_MS: 60, micDenied: () => false, desktopNow: () => ({ platform: 'macos' }), Date,
+  })();
+  assert.match(writing, /<h1>Capstone sync<\/h1>/);
+  assert.match(writing, /<use href="#leo-mark"\/><\/svg><span class="rec-progress-step">Writing the notes · 2\/5<\/span><div class="upload-bar"/);
+  assert.match(writing, /data-action="rec-finish"[^>]*>Finish now<\/button>/);
+  assert.match(writing, /aria-disabled="true"[^>]*disabled>Notes<\/button>.*data-rec-tab="points"[^>]*aria-selected="true".*data-rec-tab="heard"/s, 'Notes waits; Your notes is open since What you want is gone');
+  assert.doesNotMatch(writing, /rec-bar|rec-wants-live|rec-point-text|rec-felix/);
+  assert.match(writing, /a point/);
+  assert.match(writing, /id="rec-heard" role="tabpanel" data-keep/);
+});
+
+test('speakers take tones in the order they were first heard, You keeps ink and source labels are not speakers', () => {
+  const speakers = ['You', 'Others', 'Sam'];
+  assert.equal(L.toneOf(speakers, 'You'), 'var(--text)');
+  assert.equal(L.toneOf(speakers, 'Others'), 'var(--hue-0)');
+  assert.equal(L.toneOf(speakers, 'Sam'), 'var(--hue-1)');
+  assert.equal(L.toneOf(['Speaker 1', 'Speaker 2', 'Speaker 3'], 'Speaker 3'), 'var(--hue-4)');
+  assert.deepEqual(L.speakersOf(['Microphone', 'Computer audio', '']), []);
+  assert.deepEqual(L.speakersOf(['Microphone', 'Speaker 1']), ['Speaker 1']);
+});
+
+test('a meeting groups lines into turns and folds echo lines without starting a turn', () => {
+  const p = (seq, at, speaker, text, echo) => [seq, { start_secs: at, end_secs: at + 4, text, speaker, ...(echo ? { echo: true } : {}) }];
+  const flow = L.transcriptFlow(
+    [p(1, 0, 'You', 'a'), p(2, 5, 'You', 'b'), p(3, 9, 'Others', 'c'), p(4, 10, 'You', 'c', true), p(5, 11, 'You', 'd', true), p(6, 14, 'Others', 'e'), p(7, 20, 'You', 'f')],
+    [[1, { at_secs: 5, text: 'typed' }]],
+    ['You', 'Others'],
+  );
+  assert.equal(flow.meeting, true);
+  assert.deepEqual(flow.groups.map((g) => [g.speaker, g.at]), [['You', 0], ['Others', 9], ['You', 20]]);
+  assert.deepEqual(flow.groups[0].items.map((i) => Object.keys(i)[0]), ['passage', 'passage', 'point'], 'a point comes after the line said at the same second');
+  assert.deepEqual(flow.groups[1].items.map((i) => (i.echo ? i.echo.map(([seq]) => seq) : i.passage[0])), [3, [4, 5], 6]);
+});
+
+test('a lecture makes one paragraph a minute and a missing echo field counts as not echo', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 60), p(4, 179)], [], ['Microphone']);
+  assert.equal(flow.meeting, false);
+  assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => i.passage[0])]), [[3, [1, 2]], [60, [3]], [179, [4]]]);
+});
+
+test('a lecture draws a typed point under its own minute, not under the minute before', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 130)], [[9, { at_secs: 95, text: 'point' }]], ['Microphone']);
+  assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => (i.passage || i.point)[0])]), [[3, [1, 2]], [95, [9]], [130, [3]]]);
+});
+
+test('a live redraw keeps Pause, Stop and the wants box and changes Pause in place', () => {
+  const node = (id, extra = {}) => {
+    const attrs = { 'aria-label': 'Pause', title: 'Pause' };
+    return { id, children: [], className: '', innerHTML: 'pause', value: '', setAttribute: (k, v) => { attrs[k] = v; }, getAttribute: (k) => attrs[k], attrs, contains(other) { return this === other || this.children.some((c) => c.contains(other)); }, ...extra };
+  };
+  const shown = [node('rec-pause'), node('rec-stop'), node('rec-wants-live', { value: 'typed' })];
+  const shell = node('', { children: shown, className: 'rec rec-live' });
+  const resumed = node('rec-pause', { innerHTML: 'resume' });
+  resumed.attrs['aria-label'] = 'Resume';
+  resumed.attrs.title = 'Resume';
+  const freshShell = node('', { children: [resumed, node('rec-stop'), node('rec-wants-live', { value: 'server' })], className: 'rec rec-live paused' });
+  const box = node('box', { children: [shell] });
+  box.querySelectorAll = () => shown;
+  box.querySelector = (at) => shown.find((n) => `#${n.id}` === at) || null;
+  const made = node('made', { children: [freshShell] });
+  made.querySelector = (at) => freshShell.children.find((n) => `#${n.id}` === at) || null;
+  piece('graft', 'showTranscript', 'paintLive', { root: { document: { createElement: () => made, activeElement: shown[2] } }, drawLive: () => '' })(box);
+  assert.deepEqual(shell.children, shown);
+  assert.equal(shell.className, 'rec rec-live paused');
+  assert.equal(shown[0].innerHTML, 'resume');
+  assert.equal(shown[0].attrs['aria-label'], 'Resume');
+  assert.equal(shown[2].value, 'typed', 'a focused wants box keeps what is being typed');
 });
