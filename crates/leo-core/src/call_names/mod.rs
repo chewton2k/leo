@@ -291,27 +291,36 @@ impl Timeline {
                 .find(|(_, to, who)| start < *to && !self.is_me(who))
                 .map(|(_, _, who)| who.clone());
         }
+        self.name_over(&[(start, end)])
+    }
+
+    pub fn name_over(&self, spans: &[(f64, f64)]) -> Option<String> {
         let mut time: Vec<(String, String, f64)> = Vec::new();
-        for (from, to, who) in self.runs[first..].iter() {
-            if *from >= end {
-                break;
-            }
-            if self.is_me(who) {
-                continue;
-            }
-            let overlap = to.min(end) - from.max(start);
-            if overlap <= 0.0 {
-                continue;
-            }
-            let key = norm(who);
-            match time.iter_mut().find(|(k, _, _)| *k == key) {
-                Some(entry) => entry.2 += overlap,
-                None => time.push((key, who.clone(), overlap)),
+        let mut whole = 0.0;
+        for &(start, end) in spans.iter().filter(|(start, end)| end > start) {
+            whole += end - start;
+            let first = self.runs.partition_point(|(_, to, _)| *to <= start);
+            for (from, to, who) in self.runs[first..].iter() {
+                if *from >= end {
+                    break;
+                }
+                if self.is_me(who) {
+                    continue;
+                }
+                let overlap = to.min(end) - from.max(start);
+                if overlap <= 0.0 {
+                    continue;
+                }
+                let key = norm(who);
+                match time.iter_mut().find(|(k, _, _)| *k == key) {
+                    Some(entry) => entry.2 += overlap,
+                    None => time.push((key, who.clone(), overlap)),
+                }
             }
         }
         time.into_iter()
             .max_by(|a, b| a.2.total_cmp(&b.2))
-            .filter(|(_, _, spent)| *spent > 0.5 * (end - start))
+            .filter(|(_, _, spent)| *spent > 0.5 * whole)
             .map(|(_, who, _)| who)
     }
 }

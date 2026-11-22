@@ -16,7 +16,7 @@ pub fn names() -> Option<Names> {
             readers: std::sync::Arc::new(|| {
                 Box::new(win::Win::new()) as Box<dyn leo_core::call_names::Reader>
             }),
-            own: None,
+            own: win::own_name(),
         })
     }
     #[cfg(not(any(target_os = "macos", windows)))]
@@ -520,6 +520,24 @@ mod win {
                 com,
             }
         }
+    }
+
+    pub fn own_name() -> Option<String> {
+        use windows::core::PWSTR;
+        use windows::Win32::Security::Authentication::Identity::{GetUserNameExW, NameDisplay};
+        let mut size = 0u32;
+        let _ = unsafe { GetUserNameExW(NameDisplay, None, &mut size) };
+        if size == 0 {
+            return None;
+        }
+        let mut name = vec![0u16; size as usize];
+        if !unsafe { GetUserNameExW(NameDisplay, Some(PWSTR(name.as_mut_ptr())), &mut size) } {
+            return None;
+        }
+        name.truncate(size as usize);
+        String::from_utf16(&name)
+            .ok()
+            .filter(|name| !name.trim().is_empty())
     }
 
     impl Drop for Win {

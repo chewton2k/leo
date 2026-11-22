@@ -1069,21 +1069,86 @@ impl Session {
 
     fn timed(&self, assembled: &Assembled) -> Vec<((u64, u64), leo_core::recording::Passage)> {
         let names = self.call_names();
+        let secs = |from: u64, to: u64| (from as f64 / 1000.0, to as f64 / 1000.0);
         let named = |from: u64, to: u64| {
-            names
-                .as_ref()
-                .and_then(|t| t.name(from as f64 / 1000.0, to as f64 / 1000.0))
+            let (from, to) = secs(from, to);
+            names.as_ref().and_then(|t| t.name(from, to))
         };
+        let speaker = self.label();
+        let end_of = |p: &Part| {
+            self.manifest
+                .duration_secs
+                .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
+        };
+        let lines = self.turns(assembled).map(|turns| {
+            assembled
+                .parts
+                .iter()
+                .zip(turns)
+                .flat_map(|(p, entries)| {
+                    let end = end_of(p);
+                    let base = p.start_secs * 1000;
+                    let lead = lead_ms(&self.manifest.fresh, p.index);
+                    let starts: Vec<u64> = entries.iter().map(|(ms, _, _)| base + ms).collect();
+                    let named = &named;
+                    entries
+                        .into_iter()
+                        .enumerate()
+                        .map(move |(i, (ms, spoken_to, text))| {
+                            let from = starts[i];
+                            let said = (base + ms).saturating_sub(lead);
+                            let said_to = match spoken_to {
+                                Some(to) => (base + to).saturating_sub(lead),
+                                None => starts
+                                    .get(i + 1)
+                                    .map_or(end * 1000, |next| next.saturating_sub(lead)),
+                            }
+                            .max(said);
+                            (
+                                (said, said_to),
+                                leo_core::recording::Passage {
+                                    start_secs: from / 1000,
+                                    end_secs: starts
+                                        .get(i + 1)
+                                        .map(|ms| ms / 1000)
+                                        .unwrap_or(end)
+                                        .max(from / 1000),
+                                    text,
+                                    speaker: named(said, said_to).unwrap_or_else(|| speaker.into()),
+                                    echo: false,
+                                },
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .collect::<Vec<_>>()
+        });
         if let Some(spoken) = self.labels(assembled) {
+            let said: Vec<(u64, u64)> = lines.iter().flatten().map(|(span, _)| *span).collect();
             return spoken
                 .into_iter()
                 .map(|s| {
+                    let first = said
+                        .partition_point(|(from, _)| *from < s.start_ms)
+                        .saturating_sub(1);
+                    let mut over: Vec<(f64, f64)> = said[first..]
+                        .iter()
+                        .take_while(|(from, _)| *from < s.end_ms)
+                        .map(|(from, to)| ((*from).max(s.start_ms), (*to).min(s.end_ms)))
+                        .filter(|(from, to)| to > from)
+                        .map(|(from, to)| secs(from, to))
+                        .collect();
+                    if over.is_empty() {
+                        over.push(secs(s.start_ms, s.end_ms));
+                    }
                     (
                         (s.start_ms, s.end_ms),
                         leo_core::recording::Passage {
                             start_secs: s.start_ms / 1000,
                             end_secs: s.end_ms.div_ceil(1000),
-                            speaker: named(s.start_ms, s.end_ms)
+                            speaker: names
+                                .as_ref()
+                                .and_then(|t| t.name_over(&over))
                                 .unwrap_or_else(|| format!("Speaker {}", s.speaker)),
                             text: s.text,
                             echo: false,
@@ -1092,14 +1157,8 @@ impl Session {
                 })
                 .collect();
         }
-        let speaker = self.label();
-        let end_of = |p: &Part| {
-            self.manifest
-                .duration_secs
-                .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
-        };
-        let Some(turns) = self.turns(assembled) else {
-            return assembled
+        lines.unwrap_or_else(|| {
+            assembled
                 .parts
                 .iter()
                 .map(|p| {
@@ -1114,49 +1173,8 @@ impl Session {
                         },
                     )
                 })
-                .collect();
-        };
-        assembled
-            .parts
-            .iter()
-            .zip(turns)
-            .flat_map(|(p, entries)| {
-                let end = end_of(p);
-                let base = p.start_secs * 1000;
-                let lead = lead_ms(&self.manifest.fresh, p.index);
-                let starts: Vec<u64> = entries.iter().map(|(ms, _, _)| base + ms).collect();
-                let named = &named;
-                entries
-                    .into_iter()
-                    .enumerate()
-                    .map(move |(i, (ms, spoken_to, text))| {
-                        let from = starts[i];
-                        let said = (base + ms).saturating_sub(lead);
-                        let said_to = match spoken_to {
-                            Some(to) => (base + to).saturating_sub(lead),
-                            None => starts
-                                .get(i + 1)
-                                .map_or(end * 1000, |next| next.saturating_sub(lead)),
-                        }
-                        .max(said);
-                        (
-                            (said, said_to),
-                            leo_core::recording::Passage {
-                                start_secs: from / 1000,
-                                end_secs: starts
-                                    .get(i + 1)
-                                    .map(|ms| ms / 1000)
-                                    .unwrap_or(end)
-                                    .max(from / 1000),
-                                text,
-                                speaker: named(said, said_to).unwrap_or_else(|| speaker.into()),
-                                echo: false,
-                            },
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .collect()
+                .collect()
+        })
     }
 
     pub fn archive(&self) -> leo_core::recording::Archive {

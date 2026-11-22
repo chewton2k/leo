@@ -114,8 +114,8 @@ a test, or leave it unset to see the user's own data.
   defaults, window dragging and double-click maximize.
 
 Call names (`call_names.rs`, 2026-11-22): `names()` (the readers and, on macOS,
-`NSFullUserName` as the user's own name; none on Windows, whose `GetUserNameExW`
-sits behind a windows-crate feature leo does not enable) is handed to
+`NSFullUserName`, on Windows `GetUserNameExW(NameDisplay)`, as the user's own
+name) is handed to
 `leo_host::listener`. Each read lists the running call apps' call-titled windows;
 until a call is bound it copies them all and `call_names::pick` binds the one app
 (or browser window) that shows a call (`call_names::shows_call`: a call control,
