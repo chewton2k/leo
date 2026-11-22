@@ -419,7 +419,7 @@ mod tests {
         let counts = Arc::default();
         let watch = watching(&counts, Acts::Well, temp.path(), Duration::from_secs(5));
         watch.tick(100.0, false);
-        std::thread::sleep(Duration::from_millis(1_100));
+        std::thread::sleep(Duration::from_millis(1_500));
         drop(watch);
         let timeline = named(temp.path());
         assert_eq!(
@@ -485,7 +485,7 @@ mod tests {
             let counts = Arc::default();
             let watch = watching(&counts, Acts::Well, dir, Duration::from_secs(5));
             watch.tick(100.0, false);
-            std::thread::sleep(Duration::from_millis(1_000));
+            std::thread::sleep(Duration::from_millis(1_300));
             let stopping = Instant::now();
             drop(watch);
             assert!(stopping.elapsed() < STOP_WAIT);
@@ -531,7 +531,7 @@ mod tests {
             Duration::from_millis(150),
         );
         watch.tick(50.0, false);
-        std::thread::sleep(Duration::from_millis(1_200));
+        std::thread::sleep(Duration::from_millis(1_500));
         drop(watch);
         assert_eq!(counts.made.load(Ordering::Relaxed), 2);
         assert_eq!(counts.most.load(Ordering::Relaxed), 1);

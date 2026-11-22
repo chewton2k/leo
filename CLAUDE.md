@@ -228,10 +228,11 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
 - Call speaker names (2026-11-22): while a Call records, the Others track reads
   the call app's window every 400 ms (`leo_core::call_names`: Zoom, Teams, Meet
   in a browser; macOS Accessibility, Windows UI Automation, in-process readers in
-  `leo-desktop/src/call_names.rs` handed down through `leo_host::listener`). A
-  line of the other side is named only when one person was marked talking for
-  more than half of it, or the call has exactly one other person; anything else
-  stays "Others". Never guessed, never the user's own name, nothing leaves the
+  `leo-desktop/src/call_names.rs` handed down through `leo_host::listener`),
+  bound to the one call it finds first. A line of the other side is named only
+  when one person other than the user was marked talking for more than half of
+  its spoken span, or the call has exactly one other person by the count the app
+  shows; anything else stays "Others". Never guessed, never the user's own name, nothing leaves the
   computer; tests use fixtures and fake readers. The name lands in `speaker`.
   Credited in NOTICE (its name appears only there).
 - Windows child programs stay quiet. Model and toolchain caches stay under the
