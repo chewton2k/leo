@@ -201,6 +201,7 @@ button.settings-link { width: 100%; border: 0; background: none; font-family: in
 .switch:focus-visible,
 .choice-pick:has(> input:focus-visible),
 button.choice-pick:focus-visible,
+.margin-mode:focus-visible,
 .onboarding-model:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .choice-diagram { display: block; margin-bottom: 7px; border-radius: var(--r-xs); background: var(--page); overflow: hidden; }
 .choice-diagram > svg { display: block; width: 100%; height: auto; }

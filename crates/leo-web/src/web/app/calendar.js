@@ -1724,7 +1724,8 @@ function tasksSync() {
   const pill = tasksBox.getBoundingClientRect();
   tasksBox.classList.add('open');
   const full = tasksBox.getBoundingClientRect();
-  const shut = `inset(${pill.top - full.top}px ${full.right - pill.right}px ${full.bottom - pill.bottom}px ${pill.left - full.left}px round 22px)`;
+  const edge = (gap) => (gap < 1 ? -24 : gap);
+  const shut = `inset(${edge(pill.top - full.top)}px ${edge(full.right - pill.right)}px ${edge(full.bottom - pill.bottom)}px ${edge(pill.left - full.left)}px round 22px)`;
   const open = 'inset(-24px round 14px)';
   tasksRun = tasksBox.animate([{ clipPath: live || (want ? shut : open) }, { clipPath: want ? open : shut }], { duration: want ? MOTION_MS : MOTION_MS * EXIT_SHARE, easing: want ? EASE_OUT : EASE_EXIT });
   tasksRun.onfinish = () => {
@@ -1734,6 +1735,7 @@ function tasksSync() {
   };
 }
 for (const type of ['pointerenter', 'pointerleave', 'focusin', 'focusout']) tasksBox.addEventListener(type, () => requestAnimationFrame(tasksSync));
+document.addEventListener('pointerdown', () => requestAnimationFrame(tasksSync), true);
 const TASKS_HOLD_MS = 300;
 let tasksOpened = { at: 0, x: 0, y: 0 };
 tasksBox.addEventListener('pointerenter', (e) => { tasksOpened = { at: performance.now(), x: e.clientX, y: e.clientY }; });
