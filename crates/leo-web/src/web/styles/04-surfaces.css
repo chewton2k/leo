@@ -221,9 +221,9 @@ svg.drawn-tasks { width: 64px; height: 66px; margin: 0 0 4px -6px; }
 .prose h3 { font-size: calc(19px * var(--read)); }
 .prose h4 { font-size: calc(17px * var(--read)); }
 .prose h5, .prose h6 { font-size: calc(15px * var(--read)); color: var(--muted); }
-.prose p { margin: .7em 0; text-wrap: pretty; }
+.prose p { margin: .7em 0; }
 .prose ul, .prose ol { padding-left: 1.4em; margin: .6em 0; }
-.prose li { margin: .25em 0; text-wrap: pretty; }
+.prose li { margin: .25em 0; }
 .prose li > ul, .prose li > ol { margin: .2em 0; }
 ul.list-1 { list-style-type: disc; }
 ul.list-2 { list-style-type: circle; }

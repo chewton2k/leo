@@ -368,7 +368,7 @@ body.files-over main::after {
 .source-more > summary::-webkit-details-marker { display: none; }
 .source-more > summary > svg { width: 15px; height: 15px; flex: none; }
 .source-more[open]:not(.closing) > summary > svg { transform: rotate(90deg); }
-.home-wd:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+.home-wd:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible, :where(.note-layout[data-wide]) .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
 .rec-error-details.source-more > summary { padding: 0; }
 
 .select-control { position: relative; display: flex; align-items: center; min-width: 0; flex: 1; }

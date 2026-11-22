@@ -116,10 +116,6 @@
 .margin-tools button, .margin-acts .icon-act { position: relative; }
 .margin-tools button::after, .margin-acts .icon-act::after { left: auto; right: 0; bottom: calc(100% + 6px); transform: none; }
 
-@media (max-width: 1199px) {
-  body.chat-open .actions { left: calc(var(--side) + (100% - var(--side) - var(--chat-over, 0px)) / 2); max-width: calc(100% - var(--side) - var(--chat-over, 0px) - 12px); flex-wrap: wrap; justify-content: center; }
-  body.chat-open .actions button { flex: 1 1 30px; min-width: 30px; max-width: 44px; }
-}
 @media (max-width: 599px) { body.chat-open .actions { display: none; } }
 
 .row { display: flex; gap: 8px; flex-wrap: wrap; }

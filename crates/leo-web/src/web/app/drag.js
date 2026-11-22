@@ -383,7 +383,7 @@ function pageWidthLive(article, px, edge = 'right') {
   const [least, most] = window.leoTheme.PAGE_RANGE;
   const room = article.closest('.note-columns')?.clientWidth || most;
   const width = Math.round(Math.max(least, Math.min(most, room, marginMostColumn(room), px)));
-  document.documentElement.style.setProperty('--note-width', `${width}px`);
+  article.style.maxWidth = `${width}px`;
   const label = $('.page-width-label', article);
   label.textContent = `${width} px`;
   label.dataset.edge = edge;
@@ -396,6 +396,7 @@ function pageWidthLive(article, px, edge = 'right') {
 function pageWidthDone(article, width) {
   $('.page-width-label', article).hidden = true;
   window.leoTheme.setPageWidth(width);
+  article.style.maxWidth = '';
   marginRedraw();
 }
 

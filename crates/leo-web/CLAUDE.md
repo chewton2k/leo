@@ -410,8 +410,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   header fill (everywhere `.prose th` is a 0.92 em medium-weight label in ink with no fill, 2026-11-21, the user's call), every other body row sits on `--wash`, and each `th::after` draws the
   double pencil rule across its cell, edge to edge. Print and forced colours keep
   the old look: a plain underline, the 3 px quote bar, row rules. The title row's chips
-  (`.margin-mode`) sit 16 px apart with 14 px icons and 4/8 padding, and the two Felix chips
-  (not the ⋯) carry a 1 px `--line` ring at rest (2026-11-21, the user's call). A picture whose alt text says something (not empty, not a file name, not "Pasted picture") sits in a
+  (`.margin-mode`) sit 16 px apart with 14 px icons; the two Felix chips (not the ⋯) are plain
+  text, no ring, fill or side padding, and only take the text colour on hover; the ⋯ keeps its
+  4/8 padding and hover fill (2026-11-21, the user's call: "just keep text"). A picture whose alt text says something (not empty, not a file name, not "Pasted picture") sits in a
   `.note-fig` span whose `::after` shows it as a 13 px caption on the note page (generated
   content, so no text node reaches the caret or margin maths; the Markdown is unchanged;
   2026-11-21, the user's call). A heading block (not the first)
@@ -564,6 +565,16 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   position `/api/notes/{id}/reading`; related notes `/api/notes/{id}/related`.
 - Nothing reflows the writing column: the outline gutter and the margin are
   reserved before the first heading or comment exists.
+- Resizing stays cheap on long notes (2026-11-21, measured in WebKit on a 200 KB note):
+  `.note-layout` is not a size container (a container query re-resolved every note element's
+  style on each width change); it keeps the same containment through `contain`, and doc.js sets
+  `data-wide` (≥ `OUTLINE_WIDE`, 900 px) once at mount and from its ResizeObserver, read through
+  `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
+  (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
+  pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
+  read them. Note prose has no `text-wrap: pretty` (WebKit re-balances every paragraph on each
+  relayout). The page-width drag writes the article's own `max-width` and commits
+  `--note-width` once on release.
 - Outline (2026-11-17, the user's call: no fixed limit on data): every heading
   (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
   (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
@@ -1156,7 +1167,9 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   `--shadow-lift`), the label becomes Show less, and Escape, a click outside or the label
   closes it; the day number still opens Day, and no other cell moves.
 - The Tasks card in `#dock` is folded to a small pill (the tick and the open count as plain text, danger-coloured when something is late; 2026-11-21, the user's call) at every start and opens only
-  while hovered or holding keyboard focus (CSS `:hover`/`:focus-within`, the card is
+  while hovered or holding keyboard focus (`tasksSync` sets `.open` from `:hover`/`:focus-within`;
+  opening reveals the card from the pill with a `clip-path` over `MOTION_MS`, folding shrinks it
+  back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
   not take focus). Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon

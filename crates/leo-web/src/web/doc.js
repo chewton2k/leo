@@ -747,6 +747,7 @@
 
     const outlineResize = outline && root.ResizeObserver ? new ResizeObserver((entries) => {
       const wide = entries[0].contentRect.width >= OUTLINE_WIDE;
+      entries[0].target.toggleAttribute('data-wide', wide);
       if (wide !== outlineWide) {
         outlineWide = wide;
         closeOutline();
@@ -768,7 +769,11 @@
       document.addEventListener('pointerdown', outlineOutside, true);
       root.addEventListener('scroll', outlineScroll, { passive: true });
       root.addEventListener('resize', outlineScroll);
-      if (outlineResize) outlineResize.observe(outline.closest('.note-layout'));
+      if (outlineResize) {
+        const layout = outline.closest('.note-layout');
+        layout.toggleAttribute('data-wide', layout.clientWidth >= OUTLINE_WIDE);
+        outlineResize.observe(layout);
+      }
       outlineDraw();
     }
 

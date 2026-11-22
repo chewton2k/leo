@@ -1227,7 +1227,6 @@
     });
     if (typeof root.ResizeObserver === 'function') {
       const historySize = new root.ResizeObserver(() => {
-        document.body.style.setProperty('--chat-over', `${panel.hidden ? 0 : Math.round(panel.getBoundingClientRect().width)}px`);
         const narrow = sourceNarrow();
         const crossed = narrow && !panel.classList.contains('source-narrow') && panel.classList.contains('with-history');
         const swap = !panel.hidden && narrow !== panel.classList.contains('source-narrow');

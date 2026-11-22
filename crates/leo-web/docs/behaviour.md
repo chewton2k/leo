@@ -938,8 +938,8 @@ The heading disclosure opens on mouse hover without taking focus, stays open acr
 - Felix's toolbar face does not bob while idle and the panel is closed (`#chat-toggle .felix.idle`);
   only an open panel animates him idle (2026-11-06). The composer's dock moves its width as well as its
   height. In a narrow panel the placeholder keeps one line (ellipsis), the note chip keeps 76 px and the
-  access chip drops its chevron (`@container chatmain`); under 1200 px the note toolbar centres in the
-  room left of the overlaying panel (`--chat-over`), its buttons shrink to 30 px and then wrap so it never passes the panel, and is hidden on phones while Felix is open.
+  access chip drops its chevron (`@container chatmain`). The floating note toolbar and its `--chat-over`
+  room are gone (2026-11-21: nothing read it, and writing it on every panel resize restyled the whole note).
 - Chat panel (2026-11-06, the owner; simulation in `docs/superpowers/user-simulation-report.md`): the eye
   (`data-chat="drop"`) is a toggle that shows while a note is open, eye or eye-off, "Stop reading this
   note" or "Read this note again", and keeps focus. New chat adds a placeholder row to the Chats list
