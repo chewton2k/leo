@@ -1,17 +1,23 @@
-use leo_core::call_names::Readers;
+use leo_core::call_names::Names;
 
-pub fn readers() -> Option<Readers> {
+pub fn names() -> Option<Names> {
     #[cfg(target_os = "macos")]
     {
-        Some(std::sync::Arc::new(|| {
-            Box::new(mac::Mac::new()) as Box<dyn leo_core::call_names::Reader>
-        }))
+        Some(Names {
+            readers: std::sync::Arc::new(|| {
+                Box::new(mac::Mac::new()) as Box<dyn leo_core::call_names::Reader>
+            }),
+            own: Some(objc2_foundation::NSFullUserName().to_string()),
+        })
     }
     #[cfg(windows)]
     {
-        Some(std::sync::Arc::new(|| {
-            Box::new(win::Win::new()) as Box<dyn leo_core::call_names::Reader>
-        }))
+        Some(Names {
+            readers: std::sync::Arc::new(|| {
+                Box::new(win::Win::new()) as Box<dyn leo_core::call_names::Reader>
+            }),
+            own: None,
+        })
     }
     #[cfg(not(any(target_os = "macos", windows)))]
     {

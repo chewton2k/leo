@@ -72,6 +72,12 @@ pub trait Reader {
 
 pub type Readers = std::sync::Arc<dyn Fn() -> Box<dyn Reader> + Send + Sync>;
 
+#[derive(Clone)]
+pub struct Names {
+    pub readers: Readers,
+    pub own: Option<String>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Reading {
     pub speaking: Vec<String>,
@@ -131,6 +137,7 @@ pub enum Mark {
 pub struct Timeline {
     runs: Vec<(f64, f64, String)>,
     me: Vec<String>,
+    own: Option<String>,
     open: Option<(f64, String)>,
     last: Option<f64>,
 }
@@ -149,6 +156,13 @@ fn usable(name: &str) -> Option<String> {
 }
 
 impl Timeline {
+    pub fn owned_by(own: Option<&str>) -> Self {
+        Self {
+            own: own.map(norm).filter(|own| !own.is_empty()),
+            ..Self::default()
+        }
+    }
+
     pub fn from_marks(marks: impl IntoIterator<Item = Mark>) -> Self {
         let mut timeline = Self::default();
         for mark in marks {
@@ -179,7 +193,8 @@ impl Timeline {
     }
 
     fn is_me(&self, name: &str) -> bool {
-        self.me.contains(&norm(name))
+        let name = norm(name);
+        self.me.contains(&name) || self.own.as_ref() == Some(&name)
     }
 
     fn learn(&mut self, me: &str) -> bool {

@@ -77,7 +77,7 @@ pub struct Request {
     pub input: Source,
     pub draft: Option<DraftFn>,
     pub turns: bool,
-    pub names: Option<leo_core::call_names::Readers>,
+    pub names: Option<leo_core::call_names::Names>,
 }
 
 pub fn transcribe_segment() -> TranscribeFn {
@@ -723,11 +723,13 @@ fn label_speakers(
         label: "Telling speakers apart".to_string(),
         steps: None,
     });
-    let parts = session.segments().len() as u32;
+    let leads_ms: Vec<u64> = (0..session.segments().len() as u32)
+        .map(|index| session::lead_ms(&session.manifest.fresh, index))
+        .collect();
     let started = Instant::now();
     let labelled = session::speakers::label(
         &session.dir,
-        parts,
+        &leads_ms,
         session.manifest.segment_secs * 1000,
         diarize,
         transcribe,
@@ -760,7 +762,7 @@ fn label_speakers(
     if let Err(e) = session::speakers::write(&session.dir, &spoken) {
         skipped(&format!("the labels could not be saved ({e})"));
     }
-    for index in 0..parts {
+    for index in 0..leads_ms.len() as u32 {
         if session.dir.join(format!("seg-{index:05}.txt")).exists() {
             let _ = std::fs::remove_file(session.dir.join(wav::done_name(index)));
         }
@@ -882,7 +884,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     };
     emit(Event::Started("Recording".to_string()));
     crate::ai::warm_credentials();
-    let watch = names.map(|readers| super::call_watch::Watch::start(readers, session.dir.clone()));
+    let watch = names.map(|names| super::call_watch::Watch::start(names, session.dir.clone()));
 
     let (updates_tx, updates) = mpsc::channel();
     let transcriber = Transcriber::start(

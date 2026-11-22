@@ -65,6 +65,8 @@ pub struct Manifest {
     pub turns: bool,
     #[serde(default)]
     pub note: Option<String>,
+    #[serde(default)]
+    pub fresh: Vec<u32>,
 }
 
 impl Manifest {
@@ -89,6 +91,7 @@ impl Manifest {
             saved: false,
             turns: false,
             note: None,
+            fresh: Vec::new(),
         }
     }
 }
@@ -220,6 +223,14 @@ type Turns = Vec<(u64, Option<u64>, String)>;
 enum TurnRow {
     Spoken(u64, u64, String),
     Started(u64, String),
+}
+
+pub fn lead_ms(fresh: &[u32], index: u32) -> u64 {
+    if index == 0 || fresh.contains(&index) {
+        0
+    } else {
+        OVERLAP_SECS * 1000
+    }
 }
 
 pub fn turns_name(index: u32) -> String {
@@ -1112,7 +1123,7 @@ impl Session {
             .flat_map(|(p, entries)| {
                 let end = end_of(p);
                 let base = p.start_secs * 1000;
-                let lead = if p.index > 0 { OVERLAP_SECS * 1000 } else { 0 };
+                let lead = lead_ms(&self.manifest.fresh, p.index);
                 let starts: Vec<u64> = entries.iter().map(|(ms, _, _)| base + ms).collect();
                 let named = &named;
                 entries
@@ -2088,6 +2099,49 @@ mod tests {
                 (322, "Tamsin Okafor".to_string())
             ]
         );
+    }
+
+    #[test]
+    fn a_part_that_began_a_capture_has_no_lead_to_skip() {
+        let (mut s, _tmp) = call_track(&["", "Hi."]);
+        s.manifest.fresh = vec![1];
+        std::fs::write(s.dir.join(turns_name(0)), "[]").unwrap();
+        std::fs::write(s.dir.join(turns_name(1)), r#"[[1500,2500,"Hi."]]"#).unwrap();
+        std::fs::write(
+            s.dir.join(leo_core::call_names::FILE),
+            concat!(
+                "{\"from\":300.4,\"to\":301.6,\"who\":\"Tamsin Okafor\"}\n",
+                "{\"from\":301.4,\"to\":302.6,\"who\":\"Rowan Ellery\"}\n",
+            ),
+        )
+        .unwrap();
+        assert_eq!(s.spans_ms(), [(301_500, 302_500)]);
+        let speakers: Vec<String> = s
+            .archive()
+            .passages
+            .into_iter()
+            .map(|p| p.speaker)
+            .collect();
+        assert_eq!(speakers, ["Rowan Ellery"]);
+        s.manifest.fresh.clear();
+        assert_eq!(s.spans_ms(), [(300_500, 301_500)]);
+    }
+
+    #[test]
+    fn line_spans_end_where_the_speech_ends_and_older_rows_reach_the_next_line() {
+        let (s, _tmp) = call_track(&["First. Second."]);
+        std::fs::write(
+            s.dir.join(turns_name(0)),
+            r#"[[1200,2000,"First."],[4600,5300,"Second."]]"#,
+        )
+        .unwrap();
+        assert_eq!(s.spans_ms(), [(1_200, 2_000), (4_600, 5_300)]);
+        std::fs::write(
+            s.dir.join(turns_name(0)),
+            r#"[[1200,"First."],[4600,"Second."]]"#,
+        )
+        .unwrap();
+        assert_eq!(s.spans_ms(), [(1_200, 4_600), (4_600, 300_000)]);
     }
 
     #[test]

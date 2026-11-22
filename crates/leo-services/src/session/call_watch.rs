@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex, OnceLock, TryLockError};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use leo_core::call_names::{self, Ask, Look, Mark, Readers, Seat, Timeline};
+use leo_core::call_names::{self, Ask, Look, Mark, Names, Readers, Seat, Timeline};
 
 #[derive(Debug, Clone, Copy)]
 struct Moment {
@@ -40,16 +40,16 @@ pub struct Watch {
 }
 
 impl Watch {
-    pub fn start(readers: Readers, dir: PathBuf) -> Self {
+    pub fn start(names: Names, dir: PathBuf) -> Self {
         let pace = Pace {
             every: call_names::EVERY,
             quiet: call_names::QUIET,
             alive: ALIVE.get_or_init(Alive::default).clone(),
         };
-        Self::start_with(readers, dir, pace)
+        Self::start_with(names, dir, pace)
     }
 
-    fn start_with(readers: Readers, dir: PathBuf, pace: Pace) -> Self {
+    fn start_with(names: Names, dir: PathBuf, pace: Pace) -> Self {
         let anchor: Anchor = Arc::default();
         let stop = Arc::new(AtomicBool::new(false));
         let (done_tx, done) = mpsc::channel();
@@ -58,7 +58,7 @@ impl Watch {
             std::thread::Builder::new()
                 .name("call-names".into())
                 .spawn(move || {
-                    watch(readers, &dir, &anchor, &stop, &pace);
+                    watch(names, &dir, &anchor, &stop, &pace);
                     let _ = done_tx.send(());
                 })
                 .is_ok()
@@ -255,13 +255,14 @@ impl Sidecar {
     }
 }
 
-fn watch(readers: Readers, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace: &Pace) {
+fn watch(names: Names, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace: &Pace) {
+    let readers = names.readers;
     let mut sidecar = Sidecar::new(dir);
     let lag = Duration::from_secs_f64(call_names::LAG_SECS);
     let seat: Seated = Arc::default();
     let (tx, rx) = mpsc::channel();
     let mut reader = spawn_reader(&readers, anchor, &seat, stop, &tx, pace);
-    let mut timeline = Timeline::default();
+    let mut timeline = Timeline::owned_by(names.own.as_deref());
     let mut heard_at = Instant::now();
     let mut restarts = 0;
     let mut stuck = false;
@@ -387,17 +388,20 @@ mod tests {
         }
     }
 
-    fn readers(counts: &Arc<Counts>, acts: Acts) -> Readers {
+    fn readers(counts: &Arc<Counts>, acts: Acts) -> Names {
         let counts = counts.clone();
-        Arc::new(move || {
-            let first = counts.made.fetch_add(1, Ordering::Relaxed) == 0;
-            let alive = counts.alive.fetch_add(1, Ordering::Relaxed) + 1;
-            counts.most.fetch_max(alive, Ordering::Relaxed);
-            Box::new(Fake {
-                counts: counts.clone(),
-                acts: if first { acts } else { Acts::Well },
-            }) as Box<dyn Reader>
-        })
+        Names {
+            readers: Arc::new(move || {
+                let first = counts.made.fetch_add(1, Ordering::Relaxed) == 0;
+                let alive = counts.alive.fetch_add(1, Ordering::Relaxed) + 1;
+                counts.most.fetch_max(alive, Ordering::Relaxed);
+                Box::new(Fake {
+                    counts: counts.clone(),
+                    acts: if first { acts } else { Acts::Well },
+                }) as Box<dyn Reader>
+            }),
+            own: None,
+        }
     }
 
     fn watching(counts: &Arc<Counts>, acts: Acts, dir: &Path, quiet: Duration) -> Watch {

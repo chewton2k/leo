@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
 
-use leo_core::call_names::Readers;
+use leo_core::call_names::Names;
 use leo_services::ai::chat::Jotted;
 use leo_services::session::capture::Source;
 use leo_services::session::recorder::{self, Controls, Event, Request};
@@ -13,13 +13,13 @@ use leo_web::record::{Heard, Listener, Listening, Recorded};
 
 type Usage = Arc<leo_web::usage::Usage>;
 
-pub fn listener(usage: Usage, names: Option<Readers>) -> Listener {
+pub fn listener(usage: Usage, names: Option<Names>) -> Listener {
     Arc::new(move |listening, heard| listen(&usage, names.as_ref(), listening, heard))
 }
 
 fn listen(
     usage: &Usage,
-    names: Option<&Readers>,
+    names: Option<&Names>,
     listening: Listening,
     heard: &mut dyn FnMut(Heard),
 ) -> Result<Recorded> {
@@ -284,7 +284,7 @@ fn parts_of_archive(source: &leo_core::recording::Archive) -> Parts {
 
 fn listen_call(
     usage: &Usage,
-    names: Option<&Readers>,
+    names: Option<&Names>,
     listening: Listening,
     heard: &mut dyn FnMut(Heard),
 ) -> Result<Recorded> {
@@ -849,6 +849,57 @@ mod tests {
             super::labelled("Others", far, named).speaker,
             "Rowan Ellery"
         );
+    }
+
+    #[test]
+    fn call_app_names_win_over_told_apart_voices_and_plain_others() {
+        use leo_services::session::{speakers, turns_name, Manifest, Session};
+        let heard = |voices: bool, names: bool| -> Vec<String> {
+            let root = tempfile::tempdir().unwrap();
+            let mut manifest = Manifest::new(None, None, "", true);
+            manifest.duration_secs = Some(60);
+            manifest.turns = true;
+            let session = Session::create(root.path(), manifest).unwrap();
+            std::fs::write(session.dir.join("seg-00000.txt"), "a b c").unwrap();
+            std::fs::write(
+                session.dir.join(turns_name(0)),
+                r#"[[0,4000,"a"],[5000,9000,"b"],[10000,14000,"c"]]"#,
+            )
+            .unwrap();
+            if voices {
+                let spoken: Vec<speakers::Spoken> = [
+                    (0, 4_000, 1, "a"),
+                    (5_000, 9_000, 2, "b"),
+                    (10_000, 14_000, 1, "c"),
+                ]
+                .into_iter()
+                .map(|(start_ms, end_ms, speaker, text)| speakers::Spoken {
+                    start_ms,
+                    end_ms,
+                    speaker,
+                    text: text.into(),
+                })
+                .collect();
+                speakers::write(&session.dir, &spoken).unwrap();
+            }
+            if names {
+                std::fs::write(
+                    session.dir.join(leo_core::call_names::FILE),
+                    "{\"from\":5.0,\"to\":9.0,\"who\":\"Rowan Ellery\"}\n",
+                )
+                .unwrap();
+            }
+            super::merged(&[("Others", session.dir.clone())], &AtomicBool::new(false))
+                .unwrap()
+                .passages
+                .into_iter()
+                .map(|p| p.speaker)
+                .collect()
+        };
+        assert_eq!(heard(true, true), ["Others 1", "Rowan Ellery", "Others 1"]);
+        assert_eq!(heard(true, false), ["Others 1", "Others 2", "Others 1"]);
+        assert_eq!(heard(false, true), ["Others", "Rowan Ellery", "Others"]);
+        assert_eq!(heard(false, false), ["Others"]);
     }
 
     #[test]

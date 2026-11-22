@@ -456,6 +456,38 @@ fn the_users_own_name_never_goes_to_the_other_side() {
 }
 
 #[test]
+fn the_computer_account_name_is_never_given_to_the_other_side() {
+    let named = |own: Option<&str>, r: Reading| {
+        let mut t = Timeline::owned_by(own);
+        for (at, r) in every(0.0, 6.0, Some(r)) {
+            t.heard(at, r.as_ref());
+        }
+        t.end();
+        t.name(1.0, 5.0)
+    };
+    let juno = reading(&["Juno Halvorsen"], GROUP, None);
+    assert_eq!(named(Some("juno  HALVORSEN"), juno.clone()), None);
+    assert_eq!(
+        named(Some("Juno"), juno.clone()).as_deref(),
+        Some("Juno Halvorsen")
+    );
+    assert_eq!(named(None, juno).as_deref(), Some("Juno Halvorsen"));
+    let two = |speaking: &[&str]| Reading {
+        shown: Some(2),
+        ..reading(speaking, &["Juno Halvorsen", "Rowan Ellery"], None)
+    };
+    assert_eq!(
+        named(Some("Juno Halvorsen"), two(&["Juno Halvorsen"])).as_deref(),
+        Some("Rowan Ellery")
+    );
+    let unsure = Reading {
+        unmarked_self: true,
+        ..reading(&["Rowan Ellery"], GROUP, None)
+    };
+    assert_eq!(named(Some("Juno Halvorsen"), unsure), None);
+}
+
+#[test]
 fn a_reading_stands_for_two_seconds_at_most() {
     let t = timeline(&[
         (0.0, Some(reading(&["Rowan Ellery"], GROUP, None))),

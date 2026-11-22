@@ -234,7 +234,7 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   bound to the one call it finds first. A line of the other side is named only
   when one person other than the user was marked talking for more than half of
   its spoken span, or the call has exactly one other person by the count the app
-  shows; anything else stays "Others". Never guessed, never the user's own name, nothing leaves the
+  shows; anything else stays "Others". Never guessed, never the user's own name (as the call app marks it, or the computer account's full name), nothing leaves the
   computer; tests use fixtures and fake readers. The name lands in `speaker`.
   Credited in NOTICE (its name appears only there).
 - Windows child programs stay quiet. Model and toolchain caches stay under the

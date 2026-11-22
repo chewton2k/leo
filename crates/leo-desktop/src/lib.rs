@@ -236,7 +236,7 @@ fn set_up(
     let mut powers = leo_host::powers();
     powers.listener = Some(leo_host::listener(
         powers.usage.clone(),
-        call_names::readers(),
+        call_names::names(),
     ));
     let _ = dictation.usage.set(powers.usage.clone());
     powers.dictation = Some(dictation.clone());

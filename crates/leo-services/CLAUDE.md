@@ -107,17 +107,26 @@ its lines stay unnamed. One reader is alive at a time in the whole process (a lo
 held for its life): a reader is started again only after its thread has ended (at
 most `MOST_RESTARTS`, 20), and one quiet for `QUIET` (5 s) is traced, never joined
 by a second; problems go to the trace once each, never names.
-`archive` names each turn from its spoken interval, less each later part's 1 s
-lead-in (`Timeline::name`: more than half the line, or a zero-length line's start;
-an older row without an end runs to the next row); leo-host's `labelled` keeps a
-name and replaces only the plain track label, so the call merge never joins
-two people.
+`archive` names each turn from its spoken interval, less its part's lead-in
+(`Timeline::name`: more than half the line, or a zero-length line's start;
+an older row without an end runs to the next row), and each told-apart voice from
+its own span; leo-host's `labelled` keeps a name and replaces only the plain
+track label or a `Speaker N` voice, so the call merge never joins two people.
+`Names { readers, own }` carries the computer account's full name (`own`, from
+leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run
+of it is never kept and `name` never gives it (compared ignoring case and spaces,
+the whole name only), while Zoom's unmarked-self refusal still needs `me`.
+Lead-in (`session::lead_ms`, the one rule for `speakers::label`, `archive`'s
+call names and echo levels): none for part 0 or a part listed in
+`Manifest.fresh` (parts that began a capture with no earlier audio; every capture
+today starts at part 0, so the list stays empty), 1 s otherwise.
 
 Speaker labels (2026-11-16, per recording: `Profile.speakers`, off by default;
 omitted from JSON when off, so old cache keys hold; on a call, 2026-11-22, the
 owner's call, only the Others track gets it, You is always You, and leo-host's
-`merged` names its voices Others 1, Others 2… by first appearance, only on lines
-still plain "Others": a name from the call app wins):
+`merged` names its voices Others 1, Others 2… by first appearance; a voice's
+line the call app names over its span takes that name instead, and one voice
+stays "Others": a name from the call app wins):
 `Policy.keep_parts` keeps the first two hours of part WAVs beside their text and
 drafting is off. In `recorder::finish`, once every part is done,
 `label_speakers` runs `session/speakers.rs` `label`: one Sortformer pass over the
@@ -158,7 +167,8 @@ carry sound (6 dB over each track's idle level, its 10th percentile, at least
 two others within 20 s agree within 20 ms (a sorted scan of the neighbours, not
 all pairs); echo exists only when steady windows are ≥ 20% of shared windows
 (headphones: none, nothing marked). Each You line is judged on its own span (its
-onset to the next line's onset, so silence is not counted, only sound) at the
+spoken interval, `Session::spans_ms`; an older row without an end runs to the next
+line's onset; silence is not counted, only sound) at the
 nearest steady lag, with the leak's level the median of the steady windows within
 20 s (a later volume change is followed). A sound block (10 ms, at least the
 track's floor) is a copy when the other side is at or above its floor (the

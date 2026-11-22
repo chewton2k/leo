@@ -2482,6 +2482,33 @@ mod tests {
     }
 
     #[test]
+    fn a_call_voice_is_renamed_only_when_no_two_speakers_would_merge() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names3",
+                &[
+                    (0, "You", "hi"),
+                    (5, "Others 1", "one"),
+                    (9, "Others 2", "two"),
+                ],
+            ),
+        )
+        .unwrap();
+        let rename =
+            |to: &str| rename_speaker(&notes, "note-0001", "rec-names3", 1, "Others 1", to);
+        let refused = |to: &str| rename(to).unwrap_err().downcast::<Refused>().unwrap();
+        assert_eq!(refused("Others 2"), Refused::Taken);
+        assert_eq!(refused(" OTHERS 2 "), Refused::Taken);
+        assert_eq!(refused("you"), Refused::Reserved);
+        assert_eq!(refused("Others"), Refused::Reserved);
+        assert_eq!(rename("Others 3").unwrap().revision, 2);
+    }
+
+    #[test]
     fn pages_cover_every_passage_exactly_once() {
         let temp = tempfile::tempdir().unwrap();
         let notes = temp.path().join("notes");
