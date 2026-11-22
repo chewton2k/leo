@@ -2535,6 +2535,7 @@ test.describe('advanced settings', () => {
     await facts.locator('[data-action="note-back"]').click();
     await expect(aside).toBeHidden();
     await expect(page.locator('#doc')).toBeVisible();
+    await expect(page.locator('.chip.original', { hasText: 'paper.pdf' })).toBeFocused();
 
     await page.locator('.chip.original', { hasText: 'board.png' }).click();
     const img = aside.locator('.aside-img');
