@@ -331,7 +331,7 @@ impl leo_web::app_settings::AppApi for AppSettings {
         let (shortcut, keys) = self.dictation.shortcut_health();
         let mut checks = vec![
             json!({"name":"Microphone permission","state":if permissions["microphone"]=="allowed" {"ready"} else {"missing"},"fix":"Allow Leo to use the microphone in your system privacy settings.","action":"microphone"}),
-            json!({"name":"Accessibility permission","state":if permissions["accessibility"]==true {"ready"} else {"missing"},"fix":"Allow Leo in System Settings → Privacy & Security → Accessibility to paste into other apps.","action":"accessibility"}),
+            json!({"name":"Accessibility permission","state":if permissions["accessibility"]==true {"ready"} else {"missing"},"fix":"Allow Leo in System Settings → Privacy & Security → Accessibility to paste into other apps and to name who talks in calls.","action":"accessibility"}),
             json!({"name":"Speech model","state":if model {"ready"} else {"missing"},"fix":"Download and use a model in Speech models.","section":"models"}),
             json!({"name":"Dictation shortcut","state":if shortcut["problem"].as_str().is_none_or(str::is_empty) {"ready"} else {"missing"},"fix":shortcut["problem"],"section":"shortcuts"}),
         ];
