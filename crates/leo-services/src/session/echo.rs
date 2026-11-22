@@ -770,7 +770,7 @@ mod tests {
                 std::fs::remove_file(s.others.dir.join(levels_name(1))).unwrap()
             }),
             ("You", (6_000, 30_000), &|s: &Sides| {
-                std::fs::write(s.you.dir.join(levels_name(0)), call.mic[..6_000].to_vec()).unwrap()
+                std::fs::write(s.you.dir.join(levels_name(0)), &call.mic[..6_000]).unwrap()
             }),
             ("Others", (0, 30_000), &|s: &Sides| {
                 std::fs::write(s.others.dir.join(levels_name(0)), []).unwrap()
