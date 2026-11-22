@@ -105,10 +105,14 @@ stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
 for a browser, the window title), which every later read and a restarted reader
 keep; `call_names::pick` binds only when exactly one app (one window, for a
 browser) shows a call tree, and a bound call that is gone reads as unreadable, so
-its lines stay unnamed. One reader is alive at a time in the whole process (a lock
-held for its life): a reader is started again only after its thread has ended (at
-most `MOST_RESTARTS`, 20), and one quiet for `QUIET` (5 s) is traced, never joined
-by a second; problems go to the trace once each, never names.
+its lines stay unnamed. At most two reader threads are alive in the whole process
+(a counted slot held for a thread's life; 2026-11-22, the orchestrator's call), so a
+native call that hangs past its recording leaves room for the next recording's
+reader; with two hung, a new recording waits `MOST_READ` for a slot, then traces
+that names stay off until leo is opened again. Within a recording a reader is
+started again only after its thread has ended (at most `MOST_RESTARTS`, 20), and
+one quiet for `QUIET` (5 s) is traced, never joined by a second; problems go to
+the trace once each, never names.
 `archive` names each turn from its spoken interval, less its part's lead-in
 (`Timeline::name`: more than half the line, or a zero-length line's start;
 an older row without an end runs to the next row), and each told-apart voice from

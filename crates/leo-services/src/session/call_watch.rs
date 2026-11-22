@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
-use std::sync::{Arc, Mutex, OnceLock, TryLockError};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -19,11 +19,14 @@ struct Moment {
 
 type Anchor = Arc<Mutex<Option<Moment>>>;
 type Seated = Arc<Mutex<Option<Seat>>>;
-type Alive = Arc<Mutex<()>>;
+type Alive = Arc<AtomicUsize>;
 type Heard = (u32, Instant, Look);
 
 const STOP_WAIT: Duration = Duration::from_secs(1);
 const STEP: Duration = Duration::from_millis(50);
+const MOST_READERS: usize = 2;
+const NO_ROOM: &str =
+    "two call readers stopped answering and are still waiting; names stay off until leo is opened again";
 
 static ALIVE: OnceLock<Alive> = OnceLock::new();
 
@@ -141,7 +144,36 @@ fn rest(stop: &AtomicBool, wait: Duration) {
     }
 }
 
+struct Slot(Alive);
+
+impl Slot {
+    fn take(alive: &Alive) -> Option<Slot> {
+        let slot = Slot(alive.clone());
+        (alive.fetch_add(1, Ordering::SeqCst) < MOST_READERS).then_some(slot)
+    }
+
+    fn wait(alive: &Alive, stop: &AtomicBool, most: Duration) -> Option<Slot> {
+        let until = Instant::now() + most;
+        loop {
+            if let Some(slot) = Slot::take(alive) {
+                return Some(slot);
+            }
+            if stop.load(Ordering::Relaxed) || Instant::now() >= until {
+                return None;
+            }
+            std::thread::sleep(STEP);
+        }
+    }
+}
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 fn spawn_reader(
+    slot: Slot,
     readers: &Readers,
     anchor: &Anchor,
     seat: &Seated,
@@ -160,16 +192,7 @@ fn spawn_reader(
     std::thread::Builder::new()
         .name("call-reader".into())
         .spawn(move || {
-            let _alive = loop {
-                if stop.load(Ordering::Relaxed) {
-                    return;
-                }
-                match pace.alive.try_lock() {
-                    Ok(alive) => break alive,
-                    Err(TryLockError::Poisoned(alive)) => break alive.into_inner(),
-                    Err(TryLockError::WouldBlock) => std::thread::sleep(pace.every),
-                }
-            };
+            let _slot = slot;
             let mut reader = readers();
             while !stop.load(Ordering::Relaxed) {
                 let Some(epoch) = now_of(&anchor).filter(|m| !m.paused).map(|m| m.epoch) else {
@@ -269,7 +292,11 @@ fn watch(names: Names, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace
     let lag = Duration::from_secs_f64(call_names::LAG_SECS);
     let seat: Seated = Arc::default();
     let (tx, rx) = mpsc::channel();
-    let mut reader = spawn_reader(&readers, anchor, &seat, stop, &tx, pace);
+    let Some(slot) = Slot::wait(&pace.alive, stop, call_names::MOST_READ + pace.every) else {
+        super::trace_to(dir, "call-names", NO_ROOM);
+        return;
+    };
+    let mut reader = spawn_reader(slot, &readers, anchor, &seat, stop, &tx, pace);
     let mut timeline = Timeline::owned_by(names.own.as_deref());
     let mut heard_at = Instant::now();
     let mut restarts = 0;
@@ -307,12 +334,17 @@ fn watch(names: Names, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace
         let ended = reader.as_ref().is_none_or(JoinHandle::is_finished);
         if ended && restarts < call_names::MOST_RESTARTS && !stop.load(Ordering::Relaxed) {
             restarts += 1;
+            let Some(slot) = Slot::take(&pace.alive) else {
+                super::trace_to(dir, "call-names", NO_ROOM);
+                restarts = call_names::MOST_RESTARTS;
+                continue;
+            };
             super::trace_to(
                 dir,
                 "call-names",
                 "the call reader stopped; started it again",
             );
-            reader = spawn_reader(&readers, anchor, &seat, stop, &tx, pace);
+            reader = spawn_reader(slot, &readers, anchor, &seat, stop, &tx, pace);
             heard_at = Instant::now();
         } else if !ended && !stuck && heard_at.elapsed() > pace.quiet {
             stuck = true;
@@ -337,6 +369,7 @@ mod tests {
         Well,
         PanicsOnce,
         Sticks,
+        Hangs,
     }
 
     #[derive(Default)]
@@ -346,6 +379,7 @@ mod tests {
         alive: AtomicU32,
         most: AtomicU32,
         seats: Mutex<Vec<Option<Seat>>>,
+        release: AtomicBool,
     }
 
     struct Fake {
@@ -360,6 +394,11 @@ mod tests {
             match self.acts {
                 Acts::Sticks => {
                     while !ask.stop.load(Ordering::Relaxed) {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+                Acts::Hangs => {
+                    while !self.counts.release.load(Ordering::Relaxed) {
                         std::thread::sleep(Duration::from_millis(10));
                     }
                 }
@@ -614,35 +653,53 @@ mod tests {
         assert_eq!(counts.alive.load(Ordering::Relaxed), 0);
     }
 
+    struct Freed(Vec<Arc<Counts>>);
+
+    impl Drop for Freed {
+        fn drop(&mut self) {
+            for counts in &self.0 {
+                counts.release.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+
     #[test]
-    fn a_new_reader_waits_until_the_last_one_has_gone() {
-        let counts: Arc<Counts> = Arc::default();
-        let (first, second) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    fn one_hung_reader_leaves_room_for_a_fresh_one_and_a_second_turns_names_off() {
         let alive = Alive::default();
-        let pace = |quiet| Pace {
+        let pace = || Pace {
             every: Duration::from_millis(20),
-            quiet,
+            quiet: Duration::from_secs(5),
             alive: alive.clone(),
         };
-        let stuck = Watch::start_with(
-            readers(&counts, Acts::Sticks),
-            first.path().to_path_buf(),
-            pace(Duration::from_secs(5)),
-        );
-        stuck.tick(10.0, false);
-        std::thread::sleep(Duration::from_millis(100));
-        let next = Watch::start_with(
-            readers(&counts, Acts::Well),
-            second.path().to_path_buf(),
-            pace(Duration::from_secs(5)),
-        );
-        next.tick(10.0, false);
-        std::thread::sleep(Duration::from_millis(200));
-        assert_eq!(counts.made.load(Ordering::Relaxed), 1);
-        drop(stuck);
-        std::thread::sleep(Duration::from_millis(300));
-        drop(next);
-        assert_eq!(counts.made.load(Ordering::Relaxed), 2);
-        assert_eq!(counts.most.load(Ordering::Relaxed), 1);
+        let hung: [Arc<Counts>; 2] = Default::default();
+        let freed = Freed(hung.to_vec());
+        let fresh: [Arc<Counts>; 2] = Default::default();
+        let dirs: Vec<tempfile::TempDir> = (0..4).map(|_| tempfile::tempdir().unwrap()).collect();
+        let run = |counts: &Arc<Counts>, acts: Acts, dir: &Path| {
+            let watch = Watch::start_with(readers(counts, acts), dir.to_path_buf(), pace());
+            watch.tick(10.0, false);
+            let waited = Instant::now();
+            while counts.calls.load(Ordering::Relaxed) == 0 && waited.elapsed() < STOP_WAIT {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            std::thread::sleep(Duration::from_millis(100));
+            drop(watch);
+        };
+        run(&hung[0], Acts::Hangs, dirs[0].path());
+        run(&fresh[0], Acts::Well, dirs[1].path());
+        assert_eq!(fresh[0].made.load(Ordering::Relaxed), 1);
+        assert!(fresh[0].calls.load(Ordering::Relaxed) > 0);
+        run(&hung[1], Acts::Hangs, dirs[2].path());
+        assert_eq!(alive.load(Ordering::SeqCst), 2);
+        run(&fresh[1], Acts::Well, dirs[3].path());
+        assert_eq!(fresh[1].made.load(Ordering::Relaxed), 0);
+        let trace = std::fs::read_to_string(dirs[3].path().join("trace.jsonl")).unwrap();
+        assert!(trace.contains("names stay off"), "{trace}");
+        drop(freed);
+        let waited = Instant::now();
+        while alive.load(Ordering::SeqCst) > 0 && waited.elapsed() < STOP_WAIT {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(alive.load(Ordering::SeqCst), 0);
     }
 }
