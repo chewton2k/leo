@@ -394,7 +394,7 @@ points, warnings and context are kept, and a passage already there by time and
 text keeps its stored label, so running a recovery twice changes nothing. Plain
 `recording::save` replaces (a new recording, `Session::commit`), so a corrected
 point never brings back its old wording; transcript corrections go through
-`recording::edit`. `recording::save_from(notes, note, head, passages, points)`
+`recording::edit` and speaker renames through `recording::rename_speaker` (2026-11-22). `recording::save_from(notes, note, head, passages, points)`
 takes iterators, so a caller holding its points in `points.jsonl` can save
 without holding them whole.
 While recording, the transcriber finds the next part by name and lists the

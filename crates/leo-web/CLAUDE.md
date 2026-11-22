@@ -217,8 +217,8 @@ Decided: one app, window only (2026-10-31).
   one into the app's menu (not under forced colours), keeping id, value and
   `change`. Do not hand-build list menus.
 - Text fields: `.field` (icon-led, sheets) or `.set-input` (Settings rows).
-  Folder/Title/What do you want: `noteFields()` (uploads.js), shared by the
-  upload sheet and Record page.
+  Folder/Title/What do you want: `noteFields()` (uploads.js) in the upload
+  sheet; the Record page draws the folder list (`folderOptions`) in a chip.
 - Confirmations: `confirmSheet({ title, text, yes, action, data, danger, cancel })`
   for permanent losses only. Moving to the trash asks nothing and offers Undo for
   10 s. The time left is a pencil line under the toast (`.toast-time`, the
@@ -421,7 +421,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   words hidden, or a visible problem such as "Not saved"), then `#note-edited` ("Edited …",
   "Edited just now" after a save, hidden while a problem shows), then the read time (`#note-read`, " · N min read" from
   `md.readTime`, 238 words a minute, none for an empty note, refreshed 300 ms after an
-  edit); the line has no word count (2026-11-16, the user's call), but the ⋯ menu ends
+  edit) and, on a note made from a recording, " · Transcript" (a quiet underlined
+  `.facts-link`, 2026-11-22, the owner's call); the line has no word count (2026-11-16, the user's call), but the ⋯ menu ends
   with one quiet footer row, the word count alone (`md.wordCount`, no read time or last
   edit; 2026-11-21, the user's call: "maybe we just need the word count and that's it"). It is skipped by search highlights and hidden in print. The note's
   tools (transcript, Tasks, Add picture, Move to folder, Read through and Share as second
@@ -571,7 +572,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `resize` and a frame after each ResizeObserver report (toggling inside the callback resized `body` under the page bar's
   observer, a ResizeObserver loop error in WebKit), read through
   `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
-  (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
+  (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--dock-room`) so a
   pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
   read them. Note prose has no `text-wrap: pretty` (WebKit re-balances every paragraph on each
   relayout). The page-width drag writes the article's own `max-width` and commits
@@ -1032,21 +1033,32 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `Housekeeper` lists (`pending_page`, every unfinished recording newest first; recover
   and Delete look one up with `pending_recording`); a recovery job carries its session id.
 - Live transcript (2026-11-21, the user's call): the 1 s poll redraws the live page
-  around `#rec-heard` (`paintLive`/`graft` swap what surrounds it, at any depth; the node is never
-  rebuilt), and `showTranscript` patches it with `tailMerge(shown, next)`: a trimmed head
+  around the kept nodes (`paintLive`/`graft` swap what surrounds them, at any depth; a kept node is never
+  rebuilt), and `showTranscript` patches `#rec-transcript` with `tailMerge(shown, next)`: a trimmed head
   (`keep_tail`) is dropped from the front, the stable prefix stays, and only the changed
   tail (backed up to its word) is replaced, so selection and scroll survive. New words are
   a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes; text already said when
   the node is made arrives plain. Scrolled up, the view stays put and Back to latest
   (`#rec-latest`) scrolls down and resumes following. `aria-live="off"`: the node now
-  persists, so polite would read every update. Every `[data-keep]` node (the transcript
-  and Felix's questions) survives the redraw the same way.
-- Live layout and Felix's questions (2026-11-21, the user's call; Start and the live
-  controls stay red): `#rec-box` is the `recroom` container while live and `main` widens to
-  1280 px. At 1000 px or more the live card spans the top over three columns, transcript |
-  Your notes + What you want | Ask Felix; beside the docked chat (`body.chat-open` at 1200 px
-  windows and up, the same breakpoint as the dock) at 640 px or more, two columns with Ask Felix above Your notes; narrower, the cards stack with Ask
-  Felix under Your notes. The questions are chat `.starter` rows (`FELIX_ASKS`, listed like Felix's starters since 2026-11-21): before
+  persists, so polite would read every update. The `[data-keep]` nodes are the transcript
+  panel `#rec-heard`, the tab list `#rec-tabs` (its count and selection are set in place by
+  `syncTabs`, so keyboard focus stays) and Felix's column. The live string is untimed, one
+  track at a time for calls, so it stays plain text; turns are drawn only for a saved transcript.
+- Record page (2026-11-22, the owner's call: lectures and meetings share it; speaker UI only
+  where speaker data exists; Start and the live controls stay red). Before Start: the title
+  field first (`#rec-title`, note-title type, "Untitled recording"), then the event and folder
+  selects as chips (`.rec-chip`, still `.select-control` selects), the Microphone/Screen/Call
+  picture cards, What you want, Label speakers, the red Start and Felix's before-start questions
+  under it. While recording and after Stop the page keeps one shell (`drawLive`): a note-like
+  header (title, chips for event time, folder and kind, the hearing line) with one recorder bar
+  on the right (`.rec-bar`: pulsing dot, clock, the wave at 120×24, Pause, red Stop and save);
+  tabs Your notes (count, default) · Transcript · What you want (`kanban-tab` buttons, the tab
+  in `s.tab`, panels toggled by `hidden`); Felix's three live questions in a 300 px `set-card`
+  column beside the tabs from a 820 px `recroom` container, under them narrower. After Stop
+  (`writing`) there is no bar; one progress line under the title (the leo mark in ink, "Writing
+  the notes · step", the bar, Finish now = `rec-finish`), tabs Notes (disabled) · Your notes ·
+  Transcript; the saved note opens as before. The view carries `title` and `directory`; the
+  event is the page's own. The questions are chat `.starter` rows (`FELIX_ASKS`): before
   Start, shown once an event is chosen or What you want is filled, What should I listen
   for? and What should I ask? attach the event and the want (`briefAsk`); while recording,
   What did I just miss?, Sum up so far and What should I ask next? attach the typed points
@@ -1062,12 +1074,31 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   while the model is ready or downloading. The switch is `settingsSwitch()`,
   and the choice is kept in memory when storage is blocked. Settings → Speech
   models lists the speaker model under Downloaded with Delete.
-- The transcript sheet pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`,
-  512 KB of each kind a page, Earlier and Later; a pick list when a note has several; search
-  matches across all of them open the page that holds each); a fix sends only the changed rows
-  (`{source, base: revision, changes}`, batches under 1 MB); Combine's Undo sends `{from}` and
-  removes the recordings copied from that note (`copied_from`).
-- What you want from the notes and the meeting details are kept whole, of any length (2026-11-18, the owner's principle 1); only what is sent is bounded: the AI reads the first `WANTS_READ_CHARS` (4,000) and `CONTEXT_READ_CHARS` (8,000) characters (`long::read_of`, also what `room_after_profile` charges to the word budget), and the Record page, the live card and the transcript sheet say so under the box once the brief is longer (`data-reads`). Felix's rename of a note keeps the whole title he gives; the file name is shortened by the usual rule.
+- A note's transcript and original files open in the note's place (2026-11-22, the owner's
+  call; the side pane is gone): `openAside` (sources.js) sets `.note-layout.aside-open`, which hides
+  `#doc`, the margin, outline, related and `#note-facts` and shows `#note-aside` with its own facts
+  line `#note-aside-facts` (the doc stays mounted; `closeAside` redraws the margin). The title stays;
+  Back to note or Escape returns (refused with "Save your fixes first." while a fix is unsaved).
+  Transcript: facts "Transcript · <duration> · Back to note" (the duration once the last page is
+  shown); Find in transcript (the server's matches and the page's row filter); `transcriptFlow`
+  (recording.js) groups a page: with speakers (`speakersOf(head.speakers)`, not `Microphone`,
+  `Computer audio` or empty) one turn per run of a speaker (tone dot, name, time once), else a
+  paragraph a minute with its time; typed points sit at their time as "Your point · …"; a run of
+  passages with `echo: true` (missing is false) folds into "Hidden: N echo lines · Show". Tones
+  come from `head.speakers` order (`toneOf`: You in ink, others `--hue-0`, `-1`, `-4`, …), so
+  paging never recolours. Each line is a `contenteditable="plaintext-only"` `.source-text` span;
+  it pages through recordings (`?at=<id>&passages=<n|end>&points=<n|end>`, 512 KB of each kind a
+  page, Earlier and Later; a pick list when a note has several; search matches across all of them
+  open the page that holds each); a fix sends only the changed rows (`{source, base: revision,
+  changes}`, batches under 1 MB); the speaker row renames a speaker for every line of that
+  recording (`{source, base, rename: {from, to}}` → `recording::rename_speaker` through the same
+  revision writer; a name another speaker has is 422, so first-seen order never changes; the note
+  text is not rewritten). What you want, Write the note again and "How this recording went" stay
+  below. The ⋯ menu's Show transcript opens the same view with the selected text as the search.
+  Originals: facts "<name> · Download · Back to note", the PDF (with its page), picture or text at
+  the note's width; off the note the viewer sheet stays. Combine's Undo sends `{from}` and removes
+  the recordings copied from that note (`copied_from`).
+- What you want from the notes and the meeting details are kept whole, of any length (2026-11-18, the owner's principle 1); only what is sent is bounded: the AI reads the first `WANTS_READ_CHARS` (4,000) and `CONTEXT_READ_CHARS` (8,000) characters (`long::read_of`, also what `room_after_profile` charges to the word budget), and the Record page, its What you want tab and the note's transcript say so under the box once the brief is longer (`data-reads`). Felix's rename of a note keeps the whole title he gives; the file name is shortened by the usual rule.
 - Pre-Start checks (`Housekeeper::checks`: `speech`, `writing`, `headset`) are
   cheap and never open the microphone.
 - When no writing AI wrote the notes (`writer_failed`), the transcript is the
