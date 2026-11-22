@@ -24,6 +24,7 @@ const OWN_RUN: usize = 20;
 const LINE_CORR: f32 = 0.5;
 const ABOVE_LEAK: f32 = 6.0;
 const SHORT_BY: u64 = 100;
+const COARSE: i64 = 5;
 
 pub fn levels_name(index: u32) -> String {
     format!("seg-{index:05}.levels")
@@ -117,34 +118,43 @@ fn floor_of(levels: &mut dyn FnMut(i64) -> u8, blocks: i64) -> f32 {
     FLOOR as f32
 }
 
-fn best_lag(near: &[f32], other: &[f32]) -> (f32, i64) {
+fn best_lag(near: &[f32], other: &[f32]) -> (f32, i64, usize) {
     let n = near.len() as f64;
     let mean = near.iter().map(|&x| x as f64).sum::<f64>() / n;
     let centred: Vec<f64> = near.iter().map(|&x| x as f64 - mean).collect();
     let aa: f64 = centred.iter().map(|x| x * x).sum();
     if (aa / n).sqrt() < LEAST_SPREAD as f64 {
-        return (0.0, 0);
+        return (0.0, 0, 0);
     }
-    (-MOST_LAG..=MOST_LAG)
-        .map(|lag| {
-            let from = (MOST_LAG - lag) as usize;
-            let (mut sum, mut square, mut product) = (0.0, 0.0, 0.0);
-            for (a, &x) in centred.iter().zip(&other[from..from + near.len()]) {
-                let x = x as f64;
-                sum += x;
-                square += x * x;
-                product += a * x;
-            }
-            let spread = (square - sum * sum / n).max(0.0);
-            if (spread / n).sqrt() < LEAST_SPREAD as f64 {
-                return (0.0, lag);
-            }
-            ((product / (aa * spread).sqrt()) as f32, lag)
+    let score = |lag: i64| {
+        let from = (MOST_LAG - lag) as usize;
+        let (mut sum, mut square, mut product) = (0.0, 0.0, 0.0);
+        for (a, &x) in centred.iter().zip(&other[from..from + near.len()]) {
+            let x = x as f64;
+            sum += x;
+            square += x * x;
+            product += a * x;
+        }
+        let spread = (square - sum * sum / n).max(0.0);
+        if (spread / n).sqrt() < LEAST_SPREAD as f64 {
+            return 0.0;
+        }
+        (product / (aa * spread).sqrt()) as f32
+    };
+    let mut tried = 0;
+    let mut pick = |lags: &mut dyn Iterator<Item = i64>| {
+        lags.map(|lag| {
+            tried += 1;
+            (score(lag), lag)
         })
         .fold(
             (f32::MIN, 0),
             |best, next| if next.0 > best.0 { next } else { best },
         )
+    };
+    let (_, rough) = pick(&mut (-MOST_LAG..=MOST_LAG).step_by(COARSE as usize));
+    let (corr, lag) = pick(&mut ((rough - COARSE).max(-MOST_LAG)..=(rough + COARSE).min(MOST_LAG)));
+    (corr, lag, tried)
 }
 
 fn steady_of(windows: &[(i64, i64, f32)]) -> Vec<(i64, i64, f32)> {
@@ -192,7 +202,7 @@ pub fn leak(
             && active(&other[at..at + WINDOW as usize], floors.1) >= ACTIVE
         {
             heard += 1;
-            let (corr, lag) = best_lag(&near, &other);
+            let (corr, lag, _) = best_lag(&near, &other);
             if corr >= CONFIDENT {
                 let from = (MOST_LAG - lag) as usize;
                 let both: Vec<f32> = near
@@ -217,8 +227,8 @@ pub fn leak(
 
 pub fn is_echo(
     leak: &Leak,
-    mic: &mut dyn FnMut(i64) -> u8,
-    far: &mut dyn FnMut(i64) -> u8,
+    mic: &mut dyn FnMut(i64) -> Option<u8>,
+    far: &mut dyn FnMut(i64) -> Option<u8>,
     from: i64,
     to: i64,
 ) -> bool {
@@ -227,10 +237,18 @@ pub fn is_echo(
     }
     let (lag, gain) = leak.near((from + to) / 2);
     let (mic_floor, far_floor) = leak.floors;
-    let near: Vec<f32> = (from..to).map(|t| mic(t) as f32).collect();
-    let wide: Vec<f32> = (from - SLACK..to + SLACK)
-        .map(|t| far(t - lag) as f32)
-        .collect();
+    let Some(near) = (from..to)
+        .map(|t| mic(t).map(f32::from))
+        .collect::<Option<Vec<f32>>>()
+    else {
+        return false;
+    };
+    let Some(wide) = (from - SLACK..to + SLACK)
+        .map(|t| far(t - lag).map(f32::from))
+        .collect::<Option<Vec<f32>>>()
+    else {
+        return false;
+    };
     let other = &wide[SLACK as usize..wide.len() - SLACK as usize];
     let (mut heard, mut own, mut run, mut longest) = (0usize, 0usize, 0usize, 0usize);
     for (m, f) in near.iter().zip(
@@ -259,6 +277,7 @@ struct Track {
     dir: PathBuf,
     per_part: i64,
     parts: i64,
+    end: Option<i64>,
     loaded: Vec<(i64, Vec<u8>)>,
 }
 
@@ -268,6 +287,10 @@ impl Track {
             dir: session.dir.clone(),
             per_part: (session.manifest.segment_secs * 1000 / BLOCK_MS) as i64,
             parts: session.segments().last().map_or(0, |s| s.index as i64 + 1),
+            end: session
+                .manifest
+                .duration_secs
+                .map(|secs| (secs * 1000 / BLOCK_MS) as i64),
             loaded: Vec::new(),
         }
     }
@@ -297,12 +320,16 @@ impl Track {
     }
 
     fn at(&mut self, block: i64) -> u8 {
+        self.level(block).unwrap_or(0)
+    }
+
+    fn level(&mut self, block: i64) -> Option<u8> {
         if block < 0 || self.per_part == 0 {
-            return 0;
+            return Some(0);
         }
         let part = block / self.per_part;
         if part >= self.parts {
-            return 0;
+            return Some(0);
         }
         if !self.loaded.iter().any(|(p, _)| *p == part) {
             let levels = std::fs::read(self.dir.join(levels_name(part as u32))).unwrap_or_default();
@@ -317,7 +344,6 @@ impl Track {
             .find(|(p, _)| *p == part)
             .and_then(|(_, levels)| levels.get((block % self.per_part + skip) as usize))
             .copied()
-            .unwrap_or(0)
     }
 }
 
@@ -340,9 +366,13 @@ pub fn marks(you: &Session, others: &Session, halt: &AtomicBool) -> Vec<bool> {
         }
     }
     let blocks = mic.blocks();
-    let mut near = |t: i64| mic.at(t);
-    let mut other = |t: i64| far.at(t - shift);
-    let Some(found) = leak(&mut near, &mut other, blocks, halt) else {
+    let found = leak(
+        &mut |t: i64| mic.at(t),
+        &mut |t: i64| far.at(t - shift),
+        blocks,
+        halt,
+    );
+    let Some(found) = found else {
         let why = if halt.load(Ordering::Relaxed) {
             "finishing now, echo not judged"
         } else {
@@ -351,6 +381,9 @@ pub fn marks(you: &Session, others: &Session, halt: &AtomicBool) -> Vec<bool> {
         you.trace("echo", why);
         return vec![false; spans.len()];
     };
+    let end = mic.end;
+    let mut near = |t: i64| mic.level(t);
+    let mut other = |t: i64| far.level(t - shift);
     let mut marked = Vec::with_capacity(spans.len());
     for (from, to) in &spans {
         if halt.load(Ordering::Relaxed) {
@@ -362,7 +395,9 @@ pub fn marks(you: &Session, others: &Session, halt: &AtomicBool) -> Vec<bool> {
             &mut near,
             &mut other,
             (from / BLOCK_MS) as i64,
-            to.div_ceil(BLOCK_MS) as i64,
+            end.map_or(to.div_ceil(BLOCK_MS) as i64, |end| {
+                end.min(to.div_ceil(BLOCK_MS) as i64)
+            }),
         ));
     }
     you.trace(
@@ -435,8 +470,8 @@ mod tests {
         fn echo(&self, leak: &Leak, from: i64, to: i64) -> bool {
             is_echo(
                 leak,
-                &mut |t| self.mic.get(t as usize).copied().unwrap_or(0),
-                &mut |t| self.far.get(t as usize).copied().unwrap_or(0),
+                &mut |t| Some(self.mic.get(t as usize).copied().unwrap_or(0)),
+                &mut |t| Some(self.far.get(t as usize).copied().unwrap_or(0)),
                 from,
                 to,
             )
@@ -809,6 +844,74 @@ mod tests {
                 "{side}: {said:?}"
             );
         }
+    }
+
+    #[test]
+    fn a_line_whose_end_has_no_levels_is_never_marked_even_when_its_start_is_echo() {
+        let mut call = turns(|_| 18, false);
+        let tail = speech(4, TURN / 2);
+        let from = (28 * TURN + TURN / 2) as usize;
+        for (i, level) in tail.iter().enumerate() {
+            call.far[from + i] = 11;
+            call.mic[from + i] = *level;
+        }
+        let expected: Vec<bool> = line_starts()
+            .into_iter()
+            .map(|(at, echo)| echo && at < 28 * TURN)
+            .collect();
+        let whole = sides(&call, 0);
+        assert_eq!(
+            marks(&whole.you, &whole.others, &AtomicBool::new(false)),
+            expected
+        );
+        let cut = sides(&call, 0);
+        std::fs::write(
+            cut.you.dir.join(levels_name(1)),
+            &call.mic[PER_PART - LEAD..from],
+        )
+        .unwrap();
+        assert_eq!(
+            marks(&cut.you, &cut.others, &AtomicBool::new(false)),
+            expected,
+            "the missing end is not read as silence"
+        );
+    }
+
+    #[test]
+    fn the_lag_search_tries_under_a_quarter_of_the_lags_and_grows_with_the_call_alone() {
+        let call = turns(|_| 18, false);
+        let near: Vec<f32> = call.mic[400..400 + WINDOW as usize]
+            .iter()
+            .map(|&l| l as f32)
+            .collect();
+        let other: Vec<f32> = call.far
+            [(400 - MOST_LAG) as usize..(400 + WINDOW + MOST_LAG) as usize]
+            .iter()
+            .map(|&l| l as f32)
+            .collect();
+        let (corr, lag, tried) = best_lag(&near, &other);
+        assert!(
+            (lag - 18).abs() <= SLACK && corr >= CONFIDENT,
+            "{lag} {corr}"
+        );
+        assert!(tried <= 2 * MOST_LAG as usize / 4, "{tried}");
+        let reads = |blocks: i64| {
+            let counted = std::cell::Cell::new(0u64);
+            let level = |t: i64| {
+                counted.set(counted.get() + 1);
+                call.mic[(t.rem_euclid(LENGTH)) as usize]
+            };
+            let far = |t: i64| call.far[(t.rem_euclid(LENGTH)) as usize];
+            leak(
+                &mut { level },
+                &mut { far },
+                blocks,
+                &AtomicBool::new(false),
+            );
+            counted.get()
+        };
+        let hour = 3_600 * 100;
+        assert_eq!(reads(4 * hour), 4 * reads(hour));
     }
 
     #[test]

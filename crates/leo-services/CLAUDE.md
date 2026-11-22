@@ -161,10 +161,12 @@ long (whisper-large-v3: 706 words where most models give about 575).
 
 Call echo (2026-11-22, the owner's call; `session/echo.rs`): without headphones the
 microphone hears the call. Call tracks keep `seg-NNNNN.levels` (one dB byte per
-10 ms, written before the part is transcribed; missing means silence). Once both
+10 ms, written before the part is transcribed; outside a track's parts is
+silence). Once both
 tracks finish, `echo::marks` compares the envelopes in 2 s windows where both
 carry sound (6 dB over each track's idle level, its 10th percentile, at least
-30 dB), lags ±2 s: a window is confident at correlation ≥ 0.6, steady when
+30 dB), lags ±2 s (searched every 50 ms, then every 10 ms within 50 ms of the
+best, so a window costs 92 lags, not 401): a window is confident at correlation ≥ 0.6, steady when
 two others within 20 s agree within 20 ms (a sorted scan of the neighbours, not
 all pairs); echo exists only when steady windows are ≥ 20% of shared windows
 (headphones: none, nothing marked). Each You line is judged on its own span (its
@@ -178,8 +180,10 @@ leak's level; the line is echo only when at most 5% of its sound blocks are not
 copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
 line of yours before or under an echo is never hidden; under 0.5 s of sound stays
 unmarked. Lines are never marked when the search is cut short (finish now), and a
-part with a transcript whose levels file is missing or cut short is traced and
-never marked. Marked lines keep their text with `Passage.echo` (omitted when
+part with a transcript whose levels file is missing or cut short is traced, and
+a line is judged only when both tracks have levels for its whole span (clamped
+to the recording's length, the other side at the line's lag), so a cut-short
+file is never read as silence. Marked lines keep their text with `Passage.echo` (omitted when
 false); the writing AI skips them, so they are never joined with real speech.
 Envelopes are read a part at a time.
 
