@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -373,7 +374,16 @@ fn listen_call(
             }
         }
     });
-    finish_tracks(usage, dirs, warnings, id, profile, wants, heard)
+    finish_tracks(
+        usage,
+        dirs,
+        warnings,
+        id,
+        profile,
+        wants,
+        &finish_now,
+        heard,
+    )
 }
 
 fn clock_of(speaker: &str, event: &Event, last_others: &mut f32) -> Option<Heard> {
@@ -396,6 +406,7 @@ fn clock_of(speaker: &str, event: &Event, last_others: &mut f32) -> Option<Heard
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish_tracks(
     usage: &Usage,
     dirs: Vec<(&'static str, std::path::PathBuf)>,
@@ -403,12 +414,13 @@ fn finish_tracks(
     id: String,
     mut profile: leo_core::recording::Profile,
     wants: Arc<std::sync::Mutex<Option<String>>>,
+    finish_now: &AtomicBool,
     heard: &mut dyn FnMut(Heard),
 ) -> Result<Recorded> {
     if dirs.is_empty() {
         anyhow::bail!(warnings.join("; "));
     }
-    let mut source = merged(&dirs)?;
+    let mut source = merged(&dirs, finish_now)?;
     source.id = id;
     source.warnings.extend(warnings);
     for warning in &source.warnings {
@@ -444,7 +456,10 @@ fn finish_tracks(
     })
 }
 
-fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Archive> {
+fn merged(
+    dirs: &[(&str, std::path::PathBuf)],
+    finish_now: &AtomicBool,
+) -> Result<leo_core::recording::Archive> {
     let sessions = dirs
         .iter()
         .map(|(speaker, dir)| Ok((*speaker, leo_services::session::Session::open(dir)?)))
@@ -467,7 +482,7 @@ fn merged(dirs: &[(&str, std::path::PathBuf)]) -> Result<leo_core::recording::Ar
             .map(|(_, session)| session)
     };
     let echo = match (side("You"), side("Others")) {
-        (Some(you), Some(others)) => leo_services::session::echo::marks(you, others),
+        (Some(you), Some(others)) => leo_services::session::echo::marks(you, others, finish_now),
         _ => Vec::new(),
     };
     for (speaker, session) in &sessions {
@@ -676,6 +691,7 @@ fn recover(usage: &Usage, listening: Listening, heard: &mut dyn FnMut(Heard)) ->
         id.to_owned(),
         listening.profile,
         listening.wants,
+        &listening.finish_now,
         heard,
     )?;
     recorded.into = into;
@@ -729,6 +745,7 @@ fn draft_fn(usage: &Usage) -> Option<recorder::DraftFn> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::AtomicBool;
 
     #[test]
     fn write_sources_gives_the_same_parts_from_saved_recordings_as_from_the_archives() {
@@ -864,7 +881,7 @@ mod tests {
             std::fs::write(session.dir.join(levels_name(0)), levels).unwrap();
             dirs.push((speaker, session.dir.clone()));
         }
-        let source = super::merged(&dirs).unwrap();
+        let source = super::merged(&dirs, &AtomicBool::new(false)).unwrap();
         let said: Vec<(&str, &str, bool)> = source
             .passages
             .iter()
@@ -886,7 +903,7 @@ mod tests {
         assert_eq!(read, ["[You] Hello there.", "[Others] Our plan holds."]);
 
         std::fs::remove_file(dirs[1].1.join(levels_name(0))).unwrap();
-        let unheard = super::merged(&dirs).unwrap();
+        let unheard = super::merged(&dirs, &AtomicBool::new(false)).unwrap();
         assert!(unheard.passages.iter().all(|p| !p.echo));
     }
 
@@ -942,7 +959,7 @@ mod tests {
             .unwrap();
             dirs.push((speaker, session.dir.clone()));
         }
-        let source = super::merged(&dirs).unwrap();
+        let source = super::merged(&dirs, &AtomicBool::new(false)).unwrap();
         let order: Vec<String> = source
             .passages
             .iter()
@@ -966,7 +983,7 @@ mod tests {
         let single = Session::create(&root.path().join("single"), manifest).unwrap();
         std::fs::write(single.dir.join("seg-00000.txt"), "First part.").unwrap();
         std::fs::write(single.dir.join("seg-00001.txt"), "Second part.").unwrap();
-        let kept = super::merged(&[("", single.dir.clone())]).unwrap();
+        let kept = super::merged(&[("", single.dir.clone())], &AtomicBool::new(false)).unwrap();
         assert_eq!(kept.passages.len(), 2, "a single recording keeps its parts");
     }
 
@@ -998,7 +1015,7 @@ mod tests {
             }
             dirs.push((speaker, session.dir.clone()));
         }
-        let source = super::merged(&dirs).unwrap();
+        let source = super::merged(&dirs, &AtomicBool::new(false)).unwrap();
         assert!(source.passages.len() >= 3, "{:?}", source.passages.len());
         assert!(source
             .passages
@@ -1071,6 +1088,7 @@ mod tests {
                     "call-0001".into(),
                     Default::default(),
                     Default::default(),
+                    &Default::default(),
                     &mut |_| {},
                 )
                 .unwrap();
@@ -1231,6 +1249,7 @@ mod tests {
                     "call-named".into(),
                     Default::default(),
                     Default::default(),
+                    &Default::default(),
                     &mut |_| {},
                 )
                 .unwrap();

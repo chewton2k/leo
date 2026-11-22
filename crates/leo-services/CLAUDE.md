@@ -123,13 +123,22 @@ microphone hears the call. Call tracks keep `seg-NNNNN.levels` (one dB byte per
 tracks finish, `echo::marks` compares the envelopes in 2 s windows where both
 carry sound (6 dB over each track's idle level, its 10th percentile, at least
 30 dB), lags ±2 s: a window is confident at correlation ≥ 0.6, steady when
-two others within 20 s agree within 20 ms; echo exists only when steady windows
-are ≥ 20% of shared windows (headphones: none, nothing marked). Each You line is
-judged on its own span at the nearest steady lag: ≥ 70% of its sound within 6 dB
-of the leak's level and correlation ≥ 0.5; under 0.5 s of sound stays unmarked.
-Marked lines keep their text with `Passage.echo` (omitted when false); the
-writing AI skips them, the join never fuses echo with real speech. Envelopes are
-read a part at a time.
+two others within 20 s agree within 20 ms (a sorted scan of the neighbours, not
+all pairs); echo exists only when steady windows are ≥ 20% of shared windows
+(headphones: none, nothing marked). Each You line is judged on its own span (its
+onset to the next line's onset, so silence is not counted, only sound) at the
+nearest steady lag, with the leak's level the median of the steady windows within
+20 s (a later volume change is followed). A sound block (10 ms, at least the
+track's floor) is a copy when the other side is at or above its floor (the
+loudest within 20 ms of the lag) and the block is no more than 6 dB over the
+leak's level; the line is echo only when at most 5% of its sound blocks are not
+copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
+line of yours before or under an echo is never hidden; under 0.5 s of sound stays
+unmarked. Lines are never marked when the search is cut short (finish now), and a
+part with a transcript whose levels file is missing or cut short is traced and
+never marked. Marked lines keep their text with `Passage.echo` (omitted when
+false); the writing AI skips them, the join never fuses echo with real speech.
+Envelopes are read a part at a time.
 
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
 re-transcribe from `settled_at`, at most
