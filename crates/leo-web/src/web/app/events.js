@@ -33,8 +33,8 @@ document.addEventListener('keydown', (e) => {
   }
   if (e.key === 'Escape') {
     if ($('.scrim')) return closeSheet();
-    if (source.note && sourcePane.contains(e.target)) return closeSource();
     if (typing && !e.target.matches('input[type="checkbox"], input[type="radio"]')) return e.target.blur();
+    if (asideOpen()) return closeAside();
     if (e.target === document.body && chat.isOpen()) return;
     if (state.view === 'trash' && state.selecting) {
       state.selecting = false;
@@ -293,7 +293,6 @@ async function render() {
   const generation = ++renderGeneration;
   hideAskFloat();
   clearTimeout(cal.timer);
-  if (!/^#\/n\//.test(location.hash)) closeSource();
   // Plain groups: tests/wording.rs flags a colon right before "settings" (an old command).
   document.body.classList.toggle('on-settings', /^#\/(settings|trash)(\/|$)/.test(location.hash));
   document.body.classList.toggle('on-calendar', /^#\/calendar/.test(location.hash));

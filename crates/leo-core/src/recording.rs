@@ -234,6 +234,7 @@ pub struct Change {
 pub enum Refused {
     Stale,
     NoRow,
+    Taken,
 }
 
 impl std::fmt::Display for Refused {
@@ -241,6 +242,7 @@ impl std::fmt::Display for Refused {
         f.write_str(match self {
             Refused::Stale => "This transcript was changed since it was opened",
             Refused::NoRow => "That line is not in this transcript",
+            Refused::Taken => "Another speaker in this recording already has that name",
         })
     }
 }
@@ -1001,6 +1003,39 @@ pub fn each_point(
 }
 
 pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change]) -> Result<Head> {
+    rewrite(notes, note, id, revision, changes, None)
+}
+
+pub fn rename_speaker(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    from: &str,
+    to: &str,
+) -> Result<Head> {
+    let to = to.trim();
+    let old = head(notes, note, id)?;
+    if old.revision != revision {
+        return Err(Refused::Stale.into());
+    }
+    if from.is_empty() || !old.speakers.iter().any(|s| s == from) {
+        return Err(Refused::NoRow.into());
+    }
+    if to.is_empty() || old.speakers.iter().any(|s| s == to && s != from) {
+        return Err(Refused::Taken.into());
+    }
+    rewrite(notes, note, id, revision, &[], Some((from, to)))
+}
+
+fn rewrite(
+    notes: &Path,
+    note: &str,
+    id: &str,
+    revision: u64,
+    changes: &[Change],
+    rename: Option<(&str, &str)>,
+) -> Result<Head> {
     let dir = folder(notes, note)?;
     let old = head(notes, note, id)?;
     if old.revision != revision {
@@ -1024,6 +1059,9 @@ pub fn edit(notes: &Path, note: &str, id: &str, revision: u64, changes: &[Change
             |seq, mut p| {
                 if let Some(text) = said.remove(&seq) {
                     p.text = text.to_string();
+                }
+                if let Some((_, to)) = rename.filter(|(from, _)| p.speaker == *from) {
+                    p.speaker = to.to_string();
                 }
                 pout.passage(seq, &p).map(|()| true)
             },
@@ -2285,6 +2323,62 @@ mod tests {
         assert_eq!(
             fix(1, 1).unwrap_err().downcast::<Refused>().unwrap(),
             Refused::Stale
+        );
+    }
+
+    #[test]
+    fn renaming_a_speaker_changes_every_line_of_that_speaker_and_keeps_the_order() {
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        save(
+            &notes,
+            "note-0001",
+            &spoken(
+                "rec-names1",
+                &[
+                    (0, "Speaker 1", "one"),
+                    (5, "Speaker 2", "two"),
+                    (9, "Speaker 1", "three"),
+                ],
+            ),
+        )
+        .unwrap();
+        let rename = |revision, from: &str, to: &str| {
+            rename_speaker(&notes, "note-0001", "rec-names1", revision, from, to)
+        };
+        assert_eq!(
+            rename(1, "Speaker 1", "Speaker 2")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::Taken
+        );
+        assert_eq!(
+            rename(1, "Speaker 9", "Ana")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::NoRow
+        );
+        assert_eq!(
+            rename(0, "Speaker 1", "Ana")
+                .unwrap_err()
+                .downcast::<Refused>()
+                .unwrap(),
+            Refused::Stale
+        );
+        let head = rename(1, "Speaker 1", " Ana ").unwrap();
+        assert_eq!(head.revision, 2);
+        assert_eq!(head.speakers, ["Ana", "Speaker 2"]);
+        let page = page(&notes, "note-0001", "rec-names1", Cursor::START).unwrap();
+        let said: Vec<_> = page
+            .passages
+            .iter()
+            .map(|(_, p)| (p.speaker.as_str(), p.text.as_str()))
+            .collect();
+        assert_eq!(
+            said,
+            [("Ana", "one"), ("Speaker 2", "two"), ("Ana", "three")]
         );
     }
 

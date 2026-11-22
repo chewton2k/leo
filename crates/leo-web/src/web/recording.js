@@ -142,6 +142,46 @@
     return { drop, keep, tail: next.slice(keep) };
   }
 
+  const NOT_SPEAKERS = ['', 'Microphone', 'Computer audio'];
+  const TONES = ['var(--hue-0)', 'var(--hue-1)', 'var(--hue-4)', 'var(--hue-2)', 'var(--hue-5)', 'var(--hue-3)', 'var(--hue-6)', 'var(--hue-7)'];
+
+  const speakersOf = (speakers) => (speakers || []).filter((name) => !NOT_SPEAKERS.includes(name));
+
+  function toneOf(speakers, name) {
+    if (name === 'You') return 'var(--text)';
+    const i = speakersOf(speakers).filter((n) => n !== 'You').indexOf(name);
+    return i < 0 ? 'var(--faint)' : TONES[i % TONES.length];
+  }
+
+  function transcriptFlow(passages, points, speakers) {
+    const meeting = speakersOf(speakers).length > 0;
+    const rows = [
+      ...(passages || []).map((row) => ({ at: row[1].start_secs || 0, passage: row })),
+      ...(points || []).map((row) => ({ at: row[1].at_secs || 0, point: row })),
+    ].sort((a, b) => a.at - b.at || Boolean(a.point) - Boolean(b.point));
+    const groups = [];
+    let group = null;
+    const open = (at, speaker, key) => {
+      group = { at, speaker, key, items: [] };
+      groups.push(group);
+    };
+    for (const row of rows) {
+      if (row.point) {
+        if (!group) open(row.at, '', meeting ? null : Math.floor(row.at / 60));
+        group.items.push({ point: row.point });
+        continue;
+      }
+      const p = row.passage[1];
+      const echo = p.echo === true;
+      const key = meeting ? p.speaker || '' : Math.floor(row.at / 60);
+      if (!group || (!echo && group.key !== key)) open(row.at, meeting ? p.speaker || '' : '', key);
+      const last = group.items[group.items.length - 1];
+      if (echo && last && last.echo) last.echo.push(row.passage);
+      else group.items.push(echo ? { echo: [row.passage] } : { passage: row.passage });
+    }
+    return { meeting, groups };
+  }
+
   const MOST_ASK = 8000;
   const FELIX_ASKS = {
     before: ['What should I listen for?', 'What should I ask?'],
@@ -1036,5 +1076,5 @@
     };
   }
 
-  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
+  root.leoRecording = { pastedScreenshot, saveScreenshot, eventNow, whenOf, MEETING_WANTS, ease, spread, freshLevels, sourceFor, create, clock, stateWord, failureOf, pendingLine, mergePages, earlierFirst, tailMerge, speakersOf, toneOf, transcriptFlow, askChips, liveAsk, briefAsk, FELIX_ASKS, MOST_ASK, unsavedLine, loudness, hearing, hearingWords, preflight, tipWords, HEADSET, QUIET };
 })(typeof window !== 'undefined' ? window : globalThis);

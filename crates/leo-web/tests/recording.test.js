@@ -533,3 +533,33 @@ test('the live page keeps the stacked page unless a container or the docked chat
   assert.ok(gated.every((line) => /^\s*(?:@media \([^)]*\) \{ )?@container recroom \(min-width: \d+px\) \{/.test(line)), 'only inside a container query');
   assert.ok(gated.some((line) => /@media \(min-width: 1200px\) \{ @container[^\n]*body\.chat-open \.rec-live/.test(line)), 'two columns only beside a docked chat');
 });
+
+test('speakers take tones in the order they were first heard, You keeps ink and source labels are not speakers', () => {
+  const speakers = ['You', 'Others', 'Sam'];
+  assert.equal(L.toneOf(speakers, 'You'), 'var(--text)');
+  assert.equal(L.toneOf(speakers, 'Others'), 'var(--hue-0)');
+  assert.equal(L.toneOf(speakers, 'Sam'), 'var(--hue-1)');
+  assert.equal(L.toneOf(['Speaker 1', 'Speaker 2', 'Speaker 3'], 'Speaker 3'), 'var(--hue-4)');
+  assert.deepEqual(L.speakersOf(['Microphone', 'Computer audio', '']), []);
+  assert.deepEqual(L.speakersOf(['Microphone', 'Speaker 1']), ['Speaker 1']);
+});
+
+test('a meeting groups lines into turns and folds echo lines without starting a turn', () => {
+  const p = (seq, at, speaker, text, echo) => [seq, { start_secs: at, end_secs: at + 4, text, speaker, ...(echo ? { echo: true } : {}) }];
+  const flow = L.transcriptFlow(
+    [p(1, 0, 'You', 'a'), p(2, 5, 'You', 'b'), p(3, 9, 'Others', 'c'), p(4, 10, 'You', 'c', true), p(5, 11, 'You', 'd', true), p(6, 14, 'Others', 'e'), p(7, 20, 'You', 'f')],
+    [[1, { at_secs: 5, text: 'typed' }]],
+    ['You', 'Others'],
+  );
+  assert.equal(flow.meeting, true);
+  assert.deepEqual(flow.groups.map((g) => [g.speaker, g.at]), [['You', 0], ['Others', 9], ['You', 20]]);
+  assert.deepEqual(flow.groups[0].items.map((i) => Object.keys(i)[0]), ['passage', 'passage', 'point'], 'a point comes after the line said at the same second');
+  assert.deepEqual(flow.groups[1].items.map((i) => (i.echo ? i.echo.map(([seq]) => seq) : i.passage[0])), [3, [4, 5], 6]);
+});
+
+test('a lecture makes one paragraph a minute and a missing echo field counts as not echo', () => {
+  const p = (seq, at) => [seq, { start_secs: at, end_secs: at + 5, text: String(seq), speaker: 'Microphone' }];
+  const flow = L.transcriptFlow([p(1, 3), p(2, 50), p(3, 60), p(4, 179)], [], ['Microphone']);
+  assert.equal(flow.meeting, false);
+  assert.deepEqual(flow.groups.map((g) => [g.at, g.items.map((i) => i.passage[0])]), [[3, [1, 2]], [60, [3]], [179, [4]]]);
+});

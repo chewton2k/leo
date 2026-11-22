@@ -38,7 +38,7 @@ function engine(rows, size = 2) {
   const hooks = { failPut: null };
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const head = (r, trace) => ({
-    id: r.id, started: r.started, context: '', wants: r.wants, warnings: [], speakers: [], passages: r.passages.length, points: r.points.length, revision: r.revision,
+    id: r.id, started: r.started, context: '', wants: r.wants, warnings: [], speakers: r.speakers || [], passages: r.passages.length, points: r.points.length, revision: r.revision,
     ...(r.from ? { from: r.from } : {}), ...(trace ? { trace: [] } : {}),
   });
   const take = (list, from) => {
@@ -56,7 +56,11 @@ function engine(rows, size = 2) {
       if (hooks.failPut && hooks.failPut(body)) throw Object.assign(new Error(hooks.failPutSays || 'leo answered 500.'), { status: hooks.failPutStatus || 500 });
       const r = rows.find((x) => x.id === body.source);
       if (body.base !== r.revision) throw Object.assign(new Error('Could not save original notes'), { status: 409 });
-      for (const c of body.changes) {
+      if (body.rename) {
+        for (const [, passage] of r.passages) if (passage.speaker === body.rename.from) passage.speaker = body.rename.to;
+        r.speakers = r.speakers.map((name) => (name === body.rename.from ? body.rename.to : name));
+      }
+      for (const c of body.changes || []) {
         const row = (c.kind === 'passage' ? r.passages : r.points).find(([seq]) => seq === c.seq);
         if (!row) throw Object.assign(new Error('Could not save original notes'), { status: 400 });
         row[1].text = c.text;
@@ -87,32 +91,40 @@ function engine(rows, size = 2) {
 }
 
 function screen(eng) {
-  const ui = { open: false, areas: [], rows: [], toasts: [], timers: [], sheets: 0 };
+  const ui = { open: false, areas: [], rows: [], toasts: [], timers: [], sheets: 0, facts: '' };
   const field = (value) => ({ value, listeners: {}, addEventListener(type, fn) { this.listeners[type] = fn; } });
+  const layout = { dataset: {}, classes: new Set(), classList: { add(c) { layout.classes.add(c); }, remove(c) { layout.classes.delete(c); }, contains: (c) => layout.classes.has(c) } };
   const draw = (html) => {
     ui.open = true;
     ui.sheets += 1;
     ui.html = html;
-    ui.areas = [...html.matchAll(/<textarea class="source-text" data-(passage|point)="(\d+)"[^>]*>([\s\S]*?)<\/textarea>/g)].map((m) => ({
-      kind: m[1], seq: Number(m[2]), value: unescape(m[3]), dataset: { [m[1]]: m[2] }, style: {}, scrollHeight: 0, scrolled: 0,
+    ui.areas = [...html.matchAll(/<span class="source-text" contenteditable="plaintext-only" spellcheck="true" data-(passage|point)="(\d+)">([\s\S]*?)<\/span>/g)].map((m) => ({
+      kind: m[1], seq: Number(m[2]), textContent: unescape(m[3]), dataset: { [m[1]]: m[2] }, scrolled: 0,
       addEventListener() {}, scrollIntoView() { this.scrolled += 1; },
     }));
-    ui.rows = [...html.matchAll(/<div class="source-row" data-text="([^"]*)">/g)].map((m) => ({ dataset: { text: unescape(m[1]) }, hidden: false }));
+    ui.rows = [...html.matchAll(/<div class="source-row (?:turn|minute)" data-text="([^"]*)">/g)].map((m) => ({ dataset: { text: unescape(m[1]) }, hidden: false }));
     ui.query = field(unescape((html.match(/<input id="source-query" value="([^"]*)"/) || [, ''])[1]));
     const pick = html.includes('id="source-pick"');
     ui.pick = pick ? field((html.match(/<option value="([^"]*)" selected>/) || [, ''])[1]) : null;
     ui.wants = field(unescape((html.match(/<textarea id="regenerate-wants"[^>]*>([\s\S]*?)<\/textarea>/) || [, ''])[1]));
-    ui.found = { innerHTML: html.slice(html.indexOf('<div id="source-found">') + 23, html.indexOf('</div>\n    <div id="source-passages"')) };
-    ui.passages = { scrollTop: 40 };
+    const from = html.indexOf('<div id="source-found">') + 23;
+    ui.found = { innerHTML: html.slice(from, html.indexOf('\n', from)).replace(/<\/div>$/, '') };
+    ui.passages = { scrollIntoView() {} };
     ui.none = { hidden: true };
-    return {
-      querySelectorAll(selector) {
-        return selector === '.source-text' || selector === '[data-passage],[data-point]' ? ui.areas : selector === '.source-row' ? ui.rows : [];
-      },
-    };
   };
+  const aside = {
+    set innerHTML(html) { if (html) draw(html); else ui.open = false; },
+    querySelectorAll(selector) {
+      return selector === '[data-passage],[data-point]' ? ui.areas : selector === '.source-row' ? ui.rows : [];
+    },
+    addEventListener() {},
+  };
+  const facts = { set innerHTML(html) { ui.facts = html; } };
   const find = (selector) => {
-    if (selector === '.sheet') return { classList: { add() {} } };
+    if (selector === '.note-layout') return layout;
+    if (selector === '.note-layout.aside-open') return layout.classes.has('aside-open') ? layout : null;
+    if (selector === '#note-aside') return aside;
+    if (selector === '#note-aside-facts') return facts;
     if (!ui.open) return null;
     const map = { '#source-query': ui.query, '#source-pick': ui.pick, '#source-found': ui.found, '#source-passages': ui.passages, '#regenerate-wants': ui.wants, '.source-none': ui.none };
     return map[selector] || null;
@@ -126,13 +138,15 @@ function screen(eng) {
     },
   };
   const context = {
-    seq: 1, document, window: { leoRecording: globalThis.leoRecording }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
+    seq: 1, document, window: { leoRecording: globalThis.leoRecording, scrollTo() {} }, esc: escape, enc: encodeURIComponent, ICON: { chevron: '', search: '' },
+    plural: (n, word) => `${n} ${n === 1 ? word : `${word}s`}`,
     $: (selector) => find(selector),
     api: eng.api,
     ready: async () => ({ note: { id: 'n1', title: 'Lecture' } }),
     toast: (message, options = {}) => ui.toasts.push({ message, bad: Boolean(options.bad) }),
     fail: (e) => ui.toasts.push({ message: e.message, bad: true }),
-    sheet: draw,
+    arriveOnPage() {},
+    sheet: () => ({ querySelector: () => null }),
     sheetButtons: () => '',
     settingsSwitch: () => '',
     closeSheet() {},
@@ -155,9 +169,9 @@ function screen(eng) {
     }
   };
   ui.edit = (kind, seq, text) => {
-    ui.areas.find((a) => a.kind === kind && a.seq === seq).value = text;
+    ui.areas.find((a) => a.kind === kind && a.seq === seq).textContent = text;
   };
-  ui.shown = (kind) => ui.areas.filter((a) => a.kind === kind).map((a) => [a.seq, a.value]);
+  ui.shown = (kind) => ui.areas.filter((a) => a.kind === kind).map((a) => [a.seq, a.textContent]);
   return ui;
 }
 
@@ -277,7 +291,7 @@ test('a save refused because the revision moved keeps the fixes on the page and 
   assert.match(said.message, /changed/);
   assert.match(said.message, /still/);
   assert.equal(ui.shown('passage')[1][1], 'my fix', 'the person\'s fix is still on the page');
-  assert.equal(ui.sheets, 1, 'the sheet was not redrawn');
+  assert.equal(ui.sheets, 1, 'the transcript was not redrawn');
   assert.equal(eng.log.filter((c) => c.method === 'GET').length, 1, 'nothing was reloaded over the fix');
 });
 
@@ -321,4 +335,64 @@ test('the sheet\'s buttons run the paging functions', () => {
     assert.ok(new RegExp(`'${name}': \\([a-z]*\\) => ${call}\\(`).test(actions), name);
   }
   assert.ok(/'source-match': \(el\) => sourceMatch\(el\.dataset\.source, el\.dataset\.at\)/.test(actions));
+});
+
+function meeting() {
+  return [{
+    id: 'rec-cccccccc',
+    started: '2026-11-03T09:00:00Z',
+    revision: 1,
+    wants: '',
+    speakers: ['Speaker 1', 'Speaker 2'],
+    passages: [
+      [1, { start_secs: 0, end_secs: 4, text: 'hello all', speaker: 'Speaker 1' }],
+      [2, { start_secs: 5, end_secs: 9, text: 'next item', speaker: 'Speaker 1' }],
+      [3, { start_secs: 10, end_secs: 14, text: 'sure', speaker: 'Speaker 2' }],
+      [4, { start_secs: 15, end_secs: 19, text: 'sure', speaker: 'Speaker 1', echo: true }],
+      [5, { start_secs: 16, end_secs: 19, text: 'it echoed', speaker: 'Speaker 1', echo: true }],
+      [6, { start_secs: 20, end_secs: 29, text: 'back to me', speaker: 'Speaker 1' }],
+    ],
+    points: [[1, { at_secs: 6, text: 'my point' }]],
+  }];
+}
+
+test('a meeting shows one turn per speaker with a tone dot, the typed point at its time and echo lines folded', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  assert.equal(ui.rows.length, 3, 'three turns: Speaker 1, Speaker 2 with its echo, Speaker 1');
+  const who = [...ui.html.matchAll(/<span class="turn-name">([^<]*)<\/span>/g)].map((m) => m[1]);
+  assert.deepEqual(who, ['Speaker 1', 'Speaker 2', 'Speaker 1']);
+  assert.ok(ui.html.includes('--tone: var(--hue-0)') && ui.html.includes('--tone: var(--hue-1)'));
+  const first = ui.html.indexOf('hello all');
+  const point = ui.html.indexOf('Your point · ');
+  assert.ok(first < point && point < ui.html.indexOf('>sure<'), 'the point sits inside the first turn, after the line before it');
+  assert.ok(ui.html.includes('Hidden: 2 echo lines · '));
+  assert.ok(ui.html.includes('aria-label="Rename Speaker 2"'));
+  assert.match(ui.facts, /^Transcript · 0:29 · /);
+});
+
+test('renaming a speaker sends the rename with the revision and reloads the same page', async () => {
+  const eng = engine(meeting(), 50);
+  const ui = screen(eng);
+  await ui.context.showRecordingSources();
+  const before = eng.log.length;
+  await ui.context.renameSpeaker('Speaker 2', 'Sam');
+  assert.deepEqual(eng.log[before].body, { source: 'rec-cccccccc', base: 1, rename: { from: 'Speaker 2', to: 'Sam' } });
+  assert.ok(ui.html.includes('<span class="turn-name">Sam</span>'));
+  assert.ok(ui.html.includes('aria-label="Rename Sam"'));
+  assert.equal(ui.context.page().page.head.revision, 2);
+  assert.deepEqual(ui.toasts.at(-1), { message: 'Speaker 2 is now Sam in this recording.', bad: false });
+});
+
+test('a lecture shows a paragraph a minute with its time and no speaker row', async () => {
+  const rows = [{ id: 'rec-dddddddd', started: '2026-11-04T09:00:00Z', revision: 1, wants: '', speakers: ['Microphone'], points: [],
+    passages: [[1, { start_secs: 2, end_secs: 30, text: 'first', speaker: 'Microphone' }], [2, { start_secs: 40, end_secs: 59, text: 'second', speaker: 'Microphone' }], [3, { start_secs: 61, end_secs: 80, text: 'third', speaker: 'Microphone' }]] }];
+  const ui = screen(engine(rows, 50));
+  await ui.context.showRecordingSources();
+  assert.equal(ui.rows.length, 2);
+  assert.ok(!ui.html.includes('speaker-row'));
+  assert.ok(!ui.html.includes('turn-name'));
+  assert.match(ui.html, /<span class="rec-at">0:02<\/span><div class="minute-said"><p class="said">[^]*first[^]*second[^]*<\/p><\/div>/);
+  assert.match(ui.html, /<span class="rec-at">1:01<\/span>/);
 });

@@ -192,7 +192,16 @@ pub(crate) async fn regenerate(
 pub(crate) struct Fix {
     source: String,
     base: u64,
+    #[serde(default)]
     changes: Vec<recording::Change>,
+    #[serde(default)]
+    rename: Option<Rename>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct Rename {
+    from: String,
+    to: String,
 }
 
 pub(crate) async fn edit_sources(
@@ -208,10 +217,22 @@ pub(crate) async fn edit_sources(
     };
     match outside(&state, Some(id.clone()), move |notes, _| {
         let _editing = editing;
-        recording::edit(&notes, &id, &body.source, body.base, &body.changes).map_err(|e| {
+        match &body.rename {
+            Some(rename) => recording::rename_speaker(
+                &notes,
+                &id,
+                &body.source,
+                body.base,
+                &rename.from,
+                &rename.to,
+            ),
+            None => recording::edit(&notes, &id, &body.source, body.base, &body.changes),
+        }
+        .map_err(|e| {
             match e.downcast_ref::<recording::Refused>() {
                 Some(recording::Refused::Stale) => StatusCode::CONFLICT,
                 Some(recording::Refused::NoRow) => StatusCode::BAD_REQUEST,
+                Some(recording::Refused::Taken) => StatusCode::UNPROCESSABLE_ENTITY,
                 None if e
                     .downcast_ref::<std::io::Error>()
                     .is_some_and(|e| e.kind() == std::io::ErrorKind::NotFound) =>
@@ -224,9 +245,14 @@ pub(crate) async fn edit_sources(
     })
     .await
     {
-        Ok(head) => {
-            Json(serde_json::json!({"saved": true, "revision": head.revision})).into_response()
-        }
+        Ok(head) => Json(
+            serde_json::json!({"saved": true, "revision": head.revision, "speakers": head.speakers}),
+        )
+        .into_response(),
+        Err(StatusCode::UNPROCESSABLE_ENTITY) => error(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "Another speaker in this recording already has that name.",
+        ),
         Err(code) => error(code, "Could not save original notes"),
     }
 }

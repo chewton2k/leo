@@ -368,7 +368,7 @@ body.files-over main::after {
 .source-more > summary::-webkit-details-marker { display: none; }
 .source-more > summary > svg { width: 15px; height: 15px; flex: none; }
 .source-more[open]:not(.closing) > summary > svg { transform: rotate(90deg); }
-.home-wd:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible, :where(.note-layout[data-wide]) .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
+.home-wd:focus-visible, .facts-link:focus-visible, .speaker-name:focus-visible, .source-more > summary:focus-visible, .msg-step > summary:focus-visible, :where(.note-layout[data-wide]) .note-outline .outline-ticks:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-xs); }
 .rec-error-details.source-more > summary { padding: 0; }
 
 .select-control { position: relative; display: flex; align-items: center; min-width: 0; flex: 1; }
@@ -440,7 +440,7 @@ textarea.set-input { width: 100%; resize: vertical; line-height: 1.5; }
 .quiz-hint > :last-child { margin-bottom: 0; }
 
 @media (forced-colors: active) {
-  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .source-pane, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .margin-mode:not(.note-more), .toast button, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
+  .card, .set-card, .panel, .kanban-card, .kanban-col, .kanban-tab, .tasks-window, .activity, .cal-item, .cal-side.peek, .proposal-old, .proposal-new, .starter, .toast, .choice-pick, .segmented, .settings-search, .settings-result, .rec-kind-body, .chat-history, .chat-attach-menu, .chat-access-menu, .select-menu, .picker-menu, .sheet, .scrim .quick-leo, .popup-menu, .popup-menu-gone, .select-menu, .margin-mode-menu, .picker-menu, .outline-preview, .note-outline nav, .float-act, .home-ask, .side-filter, .chat-compose, .margin-add, .margin-mode:not(.note-more), .toast button, .icon-act, .fa-tile, .hc-tile, .hc-fix, .hc-fix .btn.ink, .fa-lg, .fa-run-bar { border: 1px solid CanvasText; }
   .rec-card { border: 0; }
   .fa-stack i, .fa-lg-bar, .fa-track i, .fa-run-bar i, .fa-rm i, .fa-lg i, .fa-one i, .kanban-col-head::before { forced-color-adjust: none; }
   .settings-section .segmented { border: 1px solid CanvasText; }

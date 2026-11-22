@@ -392,8 +392,12 @@ function viewKind(name) {
 async function viewOriginal(id, name, page = null) {
   const kind = viewKind(name);
   if (!kind) return;
-  if (state.view === 'note' && state.session && state.session.note.id === id && sourceFits()) return openSource(id, name, page);
   const url = `/api/notes/${enc(id)}/originals/${enc(name)}`;
+  if (state.view === 'note' && state.session && state.session.note.id === id) {
+    if ($('.note-layout').dataset.aside === 'transcript' && changedSources().length) return toast('Save your fixes first.');
+    sourcePage = null;
+    return openFileAside(url, kind, name, page);
+  }
   const tab = kind === 'text' ? '' : `<a class="btn sm plain" href="${url}?view=1" target="_blank" rel="noopener">Open in a new tab</a>`;
   const links = `<a class="btn sm plain" href="${url}" download="${esc(name)}">Download</a>${tab}`;
   if (kind === 'image') {
@@ -409,6 +413,16 @@ async function viewOriginal(id, name, page = null) {
   if (kind === 'text') {
     await fillTextFile(scrim.querySelector('.viewer-text'), url, name);
   }
+}
+
+async function openFileAside(url, kind, name, page) {
+  const body = kind === 'pdf'
+    ? `<iframe class="aside-frame" src="${url}?view=1${page ? `#page=${Number(page)}` : ''}" title="${esc(name)}"></iframe>`
+    : kind === 'image'
+      ? `<img class="aside-img" src="${url}?view=1" alt="${esc(name)}">`
+      : '<div class="prose aside-text">Loading…</div>';
+  const box = openAside('file', `<span class="aside-name" title="${esc(name)}">${esc(name)}</span> · <a class="facts-link" href="${url}" download="${esc(name)}">Download</a> · ${backLink}`, body);
+  if (box && kind === 'text') await fillTextFile(box.querySelector('.aside-text'), url, name);
 }
 
 async function fillTextFile(box, url, name) {

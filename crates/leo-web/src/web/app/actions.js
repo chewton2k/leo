@@ -106,8 +106,6 @@ const actions = {
   'task-promote': (el) => promoteTask(el.dataset.line),
   'note-tasks': () => noteTasksSheet(),
   'note-tasks-more': () => noteTasksMore(),
-  'source-close': closeSource,
-  'source-file': (el) => openSource(el.dataset.id, el.dataset.name),
   'set-model': (el) => changeSetting({ set: 'model', task: el.dataset.task, value: el.dataset.model }),
   'set-effort': (el) => changeSetting({ set: 'effort', value: el.dataset.effort === 'default' ? '' : el.dataset.effort }),
   'side-twist': (el) => twistFolder(el.dataset.dir, el),
@@ -128,6 +126,7 @@ const actions = {
     state.calendarAdding = false;
     drawSettings(state.settings);
   },
+  'note-back': () => closeAside(),
   'note-sources': () => showRecordingSources(window.getSelection().toString().trim().slice(0,200)).catch(fail),
   'source-save': () => saveSource().catch(fail),
   'source-regenerate': () => regenerateSource().catch(fail),
