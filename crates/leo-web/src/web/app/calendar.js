@@ -2013,7 +2013,7 @@ function fitTasksWindow() {
   if (!tasksBox.classList.contains('open')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
 }
 
-new MutationObserver(() => (tasksWin.tasks ? drawTasksWindow() : fitTasksWindow())).observe(app, { childList: true });
+new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow() : fitTasksWindow())).observe(app, { childList: true });
 let railFit = 0;
 new MutationObserver(() => {
   if (railFit || !(app.querySelector('.outline-ticks') || tasksBox.style.getPropertyValue('--tasks-room'))) return;

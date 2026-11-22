@@ -1180,8 +1180,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   opening reveals the card from the pill with a `clip-path` over `MOTION_MS`, folding shrinks it
   back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
-  not take focus). Every page swap redraws it from the loaded tasks (the `#app` childList observer),
-  so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
+  not take focus). A page swap that finds it hidden with tasks loaded redraws it (the `#app` childList
+  observer), so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that
