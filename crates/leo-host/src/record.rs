@@ -171,7 +171,7 @@ pub fn regenerator(usage: Usage) -> leo_web::record::Regenerator {
 #[derive(Debug, PartialEq)]
 struct Parts {
     named: bool,
-    speaker: String,
+    joins: Option<String>,
     offset: u64,
     end: u64,
     parts: Vec<leo_services::session::Part>,
@@ -182,7 +182,7 @@ impl Parts {
     fn new<'a>(speakers: impl Iterator<Item = &'a str>) -> Parts {
         Parts {
             named: speakers.collect::<std::collections::HashSet<_>>().len() > 1,
-            speaker: String::new(),
+            joins: None,
             offset: 0,
             end: 0,
             parts: Vec::new(),
@@ -197,16 +197,16 @@ impl Parts {
         }
         let start_secs = self.offset + p.start_secs;
         let end_secs = self.offset + p.end_secs;
+        let call = p.turns.first().is_some_and(|t| !t.track.is_empty());
         if let Some(last) = self.parts.last_mut().filter(|last| {
-            self.named
-                && self.speaker == p.speaker
+            call && self.joins.as_ref() == Some(&p.speaker)
                 && end_secs.saturating_sub(last.start_secs) <= leo_services::session::SEGMENT_SECS
         }) {
             last.end_secs = last.end_secs.max(end_secs);
             last.text = leo_services::speech::chunking::join_transcripts(&[&last.text, &p.text]);
             return;
         }
-        self.speaker.clone_from(&p.speaker);
+        self.joins = call.then(|| p.speaker.clone());
         self.parts.push(leo_services::session::Part {
             index: self.parts.len() as u32,
             start_secs,
@@ -229,7 +229,7 @@ impl Parts {
     fn next_source(&mut self) {
         self.offset += self.end;
         self.end = 0;
-        self.speaker.clear();
+        self.joins = None;
     }
 
     fn write(
@@ -1073,6 +1073,58 @@ mod tests {
         std::fs::write(single.dir.join("seg-00001.txt"), "Second part.").unwrap();
         let kept = super::merged(&[("", single.dir.clone())], &AtomicBool::new(false)).unwrap();
         assert_eq!(kept.passages.len(), 2, "a single recording keeps its parts");
+    }
+
+    #[test]
+    fn the_writing_ai_reads_a_side_s_consecutive_call_turns_as_one_part() {
+        let line = |at: u64, speaker: &str, track: &str, echo: bool| leo_core::recording::Passage {
+            start_secs: at,
+            end_secs: at + 4,
+            text: format!("{speaker} at {at}."),
+            speaker: speaker.into(),
+            echo,
+            turns: vec![leo_core::recording::Turn {
+                track: track.into(),
+                part: 0,
+                ms: at * 1000,
+            }],
+        };
+        let mut source = leo_core::recording::Archive {
+            id: "call-0005".into(),
+            started: chrono::Utc::now(),
+            passages: vec![
+                line(0, "Others", "Others", false),
+                line(5, "Others", "Others", false),
+                line(9, "You", "You", true),
+                line(12, "Others", "Others", false),
+                line(20, "You", "You", false),
+                line(400, "Others", "Others", false),
+            ],
+            points: vec![],
+            context: String::new(),
+            wants: String::new(),
+            warnings: vec![],
+            trace: vec![],
+            from: String::new(),
+        };
+        let parts = super::parts_of_archive(&source);
+        let said: Vec<&str> = parts.parts.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(
+            said,
+            [
+                "[Others] Others at 0. Others at 5. Others at 12.",
+                "[You] You at 20.",
+                "[Others] Others at 400."
+            ]
+        );
+        for p in &mut source.passages {
+            p.turns[0].track.clear();
+        }
+        assert_eq!(
+            super::parts_of_archive(&source).parts.len(),
+            5,
+            "rows that are not call turns stay apart"
+        );
     }
 
     #[test]

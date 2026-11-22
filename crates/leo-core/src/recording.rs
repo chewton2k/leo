@@ -1164,7 +1164,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
     let moved = |at: u64| at.saturating_add_signed(shift);
     let mut said = std::collections::HashSet::new();
     let mut heard = std::collections::HashSet::new();
-    let mut whole: Vec<(u64, u64, String)> = Vec::new();
+    let mut whole: Vec<(u64, u64, String, String)> = Vec::new();
     let mut typed = std::collections::HashSet::new();
     let (mut last_passage, mut last_point) = (0u64, 0u64);
     rows(
@@ -1172,9 +1172,9 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         note,
         &old,
         |seq, p| {
-            said.insert(key(p.start_secs, &p.text));
             if p.turns.is_empty() {
-                whole.push((p.start_secs, p.end_secs, p.text));
+                said.insert(key(p.start_secs, &p.text));
+                whole.push((p.start_secs, p.end_secs, p.speaker, p.text));
             } else {
                 heard.extend(p.turns);
             }
@@ -1196,7 +1196,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         !text.is_empty()
             && whole[from..to]
                 .iter()
-                .any(|w| p.end_secs <= w.1 && w.2.contains(text))
+                .any(|w| p.end_secs <= w.1 && w.2 == p.speaker && w.3.contains(text))
     };
     let mut passages: Vec<Passage> = leftover
         .passages
@@ -1882,6 +1882,45 @@ mod tests {
             kept,
             [(3, "first second".to_string()), (310, "late".to_string())],
             "a transcript saved before turns were kept loses no line and gains no copy"
+        );
+
+        let spoken_over = temp.path().join("spoken-over");
+        let mut mine = spoken("call-0003", &[]);
+        mine.started = saved.started;
+        mine.passages = vec![row(0, 290, "You", "so first I think yeah late", Vec::new())];
+        save(&spoken_over, "note-0001", &mine).unwrap();
+        let mut same_second = spoken("call-0003", &[]);
+        same_second.started = saved.started;
+        same_second.passages = vec![row(310, 314, "You", "late", vec![turn("You", 1, 310_000)])];
+        save(&older, "note-0002", &same_second).unwrap();
+        merge_into(&older, "note-0002", &recovered).unwrap();
+        merge_into(&spoken_over, "note-0001", &recovered).unwrap();
+        let said = |notes: &Path, note: &str| -> Vec<String> {
+            whole(notes, note)[0]
+                .passages
+                .iter()
+                .map(|p| format!("{}@{} {}", p.speaker, p.start_secs, p.text))
+                .collect()
+        };
+        assert_eq!(
+            said(&spoken_over, "note-0001"),
+            [
+                "You@0 so first I think yeah late",
+                "Others@3 first",
+                "Others@14 second",
+                "Others@310 late"
+            ],
+            "the other side's words inside a stored line of yours are new speech"
+        );
+        assert_eq!(
+            said(&older, "note-0002"),
+            [
+                "Others@3 first",
+                "Others@14 second",
+                "You@310 late",
+                "Others@310 late"
+            ],
+            "a stored turn with the same second and words is a different turn"
         );
     }
 

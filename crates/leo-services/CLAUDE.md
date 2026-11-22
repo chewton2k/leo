@@ -79,7 +79,7 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a speaker's consecutive lines within 300 s for the writing AI), so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a side's consecutive call turns within 300 s for the writing AI), so the two sides interleave turn by turn.
 
 Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 `powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
@@ -475,8 +475,8 @@ Saving a recovered recording's sources, and the call commit, merge with an
 existing archive of the same id (`recording::merge_into`, streamed): other speakers,
 points, warnings and context are kept; the leftover's times are moved to the
 archive's start, a passage whose turn ids are all stored (or, for a stored line
-without ids, one at the same time and text or inside a stored line's span and
-words) keeps its stored text and label, so running a recovery twice, or
+without ids, one at the same time and text, or inside the span and words of a
+stored line of the same speaker) keeps its stored text and label, so running a recovery twice, or
 recovering one track of a saved call, changes nothing already saved. Recovering a
 saved track turns its speaker labelling off, so its rows keep the shape they were
 saved in. Plain
