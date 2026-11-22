@@ -124,7 +124,9 @@ track label or a `Speaker N` voice, so two people never share a line.
 `Names { readers, own }` carries the computer account's full name (`own`, from
 leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run
 of it is never kept and `name` never gives it (compared ignoring case and spaces,
-the whole name only), while Zoom's unmarked-self refusal still needs `me`.
+the whole name only); it is only a veto (2026-11-22, the orchestrator's call): the
+one-other-person shortcut needs the call app's own `me` marker, never the account
+name, and Zoom's unmarked-self refusal still needs `me`.
 Lead-in (`session::lead_ms`, the one rule for `speakers::label`, `archive`'s
 call names and echo levels): none for part 0, 1 s for every later part (every
 capture starts at part 0; an older manifest's unused `fresh` list is ignored and

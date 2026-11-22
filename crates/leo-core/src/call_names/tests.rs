@@ -477,8 +477,22 @@ fn the_computer_account_name_is_never_given_to_the_other_side() {
         ..reading(speaking, &["Juno Halvorsen", "Rowan Ellery"], None)
     };
     assert_eq!(
-        named(Some("Juno Halvorsen"), two(&["Juno Halvorsen"])).as_deref(),
+        named(Some("Juno Halvorsen"), two(&["Juno Halvorsen"])),
+        None,
+        "the account name never stands in for the call app's own marker"
+    );
+    let marked = |me: &str| Reading {
+        me: Some(me.into()),
+        ..two(&["Juno Halvorsen"])
+    };
+    assert_eq!(
+        named(Some("Juno Halvorsen"), marked("Juno Halvorsen")).as_deref(),
         Some("Rowan Ellery")
+    );
+    assert_eq!(
+        named(Some("Rowan Ellery"), marked("Juno Halvorsen")),
+        None,
+        "the one other person is never the account's own name"
     );
     let unsure = Reading {
         unmarked_self: true,

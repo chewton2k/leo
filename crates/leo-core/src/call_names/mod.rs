@@ -213,9 +213,11 @@ impl Timeline {
     }
 
     fn who(&self, reading: &Reading) -> Option<String> {
-        let mine = |name: &str| {
-            self.is_me(name) || reading.me.as_deref().is_some_and(|m| norm(m) == norm(name))
+        let marked = |name: &str| {
+            self.me.contains(&norm(name))
+                || reading.me.as_deref().is_some_and(|m| norm(m) == norm(name))
         };
+        let mine = |name: &str| marked(name) || self.is_me(name);
         let people = unique(&reading.participants);
         let roster: Vec<String> = people.iter().map(|p| norm(p)).collect();
         let outside = reading
@@ -223,9 +225,11 @@ impl Timeline {
             .iter()
             .any(|p| !mine(p) && !roster.contains(&norm(p)));
         if people.len() == 2 && reading.shown == Some(2) && !outside {
-            let others: Vec<&String> = people.iter().filter(|p| !mine(p)).collect();
+            let others: Vec<&String> = people.iter().filter(|p| !marked(p)).collect();
             if let [other] = others.as_slice() {
-                return usable(other);
+                if !mine(other) {
+                    return usable(other);
+                }
             }
         }
         if reading.unmarked_self && self.me.is_empty() && reading.me.is_none() {

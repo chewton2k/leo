@@ -235,7 +235,8 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   when one person other than the user was marked talking for more than half of
   its spoken span, or the call has exactly one other person by the count the app
   shows; anything else stays "Others". Never guessed, never the user's own name (as the call app marks it, or the computer account's full name), nothing leaves the
-  computer; tests use fixtures and fake readers. The name lands in `speaker`.
+  computer (the account's full name only vetoes; the one-other-person rule needs
+  the call app's own marker of the user); tests use fixtures and fake readers. The name lands in `speaker`.
   Credited in NOTICE (its name appears only there).
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are

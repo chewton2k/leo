@@ -523,15 +523,26 @@ mod win {
     }
 
     pub fn own_name() -> Option<String> {
+        use windows::Win32::Security::Authentication::Identity::{NameDisplay, NameSamCompatible};
+        user_name(NameDisplay).or_else(|| {
+            user_name(NameSamCompatible)
+                .and_then(|name| name.rsplit('\\').next().map(str::to_owned))
+                .filter(|name| !name.trim().is_empty())
+        })
+    }
+
+    fn user_name(
+        format: windows::Win32::Security::Authentication::Identity::EXTENDED_NAME_FORMAT,
+    ) -> Option<String> {
         use windows::core::PWSTR;
-        use windows::Win32::Security::Authentication::Identity::{GetUserNameExW, NameDisplay};
+        use windows::Win32::Security::Authentication::Identity::GetUserNameExW;
         let mut size = 0u32;
-        let _ = unsafe { GetUserNameExW(NameDisplay, None, &mut size) };
+        let _ = unsafe { GetUserNameExW(format, None, &mut size) };
         if size == 0 {
             return None;
         }
         let mut name = vec![0u16; size as usize];
-        if !unsafe { GetUserNameExW(NameDisplay, Some(PWSTR(name.as_mut_ptr())), &mut size) } {
+        if !unsafe { GetUserNameExW(format, Some(PWSTR(name.as_mut_ptr())), &mut size) } {
             return None;
         }
         name.truncate(size as usize);
