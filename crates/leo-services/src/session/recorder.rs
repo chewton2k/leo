@@ -77,6 +77,7 @@ pub struct Request {
     pub input: Source,
     pub draft: Option<DraftFn>,
     pub turns: bool,
+    pub names: Option<leo_core::call_names::Readers>,
 }
 
 pub fn transcribe_segment() -> TranscribeFn {
@@ -834,6 +835,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
         input,
         draft,
         turns,
+        names,
     } = request;
     let labelled = profile.as_ref().is_some_and(|p| p.speakers);
     let drafting = draft.is_some() && append_to.is_none() && !labelled;
@@ -868,6 +870,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
     };
     emit(Event::Started("Recording".to_string()));
     crate::ai::warm_credentials();
+    let watch = names.map(|readers| super::call_watch::Watch::start(readers, session.dir.clone()));
 
     let (updates_tx, updates) = mpsc::channel();
     let transcriber = Transcriber::start(
@@ -913,6 +916,9 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             session.trace("audio-gap", &warning);
             emit(Event::Warning(warning));
             lost_up_to = lost;
+        }
+        if let Some(watch) = &watch {
+            watch.tick(capture.recorded_secs(), capture.paused());
         }
         let secs = capture.recorded_secs() as u64;
         let backlog = transcriber.backlog();
@@ -979,6 +985,7 @@ pub fn record(request: Request, controls: &Controls, emit: &dyn Fn(Event)) {
             "{problem} What was recorded is being saved."
         )));
     }
+    drop(watch);
     final_points(&mut session, controls, emit);
     match capture.stop_with_stats() {
         Ok((samples, _)) => {

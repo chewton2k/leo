@@ -1,4 +1,5 @@
 pub mod awake;
+mod call_watch;
 pub mod capture;
 pub mod mic;
 pub mod recorder;
@@ -188,6 +189,26 @@ impl Drop for Lock {
             let _ = thread.join();
         }
         let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+const MOST_NAMES_BYTES: u64 = 64 << 20;
+
+pub(crate) fn trace_to(dir: &Path, stage: &str, detail: &str) {
+    use std::io::Write;
+    let row = leo_core::recording::Trace {
+        at: Utc::now(),
+        stage: stage.into(),
+        detail: detail.into(),
+    };
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("trace.jsonl"))
+    {
+        if let Ok(text) = serde_json::to_string(&row) {
+            let _ = writeln!(file, "{text}");
+        }
     }
 }
 
@@ -993,6 +1014,23 @@ impl Session {
         }
     }
 
+    pub fn label(&self) -> &'static str {
+        if self.manifest.screen {
+            "Computer audio"
+        } else {
+            "Microphone"
+        }
+    }
+
+    fn call_names(&self) -> Option<leo_core::call_names::Timeline> {
+        let file =
+            leo_core::paths::open_regular(&self.dir.join(leo_core::call_names::FILE)).ok()?;
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::Read::take(file, MOST_NAMES_BYTES), &mut text)
+            .ok()?;
+        Some(leo_core::call_names::Timeline::parse(&text))
+    }
+
     pub fn archive(&self) -> leo_core::recording::Archive {
         let assembled = assemble(&self.segments(), self.manifest.segment_secs);
         let passages = match self.labels(&assembled) {
@@ -1006,16 +1044,13 @@ impl Session {
                 })
                 .collect(),
             None => {
-                let speaker = if self.manifest.screen {
-                    "Computer audio"
-                } else {
-                    "Microphone"
-                };
+                let speaker = self.label();
                 let end_of = |p: &Part| {
                     self.manifest
                         .duration_secs
                         .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
                 };
+                let names = self.call_names();
                 match self.turns(&assembled) {
                     Some(turns) => assembled
                         .parts
@@ -1025,20 +1060,31 @@ impl Session {
                             let end = end_of(p);
                             let starts: Vec<u64> = entries
                                 .iter()
-                                .map(|(ms, _)| p.start_secs + ms / 1000)
+                                .map(|(ms, _)| p.start_secs * 1000 + ms)
                                 .collect();
+                            let names = &names;
                             entries
                                 .into_iter()
                                 .enumerate()
-                                .map(|(i, (_, text))| leo_core::recording::Passage {
-                                    start_secs: starts[i],
-                                    end_secs: starts
-                                        .get(i + 1)
-                                        .copied()
-                                        .unwrap_or(end)
-                                        .max(starts[i]),
-                                    text,
-                                    speaker: speaker.into(),
+                                .map(move |(i, (_, text))| {
+                                    let from = starts[i];
+                                    let to =
+                                        starts.get(i + 1).copied().unwrap_or(end * 1000).max(from);
+                                    leo_core::recording::Passage {
+                                        start_secs: from / 1000,
+                                        end_secs: starts
+                                            .get(i + 1)
+                                            .map(|ms| ms / 1000)
+                                            .unwrap_or(end)
+                                            .max(from / 1000),
+                                        text,
+                                        speaker: names
+                                            .as_ref()
+                                            .and_then(|t| {
+                                                t.name(from as f64 / 1000.0, to as f64 / 1000.0)
+                                            })
+                                            .unwrap_or_else(|| speaker.into()),
+                                    }
                                 })
                                 .collect::<Vec<_>>()
                         })
@@ -1087,21 +1133,7 @@ impl Session {
     }
 
     pub fn trace(&self, stage: &str, detail: &str) {
-        use std::io::Write;
-        let row = leo_core::recording::Trace {
-            at: Utc::now(),
-            stage: stage.into(),
-            detail: detail.into(),
-        };
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(self.dir.join("trace.jsonl"))
-        {
-            if let Ok(text) = serde_json::to_string(&row) {
-                let _ = writeln!(file, "{text}");
-            }
-        }
+        trace_to(&self.dir, stage, detail);
     }
 
     pub fn traces(&self) -> Vec<leo_core::recording::Trace> {
@@ -1945,6 +1977,32 @@ mod tests {
                 (320, 600, "Then more."),
             ]
         );
+    }
+
+    #[test]
+    fn call_lines_take_the_names_the_call_app_showed() {
+        let (s, _tmp) = call_track(&["First. Second. Third."]);
+        std::fs::write(
+            s.dir.join(turns_name(0)),
+            r#"[[1200,"First."],[4600,"Second."],[9100,"Third."]]"#,
+        )
+        .unwrap();
+        std::fs::write(
+            s.dir.join(leo_core::call_names::FILE),
+            concat!(
+                "{\"from\":1.0,\"to\":4.4,\"who\":\"Rowan Ellery\"}\n",
+                "{\"from\":4.4,\"to\":6.0,\"who\":\"Tamsin Okafor\"}\n",
+                "{\"me\":\"Juno Halvorsen\"}\n",
+            ),
+        )
+        .unwrap();
+        let speakers: Vec<String> = s
+            .archive()
+            .passages
+            .into_iter()
+            .map(|p| p.speaker)
+            .collect();
+        assert_eq!(speakers, ["Rowan Ellery", "Microphone", "Microphone"]);
     }
 
     #[test]
