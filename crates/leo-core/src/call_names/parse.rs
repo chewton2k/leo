@@ -65,16 +65,53 @@ fn low(text: &str) -> String {
     text.trim().to_lowercase()
 }
 
+const COUNTED: &[&str] = &[
+    "participants",
+    "people",
+    "attendees",
+    "in this meeting",
+    "in the meeting",
+    "in call",
+];
+
+fn shown_count(text: &str) -> Option<usize> {
+    let body = text.trim().strip_suffix(')')?;
+    let open = body.rfind('(')?;
+    let head = low(&body[..open]);
+    if !COUNTED.contains(&head.strip_prefix("meeting ").unwrap_or(&head)) {
+        return None;
+    }
+    body[open + 1..].trim().parse().ok()
+}
+
+fn shown(windows: &[&Window]) -> Option<usize> {
+    let mut counts: Vec<usize> = Vec::new();
+    each(windows.iter().copied(), &mut |node, _| {
+        counts.extend(texts(node).filter_map(shown_count));
+    });
+    let first = *counts.first()?;
+    counts.iter().all(|n| *n == first).then_some(first)
+}
+
 pub fn read_windows(kind: Kind, windows: &[Window]) -> Reading {
+    let looked: Vec<&Window> = match kind {
+        Kind::Teams => windows
+            .iter()
+            .filter(|w| super::is_call_tree(&w.tree))
+            .collect(),
+        _ => windows.iter().collect(),
+    };
     let reading = match kind {
         Kind::Zoom => zoom(windows),
         Kind::Meet => meet(windows),
-        Kind::Teams => teams(windows.iter().filter(|w| super::is_call_tree(&w.tree))),
+        Kind::Teams => teams(looked.iter().copied()),
     };
     Reading {
         speaking: unique(&reading.speaking),
         participants: unique(&reading.participants),
         me: reading.me,
+        shown: shown(&looked),
+        unmarked_self: kind == Kind::Zoom,
     }
 }
 
@@ -201,7 +238,12 @@ fn zoom_name(raw: &str) -> Option<String> {
         .then_some(name)
 }
 
-fn zoom_tile(description: &str) -> Option<(String, bool)> {
+fn zoom_mine(tags: &[String]) -> bool {
+    tags.iter()
+        .any(|t| ZOOM_WORDS.iter().any(|w| w[5] == t.as_str()))
+}
+
+fn zoom_tile(description: &str) -> Option<(String, bool, bool)> {
     let mut fields: Vec<&str> = description.split([',', '、']).map(str::trim).collect();
     let (mut talking, mut known) = (false, false);
     while fields.len() > 1 {
@@ -222,7 +264,8 @@ fn zoom_tile(description: &str) -> Option<(String, bool)> {
     if !known {
         return None;
     }
-    zoom_name(&fields.join(", ")).map(|name| (name, talking))
+    let raw = fields.join(", ");
+    zoom_name(&raw).map(|name| (name, talking, zoom_mine(&zoom_tags(&raw).1)))
 }
 
 fn zoom_talking(text: &str) -> Option<String> {
@@ -237,9 +280,12 @@ fn zoom(windows: &[Window]) -> Reading {
     let mut reading = Reading::default();
     each(windows, &mut |node, up| {
         if is(node, TILES) {
-            if let Some((name, talking)) = label(node).and_then(zoom_tile) {
+            if let Some((name, talking, mine)) = label(node).and_then(zoom_tile) {
                 if talking {
                     reading.speaking.push(name.clone());
+                }
+                if mine {
+                    reading.me = Some(name.clone());
                 }
                 reading.participants.push(name);
             }
@@ -261,11 +307,7 @@ fn zoom(windows: &[Window]) -> Reading {
             });
             if let Some(raw) = first {
                 if let Some(name) = zoom_name(raw) {
-                    let (_, tags) = zoom_tags(raw);
-                    if tags
-                        .iter()
-                        .any(|t| ZOOM_WORDS.iter().any(|w| w[5] == t.as_str()))
-                    {
+                    if zoom_mine(&zoom_tags(raw).1) {
                         reading.me = Some(name.clone());
                     }
                     reading.participants.push(name);

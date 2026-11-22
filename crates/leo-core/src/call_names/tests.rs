@@ -13,6 +13,7 @@ fn reading(speaking: &[&str], participants: &[&str], me: Option<&str>) -> Readin
         speaking: names(speaking),
         participants: names(participants),
         me: me.map(String::from),
+        ..Reading::default()
     }
 }
 
@@ -230,17 +231,112 @@ fn several_talking_at_once_or_nobody_marked_stays_unnamed() {
 
 #[test]
 fn a_call_with_one_other_person_names_them_whoever_is_marked() {
-    let two = reading(
-        &[],
-        &["Juno Halvorsen", "Rowan Ellery"],
-        Some("Juno Halvorsen"),
-    );
-    let t = timeline(&every(0.0, 6.0, Some(two)));
+    let two = Reading {
+        shown: Some(2),
+        ..reading(
+            &[],
+            &["Juno Halvorsen", "Rowan Ellery"],
+            Some("Juno Halvorsen"),
+        )
+    };
+    let t = timeline(&every(0.0, 6.0, Some(two.clone())));
     assert_eq!(t.name(1.0, 5.0).as_deref(), Some("Rowan Ellery"));
-    let unknown_me = reading(&[], &["Juno Halvorsen", "Rowan Ellery"], None);
+    let unknown_me = Reading {
+        me: None,
+        ..two.clone()
+    };
     assert_eq!(
         timeline(&every(0.0, 6.0, Some(unknown_me))).name(1.0, 5.0),
         None
+    );
+    for shown in [None, Some(3)] {
+        let partial = Reading {
+            shown,
+            ..two.clone()
+        };
+        assert_eq!(
+            timeline(&every(0.0, 6.0, Some(partial))).name(1.0, 5.0),
+            None
+        );
+    }
+}
+
+#[test]
+fn the_count_a_call_app_shows_is_read_only_when_it_agrees() {
+    let list = |labels: &[&str]| {
+        vec![Window {
+            title: "Zoom Meeting".into(),
+            id: String::new(),
+            tree: Node {
+                role: "AXWindow".into(),
+                children: labels
+                    .iter()
+                    .map(|l| Node {
+                        role: "AXStaticText".into(),
+                        value: Some(l.to_string()),
+                        ..Node::default()
+                    })
+                    .collect(),
+                ..Node::default()
+            },
+        }]
+    };
+    assert_eq!(
+        read_windows(Kind::Zoom, &list(&["Participants (2)"])).shown,
+        Some(2)
+    );
+    assert_eq!(
+        read_windows(Kind::Meet, &list(&["In this meeting (3)"])).shown,
+        Some(3)
+    );
+    assert_eq!(
+        read_windows(Kind::Zoom, &list(&["Participants (2)", "People (3)"])).shown,
+        None
+    );
+    assert_eq!(
+        read_windows(Kind::Zoom, &list(&["Talking points (2)"])).shown,
+        None
+    );
+}
+
+#[test]
+fn a_zoom_speaker_is_named_only_once_the_user_is_known() {
+    let tiles = |me_tagged: bool| {
+        let mine = if me_tagged {
+            "Juno Halvorsen (me), Computer audio muted"
+        } else {
+            "Juno Halvorsen, Computer audio muted"
+        };
+        vec![Window {
+            title: "Zoom Meeting".into(),
+            id: String::new(),
+            tree: Node {
+                role: "AXWindow".into(),
+                children: [mine, "Rowan Ellery, Computer audio unmuted, Active speaker"]
+                    .iter()
+                    .map(|d| Node {
+                        role: "AXTabGroup".into(),
+                        description: Some(d.to_string()),
+                        ..Node::default()
+                    })
+                    .collect(),
+                ..Node::default()
+            },
+        }]
+    };
+    let unsure = read_windows(Kind::Zoom, &tiles(false));
+    assert!(unsure.unmarked_self && unsure.me.is_none());
+    assert_eq!(
+        timeline(&every(0.0, 6.0, Some(unsure.clone()))).name(1.0, 5.0),
+        None
+    );
+    let sure = read_windows(Kind::Zoom, &tiles(true));
+    assert_eq!(sure.me.as_deref(), Some("Juno Halvorsen"));
+    let mut samples = vec![(0.0, Some(sure))];
+    samples.extend(every(0.4, 6.0, Some(unsure)));
+    assert_eq!(
+        timeline(&samples).name(1.0, 5.0).as_deref(),
+        Some("Rowan Ellery")
     );
 }
 

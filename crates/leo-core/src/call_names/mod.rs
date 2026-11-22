@@ -56,6 +56,8 @@ pub struct Reading {
     pub speaking: Vec<String>,
     pub participants: Vec<String>,
     pub me: Option<String>,
+    pub shown: Option<usize>,
+    pub unmarked_self: bool,
 }
 
 pub fn read(look: &Look) -> Option<Reading> {
@@ -150,11 +152,14 @@ impl Timeline {
             .speaking
             .iter()
             .any(|p| !mine(p) && !roster.contains(&norm(p)));
-        if people.len() == 2 && !outside {
+        if people.len() == 2 && reading.shown == Some(2) && !outside {
             let others: Vec<&String> = people.iter().filter(|p| !mine(p)).collect();
             if let [other] = others.as_slice() {
                 return usable(other);
             }
+        }
+        if reading.unmarked_self && self.me.is_empty() && reading.me.is_none() {
+            return None;
         }
         let talking: Vec<String> = unique(&reading.speaking)
             .into_iter()

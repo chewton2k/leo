@@ -86,7 +86,10 @@ Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
 each reading is stamped in the track's recorded time from the loop's
 `tick(recorded_secs, paused)` anchor, dropped while paused, less `LAG_SECS`
-(0.75). `Timeline` keeps only named runs (a reading stands until the next, at
+(0.75). A reading names someone only when exactly one person other than the user is
+marked speaking, and in Zoom (which does not mark the user's own tile) only once
+the user's name is known; the one-other-person shortcut needs the participant
+count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at
 most `HOLD_SECS` 2 s; unreadable or unclear readings end a run) and every name
 marked as the user's (`me`), appended to the session's `call-names.jsonl` as
 they close, so recovery keeps them. A reader quiet for `QUIET` (5 s) is replaced

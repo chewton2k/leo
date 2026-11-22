@@ -192,10 +192,18 @@ mod tests {
                     title: "Zoom Meeting".into(),
                     id: String::new(),
                     tree: Node {
-                        role: "AXTabGroup".into(),
-                        description: Some(
-                            "Rowan Ellery, Computer audio unmuted, Active speaker".into(),
-                        ),
+                        role: "AXWindow".into(),
+                        children: [
+                            "Juno Halvorsen (me), Computer audio muted",
+                            "Rowan Ellery, Computer audio unmuted, Active speaker",
+                        ]
+                        .iter()
+                        .map(|d| Node {
+                            role: "AXTabGroup".into(),
+                            description: Some(d.to_string()),
+                            ..Node::default()
+                        })
+                        .collect(),
                         ..Node::default()
                     },
                 }],
