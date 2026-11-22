@@ -483,15 +483,18 @@ fn starts_word(text: &str, word: &str) -> bool {
             .is_none_or(|c| !c.is_alphanumeric())
 }
 
+fn find_ascii(text: &str, needle: &str) -> Option<usize> {
+    text.char_indices().map(|(at, _)| at).find(|&at| {
+        text.get(at..at + needle.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(needle))
+    })
+}
+
 fn clean_teams(text: &str) -> String {
     let mut name = text.to_owned();
     for tag in TEAMS_TAGS {
-        loop {
-            let lower = name.to_lowercase();
-            let needle = format!("({tag})");
-            let Some(at) = lower.find(&needle).filter(|_| lower.len() == name.len()) else {
-                break;
-            };
+        let needle = format!("({tag})");
+        while let Some(at) = find_ascii(&name, &needle) {
             name = format!("{}{}", name[..at].trim_end(), &name[at + needle.len()..]);
         }
     }
@@ -523,16 +526,12 @@ fn teams_speaker(label: &str) -> Option<String> {
             return Some(clean_teams(&label[..at]));
         }
     }
-    let lower = label.to_lowercase();
-    if lower.len() != label.len() {
-        return None;
-    }
     for marker in ["active speaker", "now speaking", "speaking now"] {
-        let Some(at) = lower.find(marker) else {
+        let Some(at) = find_ascii(label, marker) else {
             continue;
         };
         if at > 0
-            && lower[..at]
+            && label[..at]
                 .chars()
                 .next_back()
                 .is_some_and(char::is_alphanumeric)
@@ -567,11 +566,7 @@ fn teams_person(label: &str) -> Option<(String, bool)> {
 }
 
 fn teams_me(label: &str) -> Option<String> {
-    let lower = label.to_lowercase();
-    if lower.len() != label.len() {
-        return None;
-    }
-    let at = lower.find("(you)").or_else(|| lower.find("(me)"))?;
+    let at = find_ascii(label, "(you)").or_else(|| find_ascii(label, "(me)"))?;
     bounded(&clean_teams(&label[..at]))
 }
 

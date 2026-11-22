@@ -120,6 +120,45 @@ fn teams_reads_only_the_call_window_roster_and_speaking_label() {
 }
 
 #[test]
+fn teams_labels_whose_case_changes_their_length_are_read_without_a_panic() {
+    let row = |d: &str| Node {
+        role: "AXRow".into(),
+        description: Some(d.into()),
+        ..Node::default()
+    };
+    let list = vec![Window {
+        title: "Weekly sync | Microsoft Teams".into(),
+        id: String::new(),
+        tree: Node {
+            role: "AXWindow".into(),
+            children: vec![
+                Node {
+                    role: "AXButton".into(),
+                    id: Some("hangup-button".into()),
+                    ..Node::default()
+                },
+                Node {
+                    role: "AXOutline".into(),
+                    description: Some("Participants".into()),
+                    children: vec![row("İ(You)ẞ, Muted"), row("İrem Aksoy (You), Muted")],
+                    ..Node::default()
+                },
+                Node {
+                    role: "AXGroup".into(),
+                    description: Some("Active speaker: ẞtefan İnce (Guest)".into()),
+                    ..Node::default()
+                },
+            ],
+            ..Node::default()
+        },
+    }];
+    let read = read_windows(Kind::Teams, &list);
+    assert_eq!(read.participants, ["İẞ", "İrem Aksoy"]);
+    assert_eq!(read.me.as_deref(), Some("İrem Aksoy"));
+    assert_eq!(read.speaking, ["ẞtefan İnce"]);
+}
+
+#[test]
 fn teams_in_a_browser_is_read_as_teams() {
     let list = windows(include_str!("fixtures/teams-mac.json"));
     assert_eq!(kind_of("msedge.exe", &list), Some(Kind::Teams));
