@@ -110,7 +110,8 @@ by a second; problems go to the trace once each, never names.
 `archive` names each turn from its spoken interval, less its part's lead-in
 (`Timeline::name`: more than half the line, or a zero-length line's start;
 an older row without an end runs to the next row), and each told-apart voice from
-its own span; leo-host's `labelled` keeps a name and replaces only the plain
+the turn rows spoken inside its span (`Timeline::name_over`; the whole span when
+none are); leo-host's `labelled` keeps a name and replaces only the plain
 track label or a `Speaker N` voice, so the call merge never joins two people.
 `Names { readers, own }` carries the computer account's full name (`own`, from
 leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run
