@@ -258,7 +258,6 @@ pub fn is_echo(
 struct Track {
     dir: PathBuf,
     per_part: i64,
-    fresh: Vec<u32>,
     parts: i64,
     loaded: Vec<(i64, Vec<u8>)>,
 }
@@ -268,14 +267,13 @@ impl Track {
         Track {
             dir: session.dir.clone(),
             per_part: (session.manifest.segment_secs * 1000 / BLOCK_MS) as i64,
-            fresh: session.manifest.fresh.clone(),
             parts: session.segments().last().map_or(0, |s| s.index as i64 + 1),
             loaded: Vec::new(),
         }
     }
 
     fn lead(&self, part: u32) -> i64 {
-        (lead_ms(&self.fresh, part) / BLOCK_MS) as i64
+        (lead_ms(part) / BLOCK_MS) as i64
     }
 
     fn blocks(&self) -> i64 {
@@ -764,21 +762,17 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_began_a_capture_is_read_from_its_first_block() {
+    fn the_first_part_is_read_from_its_first_block_and_later_ones_after_their_lead() {
         let root = tempfile::tempdir().unwrap();
-        let read = |fresh: Vec<u32>, name: &str| {
-            let mut manifest = Manifest::new(None, None, "", false);
-            manifest.fresh = fresh;
-            let session = Session::create(&root.path().join(name), manifest).unwrap();
-            for part in 0..2u32 {
-                std::fs::write(session.dir.join(format!("seg-{part:05}.txt")), "said").unwrap();
-                let levels: Vec<u8> = (0..PER_PART + LEAD).map(|k| (k % 200) as u8).collect();
-                std::fs::write(session.dir.join(levels_name(part)), levels).unwrap();
-            }
-            Track::of(&session).at(PER_PART as i64 + 5)
-        };
-        assert_eq!(read(Vec::new(), "rolled"), (LEAD + 5) as u8);
-        assert_eq!(read(vec![1], "fresh"), 5);
+        let session = Session::create(root.path(), Manifest::new(None, None, "", false)).unwrap();
+        for part in 0..2u32 {
+            std::fs::write(session.dir.join(format!("seg-{part:05}.txt")), "said").unwrap();
+            let levels: Vec<u8> = (0..PER_PART + LEAD).map(|k| (k % 200) as u8).collect();
+            std::fs::write(session.dir.join(levels_name(part)), levels).unwrap();
+        }
+        let mut track = Track::of(&session);
+        assert_eq!(track.at(5), 5);
+        assert_eq!(track.at(PER_PART as i64 + 5), (LEAD + 5) as u8);
     }
 
     #[test]

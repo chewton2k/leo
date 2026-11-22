@@ -65,8 +65,6 @@ pub struct Manifest {
     pub turns: bool,
     #[serde(default)]
     pub note: Option<String>,
-    #[serde(default)]
-    pub fresh: Vec<u32>,
 }
 
 impl Manifest {
@@ -91,7 +89,6 @@ impl Manifest {
             saved: false,
             turns: false,
             note: None,
-            fresh: Vec::new(),
         }
     }
 }
@@ -225,8 +222,8 @@ enum TurnRow {
     Started(u64, String),
 }
 
-pub fn lead_ms(fresh: &[u32], index: u32) -> u64 {
-    if index == 0 || fresh.contains(&index) {
+pub fn lead_ms(index: u32) -> u64 {
+    if index == 0 {
         0
     } else {
         OVERLAP_SECS * 1000
@@ -1088,7 +1085,7 @@ impl Session {
                 .flat_map(|(p, entries)| {
                     let end = end_of(p);
                     let base = p.start_secs * 1000;
-                    let lead = lead_ms(&self.manifest.fresh, p.index);
+                    let lead = lead_ms(p.index);
                     let starts: Vec<u64> = entries.iter().map(|(ms, _, _)| base + ms).collect();
                     let named = &named;
                     entries
@@ -2120,29 +2117,19 @@ mod tests {
     }
 
     #[test]
-    fn a_part_that_began_a_capture_has_no_lead_to_skip() {
-        let (mut s, _tmp) = call_track(&["", "Hi."]);
-        s.manifest.fresh = vec![1];
+    fn a_manifest_that_lists_fresh_parts_still_loads_and_every_later_part_has_a_lead() {
+        let (s, _tmp) = call_track(&["", "Hi."]);
+        let mut written: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(s.dir.join("session.json")).unwrap()).unwrap();
+        written["fresh"] = serde_json::json!([1]);
+        std::fs::write(s.dir.join("session.json"), written.to_string()).unwrap();
+        let s = Session::open(&s.dir).unwrap();
         std::fs::write(s.dir.join(turns_name(0)), "[]").unwrap();
         std::fs::write(s.dir.join(turns_name(1)), r#"[[1500,2500,"Hi."]]"#).unwrap();
-        std::fs::write(
-            s.dir.join(leo_core::call_names::FILE),
-            concat!(
-                "{\"from\":300.4,\"to\":301.6,\"who\":\"Tamsin Okafor\"}\n",
-                "{\"from\":301.4,\"to\":302.6,\"who\":\"Rowan Ellery\"}\n",
-            ),
-        )
-        .unwrap();
-        assert_eq!(s.spans_ms(), [(301_500, 302_500)]);
-        let speakers: Vec<String> = s
-            .archive()
-            .passages
-            .into_iter()
-            .map(|p| p.speaker)
-            .collect();
-        assert_eq!(speakers, ["Rowan Ellery"]);
-        s.manifest.fresh.clear();
         assert_eq!(s.spans_ms(), [(300_500, 301_500)]);
+        s.save().unwrap();
+        let kept = std::fs::read_to_string(s.dir.join("session.json")).unwrap();
+        assert!(!kept.contains("fresh"), "{kept}");
     }
 
     #[test]

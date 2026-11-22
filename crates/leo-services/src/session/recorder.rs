@@ -724,7 +724,7 @@ fn label_speakers(
         steps: None,
     });
     let leads_ms: Vec<u64> = (0..session.segments().len() as u32)
-        .map(|index| session::lead_ms(&session.manifest.fresh, index))
+        .map(|index| session::lead_ms(index))
         .collect();
     let started = Instant::now();
     let labelled = session::speakers::label(

@@ -322,9 +322,7 @@ mod tests {
     }
 
     fn rolled(parts: u32) -> Vec<u64> {
-        (0..parts)
-            .map(|i| crate::session::lead_ms(&[], i))
-            .collect()
+        (0..parts).map(|i| crate::session::lead_ms(i)).collect()
     }
 
     fn part(dir: &Path, index: u32, secs: u64) {
