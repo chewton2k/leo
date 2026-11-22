@@ -1,5 +1,6 @@
 pub mod awake;
 pub mod capture;
+pub mod echo;
 pub mod mic;
 pub mod recorder;
 pub mod speakers;
@@ -993,69 +994,108 @@ impl Session {
         }
     }
 
-    pub fn archive(&self) -> leo_core::recording::Archive {
-        let assembled = assemble(&self.segments(), self.manifest.segment_secs);
-        let passages = match self.labels(&assembled) {
-            Some(spoken) => spoken
+    pub fn spans_ms(&self) -> Vec<(u64, u64)> {
+        self.timed(&assemble(&self.segments(), self.manifest.segment_secs))
+            .into_iter()
+            .map(|(span, _)| span)
+            .collect()
+    }
+
+    fn timed(&self, assembled: &Assembled) -> Vec<((u64, u64), leo_core::recording::Passage)> {
+        if let Some(spoken) = self.labels(assembled) {
+            return spoken
                 .into_iter()
-                .map(|s| leo_core::recording::Passage {
-                    start_secs: s.start_ms / 1000,
-                    end_secs: s.end_ms.div_ceil(1000),
-                    text: s.text,
-                    speaker: format!("Speaker {}", s.speaker),
+                .map(|s| {
+                    (
+                        (s.start_ms, s.end_ms),
+                        leo_core::recording::Passage {
+                            start_secs: s.start_ms / 1000,
+                            end_secs: s.end_ms.div_ceil(1000),
+                            text: s.text,
+                            speaker: format!("Speaker {}", s.speaker),
+                            echo: false,
+                        },
+                    )
                 })
-                .collect(),
-            None => {
-                let speaker = if self.manifest.screen {
-                    "Computer audio"
-                } else {
-                    "Microphone"
-                };
-                let end_of = |p: &Part| {
-                    self.manifest
-                        .duration_secs
-                        .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
-                };
-                match self.turns(&assembled) {
-                    Some(turns) => assembled
-                        .parts
-                        .iter()
-                        .zip(turns)
-                        .flat_map(|(p, entries)| {
-                            let end = end_of(p);
-                            let starts: Vec<u64> = entries
-                                .iter()
-                                .map(|(ms, _)| p.start_secs + ms / 1000)
-                                .collect();
-                            entries
-                                .into_iter()
-                                .enumerate()
-                                .map(|(i, (_, text))| leo_core::recording::Passage {
-                                    start_secs: starts[i],
-                                    end_secs: starts
-                                        .get(i + 1)
-                                        .copied()
-                                        .unwrap_or(end)
-                                        .max(starts[i]),
-                                    text,
-                                    speaker: speaker.into(),
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .collect(),
-                    None => assembled
-                        .parts
-                        .iter()
-                        .map(|p| leo_core::recording::Passage {
+                .collect();
+        }
+        let speaker = if self.manifest.screen {
+            "Computer audio"
+        } else {
+            "Microphone"
+        };
+        let end_of = |p: &Part| {
+            self.manifest
+                .duration_secs
+                .map_or(p.end_secs, |end| p.end_secs.min(end).max(p.start_secs))
+        };
+        let Some(turns) = self.turns(assembled) else {
+            return assembled
+                .parts
+                .iter()
+                .map(|p| {
+                    (
+                        (p.start_secs * 1000, end_of(p) * 1000),
+                        leo_core::recording::Passage {
                             start_secs: p.start_secs,
                             end_secs: end_of(p),
                             text: p.text.clone(),
                             speaker: speaker.into(),
-                        })
-                        .collect(),
-                }
-            }
+                            echo: false,
+                        },
+                    )
+                })
+                .collect();
         };
+        assembled
+            .parts
+            .iter()
+            .zip(turns)
+            .flat_map(|(p, entries)| {
+                let end = end_of(p);
+                let lead = if p.index == 0 { 0 } else { OVERLAP_SECS * 1000 };
+                let heard: Vec<u64> = entries
+                    .iter()
+                    .map(|(ms, _)| p.start_secs * 1000 + ms.saturating_sub(lead))
+                    .collect();
+                let starts: Vec<u64> = entries
+                    .iter()
+                    .map(|(ms, _)| p.start_secs + ms / 1000)
+                    .collect();
+                entries
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (_, text))| {
+                        (
+                            (
+                                heard[i],
+                                heard
+                                    .get(i + 1)
+                                    .copied()
+                                    .unwrap_or(end * 1000)
+                                    .max(heard[i]),
+                            ),
+                            leo_core::recording::Passage {
+                                start_secs: starts[i],
+                                end_secs: starts.get(i + 1).copied().unwrap_or(end).max(starts[i]),
+                                text,
+                                speaker: speaker.into(),
+                                echo: false,
+                            },
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    pub fn archive(&self) -> leo_core::recording::Archive {
+        let assembled = assemble(&self.segments(), self.manifest.segment_secs);
+        let passages = self
+            .timed(&assembled)
+            .into_iter()
+            .map(|(_, passage)| passage)
+            .collect();
         leo_core::recording::Archive {
             id: self.manifest.id.clone(),
             started: self.manifest.started,

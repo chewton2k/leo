@@ -88,22 +88,34 @@ pub fn transcribe_segment() -> TranscribeFn {
             .filter(|s| s.manifest.turns)
             .zip(path.file_name().and_then(|name| name.to_str()))
             .and_then(|(s, name)| match session::index_of(name) {
-                Some((index, "wav")) => Some(s.dir.join(session::turns_name(index))),
+                Some((index, "wav")) => Some((s, index)),
                 _ => None,
             });
         let outcome = match turns {
-            Some(file) => crate::ai::transcribe_turns(path)
-                .and_then(|timed| {
-                    leo_core::paths::write_atomic(&file, &serde_json::to_string(&timed)?)?;
-                    let texts: Vec<&str> = timed.iter().map(|(_, text)| text.as_str()).collect();
-                    Ok(crate::ai::chain::ChainOutcome {
-                        value: crate::speech::chunking::join_transcripts(&texts),
-                        provider: "local speech with times".into(),
-                        fallbacks: Vec::new(),
-                        spent: None,
+            Some((s, index)) => {
+                if let Err(e) = session::echo::write_levels(
+                    path,
+                    &s.dir.join(session::echo::levels_name(index)),
+                ) {
+                    s.trace("echo", &format!("levels not kept: {e}"));
+                }
+                crate::ai::transcribe_turns(path)
+                    .and_then(|timed| {
+                        leo_core::paths::write_atomic(
+                            &s.dir.join(session::turns_name(index)),
+                            &serde_json::to_string(&timed)?,
+                        )?;
+                        let texts: Vec<&str> =
+                            timed.iter().map(|(_, text)| text.as_str()).collect();
+                        Ok(crate::ai::chain::ChainOutcome {
+                            value: crate::speech::chunking::join_transcripts(&texts),
+                            provider: "local speech with times".into(),
+                            fallbacks: Vec::new(),
+                            spent: None,
+                        })
                     })
-                })
-                .map_err(|e| e.to_string()),
+                    .map_err(|e| e.to_string())
+            }
             None => crate::ai::transcribe_outcome(path).map_err(|e| e.to_string()),
         };
         if let Some(session) = session {

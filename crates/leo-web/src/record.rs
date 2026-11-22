@@ -522,8 +522,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
     if let Err(code) = checked {
         return error(code, "Check the folder before recording.");
     }
-    let mut profile = body.profile.clone().unwrap_or_default().checked();
-    profile.speakers &= body.source != Source::Nativecall;
+    let profile = body.profile.clone().unwrap_or_default().checked();
     let title = body
         .title
         .map(|t| t.trim().to_string())

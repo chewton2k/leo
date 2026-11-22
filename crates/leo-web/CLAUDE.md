@@ -1055,8 +1055,8 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   `attachSelection({note: '', title: 'Live recording', text})` and `askNew` (`deps.chat`).
 - Label speakers (2026-11-16, the user's call: per recording, for meetings,
   not lectures): a switch under the note fields, off by default, remembered as
-  `leo-label-speakers`, hidden for Call; it sends `profile.speakers` and
-  `record::start` forces it off for a call. With the speaker model missing it
+  `leo-label-speakers`, shown for Call too (2026-11-22, the owner's call: a call
+  splits only its Others track); it sends `profile.speakers`. With the speaker model missing it
   offers Download through `/api/speech` (`speakers` in the view, polled while
   downloading, redrawn only when it changes, focus kept); Start sends it only
   while the model is ready or downloading. The switch is `settingsSwitch()`,
