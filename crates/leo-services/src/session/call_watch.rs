@@ -14,6 +14,7 @@ struct Moment {
     paused: bool,
     resumed: Instant,
     epoch: u32,
+    held: f64,
 }
 
 type Anchor = Arc<Mutex<Option<Moment>>>;
@@ -103,8 +104,15 @@ fn moved(last: Option<Moment>, now: Instant, secs: f64, paused: bool) -> Moment 
             paused,
             resumed: now,
             epoch: last.map_or(0, |last| last.epoch + 1),
+            held: secs,
         },
     }
+}
+
+fn paused_at(seen: &mut Option<u32>, moment: Moment) -> Option<f64> {
+    let changed = seen.is_some_and(|epoch| epoch != moment.epoch);
+    *seen = Some(moment.epoch);
+    changed.then_some(moment.held)
 }
 
 fn now_of(anchor: &Anchor) -> Option<Moment> {
@@ -267,8 +275,14 @@ fn watch(names: Names, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace
     let mut restarts = 0;
     let mut stuck = false;
     let mut told: Vec<String> = Vec::new();
+    let mut seen = None;
     while !stop.load(Ordering::Relaxed) {
-        match rx.recv_timeout(pace.every) {
+        let heard = rx.recv_timeout(pace.every);
+        let moment = now_of(anchor);
+        if let Some(held) = moment.and_then(|m| paused_at(&mut seen, m)) {
+            sidecar.write(dir, timeline.cut(held));
+        }
+        match heard {
             Ok((epoch, at, look)) => {
                 heard_at = Instant::now();
                 stuck = false;
@@ -282,7 +296,7 @@ fn watch(names: Names, dir: &Path, anchor: &Anchor, stop: &Arc<AtomicBool>, pace
                         told.push(why.clone());
                     }
                 }
-                if let Some(secs) = now_of(anchor).and_then(|m| recorded_at(m, at, epoch, lag)) {
+                if let Some(secs) = moment.and_then(|m| recorded_at(m, at, epoch, lag)) {
                     let reading = call_names::read(&look);
                     sidecar.write(dir, timeline.heard(secs, reading.as_ref()));
                 }
@@ -464,6 +478,34 @@ mod tests {
         assert_eq!(recorded_at(resumed, at(60_400), resumed.epoch, lag), None);
         let after = recorded_at(resumed, at(61_000), resumed.epoch, lag).unwrap();
         assert!((after - 11.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_pause_ends_the_name_and_the_resumed_audio_waits_for_a_fresh_reading() {
+        let start = Instant::now();
+        let at = |ms: u64| start + Duration::from_millis(ms);
+        let rowan = call_names::Reading {
+            speaking: vec!["Rowan Ellery".into()],
+            ..call_names::Reading::default()
+        };
+        let mut timeline = Timeline::default();
+        let mut seen = None;
+        let running = moved(None, at(0), 10.0, false);
+        assert_eq!(paused_at(&mut seen, running), None);
+        timeline.heard(10.0, Some(&rowan));
+        timeline.heard(10.4, Some(&rowan));
+        let paused = moved(Some(running), at(800), 10.8, true);
+        let resumed = moved(Some(paused), at(60_000), 10.8, false);
+        let later = moved(Some(resumed), at(60_500), 11.3, false);
+        assert_eq!(paused_at(&mut seen, later), Some(10.8));
+        assert_eq!(paused_at(&mut seen, later), None);
+        timeline.cut(10.8);
+        timeline.heard(11.5, Some(&rowan));
+        timeline.heard(11.9, Some(&rowan));
+        timeline.end();
+        assert_eq!(timeline.name(10.0, 10.8).as_deref(), Some("Rowan Ellery"));
+        assert_eq!(timeline.name(10.85, 11.45), None);
+        assert_eq!(timeline.name(11.5, 11.9).as_deref(), Some("Rowan Ellery"));
     }
 
     #[cfg(unix)]

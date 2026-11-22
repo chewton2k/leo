@@ -87,7 +87,9 @@ thread reads every `call_names::EVERY` (400 ms, longer when a reading is slow);
 the reader does not read while paused. Each reading's start, less `LAG_SECS`
 (0.75) on the wall clock, is mapped to the track's recorded time from the loop's
 `tick(recorded_secs, paused)` anchor; a reading from before the latest pause
-change (an epoch counter) or said before the latest resume is dropped. A reading names someone only when exactly one person other than the user is
+change (an epoch counter) or said before the latest resume is dropped, and a
+pause change ends the open name at the recorded second it paused (`Timeline::cut`),
+so resumed audio stays unnamed until a reading made after the resume. A reading names someone only when exactly one person other than the user is
 marked speaking, and in Zoom (which does not mark the user's own tile) only once
 the user's name is known; the one-other-person shortcut needs the participant
 count the app shows (`Reading.shown`) to be 2. `Timeline` keeps only named runs (a reading stands until the next, at

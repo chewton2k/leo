@@ -285,6 +285,10 @@ impl Timeline {
         Some(Mark::Run { from, to, who })
     }
 
+    pub fn cut(&mut self, at: f64) -> Option<Mark> {
+        self.close(at)
+    }
+
     pub fn end(&mut self) -> Option<Mark> {
         self.close(f64::INFINITY)
     }
