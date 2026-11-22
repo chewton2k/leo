@@ -229,6 +229,50 @@ fn the_call_chosen_first_stays_the_one_read() {
 }
 
 #[test]
+fn a_call_without_an_english_leave_button_can_still_be_chosen() {
+    let window = |title: &str, tree: Node| Window {
+        title: title.into(),
+        id: String::new(),
+        tree,
+    };
+    let tile = Node {
+        role: "AXTabGroup".into(),
+        description: Some(
+            "Rowan Ellery, Bei Computeraudio Stummschaltung deaktiviert, Aktiver Sprecher".into(),
+        ),
+        ..Node::default()
+    };
+    let german = window("Zoom Meeting", tile);
+    assert!(!is_call_tree(&german.tree));
+    assert!(shows_call("us.zoom.xos", &german));
+    let seen = [Seen {
+        pid: 9,
+        app: "us.zoom.xos".into(),
+        title: german.title.clone(),
+        call: shows_call("us.zoom.xos", &german),
+    }];
+    assert!(pick(None, &seen).is_ok());
+    let mut meet = windows(include_str!("fixtures/meet-chrome.json")).remove(0);
+    assert!(shows_call("com.google.Chrome", &meet));
+    meet.tree.children[0]
+        .children
+        .retain(|n| n.role != "AXButton");
+    assert!(!is_call_tree(&meet.tree));
+    assert!(shows_call("com.google.Chrome", &meet));
+    let teams = windows(include_str!("fixtures/teams-mac.json")).remove(0);
+    assert!(!shows_call("com.microsoft.teams2", &teams));
+    let notes = window(
+        "Meet the team - Docs",
+        Node {
+            role: "AXStaticText".into(),
+            value: Some("Rowan Ellery".into()),
+            ..Node::default()
+        },
+    );
+    assert!(!shows_call("com.google.Chrome", &notes));
+}
+
+#[test]
 fn an_unreadable_app_reads_nothing() {
     assert_eq!(read(&Look::Unreadable("no permission".into())), None);
 }

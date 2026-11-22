@@ -81,6 +81,22 @@ pub struct Reading {
     pub unmarked_self: bool,
 }
 
+pub fn shows_call(app: &str, window: &Window) -> bool {
+    let windows = std::slice::from_ref(window);
+    let Some(kind) = kind_of(app, windows) else {
+        return false;
+    };
+    if is_call_tree(&window.tree) {
+        return true;
+    }
+    let reading = read_windows(kind, windows);
+    match kind {
+        Kind::Teams => false,
+        Kind::Meet => !reading.speaking.is_empty(),
+        Kind::Zoom => !reading.speaking.is_empty() || !reading.participants.is_empty(),
+    }
+}
+
 pub fn read(look: &Look) -> Option<Reading> {
     let Look::Call { app, windows, .. } = look else {
         return None;

@@ -23,7 +23,6 @@ pub fn readers() -> Option<Readers> {
 mod mac {
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
-    use std::time::Instant;
 
     use leo_core::call_names::{
         self as names, Ask, Kind, Look, Node, Reader, Seat, Seen, Window, BROWSERS, MOST_WINDOWS,
@@ -230,7 +229,7 @@ mod mac {
             budget: &mut usize,
             most_depth: usize,
             zoom: bool,
-            until: Instant,
+            ask: &Ask,
         ) -> Node {
             *budget = budget.saturating_sub(1);
             unsafe { AXUIElementSetMessagingTimeout(element, TIMEOUT) };
@@ -267,11 +266,11 @@ mod mac {
                 return node;
             }
             for child in items(at(6)) {
-                if *budget == 0 || Instant::now() >= until {
+                if *budget == 0 || ask.over() {
                     break;
                 }
                 node.children
-                    .push(self.copy(child, depth + 1, budget, most_depth, zoom, until));
+                    .push(self.copy(child, depth + 1, budget, most_depth, zoom, ask));
             }
             node
         }
@@ -308,18 +307,11 @@ mod mac {
                 .collect()
         }
 
-        fn tree(&self, window: Ref, kind: Kind, budget: &mut usize, until: Instant) -> Node {
+        fn tree(&self, window: Ref, kind: Kind, budget: &mut usize, ask: &Ask) -> Node {
             let zoom = kind == Kind::Zoom;
             let mut most = if zoom { (*budget).min(1500) } else { *budget };
             let before = most;
-            let node = self.copy(
-                window,
-                0,
-                &mut most,
-                if zoom { 14 } else { 40 },
-                zoom,
-                until,
-            );
+            let node = self.copy(window, 0, &mut most, if zoom { 14 } else { 40 }, zoom, ask);
             *budget -= before - most;
             node
         }
@@ -385,11 +377,15 @@ mod mac {
                 });
             }
             let mut budget = 4000;
-            let mut trees: Vec<Option<Node>> = Vec::new();
+            let window = |this: &Self, c: &Candidate, budget: &mut usize| Window {
+                title: c.title.clone(),
+                id: c.ident.clone(),
+                tree: this.tree(c.window, found[c.found].kind, budget, ask),
+            };
+            let mut trees: Vec<Option<Window>> = Vec::new();
             if ask.seat.is_none() {
                 for c in &candidates {
-                    let tree = self.tree(c.window, found[c.found].kind, &mut budget, ask.until);
-                    trees.push(Some(tree));
+                    trees.push(Some(window(self, c, &mut budget)));
                 }
             }
             let seen: Vec<Seen> = candidates
@@ -402,7 +398,7 @@ mod mac {
                     call: trees
                         .get(i)
                         .and_then(Option::as_ref)
-                        .is_some_and(names::is_call_tree),
+                        .is_some_and(|w| names::shows_call(found[c.found].id, w)),
                 })
                 .collect();
             let (seat, at) = match names::pick(ask.seat, &seen) {
@@ -411,15 +407,9 @@ mod mac {
             };
             let mut windows = Vec::new();
             for i in at {
-                let c = &candidates[i];
-                let tree = match trees.get_mut(i).and_then(Option::take) {
+                windows.push(match trees.get_mut(i).and_then(Option::take) {
                     Some(tree) => tree,
-                    None => self.tree(c.window, found[c.found].kind, &mut budget, ask.until),
-                };
-                windows.push(Window {
-                    title: c.title.clone(),
-                    id: c.ident.clone(),
-                    tree,
+                    None => window(self, &candidates[i], &mut budget),
                 });
             }
             if ask.over() {
@@ -447,8 +437,6 @@ mod mac {
 
 #[cfg(windows)]
 mod win {
-    use std::time::Instant;
-
     use leo_core::call_names::{
         self as names, Ask, Look, Node, Reader, Seen, Window, MOST_WINDOWS,
     };
@@ -577,7 +565,7 @@ mod win {
         element: &IUIAutomationElement,
         depth: usize,
         budget: &mut usize,
-        until: Instant,
+        ask: &Ask,
     ) -> Node {
         *budget = budget.saturating_sub(1);
         unsafe {
@@ -622,11 +610,11 @@ mod win {
                 .GetFirstChildElementBuildCache(element, &uia.request)
                 .ok();
             while let Some(next) = child {
-                if *budget == 0 || Instant::now() >= until {
+                if *budget == 0 || ask.over() {
                     break;
                 }
                 node.children
-                    .push(self::node(uia, &next, depth + 1, budget, until));
+                    .push(self::node(uia, &next, depth + 1, budget, ask));
                 child = uia
                     .walker
                     .GetNextSiblingElementBuildCache(&next, &uia.request)
@@ -724,14 +712,21 @@ mod win {
                 handles.push(hwnd);
             }
             let mut budget = BUDGET;
-            let mut trees: Vec<Option<Node>> = Vec::new();
+            let mut trees: Vec<Option<Window>> = Vec::new();
             if ask.seat.is_none() {
                 for (i, hwnd) in handles.iter().enumerate() {
                     if ask.over() {
                         return Look::Unreadable(names::SLOW.into());
                     }
-                    let tree = window_tree(uia, *hwnd, &mut budget, ask.until);
-                    seen[i].call = tree.as_ref().is_some_and(names::is_call_tree);
+                    let tree = window_tree(uia, *hwnd, &mut budget, ask).map(|tree| Window {
+                        title: seen[i].title.clone(),
+                        id: String::new(),
+                        tree,
+                    });
+                    let call = tree
+                        .as_ref()
+                        .is_some_and(|w| names::shows_call(&seen[i].app, w));
+                    seen[i].call = call;
                     trees.push(tree);
                 }
             }
@@ -744,17 +739,15 @@ mod win {
             };
             let mut windows = Vec::new();
             for i in at {
-                let tree = match trees.get_mut(i).and_then(Option::take) {
-                    Some(tree) => Some(tree),
-                    None => window_tree(uia, handles[i], &mut budget, ask.until),
-                };
-                if let Some(tree) = tree {
-                    windows.push(Window {
+                let window = match trees.get_mut(i).and_then(Option::take) {
+                    Some(window) => Some(window),
+                    None => window_tree(uia, handles[i], &mut budget, ask).map(|tree| Window {
                         title: seen[i].title.clone(),
                         id: String::new(),
                         tree,
-                    });
-                }
+                    }),
+                };
+                windows.extend(window);
             }
             if ask.over() {
                 return Look::Unreadable(names::SLOW.into());
@@ -767,8 +760,8 @@ mod win {
         }
     }
 
-    fn window_tree(uia: &Uia, hwnd: HWND, budget: &mut usize, until: Instant) -> Option<Node> {
+    fn window_tree(uia: &Uia, hwnd: HWND, budget: &mut usize, ask: &Ask) -> Option<Node> {
         let element = unsafe { uia.uia.ElementFromHandleBuildCache(hwnd, &uia.request) }.ok()?;
-        Some(node(uia, &element, 0, budget, until))
+        Some(node(uia, &element, 0, budget, ask))
     }
 }

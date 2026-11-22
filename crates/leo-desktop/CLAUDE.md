@@ -116,7 +116,9 @@ a test, or leave it unset to see the user's own data.
 Call names (`call_names.rs`, 2026-11-22): `readers()` is handed to
 `leo_host::listener`. Each read lists the running call apps' call-titled windows;
 until a call is bound it copies them all and `call_names::pick` binds the one app
-(or browser window) with a call control, after which only that pid (and title) is
+(or browser window) that shows a call (`call_names::shows_call`: a call control,
+or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
+control), after which only that pid (and title) is
 read; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
 every element before it is messaged, 4,000 elements a read, a Zoom window at most
