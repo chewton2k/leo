@@ -230,6 +230,14 @@ pub fn lead_ms(index: u32) -> u64 {
     }
 }
 
+fn turn(part: u32, ms: u64) -> leo_core::recording::Turn {
+    leo_core::recording::Turn {
+        track: String::new(),
+        part,
+        ms,
+    }
+}
+
 pub fn turns_name(index: u32) -> String {
     format!("seg-{index:05}.turns.json")
 }
@@ -1088,6 +1096,7 @@ impl Session {
                     let lead = lead_ms(p.index);
                     let starts: Vec<u64> = entries.iter().map(|(ms, _, _)| base + ms).collect();
                     let named = &named;
+                    let part = p.index;
                     entries
                         .into_iter()
                         .enumerate()
@@ -1113,6 +1122,7 @@ impl Session {
                                     text,
                                     speaker: named(said, said_to).unwrap_or_else(|| speaker.into()),
                                     echo: false,
+                                    turns: vec![turn(part, from)],
                                 },
                             )
                         })
@@ -1149,6 +1159,10 @@ impl Session {
                                 .unwrap_or_else(|| format!("Speaker {}", s.speaker)),
                             text: s.text,
                             echo: false,
+                            turns: vec![turn(
+                                (s.start_ms / (self.manifest.segment_secs.max(1) * 1000)) as u32,
+                                s.start_ms,
+                            )],
                         },
                     )
                 })
@@ -1167,6 +1181,7 @@ impl Session {
                             text: p.text.clone(),
                             speaker: speaker.into(),
                             echo: false,
+                            turns: vec![turn(p.index, p.start_secs * 1000)],
                         },
                     )
                 })

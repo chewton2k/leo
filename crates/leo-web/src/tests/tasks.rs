@@ -998,6 +998,7 @@ fn audit_bench_p11_combine_lock() {
             text: "word ".repeat(megabytes * 1024 * 1024 / 5),
             speaker: String::new(),
             echo: false,
+            turns: Vec::new(),
         }],
         points: vec![],
         context: String::new(),

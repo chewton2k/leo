@@ -10,6 +10,7 @@ fn source(id: &str) -> leo_core::recording::Archive {
             text: "Dijkstra finds shortest paths".into(),
             speaker: "Microphone".into(),
             echo: false,
+            turns: Vec::new(),
         }],
         points: vec![leo_core::recording::Point {
             at_secs: 5,

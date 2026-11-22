@@ -342,6 +342,7 @@ fn a_recording_whose_notes_were_not_written_says_so_until_they_are() {
                     text: "what was said".into(),
                     speaker: String::new(),
                     echo: false,
+                    turns: Vec::new(),
                 }],
                 points: vec![],
                 context: String::new(),
@@ -597,6 +598,7 @@ fn recover_saved_into(
                     text: "the part that failed before".into(),
                     speaker: String::new(),
                     echo: false,
+                    turns: Vec::new(),
                 }],
                 points: vec![],
                 context: String::new(),
@@ -1069,6 +1071,7 @@ fn one_side(id: String, speaker: &str, text: &str) -> leo_core::recording::Archi
             text: text.into(),
             speaker: speaker.into(),
             echo: false,
+            turns: Vec::new(),
         }],
         points: vec![],
         context: String::new(),
@@ -1490,6 +1493,7 @@ fn spoken(id: &str, text: &str) -> leo_core::recording::Archive {
             text: text.into(),
             speaker: String::new(),
             echo: false,
+            turns: Vec::new(),
         }],
         points: vec![leo_core::recording::Point {
             at_secs: 2,
@@ -1594,6 +1598,7 @@ fn a_fix_through_the_transcript_route_changes_only_the_rows_sent() {
         text: "untouched".into(),
         speaker: String::new(),
         echo: false,
+        turns: Vec::new(),
     });
     leo_core::recording::save(&notes, &ids[0], &source).unwrap();
     let put = |body: serde_json::Value| {

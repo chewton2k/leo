@@ -79,7 +79,7 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry and the call merge joins a side's consecutive entries, so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a speaker's consecutive lines within 300 s for the writing AI), so the two sides interleave turn by turn.
 
 Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 `powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
@@ -112,7 +112,7 @@ by a second; problems go to the trace once each, never names.
 an older row without an end runs to the next row), and each told-apart voice from
 the turn rows spoken inside its span (`Timeline::name_over`; the whole span when
 none are); leo-host's `labelled` keeps a name and replaces only the plain
-track label or a `Speaker N` voice, so the call merge never joins two people.
+track label or a `Speaker N` voice, so two people never share a line.
 `Names { readers, own }` carries the computer account's full name (`own`, from
 leo-desktop), held by `Timeline::owned_by` apart from the call app's `me`: a run
 of it is never kept and `name` never gives it (compared ignoring case and spaces,
@@ -180,7 +180,7 @@ line of yours before or under an echo is never hidden; under 0.5 s of sound stay
 unmarked. Lines are never marked when the search is cut short (finish now), and a
 part with a transcript whose levels file is missing or cut short is traced and
 never marked. Marked lines keep their text with `Passage.echo` (omitted when
-false); the writing AI skips them, the join never fuses echo with real speech.
+false); the writing AI skips them, so they are never joined with real speech.
 Envelopes are read a part at a time.
 
 Live transcript (catalog models marked fast enough): every `ROLL_INTERVAL` (3 s)
@@ -459,8 +459,13 @@ recording stays recoverable. `recorder::resume_with_controls` exposes the finish
 control in recovery; leo-host refuses to write a note when recovery failed.
 Saving a recovered recording's sources, and the call commit, merge with an
 existing archive of the same id (`recording::merge_into`, streamed): other speakers,
-points, warnings and context are kept, and a passage already there by time and
-text keeps its stored label, so running a recovery twice changes nothing. Plain
+points, warnings and context are kept; the leftover's times are moved to the
+archive's start, a passage whose turn ids are all stored (or, for a stored line
+without ids, one at the same time and text or inside a stored line's span and
+words) keeps its stored text and label, so running a recovery twice, or
+recovering one track of a saved call, changes nothing already saved. Recovering a
+saved track turns its speaker labelling off, so its rows keep the shape they were
+saved in. Plain
 `recording::save` replaces (a new recording, `Session::commit`), so a corrected
 point never brings back its old wording; transcript corrections go through
 `recording::edit` and speaker renames through `recording::rename_speaker` (2026-11-22). `recording::save_from(notes, note, head, passages, points)`

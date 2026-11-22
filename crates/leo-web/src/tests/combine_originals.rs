@@ -243,6 +243,7 @@ fn archive(id: &str) -> leo_core::recording::Archive {
             text: format!("said in {id}"),
             speaker: String::new(),
             echo: false,
+            turns: Vec::new(),
         }],
         points: vec![],
         context: String::new(),

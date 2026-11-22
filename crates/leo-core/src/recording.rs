@@ -37,6 +37,16 @@ pub struct Passage {
     pub speaker: String,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub echo: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<Turn>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct Turn {
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub track: String,
+    pub part: u32,
+    pub ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1126,7 +1136,11 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         Ok(old) if old.id == leftover.id => old,
         _ => return save(notes, note, leftover),
     };
+    let shift = (leftover.started - old.started).num_seconds();
+    let moved = |at: u64| at.saturating_add_signed(shift);
     let mut said = std::collections::HashSet::new();
+    let mut heard = std::collections::HashSet::new();
+    let mut whole: Vec<(u64, u64, String)> = Vec::new();
     let mut typed = std::collections::HashSet::new();
     let (mut last_passage, mut last_point) = (0u64, 0u64);
     rows(
@@ -1135,6 +1149,11 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
         &old,
         |seq, p| {
             said.insert(key(p.start_secs, &p.text));
+            if p.turns.is_empty() {
+                whole.push((p.start_secs, p.end_secs, p.text));
+            } else {
+                heard.extend(p.turns);
+            }
             last_passage = last_passage.max(seq);
             Ok(true)
         },
@@ -1144,15 +1163,38 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
             Ok(true)
         },
     )?;
-    let mut passages: Vec<&Passage> = leftover
+    whole.sort_by_key(|w| w.0);
+    let longest = whole.iter().map(|w| w.1 - w.0).max().unwrap_or(0);
+    let within = |p: &Passage| {
+        let text = p.text.trim();
+        let to = whole.partition_point(|w| w.0 <= p.start_secs);
+        let from = whole.partition_point(|w| w.0 < p.start_secs.saturating_sub(longest));
+        !text.is_empty()
+            && whole[from..to]
+                .iter()
+                .any(|w| p.end_secs <= w.1 && w.2.contains(text))
+    };
+    let mut passages: Vec<Passage> = leftover
         .passages
         .iter()
-        .filter(|p| !said.contains(&key(p.start_secs, &p.text)))
+        .map(|p| Passage {
+            start_secs: moved(p.start_secs),
+            end_secs: moved(p.end_secs),
+            ..p.clone()
+        })
+        .filter(|p| {
+            let known = !p.turns.is_empty() && p.turns.iter().all(|t| heard.contains(t));
+            !known && !said.contains(&key(p.start_secs, &p.text)) && !within(p)
+        })
         .collect();
     passages.sort_by_key(|p| p.start_secs);
-    let mut points: Vec<&Point> = leftover
+    let mut points: Vec<Point> = leftover
         .points
         .iter()
+        .map(|p| Point {
+            at_secs: moved(p.at_secs),
+            text: p.text.clone(),
+        })
         .filter(|p| !typed.contains(&key(p.at_secs, &p.text)))
         .collect();
     points.sort_by_key(|p| p.at_secs);
@@ -1178,7 +1220,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
     new.revision = next_revision(old.revision)?;
     let backup = old.revision == 0;
     commit(&dir, Some(&old), &mut new, backup, |pout, qout| {
-        let mut adding = passages.into_iter().peekable();
+        let mut adding = passages.iter().peekable();
         let mut seq = last_passage;
         let mut put_passages = |pout: &mut Out, before: Option<u64>| -> Result<()> {
             while let Some(p) = adding.next_if(|p| before.is_none_or(|at| p.start_secs < at)) {
@@ -1187,7 +1229,7 @@ pub fn merge_into(notes: &Path, note: &str, leftover: &Archive) -> Result<()> {
             }
             Ok(())
         };
-        let mut jotting = points.into_iter().peekable();
+        let mut jotting = points.iter().peekable();
         let mut jot = last_point;
         let mut put_points = |qout: &mut Out, before: Option<u64>| -> Result<()> {
             while let Some(p) = jotting.next_if(|p| before.is_none_or(|at| p.at_secs < at)) {
@@ -1550,6 +1592,7 @@ mod tests {
                     text: (*text).into(),
                     speaker: (*speaker).into(),
                     echo: false,
+                    turns: Vec::new(),
                 })
                 .collect(),
             points: vec![],
@@ -1588,6 +1631,7 @@ mod tests {
                 text: format!("{n} {text}"),
                 speaker: if n % 2 == 0 { "A" } else { "B" }.into(),
                 echo: false,
+                turns: Vec::new(),
             };
             serde_json::to_writer(&mut out, &p).unwrap();
         }
@@ -1738,6 +1782,83 @@ mod tests {
         );
         merge_into(&notes, "note-0002", &others).unwrap();
         assert_eq!(whole(&notes, "note-0002")[0].passages, others.passages);
+    }
+
+    #[test]
+    fn a_recovered_track_adds_only_turns_it_has_not_saved_and_keeps_a_rename() {
+        let turn = |track: &str, part: u32, ms: u64| Turn {
+            track: track.into(),
+            part,
+            ms,
+        };
+        let row = |at: u64, to: u64, speaker: &str, text: &str, turns: Vec<Turn>| Passage {
+            start_secs: at,
+            end_secs: to,
+            text: text.into(),
+            speaker: speaker.into(),
+            echo: false,
+            turns,
+        };
+        let temp = tempfile::tempdir().unwrap();
+        let notes = temp.path().join("notes");
+        let mut saved = spoken("call-0003", &[]);
+        saved.passages = vec![
+            row(3, 7, "Others", "first", vec![turn("Others", 0, 3_000)]),
+            row(8, 12, "You", "mine", vec![turn("You", 0, 8_000)]),
+            row(14, 18, "Others", "second", vec![turn("Others", 0, 14_000)]),
+        ];
+        save(&notes, "note-0001", &saved).unwrap();
+        let revision = list(&notes, "note-0001").unwrap()[0].revision;
+        rename_speaker(
+            &notes,
+            "note-0001",
+            "call-0003",
+            revision,
+            "Others",
+            "Rowan Ellery",
+        )
+        .unwrap();
+        let mut recovered = spoken("call-0003", &[]);
+        recovered.started = saved.started + chrono::Duration::seconds(2);
+        recovered.passages = vec![
+            row(1, 5, "Others", "first", vec![turn("Others", 0, 3_000)]),
+            row(12, 16, "Others", "second", vec![turn("Others", 0, 14_000)]),
+            row(308, 312, "Others", "late", vec![turn("Others", 1, 310_000)]),
+        ];
+        merge_into(&notes, "note-0001", &recovered).unwrap();
+        merge_into(&notes, "note-0001", &recovered).unwrap();
+        let kept: Vec<(u64, String, String)> = whole(&notes, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.start_secs, p.speaker.clone(), p.text.clone()))
+            .collect();
+        let at = |at: u64, who: &str, text: &str| (at, who.to_string(), text.to_string());
+        assert_eq!(
+            kept,
+            [
+                at(3, "Rowan Ellery", "first"),
+                at(8, "You", "mine"),
+                at(14, "Rowan Ellery", "second"),
+                at(310, "Others", "late"),
+            ]
+        );
+
+        let older = temp.path().join("older");
+        let mut joined = spoken("call-0003", &[]);
+        joined.started = saved.started;
+        joined.passages = vec![row(3, 18, "Others", "first second", Vec::new())];
+        save(&older, "note-0001", &joined).unwrap();
+        merge_into(&older, "note-0001", &recovered).unwrap();
+        let kept: Vec<(u64, String)> = whole(&older, "note-0001")[0]
+            .passages
+            .iter()
+            .map(|p| (p.start_secs, p.text.clone()))
+            .collect();
+        assert_eq!(
+            kept,
+            [(3, "first second".to_string()), (310, "late".to_string())],
+            "a transcript saved before turns were kept loses no line and gains no copy"
+        );
     }
 
     #[test]
@@ -2532,6 +2653,7 @@ mod tests {
                 text: "é".repeat(size / 2),
                 speaker: String::new(),
                 echo: false,
+                turns: Vec::new(),
             });
             if next() % 3 == 0 {
                 source
@@ -2787,6 +2909,7 @@ mod tests {
                         text: format!("{n} {big}"),
                         speaker: String::new(),
                         echo: false,
+                        turns: Vec::new(),
                     }),
                     std::iter::once(typed(3, "typed")),
                 )
@@ -2808,6 +2931,7 @@ mod tests {
                             text: format!("{i} {big}"),
                             speaker: String::new(),
                             echo: false,
+                            turns: Vec::new(),
                         }),
                         std::iter::empty(),
                     )
