@@ -102,12 +102,12 @@ fn create(app: &AppHandle) -> tauri::Result<()> {
             .size(tauri::Size::Logical(tauri::LogicalSize::new(WIDTH, HEIGHT)))
             .has_shadow(false)
             .transparent(true)
-            .no_activate(true)
             .corner_radius(0.0)
             .style_mask(StyleMask::empty().borderless().nonactivating_panel())
             .with_window(|w| {
                 w.decorations(false)
                     .transparent(true)
+                    .focused(false)
                     .focusable(false)
                     .visible(false)
             })
