@@ -567,7 +567,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
 - Resizing stays cheap on long notes (2026-11-21, measured in WebKit on a 200 KB note):
   `.note-layout` is not a size container (a container query re-resolved every note element's
   style on each width change); it keeps the same containment through `contain`, and `leoDoc.mount`
-  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn and from a ResizeObserver, read through
+  sets `data-wide` on its `.note-layout` (`OUTLINE_WIDE`, 900 px of room) before the note is drawn and a frame
+  after each ResizeObserver report (toggling inside the callback resized `body` under the page bar's
+  observer, a ResizeObserver loop error in WebKit), read through
   `:where(...)` so specificity is unchanged. `.note-layout` pins the page-layout variables
   (`--side`, `--right`, `--mid`, `--explorer-w`, `--chat-w`, `--source-*`, `--dock-room`) so a
   pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
@@ -922,7 +924,8 @@ Felix (2026-10-19).
   (fixed ⌘↵/Ctrl+Enter), Ask Felix and Visualize; the two quick ones are asks
   with a preset question (`ASK_PRESETS`). It opens in the right margin beside the
   selection when the layout has one (`.ask-float.beside`), else above the selection (below
-  its last word when there is no room above; 2026-11-21, the user's call).
+  its last word when there is no room above; 2026-11-21, the user's call); `marginDraw` places it
+  again whenever the margin layout changes, so a resize never leaves it beside a margin that is gone.
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
@@ -1177,7 +1180,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   opening reveals the card from the pill with a `clip-path` over `MOTION_MS`, folding shrinks it
   back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
-  not take focus). Home draws the date, one sentence
+  not take focus). Every page swap redraws it from the loaded tasks (the `#app` childList observer),
+  so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that

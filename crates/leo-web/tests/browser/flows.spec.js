@@ -6036,6 +6036,7 @@ test('a long note reads to its end with the Tasks panel clear of its text on sho
   const note = await (await page.request.post('/api/notes', { data: { title: 'Long reading', body: ('Reading paragraph.\n\n').repeat(100) } })).json();
   await page.setViewportSize({ width: 1280, height: 600 });
   await page.goto('/#/n/' + note.id);
+  await page.reload();
   await expect(page.locator('#doc')).toContainText('Reading paragraph.');
   const panel = page.locator('#tasks-window');
   for (const height of [600, 900]) {

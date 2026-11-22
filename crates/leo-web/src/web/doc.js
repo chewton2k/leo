@@ -776,7 +776,7 @@
     if (noteLayout) {
       const wide = () => noteLayout.toggleAttribute('data-wide', noteLayout.getBoundingClientRect().width >= OUTLINE_WIDE);
       wide();
-      if (root.ResizeObserver) new ResizeObserver(wide).observe(noteLayout);
+      if (root.ResizeObserver) new ResizeObserver(() => requestAnimationFrame(wide)).observe(noteLayout);
     }
 
     function blockAtLine(line) {
