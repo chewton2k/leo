@@ -390,7 +390,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js); in a list or
   checkbox item a click on the picture frames it like any other, and a click beside it, left
   or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
-  call).
+  call). Backspace or Delete on a framed picture removes it and leaves the caret in its place
+  (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
+  listener (events.js) so WebKit never goes back a page (2026-11-22, the user's call).
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
   without it, byte-identical): a column whose body cells are all numbers (%, a

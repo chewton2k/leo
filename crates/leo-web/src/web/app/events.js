@@ -11,6 +11,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !e.isComposing) e.preventDefault();
 }, true);
 
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Backspace' && !e.target.closest?.('input, textarea, select, [contenteditable]')) e.preventDefault();
+});
+
 document.addEventListener('keydown', (e) => {
   const typing = e.target.closest('input, textarea, select, [contenteditable]');
   if (pressed(e, 'quick')) {

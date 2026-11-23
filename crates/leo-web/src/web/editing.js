@@ -472,20 +472,29 @@
     return !/^data:image\/svg\+xml[;,]/i.test(src) && (/^[a-z][a-z0-9+.-]*:/i.test(src) || src.startsWith('//'));
   };
 
-  function setPictureWidth(text, index, width) {
+  function changePicture(text, index, change) {
     let n = -1;
-    const size = width ? `|${Math.round(width)}` : '';
     const code = [...String(text).matchAll(/`[^`]+`/g)].map((m) => [m.index, m.index + m[0].length]);
     return String(text).replace(PICTURE, (whole, name, option, alt, target, title, at) => {
       if (code.some(([from, to]) => at >= from && at < to) || outside(name ?? target)) return whole;
       n += 1;
-      if (n !== index) return whole;
+      return n === index ? change(name, option, alt, target, title) : whole;
+    });
+  }
+
+  function setPictureWidth(text, index, width) {
+    const size = width ? `|${Math.round(width)}` : '';
+    return changePicture(text, index, (name, option, alt, target, title) => {
       if (name !== undefined) {
         const keep = option && !/^\s*\d{1,4}(?:\s*x\s*\d{1,4})?\s*$/.test(option) ? `|${option}` : '';
         return `![[${name}${size || keep}]]`;
       }
       return `![${alt.replace(/\|\s*\d{1,4}(?:\s*x\s*\d{1,4})?\s*$/, '')}${size}](${target}${title || ''})`;
     });
+  }
+
+  function removePicture(text, index) {
+    return changePicture(text, index, () => '');
   }
 
   const SLASH = [
@@ -512,7 +521,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

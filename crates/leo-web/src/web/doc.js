@@ -1772,6 +1772,23 @@
       else again.addEventListener('load', show, { once: true });
     }
 
+    function deletePicture(img) {
+      const at = pictureAt(img);
+      unframe();
+      if (!at || at.index < 0) return;
+      if (editing) stop();
+      const before = lines.slice(at.start, at.start + at.length).join('\n');
+      const after = ed.removePicture(before, at.index);
+      if (after === before) return;
+      let cut = 0;
+      while (before[cut] === after[cut]) cut += 1;
+      lines.splice(at.start, at.length, ...after.split('\n'));
+      changed();
+      draw();
+      const caret = lineStart(at.start) + cut;
+      editSpan(caret, caret);
+    }
+
     function lonePicture(el) {
       const blk = el.closest('.blk');
       const pictures = blk && !blk.textContent.trim() ? blk.querySelectorAll('img.note-img') : [];
@@ -1791,10 +1808,13 @@
     });
 
     function onFrameKey(e) {
-      if (e.key !== 'Escape' || !framed || !framed.frame.isConnected) return;
+      if (!framed || !framed.frame.isConnected || e.isComposing) return;
+      const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused();
+      if (e.key !== 'Escape' && !remove) return;
       e.preventDefault();
       e.stopPropagation();
-      unframe();
+      if (remove) deletePicture(framed.img);
+      else unframe();
     }
     document.addEventListener('keydown', onFrameKey, true);
     root.addEventListener('resize', placeFrame);

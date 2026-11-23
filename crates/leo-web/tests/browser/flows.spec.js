@@ -2720,6 +2720,33 @@ test.describe('uploads', () => {
     expect(page.url()).not.toContain('#/n/');
   });
 
+  test('a finished upload shows up in the explorer while a note is open', async ({ page }) => {
+    const title = `Uploaded beside ${test.info().project.name}`;
+    const open = await (await page.request.post('/api/notes', { data: { title: `Open while uploading ${test.info().project.name}`, body: 'Reading this.' } })).json();
+    let polls = 0;
+    let made = null;
+    await fakeFileSends(page);
+    await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-beside' } }));
+    await page.route('**/api/import/job-beside', async (route) => {
+      polls += 1;
+      if (polls < 3) return route.fulfill({ json: { state: 'working', step: 'Writing the note', done: 0, total: 1 } });
+      if (!made) made = await (await page.request.post('/api/notes', { data: { title, body: 'From the upload.' } })).json();
+      return route.fulfill({ json: { state: 'done', step: '', done: 1, total: 1, note: made.id } });
+    });
+    await page.goto(`/#/n/${open.id}`);
+    await expect(page.locator('.side-note', { hasText: open.title })).toBeVisible();
+    await control(page, 'upload').click();
+    await page.locator('#upload-input').setInputFiles({ name: 'beside.txt', mimeType: 'text/plain', buffer: Buffer.from('From the upload.') });
+    await page.locator('#upload-go').click();
+    await expect(page.locator('.upload-working')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.scrim')).toHaveCount(0);
+    await expect(page.locator('.toast')).toContainText('Your note from the upload is ready.');
+    await expect(page.locator('.side-note', { hasText: title })).toBeVisible({ timeout: 2000 });
+    expect(page.url()).toContain(`#/n/${open.id}`);
+    for (const id of [open.id, made.id]) await page.request.delete(`/api/notes/${id}`);
+  });
+
   test('a failed upload says why and offers to try again', async ({ page }) => {
     await fakeFileSends(page);
     await page.route('**/api/import', (route) => route.fulfill({ status: 202, json: { id: 'job-2' } }));
@@ -5670,6 +5697,34 @@ test('a picture in a note can be resized by dragging its corner, and keeps that 
   await page.locator('#doc img.note-img').dblclick();
   await expect(page.locator('#doc img.note-img')).toHaveClass(/picked/);
   await expect(page.locator('#doc textarea')).toHaveCount(0);
+  await page.request.delete(`/api/notes/${note.id}`);
+});
+
+test('Backspace or Delete on a selected picture takes it out of the note and stays on the note', async ({ page }) => {
+  test.skip(test.info().project.name !== 'desktop', 'the click is a mouse click');
+  const svg = encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="300" height="150"><rect width="300" height="150" fill="#9ab"/></svg>');
+  const note = await (await page.request.post('/api/notes', { data: { title: `Gone picture ${Date.now().toString(36)}`, body: `Intro line\n\n![Box](data:image/svg+xml;utf8,${svg}) ![Two](data:image/svg+xml;utf8,${svg})\n\nAfter line` } })).json();
+  const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+  await page.goto('/#/');
+  await page.goto(`/#/n/${note.id}`);
+  const img = page.locator('#doc img.note-img');
+  await expect(img).toHaveCount(2);
+  await img.first().click();
+  await expect(img.first()).toHaveClass(/picked/);
+  await page.keyboard.press('Backspace');
+  await expect.poll(body, { timeout: 5000 }).not.toContain('![Box]');
+  expect(await body()).toMatch(/^Intro line\n\n *!\[Two\]\(data:image[^)]*\)\n\nAfter line$/);
+  await expect(page.locator('.pic-frame')).toHaveCount(0);
+  await expect(page.locator('#doc textarea')).toBeFocused();
+  expect(page.url()).toContain(`#/n/${note.id}`);
+  await page.keyboard.press('Escape');
+  await expect(img).toHaveCount(1);
+  await img.click();
+  await page.locator('.pic-handle').focus();
+  await page.keyboard.press('Delete');
+  await expect.poll(body, { timeout: 5000 }).not.toContain('![Two]');
+  expect(await body()).toMatch(/^Intro line\n+ *\n*After line$/);
+  expect(page.url()).toContain(`#/n/${note.id}`);
   await page.request.delete(`/api/notes/${note.id}`);
 });
 

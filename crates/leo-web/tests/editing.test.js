@@ -67,6 +67,14 @@ test('resizing counts only the pictures the page draws, so outside images and co
   assert.equal(ed.setPictureWidth(line, 2, 200), line, 'there is no third drawn picture');
 });
 
+test('removing a picture takes out only the chosen drawn one, never code or outside images', () => {
+  const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
+  assert.equal(ed.removePicture(line, 0), line.replace('![Tree|400](attachments/tree.png)', ''));
+  assert.equal(ed.removePicture(line, 1), line.replace('![[graph.png|250]]', ''));
+  assert.equal(ed.removePicture(line, 2), line, 'there is no third drawn picture');
+  assert.equal(ed.removePicture('![Box](a.png "Title")', 0), '');
+});
+
 test('a picture keeps a width in the Obsidian style and only the chosen one changes', () => {
   const line = 'Before ![Tree](attachments/tree.png) and ![[graph.png]] and ![Old|120](a.png "Title")';
   assert.equal(ed.setPictureWidth(line, 0, 400), 'Before ![Tree|400](attachments/tree.png) and ![[graph.png]] and ![Old|120](a.png "Title")');
