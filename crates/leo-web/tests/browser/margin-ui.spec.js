@@ -267,6 +267,30 @@ test('a saved margin note on a formula, or on part of one, marks each drawn row 
   }
 });
 
+test('a saved margin note marks the formula it quotes, in a quote block and among words', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const second = '$$E=\\frac{a}{b}$$';
+  const body = `> $$F=ma$$\n> Between them:\n> ${second}\n\nWords with $\\kappa_i$ in a paragraph long enough to wrap onto a second line of the note, so a mark of the whole paragraph would be far wider than the formula it quotes.`;
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula quotes', body } })).json();
+  let quote = second;
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...view, threads: [{ id: 'f1', note: note.id, quote, prefix: '', suffix: '', status: 'open', source: 'ask', pinned: false, messages: [{ from: 'felix', text: 'Yes.', at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' }] } });
+  });
+  for (const [asked, at] of [[second, 1], ['$\\kappa_i$', 2]]) {
+    quote = asked;
+    await page.goto('/#/');
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .katex-html')).toHaveCount(3);
+    await expect.poll(() => page.evaluate((i) => {
+      const formula = document.querySelectorAll('#doc .katex-html')[i].getBoundingClientRect();
+      const marks = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => el.getBoundingClientRect());
+      return marks.length === 1 && marks[0].width < 120 && marks[0].top > formula.top - 20 && marks[0].top < formula.bottom + 20;
+    }, at)).toBe(true);
+  }
+});
+
 test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
