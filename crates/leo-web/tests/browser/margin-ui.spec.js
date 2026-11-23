@@ -238,6 +238,33 @@ test('the ask draft on a passage with a display formula marks only the visible f
   }
 });
 
+test('a saved margin note on a formula, or on part of one, marks each drawn row and keeps its blot off the formula', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const rows = ['v_{i+1} &= v_i + h a_i,', 'x_{i+1} &= x_i + \\frac{h}{2}(v_i\\cos\\psi_i + v_{i+1}\\cos\\psi_{i+1}),', 'y_{i+1} &= y_i + \\frac{h}{2}(v_i\\sin\\psi_i + v_{i+1}\\sin\\psi_{i+1}).'];
+  const formula = `$$\n\\begin{aligned}\n${rows.join('\\\\\n')}\n\\end{aligned}\n$$`;
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula note', body: `Before the formula.\n\n${formula}\n\nAfter the formula it ends.` } })).json();
+  let quote = formula;
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...view, threads: [{ id: 'f1', note: note.id, quote, prefix: '', suffix: '', status: 'open', source: 'ask', pinned: false, messages: [{ from: 'felix', text: 'Yes.', at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' }] } });
+  });
+  for (quote of [formula, rows[1]]) {
+    await page.goto('/#/');
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .katex-display .katex-html')).toBeVisible();
+    const marks = () => page.evaluate(() => {
+      const box = document.querySelector('#doc .katex-display .katex-html').getBoundingClientRect();
+      const right = Math.max(...[...document.querySelectorAll('#doc .katex-display .katex-html .base')].map((el) => el.getBoundingClientRect().right));
+      const lines = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => el.getBoundingClientRect());
+      const blot = document.querySelector('.margin-mark')?.getBoundingClientRect();
+      const ends = [...document.querySelectorAll('#doc .katex-display .katex-html *')].filter((el) => !el.children.length && el.textContent.trim()).map((el) => el.getBoundingClientRect());
+      return { rows: lines.length, stray: lines.some((r) => r.right > right + 4 || r.top > box.bottom + 12), covers: Boolean(blot && ends.some((r) => r.right > blot.left + 8 && r.left < blot.right - 8 && r.bottom > blot.top + 8 && r.top < blot.bottom - 8)) };
+    });
+    await expect.poll(marks).toEqual({ rows: 3, stray: false, covers: false });
+  }
+});
+
 test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });

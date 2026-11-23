@@ -2070,16 +2070,18 @@
             piece.selectNodeContents(node);
             if (node === range.startContainer) piece.setStart(node, range.startOffset);
             if (node === range.endContainer) piece.setEnd(node, range.endOffset);
-            for (const box of piece.getClientRects()) if (box.width > 0) found.push(box);
+            const formula = Boolean(node.parentElement.closest('.katex-display'));
+            for (const { left, right, top, bottom } of piece.getClientRects()) if (right > left) found.push({ left, right, top, bottom, formula });
             if (node === range.endContainer) break;
           }
           const lines = [];
-          for (const { left, right, top, bottom } of found.sort((a, b) => a.top - b.top)) {
-            const line = lines.find((l) => (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom);
-            if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
-            else lines.push({ left, right, top, bottom });
+          for (const { left, right, top, bottom, formula } of found.sort((a, b) => a.formula - b.formula || (a.formula ? b.right - b.left - a.right + a.left : a.top - b.top))) {
+            const line = lines.find((l) => (formula ? l.formula && Math.min(bottom, l.bottom) - Math.max(top, l.top) > 2 : (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom));
+            if (line && formula) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right) });
+            else if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
+            else lines.push({ left, right, top, bottom, formula });
           }
-          return lines.slice(0, 24);
+          return lines.sort((a, b) => a.top - b.top).slice(0, 24);
         };
         const found = boxes();
         if (found.length) return found;
@@ -2114,6 +2116,12 @@
           range.setEnd(...end);
           const inside = boxes();
           if (inside.length) return inside;
+        }
+        const formula = blk.querySelector('.katex-display .katex-html');
+        if (formula) {
+          range.selectNodeContents(formula);
+          const drawn = boxes();
+          if (drawn.length) return drawn;
         }
         const { left, right, top, bottom } = blk.getBoundingClientRect();
         return right > left ? [{ left, right, top, bottom }] : [];
