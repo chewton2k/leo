@@ -996,7 +996,7 @@ Felix (2026-10-19).
   The solid underline (one per text line) and the spine are drawn with `marginWobble` (the pencil's jitter), phased by
   `marginSeed(thread id)` plus the line index, so a repaint, scroll or relayout never reshapes them; their
   endpoints sit exactly where a straight line's would, and the tie stays a plain cubic.
-  `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box).
+  `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box, and never KaTeX's hidden `.katex-mathml` copy); a display formula gives one rect as tall as it is drawn, clipped to its column, or one per row of a matrix or aligned block where the rows do not overlap (the resting mark takes that height through `--mark`), and a quote that falls inside a formula marks the whole formula (2026-11-22).
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
 Decided: margin threads never in files (2026-11-04); read-along default for new

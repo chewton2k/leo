@@ -67,7 +67,7 @@
 .margin-layer > * { pointer-events: auto; }
 .margin-ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none !important; }
 .margin-ink path { fill: none; stroke-linecap: round; }
-.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: 20px; stroke-linecap: butt; transform: translateY(-12px); transition: opacity var(--t-fade) ease-out; }
+.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: var(--mark, 20px); stroke-linecap: butt; transform: translateY(calc(-2px - var(--mark, 20px) / 2)); transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid { stroke: var(--accent); stroke-width: 1.5; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.wash { fill: var(--accent); stroke: none; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid.on { opacity: 1; }
