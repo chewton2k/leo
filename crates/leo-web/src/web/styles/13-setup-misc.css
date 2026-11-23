@@ -287,10 +287,11 @@ body.files-over main::after {
 .pick-chip:hover { border-color: var(--accent); }
 .pick-chip.on { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
 .pick-hint { margin: 2px 10px 6px; font-size: var(--fs-xs); line-height: 1.4; color: var(--muted); }
-.math-block { margin: 12px 0; overflow-x: auto; overscroll-behavior-x: contain; overflow-y: hidden; text-align: center; }
+.math-block { display: block; margin: 12px 0; overflow-x: auto; overscroll-behavior-x: contain; overflow-y: hidden; text-align: center; }
 .math:not([data-drawn="yes"]) { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; font-size: .92em; color: var(--muted); }
 .math-block:not([data-drawn="yes"]) { white-space: pre-wrap; text-align: left; }
 .math .katex { font-size: 1.08em; }
+.math-block .katex-display > .katex { white-space: normal; }
 .callout { --tone: var(--hue-indigo); margin: 10px 0; border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--line)); border-left: 3px solid var(--tone); border-radius: var(--r-md); background: color-mix(in srgb, var(--tone) 7%, var(--surface)); }
 .callout-tip, .callout-success, .callout-check, .callout-done { --tone: var(--good); }
 .callout-warning, .callout-caution, .callout-attention { --tone: var(--hue-amber); }

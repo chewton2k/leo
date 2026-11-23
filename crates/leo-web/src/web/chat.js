@@ -881,6 +881,11 @@
   }
 
   function settle(from, to) {
+  function figured(el) {
+    if (el.classList.contains('math')) return `${el.getAttribute('class')}\n${el.getAttribute('data-tex')}`;
+    return el.classList.contains('diagram') ? el.querySelector('.diagram-src').textContent : null;
+  }
+
     const was = runs(from);
     const now = runs(to);
     now.forEach((b, i) => {
@@ -905,9 +910,15 @@
       const y = b.nodes[0];
       if (!a.run && !b.run && x.nodeType === 1 && y.nodeType === 1 && x.tagName === y.tagName) {
         if (x.outerHTML === y.outerHTML) return;
-        match(x, y);
-        settle(x, y);
-        return;
+        const shown = figured(x);
+        const wanted = figured(y);
+        const drawn = shown !== null && x.hasAttribute('data-drawn');
+        if (drawn && shown === wanted) return;
+        if (!drawn && (shown === null) === (wanted === null)) {
+          match(x, y);
+          settle(x, y);
+          return;
+        }
       }
       x.before(...b.nodes);
       a.nodes.forEach((n) => n.remove());

@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
 
-  const { MARKER, MATH_ENV, listKind, listable } = root.leoMarkdown || require('./markdown.js');
+  const { MARKER, MATH_ENV, MATH_THEN, MATH_END, listKind, listable, caption } = root.leoMarkdown || require('./markdown.js');
   const FENCE = /^\s*(```|~~~)/;
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const QUOTE = /^\s*>/;
@@ -34,9 +34,9 @@
         i = end;
         continue;
       }
-      if (math.startsWith('$$') && !(math.length > 4 && math.endsWith('$$'))) {
+      if (math.startsWith('$$') && !MATH_THEN.test(math) && !(math.length > 4 && math.endsWith('$$'))) {
         let end = i + 1;
-        while (end < lines.length && !lines[end].trim().endsWith('$$')) end++;
+        while (end < lines.length && !MATH_END.test(lines[end])) end++;
         end = Math.min(end + 1, lines.length);
         blocks.push({ start: i, end, kind: 'math' });
         i = end;

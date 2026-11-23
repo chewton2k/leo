@@ -320,6 +320,12 @@ test('Obsidian callouts become boxes, and a - or + makes them fold', () => {
 });
 
 test('the other ways models write math are drawn too', () => {
+test('a formula followed by words or a full stop never swallows the text after it', () => {
+  assert.equal(render('$$a=b$$.\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span>.</p><p>After</p>');
+  assert.equal(render('$$a=b$$ where a is\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span> where a is</p><p>After</p>');
+  assert.equal(render('$$\na=b\n$$.\n\nAfter'), '<div class="math math-block" data-tex="a=b">a=b</div><p>After</p>');
+});
+
   assert.equal(render('Energy \\(E = mc^2\\) here.'), '<p>Energy <span class="math" data-tex="E = mc^2">E = mc^2</span> here.</p>');
   assert.equal(render('So \\[a^2 + b^2 = c^2\\] holds.'), '<p>So <span class="math math-block" data-tex="a^2 + b^2 = c^2">a^2 + b^2 = c^2</span> holds.</p>');
   assert.equal(render('Then $$x_1 + x_2$$ follows.'), '<p>Then <span class="math math-block" data-tex="x_1 + x_2">x_1 + x_2</span> follows.</p>');

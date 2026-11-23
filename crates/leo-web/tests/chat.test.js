@@ -1842,6 +1842,88 @@ test('a chat drawing is inked on first insert and stays inked when the reply is 
   assert.equal(records.length, 0, 'inking it again does not loop');
 });
 
+test('a redraw keeps a drawn formula or diagram, and one whose source changed goes back to be drawn', () => {
+  const added = [];
+  class T {
+    constructor(text) { Object.assign(this, { nodeType: 3, text }); }
+    get textContent() { return this.text; }
+    get outerHTML() { return this.text; }
+    appendData(more) { this.text += more; }
+  }
+  class N {
+    constructor(tag, attrs, ...kids) {
+      Object.assign(this, { nodeType: 1, tagName: tag.toUpperCase(), attrs: new Map(Object.entries(attrs)), childNodes: [] });
+      this.append(...kids.map((k) => (typeof k === 'string' ? new T(k) : k)));
+      this.classList = { contains: (c) => (this.getAttribute('class') || '').split(' ').includes(c) };
+    }
+    get attributes() { return [...this.attrs].map(([name, value]) => ({ name, value })); }
+    get textContent() { return this.childNodes.map((n) => n.textContent).join(''); }
+    get outerHTML() { return `<${this.tagName}${this.attributes.map((a) => ` ${a.name}="${a.value}"`).join('')}>${this.childNodes.map((n) => n.outerHTML).join('')}</${this.tagName}>`; }
+    getAttribute(n) { return this.attrs.has(n) ? this.attrs.get(n) : null; }
+    hasAttribute(n) { return this.attrs.has(n); }
+    removeAttribute(n) { this.attrs.delete(n); }
+    setAttribute(n, v) { this.attrs.set(n, v); }
+    append(...kids) { this.put(this.childNodes.length, kids); }
+    put(at, kids) {
+      for (const k of kids) {
+        if (k.up) k.up.childNodes.splice(k.up.childNodes.indexOf(k), 1);
+        k.up = this;
+        added.push(k);
+      }
+      this.childNodes.splice(at, 0, ...kids);
+    }
+    querySelector() { return this.childNodes.find((k) => k.classList?.contains('diagram-src')) || null; }
+  }
+  for (const Kind of [T, N]) {
+    Kind.prototype.before = function (...kids) { this.up.put(this.up.childNodes.indexOf(this), kids); };
+    Kind.prototype.after = function (...kids) { this.up.put(this.up.childNodes.indexOf(this) + 1, kids); };
+    Kind.prototype.remove = function () { this.up.childNodes.splice(this.up.childNodes.indexOf(this), 1); this.up = null; };
+  }
+  const math = (tex, block) => new N(block ? 'div' : 'span', { class: block ? 'math math-block' : 'math', 'data-tex': tex }, tex);
+  const diagram = (code) => new N('figure', { class: 'diagram' }, new N('pre', { class: 'diagram-src' }, code));
+  const drawn = (el, state = 'yes') => {
+    if (el.tagName !== 'FIGURE') for (const n of [...el.childNodes]) n.remove();
+    el.append(new N('span', { class: 'art' }, 'drawn'));
+    el.setAttribute('data-drawn', state);
+    return el;
+  };
+  const turn = (...kids) => new N('div', { class: 'msg leo' }, ...kids);
+  const settled = (was, now) => {
+    const from = turn('Say ', was, ' is it.');
+    const to = turn('Say ', now, ' is it.');
+    added.length = 0;
+    C.settle(from, to);
+    assert.equal(from.childNodes.length, 3);
+    return from.childNodes[1];
+  };
+  for (const make of [() => math('x_1'), () => math('x_1', true), () => diagram('A-->B')]) {
+    for (const state of ['yes', 'working', 'failed']) {
+      const kept = drawn(make(), state);
+      assert.equal(settled(kept, make()), kept, 'the drawn node stays');
+      assert.equal(kept.getAttribute('data-drawn'), state);
+      assert.ok(kept.childNodes.some((n) => n.getAttribute?.('class') === 'art'), 'with its drawing');
+      assert.equal(added.length, 0, 'and nothing is drawn again');
+    }
+  }
+  for (const [was, now] of [[math('x_1'), math('x_2')], [math('x', true), math('y', true)], [diagram('A-->B'), diagram('A-->C')]]) {
+    drawn(was);
+    assert.equal(settled(was, now), now, 'a changed source takes the place of the drawn one');
+    assert.ok(added.includes(now), 'and is seen as added, so it is drawn');
+    assert.equal(now.hasAttribute('data-drawn'), false);
+  }
+  const note = new N('div', { class: 'msg-note' }, 'Working');
+  const formula = math('x', true);
+  assert.equal(settled(note, formula), formula);
+  assert.ok(added.includes(formula), 'a formula that takes another block\'s place is drawn');
+  const prose = settled(drawn(math('x', true)), new N('div', { class: 'msg-note' }, 'Working'));
+  assert.equal(prose.outerHTML, '<DIV class="msg-note">Working</DIV>');
+  const gone = settled(math('x', true), new N('div', { class: 'msg-note' }, 'Working'));
+  assert.ok(added.includes(gone), 'a formula still waiting to be drawn is not reused for another block');
+  const waiting = math('x');
+  assert.equal(settled(waiting, math('x+y')), waiting, 'a formula still being written grows in place');
+  assert.equal(waiting.outerHTML, '<SPAN class="math" data-tex="x+y">x+y</SPAN>');
+});
+
 test('a marked quiz offers Visualize, asking with the selection toolbar\'s words', () => {
   const fs = require('node:fs');
   const path = require('node:path');

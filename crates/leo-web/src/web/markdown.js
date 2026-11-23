@@ -237,6 +237,8 @@
 
   const isBox = (line) => BOX.test(line.trimStart());
 
+  const MATH_THEN = /^\$\$[^$]+\$\$\s*[^\s$]/;
+  const MATH_END = /\$\$[.,;:]?\s*$/;
   function listable(line, after) {
     const found = line.match(ITEM);
     return found && (after || !/[a-z]/i.test(found[2]) || /^[aA][.)]/.test(found[2]) || isBox(line)) ? found : null;
@@ -358,7 +360,7 @@
         html += `<div class="math math-block" data-tex="${escape(tex)}">${escape(tex)}</div>`;
         continue;
       }
-      if (math.startsWith('$$')) {
+      if (math.startsWith('$$') && !MATH_THEN.test(math)) {
         let tex;
         if (math.length > 4 && math.endsWith('$$')) {
           tex = math.slice(2, -2);
@@ -366,11 +368,11 @@
         } else {
           const body = [math.slice(2)];
           i++;
-          while (i < lines.length && !lines[i].trim().endsWith('$$')) {
+          while (i < lines.length && !MATH_END.test(lines[i])) {
             body.push(lines[i]);
             i++;
           }
-          if (i < lines.length) body.push(lines[i].trim().slice(0, -2));
+          if (i < lines.length) body.push(lines[i].replace(MATH_END, ''));
           i++;
           tex = body.join('\n');
         }
@@ -702,7 +704,7 @@
     return copyHtml(box.innerHTML);
   }
 
-  const api = { render, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, caption, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, MATH_END, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);
