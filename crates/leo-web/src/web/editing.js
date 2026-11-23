@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
 
-  const { MARKER, MATH_ENV, listKind, listable } = root.leoMarkdown || require('./markdown.js');
+  const { MARKER, MATH_ENV, MATH_THEN, listKind, listable, caption } = root.leoMarkdown || require('./markdown.js');
   const FENCE = /^\s*(```|~~~)/;
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const QUOTE = /^\s*>/;
@@ -34,9 +34,9 @@
         i = end;
         continue;
       }
-      if (math.startsWith('$$') && !(math.length > 4 && math.endsWith('$$'))) {
+      if (math.startsWith('$$') && !MATH_THEN.test(math) && !(math.length > 4 && math.endsWith('$$'))) {
         let end = i + 1;
-        while (end < lines.length && !lines[end].trim().endsWith('$$')) end++;
+        while (end < lines.length && !lines[end].includes('$$')) end++;
         end = Math.min(end + 1, lines.length);
         blocks.push({ start: i, end, kind: 'math' });
         i = end;
@@ -478,7 +478,7 @@
     return String(text).replace(PICTURE, (whole, name, option, alt, target, title, at) => {
       if (code.some(([from, to]) => at >= from && at < to) || outside(name ?? target)) return whole;
       n += 1;
-      return n === index ? change(name, option, alt, target, title, at) : whole;
+      return index === null || n === index ? change(name, option, alt, target, title, at, whole) : whole;
     });
   }
 
@@ -500,6 +500,45 @@
       return '';
     });
     return { text: rest, at };
+  }
+
+  function pictureSource(text, index) {
+    let source = '';
+    changePicture(text, index, (name, option, alt, target, title, at, whole) => {
+      source = whole;
+      return '';
+    });
+    return source;
+  }
+
+  function withoutPictures(text, said = caption) {
+    const lines = String(text).split('\n');
+    const out = [];
+    let found = false;
+    let gone = false;
+    for (const { kind, start, end } of splitBlocks(lines)) {
+      const raw = lines.slice(start, end).join('\n');
+      const rest = kind === 'code' || kind === 'math' ? raw : changePicture(raw, null, (name, option, alt) => said(name ?? alt));
+      if (rest !== raw) found = true;
+      if (rest !== raw && !rest.trim()) gone = true;
+      else if (rest.trim()) {
+        out.push(rest);
+        gone = false;
+      } else if (!gone || out.at(-1)?.trim()) out.push(rest);
+    }
+    return found ? out.join('\n').replace(/^\s*\n/, '').trimEnd() : text;
+  }
+
+  const onlyPictures = (text) => !withoutPictures(text, () => '').trim();
+
+  const stored = (text) => [...text.matchAll(PICTURE)].every((m) => /^<?attachments\//.test(m[1] ?? m[4]));
+
+  const OWN_COPY_WORK = 300000000;
+
+  function ownCopy(markdown, text) {
+    const said = String(text).replace(/\r\n?/g, '\n').trim();
+    if (!markdown.trim() || markdown.split('![').length * markdown.length > OWN_COPY_WORK || [...markdown.matchAll(PICTURE)].some((m) => outside(m[1] ?? m[4]))) return false;
+    return said ? withoutPictures(markdown).trim() === said : onlyPictures(markdown);
   }
 
   const SLASH = [
@@ -526,7 +565,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, withoutPictures, onlyPictures, stored, ownCopy, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

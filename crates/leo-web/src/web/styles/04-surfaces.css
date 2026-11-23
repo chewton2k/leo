@@ -129,10 +129,10 @@
 .msg-steps { display: grid; gap: 2px; margin-bottom: 8px; padding: 6px 8px; border-radius: var(--r-md); background: var(--surface-2); }
 .msg-trace { margin-bottom: 8px; font-size: var(--fs-xs); color: var(--muted); }
 .msg-status { margin-bottom: 8px; min-height: 22px; }
-.msg-trace > summary { display: flex; align-items: center; gap: 6px; min-height: 22px; cursor: pointer; list-style: none; }
-.msg-trace > summary::-webkit-details-marker { display: none; }
+:is(.msg-trace, .msg-from) > summary { display: flex; align-items: center; gap: 6px; min-height: 22px; cursor: pointer; list-style: none; }
+:is(.msg-trace, .msg-from) > summary::-webkit-details-marker { display: none; }
 .msg-trace > .msg-steps { margin: 4px 0 0; }
-.msg-trace[open] > summary > .msg-step-chevron { transform: rotate(90deg); }
+:is(.msg-trace, .msg-from)[open] > summary > .msg-step-chevron { transform: rotate(90deg); }
 .msg-outside { font-weight: 500; }
 .msg-step { font-size: var(--fs-xs); color: var(--muted); }
 .msg-step > summary, div.msg-step { display: flex; align-items: center; gap: 6px; min-height: 22px; }
@@ -286,7 +286,9 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 @media print, (forced-colors: active) { .prose hr, .home-rule, .toast-time, .kanban-tab.on::after, :is(.source-label, .quick-due-head, .chat-history-group, .pick-head, .settings-group-title)::after { height: 0; background: none; -webkit-mask: none; mask: none; border-top: 1px solid var(--line); } }
 .prose .table { overflow-x: auto; overscroll-behavior-x: contain; margin: 1em 0; border: 1px solid var(--line); border-radius: var(--r-md); }
 .prose table { border-collapse: collapse; width: 100%; font-size: calc(14.5px * var(--read)); }
-.prose th, .prose td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; }
+.prose th, .prose td { max-width: 40em; padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
+.margin-said > .prose { min-width: 0; }
+.margin-note:not([data-open]) :is(th, td) { overflow-wrap: anywhere; }
 .prose th { font-size: .92em; font-weight: var(--fw-medium); }
 .prose tr:last-child td { border-bottom: 0; }
 .prose .align-left { text-align: left; }

@@ -429,3 +429,112 @@ test('a streamed reply leaves the finished bubbles exactly as they were', async 
   await page.evaluate(() => window.__end());
   await expect(pending).toHaveCount(0);
 });
+
+test.describe('Felix answers in the chat panel', () => {
+  const ndjson = (list) => ({ status: 200, headers: { 'content-type': 'application/x-ndjson' }, body: list.map((l) => JSON.stringify(l)).join('\n') + '\n' });
+  const source = (n, id, title) => ({ n, id, title, folder: '', why: 'open' });
+
+  async function openFelix(page) {
+    await page.goto('/');
+    await page.locator('#chat-toggle').click();
+    const chat = page.locator('#chat');
+    await expect(chat).toBeVisible();
+    return chat;
+  }
+
+  async function ask(chat, text) {
+    await chat.locator('#chat-input').fill(text);
+    await chat.locator('#chat-input').press('Enter');
+  }
+
+  test('several sources fold behind a count that opens on click and stays open, one source stays a line', async ({ page }) => {
+    const [heap, queue, tree, graph] = [await note(page, 'Heaps'), await note(page, 'Queues'), await note(page, 'Trees'), await note(page, 'Graphs')];
+    let asked = 0;
+    await page.route('**/api/chat', (route) => {
+      asked += 1;
+      return route.fulfill(ndjson(asked === 1
+        ? [{ sources: [source(1, heap.id, 'Heaps'), source(2, queue.id, 'Queues'), source(3, tree.id, 'Trees')] }, { t: 'A heap keeps the smallest on top [n1], a queue the oldest [n2] and a tree both [n3].' }, { done: true }]
+        : [{ sources: [source(1, graph.id, 'Graphs')] }, { t: 'A graph has edges [n1].' }, { done: true }]));
+    });
+    const chat = await openFelix(page);
+    await ask(chat, 'compare these');
+    const fold = chat.locator('.msg.leo details.msg-from');
+    await expect(fold).toHaveCount(1);
+    await expect(fold).not.toHaveAttribute('open', '');
+    await expect(fold.locator('summary')).toHaveText('3 sources');
+    await expect(fold.locator('.cite-src').first()).toBeHidden();
+    await fold.locator('summary').click();
+    await expect(fold).toHaveAttribute('open', '');
+    const rows = fold.locator('.cite-src');
+    await expect(rows).toHaveCount(3);
+    const boxes = await rows.evaluateAll((els) => els.map((el) => el.getBoundingClientRect()).map((r) => ({ top: r.top, bottom: r.bottom, left: r.left })));
+    expect(boxes[1].top).toBeGreaterThanOrEqual(boxes[0].bottom - 1);
+    expect(boxes[2].top).toBeGreaterThanOrEqual(boxes[1].bottom - 1);
+    expect(boxes[1].left).toBe(boxes[0].left);
+    await rows.nth(1).click();
+    await expect(page).toHaveURL(new RegExp(`#/n/${queue.id}$`));
+    if (!(await chat.isVisible())) await page.locator('#chat-toggle').click();
+    await ask(chat, 'and graphs');
+    await expect(chat.locator('.msg.leo')).toHaveCount(2);
+    await expect(chat.locator('.msg.leo').last().locator('div.msg-from .cite-src')).toHaveCount(1);
+    await expect(chat.locator('.msg.leo').last().locator('details.msg-from')).toHaveCount(0);
+    await expect(chat.locator('.msg.leo').first().locator('details.msg-from')).toHaveAttribute('open', '');
+  });
+
+  test('a long answer stays where it is while the draft grows, at the end or in the middle', async ({ page }) => {
+    const paragraphs = Array.from({ length: 60 }, (_, i) => `Paragraph ${i} of a long answer that goes on for a while so the conversation is much taller than the panel.`).join('\n\n');
+    await page.route('**/api/chat', (route) => route.fulfill(ndjson([{ sources: [] }, { t: paragraphs }, { done: true }])));
+    const chat = await openFelix(page);
+    await page.addStyleTag({ content: '#chat-body { overflow-anchor: none; }' });
+    await ask(chat, 'tell me everything');
+    await expect(chat.locator('.msg.leo')).toHaveCount(1);
+    await expect(chat.locator('#chat-body')).not.toHaveAttribute('aria-busy', 'true');
+    const input = chat.locator('#chat-input');
+    await input.fill('one\ntwo\nthree\nfour');
+    const body = chat.locator('#chat-body');
+    const gap = () => body.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop);
+    await body.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    expect(await gap()).toBeLessThanOrEqual(1);
+    await input.press('x');
+    expect(await gap()).toBeLessThanOrEqual(1);
+    await body.evaluate((el) => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2; });
+    const middle = await body.evaluate((el) => el.scrollTop);
+    await input.press('y');
+    expect(Math.abs((await body.evaluate((el) => el.scrollTop)) - middle)).toBeLessThanOrEqual(1);
+  });
+
+  test('a table in an answer keeps whole words in every cell and a wide first column', async ({ page }) => {
+    const table = [
+      '**What actually gets trained**',
+      '',
+      '| Stage | What updates | What teaches it |',
+      '|---|---|---|',
+      '| 1. Train the 3D module | The new perception module. The pretrained vision encoder and VLM are frozen, meaning their weights stay fixed. | Labeled boxes, occupancy grids, and road maps. The losses measure errors in those three outputs and teach the depth network through its contribution to them. |',
+      '| 2. Adapt the shared model | The perception module, vision encoder, and VLM. | Each batch mixes 3D examples with driving and general-purpose image-and-text examples. A 3D example supplies perception losses. |',
+      '| 3. Train the planner by imitation | Only the Planning Expert. | Take a recorded future path, mix it with random noise, and train the planner to recover the clean path. |',
+    ].join('\n');
+    await page.route('**/api/chat', (route) => route.fulfill(ndjson([{ sources: [] }, { t: table }, { done: true }])));
+    await page.setViewportSize({ width: 1500, height: 900 });
+    const chat = await openFelix(page);
+    await page.evaluate(() => { const panel = document.querySelector('#chat'); panel.style.width = '866px'; });
+    await ask(chat, 'what gets trained');
+    const cells = chat.locator('.msg.leo .prose table th, .msg.leo .prose table td');
+    await expect(cells).toHaveCount(12);
+    const first = await chat.locator('.msg.leo .prose table th').first().evaluate((el) => el.getBoundingClientRect().width);
+    expect(first).toBeGreaterThan(110);
+    const broken = await cells.evaluateAll((els) => els.flatMap((cell) => {
+      const out = [];
+      const walker = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        for (const word of node.data.matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, word.index);
+          range.setEnd(node, word.index + word[0].length);
+          if (new Set([...range.getClientRects()].map((r) => Math.round(r.top))).size > 1) out.push(word[0]);
+        }
+      }
+      return out;
+    }));
+    expect(broken).toEqual([]);
+  });
+});

@@ -1186,15 +1186,116 @@
       return !focus || focus === document.body || (container.contains(focus) && !(editing && focus === editing.area));
     }
 
+    const MOST_COPIED = 60000000;
+    const MOST_INLINE = 15000000;
+
     function onCopy(e) {
-      if (!container.isConnected || !noteFocused()) return;
+      if (!container.isConnected || !noteFocused() || !e.clipboardData) return;
+      const selection = root.getSelection();
       const span = selectedSpan();
-      if (!span || !e.clipboardData) return;
+      const picked = !span && !editing && e.type === 'copy' && framed && framed.img.isConnected && selection.isCollapsed ? framed.img : null;
+      if (!span && !picked) return;
       e.preventDefault();
-      e.clipboardData.setData('text/plain', lines.join('\n').slice(span[0], span[1]));
-      const html = md.selectionCopy && md.selectionCopy(root.getSelection().getRangeAt(0));
-      if (html) e.clipboardData.setData('text/html', html);
+      const range = span ? selection.getRangeAt(0) : document.createRange();
+      if (picked) range.selectNode(picked);
+      const source = span ? lines.join('\n').slice(span[0], span[1]) : pictureMarkdown(picked);
+      const shown = [...container.querySelectorAll('img')].filter((img) => range.intersectsNode(img));
+      const able = e.type === 'copy' && root.ClipboardItem && root.navigator.clipboard?.write;
+      if (able && shown.length === 1 && ed.onlyPictures(source) && (shown[0].naturalWidth || !shown[0].complete)) {
+        const drawn = pictureDrawn(shown[0], source);
+        putCopy({ 'image/png': drawn.then(({ png }) => png), 'text/html': drawn.then(({ html }) => html) }, shown[0]);
+        return;
+      }
+      const html = md.selectionCopy && md.selectionCopy(range);
+      const said = html ? ed.withoutPictures(source) : source;
+      const own = html && ed.ownCopy(source, said);
+      const text = own ? said : source;
+      const rich = (body) => (own ? leoCopy(source, body) : body);
+      const late = able && html ? shown.filter((img) => !img.complete) : [];
+      if (late.length) {
+        const kept = range.cloneRange();
+        const loaded = Promise.allSettled(late.map(loadPicture)).then(() => textBlob(rich(md.selectionCopy(kept) || html), 'text/html'));
+        putCopy({ 'text/plain': textBlob(text, 'text/plain'), 'text/html': loaded });
+        return;
+      }
+      e.clipboardData.setData('text/plain', text);
+      if (html) e.clipboardData.setData('text/html', rich(html));
       if (e.type === 'cut') replaceSelection('');
+    }
+
+    const textBlob = (text, type) => new Blob([text], { type });
+
+    function leoCopy(source, html) {
+      return html.replace('<div', () => `<div data-leo="${md.escape(source)}" data-leo-from="${md.escape(dir)}"`);
+    }
+
+    function loadPicture(img) {
+      img.loading = 'eager';
+      return img.decode();
+    }
+
+    async function pictureDrawn(img, source) {
+      await loadPicture(img);
+      const canvas = document.createElement('canvas');
+      const paint = canvas.getContext('2d');
+      const drawn = (type) => new Promise((done, failed) => canvas.toBlob((blob) => (blob ? done(blob) : failed(new Error('No picture'))), type, 0.92));
+      let png = null;
+      for (let scale = 1; !png || png.size > MOST_COPIED; scale /= 2) {
+        canvas.width = Math.ceil(img.naturalWidth * scale);
+        canvas.height = Math.ceil(img.naturalHeight * scale);
+        paint.drawImage(img, 0, 0, canvas.width, canvas.height);
+        png = await drawn('image/png');
+      }
+      let inline = png;
+      if (png.size > MOST_INLINE) {
+        paint.globalCompositeOperation = 'destination-over';
+        paint.fillStyle = '#fff';
+        paint.fillRect(0, 0, canvas.width, canvas.height);
+        inline = await drawn('image/jpeg');
+      }
+      const url = await new Promise((done, failed) => {
+        const reader = new FileReader();
+        reader.onload = () => done(reader.result);
+        reader.onerror = failed;
+        reader.readAsDataURL(inline);
+      });
+      const html = leoCopy(source, `<div style="color:inherit"><img src="${url}" alt="${md.escape(img.alt)}"></div>`);
+      return { png, html: textBlob(html, 'text/html') };
+    }
+
+    function putCopy(parts, img) {
+      root.navigator.clipboard.write([new root.ClipboardItem(parts)]).catch(() => {
+        copySaid(document).textContent = 'Could not copy';
+        if (!img || !img.isConnected) return;
+        frame(img);
+        framed.frame.querySelector('.pic-size').textContent = 'Could not copy';
+      });
+    }
+
+    function onLeoPaste(e) {
+      const area = editing && document.activeElement === editing.area ? editing.area : null;
+      if (!container.isConnected || !e.clipboardData || !(area || noteFocused())) return;
+      const html = e.clipboardData.getData('text/html');
+      const [, kept, from] = /\sdata-leo="([^"]*)" data-leo-from="([^"]*)"/.exec(html) || [];
+      const source = kept && md.unescapeHtml(kept);
+      if (!source || !ed.ownCopy(source, e.clipboardData.getData('text/plain'))) return;
+      const alone = ed.onlyPictures(source);
+      if (alone ? md.unescapeHtml(from) !== dir && !ed.stored(source) : !area && !framed && !selectedSpan()) return;
+      if (!area && (e.target.closest?.('#chat') || [...document.querySelectorAll('.scrim')].some((scrim) => !scrim.contains(container)))) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (area) {
+        area.setRangeText(source, area.selectionStart, area.selectionEnd, 'end');
+        onInput();
+        return;
+      }
+      if (replaceSelection(source)) return;
+      const at = framed && pictureAt(framed.img);
+      if (!at) return insert(source);
+      unframe();
+      lines.splice(at.start + at.length, 0, '', ...source.split('\n'));
+      changed();
+      draw();
     }
 
     function onTextPaste(e) {
@@ -1207,6 +1308,7 @@
 
     document.addEventListener('copy', onCopy);
     document.addEventListener('cut', onCopy);
+    document.addEventListener('paste', onLeoPaste, true);
     document.addEventListener('paste', onTextPaste);
 
     document.addEventListener('keydown', onDocumentKey);
@@ -1645,11 +1747,15 @@
       return e.clientX < text.getBoundingClientRect().left ? input : null;
     }
 
-    function copyCode(button) {
-      const code = button.parentNode.querySelector('pre code');
-      const doc = button.ownerDocument;
+    function copySaid(doc) {
       const said = doc.getElementById('code-said') || doc.body.appendChild(Object.assign(doc.createElement('span'), { id: 'code-said', className: 'code-said' }));
       said.setAttribute('role', 'status');
+      return said;
+    }
+
+    function copyCode(button) {
+      const code = button.parentNode.querySelector('pre code');
+      const said = copySaid(button.ownerDocument);
       const shown = (label) => {
         button.setAttribute('aria-label', label);
         button.title = label;
@@ -1696,6 +1802,11 @@
       const block = blocks[Number(blk.dataset.i)];
       if (!block) return null;
       return { start: shifted(block.start), length: block.end - block.start, index: [...blk.querySelectorAll('img.note-img')].indexOf(img) };
+    }
+
+    function pictureMarkdown(img) {
+      const at = pictureAt(img);
+      return at ? ed.pictureSource(lines.slice(at.start, at.start + at.length).join('\n'), at.index) : '';
     }
 
     function frame(img) {
@@ -1934,8 +2045,8 @@
       }
       const last = lines[lines.length - 1];
       if (last.trim()) lines.push('');
-      if (lines.length === 1 && !lines[0].trim()) lines[0] = text;
-      else lines.push(text);
+      if (lines.length === 1 && !lines[0].trim()) lines = text.split('\n');
+      else lines.push(...text.split('\n'));
       changed();
       draw();
     }
@@ -1996,6 +2107,7 @@
         document.removeEventListener('keydown', onDocumentKey);
         document.removeEventListener('copy', onCopy);
         document.removeEventListener('cut', onCopy);
+        document.removeEventListener('paste', onLeoPaste, true);
         document.removeEventListener('paste', onTextPaste);
         document.removeEventListener('pointermove', onDragMove);
         document.removeEventListener('pointerup', onDragEnd);

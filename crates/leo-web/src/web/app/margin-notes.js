@@ -638,7 +638,7 @@ function marginFill(el, t, arriving, changed) {
       if (resolved) said.insertAdjacentHTML('beforeend', '<div class="margin-resolved-label">Resolved</div>');
       const line = document.createElement('div');
       line.className = 'margin-felix';
-      marginAnswer(line, marginNow(t), arriving);
+      marginAnswer(line, (t.messages || []).find((m) => m.from === 'felix')?.text || '', arriving);
       said.append(line);
       const more = (t.messages || []).length - 1;
       if (more > 0) said.insertAdjacentHTML('beforeend', `<div class="margin-foot"><span>${more} ${more === 1 ? 'reply' : 'replies'}</span></div>`);
@@ -712,25 +712,42 @@ function marginFill(el, t, arriving, changed) {
 const MARGIN_CUT_LINES = 12;
 
 function marginCuts(boxes) {
-  const notes = boxes.filter(({ el }) => el && !el.hasAttribute('data-open')).map(({ el }) => {
+  const notes = boxes.filter(({ el }) => el && !el.hasAttribute('data-open')).map(({ t, el }) => {
     const blocks = [...el.querySelectorAll('.margin-said > .margin-felix:not(.prose), .margin-said > .margin-felix.prose > :is(p, ul, ol, blockquote)')];
-    return { blocks, line: blocks.length ? parseFloat(getComputedStyle(blocks[0]).lineHeight) : NaN, heights: blocks.map((block) => block.scrollHeight) };
+    return { id: t.id, el, blocks, line: blocks.length ? parseFloat(getComputedStyle(blocks[0]).lineHeight) : NaN, heights: blocks.map((block) => block.scrollHeight) };
   });
-  for (const { blocks, line, heights } of notes) {
-    let room = MARGIN_CUT_LINES * line;
-    let last = null;
-    blocks.forEach((block, i) => {
-      const fits = !(line > 0) || heights[i] <= room + 1;
-      const allowed = fits ? heights[i] : room >= line ? Math.floor(room / line) * line : 0;
-      if (fits) block.style.removeProperty('--room');
-      else block.style.setProperty('--room', `${allowed}px`);
-      block.classList.toggle('margin-cut', !fits && allowed > 0);
-      block.classList.toggle('margin-over', !fits && allowed === 0);
-      if (!fits && allowed === 0) last?.classList.add('margin-cut');
-      if (fits || allowed > 0) last = block;
-      room = fits ? room - heights[i] : 0;
-    });
-  }
+  for (const note of notes) note.cut = marginCut(note, MARGIN_CUT_LINES * note.line);
+  return notes.filter((note) => note.cut);
+}
+
+function marginCut({ blocks, line, heights }, room) {
+  let last = null;
+  let cut = false;
+  blocks.forEach((block, i) => {
+    const fits = !(line > 0) || heights[i] <= room + 1;
+    const allowed = fits ? heights[i] : room >= line ? Math.floor(room / line + 0.001) * line : 0;
+    if (fits) block.style.removeProperty('--room');
+    else block.style.setProperty('--room', `${allowed}px`);
+    block.classList.toggle('margin-cut', !fits && allowed > 0);
+    block.classList.toggle('margin-over', !fits && allowed === 0);
+    if (!fits && allowed === 0) last?.classList.add('margin-cut');
+    if (fits || allowed > 0) last = block;
+    if (!fits) cut = true;
+    room = fits ? room - heights[i] : 0;
+  });
+  return cut;
+}
+
+function marginGrow(cuts, items, spare) {
+  const grown = cuts.filter(({ id, line }) => spare[id] >= line);
+  for (const note of grown) marginCut(note, MARGIN_CUT_LINES * note.line + spare[note.id]);
+  const heights = grown.map(({ el }) => el.offsetHeight);
+  grown.forEach((note, i) => {
+    const item = items.find(({ id }) => id === note.id);
+    const over = heights[i] - item.height - spare[note.id];
+    if (over > 0) marginCut(note, MARGIN_CUT_LINES * note.line + spare[note.id] - Math.ceil(over / note.line) * note.line);
+    item.height = heights[i] - Math.max(0, over);
+  });
 }
 
 function marginLit(id) {
@@ -880,7 +897,7 @@ function marginDraw() {
     if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };
   });
-  marginCuts(boxes);
+  const cuts = marginCuts(boxes);
   const shown = new Set(boxes.map(({ t }) => t.id));
   for (const [id, el] of marginPage.els) if (!shown.has(id)) el.hidden = true;
   for (const { t } of placed) {
@@ -898,9 +915,10 @@ function marginDraw() {
   marginPencil(origin);
   for (const block of marginPage.roomy.values()) block.classList.remove('margin-room');
   marginPage.roomy = new Map();
-  if (margins) marginPlaceInMargin(boxes, layout, page, origin);
+  if (margins) marginPlaceInMargin(boxes, layout, page, origin, cuts);
   else {
     marginPage.sides = {};
+    columns.style.paddingBottom = '';
     marginPlaceAsMarks(boxes, page, origin, slots);
   }
   for (const { t, rects } of boxes) {
@@ -1026,7 +1044,7 @@ async function marginReopen(id) {
   }
 }
 
-function marginPlaceInMargin(boxes, layout, page, origin) {
+function marginPlaceInMargin(boxes, layout, page, origin, cuts) {
   const left = page.left - origin.left;
   const right = page.right - origin.left;
   const size = parseFloat(getComputedStyle(marginPage.layer.parentElement).getPropertyValue('--margin-w')) || marginKit.MARGIN_WIDTH;
@@ -1035,7 +1053,12 @@ function marginPlaceInMargin(boxes, layout, page, origin) {
   const side = layout === 'both' ? marginKit.sides(items, 16, marginPage.sides) : Object.fromEntries(items.map((item) => [item.id, 'right']));
   marginPage.sides = layout === 'both' ? side : {};
   const pinned = marginPage.open;
-  const tops = { ...marginKit.stack(items.filter((i) => side[i.id] === 'right'), { pinned }), ...marginKit.stack(items.filter((i) => side[i.id] === 'left'), { pinned }) };
+  const stacks = ['right', 'left'].map((on) => items.filter((i) => side[i.id] === on));
+  const tops = Object.assign({}, ...stacks.map((list) => marginKit.stack(list, { pinned })));
+  marginGrow(cuts, items, Object.assign({}, ...stacks.map((list) => marginKit.spare(list, tops))));
+  const end = Math.max(0, ...items.map((i) => tops[i.id] + i.height));
+  const reach = end && end - (Math.max(...[...$('article.note', marginPage.layer.parentElement).children].map((el) => el.getBoundingClientRect().bottom)) - origin.top);
+  marginPage.layer.parentElement.style.paddingBottom = reach > 0 ? `${Math.ceil(reach)}px` : '';
   const dots = all.find((i) => i.id === 'reading');
   if (dots) {
     const spot = marginKit.clear(dots, items.map((i) => ({ top: tops[i.id], height: i.height, side: side[i.id] })), layout === 'both');
@@ -1408,7 +1431,7 @@ async function marginReply(s, el, t, text, area = null) {
     marginDraw();
     const fresh = marginPage.els.get(done.id);
     const replies = fresh && [...fresh.querySelectorAll('.margin-felix')];
-    if (replies?.length) marginAnswer(replies[replies.length - 1], marginNow(done), true);
+    if (replies?.length && marginIsOpen(done)) marginAnswer(replies[replies.length - 1], marginNow(done), true);
     if (marginPage.open === done.id) $('textarea', fresh)?.focus();
   } catch (error) {
     if (marginPage.s !== s) return;

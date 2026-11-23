@@ -124,6 +124,8 @@ test('only the math the page itself draws as a block opens a math block', () => 
   assert.deepEqual(kinds(['\\[ not a block', '# Heading']), ['line', 'line']);
   assert.deepEqual(kinds(['\\begin{align}', 'x', '\\end{align}', 'after']), ['math', 'line']);
   assert.deepEqual(kinds(['\\[', 'x', '\\]', 'after']), ['math', 'line']);
+  assert.deepEqual(kinds(['$$a=b$$.', 'after']), ['line', 'line']);
+  assert.deepEqual(kinds(['$$', 'a=b', '$$.', 'after']), ['math', 'line']);
 });
 
 test('an unclosed fence runs to the end', () => {

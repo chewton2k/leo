@@ -5,6 +5,8 @@ const path = require('node:path');
 const { pageCss } = require('../page-source');
 const { signIn } = require('./sign-in');
 
+const PICTURE_PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAABgAAAAQCAIAAACDRijCAAAClUlEQVR4nBXSERuGMBiF4XEyicfJJB4nk3icTOKHk0k8TibxOJnE42TS7/j63h9wX+c65xVC0Al6gRIMglFgBJNgFjjBIlgFCDbBLoiCQ3AKsuAS3IIqeASvQAhJJ+klSjJIRomRTJJZ4iSLZJUg2SS7JEoOySnJkktyS6rkkbzygxSdolcoxaAYFUYxKWaFUyyKVYFiU+yKqDgUpyIrLsWtqIpH8aoP0nSaXqM0g2bUGM2kmTVOs2hWDZpNs2ui5tCcmqy5NLemah7Nqz/I0Bl6gzIMhtFgDJNhNjjDYlgNGDbDboiGw3AasuEy3IZqeAyv+SBLZ+ktyjJYRouxTJbZ4iyLZbVg2Sy7JVoOy2nJlstyW6rlsbz2gxydo3cox+AYHcYxOWaHcyyO1YFjc+yO6DgcpyM7LsftqI7H8boP8nSe3qM8g2f0GM/kmT3Os3hWD57Ns3ui5/Ccnuy5PLeneh7P6z8IOuj/yzDA+C+ECeZ/DhZY+d8GO0Q44IQMF9xQ4YH3ezUR6AJ9QAWGwBgwgSkwB1xgCawBAltgD8TAETgDOXAF7kANPIE3fFCki/QRFRkiY8REpsgccZElssZ/ki2yR2LkiJyRHLkid6RGnsgbPyjRJfqESgyJMWESU2JOuMSSWBMktsSeiIkjcSZy4krciZp4Em/6oEyX6TMqM2TGjMlMmTnjMktmzf9KtsyeiZkjc2Zy5srcmZp5Mm/+oEJX6AuqMBTGgilMhbngCkthLVDYCnshFo7CWciFq3AXauEpvOWDKl2lr6jKUBkrpjJV5oqrLJW1/rfZKnslVo7KWcmVq3JXauWpvPWDGl2jb6jG0BgbpjE15oZrLI21QWNr7I3YOBpnIzeuxt2ojafxNn6Q3Alf0XLvqwAAAABJRU5ErkJggg==', 'base64');
+
 async function editorFixture(browser, run, { remember = false, body = null, touch = false, related = false } = {}) {
   const web = path.resolve(__dirname, '../../src/web');
   const read = name => fs.readFileSync(path.join(web, name), 'utf8');
@@ -12,7 +14,8 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
   const passages = read('app/passages.js');
   const source = body ?? (remember ? Array.from({ length: 160 }, (_, i) => `Paragraph number ${i + 1} about reading.`).join('\n\n') : 'An ordinary paragraph.');
   const fixture = `window.doc = leoDoc.mount(document.querySelector('#doc'), {
-    source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {}, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
+    source: new URLSearchParams(location.search).get('body') ?? ${JSON.stringify(source)}, onChange() {},
+    dir: new URLSearchParams(location.search).get('dir') ?? '', onPictures: new URLSearchParams(location.search).has('pics') ? files => (window.pictured ??= []).push(files.length) : null, outline: document.querySelector('.note-outline'), noteTools: new URLSearchParams(location.search).has('tools')
   });
   window.audit = { pick: width => leoTheme.setNoteWidth(width), anchor: () => JSON.parse(localStorage.getItem('fixture-reading') || 'null') };
   ${related ? `const hideAskFloat = () => {};
@@ -28,6 +31,7 @@ async function editorFixture(browser, run, { remember = false, body = null, touc
     restoreReading('fixture-note', seq);` : ''}`;
   const server = http.createServer((req, res) => {
     if (req.url === '/away') { res.setHeader('Content-Type', 'text/html'); return res.end('<p>Another page</p>'); }
+    if (req.url.startsWith('/api/image')) { res.setHeader('Content-Type', 'image/png'); return res.end(PICTURE_PNG); }
     if (req.url === '/style.css') { res.setHeader('Content-Type', 'text/css'); return res.end(css); }
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript'); return res.end(fixture); }
     if (['/markdown.js', '/editing.js', '/doc.js', '/theme.js'].includes(req.url)) {
@@ -1850,4 +1854,152 @@ test('Cmd or Ctrl+Enter on a selected line never splits or empties it; Enter sti
     await page.keyboard.press('Enter');
     await expect(page.locator('#doc .blk')).toHaveCount(2);
   });
+});
+
+const PICTURE_NOTE = 'Before the picture\n\n![shot](attachments/shot.png)\n\nAfter it';
+
+async function pictureNote(page, url, query = '') {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.goto(url + '/?body=' + encodeURIComponent(PICTURE_NOTE) + query);
+  await page.waitForFunction(() => { const img = document.querySelector('#doc img.note-img'); return img && img.complete && img.naturalWidth; });
+  return errors;
+}
+
+const ownHtml = (markdown, from = '') => `<div data-leo="${markdown}" data-leo-from="${from}" style="color:#000"><p>x</p></div>`;
+
+function pasteInto(page, { html = '', text = '', files = 0, selector = '#doc img.note-img' }) {
+  return page.evaluate(([html, text, files, selector]) => {
+    const data = new DataTransfer();
+    for (let n = 0; n < files; n++) data.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'p' + n + '.png', { type: 'image/png' }));
+    data.setData('text/plain', text);
+    data.setData('text/html', html);
+    const event = new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true });
+    (document.querySelector(selector) || document.body).dispatchEvent(event);
+    return event.defaultPrevented;
+  }, [html, text, files, selector]);
+}
+
+test('copying pictures: a selection with a picture puts the markdown in data-leo and a picture in the html, and cut and paste give it back', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const errors = await pictureNote(page, url);
+    await page.evaluate(() => {
+      document.addEventListener('copy', e => { window.written = { text: e.clipboardData.getData('text/plain'), html: e.clipboardData.getData('text/html') }; });
+    });
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('ControlOrMeta+c');
+    const written = await page.evaluate(() => window.written);
+    expect(written.text).not.toContain('![');
+    expect(written.text).toContain('Before the picture');
+    expect(written.html.startsWith('<div data-leo="')).toBe(true);
+    expect(written.html).toMatch(/<img src="data:image\/png;base64,/);
+    const kept = await page.evaluate(html => new DOMParser().parseFromString(html, 'text/html').body.firstElementChild.dataset.leo, written.html);
+    expect(kept).toBe(PICTURE_NOTE);
+    await page.keyboard.press('ControlOrMeta+x');
+    expect(await page.evaluate(() => doc.source())).toBe('');
+    await page.keyboard.press('ControlOrMeta+v');
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+    expect(errors).toEqual([]);
+  }, { body: PICTURE_NOTE });
+});
+
+test('copying pictures: a clicked picture goes to the clipboard as a png and html inside the copy event', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const errors = await pictureNote(page, url);
+    await page.evaluate(() => {
+      window.writes = [];
+      let inCopy = false;
+      document.addEventListener('copy', () => { inCopy = true; }, true);
+      document.addEventListener('copy', () => { inCopy = false; });
+      Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: items => { window.writes.push({ items, inCopy }); return Promise.resolve(); } });
+    });
+    await page.locator('#doc img.note-img').click();
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(() => page.evaluate(() => window.writes.length)).toBe(1);
+    const sent = await page.evaluate(async () => {
+      const { items, inCopy } = window.writes[0];
+      const item = items[0];
+      const png = await (await item.getType('image/png')).arrayBuffer();
+      const html = await (await item.getType('text/html')).text();
+      const img = document.querySelector('#doc img.note-img');
+      return { inCopy, count: items.length, types: [...item.types].sort(), signature: [...new Uint8Array(png).slice(0, 8)], width: new DataView(png).getUint32(16), height: new DataView(png).getUint32(20), natural: [img.naturalWidth, img.naturalHeight], html };
+    });
+    expect(sent.inCopy).toBe(true);
+    expect(sent.count).toBe(1);
+    expect(sent.types).toEqual(['image/png', 'text/html']);
+    expect(sent.signature).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+    expect([sent.width, sent.height]).toEqual(sent.natural);
+    expect(sent.html.startsWith('<div data-leo="![shot](attachments/shot.png)"')).toBe(true);
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+    expect(errors).toEqual([]);
+  }, { body: PICTURE_NOTE });
+});
+
+test('copying pictures: when the clipboard refuses the picture the note is unchanged and says so', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await pictureNote(page, url);
+    await page.evaluate(() => {
+      Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: () => Promise.reject(new Error('refused')) });
+    });
+    await page.locator('#doc img.note-img').click();
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect(page.locator('#code-said')).toHaveText('Could not copy');
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+  }, { body: PICTURE_NOTE });
+});
+
+test('copying pictures: leo\'s own picture paste goes in as markdown from the same folder and as a new picture from another', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await pictureNote(page, url, '&pics');
+    await page.locator('#doc img.note-img').click();
+    const own = '![copy](attachments/shot.png)';
+    expect(await pasteInto(page, { html: ownHtml(own), files: 1 })).toBe(true);
+    expect(await page.evaluate(() => doc.source())).toBe('Before the picture\n\n![shot](attachments/shot.png)\n\n' + own + '\n\nAfter it');
+    expect(await page.evaluate(() => window.pictured)).toBeUndefined();
+
+    await pictureNote(page, url, '&pics');
+    await page.locator('#doc img.note-img').click();
+    expect(await pasteInto(page, { html: ownHtml(own, 'other'), files: 1 })).toBe(true);
+    expect(await page.evaluate(() => doc.source())).toContain('\n\n' + own + '\n\nAfter it');
+    expect(await page.evaluate(() => window.pictured)).toBeUndefined();
+
+    await pictureNote(page, url, '&pics');
+    await page.locator('#doc img.note-img').click();
+    await pasteInto(page, { html: ownHtml('![far](far.png)', 'other'), files: 1 });
+    expect(await page.evaluate(() => window.pictured)).toEqual([1]);
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+  }, { body: PICTURE_NOTE });
+});
+
+test('copying pictures: html that is not leo\'s own copy is ignored', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    await pictureNote(page, url, '&pics');
+    await page.locator('#doc img.note-img').click();
+    expect(await pasteInto(page, { html: ownHtml('![web](https://example.com/web.png)'), files: 1 })).toBe(true);
+    expect(await page.evaluate(() => window.pictured)).toEqual([1]);
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+    expect(await pasteInto(page, { html: ownHtml('Hello'), text: 'Goodbye' })).toBe(false);
+    expect(await pasteInto(page, { html: ownHtml('![web](https://example.com/web.png)'), text: 'Hello' })).toBe(false);
+    expect(await page.evaluate(() => doc.source())).toBe(PICTURE_NOTE);
+    expect(await page.evaluate(() => window.pictured)).toEqual([1]);
+  }, { body: PICTURE_NOTE });
+});
+
+test('copying pictures: after destroy a paste does nothing', async ({ browser }) => {
+  await editorFixture(browser, async (context, url) => {
+    const page = await context.newPage();
+    const errors = await pictureNote(page, url, '&pics');
+    await page.locator('#doc img.note-img').click();
+    await page.evaluate(() => doc.destroy());
+    const before = await page.evaluate(() => document.querySelector('#doc').innerHTML);
+    expect(await pasteInto(page, { html: ownHtml('![copy](attachments/shot.png)'), files: 1, selector: 'body' })).toBe(false);
+    expect(await page.evaluate(() => document.querySelector('#doc').innerHTML)).toBe(before);
+    expect(await page.evaluate(() => window.pictured)).toBeUndefined();
+    expect(errors).toEqual([]);
+  }, { body: PICTURE_NOTE });
 });

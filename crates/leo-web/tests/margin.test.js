@@ -170,6 +170,16 @@ test('stacking: nothing goes above the floor, even with an open note', () => {
   assert.deepEqual(M.stack([{ id: 'a', want: -30, height: 10 }], { floor: 0 }), { a: 0 });
 });
 
+test('spare: the free room under each note before the next, never negative, unbounded for the last', () => {
+  const items = [{ id: 'c', height: 40 }, { id: 'a', height: 40 }, { id: 'b', height: 40 }];
+  const tops = { a: 0, b: 100, c: 130 };
+  assert.deepEqual(M.spare(items, tops, 10), { a: 50, b: 0, c: Infinity });
+  assert.deepEqual(M.spare(items.slice().reverse(), tops, 10), { a: 50, b: 0, c: Infinity });
+  assert.deepEqual(M.spare([{ id: 'a', height: 40 }], { a: 5 }), { a: Infinity });
+  assert.deepEqual(M.spare([], {}), {});
+  assert.equal(M.spare([{ id: 'a', height: 40 }, { id: 'b', height: 40 }], { a: 0, b: 20 }).a, 0);
+});
+
 test('both margins: a crowded right side spills left', () => {
   const on = M.sides([{ id: 'a', want: 0, height: 100 }, { id: 'b', want: 10, height: 100 }, { id: 'c', want: 20, height: 100 }, { id: 'd', want: 400, height: 10 }]);
   assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'left' });

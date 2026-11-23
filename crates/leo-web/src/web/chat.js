@@ -159,6 +159,7 @@
   }
 
   const openTraces = new WeakSet();
+  const openSources = new WeakSet();
   const OPENING_TOOLS = new Set(['open_note', 'read_document', 'read_transcript', 'read_original']);
   const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
 
@@ -553,7 +554,7 @@
           opens.push([fence, k]);
           fence = -1;
         }
-      } else if (fence < 0 && line === '$$') {
+      } else if (fence < 0 && (math < 0 ? line === '$$' : line.includes('$$'))) {
         if (math < 0) math = k;
         else {
           opens.push([math, k]);
@@ -880,6 +881,11 @@
     for (const { name, value } of to.attributes) if (from.getAttribute(name) !== value) from.setAttribute(name, value);
   }
 
+  function figured(el) {
+    if (el.classList.contains('math')) return `${el.getAttribute('class')}\n${el.getAttribute('data-tex')}`;
+    return el.classList.contains('diagram') ? el.querySelector('.diagram-src').textContent : null;
+  }
+
   function settle(from, to) {
     const was = runs(from);
     const now = runs(to);
@@ -905,9 +911,15 @@
       const y = b.nodes[0];
       if (!a.run && !b.run && x.nodeType === 1 && y.nodeType === 1 && x.tagName === y.tagName) {
         if (x.outerHTML === y.outerHTML) return;
-        match(x, y);
-        settle(x, y);
-        return;
+        const shown = figured(x);
+        const wanted = figured(y);
+        const drawn = shown !== null && x.hasAttribute('data-drawn');
+        if (drawn && shown === wanted) return;
+        if (!drawn && (shown === null) === (wanted === null)) {
+          match(x, y);
+          settle(x, y);
+          return;
+        }
       }
       x.before(...b.nodes);
       a.nodes.forEach((n) => n.remove());
@@ -2072,9 +2084,10 @@
       const html = !shown && m.pending ? '<span class="typing"><i></i><i></i><i></i></span>' : '';
       const used = cited(m.text, m.sources);
       const marks = numbered(shown, m.sources);
-      const from = !m.pending && marks.length
-        ? `<div class="msg-from">${marks.map((x) => `<button class="cite cite-src" data-chat="open" data-id="${escape(x.s.id)}"${x.lines ? ` data-line="${x.lines}"` : ''}><b>${x.n}</b>${escape(x.s.title)}${x.where ? ` · ${escape(x.where)}` : ''}</button>`).join('')}</div>`
-        : '';
+      const rows = marks.map((x) => `<button class="cite cite-src" data-chat="open" data-id="${escape(x.s.id)}"${x.lines ? ` data-line="${x.lines}"` : ''}><b>${x.n}</b>${escape(x.s.title)}${x.where ? ` · ${escape(x.where)}` : ''}</button>`).join('');
+      const from = m.pending || !marks.length ? ''
+        : marks.length === 1 ? `<div class="msg-from">${rows}</div>`
+        : `<details class="msg-from" data-i="${i}"${openSources.has(m) ? ' open' : ''}><summary>${plural(marks.length, 'source')}${stepChevron}</summary><div class="msg-from-rows">${rows}</div></details>`;
       const error = noAi(m.error)
         ? `${drawings.noink || ''}<div class="prose"><p>${escape(m.error)}</p></div><div class="msg-acts"><a class="btn primary sm" href="#/settings/writing">Set up writing AI</a></div>`
         : m.error ? `<div class="msg-error">${escape(m.error)}</div>` : '';
@@ -2647,18 +2660,20 @@
     body.addEventListener('scroll', () => hideAddFloat(), { passive: true });
     body.addEventListener('scroll', () => { if (body.scrollTop < 80) earlier(); }, { passive: true });
     body.addEventListener('click', (e) => {
-      const trace = e.target.closest?.('.msg-trace > summary')?.parentElement;
-      const m = trace && state.messages[Number(trace.dataset.i)];
+      const fold = e.target.closest?.(':is(.msg-trace, .msg-from) > summary')?.parentElement;
+      const m = fold && state.messages[Number(fold.dataset.i)];
       if (!m) return;
-      if (trace.open) openTraces.delete(m);
-      else openTraces.add(m);
+      const kept = fold.matches('.msg-trace') ? openTraces : openSources;
+      if (fold.open) kept.delete(m);
+      else kept.add(m);
     }, true);
     body.addEventListener('toggle', (e) => {
-      if (!e.target.matches?.('.msg-trace')) return;
+      if (!e.target.matches?.('.msg-trace, .msg-from')) return;
       const m = state.messages[Number(e.target.dataset.i)];
       if (!m) return;
-      if (e.target.open) openTraces.add(m);
-      else openTraces.delete(m);
+      const kept = e.target.matches('.msg-trace') ? openTraces : openSources;
+      if (e.target.open) kept.add(m);
+      else kept.delete(m);
     }, true);
 
     async function saveAnswer(i) {
@@ -2881,8 +2896,11 @@
     }
 
     function fit() {
+      const kept = body.scrollTop;
+      const below = body.scrollHeight - body.clientHeight - kept;
       input.style.height = 'auto';
       input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
+      body.scrollTop = below < 80 ? body.scrollHeight - body.clientHeight - below : kept;
     }
 
     function react(message) {

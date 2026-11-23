@@ -65,9 +65,13 @@
 
   const AUTO_ALT = /^(?:pasted (?:picture|image)|image|picture|photo|drawing|(?:img|dsc|pxl)[\s_-]?\d.*|screen ?shot.*|.*\.(?:png|jpe?g|gif|webp|svg|heic|avif|bmp))$/i;
 
+  const typed = (alt) => (AUTO_ALT.test(alt.trim()) ? '' : alt.trim());
+
+  const caption = (label) => typed(sized(label).alt);
+
   function captioned(img, alt) {
-    const said = alt.trim();
-    return said && !AUTO_ALT.test(said) ? `<span class="note-fig" data-cap="${escape(said)}">${img}</span>` : img;
+    const said = typed(alt);
+    return said ? `<span class="note-fig" data-cap="${escape(said)}">${img}</span>` : img;
   }
 
   function picture(target, label) {
@@ -233,6 +237,7 @@
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const BOX = new RegExp(String.raw`^(?:${MARKER}) {1,4}\[( |x|X)\](?: |$)`);
 
+  const MATH_THEN = /^\$\$(?:\\.|[^$\\])+\$\$\s*[^\s$]/;
   const MATH_ENV = /^\\begin\{((?:equation|align|aligned|gather|gathered|multline|alignat|flalign|split|cases|matrix|pmatrix|bmatrix|vmatrix|array)\*?)\}/;
 
   const isBox = (line) => BOX.test(line.trimStart());
@@ -358,7 +363,7 @@
         html += `<div class="math math-block" data-tex="${escape(tex)}">${escape(tex)}</div>`;
         continue;
       }
-      if (math.startsWith('$$')) {
+      if (math.startsWith('$$') && !MATH_THEN.test(math)) {
         let tex;
         if (math.length > 4 && math.endsWith('$$')) {
           tex = math.slice(2, -2);
@@ -366,12 +371,15 @@
         } else {
           const body = [math.slice(2)];
           i++;
-          while (i < lines.length && !lines[i].trim().endsWith('$$')) {
+          while (i < lines.length && !lines[i].includes('$$')) {
             body.push(lines[i]);
             i++;
           }
-          if (i < lines.length) body.push(lines[i].trim().slice(0, -2));
-          i++;
+          const end = i < lines.length ? lines[i].indexOf('$$') : -1;
+          const rest = end < 0 ? '' : lines[i].slice(end + 2).replace(/^[.,;:]?\s*/, '');
+          if (end >= 0) body.push(lines[i].slice(0, end));
+          if (rest) lines = [...lines.slice(0, i), rest, ...lines.slice(i + 1)];
+          else i++;
           tex = body.join('\n');
         }
         html += `<div class="math math-block" data-tex="${escape(tex.trim())}">${escape(tex.trim())}</div>`;
@@ -595,12 +603,12 @@
   const COPY_TOKEN = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s"'<>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>=`]+))?)*)\s*\/?>|[^<]+|</g;
   const COPY_ATTR = /([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>=`]+)))?/g;
   const COPY_PICTURE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)(?:;[a-z0-9=.-]+)*[;,][^\s"'<>]*$/i;
-  const COPY_MOST_EACH = 3000000;
-  const COPY_MOST_ALL = 8000000;
+  const COPY_MOST_EACH = 20000000;
+  const COPY_MOST_ALL = 60000000;
   const COPY_PIXELS = 16000000;
 
   function unescapeHtml(text) {
-    return String(text).replace(/&(amp|lt|gt|quot|#39|#x27);/g, (_, name) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'" })[name]);
+    return String(text).replace(/&(amp|lt|gt|quot|nbsp|#39|#x27);/g, (_, name) => ({ amp: '&', lt: '<', gt: '>', quot: '"', nbsp: '\u00a0', '#39': "'", '#x27': "'" })[name]);
   }
 
   function copyHtml(html, { each = COPY_MOST_EACH, all = COPY_MOST_ALL } = {}) {
@@ -699,10 +707,10 @@
       if (data) clone.setAttribute('src', data);
       else clone.removeAttribute('src');
     });
-    return copyHtml(box.innerHTML);
+    return `<div style="color:inherit">${copyHtml(box.innerHTML)}</div>`;
   }
 
-  const api = { render, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, caption, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

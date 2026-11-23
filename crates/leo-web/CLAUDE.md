@@ -192,7 +192,20 @@ Decided: one app, window only (2026-10-31).
 - Copying a selection that holds a picture (note reading view and Felix's answers, 2026-11-18) also puts
   `text/html` on the clipboard: `leoMarkdown.selectionCopy` draws each loaded picture to a canvas and
   `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a
-  picture over 3 MB, or past 8 MB in all, stays its alt text). A selection without a picture is untouched.
+  picture over 16 megapixels or 20 MB, or past 60 MB in all, stays its alt text). A selection without a picture is untouched.
+  From a note (2026-11-23), `text/plain` leaves the pictures out (a typed caption stays,
+  `leoEditing.withoutPictures`) and the html's outer `div` carries `data-leo="the markdown"`. That `div` (Felix's answers too)
+  is `color:inherit`, because WebKit otherwise writes the page's own text colour, white in dark mode, and black is unreadable
+  on a dark page. A picture alone (clicked, or the only thing selected) is copied with `navigator.clipboard.write` as
+  `image/png` and that html (a JPEG there when the PNG passes 15 MB; halved in size until the PNG is under 60 MB, since
+  WebKit refuses over about 100 MB), called inside the copy event and never with `clipboardData.setData`, which WebKit
+  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Cut always uses the plain path.
+  A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
+  `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
+  it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
+  outside. It goes to the caret, the selection or under the clicked picture; pictures alone with none of these go
+  to the end. A picture alone whose path is relative to another folder (`data-leo-from`) is pasted as a new picture.
+  Any other paste is handled as before.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.
@@ -674,6 +687,10 @@ read (root CLAUDE.md, 2026-11-17).
   and files stay above the composer (`#chat-refs`; files are 52 px tiles, notes
   `noteCard`s); the note finder (`#chat-pick`) is a popover at the paperclip and
   never pushes the layout (2026-11-09).
+- Sources under an answer (2026-11-23, the user's call): one source stays the
+  plain line (`div.msg-from` with its "Sources" label); two or more fold into
+  `details.msg-from` ("N sources" and the step chevron), one row a line when open,
+  its open state kept per message (`openSources`) like the finished-steps summary.
 - Change tools become `Proposal` cards, validate against the store, run through
   POST `/api/felix/act` (reusing normal routes) and return the inverse as `undo`.
   edit_note/create_note Apply POSTs `/api/notes/{id}/suggestion` (409 unless
@@ -805,10 +822,16 @@ Felix (2026-10-19).
   the text line so the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
   `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
 - Whole notes (2026-11-15, the user's call, replacing the first-line fold): a
-  closed note shows its whole text and dims to .7 until lit; its text as a whole
-  stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
-  the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
-  read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
+  closed note shows Felix's first answer (`marginFill`; Copy, Add, print and chat keep
+  the latest, `marginNow`, and an arriving reply never overwrites a closed note) and dims to .7 until lit. The layout is first
+  computed with the text as a whole cut at 12 lines, the last shown block with a fade
+  (`.margin-cut`) and the blocks after it hidden (`.margin-over`), both set by `marginCuts`
+  (one read pass, then the writes) only when the text overflows; then `marginGrow` lets each
+  cut note take the free room under it on its side (`marginKit.spare`: the next note's top
+  less the gap, Infinity for the last, so a note alone shows whole and nothing moves), taking
+  back the pixels paragraph margins add when hidden blocks return. A note that ends below the
+  page adds the difference as `.note-columns` bottom padding, since `.note-layout`'s `contain`
+  keeps absolute notes out of the page's scroll. Figures always show whole. Pins: `margin_threads.pinned`
   (guarded `ALTER`, db `VERSION` 7 (5 added `reworded`, 6 `closed_by`, 7 chat message rows), a revert keeps 7; a revert never lowers `VERSION`, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;

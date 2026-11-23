@@ -139,6 +139,11 @@
     return Object.fromEntries(sorted.map((item, i) => [item.id, tops[i]]));
   }
 
+  function spare(items, tops, gap = 16) {
+    const sorted = [...items].sort((a, b) => tops[a.id] - tops[b.id]);
+    return Object.fromEntries(sorted.map((item, i) => [item.id, i + 1 < sorted.length ? Math.max(0, tops[sorted[i + 1].id] - gap - tops[item.id] - item.height) : Infinity]));
+  }
+
   function sides(items, gap = 16, before = {}) {
     const ends = { left: -Infinity, right: -Infinity };
     const count = { left: 0, right: 0 };
@@ -270,7 +275,7 @@
     return path;
   }
 
-  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, edited, carried, around, contextAt, lineAfter, stack, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
+  const api = { MARGIN_WIDTH, MOST_MARGIN, LEAST_SHARED, SHARED_COLUMN, MARGIN_GAP, ROOM_RIGHT, ROOM_BOTH, LEAST_COLUMN, find, edited, carried, around, contextAt, lineAfter, stack, spare, sides, clear, arrangement, mostColumn, marginWidth, wordDelay, blocksOf, pauseFor, READ_PAUSE, changedBlocks, passes, wave };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMargin = api;
 })(typeof window !== 'undefined' ? window : globalThis);

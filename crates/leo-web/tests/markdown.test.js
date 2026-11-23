@@ -1,5 +1,6 @@
 const assert = require('node:assert/strict');
 const md = require('../src/web/markdown.js');
+const ed = require('../src/web/editing.js');
 const { render } = md;
 
 const cases = [];
@@ -319,6 +320,15 @@ test('Obsidian callouts become boxes, and a - or + makes them fold', () => {
   assert.match(render('> plain quote'), /^<blockquote>/);
 });
 
+test('a formula followed by words or a full stop never swallows the text after it', () => {
+  assert.equal(render('$$a=b$$.\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span>.</p><p>After</p>');
+  assert.equal(render('$$a=b$$ where a is\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span> where a is</p><p>After</p>');
+  assert.equal(render('$$\na=b\n$$.\n\nAfter'), '<div class="math math-block" data-tex="a=b">a=b</div><p>After</p>');
+  assert.equal(render('$$\na $$ where b\n\nAfter'), '<div class="math math-block" data-tex="a">a</div><p>where b</p><p>After</p>');
+  assert.match(render('$$a = \\$5$$ where\n\nAfter'), /<p>After<\/p>$/);
+  assert.equal(render('$$a\n=b$$ where x\n\n$$c$$'), '<div class="math math-block" data-tex="a\n=b">a\n=b</div><p>where x</p><div class="math math-block" data-tex="c">c</div>');
+});
+
 test('the other ways models write math are drawn too', () => {
   assert.equal(render('Energy \\(E = mc^2\\) here.'), '<p>Energy <span class="math" data-tex="E = mc^2">E = mc^2</span> here.</p>');
   assert.equal(render('So \\[a^2 + b^2 = c^2\\] holds.'), '<p>So <span class="math math-block" data-tex="a^2 + b^2 = c^2">a^2 + b^2 = c^2</span> holds.</p>');
@@ -570,6 +580,47 @@ test('pictures are bounded one by one and together, the rest left as alt text', 
 test('unbalanced and nested tags come out balanced', () => {
   assert.equal(md.copyHtml('</b><ul><li>a<li>b</ul><p><em>open'), '<ul><li>a<li>b</li></li></ul><p><em>open</em></p>');
   assert.equal(md.copyHtml('<ol start="3"><li>x</li></ol>'), '<ol start="3"><li>x</li></ol>');
+});
+
+test('copied text drops its pictures, keeps a real caption and leaves code as it is', () => {
+  assert.equal(ed.withoutPictures('Before\n\n![Pasted picture](attachments/a.png)\n\nAfter'), 'Before\n\nAfter');
+  assert.equal(ed.withoutPictures('![Pasted picture](a.png)\n\n  ![Screenshot 1|300](b.png)\n\n  - After'), '  - After');
+  assert.equal(ed.withoutPictures('A ![The queue|300](a.png "t") and ![[graph.png|250]]'), 'A The queue and');
+  const code = '```\n![a](b.png)\n```\n\n\n\n\n`![a](b.png)`';
+  assert.equal(ed.withoutPictures(code), code);
+  const fenced = '```\na\n\n\n\nb\n```';
+  assert.equal(ed.withoutPictures('![Image](x.png)\n\n' + fenced), fenced);
+  assert.equal(ed.withoutPictures('A\n\n\n\nB\n\n![Image](x.png)\n\nC'), 'A\n\n\n\nB\n\nC');
+  const spaces = ' a' + ' '.repeat(100000) + 'b';
+  assert.equal(ed.withoutPictures('![Image](x.png)' + spaces), spaces);
+  assert.equal(ed.withoutPictures('![Pasted picture](https://a.b/c.png)'), '![Pasted picture](https://a.b/c.png)');
+  assert.equal(ed.withoutPictures(' no picture\n\n\n\n\nhere '), ' no picture\n\n\n\n\nhere ');
+});
+
+test('markdown copied from leo is told from anything else on the clipboard', () => {
+  const own = 'Before\n\n![Pasted picture](attachments/a.png)\n\nAfter';
+  assert.ok(ed.ownCopy(own, 'Before\r\n\r\nAfter\r\n'));
+  assert.ok(!ed.ownCopy(own, 'Before\n\nAfter that'));
+  assert.ok(!ed.ownCopy(own, ''));
+  assert.ok(ed.ownCopy('![The queue](attachments/a.png)\n\n![[b.png]]', ''));
+  for (const target of ['http://a.b/c.png', 'https://a.b/c.png', '//a.b/c.png', '<file:///c.png>', 'data:image/png;base64,AA']) {
+    assert.ok(!ed.ownCopy(`![a](${target})`, ''), target);
+    assert.ok(!ed.ownCopy(`A\n\n![a](${target})`, `A\n\n![a](${target})`), target);
+  }
+  assert.ok(!ed.ownCopy('![a](b.png) ![[https://a.b/c.png]]', ''));
+  assert.ok(!ed.ownCopy(' \n', ''));
+  assert.ok(!ed.ownCopy('![a](<'.repeat(20000), ''));
+  assert.ok(ed.stored('![a](attachments/a.png) ![b](<attachments/b c.png>) ![[attachments/d.png]]'));
+  assert.ok(!ed.stored('![a](attachments/a.png) ![b](img/b.png)'));
+  assert.ok(ed.onlyPictures('![The queue](a.png)\n'));
+  assert.ok(!ed.onlyPictures('- ![The queue](a.png)'));
+});
+
+test('the markdown of one drawn picture is the one its place names', () => {
+  const line = 'A ![x](https://a.b/c.png) `![c](d.png)` ![One|300](a.png "t") ![[b.png]]';
+  assert.equal(ed.pictureSource(line, 0), '![One|300](a.png "t")');
+  assert.equal(ed.pictureSource(line, 1), '![[b.png]]');
+  assert.equal(ed.pictureSource(line, 2), '');
 });
 
 setImmediate(() => {
