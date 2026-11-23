@@ -938,7 +938,8 @@ Felix (2026-10-19).
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
-  a note on the right whenever the right is free at its height (`marginKit.sides`).
+  a note on the side with fewer notes when that side is free at its height, else the other
+  (ties right; `marginKit.sides`; 2026-11-22, the user's call, replacing right first).
   Margin icon buttons show the shared tooltip (their aria-label, `::after`), no `title`; the floating note toolbar's `.actions` rules are gone.
   Felix this on such a passage only opens it (Visualize still asks in it). The open
   thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".

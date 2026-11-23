@@ -1191,8 +1191,8 @@ target. Check the page sequence after loading preferences.
   In Marks the blot takes its own room in the line, so it never covers the next word; the open note is a raised
   card under the paragraph that unfolds and folds away (none under Reduce Motion).
 - Layout (`margin.js`, pure): `find` (exact when unique or when 6 units of context pick one copy, a guess otherwise, then between prefix and suffix of at
-  least 6 UTF-16 units, as the server's `margin::by_context` counts, or an edge of the note, then lost), `stack`, `sides` (Both margins prefers the right, 2026-11-15, the user's call: a note sits right when the right is
-  free at its height, else left when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
+  least 6 UTF-16 units, as the server's `margin::by_context` counts, or an edge of the note, then lost), `stack`, `sides` (Both margins fills the emptier side, 2026-11-22, the user's call, replacing right first: a note sits on the side with
+  fewer notes when that side is free at its height, else on the other when that is free, else on the side whose last note ends higher, ties right; `marginPage.sides` keeps each note's
   side across redraws so a new note never moves placed ones; reset on leave and outside Both),
   `arrangement`, `marginWidth`. Both margins is the default; saved choices still win. Right margin needs 928 px of column, Both 992 px.
   Note width (2026-11-15, the user's call) is worked out on every layout pass and set as `--margin-w` on the columns:
