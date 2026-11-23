@@ -554,7 +554,7 @@
           opens.push([fence, k]);
           fence = -1;
         }
-      } else if (fence < 0 && line === '$$') {
+      } else if (fence < 0 && (math < 0 ? line === '$$' : line.includes('$$'))) {
         if (math < 0) math = k;
         else {
           opens.push([math, k]);

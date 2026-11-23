@@ -394,6 +394,7 @@ test('a selection in an answer maps back to its whole Markdown lines, fences and
   assert.equal(C.answerLines(source, 'heap keeps the minimum'), 'A **heap** keeps the *minimum* at the root [n1].');
   assert.equal(C.answerLines(source, 'const b = 2;'), '```js\nconst a = 1;\nconst b = 2;\n```');
   assert.equal(C.answerLines(source, 'x2'), '$$\nx^2\n$$');
+  assert.equal(C.answerLines('$$\na=b\n$$.\n\nThe middle text.\n\n$$\nc=d\n$$\n\nEnd.', 'The middle text.'), 'The middle text.');
   assert.equal(C.answerLines(source, 'Intro line.\n\nA heap keeps'), 'Intro line.\n\nA **heap** keeps the *minimum* at the root [n1].');
   assert.equal(C.answerLines(source, 'something Felix never wrote'), 'something Felix never wrote');
   assert.equal(C.answerLines(source, 'A heap keeps the minimum at the root Heaps.'), 'A **heap** keeps the *minimum* at the root [n1].', 'a citation shown as its note title still maps back');

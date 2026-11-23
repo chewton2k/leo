@@ -237,8 +237,7 @@
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const BOX = new RegExp(String.raw`^(?:${MARKER}) {1,4}\[( |x|X)\](?: |$)`);
 
-  const MATH_THEN = /^\$\$[^$]+\$\$\s*[^\s$]/;
-  const MATH_END = /\$\$[.,;:]?\s*$/;
+  const MATH_THEN = /^\$\$(?:\\.|[^$\\])+\$\$\s*[^\s$]/;
   const MATH_ENV = /^\\begin\{((?:equation|align|aligned|gather|gathered|multline|alignat|flalign|split|cases|matrix|pmatrix|bmatrix|vmatrix|array)\*?)\}/;
 
   const isBox = (line) => BOX.test(line.trimStart());
@@ -372,12 +371,15 @@
         } else {
           const body = [math.slice(2)];
           i++;
-          while (i < lines.length && !MATH_END.test(lines[i])) {
+          while (i < lines.length && !lines[i].includes('$$')) {
             body.push(lines[i]);
             i++;
           }
-          if (i < lines.length) body.push(lines[i].replace(MATH_END, ''));
-          i++;
+          const end = i < lines.length ? lines[i].indexOf('$$') : -1;
+          const rest = end < 0 ? '' : lines[i].slice(end + 2).replace(/^[.,;:]?\s*/, '');
+          if (end >= 0) body.push(lines[i].slice(0, end));
+          if (rest) lines = [...lines.slice(0, i), rest, ...lines.slice(i + 1)];
+          else i++;
           tex = body.join('\n');
         }
         html += `<div class="math math-block" data-tex="${escape(tex.trim())}">${escape(tex.trim())}</div>`;
@@ -606,7 +608,7 @@
   const COPY_PIXELS = 16000000;
 
   function unescapeHtml(text) {
-    return String(text).replace(/&(amp|lt|gt|quot|#39|#x27);/g, (_, name) => ({ amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'", '#x27': "'" })[name]);
+    return String(text).replace(/&(amp|lt|gt|quot|nbsp|#39|#x27);/g, (_, name) => ({ amp: '&', lt: '<', gt: '>', quot: '"', nbsp: '\u00a0', '#39': "'", '#x27': "'" })[name]);
   }
 
   function copyHtml(html, { each = COPY_MOST_EACH, all = COPY_MOST_ALL } = {}) {
@@ -708,7 +710,7 @@
     return copyHtml(box.innerHTML);
   }
 
-  const api = { render, caption, copyHtml, selectionCopy, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, MATH_END, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, caption, COPY_PIXELS, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

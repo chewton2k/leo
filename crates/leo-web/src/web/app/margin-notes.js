@@ -1057,7 +1057,7 @@ function marginPlaceInMargin(boxes, layout, page, origin, cuts) {
   const tops = Object.assign({}, ...stacks.map((list) => marginKit.stack(list, { pinned })));
   marginGrow(cuts, items, Object.assign({}, ...stacks.map((list) => marginKit.spare(list, tops))));
   const end = Math.max(0, ...items.map((i) => tops[i.id] + i.height));
-  const reach = end - ($('#doc').getBoundingClientRect().bottom - origin.top);
+  const reach = end && end - (Math.max(...[...$('article.note', marginPage.layer.parentElement).children].map((el) => el.getBoundingClientRect().bottom)) - origin.top);
   marginPage.layer.parentElement.style.paddingBottom = reach > 0 ? `${Math.ceil(reach)}px` : '';
   const dots = all.find((i) => i.id === 'reading');
   if (dots) {

@@ -288,6 +288,7 @@ ol.list-upper-paren { list-style-type: upper-paren; }
 .prose table { border-collapse: collapse; width: 100%; font-size: calc(14.5px * var(--read)); }
 .prose th, .prose td { max-width: 40em; padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; overflow-wrap: break-word; }
 .margin-said > .prose { min-width: 0; }
+.margin-note:not([data-open]) :is(th, td) { overflow-wrap: anywhere; }
 .prose th { font-size: .92em; font-weight: var(--fw-medium); }
 .prose tr:last-child td { border-bottom: 0; }
 .prose .align-left { text-align: left; }

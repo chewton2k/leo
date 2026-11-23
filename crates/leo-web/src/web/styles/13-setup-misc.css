@@ -291,7 +291,7 @@ body.files-over main::after {
 .math:not([data-drawn="yes"]) { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Cascadia Mono", monospace; font-size: .92em; color: var(--muted); }
 .math-block:not([data-drawn="yes"]) { white-space: pre-wrap; text-align: left; }
 .math .katex { font-size: 1.08em; }
-.math-block .katex-display > .katex { white-space: normal; }
+.math-block:not(td *) .katex-display > .katex { white-space: normal; }
 .callout { --tone: var(--hue-indigo); margin: 10px 0; border: 1px solid color-mix(in srgb, var(--tone) 30%, var(--line)); border-left: 3px solid var(--tone); border-radius: var(--r-md); background: color-mix(in srgb, var(--tone) 7%, var(--surface)); }
 .callout-tip, .callout-success, .callout-check, .callout-done { --tone: var(--good); }
 .callout-warning, .callout-caution, .callout-attention { --tone: var(--hue-amber); }

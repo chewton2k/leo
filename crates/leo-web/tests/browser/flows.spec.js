@@ -2119,7 +2119,7 @@ test.describe('pictures', () => {
       await page.evaluate(([markdown, text]) => {
         getSelection().selectAllChildren(document.querySelector('#doc'));
         const data = new DataTransfer();
-        data.setData('text/html', `<div data-leo="${markdown}"><p>x</p></div>`);
+        data.setData('text/html', `<div data-leo="${markdown}" data-leo-from=""><p>x</p></div>`);
         if (text) data.setData('text/plain', text);
         document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
       }, [markdown, text]);

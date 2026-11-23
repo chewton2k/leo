@@ -201,7 +201,9 @@ Decided: one app, window only (2026-10-31).
   A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
   `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
   it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
-  outside. Any other paste is handled as before.
+  outside. It goes to the caret, the selection or under the clicked picture; pictures alone with none of these go
+  to the end. A picture alone whose path is relative to another folder (`data-leo-from`) is pasted as a new picture.
+  Any other paste is handled as before.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.

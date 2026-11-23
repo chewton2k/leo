@@ -246,6 +246,7 @@ label.trash-row { cursor: pointer; }
   .doc .blk pre { font-size: 9pt; line-height: 1.45; padding: 8pt 10pt; border: 1px solid #e3e2de; border-radius: var(--r-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
   .doc .blk pre, .doc .blk .table, .doc .blk img, .doc .blk figure, .doc .blk blockquote, .doc .blk .callout { break-inside: avoid; page-break-inside: avoid; }
   .doc .blk .table { font-size: 10pt; }
+  .prose :is(th, td) { max-width: none; overflow-wrap: anywhere; }
   .doc .blk img, .note-img { max-width: 100%; max-height: 180mm; }
   .diagram-art { border: 0; padding: 0; }
   .diagram-art svg { max-height: 150mm; }

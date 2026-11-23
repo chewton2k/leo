@@ -324,6 +324,9 @@ test('a formula followed by words or a full stop never swallows the text after i
   assert.equal(render('$$a=b$$.\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span>.</p><p>After</p>');
   assert.equal(render('$$a=b$$ where a is\n\nAfter'), '<p><span class="math math-block" data-tex="a=b">a=b</span> where a is</p><p>After</p>');
   assert.equal(render('$$\na=b\n$$.\n\nAfter'), '<div class="math math-block" data-tex="a=b">a=b</div><p>After</p>');
+  assert.equal(render('$$\na $$ where b\n\nAfter'), '<div class="math math-block" data-tex="a">a</div><p>where b</p><p>After</p>');
+  assert.match(render('$$a = \\$5$$ where\n\nAfter'), /<p>After<\/p>$/);
+  assert.equal(render('$$a\n=b$$ where x\n\n$$c$$'), '<div class="math math-block" data-tex="a\n=b">a\n=b</div><p>where x</p><div class="math math-block" data-tex="c">c</div>');
 });
 
 test('the other ways models write math are drawn too', () => {
@@ -585,6 +588,11 @@ test('copied text drops its pictures, keeps a real caption and leaves code as it
   assert.equal(ed.withoutPictures('A ![The queue|300](a.png "t") and ![[graph.png|250]]'), 'A The queue and');
   const code = '```\n![a](b.png)\n```\n\n\n\n\n`![a](b.png)`';
   assert.equal(ed.withoutPictures(code), code);
+  const fenced = '```\na\n\n\n\nb\n```';
+  assert.equal(ed.withoutPictures('![Image](x.png)\n\n' + fenced), fenced);
+  assert.equal(ed.withoutPictures('A\n\n\n\nB\n\n![Image](x.png)\n\nC'), 'A\n\n\n\nB\n\nC');
+  const spaces = ' a' + ' '.repeat(100000) + 'b';
+  assert.equal(ed.withoutPictures('![Image](x.png)' + spaces), spaces);
   assert.equal(ed.withoutPictures('![Pasted picture](https://a.b/c.png)'), '![Pasted picture](https://a.b/c.png)');
   assert.equal(ed.withoutPictures(' no picture\n\n\n\n\nhere '), ' no picture\n\n\n\n\nhere ');
 });
@@ -601,6 +609,9 @@ test('markdown copied from leo is told from anything else on the clipboard', () 
   }
   assert.ok(!ed.ownCopy('![a](b.png) ![[https://a.b/c.png]]', ''));
   assert.ok(!ed.ownCopy(' \n', ''));
+  assert.ok(!ed.ownCopy('![a](<'.repeat(20000), ''));
+  assert.ok(ed.stored('![a](attachments/a.png) ![b](<attachments/b c.png>) ![[attachments/d.png]]'));
+  assert.ok(!ed.stored('![a](attachments/a.png) ![b](img/b.png)'));
   assert.ok(ed.onlyPictures('![The queue](a.png)\n'));
   assert.ok(!ed.onlyPictures('- ![The queue](a.png)'));
 });
