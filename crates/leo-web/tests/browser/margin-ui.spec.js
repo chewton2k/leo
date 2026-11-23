@@ -244,6 +244,10 @@ test('a saved margin note on a formula, or on part of one, marks each drawn row 
   const formula = `$$\n\\begin{aligned}\n${rows.join('\\\\\n')}\n\\end{aligned}\n$$`;
   const note = await (await page.request.post('/api/notes', { data: { title: 'Formula note', body: `Before the formula.\n\n${formula}\n\nAfter the formula it ends.` } })).json();
   let quote = formula;
+  await page.route('**/fonts/KaTeX_*', async (route) => {
+    await new Promise((done) => setTimeout(done, 800));
+    await route.continue();
+  });
   await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
     if (route.request().method() !== 'GET') return route.continue();
     const view = await (await route.fetch()).json();

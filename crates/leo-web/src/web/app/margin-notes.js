@@ -529,7 +529,10 @@ function marginRedraw() {
   marginPage.frame = requestAnimationFrame(marginDraw);
 }
 
-if (document.fonts) Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
+if (document.fonts) {
+  Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
+  document.fonts.addEventListener('loadingdone', marginRedraw);
+}
 
 function marginPrintable() {
   const s = marginPage.s;
