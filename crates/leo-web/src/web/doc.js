@@ -2066,7 +2066,7 @@
           walker.currentNode = begin;
           for (let node = begin.nodeType === Node.TEXT_NODE ? begin : walker.nextNode(); node; node = walker.nextNode()) {
             if (range.comparePoint(node, 0) > 0) break;
-            if (!range.intersectsNode(node)) continue;
+            if (!range.intersectsNode(node) || node.parentElement?.closest('.katex-mathml')) continue;
             piece.selectNodeContents(node);
             if (node === range.startContainer) piece.setStart(node, range.startOffset);
             if (node === range.endContainer) piece.setEnd(node, range.endOffset);

@@ -205,6 +205,39 @@ test('selected note text is painted as its own text only, clipped to the note, a
   await expect.poll(painted).toBeNull();
 });
 
+test('the ask draft on a passage with a display formula marks only the visible formula', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const body = 'Before the formula it reads:\n\n$$\\begin{aligned}v_{i+1} &= v_i + h a_i,\\\\x_{i+1} &= x_i + \\tfrac{h}{2}(v_i\\cos\\psi_i + v_{i+1}\\cos\\psi_{i+1}),\\\\y_{i+1} &= y_i + \\tfrac{h}{2}(v_i\\sin\\psi_i + v_{i+1}\\sin\\psi_{i+1}).\\end{aligned}$$\n\nAfter the formula it ends.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula', body } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc .katex-display .katex-html')).toBeVisible();
+  await page.evaluate(() => {
+    const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.katex-mathml') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    const texts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+    const range = document.createRange();
+    range.setStart(texts.find((n) => n.data.includes('Before')), 0);
+    range.setEnd(texts.find((n) => n.data.includes('After')), 5);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await page.getByRole('toolbar', { name: 'Felix and this passage' }).getByRole('button', { name: 'Ask Felix' }).click();
+  await expect(page.locator('.margin-ink path.squiggle[data-id="draft"]').first()).toHaveClass(/on/);
+  const marks = await page.evaluate(() => {
+    const formula = document.querySelector('#doc .katex-display .katex-html').getBoundingClientRect();
+    const glyphs = [...document.querySelectorAll('#doc .katex-display .katex-html .base')].map((el) => el.getBoundingClientRect());
+    const right = Math.max(...glyphs.map((r) => r.right));
+    const after = [...document.querySelectorAll('#doc .blk')].find((el) => el.textContent.includes('After the formula')).getBoundingClientRect();
+    const inside = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="draft"]')].map((el) => el.getBoundingClientRect()).filter((r) => r.top > formula.top - 4 && r.top < after.top - 4);
+    return { right, formulaBottom: formula.bottom, inside: inside.map((r) => ({ right: r.right, top: r.top })) };
+  });
+  expect(marks.inside.length).toBeGreaterThan(0);
+  for (const mark of marks.inside) {
+    expect(mark.right).toBeLessThanOrEqual(marks.right + 2);
+    expect(mark.top).toBeLessThanOrEqual(marks.formulaBottom + 8);
+  }
+});
+
 test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });
