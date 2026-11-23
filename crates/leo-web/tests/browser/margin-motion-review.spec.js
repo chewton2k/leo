@@ -16,6 +16,14 @@ const THREADS = {
   long: { id: 't2', quote: WORDS, prefix: 'begins here and ', suffix: ' and then it ends.', status: 'open', messages: [{ from: 'felix', text: 'This runs long. Split it.' }] },
 };
 
+const LONG_TEXT = Array.from({ length: 400 }, (_, i) => `w${i}`).join(' ');
+const PASSAGES = ['Alpha passage sits right here.', 'Bravo passage sits right here.', 'Charlie passage sits right here.', 'Delta passage sits right here.'];
+const apart = (n) => {
+  const filler = Array.from({ length: n }, (_, i) => `Filler paragraph ${i} keeps the passages apart. `.repeat(3).trim()).join('\n\n');
+  return `Opening.\n\n${PASSAGES.map((p) => `Before it, ${p} After it.${filler ? `\n\n${filler}` : ''}`).join('\n\n')}\n\nClosing.`;
+};
+const on = (id, i, text) => ({ id, quote: PASSAGES[i], prefix: 'Before it, ', suffix: ' After it.', status: 'open', messages: [{ from: 'felix', text }] });
+
 const MODE_MARKUP = `<div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">{{pen}}</span><span id="margin-mode-label">When you ask</span>{{chevron}}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div>`;
 
 async function fixture(browser, run, { width = 1280, height = 800, layout = 'right', mode = 'ask', threads = [THREADS.short, THREADS.long], context = {}, source = SOURCE } = {}) {
@@ -54,6 +62,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
       if(url.endsWith('/margin')&&method==='GET')return {mode:fake.mode,threads:structuredClone(fake.threads)};
       if(url.endsWith('/margin/threads')&&method==='POST'){fake.posts.push(body);return {id:'t9',quote:body.quote,prefix:body.prefix,suffix:body.suffix,status:'open',source:'ask',messages:[{from:'felix',text:'A fake answer.'}]};}
       if(method==='PATCH'&&url.includes('/margin/threads/')){fake.posts.push(body);const t=fake.threads.find(x=>url.endsWith('/'+x.id));t.pinned=body.pinned;return structuredClone(t);}
+      if(url.endsWith('/reply')&&method==='POST'){const t=fake.threads.find(x=>url.includes('/'+x.id+'/'));t.messages.push({from:'you',text:body.text},{from:'felix',text:'Latest answer.'});return structuredClone(t);}
       if(url.endsWith('/margin/read')){fake.posts.push(body);return new Promise(r=>{fake.answer=r;});}
       if(url.endsWith('/margin')&&method==='POST'){fake.posts.push(body);if(fake.failMode){const e=new Error('Try again.');e.status=503;throw e;}fake.mode=body.mode;return {mode:body.mode};}
       throw new Error('No fake for '+method+' '+url);
@@ -413,36 +422,131 @@ test.describe('whole notes and pins', () => {
     }, { threads: [LONG] });
   });
 
-  test('a long closed note stops at twelve lines with a fade, and a figure always shows whole', async ({ browser }) => {
+  test('a long closed note alone shows whole with no fade, its end can be scrolled into view, and a figure shows whole', async ({ browser }) => {
     const words = Array.from({ length: 400 }, (_, i) => `w${i}`).join(' ');
-    const drawn = `${words}\n\n\`\`\`svg\n<svg viewBox="0 0 40 400" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="400"/></svg>\n\`\`\``;
+    const drawn = `${words}\n\n\`\`\`svg\n<svg viewBox="0 0 40 200" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="200"/></svg>\n\`\`\``;
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
       const text = note.locator('.margin-felix > p').first();
-      await expect(text).toHaveClass(/margin-cut/);
+      await expect(note.locator('.margin-cut, .margin-over')).toHaveCount(0);
       const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
-      expect((await text.boundingBox()).height).toBeLessThanOrEqual(line * 12 + 1);
+      expect((await text.boundingBox()).height).toBeGreaterThan(line * 12);
+      expect(await text.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && getComputedStyle(el).maxHeight === 'none')).toBe(true);
+      expect(await text.evaluate((el) => getComputedStyle(el).maskImage)).toBe('none');
       const figure = note.locator('.margin-felix figure').first();
       expect(await figure.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && getComputedStyle(el).maxHeight === 'none')).toBe(true);
-      await page.evaluate(() => marginOpen('t1', false));
-      await expect(note.locator('.margin-cut')).toHaveCount(0);
+      await figure.scrollIntoViewIfNeeded();
+      expect(await figure.evaluate((el) => el.getBoundingClientRect().bottom <= innerHeight + 1)).toBe(true);
     }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
   });
 
-  test('twelve lines cap the closed note\'s text as a whole across paragraphs, and the figure after them stays whole', async ({ browser }) => {
-    const para = (tag) => Array.from({ length: 70 }, (_, i) => `${tag}${i}`).join(' ');
-    const drawn = `${para('a')}\n\n${para('b')}\n\n${para('c')}\n\n\`\`\`svg\n<svg viewBox="0 0 40 200" xmlns="http://www.w3.org/2000/svg"><rect width="40" height="200"/></svg>\n\`\`\``;
+  test('two long notes with near passages: the upper stops at twelve lines with a fade and the lower stays where it was', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const first = page.locator('.margin-note[data-id="t1"]');
+      const second = page.locator('.margin-note[data-id="t2"]');
+      const text = first.locator('.margin-felix').first();
+      await expect(text).toHaveClass(/margin-cut/);
+      expect(await text.evaluate((el) => getComputedStyle(el).maskImage)).not.toBe('none');
+      await expect(second.locator('.margin-cut, .margin-over')).toHaveCount(0);
+      const line = await first.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      expect(Math.abs((await text.boundingBox()).height - line * 12)).toBeLessThanOrEqual(1);
+      const a = await first.boundingBox();
+      const b = await second.boundingBox();
+      expect(a.y + a.height).toBeLessThanOrEqual(b.y);
+      expect(Math.abs(b.y - (a.y + a.height + 16))).toBeLessThanOrEqual(1);
+    }, { source: apart(0), threads: [on('t1', 0, LONG_TEXT), on('t2', 1, LONG_TEXT)] });
+  });
+
+  test('a cut note takes the room before the next note, never overlaps it, and leaves it where it was', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => addEventListener('error', (e) => window.errors.push(e.message)));
+      const first = page.locator('.margin-note[data-id="t1"]');
+      const second = page.locator('.margin-note[data-id="t2"]');
+      const text = first.locator('.margin-felix').first();
+      await expect(text).toHaveClass(/margin-cut/);
+      const line = await first.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
+      const a = await first.boundingBox();
+      const b = await second.boundingBox();
+      expect((await text.boundingBox()).height).toBeGreaterThan(line * 12 + 1);
+      expect(a.y + a.height + 16 - 1).toBeLessThanOrEqual(b.y);
+      expect(b.y - (a.y + a.height + 16)).toBeLessThanOrEqual(line * 2);
+      await page.evaluate(() => { marginPage.threads = marginPage.threads.filter((t) => t.id !== 't1'); marginRedraw(); });
+      await expect(first).toBeHidden();
+      expect(Math.abs((await second.boundingBox()).y - b.y)).toBeLessThanOrEqual(1);
+    }, { source: apart(5), threads: [on('t1', 0, LONG_TEXT), on('t2', 1, LONG_TEXT)] });
+  });
+
+  test('notes do not move or resize across ten frames after a redraw, and no resize loop is reported', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => addEventListener('error', (e) => window.errors.push(e.message)));
+      await expect(page.locator('.margin-note[data-id="t1"] .margin-cut')).toHaveCount(1);
+      const read = () => ['t1', 't2'].map((id) => { const r = document.querySelector(`.margin-note[data-id="${id}"]`).getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; });
+      const before = await page.evaluate(read);
+      const seen = await frames(page, 400, () => ['t1', 't2'].map((id) => { const r = document.querySelector(`.margin-note[data-id="${id}"]`).getBoundingClientRect(); return { box: [r.x, r.y, r.width, r.height] }; }), [[0, 'marginRedraw()'], [100, 'marginRedraw()']]);
+      expect(seen.length).toBeGreaterThanOrEqual(10);
+      for (const frame of seen) expect(frame[0].box).toEqual(before[0]);
+      for (const frame of seen) expect(frame[1].box).toEqual(before[1]);
+    }, { source: apart(5), threads: [on('t1', 0, LONG_TEXT), on('t2', 1, LONG_TEXT)] });
+  });
+
+  test('closed text is Felix\'s first answer, and a reply that arrives on a closed note does not replace it', async ({ browser }) => {
+    const first = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it.' }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Salt it too.' }] };
     await fixture(browser, async (page) => {
       const note = page.locator('.margin-note[data-id="t1"]');
-      const line = await note.locator('.margin-felix').evaluate((el) => parseFloat(getComputedStyle(el).lineHeight));
-      const visible = await note.locator('.margin-felix > p').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
-      expect(visible[0] + visible[1] + visible[2]).toBeLessThanOrEqual(line * 12 + 1);
-      expect(visible[0]).toBeGreaterThan(line * 3);
-      expect(visible[2]).toBe(0);
-      await expect(note.locator('.margin-felix > p').nth(1)).toHaveClass(/margin-cut/);
-      const figure = note.locator('.margin-felix figure').first();
-      expect(await figure.evaluate((el) => el.scrollHeight <= el.clientHeight + 1 && el.getBoundingClientRect().height > 0)).toBe(true);
-    }, { threads: [{ ...THREADS.short, messages: [{ from: 'felix', text: drawn }] }] });
+      await expect(note.locator('.margin-felix')).toHaveText('Hash it.');
+      await expect(note.locator('.margin-foot')).toHaveText('2 replies');
+      await page.evaluate(() => { fake.delay = 300; window.replied = marginReply(session, document.querySelector('.margin-note[data-id="t1"]'), marginThread('t1'), 'And then?'); });
+      await page.evaluate(() => window.replied);
+      await expect(note.locator('.margin-felix')).toHaveText('Hash it.');
+      await expect(note.locator('.margin-foot')).toHaveText('4 replies');
+      await page.evaluate(() => marginOpen('t1', false));
+      await expect(note.locator('.margin-felix').last()).toHaveText('Latest answer.');
+    }, { threads: [first] });
+  });
+
+  test('an open note between closed ones never overlaps them', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const boxes = () => page.evaluate(() => ['t1', 't2', 't3'].map((id) => { const r = document.querySelector(`.margin-note[data-id="${id}"]`).getBoundingClientRect(); return [r.top, r.bottom]; }));
+      const apartBy = (list) => list[0][1] <= list[1][0] && list[1][1] <= list[2][0];
+      expect(apartBy(await boxes())).toBe(true);
+      await page.evaluate(() => marginOpen('t2', false));
+      await expect(page.locator('.margin-note[data-id="t2"]')).toHaveAttribute('data-open', '');
+      await expect.poll(async () => apartBy(await boxes())).toBe(true);
+      await page.waitForTimeout(400);
+      expect(apartBy(await boxes())).toBe(true);
+    }, { source: apart(1), threads: [on('t1', 0, LONG_TEXT), on('t2', 1, LONG_TEXT), on('t3', 2, LONG_TEXT)] });
+  });
+
+  test('with both margins every side keeps its notes apart, cuts the ones that are crowded and shows its last whole', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const list = await page.evaluate(() => [...document.querySelectorAll('.margin-note')].filter((el) => !el.hidden).map((el) => { const r = el.getBoundingClientRect(); return { side: el.dataset.side, top: r.top, bottom: r.bottom, cut: Boolean(el.querySelector('.margin-cut')) }; }));
+      expect(list).toHaveLength(4);
+      expect(new Set(list.map((n) => n.side)).size).toBe(2);
+      for (const side of ['left', 'right']) {
+        const on = list.filter((n) => n.side === side).sort((x, y) => x.top - y.top);
+        for (let i = 1; i < on.length; i++) expect(on[i - 1].bottom).toBeLessThanOrEqual(on[i].top);
+        expect(on.at(-1).cut).toBe(false);
+      }
+      expect(list.some((n) => n.cut)).toBe(true);
+    }, { width: 1600, height: 900, layout: 'both', source: apart(0), threads: [on('t1', 0, LONG_TEXT), on('t2', 1, LONG_TEXT), on('t3', 2, LONG_TEXT), on('t4', 3, LONG_TEXT)] });
+  });
+
+  test('paragraph margins that return with hidden blocks never overlap the next note, whatever room the cut gets', async ({ browser }) => {
+    const para = (tag, n = 70) => Array.from({ length: n }, (_, i) => `${tag}${i}`).join(' ');
+    await fixture(browser, async (page) => {
+      const first = page.locator('.margin-note[data-id="t1"]');
+      const second = page.locator('.margin-note[data-id="t2"]');
+      for (let push = 0; push < 26; push += 1) {
+        await page.evaluate(async (px) => {
+          [...document.querySelectorAll('#doc .blk')].find((block) => block.textContent.includes('Bravo')).style.paddingTop = `${px}px`;
+          marginRedraw();
+          await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+        }, push);
+        const a = await first.boundingBox();
+        const b = await second.boundingBox();
+        expect(a.y + a.height + 15, `pushed ${push}px`).toBeLessThanOrEqual(b.y);
+      }
+    }, { source: apart(3), threads: [on('t1', 0, `${para('a', 100)}\n\n${para('b')}\n\n${para('c')}\n\n${para('d')}`), on('t2', 1, LONG_TEXT)] });
   });
 
   test('at 1600 px with the comfortable column an open note is wider than 300 px, has no close cross and keeps every action on one row', async ({ browser }) => {
@@ -1165,7 +1269,7 @@ test('a closed thread with replies says how many more and marks-only shows the c
   const two = { ...THREADS.short, messages: [{ from: 'felix', text: 'Hash it.' }, { from: 'you', text: 'Why?' }, { from: 'felix', text: 'Salt it too.' }] };
   await fixture(browser, async page => {
     await expect(page.locator('.margin-note[data-id="t1"] .margin-foot')).toHaveText('2 replies');
-    await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Salt it too.');
+    await expect(page.locator('.margin-note[data-id="t1"] .margin-felix')).toHaveText('Hash it.');
   }, { threads: [two] });
   await fixture(browser, async page => {
     const mark = page.locator('.margin-mark[data-id="t1"]');

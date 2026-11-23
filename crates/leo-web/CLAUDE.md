@@ -809,10 +809,16 @@ Felix (2026-10-19).
   the text line so the text stays editable. Click or Enter/Space runs `marginReopen`: POST status `open` with
   `gone`, then the returned thread opens. Resolving, and a read's tidied ids, join the list.
 - Whole notes (2026-11-15, the user's call, replacing the first-line fold): a
-  closed note shows its whole text and dims to .7 until lit; its text as a whole
-  stops at 12 lines, the last shown block cut with a fade (`.margin-cut`) and
-  the blocks after it hidden (`.margin-over`), both set by `marginCuts` (one
-  read pass, then the writes) only when the text overflows; figures always show whole. Pins: `margin_threads.pinned`
+  closed note shows Felix's first answer (`marginFill`; Copy, Add, print and chat keep
+  the latest, `marginNow`, and an arriving reply never overwrites a closed note) and dims to .7 until lit. The layout is first
+  computed with the text as a whole cut at 12 lines, the last shown block with a fade
+  (`.margin-cut`) and the blocks after it hidden (`.margin-over`), both set by `marginCuts`
+  (one read pass, then the writes) only when the text overflows; then `marginGrow` lets each
+  cut note take the free room under it on its side (`marginKit.spare`: the next note's top
+  less the gap, Infinity for the last, so a note alone shows whole and nothing moves), taking
+  back the pixels paragraph margins add when hidden blocks return. A note that ends below the
+  page adds the difference as `.note-columns` bottom padding, since `.note-layout`'s `contain`
+  keeps absolute notes out of the page's scroll. Figures always show whole. Pins: `margin_threads.pinned`
   (guarded `ALTER`, db `VERSION` 7 (5 added `reworded`, 6 `closed_by`, 7 chat message rows), a revert keeps 7; a revert never lowers `VERSION`, in `margin.json`), PATCH
   `.../threads/{id}` `{pinned}` (or `{version, quote, prefix, suffix}` to re-anchor, below the body limit); a pinned note stays open in every layout
   (`marginPinnedOpen`: Escape and a click outside never fold it, several can be open;
