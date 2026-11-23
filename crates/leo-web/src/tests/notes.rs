@@ -314,6 +314,7 @@ fn a_reload_failure_is_reported_instead_of_serving_a_stale_store() {
             dir: None,
             offset: 0,
             brief: false,
+            rows: false,
             sort: None,
             show: None,
         }),
@@ -362,6 +363,7 @@ fn a_large_folder_comes_in_pages_with_its_total_and_short_cards() {
                 dir: Some("big".into()),
                 offset,
                 brief: true,
+                rows: false,
                 sort: None,
                 show: None,
             }),
@@ -509,7 +511,7 @@ fn folders_can_be_renamed_in_place_without_changing_note_identity() {
 }
 
 #[test]
-fn library_sorting_happens_before_pagination_and_brief_results_include_visuals() {
+fn library_sorting_happens_before_pagination_and_brief_results_carry_a_summary() {
     let (state, _dir, ids) = state_with(&[("Zebra", "B"), ("Alpha", "A"), ("Pinned", "")]);
     {
         let mut store = state.store.lock().unwrap();
@@ -530,10 +532,34 @@ fn library_sorting_happens_before_pagination_and_brief_results_include_visuals()
     let alpha = json_of(page("title", 1).unwrap());
     assert_eq!(alpha[0]["id"], ids[1]);
     assert_eq!(alpha[0]["summary"], "A useful description of this lecture.");
-    assert_eq!(alpha[0]["preview"], "```mermaid\ngraph LR\n A --> B\n```");
     for unknown in ["unknown", "opened", "folder"] {
         assert_eq!(page(unknown, 0).err(), Some(StatusCode::BAD_REQUEST));
     }
+}
+
+#[test]
+fn explorer_rows_carry_no_note_text() {
+    let (state, _dir, ids) = state_with(&[("Beta", "work"), ("Alpha", "work"), ("Other", "")]);
+    {
+        let mut store = state.store.lock().unwrap();
+        store.find_note_mut(&ids[1]).unwrap().body = "A long body.".into();
+        store.save().unwrap();
+    }
+    let query = serde_json::json!({ "dir": "work", "sort": "title", "limit": 1, "rows": true });
+    let out = run(list_notes(
+        State(state.clone()),
+        Query(serde_json::from_value(query).unwrap()),
+    ))
+    .unwrap();
+    assert_eq!(out.headers()["x-total"], "2");
+    let rows = json_of(out);
+    assert_eq!(rows.as_array().unwrap().len(), 1);
+    assert_eq!(rows[0]["id"], ids[1]);
+    assert_eq!(rows[0]["title"], "Alpha");
+    assert_eq!(rows[0]["directory"], "work");
+    assert!(rows[0]["created_at"].is_string() && rows[0]["updated_at"].is_string());
+    assert_eq!(rows[0]["body"], "");
+    assert!(rows[0].get("summary").is_none());
 }
 
 #[test]

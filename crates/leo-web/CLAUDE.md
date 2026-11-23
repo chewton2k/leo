@@ -524,7 +524,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   (Cmd/Ctrl + q w r c v x z y a s b i u `,` and Shift+Z), another page shortcut and
   the dictation shortcut are refused with the reason.
   `leo-last-place` restores only on a new window session.
-- Explorer reads: 100 per page, four concurrent reads with ten-second aborts, 64
+- Explorer reads (`/api/notes?rows=true`: no note text, hash or summary): 100 per page, four concurrent reads with ten-second aborts, 64
   cached folders, 32 automatic visible reads; late reads check generation and
   entry identity.
 - Folders: create, rename, move, trash with Undo (POST `/api/trash/move`,
@@ -578,7 +578,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
   read them. Note prose has no `text-wrap: pretty` (WebKit re-balances every paragraph on each
   relayout). The page-width drag writes the article's own `max-width` and commits
-  `--note-width` once on release.
+  `--note-width` once on release. The explorer's three parts (`.side > *`) pin the same
+  variables and `#doc` pins `--margin-w`, so folding the explorer or opening Felix restyles
+  neither the explorer's rows nor the note (2026-11-22, measured in WebKit): nothing inside
+  them may read those variables. Opening Felix only refits the explorer's width
+  (`sideResize.fit()`), never redraws it, and `refreshPanel` leaves a subtree equal to the new
+  one alone (`isEqualNode`), except around `LIVE_STATE` controls, whose values the markup
+  cannot show.
 - Outline (2026-11-17, the user's call: no fixed limit on data): every heading
   (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
   (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;

@@ -17,6 +17,8 @@ pub(crate) struct ListParams {
     pub(crate) offset: usize,
     #[serde(default)]
     pub(crate) brief: bool,
+    #[serde(default)]
+    pub(crate) rows: bool,
     pub(crate) sort: Option<String>,
     pub(crate) show: Option<String>,
 }
@@ -91,8 +93,6 @@ pub(crate) struct NoteResponse {
     pub(crate) writeup_pending: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) summary: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) preview: Option<String>,
 }
 
 pub(crate) fn version_of(note: &leo_core::notes::Note) -> String {
@@ -104,19 +104,26 @@ pub(crate) fn version_of(note: &leo_core::notes::Note) -> String {
 impl NoteResponse {
     pub(crate) fn from_note(n: &leo_core::notes::Note) -> Self {
         NoteResponse {
+            body: n.body.clone(),
+            version: version_of(n),
+            ..NoteResponse::row(n)
+        }
+    }
+
+    pub(crate) fn row(n: &leo_core::notes::Note) -> Self {
+        NoteResponse {
             id: n.id.clone(),
             title: n.title.clone(),
-            body: n.body.clone(),
+            body: String::new(),
             created_at: n.created_at.to_rfc3339(),
             updated_at: n.updated_at.to_rfc3339(),
             directory: n.directory.clone(),
             pinned: n.pinned,
-            version: version_of(n),
+            version: String::new(),
             tasks: None,
             recorded: false,
             writeup_pending: false,
             summary: None,
-            preview: None,
         }
     }
 
@@ -124,7 +131,8 @@ impl NoteResponse {
         NoteResponse {
             body: excerpt(&n.body, words),
             tasks: Some(tasks_in(&n.body)),
-            ..NoteResponse::from_note(n)
+            version: version_of(n),
+            ..NoteResponse::row(n)
         }
     }
 }
@@ -198,7 +206,8 @@ pub(crate) async fn list_notes(
     Query(params): Query<ListParams>,
 ) -> Result<Response, StatusCode> {
     let brief = params.brief;
-    let (total, notes) = state
+    let rows = params.rows;
+    let (total, notes, listed) = state
         .read_store(move |store| {
             let limit = params.limit.unwrap_or(100).min(1000);
             if let Some(ref dir) = params.dir {
@@ -208,15 +217,17 @@ pub(crate) async fn list_notes(
             crate::browse::only(&mut notes, params.show.as_deref(), chrono::Utc::now())?;
             crate::browse::order(&mut notes, params.sort.as_deref())?;
             let total = notes.len();
-            let page: Vec<leo_core::notes::Note> = notes
-                .into_iter()
-                .skip(params.offset)
-                .take(limit)
-                .cloned()
-                .collect();
-            Ok((total, page))
+            let page = notes.into_iter().skip(params.offset).take(limit);
+            if rows {
+                return Ok((total, Vec::new(), page.map(NoteResponse::row).collect()));
+            }
+            let page: Vec<leo_core::notes::Note> = page.cloned().collect();
+            Ok((total, page, Vec::new()))
         })
         .await?;
+    if rows {
+        return Ok(([("x-total", total.to_string())], Json(listed)).into_response());
+    }
     let graphs = std::sync::Arc::clone(&state.graphs);
     let page = tokio::task::spawn_blocking(move || {
         let summaries = if brief {
@@ -235,7 +246,6 @@ pub(crate) async fn list_notes(
                                 .cloned()
                                 .unwrap_or_else(|| crate::browse::summary(&note.body)),
                         ),
-                        preview: Some(crate::browse::preview(&note.body)),
                         ..NoteResponse::brief(note, &[])
                     }
                 } else {

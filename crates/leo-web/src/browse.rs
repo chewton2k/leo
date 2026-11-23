@@ -2,7 +2,6 @@ use axum::http::StatusCode;
 use leo_core::notes::Note;
 
 const MOST_SCAN: usize = 32_000;
-const MOST_PREVIEW: usize = 1_600;
 const MOST_SUMMARY: usize = 220;
 const MOST_LINES: usize = 800;
 
@@ -63,52 +62,6 @@ pub(crate) fn only(
         _ => return Err(StatusCode::BAD_REQUEST),
     }
     Ok(())
-}
-
-pub(crate) fn preview(body: &str) -> String {
-    let scan: String = body.chars().take(MOST_SCAN).collect();
-    let lines: Vec<&str> = scan.lines().take(MOST_LINES).collect();
-    let mut fence: Option<(usize, char, usize)> = None;
-    let mut visual = None;
-    for (i, line) in lines.iter().enumerate() {
-        let trimmed = line.trim();
-        if let Some((start, mark, width)) = fence {
-            if trimmed.chars().take_while(|c| *c == mark).count() >= width {
-                let part = lines[start..=i].join("\n");
-                if part.chars().count() <= MOST_PREVIEW && visual == Some(start) {
-                    return part;
-                }
-                fence = None;
-                visual = None;
-            }
-            continue;
-        }
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            let mark = trimmed.chars().next().unwrap_or('`');
-            let width = trimmed.chars().take_while(|c| *c == mark).count();
-            let kind = trimmed.trim_start_matches(mark).trim();
-            fence = Some((i, mark, width));
-            if matches!(kind, "mermaid" | "svg") {
-                visual = Some(i);
-            }
-        } else if (trimmed.starts_with("![") || trimmed.starts_with("![["))
-            && trimmed.chars().count() <= MOST_PREVIEW
-        {
-            return trimmed.to_string();
-        } else if trimmed == "$$" {
-            if let Some(end) = lines
-                .iter()
-                .skip(i + 1)
-                .position(|line| line.trim() == "$$")
-            {
-                let part = lines[i..=i + end + 1].join("\n");
-                if part.chars().count() <= MOST_PREVIEW {
-                    return part;
-                }
-            }
-        }
-    }
-    scan.chars().take(MOST_PREVIEW).collect()
 }
 
 pub(crate) fn summary(body: &str) -> String {
@@ -256,21 +209,6 @@ mod tests {
             only(&mut list, Some("nope"), Utc::now()),
             Err(StatusCode::BAD_REQUEST)
         );
-    }
-
-    #[test]
-    fn a_visual_preview_is_complete_bounded_and_unicode_safe() {
-        let body =
-            "# Lecture\nAn opening paragraph.\n```mermaid\ngraph LR\n A --> B\n```\nMore text";
-        assert_eq!(preview(body), "```mermaid\ngraph LR\n A --> B\n```");
-        assert_eq!(
-            preview("# Photos\n![A figure](picture.png)"),
-            "![A figure](picture.png)"
-        );
-        assert_eq!(preview("# Math\n$$\nx^2\n$$"), "$$\nx^2\n$$");
-        assert_eq!(preview(&"é🦊".repeat(2000)).chars().count(), MOST_PREVIEW);
-        let oversized = format!("```svg\n{}\n```\n![Small](small.png)", "x".repeat(2000));
-        assert_eq!(preview(&oversized), "![Small](small.png)");
     }
 
     #[test]
