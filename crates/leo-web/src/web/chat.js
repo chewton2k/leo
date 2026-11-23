@@ -2896,8 +2896,11 @@
         setTimeout(() => mood('perk', 700), 1650);
       }
     }
+      const kept = body.scrollTop;
+      const below = body.scrollHeight - body.clientHeight - kept;
 
     async function send(text, extra = {}) {
+      body.scrollTop = below < 80 ? body.scrollHeight - body.clientHeight - below : kept;
       const question = text.trim();
       if (!question || state.busy || state.preparingSend) return;
       if (!extra.held) {
