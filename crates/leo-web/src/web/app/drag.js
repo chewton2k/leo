@@ -326,9 +326,10 @@ async function saveCombined(made, from, into, id) {
 }
 
 async function afterCombine(id) {
-  if (state.view === 'note' && state.session && state.session.note.id === id && !saving.unsaved()) await showNote(id);
-  else await showLatest();
-  loadSideFolders();
+  if (state.view === 'note' && state.session && state.session.note.id === id && !saving.unsaved()) {
+    await showNote(id);
+    loadSideFolders();
+  } else await showLatest();
 }
 
 async function moveNote(id, dir) {
@@ -372,9 +373,10 @@ async function afterMove(from, to, noteId = null) {
   }
   if (from && state.view === 'note' && (dir === from || dir.startsWith(`${from}/`))) state.dir = to + dir.slice(from.length);
   const affected = noteId === state.session?.note.id || from && (dir === from || dir.startsWith(`${from}/`));
-  if (affected && state.view === 'note' && state.session?.note.id && !saving.get(state.session.key)) await showNote(state.session.note.id);
-  else await showLatest();
-  await loadSideFolders();
+  if (affected && state.view === 'note' && state.session?.note.id && !saving.get(state.session.key)) {
+    await showNote(state.session.note.id);
+    await loadSideFolders();
+  } else await showLatest();
 }
 
 const PAGE_STEP = 20;

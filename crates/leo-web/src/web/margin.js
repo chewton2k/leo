@@ -141,12 +141,17 @@
 
   function sides(items, gap = 16, before = {}) {
     const ends = { left: -Infinity, right: -Infinity };
+    const count = { left: 0, right: 0 };
     const out = {};
+    for (const item of items) if (before[item.id]) count[before[item.id]]++;
     for (const item of [...items].sort((a, b) => a.want - b.want)) {
       const kept = before[item.id];
       const free = (side) => ends[side] <= item.want;
       const sooner = ends.right <= ends.left ? 'right' : 'left';
-      const side = kept && free(kept) ? kept : free('right') ? 'right' : free('left') ? 'left' : sooner;
+      const [fewer, more] = count.left < count.right ? ['left', 'right'] : ['right', 'left'];
+      const side = kept && free(kept) ? kept : free(fewer) ? fewer : free(more) ? more : sooner;
+      if (kept) count[kept]--;
+      count[side]++;
       out[item.id] = side;
       ends[side] = Math.max(ends[side], item.want) + item.height + gap;
     }

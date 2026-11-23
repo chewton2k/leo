@@ -205,6 +205,92 @@ test('selected note text is painted as its own text only, clipped to the note, a
   await expect.poll(painted).toBeNull();
 });
 
+test('the ask draft on a passage with a display formula marks only the visible formula', async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  const body = 'Before the formula it reads:\n\n$$\\begin{aligned}v_{i+1} &= v_i + h a_i,\\\\x_{i+1} &= x_i + \\tfrac{h}{2}(v_i\\cos\\psi_i + v_{i+1}\\cos\\psi_{i+1}),\\\\y_{i+1} &= y_i + \\tfrac{h}{2}(v_i\\sin\\psi_i + v_{i+1}\\sin\\psi_{i+1}).\\end{aligned}$$\n\nAfter the formula it ends.';
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula', body } })).json();
+  await page.goto(`/#/n/${note.id}`);
+  await expect(page.locator('#doc .katex-display .katex-html')).toBeVisible();
+  await page.evaluate(() => {
+    const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.katex-mathml') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+    const texts = [];
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) texts.push(node);
+    const range = document.createRange();
+    range.setStart(texts.find((n) => n.data.includes('Before')), 0);
+    range.setEnd(texts.find((n) => n.data.includes('After')), 5);
+    getSelection().removeAllRanges();
+    getSelection().addRange(range);
+  });
+  await page.getByRole('toolbar', { name: 'Felix and this passage' }).getByRole('button', { name: 'Ask Felix' }).click();
+  await expect(page.locator('.margin-ink path.squiggle[data-id="draft"]').first()).toHaveClass(/on/);
+  const marks = await page.evaluate(() => {
+    const formula = document.querySelector('#doc .katex-display .katex-html').getBoundingClientRect();
+    const glyphs = [...document.querySelectorAll('#doc .katex-display .katex-html .base')].map((el) => el.getBoundingClientRect());
+    const right = Math.max(...glyphs.map((r) => r.right));
+    const after = [...document.querySelectorAll('#doc .blk')].find((el) => el.textContent.includes('After the formula')).getBoundingClientRect();
+    const inside = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="draft"]')].map((el) => el.getBoundingClientRect()).filter((r) => r.top > formula.top - 4 && r.top < after.top - 4);
+    return { right, formulaBottom: formula.bottom, inside: inside.map((r) => ({ right: r.right, top: r.top })) };
+  });
+  expect(marks.inside.length).toBeGreaterThan(0);
+  for (const mark of marks.inside) {
+    expect(mark.right).toBeLessThanOrEqual(marks.right + 2);
+    expect(mark.top).toBeLessThanOrEqual(marks.formulaBottom + 8);
+  }
+});
+
+test('a saved margin note on a formula, or on part of one, marks each drawn row and keeps its blot off the formula', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const rows = ['v_{i+1} &= v_i + h a_i,', 'x_{i+1} &= x_i + \\frac{h}{2}(v_i\\cos\\psi_i + v_{i+1}\\cos\\psi_{i+1}),', 'y_{i+1} &= y_i + \\frac{h}{2}(v_i\\sin\\psi_i + v_{i+1}\\sin\\psi_{i+1}).'];
+  const formula = `$$\n\\begin{aligned}\n${rows.join('\\\\\n')}\n\\end{aligned}\n$$`;
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula note', body: `Before the formula.\n\n${formula}\n\nAfter the formula it ends.` } })).json();
+  let quote = formula;
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...view, threads: [{ id: 'f1', note: note.id, quote, prefix: '', suffix: '', status: 'open', source: 'ask', pinned: false, messages: [{ from: 'felix', text: 'Yes.', at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' }] } });
+  });
+  for (quote of [formula, rows[1]]) {
+    await page.goto('/#/');
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .katex-display .katex-html')).toBeVisible();
+    const marks = () => page.evaluate(() => {
+      const box = document.querySelector('#doc .katex-display .katex-html').getBoundingClientRect();
+      const right = Math.max(...[...document.querySelectorAll('#doc .katex-display .katex-html .base')].map((el) => el.getBoundingClientRect().right));
+      const lines = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => el.getBoundingClientRect());
+      const blot = document.querySelector('.margin-mark')?.getBoundingClientRect();
+      const ends = [...document.querySelectorAll('#doc .katex-display .katex-html *')].filter((el) => !el.children.length && el.textContent.trim()).map((el) => el.getBoundingClientRect());
+      const tallest = Math.max(...[...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => parseFloat(getComputedStyle(el).strokeWidth)));
+      const fraction = document.querySelector('#doc .katex-display .katex-html .mfrac').getBoundingClientRect();
+      return { rows: lines.length, covered: tallest > 24 && tallest > fraction.height - 10, stray: lines.some((r) => r.right > right + 4 || r.top > box.bottom + 12), covers: Boolean(blot && ends.some((r) => r.right > blot.left + 8 && r.left < blot.right - 8 && r.bottom > blot.top + 8 && r.top < blot.bottom - 8)) };
+    });
+    await expect.poll(marks).toEqual({ rows: 3, covered: true, stray: false, covers: false });
+  }
+});
+
+test('a saved margin note marks the formula it quotes, in a quote block and among words', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 900 });
+  const second = '$$E=\\frac{a}{b}$$';
+  const body = `> $$F=ma$$\n> Between them:\n> ${second}\n\nWords with $\\kappa_i$ in a paragraph long enough to wrap onto a second line of the note, so a mark of the whole paragraph would be far wider than the formula it quotes.`;
+  const note = await (await page.request.post('/api/notes', { data: { title: 'Formula quotes', body } })).json();
+  let quote = second;
+  await page.route(`**/api/notes/${note.id}/margin`, async (route) => {
+    if (route.request().method() !== 'GET') return route.continue();
+    const view = await (await route.fetch()).json();
+    await route.fulfill({ json: { ...view, threads: [{ id: 'f1', note: note.id, quote, prefix: '', suffix: '', status: 'open', source: 'ask', pinned: false, messages: [{ from: 'felix', text: 'Yes.', at: '2026-11-14T10:00:00Z' }], created_at: '2026-11-14T10:00:00Z', updated_at: '2026-11-14T10:00:00Z' }] } });
+  });
+  for (const [asked, at] of [[second, 1], ['$\\kappa_i$', 2]]) {
+    quote = asked;
+    await page.goto('/#/');
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc .katex-html')).toHaveCount(3);
+    await expect.poll(() => page.evaluate((i) => {
+      const formula = document.querySelectorAll('#doc .katex-html')[i].getBoundingClientRect();
+      const marks = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => el.getBoundingClientRect());
+      return marks.length === 1 && marks[0].width < 120 && marks[0].top > formula.top - 20 && marks[0].top < formula.bottom + 20;
+    }, at)).toBe(true);
+  }
+});
+
 test('the Felix bar opens in the margin beside a selection when there is room, and above it when not', async ({ page }) => {
   const note = await (await page.request.post('/api/notes', { data: { title: 'Bar place', body: 'One\n\nTwo\n\nThree short lines here.' } })).json();
   const menu = page.getByRole('toolbar', { name: 'Felix and this passage' });

@@ -17,6 +17,8 @@ function refreshKey(node) {
   return null;
 }
 
+const LIVE_STATE = 'input, select, textarea, details';
+
 function refreshChildren(box, desired) {
   const previous = [...box.childNodes];
   const keyed = new Map(), unkeyed = new Map();
@@ -46,6 +48,7 @@ function refreshChildren(box, desired) {
       if (node.nodeValue !== next.nodeValue) node.nodeValue = next.nodeValue;
       continue;
     }
+    if (node.isEqualNode(next) && !next.matches(LIVE_STATE) && !next.querySelector(LIVE_STATE)) continue;
     if (typeof keepSelectMenu === 'function') keepSelectMenu(node, next);
     for (const attr of [...node.attributes]) {
       if (attr.name === 'open' && node.nodeName === 'DETAILS') continue;

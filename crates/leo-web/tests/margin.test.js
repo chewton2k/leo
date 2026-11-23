@@ -172,17 +172,34 @@ test('stacking: nothing goes above the floor, even with an open note', () => {
 
 test('both margins: a crowded right side spills left', () => {
   const on = M.sides([{ id: 'a', want: 0, height: 100 }, { id: 'b', want: 10, height: 100 }, { id: 'c', want: 20, height: 100 }, { id: 'd', want: 400, height: 10 }]);
-  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'right' });
+  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'left' });
 });
 
-test('both margins: spaced notes all sit on the right while it has room', () => {
+test('both margins: spaced notes fill the emptier side, the right first', () => {
   const on = M.sides([{ id: 'a', want: 0, height: 80 }, { id: 'b', want: 300, height: 80 }, { id: 'c', want: 600, height: 80 }, { id: 'd', want: 900, height: 80 }]);
-  assert.deepEqual(on, { a: 'right', b: 'right', c: 'right', d: 'right' });
+  assert.deepEqual(on, { a: 'right', b: 'left', c: 'right', d: 'left' });
 });
 
-test('both margins: a note goes left only where the right is taken at its height', () => {
+test('both margins: a note goes where there is room at its height before it evens the sides', () => {
   const on = M.sides([{ id: 'a', want: 100, height: 120 }, { id: 'b', want: 150, height: 60 }, { id: 'c', want: 400, height: 60 }]);
   assert.deepEqual(on, { a: 'right', b: 'left', c: 'right' });
+  const tall = M.sides([{ id: 'a', want: 0, height: 80 }, { id: 'b', want: 100, height: 600 }, { id: 'c', want: 200, height: 80 }, { id: 'd', want: 400, height: 80 }]);
+  assert.deepEqual(tall, { a: 'right', b: 'left', c: 'right', d: 'right' });
+});
+
+test('both margins: thirteen spaced notes split seven and six, at once or arriving one by one in any order', () => {
+  const items = Array.from({ length: 13 }, (_, i) => ({ id: `n${i}`, want: i * 500, height: 120 }));
+  const split = (on) => Object.values(on).filter((side) => side === 'left').length;
+  assert.equal(split(M.sides(items)), 6);
+  let before = {};
+  const shown = [];
+  for (const i of [6, 0, 12, 3, 9, 1, 11, 5, 7, 2, 10, 4, 8]) {
+    shown.push(items[i]);
+    const after = M.sides(shown, 16, before);
+    for (const id of Object.keys(before)) assert.equal(after[id], before[id], id);
+    before = after;
+  }
+  assert.equal(split(before), 6);
 });
 
 test('both margins: a new note never moves a placed note whose side is still free', () => {

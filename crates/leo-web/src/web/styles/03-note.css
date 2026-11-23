@@ -67,7 +67,7 @@
 .margin-layer > * { pointer-events: auto; }
 .margin-ink { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none !important; }
 .margin-ink path { fill: none; stroke-linecap: round; }
-.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: 20px; stroke-linecap: butt; transform: translateY(-12px); transition: opacity var(--t-fade) ease-out; }
+.margin-ink path.squiggle { stroke: color-mix(in srgb, var(--text) 12%, transparent); stroke-width: var(--mark, 20px); stroke-linecap: butt; transform: translateY(calc(-2px - var(--mark, 20px) / 2)); transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid { stroke: var(--accent); stroke-width: 1.5; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.wash { fill: var(--accent); stroke: none; opacity: 0; transition: opacity var(--t-fade) ease-out; }
 .margin-ink path.solid.on { opacity: 1; }
@@ -84,6 +84,7 @@
 .margin-ink path.tether.sketching { stroke-dasharray: 1; animation: pencil-draw 450ms var(--ease-pencil) both; }
 .margin-ink path.spine.sketching { animation-duration: 350ms; animation-delay: 450ms; }
 @keyframes margin-wipe { from { clip-path: inset(-4px 100% -4px 0); } to { clip-path: inset(-4px 0 -4px 0); } }
+#doc { --margin-w: initial; }
 .margin-note { position: absolute; left: 0; top: 0; width: var(--margin-w); color: var(--text); border-radius: var(--r-md); }
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color var(--t-fade) ease-out, box-shadow var(--t-fade) ease-out, opacity var(--t-fade) ease-out; }

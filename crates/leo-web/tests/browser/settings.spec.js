@@ -38,6 +38,30 @@ test('panel refresh updates controls and keyed rows without resetting native sta
   })).toBe(true);
 });
 
+test('panel refresh leaves an unchanged subtree alone but still resets a control the person changed', async ({ page }) => {
+  await page.setContent('<main id="panel"></main>');
+  await page.addScriptTag({ content: fs.readFileSync(path.resolve(__dirname, '../../src/web/app/refresh.js'), 'utf8') });
+  const result = await page.evaluate(() => {
+    const box = document.querySelector('#panel');
+    const rows = Array.from({ length: 200 }, (_, i) => `<div data-refresh-key="row-${i}"><button data-action="open" data-id="${i}">Row ${i}</button></div>`).join('');
+    const html = (name) => `<section data-refresh-key="rows">${rows}</section><section data-refresh-key="form"><p>${name}</p><label><input id="words" value="before"></label><label><input id="on" type="checkbox"></label></section>`;
+    refreshPanel(box, html('First'));
+    box.querySelector('#words').value = 'typed';
+    box.querySelector('#on').checked = true;
+    const seen = [];
+    const read = Element.prototype.getAttribute;
+    Element.prototype.getAttribute = function (name) { seen.push(this.dataset.id); return read.call(this, name); };
+    refreshPanel(box, html('Second'));
+    Element.prototype.getAttribute = read;
+    const row = box.querySelector('[data-id="7"]');
+    row.tabIndex = -1;
+    row.classList.add('stale');
+    refreshPanel(box, html('Second'));
+    return { rowsRead: seen.filter((id) => id !== undefined).length, said: box.querySelector('p').textContent, words: box.querySelector('#words').value, on: box.querySelector('#on').checked, reset: !row.hasAttribute('tabindex') && row.getAttribute('class') === null };
+  });
+  expect(result).toEqual({ rowsRead: 0, said: 'Second', words: 'before', on: false, reset: true });
+});
+
 test('coding accounts show readable usage and sign-in states in both themes and narrow windows', async ({ page }) => {
   const web = path.resolve(__dirname, '../../src/web');
   const css = pageCss();

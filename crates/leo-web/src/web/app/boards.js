@@ -664,7 +664,7 @@ function kanbanMention(host) {
     const mine = ++ask;
     timer = setTimeout(async () => {
       let found = [];
-      try { found = await api(query ? `/api/search?q=${enc(query)}&brief=true&limit=8` : '/api/notes?limit=8&brief=true'); } catch (e) { found = []; }
+      try { found = await api(query ? `/api/search?q=${enc(query)}&brief=true&limit=8` : '/api/notes?limit=8&rows=true'); } catch (e) { found = []; }
       if (mine !== ask) return;
       rows = found.filter((n) => n.title && !/[[\]|#]/.test(n.title));
       at = 0;

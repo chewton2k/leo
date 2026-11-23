@@ -106,7 +106,7 @@ const chat = felix.create({
     if (tasksAtHome()) loadHomeRecent();
     toast(open && saving.unsaved() ? 'Felix changed this note while you were typing; reopen it to see the change.' : `Changed “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
   },
-  onToggle: () => { drawSide(); pageBarLater(); marginRedraw(); },
+  onToggle: () => { sideResize.fit(); pageBarLater(); marginRedraw(); },
   onOrganized: (proposal) => {
     const made = proposal.state === 'applied' && FELIX_MAKES[proposal.kind];
     if (made && proposal.undo?.[made]) inkLand(proposal.undo[made], true);
@@ -118,11 +118,12 @@ const chat = felix.create({
       if (state.view === 'boards') showBoards((kanban.board && kanban.board.id) || '').catch(fail);
       return;
     }
-    loadSideFolders().catch(() => {});
     if (state.view === 'calendar') loadSchedule(seq);
     loadTasksWindow().catch(() => {});
-    if (state.view === 'note' && state.session && state.session.note.id && !saving.unsaved()) showNote(state.session.note.id).catch(() => go(folderHash(state.dir || ''), { replace: true }));
-    else if (state.view !== 'calendar') showLatest().catch(() => {});
+    if (state.view === 'note' && state.session && state.session.note.id && !saving.unsaved()) {
+      loadSideFolders().catch(() => {});
+      showNote(state.session.note.id).catch(() => go(folderHash(state.dir || ''), { replace: true }));
+    } else showLatest().catch(() => {});
   },
   onAdd: (picked) => {
     if (!window.matchMedia('(min-width: 900px)').matches) chat.toggle(false);

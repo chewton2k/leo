@@ -831,6 +831,8 @@ function marginInk(t, rects) {
   rects.forEach((r, line) => {
     const dots = marginPath(id, 'squiggle', line);
     dots.setAttribute('d', `M${r.left.toFixed(1)} ${(r.bottom + 4).toFixed(1)} H${r.right.toFixed(1)}`);
+    if (r.formula) dots.style.setProperty('--mark', `${Math.max(20, r.bottom - r.top).toFixed(1)}px`);
+    else dots.style.removeProperty('--mark');
     const width = Math.max(1, r.right - r.left);
     if (arriving && !dots.classList.contains('arriving')) {
       dots.style.setProperty('--wipe-d', `${Math.round((WIPE_MS * before) / total)}ms`);
@@ -873,7 +875,7 @@ function marginDraw() {
   for (const id of [...marginPage.els.keys(), ...marginPage.marks.keys()]) if (!keep.has(id)) marginDropThread(id);
   const origin = columns.getBoundingClientRect();
   const page = $('article.note', columns).getBoundingClientRect();
-  const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
+  const boxes = placed.map(({ t, at }) => ({ t, at, rects: s.doc.spanRects(at.from, at.to).map((r) => ({ ...r, left: r.left - origin.left, right: r.right - origin.left, top: r.top - origin.top, bottom: r.bottom - origin.top })) })).filter(({ rects }) => rects.length).map((box) => {
     const el = marginPage.els.get(box.t.id) || (margins || marginIsOpen(box.t) ? marginElement(box.t) : null);
     if (el) marginFill(el, box.t, marginPage.arriving.has(box.t.id), box.at.how !== 'exact' || box.t.reworded);
     return { ...box, el };

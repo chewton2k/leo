@@ -480,7 +480,7 @@ async function readSideNotes(path, entry) {
   const timeout = setTimeout(() => controller.abort(), SIDE_NOTES_TIMEOUT);
   try {
     const [sort, show] = entry.order.split(' ');
-    const query = new URLSearchParams({ dir: path, offset: String(entry.offset), limit: String(SIDE_NOTES_PAGE), brief: 'true', sort, show });
+    const query = new URLSearchParams({ dir: path, offset: String(entry.offset), limit: String(SIDE_NOTES_PAGE), rows: 'true', sort, show });
     const page = await api(`/api/notes?${query}`, { total: true, signal: controller.signal });
     if (side.notes.get(path) !== entry || entry.seq !== seq) return;
     if (!Array.isArray(page.items)) throw new Error('Notes could not be opened.');
@@ -813,7 +813,7 @@ async function explorerCombineMenu(note, owner) {
   const page = async (query, offset) => {
     const got = await api(query
       ? `/api/search?q=${enc(query)}&brief=true&limit=${COMBINE_PAGE + 1}&offset=${offset}`
-      : `/api/notes?${new URLSearchParams({ limit: String(COMBINE_PAGE + 1), offset: String(offset), brief: 'true', sort: 'title' })}`);
+      : `/api/notes?${new URLSearchParams({ limit: String(COMBINE_PAGE + 1), offset: String(offset), rows: 'true', sort: 'title' })}`);
     const loaded = [...(offset ? seen.get(query) : []), ...got.slice(0, COMBINE_PAGE)];
     seen.set(query, loaded);
     return { rows: rowsOf(loaded), more: got.length > COMBINE_PAGE, loaded: loaded.length };

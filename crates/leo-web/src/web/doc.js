@@ -1772,6 +1772,21 @@
       else again.addEventListener('load', show, { once: true });
     }
 
+    function deletePicture(img) {
+      const at = pictureAt(img);
+      unframe();
+      if (!at || at.index < 0) return;
+      if (editing) stop();
+      const before = lines.slice(at.start, at.start + at.length).join('\n');
+      const gone = ed.removePicture(before, at.index);
+      if (gone.at < 0) return;
+      lines.splice(at.start, at.length, ...gone.text.split('\n'));
+      changed();
+      draw();
+      const caret = lineStart(at.start) + gone.at;
+      editSpan(caret, caret);
+    }
+
     function lonePicture(el) {
       const blk = el.closest('.blk');
       const pictures = blk && !blk.textContent.trim() ? blk.querySelectorAll('img.note-img') : [];
@@ -1791,10 +1806,14 @@
     });
 
     function onFrameKey(e) {
-      if (e.key !== 'Escape' || !framed || !framed.frame.isConnected) return;
+      if (!framed) return;
+      if (!framed.img.isConnected || !framed.frame.isConnected) return unframe();
+      const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
+      if (e.key !== 'Escape' && !remove) return;
       e.preventDefault();
       e.stopPropagation();
-      unframe();
+      if (remove) deletePicture(framed.img);
+      else unframe();
     }
     document.addEventListener('keydown', onFrameKey, true);
     root.addEventListener('resize', placeFrame);
@@ -2062,24 +2081,48 @@
           const walker = document.createTreeWalker(root.nodeType === Node.TEXT_NODE ? root.parentNode : root, NodeFilter.SHOW_TEXT);
           const piece = document.createRange();
           const found = [];
+          const hidden = new Set();
           const begin = range.startContainer;
+          const measure = (node) => {
+            const formula = node.parentElement.closest('.katex-display');
+            for (const { left, right, top, bottom } of piece.getClientRects()) if (right > left) found.push({ left, right, top, bottom, formula });
+          };
           walker.currentNode = begin;
           for (let node = begin.nodeType === Node.TEXT_NODE ? begin : walker.nextNode(); node; node = walker.nextNode()) {
             if (range.comparePoint(node, 0) > 0) break;
             if (!range.intersectsNode(node)) continue;
+            if (node.parentElement.closest('.katex-mathml')) {
+              hidden.add(node.parentElement.closest('.katex'));
+              continue;
+            }
             piece.selectNodeContents(node);
             if (node === range.startContainer) piece.setStart(node, range.startOffset);
             if (node === range.endContainer) piece.setEnd(node, range.endOffset);
-            for (const box of piece.getClientRects()) if (box.width > 0) found.push(box);
+            measure(node);
             if (node === range.endContainer) break;
           }
-          const lines = [];
-          for (const { left, right, top, bottom } of found.sort((a, b) => a.top - b.top)) {
-            const line = lines.find((l) => (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom);
-            if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
-            else lines.push({ left, right, top, bottom });
+          for (const formula of hidden) {
+            const html = formula.querySelector('.katex-html');
+            if (range.intersectsNode(html)) continue;
+            const drawn = document.createTreeWalker(html, NodeFilter.SHOW_TEXT);
+            for (let node = drawn.nextNode(); node; node = drawn.nextNode()) {
+              piece.selectNodeContents(node);
+              measure(node);
+            }
           }
-          return lines.slice(0, 24);
+          const lines = [];
+          const joins = (l, { top, bottom, formula }) => (formula ? l.formula === formula && (!formula.querySelector('.mtable') || Math.min(bottom, l.bottom) - Math.max(top, l.top) > 2) : (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom);
+          for (const box of found.sort((a, b) => a.top - b.top)) {
+            const { left, right, top, bottom } = box;
+            const line = lines.find((l) => joins(l, box));
+            if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
+            else lines.push({ ...box });
+          }
+          return lines.slice(0, 24).map(({ formula, ...line }, i) => {
+            if (!formula) return line;
+            const frame = formula.getBoundingClientRect();
+            return { left: Math.max(line.left, frame.left), right: Math.min(line.right, frame.right), top: lines[i - 1]?.formula === formula ? Math.max(line.top, lines[i - 1].bottom) : line.top, bottom: line.bottom, formula: true };
+          });
         };
         const found = boxes();
         if (found.length) return found;
@@ -2114,6 +2157,13 @@
           range.setEnd(...end);
           const inside = boxes();
           if (inside.length) return inside;
+        }
+        const tex = wanted.replace(/^\$+|\$+$/g, '').trim();
+        const formula = tex && (wanted.includes('$') || blocks[index].kind === 'math') && [...blk.querySelectorAll('.math')].find((el) => (el.dataset.tex || '').includes(tex))?.querySelector('.katex-html');
+        if (formula) {
+          range.selectNodeContents(formula);
+          const drawn = boxes();
+          if (drawn.length) return drawn;
         }
         const { left, right, top, bottom } = blk.getBoundingClientRect();
         return right > left ? [{ left, right, top, bottom }] : [];

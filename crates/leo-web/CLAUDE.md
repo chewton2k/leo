@@ -390,7 +390,9 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js); in a list or
   checkbox item a click on the picture frames it like any other, and a click beside it, left
   or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
-  call).
+  call). Backspace or Delete on a framed picture removes it and leaves the caret in its place
+  (`ed.removePicture`); a Backspace outside any text field is `preventDefault`ed in a window
+  listener (events.js) so WebKit never goes back a page (2026-11-22, the user's call).
 - Note page only (2026-11-15; `leoDoc.mount(..., { noteTools: true })` in showNote,
   passed to `md.render` as `noteTools`; board cards, chat, margin and previews render
   without it, byte-identical): a column whose body cells are all numbers (%, a
@@ -522,7 +524,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   (Cmd/Ctrl + q w r c v x z y a s b i u `,` and Shift+Z), another page shortcut and
   the dictation shortcut are refused with the reason.
   `leo-last-place` restores only on a new window session.
-- Explorer reads: 100 per page, four concurrent reads with ten-second aborts, 64
+- Explorer reads (`/api/notes?rows=true`: no note text, hash or summary): 100 per page, four concurrent reads with ten-second aborts, 64
   cached folders, 32 automatic visible reads; late reads check generation and
   entry identity.
 - Folders: create, rename, move, trash with Undo (POST `/api/trash/move`,
@@ -576,7 +578,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   pane drag or the Tasks card restyles only the shell, never the note: nothing inside a note may
   read them. Note prose has no `text-wrap: pretty` (WebKit re-balances every paragraph on each
   relayout). The page-width drag writes the article's own `max-width` and commits
-  `--note-width` once on release.
+  `--note-width` once on release. The explorer's three parts (`.side > *`) pin the same
+  variables and `#doc` pins `--margin-w`, so folding the explorer or opening Felix restyles
+  neither the explorer's rows nor the note (2026-11-22, measured in WebKit): nothing inside
+  them may read those variables. Opening Felix only refits the explorer's width
+  (`sideResize.fit()`), never redraws it, and `refreshPanel` leaves a subtree equal to the new
+  one alone (`isEqualNode`), except around `LIVE_STATE` controls, whose values the markup
+  cannot show.
 - Outline (2026-11-17, the user's call: no fixed limit on data): every heading
   (excluding code, maths, quotes, tables), on the rail 24 ticks at a time
   (`OUTLINE_PAGE`, only that page's ticks are drawn) with Earlier/Later arrows;
@@ -930,7 +938,8 @@ Felix (2026-10-19).
   Ask Felix opens the margin draft without asking (`marginAskFirst`: Felix-blue box,
   Escape keeps a half-typed question per passage in `marginPage.drafted`); a passage
   that already has an open thread opens it instead (`marginSame`). Both margins puts
-  a note on the right whenever the right is free at its height (`marginKit.sides`).
+  a note on the side with fewer notes when that side is free at its height, else the other
+  (ties right; `marginKit.sides`; 2026-11-22, the user's call, replacing right first).
   Margin icon buttons show the shared tooltip (their aria-label, `::after`), no `title`; the floating note toolbar's `.actions` rules are gone.
   Felix this on such a passage only opens it (Visualize still asks in it). The open
   thread's tools are Copy (Felix's text), pin and chat; a folded thread says "N replies".
@@ -988,7 +997,7 @@ Felix (2026-10-19).
   The solid underline (one per text line) and the spine are drawn with `marginWobble` (the pencil's jitter), phased by
   `marginSeed(thread id)` plus the line index, so a repaint, scroll or relayout never reshapes them; their
   endpoints sit exactly where a straight line's would, and the tie stays a plain cubic.
-  `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box).
+  `doc.spanRects` measures text nodes only, one rect per visual line (never a whole `li` box, and never KaTeX's hidden `.katex-mathml` copy); a display formula gives one rect as tall as it is drawn, clipped to its column, or one per row of a matrix or aligned block where the rows do not overlap (the resting mark takes that height through `--mark`), and a quote that falls inside a formula marks the whole formula (2026-11-22).
 - Tests: `src/tests/margin.rs` drives the real engine over TCP with fake powers.
 
 Decided: margin threads never in files (2026-11-04); read-along default for new
