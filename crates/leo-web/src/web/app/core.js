@@ -106,7 +106,7 @@ const chat = felix.create({
     if (tasksAtHome()) loadHomeRecent();
     toast(open && saving.unsaved() ? 'Felix changed this note while you were typing; reopen it to see the change.' : `Changed “${note.title}”`, { action: 'Open', run: () => go(noteHash(note.id)) });
   },
-  onToggle: () => { drawSide(); pageBarLater(); marginRedraw(); },
+  onToggle: () => { sideResize.fit(); pageBarLater(); marginRedraw(); },
   onOrganized: (proposal) => {
     const made = proposal.state === 'applied' && FELIX_MAKES[proposal.kind];
     if (made && proposal.undo?.[made]) inkLand(proposal.undo[made], true);
