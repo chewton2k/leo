@@ -11,8 +11,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !e.isComposing) e.preventDefault();
 }, true);
 
+const NOT_TYPED = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'file', 'color', 'image']);
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Backspace' && !e.target.closest?.('input, textarea, select, [contenteditable]')) e.preventDefault();
+  const field = e.target.isContentEditable || (e.target.matches?.('input, textarea') && !e.target.readOnly && !NOT_TYPED.has(e.target.type));
+  if (e.key === 'Backspace' && !field) e.preventDefault();
 });
 
 document.addEventListener('keydown', (e) => {

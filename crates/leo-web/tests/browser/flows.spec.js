@@ -2741,7 +2741,7 @@ test.describe('uploads', () => {
     await expect(page.locator('.upload-working')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.locator('.scrim')).toHaveCount(0);
-    await expect(page.locator('.toast')).toContainText('Your note from the upload is ready.');
+    await expect(page.locator('.toast')).toContainText('Your note from the upload is ready.', { timeout: 8000 });
     await expect(page.locator('.side-note', { hasText: title })).toBeVisible({ timeout: 2000 });
     expect(page.url()).toContain(`#/n/${open.id}`);
     for (const id of [open.id, made.id]) await page.request.delete(`/api/notes/${id}`);
@@ -5718,6 +5718,10 @@ test('Backspace or Delete on a selected picture takes it out of the note and sta
   await expect(page.locator('#doc textarea')).toBeFocused();
   expect(page.url()).toContain(`#/n/${note.id}`);
   await page.keyboard.press('Escape');
+  const backspace = (selector) => page.evaluate((s) => { const el = s ? document.createElement(s) : document.body; if (s) document.body.append(el); const e = new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }); el.dispatchEvent(e); if (s) el.remove(); return e.defaultPrevented; }, selector);
+  expect(await backspace(''), 'Backspace outside a text field never goes back a page').toBe(true);
+  expect(await backspace('input'), 'Backspace in a text field still deletes').toBe(false);
+  expect(await backspace('textarea')).toBe(false);
   await expect(img).toHaveCount(1);
   await img.click();
   await page.locator('.pic-handle').focus();

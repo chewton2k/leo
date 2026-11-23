@@ -478,7 +478,7 @@
     return String(text).replace(PICTURE, (whole, name, option, alt, target, title, at) => {
       if (code.some(([from, to]) => at >= from && at < to) || outside(name ?? target)) return whole;
       n += 1;
-      return n === index ? change(name, option, alt, target, title) : whole;
+      return n === index ? change(name, option, alt, target, title, at) : whole;
     });
   }
 
@@ -494,7 +494,12 @@
   }
 
   function removePicture(text, index) {
-    return changePicture(text, index, () => '');
+    let at = -1;
+    const rest = changePicture(text, index, (name, option, alt, target, title, found) => {
+      at = found;
+      return '';
+    });
+    return { text: rest, at };
   }
 
   const SLASH = [

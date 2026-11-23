@@ -1778,14 +1778,12 @@
       if (!at || at.index < 0) return;
       if (editing) stop();
       const before = lines.slice(at.start, at.start + at.length).join('\n');
-      const after = ed.removePicture(before, at.index);
-      if (after === before) return;
-      let cut = 0;
-      while (before[cut] === after[cut]) cut += 1;
-      lines.splice(at.start, at.length, ...after.split('\n'));
+      const gone = ed.removePicture(before, at.index);
+      if (gone.at < 0) return;
+      lines.splice(at.start, at.length, ...gone.text.split('\n'));
       changed();
       draw();
-      const caret = lineStart(at.start) + cut;
+      const caret = lineStart(at.start) + gone.at;
       editSpan(caret, caret);
     }
 
@@ -1808,8 +1806,8 @@
     });
 
     function onFrameKey(e) {
-      if (!framed || !framed.frame.isConnected || e.isComposing) return;
-      const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused();
+      if (!framed || !framed.frame.isConnected) return;
+      const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
       if (e.key !== 'Escape' && !remove) return;
       e.preventDefault();
       e.stopPropagation();

@@ -118,11 +118,12 @@ const chat = felix.create({
       if (state.view === 'boards') showBoards((kanban.board && kanban.board.id) || '').catch(fail);
       return;
     }
-    loadSideFolders().catch(() => {});
     if (state.view === 'calendar') loadSchedule(seq);
     loadTasksWindow().catch(() => {});
-    if (state.view === 'note' && state.session && state.session.note.id && !saving.unsaved()) showNote(state.session.note.id).catch(() => go(folderHash(state.dir || ''), { replace: true }));
-    else if (state.view !== 'calendar') showLatest().catch(() => {});
+    if (state.view === 'note' && state.session && state.session.note.id && !saving.unsaved()) {
+      loadSideFolders().catch(() => {});
+      showNote(state.session.note.id).catch(() => go(folderHash(state.dir || ''), { replace: true }));
+    } else showLatest().catch(() => {});
   },
   onAdd: (picked) => {
     if (!window.matchMedia('(min-width: 900px)').matches) chat.toggle(false);

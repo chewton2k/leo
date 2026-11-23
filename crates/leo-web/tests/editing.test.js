@@ -69,10 +69,11 @@ test('resizing counts only the pictures the page draws, so outside images and co
 
 test('removing a picture takes out only the chosen drawn one, never code or outside images', () => {
   const line = '`![code](a.png)` ![Logo](https://example.com/logo.png) Before ![Tree|400](attachments/tree.png) and ![[graph.png|250]] after';
-  assert.equal(ed.removePicture(line, 0), line.replace('![Tree|400](attachments/tree.png)', ''));
-  assert.equal(ed.removePicture(line, 1), line.replace('![[graph.png|250]]', ''));
-  assert.equal(ed.removePicture(line, 2), line, 'there is no third drawn picture');
-  assert.equal(ed.removePicture('![Box](a.png "Title")', 0), '');
+  assert.deepEqual(ed.removePicture(line, 0), { text: line.replace('![Tree|400](attachments/tree.png)', ''), at: line.indexOf('![Tree') });
+  assert.deepEqual(ed.removePicture(line, 1), { text: line.replace('![[graph.png|250]]', ''), at: line.indexOf('![[graph') });
+  assert.deepEqual(ed.removePicture(line, 2), { text: line, at: -1 }, 'there is no third drawn picture');
+  assert.deepEqual(ed.removePicture('![Box](a.png "Title")', 0), { text: '', at: 0 });
+  assert.deepEqual(ed.removePicture('x ![a](u)![a](u)', 1), { text: 'x ![a](u)', at: 9 }, 'the place is the removed picture’s, not where the text first differs');
 });
 
 test('a picture keeps a width in the Obsidian style and only the chosen one changes', () => {
