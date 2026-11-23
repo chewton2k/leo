@@ -20,6 +20,7 @@
   body.side-drawer .side { width: min(var(--explorer-w, 284px), calc(100vw - 48px)); box-shadow: var(--shadow-pop); }
 }
 @media screen and (min-width: 600px) and (forced-colors: none) { body::before, body::after { background-image: var(--grain); } }
+.side > * { --side: initial; --right: initial; --mid: initial; --explorer-w: initial; --chat-w: initial; --dock-room: initial; }
 .side-head { grid-column: 1 / -1; display: flex; align-items: center; gap: 2px; padding: var(--top) 6px 0; min-width: 0; }
 @media (min-width: 1000px) and (max-width: 1199px) { body:not(.side-mini) { --side: var(--explorer-w, 240px); } }
 .side-head .brand { padding-left: 8px; }
