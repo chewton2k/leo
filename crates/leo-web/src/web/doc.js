@@ -1806,7 +1806,8 @@
     });
 
     function onFrameKey(e) {
-      if (!framed || !framed.frame.isConnected) return;
+      if (!framed) return;
+      if (!framed.img.isConnected || !framed.frame.isConnected) return unframe();
       const remove = (e.key === 'Backspace' || e.key === 'Delete') && noteFocused() && !selectedSpan();
       if (e.key !== 'Escape' && !remove) return;
       e.preventDefault();

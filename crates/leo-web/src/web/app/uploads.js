@@ -364,8 +364,8 @@ async function addSection(into, job) {
 }
 
 async function showLatest() {
-  if (state.view !== 'search') await loadSideFolders();
-  else if (!$('.scrim')) await render();
+  if (state.view === 'search' && !$('.scrim')) await render();
+  else await loadSideFolders();
 }
 
 async function drawOriginals(note) {
