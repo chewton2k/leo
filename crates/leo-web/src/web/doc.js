@@ -1187,14 +1187,68 @@
     }
 
     function onCopy(e) {
-      if (!container.isConnected || !noteFocused()) return;
+      if (!container.isConnected || !noteFocused() || !e.clipboardData) return;
+      const selection = root.getSelection();
       const span = selectedSpan();
-      if (!span || !e.clipboardData) return;
+      const picked = !span && !editing && e.type === 'copy' && framed && framed.img.isConnected && selection.isCollapsed ? framed.img : null;
+      if (!span && !picked) return;
       e.preventDefault();
-      e.clipboardData.setData('text/plain', lines.join('\n').slice(span[0], span[1]));
-      const html = md.selectionCopy && md.selectionCopy(root.getSelection().getRangeAt(0));
-      if (html) e.clipboardData.setData('text/html', html);
+      const range = span ? selection.getRangeAt(0) : document.createRange();
+      if (picked) range.selectNode(picked);
+      const source = span ? lines.join('\n').slice(span[0], span[1]) : pictureMarkdown(picked);
+      const html = md.selectionCopy && md.selectionCopy(range);
+      const text = html ? ed.withoutPictures(source) : source;
+      const own = html && ed.ownCopy(source, text);
+      const rich = own ? `<div data-leo="${md.escape(source)}" style="color:#000">${html}</div>` : html;
+      const shown = html && e.type === 'copy' && ed.onlyPictures(source) ? [...container.querySelectorAll('img.note-img')].filter((img) => range.intersectsNode(img)) : [];
+      if (shown.length === 1 && shown[0].naturalWidth && root.ClipboardItem && root.navigator.clipboard?.write) {
+        copyPicture(shown[0], rich);
+        return;
+      }
+      e.clipboardData.setData('text/plain', own ? text : source);
+      if (html) e.clipboardData.setData('text/html', rich);
       if (e.type === 'cut') replaceSelection('');
+    }
+
+    async function picturePng(img, html) {
+      let url = html.match(/src="(data:image\/png;base64,[^"]+)"/)?.[1];
+      if (!url) {
+        await img.decode();
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        canvas.getContext('2d').drawImage(img, 0, 0);
+        url = canvas.toDataURL('image/png');
+      }
+      const raw = atob(url.split('base64,')[1] || '');
+      if (!raw) throw new Error('No picture');
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return new Blob([bytes], { type: 'image/png' });
+    }
+
+    function copyPicture(img, html) {
+      root.navigator.clipboard.write([new root.ClipboardItem({ 'image/png': picturePng(img, html), 'text/html': new Blob([html], { type: 'text/html' }) })]).catch(() => {
+        copySaid(document).textContent = 'Could not copy';
+        if (!img.isConnected) return;
+        frame(img);
+        framed.frame.querySelector('.pic-size').textContent = 'Could not copy';
+      });
+    }
+
+    function onLeoPaste(e) {
+      const area = editing && document.activeElement === editing.area ? editing.area : null;
+      if (!container.isConnected || !e.clipboardData || !(area || noteFocused())) return;
+      const html = e.clipboardData.getData('text/html');
+      const source = html.includes('data-leo') && new DOMParser().parseFromString(html, 'text/html').querySelector('[data-leo]')?.dataset.leo;
+      if (!source || !ed.ownCopy(source, e.clipboardData.getData('text/plain'))) return;
+      if (!area && !selectedSpan() && (e.target.closest?.('#chat') || [...document.querySelectorAll('.scrim')].some((scrim) => !scrim.contains(container)))) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (area) {
+        area.setRangeText(source, area.selectionStart, area.selectionEnd, 'end');
+        onInput();
+      } else if (!replaceSelection(source)) insert(source);
     }
 
     function onTextPaste(e) {
@@ -1207,6 +1261,7 @@
 
     document.addEventListener('copy', onCopy);
     document.addEventListener('cut', onCopy);
+    document.addEventListener('paste', onLeoPaste, true);
     document.addEventListener('paste', onTextPaste);
 
     document.addEventListener('keydown', onDocumentKey);
@@ -1645,11 +1700,15 @@
       return e.clientX < text.getBoundingClientRect().left ? input : null;
     }
 
-    function copyCode(button) {
-      const code = button.parentNode.querySelector('pre code');
-      const doc = button.ownerDocument;
+    function copySaid(doc) {
       const said = doc.getElementById('code-said') || doc.body.appendChild(Object.assign(doc.createElement('span'), { id: 'code-said', className: 'code-said' }));
       said.setAttribute('role', 'status');
+      return said;
+    }
+
+    function copyCode(button) {
+      const code = button.parentNode.querySelector('pre code');
+      const said = copySaid(button.ownerDocument);
       const shown = (label) => {
         button.setAttribute('aria-label', label);
         button.title = label;
@@ -1696,6 +1755,11 @@
       const block = blocks[Number(blk.dataset.i)];
       if (!block) return null;
       return { start: shifted(block.start), length: block.end - block.start, index: [...blk.querySelectorAll('img.note-img')].indexOf(img) };
+    }
+
+    function pictureMarkdown(img) {
+      const at = pictureAt(img);
+      return at ? ed.pictureSource(lines.slice(at.start, at.start + at.length).join('\n'), at.index) : '';
     }
 
     function frame(img) {
@@ -1996,6 +2060,7 @@
         document.removeEventListener('keydown', onDocumentKey);
         document.removeEventListener('copy', onCopy);
         document.removeEventListener('cut', onCopy);
+        document.removeEventListener('paste', onLeoPaste, true);
         document.removeEventListener('paste', onTextPaste);
         document.removeEventListener('pointermove', onDragMove);
         document.removeEventListener('pointerup', onDragEnd);

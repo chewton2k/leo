@@ -478,7 +478,7 @@
     return String(text).replace(PICTURE, (whole, name, option, alt, target, title, at) => {
       if (code.some(([from, to]) => at >= from && at < to) || outside(name ?? target)) return whole;
       n += 1;
-      return n === index ? change(name, option, alt, target, title, at) : whole;
+      return index === null || n === index ? change(name, option, alt, target, title, at, whole) : whole;
     });
   }
 
@@ -500,6 +500,32 @@
       return '';
     });
     return { text: rest, at };
+  }
+
+  function pictureSource(text, index) {
+    let source = '';
+    changePicture(text, index, (name, option, alt, target, title, at, whole) => {
+      source = whole;
+      return '';
+    });
+    return source;
+  }
+
+  function withoutPictures(text, said = caption) {
+    const lines = String(text).split('\n');
+    const rest = splitBlocks(lines).map(({ kind, start, end }) => {
+      const raw = lines.slice(start, end).join('\n');
+      return kind === 'code' || kind === 'math' ? raw : changePicture(raw, null, (name, option, alt) => said(name ?? alt));
+    }).join('\n');
+    return rest === text ? text : rest.replace(/\n(?:[^\S\n]*\n){3,}/g, '\n\n').replace(/^\s*\n|\s+$/g, '');
+  }
+
+  const onlyPictures = (text) => !withoutPictures(text, () => '').trim();
+
+  function ownCopy(markdown, text) {
+    const said = String(text).replace(/\r\n?/g, '\n').trim();
+    if (!markdown.trim() || [...markdown.matchAll(PICTURE)].some((m) => outside(m[1] ?? m[4]))) return false;
+    return said ? withoutPictures(markdown).trim() === said : onlyPictures(markdown);
   }
 
   const SLASH = [
@@ -526,7 +552,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, withoutPictures, onlyPictures, ownCopy, splitBlocks, boxesBefore, boxLine, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);

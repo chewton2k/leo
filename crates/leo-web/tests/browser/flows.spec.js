@@ -2070,12 +2070,68 @@ test.describe('pictures', () => {
       return { text: data.getData('text/plain'), html: data.getData('text/html') };
     }, selector);
     const both = await copy('#doc');
-    expect(both.text).toMatch(/!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)/);
+    expect(both.text).toBe('Before the picture.');
+    expect(both.html).toMatch(/^<div data-leo="Before the picture\.\n\n!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)"/);
     expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
     expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
     const plain = await copy('#doc .blk:first-child');
     expect(plain.text).toBe('Before the picture.');
     expect(plain.html).toBe('');
+  });
+
+  test('a clicked picture copies as a picture and pastes back as the same markdown, without another upload', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const note = await (await page.request.post('/api/notes', { data: { title: `Picked ${test.info().project.name}`, body: 'Before the picture.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Before the picture.');
+    await pastePicture(page, '#doc');
+    const img = page.locator('#doc img.note-img');
+    await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
+    const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+    await expect.poll(body).toContain('![Pasted picture]');
+    const uploads = [];
+    page.on('request', (request) => { if (request.url().includes('/api/pictures')) uploads.push(request.url()); });
+    await img.click();
+    await expect(page.locator('#doc .pic-frame')).toBeVisible();
+    await page.keyboard.press('ControlOrMeta+c');
+    const held = () => page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      const html = item.types.includes('text/html') ? await (await item.getType('text/html')).text() : '';
+      return { types: item.types, size: item.types.includes('image/png') ? (await item.getType('image/png')).size : 0, html };
+    });
+    await expect.poll(async () => (await held()).types).toContain('image/png');
+    const { size, html } = await held();
+    expect(size).toBeGreaterThan(100);
+    expect(html).toContain('data-leo="![Pasted picture](attachments/');
+    await page.keyboard.press('ControlOrMeta+v');
+    await expect(img).toHaveCount(2);
+    await expect.poll(body).toMatch(/^Before the picture\.\n\n(!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\))\n\n\1$/);
+    expect(uploads).toEqual([]);
+  });
+
+  test('a paste that only looks like leo is not taken as one', async ({ page }) => {
+    const note = await (await page.request.post('/api/notes', { data: { title: `Foreign ${test.info().project.name}`, body: 'Only this line.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Only this line.');
+    const paste = async (markdown, text) => {
+      await page.evaluate(() => document.activeElement.blur());
+      await expect(page.locator('#doc textarea')).toHaveCount(0);
+      await page.evaluate(([markdown, text]) => {
+        getSelection().selectAllChildren(document.querySelector('#doc'));
+        const data = new DataTransfer();
+        data.setData('text/html', `<div data-leo="${markdown}"><p>x</p></div>`);
+        if (text) data.setData('text/plain', text);
+        document.body.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+      }, [markdown, text]);
+    };
+    const body = async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body;
+    await paste('![x](https://a.b/c.png)', '');
+    await paste('One ![x](//a.b/c.png)', 'One');
+    await expect.poll(body).toBe('One');
+    await paste('Two ![Pasted picture](attachments/a.png)', 'Three');
+    await expect.poll(body).toBe('Three');
+    await paste('Four ![Pasted picture](attachments/a.png)', 'Four');
+    await expect.poll(body).toBe('Four ![Pasted picture](attachments/a.png)');
   });
 
   test('the transcript pages through a long recording, finds a phrase and saves only the fixed line', async ({ page }) => {

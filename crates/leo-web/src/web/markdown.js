@@ -65,9 +65,13 @@
 
   const AUTO_ALT = /^(?:pasted (?:picture|image)|image|picture|photo|drawing|(?:img|dsc|pxl)[\s_-]?\d.*|screen ?shot.*|.*\.(?:png|jpe?g|gif|webp|svg|heic|avif|bmp))$/i;
 
+  const typed = (alt) => (AUTO_ALT.test(alt.trim()) ? '' : alt.trim());
+
+  const caption = (label) => typed(sized(label).alt);
+
   function captioned(img, alt) {
-    const said = alt.trim();
-    return said && !AUTO_ALT.test(said) ? `<span class="note-fig" data-cap="${escape(said)}">${img}</span>` : img;
+    const said = typed(alt);
+    return said ? `<span class="note-fig" data-cap="${escape(said)}">${img}</span>` : img;
   }
 
   function picture(target, label) {
@@ -233,12 +237,12 @@
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const BOX = new RegExp(String.raw`^(?:${MARKER}) {1,4}\[( |x|X)\](?: |$)`);
 
+  const MATH_THEN = /^\$\$[^$]+\$\$\s*[^\s$]/;
+  const MATH_END = /\$\$[.,;:]?\s*$/;
   const MATH_ENV = /^\\begin\{((?:equation|align|aligned|gather|gathered|multline|alignat|flalign|split|cases|matrix|pmatrix|bmatrix|vmatrix|array)\*?)\}/;
 
   const isBox = (line) => BOX.test(line.trimStart());
 
-  const MATH_THEN = /^\$\$[^$]+\$\$\s*[^\s$]/;
-  const MATH_END = /\$\$[.,;:]?\s*$/;
   function listable(line, after) {
     const found = line.match(ITEM);
     return found && (after || !/[a-z]/i.test(found[2]) || /^[aA][.)]/.test(found[2]) || isBox(line)) ? found : null;
@@ -597,8 +601,8 @@
   const COPY_TOKEN = /<!--[\s\S]*?-->|<(\/?)([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s"'<>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'<>=`]+))?)*)\s*\/?>|[^<]+|</g;
   const COPY_ATTR = /([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'<>=`]+)))?/g;
   const COPY_PICTURE = /^data:image\/(?:png|jpeg|gif|webp|svg\+xml)(?:;[a-z0-9=.-]+)*[;,][^\s"'<>]*$/i;
-  const COPY_MOST_EACH = 3000000;
-  const COPY_MOST_ALL = 8000000;
+  const COPY_MOST_EACH = 20000000;
+  const COPY_MOST_ALL = 60000000;
   const COPY_PIXELS = 16000000;
 
   function unescapeHtml(text) {

@@ -192,7 +192,16 @@ Decided: one app, window only (2026-10-31).
 - Copying a selection that holds a picture (note reading view and Felix's answers, 2026-11-18) also puts
   `text/html` on the clipboard: `leoMarkdown.selectionCopy` draws each loaded picture to a canvas and
   `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a
-  picture over 3 MB, or past 8 MB in all, stays its alt text). A selection without a picture is untouched.
+  picture over 16 megapixels or 20 MB, or past 60 MB in all, stays its alt text). A selection without a picture is untouched.
+  From a note (2026-11-23), `text/plain` leaves the pictures out (a typed caption stays,
+  `leoEditing.withoutPictures`) and the html is wrapped in `<div data-leo="the markdown">`, coloured black
+  because WebKit writes the page's own text colour, which is white in dark mode. A picture alone (clicked, or the
+  only thing selected) is copied with `navigator.clipboard.write` as `image/png` and that html, called
+  inside the copy event and never with `clipboardData.setData`, which WebKit refuses together. Cut always uses the plain path.
+  A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
+  `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
+  it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
+  outside. Any other paste is handled as before.
 - Escape is always `preventDefault`ed in a capture listener, so it closes sheets
   and never leaves macOS full screen. Passive reveals never open a sheet.
 - Shortcut labels use `ON_MAC` (Ctrl on Windows); monospace falls back to Consolas.
@@ -674,6 +683,10 @@ read (root CLAUDE.md, 2026-11-17).
   and files stay above the composer (`#chat-refs`; files are 52 px tiles, notes
   `noteCard`s); the note finder (`#chat-pick`) is a popover at the paperclip and
   never pushes the layout (2026-11-09).
+- Sources under an answer (2026-11-23, the user's call): one source stays the
+  plain line (`div.msg-from` with its "Sources" label); two or more fold into
+  `details.msg-from` ("N sources" and the step chevron), one row a line when open,
+  its open state kept per message (`openSources`) like the finished-steps summary.
 - Change tools become `Proposal` cards, validate against the store, run through
   POST `/api/felix/act` (reusing normal routes) and return the inverse as `undo`.
   edit_note/create_note Apply POSTs `/api/notes/{id}/suggestion` (409 unless
@@ -683,10 +696,6 @@ read (root CLAUDE.md, 2026-11-17).
   Unicode character.
 - Successful replies may contain only proposal, ask or quiz cards. Stopped means
   cancelled; saved replies keep elapsed ms and a cancellation flag.
-- Sources under an answer (2026-11-23, the user's call): one source stays the
-  plain line (`div.msg-from` with its "Sources" label); two or more fold into
-  `details.msg-from` ("N sources" and the step chevron), one row a line when open,
-  its open state kept per message (`openSources`) like the finished-steps summary.
 - Quizzes: marking never waits for a Felix reply; two marks at a time; an
   abandoned mark, rewrite, Settings test or document read stops its AI program
   (`stop_when_dropped`). Multiple choice (needs
