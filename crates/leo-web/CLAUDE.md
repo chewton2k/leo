@@ -683,6 +683,10 @@ read (root CLAUDE.md, 2026-11-17).
   Unicode character.
 - Successful replies may contain only proposal, ask or quiz cards. Stopped means
   cancelled; saved replies keep elapsed ms and a cancellation flag.
+- Sources under an answer (2026-11-23, the user's call): one source stays the
+  plain line (`div.msg-from` with its "Sources" label); two or more fold into
+  `details.msg-from` ("N sources" and the step chevron), one row a line when open,
+  its open state kept per message (`openSources`) like the finished-steps summary.
 - Quizzes: marking never waits for a Felix reply; two marks at a time; an
   abandoned mark, rewrite, Settings test or document read stops its AI program
   (`stop_when_dropped`). Multiple choice (needs

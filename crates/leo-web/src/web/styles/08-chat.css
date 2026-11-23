@@ -171,8 +171,11 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 .cite.cite-n { position: relative; display: inline; height: auto; margin: 0 1px 0 2px; padding: 0 3px; border-radius: var(--r-xs); background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 500; line-height: 1; vertical-align: super; overflow: visible; font-variant-numeric: tabular-nums; }
 .cite.cite-n::after { content: ''; position: absolute; inset: -8px -4px; }
 .cite.cite-n:hover, .cite.cite-n:focus-visible { filter: none; background: var(--accent-soft); color: var(--accent); }
-.msg-from { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
-.msg-from::before { content: 'Sources'; font-size: var(--fs-xs); color: var(--faint); line-height: 20px; }
+div.msg-from { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+details.msg-from { margin-top: 8px; font-size: var(--fs-xs); color: var(--muted); }
+details.msg-from > summary { width: fit-content; }
+.msg-from-rows { display: grid; justify-items: start; gap: 4px; margin-top: 4px; }
+div.msg-from::before { content: 'Sources'; font-size: var(--fs-xs); color: var(--faint); line-height: 20px; }
 .cite.cite-src { margin: 0; padding: 0; background: none; color: var(--muted); font-size: var(--fs-xs); font-weight: 400; }
 .cite.cite-src b { margin-right: 6px; font-weight: 600; }
 .cite.cite-src:hover, .cite.cite-src:focus-visible { filter: none; color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }

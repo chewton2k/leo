@@ -129,10 +129,10 @@
 .msg-steps { display: grid; gap: 2px; margin-bottom: 8px; padding: 6px 8px; border-radius: var(--r-md); background: var(--surface-2); }
 .msg-trace { margin-bottom: 8px; font-size: var(--fs-xs); color: var(--muted); }
 .msg-status { margin-bottom: 8px; min-height: 22px; }
-.msg-trace > summary { display: flex; align-items: center; gap: 6px; min-height: 22px; cursor: pointer; list-style: none; }
-.msg-trace > summary::-webkit-details-marker { display: none; }
+:is(.msg-trace, .msg-from) > summary { display: flex; align-items: center; gap: 6px; min-height: 22px; cursor: pointer; list-style: none; }
+:is(.msg-trace, .msg-from) > summary::-webkit-details-marker { display: none; }
 .msg-trace > .msg-steps { margin: 4px 0 0; }
-.msg-trace[open] > summary > .msg-step-chevron { transform: rotate(90deg); }
+:is(.msg-trace, .msg-from)[open] > summary > .msg-step-chevron { transform: rotate(90deg); }
 .msg-outside { font-weight: 500; }
 .msg-step { font-size: var(--fs-xs); color: var(--muted); }
 .msg-step > summary, div.msg-step { display: flex; align-items: center; gap: 6px; min-height: 22px; }
