@@ -1186,6 +1186,9 @@
       return !focus || focus === document.body || (container.contains(focus) && !(editing && focus === editing.area));
     }
 
+    const MOST_COPIED = 60000000;
+    const MOST_INLINE = 15000000;
+
     function onCopy(e) {
       if (!container.isConnected || !noteFocused() || !e.clipboardData) return;
       const selection = root.getSelection();
@@ -1196,42 +1199,74 @@
       const range = span ? selection.getRangeAt(0) : document.createRange();
       if (picked) range.selectNode(picked);
       const source = span ? lines.join('\n').slice(span[0], span[1]) : pictureMarkdown(picked);
-      const html = md.selectionCopy && md.selectionCopy(range);
-      const text = html ? ed.withoutPictures(source) : source;
-      const own = html && ed.ownCopy(source, text);
-      const rich = own ? `<div data-leo="${md.escape(source)}" data-leo-from="${md.escape(dir)}" style="color:#000">${html}</div>` : html;
-      const shown = html && e.type === 'copy' && ed.onlyPictures(source) ? [...container.querySelectorAll('img.note-img')].filter((img) => range.intersectsNode(img)) : [];
-      if (shown.length === 1 && shown[0].naturalWidth && root.ClipboardItem && root.navigator.clipboard?.write) {
-        copyPicture(shown[0], rich);
+      const shown = [...container.querySelectorAll('img')].filter((img) => range.intersectsNode(img));
+      const able = e.type === 'copy' && root.ClipboardItem && root.navigator.clipboard?.write;
+      if (able && shown.length === 1 && ed.onlyPictures(source) && (shown[0].naturalWidth || !shown[0].complete)) {
+        const drawn = pictureDrawn(shown[0], source);
+        putCopy({ 'image/png': drawn.then(({ png }) => png), 'text/html': drawn.then(({ html }) => html) }, shown[0]);
         return;
       }
-      e.clipboardData.setData('text/plain', own ? text : source);
-      if (html) e.clipboardData.setData('text/html', rich);
+      const html = md.selectionCopy && md.selectionCopy(range);
+      const said = html ? ed.withoutPictures(source) : source;
+      const own = html && ed.ownCopy(source, said);
+      const text = own ? said : source;
+      const rich = (body) => (own ? leoCopy(source, body) : body);
+      const late = able && html ? shown.filter((img) => !img.complete) : [];
+      if (late.length) {
+        const kept = range.cloneRange();
+        const loaded = Promise.allSettled(late.map(loadPicture)).then(() => textBlob(rich(md.selectionCopy(kept) || html), 'text/html'));
+        putCopy({ 'text/plain': textBlob(text, 'text/plain'), 'text/html': loaded });
+        return;
+      }
+      e.clipboardData.setData('text/plain', text);
+      if (html) e.clipboardData.setData('text/html', rich(html));
       if (e.type === 'cut') replaceSelection('');
     }
 
-    async function picturePng(img, html) {
-      let url = html.match(/src="(data:image\/png;base64,[^"]+)"/)?.[1];
-      if (!url) {
-        await img.decode();
-        const canvas = document.createElement('canvas');
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-        canvas.getContext('2d').drawImage(img, 0, 0);
-        if (img.naturalWidth * img.naturalHeight > md.COPY_PIXELS) return new Promise((done) => canvas.toBlob(done, 'image/png'));
-        url = canvas.toDataURL('image/png');
-      }
-      const raw = atob(url.split('base64,')[1] || '');
-      if (!raw) throw new Error('No picture');
-      const bytes = new Uint8Array(raw.length);
-      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-      return new Blob([bytes], { type: 'image/png' });
+    const textBlob = (text, type) => new Blob([text], { type });
+
+    function leoCopy(source, html) {
+      return html.replace('<div', () => `<div data-leo="${md.escape(source)}" data-leo-from="${md.escape(dir)}"`);
     }
 
-    function copyPicture(img, html) {
-      root.navigator.clipboard.write([new root.ClipboardItem({ 'image/png': picturePng(img, html), 'text/html': new Blob([html], { type: 'text/html' }) })]).catch(() => {
+    function loadPicture(img) {
+      img.loading = 'eager';
+      return img.decode();
+    }
+
+    async function pictureDrawn(img, source) {
+      await loadPicture(img);
+      const canvas = document.createElement('canvas');
+      const paint = canvas.getContext('2d');
+      const drawn = (type) => new Promise((done, failed) => canvas.toBlob((blob) => (blob ? done(blob) : failed(new Error('No picture'))), type, 0.92));
+      let png = null;
+      for (let scale = 1; !png || png.size > MOST_COPIED; scale /= 2) {
+        canvas.width = Math.ceil(img.naturalWidth * scale);
+        canvas.height = Math.ceil(img.naturalHeight * scale);
+        paint.drawImage(img, 0, 0, canvas.width, canvas.height);
+        png = await drawn('image/png');
+      }
+      let inline = png;
+      if (png.size > MOST_INLINE) {
+        paint.globalCompositeOperation = 'destination-over';
+        paint.fillStyle = '#fff';
+        paint.fillRect(0, 0, canvas.width, canvas.height);
+        inline = await drawn('image/jpeg');
+      }
+      const url = await new Promise((done, failed) => {
+        const reader = new FileReader();
+        reader.onload = () => done(reader.result);
+        reader.onerror = failed;
+        reader.readAsDataURL(inline);
+      });
+      const html = leoCopy(source, `<div style="color:inherit"><img src="${url}" alt="${md.escape(img.alt)}"></div>`);
+      return { png, html: textBlob(html, 'text/html') };
+    }
+
+    function putCopy(parts, img) {
+      root.navigator.clipboard.write([new root.ClipboardItem(parts)]).catch(() => {
         copySaid(document).textContent = 'Could not copy';
-        if (!img.isConnected) return;
+        if (!img || !img.isConnected) return;
         frame(img);
         framed.frame.querySelector('.pic-size').textContent = 'Could not copy';
       });

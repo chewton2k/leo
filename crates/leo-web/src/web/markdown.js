@@ -707,10 +707,10 @@
       if (data) clone.setAttribute('src', data);
       else clone.removeAttribute('src');
     });
-    return copyHtml(box.innerHTML);
+    return `<div style="color:inherit">${copyHtml(box.innerHTML)}</div>`;
   }
 
-  const api = { render, caption, COPY_PIXELS, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, caption, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

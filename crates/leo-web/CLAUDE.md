@@ -194,10 +194,12 @@ Decided: one app, window only (2026-10-31).
   `copyHtml` rebuilds the selection from an allow list (no script, handlers, styles or leo addresses; a
   picture over 16 megapixels or 20 MB, or past 60 MB in all, stays its alt text). A selection without a picture is untouched.
   From a note (2026-11-23), `text/plain` leaves the pictures out (a typed caption stays,
-  `leoEditing.withoutPictures`) and the html is wrapped in `<div data-leo="the markdown">`, coloured black
-  because WebKit writes the page's own text colour, which is white in dark mode. A picture alone (clicked, or the
-  only thing selected) is copied with `navigator.clipboard.write` as `image/png` and that html, called
-  inside the copy event and never with `clipboardData.setData`, which WebKit refuses together. Cut always uses the plain path.
+  `leoEditing.withoutPictures`) and the html's outer `div` carries `data-leo="the markdown"`. That `div` (Felix's answers too)
+  is `color:inherit`, because WebKit otherwise writes the page's own text colour, white in dark mode, and black is unreadable
+  on a dark page. A picture alone (clicked, or the only thing selected) is copied with `navigator.clipboard.write` as
+  `image/png` and that html (a JPEG there when the PNG passes 15 MB; halved in size until the PNG is under 60 MB, since
+  WebKit refuses over about 100 MB), called inside the copy event and never with `clipboardData.setData`, which WebKit
+  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Cut always uses the plain path.
   A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
   `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
   it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is
