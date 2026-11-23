@@ -259,9 +259,11 @@ test('a saved margin note on a formula, or on part of one, marks each drawn row 
       const lines = [...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => el.getBoundingClientRect());
       const blot = document.querySelector('.margin-mark')?.getBoundingClientRect();
       const ends = [...document.querySelectorAll('#doc .katex-display .katex-html *')].filter((el) => !el.children.length && el.textContent.trim()).map((el) => el.getBoundingClientRect());
-      return { rows: lines.length, stray: lines.some((r) => r.right > right + 4 || r.top > box.bottom + 12), covers: Boolean(blot && ends.some((r) => r.right > blot.left + 8 && r.left < blot.right - 8 && r.bottom > blot.top + 8 && r.top < blot.bottom - 8)) };
+      const tallest = Math.max(...[...document.querySelectorAll('.margin-ink path.squiggle[data-id="f1"]')].map((el) => parseFloat(getComputedStyle(el).strokeWidth)));
+      const fraction = document.querySelector('#doc .katex-display .katex-html .mfrac').getBoundingClientRect();
+      return { rows: lines.length, covered: tallest > 24 && tallest > fraction.height - 10, stray: lines.some((r) => r.right > right + 4 || r.top > box.bottom + 12), covers: Boolean(blot && ends.some((r) => r.right > blot.left + 8 && r.left < blot.right - 8 && r.bottom > blot.top + 8 && r.top < blot.bottom - 8)) };
     });
-    await expect.poll(marks).toEqual({ rows: 3, stray: false, covers: false });
+    await expect.poll(marks).toEqual({ rows: 3, covered: true, stray: false, covers: false });
   }
 });
 

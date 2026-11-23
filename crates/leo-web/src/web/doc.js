@@ -2075,13 +2075,13 @@
             if (node === range.endContainer) break;
           }
           const lines = [];
-          for (const { left, right, top, bottom, formula } of found.sort((a, b) => a.formula - b.formula || (a.formula ? b.right - b.left - a.right + a.left : a.top - b.top))) {
+          for (const { left, right, top, bottom, formula } of found.sort((a, b) => a.top - b.top)) {
             const line = lines.find((l) => (formula ? l.formula && Math.min(bottom, l.bottom) - Math.max(top, l.top) > 2 : (top + bottom) / 2 > l.top && (top + bottom) / 2 < l.bottom));
-            if (line && formula) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right) });
-            else if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
+            if (line) Object.assign(line, { left: Math.min(line.left, left), right: Math.max(line.right, right), top: Math.min(line.top, top), bottom: Math.max(line.bottom, bottom) });
             else lines.push({ left, right, top, bottom, formula });
           }
-          return lines.sort((a, b) => a.top - b.top).slice(0, 24);
+          lines.forEach((line, i) => { if (line.formula && lines[i - 1]?.formula) line.top = Math.max(line.top, lines[i - 1].bottom); });
+          return lines.slice(0, 24);
         };
         const found = boxes();
         if (found.length) return found;
