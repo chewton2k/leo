@@ -401,7 +401,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `![[file|400]]`, 16–4000 px). Nesting and list styles change only the page,
   never the file. A click or a double-click on a picture frames it and never opens its
   Markdown (2026-11-21, the user's call; Shift-click or a double-click beside it does). A
-  picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js); in a list or
+  picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js), and so is a formula, drawn or not (`markdown.mathSpans`, `.math`); in a list or
   checkbox item a click on the picture frames it like any other, and a click beside it, left
   or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
   call). Backspace or Delete on a framed picture removes it and leaves the caret in its place

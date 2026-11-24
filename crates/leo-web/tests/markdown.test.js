@@ -299,6 +299,20 @@ test('a [[Title]] link to another note opens it, with an optional label, and sta
   assert.doesNotMatch(render('![[pic.png]]'), /wiki-link/);
 });
 
+test('mathSpans finds exactly the formulas the renderer draws', () => {
+  const outer = (spans) => {
+    let end = 0;
+    return spans.sort((a, b) => a[0] - b[0]).filter(([from, to]) => from >= end && (end = to, true));
+  };
+  for (const line of ['Energy $E = mc^2$ here.', 'a $x$ and $$y$$ z', String.raw`cost \$5 and \$6 $x$`, 'price $5 and $6 ok', 'code `$a$` then $b$', String.raw`\(a\) and \[b\] and $c$`, '$a$$b$ x', String.raw`nested $a \(b\) c$ end`, '- [ ] todo $x_1$ [link $y$](u) $z$', 'no formula here', '$a$ `x` $b$ `y` $c$']) {
+    const spans = outer(md.mathSpans(line));
+    assert.equal(spans.length, (render(line).match(/class="math/g) || []).length, line);
+  }
+  assert.deepEqual(md.mathSpans('a $x$ b'), [[2, 5]]);
+  assert.deepEqual(md.mathSpans('a `$x$` b $y$'), [[10, 13]]);
+  assert.deepEqual(md.mathSpans(String.raw`\$5 and $x$`), [[8, 11]]);
+});
+
 test('math in LaTeX becomes slots the page draws, and prices stay prices', () => {
   assert.equal(render('Energy $E = mc^2$ here.'), '<p>Energy <span class="math" data-tex="E = mc^2">E = mc^2</span> here.</p>');
   assert.equal(render('It costs $5 and $10.'), '<p>It costs $5 and $10.</p>');

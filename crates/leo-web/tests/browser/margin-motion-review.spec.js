@@ -26,7 +26,7 @@ const on = (id, i, text) => ({ id, quote: PASSAGES[i], prefix: 'Before it, ', su
 
 const MODE_MARKUP = `<div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">{{pen}}</span><span id="margin-mode-label">When you ask</span>{{chevron}}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div>`;
 
-async function fixture(browser, run, { width = 1280, height = 800, layout = 'right', mode = 'ask', threads = [THREADS.short, THREADS.long], context = {}, source = SOURCE } = {}) {
+async function fixture(browser, run, { width = 1280, height = 800, layout = 'right', mode = 'ask', threads = [THREADS.short, THREADS.long], context = {}, source = SOURCE, katex: katexState = 'ok' } = {}) {
   const core = read('app/core.js');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
   const motion = core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('));
@@ -72,6 +72,7 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     }
     ${read('app/popup-menu.js')}
     ${read('app/margin-notes.js')}
+    ${read('app/math.js')}
     window.start=async()=>{
       app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
       const s={note:{id:'n1',version:'v1',title:'Test'},title:$('#title'),edit:{}};
@@ -83,9 +84,18 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     window.arrive=thread=>{marginPage.threads.push(thread);marginPage.arriving.add(thread.id);marginRedraw();};
     window.dots=id=>[...document.querySelectorAll('.margin-ink path.squiggle[data-id="'+id+'"]')].sort((a,b)=>a.dataset.line-b.dataset.line).map(p=>{const cs=getComputedStyle(p);const m=cs.clipPath.match(/inset\\(([^)]*)\\)/);let progress=1;if(m){const right=m[1].trim().split(/\\s+/)[1];progress=right.endsWith('%')?1-parseFloat(right)/100:1;}const width=parseFloat(cs.strokeWidth);const n=Math.floor(p.getTotalLength()/4)+1;const pts=[];for(let k=0;k<n&&pts.length<400;k++){const pt=p.getPointAtLength(Math.min(k*4,p.getTotalLength()));pts.push([+pt.x.toFixed(2),+pt.y.toFixed(2)]);}return {progress,width,d:p.getAttribute('d'),pts,clip:cs.clipPath,anim:cs.animationName};});
     window.start().catch(fail);`;
+  const held = [];
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(fixtureScript); }
     if (req.url === '/style.css') { res.setHeader('Content-Type', 'text/css; charset=utf-8'); return res.end(css()); }
+    const katex = req.url.match(/^\/vendor\/katex-0\.16\.11\/([\w./-]+)$/);
+    if (req.url === '/release') { held.splice(0).forEach((send) => send()); return res.end('ok'); }
+    if (katex) {
+      const send = () => { res.setHeader('Content-Type', { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2' }[katex[1].split('.').pop()]); res.end(fs.readFileSync(path.join(web, 'vendor/katex', katex[1]))); };
+      if (katexState === 'missing') { res.statusCode = 404; return res.end(); }
+      if (katexState === 'held' && katex[1] === 'katex.min.js') return held.push(send);
+      return send();
+    }
     const lib = req.url.match(/^\/lib\/(.+)$/);
     if (lib) { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(read(lib[1])); }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1608,5 +1618,234 @@ test.describe('quick actions', () => {
       await expect(page.locator('.margin-note[data-id="draft"]')).toHaveAttribute('data-open', '');
       await expect(menuOf(page, 'draft')).toBeHidden();
     }, { threads: [THREADS.short] });
+  });
+});
+
+test.describe('marks around formulas', () => {
+  const F = '\ufffc';
+  const tex = String.raw;
+  const paragraphs = [
+    {
+      source: tex`The area under the curve is $\int_0^1 x^2\,dx = \frac13$ and the sum of the squares is finite.`,
+      quotes: [
+        ['the sum of the squares'],
+        ['area under the curve'],
+        [tex`curve is $\int_0^1 x^2\,dx = \frac13$ and the sum`, `curve is ${F} and the sum`],
+        [tex`$\int_0^1 x^2\,dx = \frac13$`, F],
+        [tex`\frac13`, F, 'inside'],
+        [tex`x^2\,dx = \frac13$ and the sum`, `${F} and the sum`, 'inside'],
+        [tex`curve is $\int_0^1`, `curve is ${F}`, 'inside'],
+      ],
+      carets: ['finite', 'sum'],
+    },
+    {
+      source: tex`Both $a_1$ and $b^2$ then $c_3+d_4$ end near the final word zeta.`,
+      quotes: [['and'], ['then'], ['end near the final word zeta'], [tex`$b^2$ then $c_3+d_4$ end`, `${F} then ${F} end`], [tex`Both $a_1$`, `Both ${F}`]],
+      carets: ['zeta', 'then'],
+    },
+    { source: tex`- Item one has $E=mc^2$ then plain words kilo.`, quotes: [['then plain words kilo'], [tex`has $E=mc^2$ then`, `has ${F} then`]], carets: ['kilo'] },
+    { source: tex`3. Numbered $y_n$ then lima item.`, quotes: [['then lima item']], carets: ['lima'] },
+    { source: tex`## Heading with $\alpha_i$ then mike`, quotes: [['then mike'], [tex`with $\alpha_i$`, `with ${F}`]], carets: ['mike'] },
+    { source: tex`- [ ] Todo $x_1$ then november`, quotes: [['then november']], carets: ['november'] },
+    { source: tex`Display $$\sum_{k=1}^n k$$ then oscar words here.`, quotes: [['then oscar words here'], [tex`$$\sum_{k=1}^n k$$`, F, 'display']], carets: ['oscar'] },
+    { source: tex`It costs \$5 and \$6 then $x_2$ and papa words.`, quotes: [['and papa words'], [tex`It costs \$5`], [tex`\$6 then $x_2$`, `\\$6 then ${F}`]], carets: ['papa'] },
+    { source: tex`See [the guide $z_1$ here](https://example.com/a) then ` + '`code $not$ here`' + tex` and $w_2$ quebec words.`, quotes: [['quebec words'], ['$not$ he'], [tex`and $w_2$ quebec`, `and ${F} quebec`], [tex`guide $z_1$ here`, `guide ${F} here`]], carets: ['quebec'] },
+    { source: tex`Bad $\badmacro{x}$ then sierra words.`, quotes: [['then sierra words']], carets: ['sierra'] },
+    { source: '$$\n\\sum_{k=1}^n k^2 = \\frac{n(n+1)}{2}\n$$', quotes: [[tex`\sum_{k=1}^n k^2`, F, 'display']] },
+    { source: tex`After the display, $r_1$ then uniform words.`, quotes: [['then uniform words']], carets: ['uniform'] },
+    { source: tex`> Quoted $q_1$ then tango words.`, quotes: [['then tango words', 'then tango words', 'block']] },
+  ];
+  const source = paragraphs.map((p) => p.source).join('\n\n');
+  let place = 0;
+  const cases = [];
+  for (const p of paragraphs) {
+    place = source.indexOf(p.source, place);
+    for (const [quote, shown = quote, kind = ''] of p.quotes) {
+      const at = source.indexOf(quote, place);
+      cases.push({ id: `q${cases.length}`, quote, shown, kind, thread: { id: `q${cases.length}`, quote, prefix: source.slice(Math.max(0, at - 12), at), suffix: source.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] } });
+    }
+  }
+  const carets = paragraphs.flatMap((p) => p.carets || []);
+
+  const check = (page) => page.evaluate(({ list }) => {
+    const out = [];
+    const fail = (c, what, detail) => out.push(`${c.id} ${JSON.stringify(c.quote)} ${what} ${JSON.stringify(detail)}`);
+    const unitsOf = (blk) => {
+      const units = [];
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if (child.nodeType === 3) for (let i = 0; i < child.data.length; i++) units.push({ node: child, i, ch: child.data[i] });
+          else if (child.matches?.('.math')) units.push({ math: child, ch: '\ufffc' });
+          else if (child.nodeType === 1 && !child.matches('.margin-slot')) walk(child);
+        }
+      };
+      walk(blk);
+      return units;
+    };
+    const boxOf = (u) => {
+      if (u.math) return (u.math.querySelector('.katex-html') || u.math).getBoundingClientRect();
+      const r = document.createRange();
+      r.setStart(u.node, u.i);
+      r.setEnd(u.node, u.i + 1);
+      return r.getClientRects()[0] || r.getBoundingClientRect();
+    };
+    const doc = session.doc;
+    for (const slot of document.querySelectorAll('.margin-slot')) slot.remove();
+    for (const c of list) {
+      const t = marginPage.threads.find((x) => x.id === c.id);
+      const at = leoMargin.find(doc.source(), t);
+      if (!at) {
+        fail(c, 'not found', null);
+        continue;
+      }
+      const blk = doc.blockAt(at.from);
+      const rects = doc.spanRects(at.from, at.to);
+      if (!rects.length) {
+        fail(c, 'no rects', null);
+        continue;
+      }
+      if (c.kind === 'block' || c.kind === 'display') {
+        const frame = (c.kind === 'display' ? blk.querySelector('.katex-display, .math-block') : blk).getBoundingClientRect();
+        if (rects.some((r) => r.left < frame.left - 4 || r.right > frame.right + 4 || r.top < frame.top - 4 || r.bottom > frame.bottom + 4)) fail(c, 'outside its block', rects.map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+        continue;
+      }
+      const units = unitsOf(blk);
+      const text = units.map((u) => u.ch).join('');
+      const start = text.indexOf(c.shown);
+      if (start < 0) {
+        fail(c, 'shown text not in the block', text);
+        continue;
+      }
+      const first = boxOf(units[start]);
+      const last = boxOf(units[start + c.shown.length - 1]);
+      const near = (a, b) => Math.abs(a - b) <= 4;
+      const level = (r, box) => r.bottom > box.top && r.top < box.bottom;
+      const a = rects[0];
+      const z = rects[rects.length - 1];
+      if (!near(a.left, first.left) || !level(a, first)) fail(c, 'starts wrong', { got: [a.left, a.top].map(Math.round), want: [first.left, first.top].map(Math.round) });
+      if (!near(z.right, last.right) || !level(z, last)) fail(c, 'ends wrong', { got: [z.right, z.top].map(Math.round), want: [last.right, last.top].map(Math.round) });
+      const point = doc.domPoint(at.to);
+      const kids = point.node.childNodes;
+      let x;
+      if (point.node.nodeType === 3) {
+        const r = document.createRange();
+        if (point.offset > 0) {
+          r.setStart(point.node, point.offset - 1);
+          r.setEnd(point.node, point.offset);
+          x = r.getBoundingClientRect().right;
+        } else {
+          r.setStart(point.node, 0);
+          r.setEnd(point.node, 1);
+          x = r.getBoundingClientRect().left;
+        }
+      } else x = point.offset > 0 ? kids[point.offset - 1].getBoundingClientRect().right : kids[point.offset]?.getBoundingClientRect().left;
+      if (!near(x, last.right)) fail(c, 'slot point wrong', { got: Math.round(x), want: Math.round(last.right) });
+      if (c.kind !== 'inside') {
+        const sel = getSelection();
+        const open = (u, after) => (u.math ? [u.math.parentNode, [...u.math.parentNode.childNodes].indexOf(u.math) + (after ? 1 : 0)] : [u.node, u.i + (after ? 1 : 0)]);
+        const [an, ao] = open(units[start], false);
+        const [fn, fo] = open(units[start + c.shown.length - 1], true);
+        sel.setBaseAndExtent(an, ao, fn, fo);
+        const got = doc.selection();
+        if (!got || got.text !== c.quote) fail(c, 'selection reads wrong', got && got.text);
+        sel.removeAllRanges();
+      }
+    }
+    return out;
+  }, { list: cases });
+
+  const click = async (page, token) => {
+    const spot = await page.evaluate((word) => {
+      const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.math, .margin-slot') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.data.search(new RegExp(`\\b${word}\\b`));
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + 1);
+        const box = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + box.top - 300, behavior: 'instant' });
+        const again = r.getBoundingClientRect();
+        return { x: again.left + 1, y: (again.top + again.bottom) / 2 };
+      }
+      return null;
+    }, token);
+    const seen = await page.evaluate(([x, y]) => { const r = document.caretRangeFromPoint(x, y); return `${JSON.stringify(r.startContainer.data)}@${r.startOffset}`; }, [spot.x, spot.y]);
+    await page.mouse.click(spot.x, spot.y);
+    await expect(page.locator('#doc .line-edit')).toBeFocused();
+    const got = await page.evaluate(() => ({ at: document.querySelector('#doc .line-edit').selectionStart, value: document.querySelector('#doc .line-edit').value }));
+    await page.evaluate(() => session.doc.stop());
+    await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+    return got.at === got.value.indexOf(token) ? null : `caret on ${token} is at ${got.at}, wanted ${got.value.indexOf(token)} in ${JSON.stringify(got.value)} click at ${seen}`;
+  };
+
+  const drawn = (page, state) => page.waitForFunction((want) => [...document.querySelectorAll('#doc .math')].every((m) => m.dataset.drawn === want), state).then(() => page.evaluate(() => document.fonts.ready)).then(() => page.waitForTimeout(500));
+  const options = (katex) => ({ layout: 'marks', width: 1280, height: 1800, source, threads: cases.map((c) => c.thread), katex });
+
+  for (const [state, katex, want] of [['drawn', 'ok', 'yes'], ['not drawn yet', 'held', undefined], ['failed to draw', 'missing', 'failed']]) {
+    test(`a passage is marked, selected and clicked where it reads with formulas ${state}`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        if (want) await drawn(page, want);
+        else await page.waitForTimeout(500);
+        expect(await check(page)).toEqual([]);
+        await page.addStyleTag({ content: '.margin-ink *, .margin-mark { pointer-events: none !important; } .margin-slot { display: none !important; }' });
+        const wrong = [];
+        for (const token of carets) wrong.push(await click(page, token));
+        expect(wrong.filter(Boolean)).toEqual([]);
+        const spot = await page.evaluate(() => {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          const box = document.querySelector('#doc .math').getBoundingClientRect();
+          return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
+        });
+        await page.mouse.click(spot.x, spot.y);
+        await expect(page.locator('#doc .line-edit')).toBeFocused();
+        const [at, open, shut] = await page.evaluate(() => {
+          const area = document.querySelector('#doc .line-edit');
+          return [area.selectionStart, area.value.indexOf('$'), area.value.lastIndexOf('$', area.value.indexOf(' and the sum')) + 1];
+        });
+        expect(at >= open && at <= shut).toBe(true);
+        await page.evaluate(() => session.doc.stop());
+        if (!want) {
+          await page.evaluate(() => fetch('/release'));
+          await drawn(page, 'yes');
+          expect(await check(page)).toEqual([]);
+        }
+      }, options(katex));
+    });
+  }
+
+  test('the wash, underline and blot of a passage after a formula sit on its words, not on the formula', async ({ browser }) => {
+    const text = tex`The area under the curve is $\int_0^1 x^2\,dx = \frac13$ and the sum of the squares is finite.`;
+    const quote = 'the sum of the squares';
+    const at = text.indexOf(quote);
+    const thread = { id: 't1', quote, prefix: text.slice(at - 12, at), suffix: text.slice(at + quote.length), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
+    await fixture(browser, async (page) => {
+      await drawn(page, 'yes');
+      await expect.poll(() => page.locator('.margin-slot[data-id="t1"]').count()).toBe(1);
+      if (process.env.SHOTS) await page.screenshot({ path: path.join(process.env.SHOTS, `${test.info().project.name}.png`), clip: { x: 300, y: 100, width: 900, height: 120 } });
+      const got = await page.evaluate(() => {
+        const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.math') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+        const range = document.createRange();
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const i = node.data.indexOf('the sum of the squares');
+          if (i < 0) continue;
+          range.setStart(node, i);
+          range.setEnd(node, i + 22);
+          break;
+        }
+        const words = range.getBoundingClientRect();
+        const box = (el) => el.getBoundingClientRect();
+        const paths = [...document.querySelectorAll('.margin-ink path.wash[data-id="t1"], .margin-ink path.solid[data-id="t1"]')].map(box);
+        const slot = box(document.querySelector('.margin-slot[data-id="t1"]'));
+        const formula = box(document.querySelector('#doc .katex-html'));
+        return { words: { left: words.left, right: words.right }, paths: paths.map((r) => ({ left: r.left, right: r.right })), slot: slot.left, formula: { left: formula.left, right: formula.right } };
+      });
+      expect(got.paths.length).toBeGreaterThan(0);
+      for (const path of got.paths) {
+        expect(Math.abs(path.left - got.words.left)).toBeLessThanOrEqual(4);
+        expect(Math.abs(path.right - got.words.right)).toBeLessThanOrEqual(4);
+      }
+      expect(Math.abs(got.slot - got.words.right)).toBeLessThanOrEqual(4);
+    }, { layout: 'marks', source: text, threads: [thread] });
   });
 });

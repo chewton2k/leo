@@ -952,7 +952,7 @@
       else delete area.dataset.head;
     }
 
-    function pointFor(at) {
+    function pointFor(at, before = false) {
       if (editing && editing.selectionText) {
         const base = lineStart(editing.start) + editing.prefix.length;
         if (at >= base && at <= base + editing.area.value.length) return { node: editing.selectionText.firstChild, offset: at - base };
@@ -968,7 +968,7 @@
       const texts = [];
       const walker = document.createTreeWalker(blk, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT);
       let node;
-      while ((node = walker.nextNode())) if (node.nodeType === 3 || node.matches('img.note-img')) texts.push(node);
+      while ((node = walker.nextNode())) if (node.nodeType === 3 ? !node.parentElement.closest('.math') : node.matches('img.note-img, .math')) texts.push(node);
       const whole = { node: blk, offset: inside > 0 ? blk.childNodes.length : 0 };
       if (block.kind !== 'line' || !raw.trim() || !texts.length) return whole;
       const total = texts.reduce((n, text) => n + (text.nodeType === 1 ? 1 : text.data.replace(/\u200b/g, '').length), 0);
@@ -983,7 +983,7 @@
       let seen = 0;
       for (const text of texts) {
         if (text.nodeType === 1) {
-          if (seen >= low) return beside(text, 0);
+          if (seen >= low || (before && seen + 1 === low && text.matches('.math') && ed.rawOffset(raw, 'x'.repeat(low), isItem) > inside)) return beside(text, 0);
           seen++;
           continue;
         }
@@ -1004,16 +1004,21 @@
       return { node: img.parentNode, offset: [...img.parentNode.childNodes].indexOf(img) + after };
     }
 
-    function shownBefore(blk, range) {
+    function shownBefore(blk, range, start = false) {
       let pictures = 0;
       for (const img of blk.querySelectorAll('img.note-img')) if (range.intersectsNode(img)) pictures++;
-      return range.toString().replace(/\u200b/g, '') + '\ufffc'.repeat(pictures);
+      const part = range.cloneContents();
+      const formulas = [...part.querySelectorAll('.math')];
+      const end = range.endContainer;
+      if (start && (end.nodeType === 1 ? end : end.parentElement).closest('.math')) formulas.pop()?.remove();
+      for (const formula of formulas) formula.replaceWith('\ufffc');
+      return part.textContent.replace(/\u200b/g, '') + '\ufffc'.repeat(pictures);
     }
 
     function selectSpan(from, to) {
       const selection = root.getSelection ? root.getSelection() : null;
       if (!selection) return;
-      const a = pointFor(from);
+      const a = pointFor(from, true);
       const b = pointFor(to);
       selection.setBaseAndExtent(a.node, a.offset, b.node, b.offset);
     }
@@ -1104,7 +1109,7 @@
         range.setStart(blk, 0);
         try {
           range.setEnd(node, offset);
-          inside = ed.rawOffset(raw, shownBefore(blk, range), ed.listed(lines, start));
+          inside = ed.rawOffset(raw, shownBefore(blk, range, side === 'start'), ed.listed(lines, start));
         } catch (e) {
           inside = side === 'start' ? 0 : raw.length;
         }
@@ -2179,7 +2184,7 @@
           const { area } = editing;
           if (from >= base && from <= base + area.value.length) return caretBox(area, from - base, Math.min(to - base, area.value.length)).rects;
         }
-        const a = pointFor(from);
+        const a = pointFor(from, true);
         const b = pointFor(to);
         const range = document.createRange();
         try {
