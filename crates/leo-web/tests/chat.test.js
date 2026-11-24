@@ -149,6 +149,32 @@ test('past chats are grouped the way chat apps group them', () => {
   assert.deepEqual(mixed.flatMap((x) => x.chats).map((x) => x.id), ['p1', 'p2', 'c0', 'off']);
 });
 
+test('chats about the open note sit in their own group after the pinned ones', () => {
+  const now = new Date(2026, 9, 7, 15, 0);
+  const chat = (id, days, extra = {}) => ({ id, title: 't', updated_at: new Date(2026, 9, 7 - days, 10).toISOString(), ...extra });
+  const list = [chat('a', 0), chat('b', 1, { notes: ['n1', 'n2'] }), chat('p', 2, { notes: ['n1'], pinned: true }), chat('c', 40, { notes: ['n1'] }), chat('d', 3, { notes: ['n2'] }), chat('ghost', 0, { ghost: true })];
+  const names = (g) => g.map((x) => x.name);
+  const here = C.groups(list, now, 'n1');
+  assert.deepEqual(here[0].chats.map((x) => x.id), ['p']);
+  assert.deepEqual(here[1].chats.map((x) => x.id), ['b', 'c']);
+  assert.deepEqual(here[2].chats.map((x) => x.id), ['a', 'ghost']);
+  assert.deepEqual(here.flatMap((x) => x.chats).map((x) => x.id), ['p', 'b', 'c', 'a', 'ghost', 'd']);
+  assert.deepEqual(names(here), ['Pinned', 'This note', 'Today', 'Previous 7 days']);
+  assert.deepEqual(names(C.groups(list, now, 'n2')), ['Pinned', 'This note', 'Today', 'Older']);
+  assert.deepEqual(names(C.groups(list, now)), ['Pinned', 'Today', 'Yesterday', 'Previous 7 days', 'Older']);
+  assert.deepEqual(names(C.groups(list, now, '')), names(C.groups(list, now)));
+  assert.deepEqual(names(C.groups(list, now, 'gone')), names(C.groups(list, now)));
+  assert.deepEqual(names(C.groups([{ ...chat('x', 0), notes: 'n1' }, { ...chat('y', 0), notes: null }], now, 'n1')), ['Today']);
+});
+
+test('the open note a question was asked on does not change what any model is sent', () => {
+  const plain = [{ role: 'user', text: 'hi', refs: [], docs: [] }, { role: 'assistant', text: 'hello' }, { role: 'user', text: 'again', refs: [], docs: [] }];
+  const noted = plain.map((m) => (m.role === 'user' ? { ...m, note: 'n1' } : m));
+  assert.deepEqual(C.modelHistory(noted), C.modelHistory(plain));
+  assert.deepEqual(C.threadRefs(noted), C.threadRefs(plain));
+  assert.equal(C.historyText(noted[0]), C.historyText(plain[0]));
+});
+
 test('a chat id is safe in a file name even without randomUUID', () => {
   const saved = globalThis.crypto;
   Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true });

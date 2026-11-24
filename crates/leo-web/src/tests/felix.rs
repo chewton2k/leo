@@ -4410,6 +4410,42 @@ fn pinning_a_chat_is_kept_listed_and_refused_for_an_unknown_id() {
 }
 
 #[test]
+fn a_saved_chat_and_its_listing_carry_the_notes_it_was_about() {
+    let (state, _d, _) = state_with(&[]);
+    let body: crate::chats::Saving = serde_json::from_value(serde_json::json!({
+        "messages": [{ "role": "user", "text": "hello", "note": "n-open", "refs": [{ "id": "n-ref", "title": "R" }] }],
+    }))
+    .unwrap();
+    let put = run(crate::routes::felix::put_chat(
+        State(state.clone()),
+        Path("chat-note-route1".into()),
+        Json(body),
+    ));
+    assert_eq!(
+        json_of(put)["notes"],
+        serde_json::json!(["n-open", "n-ref"])
+    );
+    let list = |q: Option<&str>| {
+        json_of(run(crate::routes::felix::list_chats(
+            State(state.clone()),
+            axum::extract::Query(crate::routes::felix::ChatQuery {
+                q: q.map(Into::into),
+            }),
+        )))
+    };
+    assert_eq!(
+        list(None)[0]["notes"],
+        serde_json::json!(["n-open", "n-ref"])
+    );
+    assert_eq!(
+        list(Some("hello"))[0]["notes"],
+        serde_json::json!(["n-open", "n-ref"])
+    );
+    let (_, plain) = put_saved(&state, "chat-note-route2", false);
+    assert_eq!(plain["notes"], serde_json::json!([]));
+}
+
+#[test]
 fn a_save_that_says_the_chat_existed_creates_nothing_when_leo_no_longer_has_it() {
     let (state, _d, _) = state_with(&[]);
     let (status, _) = put_saved(&state, "chat-gone-0001", true);

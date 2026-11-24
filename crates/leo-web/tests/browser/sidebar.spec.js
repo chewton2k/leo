@@ -901,6 +901,80 @@ test('chats pin into their own group, keep the pin through a refresh, roll back 
   });
 });
 
+test('chats about the open note gather in This note, follow the open note and keep scroll and focus', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page=await context.newPage();
+    const now=Date.now(), at=minutes=>new Date(now-minutes*60000).toISOString();
+    const chat=(id,title,minutes,notes,pinned=false)=>({id,title,named:true,about:'',count:2,updated_at:at(minutes),pinned,notes});
+    const chats=[
+      chat('chat-here-0001','Alpha',1,['n1']),
+      chat('chat-here-0002','Delta',2,[]),
+      chat('chat-here-0003','Epsilon',3,['n2']),
+      chat('chat-here-0004','Gamma',5,['n1'],true),
+      ...Array.from({length:30},(_,i)=>chat('chat-fill-'+String(i).padStart(4,'0'),'Filler '+i,10+i,[])),
+      chat('chat-here-0005','Beta',60*24*40,['n1','n2'])
+    ];
+    await page.route('**/api/chats**',async route=>{
+      const found=new URL(route.request().url());
+      if(route.request().method()==='GET'&&found.pathname==='/api/chats') {
+        const q=found.searchParams.get('q');
+        return route.fulfill({contentType:'application/json',body:JSON.stringify(q?chats.filter(c=>c.title.toLowerCase().includes(q.toLowerCase())):chats)});
+      }
+      return route.fallback();
+    });
+    await page.setViewportSize({width:1600,height:900});
+    await page.goto(url);
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.evaluate(()=>{
+      window.fixtureChat=window.leoChat.create({render:text=>'<p>'+text+'</p>',escape:text=>String(text).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])),icons:ICON,notify:()=>{}});
+      fixtureChat.toggle(true);
+    });
+    await page.locator('.chat-history-toggle').click();
+    const list=page.locator('#chat-history-list'), row=title=>list.locator('.chat-history-row',{hasText:title});
+    const groups=()=>list.locator('.chat-history-group').allTextContents();
+    const titles=()=>list.locator('.chat-history-title').allTextContents();
+    await expect(row('Gamma')).toBeVisible();
+    expect(await groups()).toEqual(['Pinned','Today','Older']);
+
+    await page.evaluate(()=>fixtureChat.setContext({id:'n1',title:'One'}));
+    await expect.poll(groups).toEqual(['Pinned','This note','Today']);
+    expect((await titles()).slice(0,5)).toEqual(['Gamma','Alpha','Beta','Delta','Epsilon']);
+    await expect(row('Gamma')).toHaveCount(1);
+
+    await list.evaluate(el=>{el.scrollTop=150;});
+    const before=await list.evaluate(el=>el.scrollTop);
+    expect(before).toBeGreaterThan(0);
+    await list.locator('.chat-history-item',{hasText:'Delta'}).focus();
+    await page.evaluate(()=>fixtureChat.setContext({id:'n2',title:'Two'}));
+    await expect.poll(async()=>(await titles()).slice(0,5)).toEqual(['Gamma','Epsilon','Beta','Alpha','Delta']);
+    expect(await groups()).toEqual(['Pinned','This note','Today']);
+    expect(await list.evaluate(el=>el.scrollTop)).toBe(before);
+    await expect(list.locator('.chat-history-item',{hasText:'Delta'})).toBeFocused();
+
+    await page.evaluate(()=>fixtureChat.setContext({id:'n3',title:'Three'}));
+    await expect.poll(groups).toEqual(['Pinned','Today','Older']);
+    await page.evaluate(()=>fixtureChat.setContext({id:'n1',title:'One'}));
+    await expect.poll(groups).toEqual(['Pinned','This note','Today']);
+    await page.evaluate(()=>fixtureChat.setContext(null));
+    await expect.poll(groups).toEqual(['Pinned','Today','Older']);
+
+    await page.evaluate(()=>fixtureChat.setContext({id:'n1',title:'One'}));
+    await expect.poll(groups).toEqual(['Pinned','This note','Today']);
+    await page.locator('#chat-history-search').fill('a');
+    await expect(list.locator('.chat-history-group')).toHaveCount(0);
+    await page.evaluate(()=>fixtureChat.setContext({id:'n2',title:'Two'}));
+    await page.locator('#chat-history-search').fill('');
+    await expect.poll(groups).toEqual(['Pinned','This note','Today']);
+    expect((await titles()).slice(0,4)).toEqual(['Gamma','Epsilon','Beta','Alpha']);
+
+    await page.locator('.chat-history-toggle').click();
+    await expect(page.locator('.chat')).not.toHaveClass(/with-history/);
+    await page.evaluate(()=>fixtureChat.setContext({id:'n1',title:'One'}));
+    await page.locator('.chat-history-toggle').click();
+    await expect.poll(async()=>(await titles()).slice(0,4)).toEqual(['Gamma','Alpha','Beta','Delta']);
+  });
+});
+
 test('a narrow Felix panel lays Chats over the chat without saving it, and slims the chat column', async ({ browser }) => {
   await sidebarFixture(browser,async(context,url)=>{
     const page=await context.newPage();

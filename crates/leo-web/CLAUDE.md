@@ -751,6 +751,10 @@ read (root CLAUDE.md, 2026-11-17).
 - Pinned chats (2026-11-23, the user's call): `chats.pinned` (an added column, `VERSION` stays 7),
   PATCH `/api/chats/{id}` `{pinned}` (204, 404). They head the history in a Pinned group, newest first;
   a pin never moves `updated_at`, and Keeping's Chats choice and its count skip pinned chats.
+- With a note open, a This note group follows Pinned (2026-11-24, the user's call): chats with a question
+  asked on that note (`note` on the user message: the note Felix was reading), with it attached (`refs`) or about a
+  passage in it (`selection`); never a search source. `chats.notes` is a JSON list of ids, added to by each
+  save and filled once from stored messages when the column is first added; `note` reaches no prompt or hash.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
 - Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed

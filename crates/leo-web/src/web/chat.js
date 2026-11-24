@@ -821,14 +821,14 @@
     return { first: mark.first, saved: count, held: messages.map((m) => JSON.stringify(m)) };
   }
 
-  function groups(list, now = new Date()) {
+  function groups(list, now = new Date(), note = '') {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const day = 86400000;
-    const order = ['Pinned', 'Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
+    const order = ['Pinned', 'This note', 'Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
     const out = new Map(order.map((name) => [name, []]));
     for (const chat of list) {
       const t = new Date(chat.updated_at).getTime();
-      const name = chat.pinned ? 'Pinned' : t >= start ? 'Today' : t >= start - day ? 'Yesterday' : t >= start - 7 * day ? 'Previous 7 days' : t >= start - 30 * day ? 'Previous 30 days' : 'Older';
+      const name = chat.pinned ? 'Pinned' : note && Array.isArray(chat.notes) && chat.notes.includes(note) ? 'This note' : t >= start ? 'Today' : t >= start - day ? 'Yesterday' : t >= start - 7 * day ? 'Previous 7 days' : t >= start - 30 * day ? 'Previous 30 days' : 'Older';
       out.get(name).push(chat);
     }
     return order.filter((name) => out.get(name).length).map((name) => ({ name, chats: out.get(name) }));
@@ -1272,6 +1272,7 @@
           const on = sidebarOpen();
           const before = panel.classList.contains('with-history');
           syncSidebar(on);
+          if (on && !before && state.chats && state.listed !== openNote()) drawChats();
           if (on && !before && !state.chats) loadChats();
         }
         syncSidebar(panel.classList.contains('with-history'));
@@ -1325,6 +1326,7 @@
 
     function showSidebar(on) {
       state.sidebar = on;
+      if (on && state.chats && state.listed !== openNote()) drawChats();
       if (on) root.leoMotion?.cascade($('#chat-history-list'));
       if (wide() && !sourceNarrow()) {
         try {
@@ -1558,8 +1560,13 @@
       if (turn === findTurn) drawChats();
     }
 
+    function openNote() {
+      return (state.context && state.context.id) || '';
+    }
+
     function drawChats() {
       drawTitle();
+      state.listed = openNote();
       const box = $('#chat-history-list');
       if (!box) return;
       if (!state.chats) {
@@ -1581,11 +1588,21 @@
         box.innerHTML = `<div class="chat-history-none">${drawings.chats || ''}Your conversations with Felix are kept here, on this computer.</div>`;
         return;
       }
-      box.innerHTML = groups(list)
+      box.innerHTML = groups(list, undefined, openNote())
         .map((g) => `<div class="chat-history-group">${escape(g.name)}</div>${g.chats
           .map((c) => chatRow(c))
           .join('')}`)
         .join('');
+    }
+
+    function drawChatsKept() {
+      const box = $('#chat-history-list');
+      const at = box.scrollTop;
+      const held = box.contains(document.activeElement) && document.activeElement.dataset.chat ? document.activeElement.dataset : null;
+      const kept = held && { chat: held.chat, id: held.id };
+      drawChats();
+      box.scrollTop = at;
+      if (kept) [...box.querySelectorAll('[data-chat]')].find((el) => el.dataset.chat === kept.chat && el.dataset.id === kept.id)?.focus({ preventScroll: true });
     }
 
     function chatRow(c) {
@@ -2994,7 +3011,7 @@
         state.selection = null;
         drawRefs();
       }
-      const asked = { role: 'user', text: question, refs: attached, docs: [], files: [], cards: going.map(cardOf), ...(passage ? { selection: passage } : {}), ...(extra.say ? { say: extra.say } : {}), ...(extra.quiz ? { quiz: extra.quiz } : {}), ...(extra.next ? { next: true } : {}) };
+      const asked = { role: 'user', text: question, refs: attached, docs: [], files: [], cards: going.map(cardOf), ...(ctx ? { note: ctx } : {}), ...(passage ? { selection: passage } : {}), ...(extra.say ? { say: extra.say } : {}), ...(extra.quiz ? { quiz: extra.quiz } : {}), ...(extra.next ? { next: true } : {}) };
       const settle = (i, doc) => {
         if (!doc) {
           asked.cards[i] = null;
@@ -3643,7 +3660,9 @@
       setContext(ctx) {
         const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '', recorded: Boolean(ctx.recorded) } : null;
         if ((next && next.id) === (state.context && state.context.id) && (!next || (next.title === state.context.title && next.recorded === state.context.recorded))) return;
+        const was = openNote();
         state.context = next;
+        if (state.chats && !state.found && state.open && panel.classList.contains('with-history') && openNote() !== was) drawChatsKept();
         if (state.open) {
           drawContext();
           if (!state.messages.length) draw();

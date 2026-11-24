@@ -744,6 +744,9 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     add_column(&tx, "dictations", "original", "TEXT")?;
     add_column(&tx, "chats", "rows", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "chats", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
+    if add_column(&tx, "chats", "notes", "TEXT NOT NULL DEFAULT '[]'")? {
+        crate::chats::fill_notes(&tx)?;
+    }
     add_column(&tx, "chat_docs", "chars", "INTEGER")?;
     add_column(&tx, "chat_docs", "bytes", "INTEGER")?;
     add_column(&tx, "chat_docs", "excerpt", "TEXT")?;
@@ -777,7 +780,7 @@ fn add_column(
     table: &str,
     column: &str,
     definition: &str,
-) -> rusqlite::Result<()> {
+) -> rusqlite::Result<bool> {
     let present: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
         [table, column],
@@ -788,7 +791,7 @@ fn add_column(
             "ALTER TABLE {table} ADD COLUMN {column} {definition};"
         ))?;
     }
-    Ok(())
+    Ok(!present)
 }
 
 const MOST_OPEN: usize = 32;
@@ -1521,6 +1524,93 @@ mod chat_pins {
         let chats = dir.path().join("chats");
         assert!(crate::chats::set_pinned(&chats, "chat-pin-000001", true));
         assert!(crate::chats::list(&chats)[0].pinned);
+    }
+}
+
+#[cfg(test)]
+mod chat_notes {
+    use super::*;
+
+    fn chat(c: &Connection, id: &str, rows: bool, messages: &str) {
+        c.execute(
+            "INSERT INTO chats (id, title, mode, refs, messages, named, about, memory, count, created_at, updated_at, rows)
+             VALUES (?1, 'Heaps', 'chat', '[]', ?2, 1, '', NULL, 0, '2026-11-01T00:00:00.000000Z', '2026-11-02T00:00:00.000000Z', ?3)",
+            rusqlite::params![id, messages, rows],
+        )
+        .unwrap();
+    }
+
+    fn row(c: &Connection, id: &str, n: i64, message: &str) {
+        c.execute(
+            "INSERT INTO chat_messages (chat, n, message) VALUES (?1, ?2, ?3)",
+            rusqlite::params![id, n, message],
+        )
+        .unwrap();
+    }
+
+    fn notes(db: &Db, id: &str) -> String {
+        db.with(|c| c.query_row("SELECT notes FROM chats WHERE id = ?1", [id], |r| r.get(0)))
+            .unwrap()
+    }
+
+    #[test]
+    fn existing_chats_are_filled_once_from_both_storage_forms() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        drop(Db::open(&path).unwrap());
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch("ALTER TABLE chats DROP COLUMN notes;")
+            .unwrap();
+        chat(&old, "chat-rows-0001", true, "[]");
+        row(
+            &old,
+            "chat-rows-0001",
+            0,
+            r#"{"role":"user","text":"a","refs":[{"id":"n2","title":"T"},{"id":"n1","title":"T"}]}"#,
+        );
+        row(&old, "chat-rows-0001", 1, "{not json");
+        row(
+            &old,
+            "chat-rows-0001",
+            2,
+            r#"{"role":"assistant","text":"b","refs":[{"id":"n-no"}]}"#,
+        );
+        row(
+            &old,
+            "chat-rows-0001",
+            3,
+            r#"{"role":"user","text":"c","selection":{"note":"n3","text":"x"},"refs":[{"id":"n1"}]}"#,
+        );
+        row(
+            &old,
+            "chat-rows-0001",
+            4,
+            r#"{"role":"user","text":"d","refs":"nope","selection":"nope"}"#,
+        );
+        chat(
+            &old,
+            "chat-older-001",
+            false,
+            r#"[{"role":"user","text":"a","refs":[{"id":"n9"}]},"stray",{"role":"user","selection":{"note":"n8"}}]"#,
+        );
+        chat(&old, "chat-older-002", false, "{broken");
+        chat(&old, "chat-plain-001", true, "[]");
+        drop(old);
+        let db = Db::open(&path).unwrap();
+        assert_eq!(notes(&db, "chat-rows-0001"), r#"["n1","n2","n3"]"#);
+        assert_eq!(notes(&db, "chat-older-001"), r#"["n8","n9"]"#);
+        assert_eq!(notes(&db, "chat-older-002"), "[]");
+        assert_eq!(notes(&db, "chat-plain-001"), "[]");
+        db.with(|c| c.execute("UPDATE chats SET notes = '[\"kept\"]'", []))
+            .unwrap();
+        drop(db);
+        let db = Db::open(&path).unwrap();
+        assert_eq!(notes(&db, "chat-rows-0001"), r#"["kept"]"#);
+        assert_eq!(
+            db.with(|c| c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0)))
+                .unwrap(),
+            VERSION
+        );
     }
 }
 
