@@ -993,6 +993,10 @@ document.addEventListener('pointercancel', (e) => {
   else calRelease();
 });
 
+window.addEventListener('hashchange', () => {
+  if (cal.compose && !cal.compose.failed) cal.compose.finish().catch(fail);
+});
+
 window.addEventListener('blur', () => {
   if (cal.drag && !cal.drag.live && !cal.drag.source) calRelease();
 });

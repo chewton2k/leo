@@ -1203,6 +1203,10 @@ test('a right click on a card, or Shift+F10, opens its quick actions and never t
     const at = await menu.boundingBox();
     expect([Math.abs(at.x - box.x - 40), Math.abs(at.y - box.y - 12)].every(gap => gap < 3)).toBe(true);
     await expect(page.locator('#kanban-panel')).toBeHidden();
+    await expect.poll(() => menu.evaluate(el => el.getAnimations().length)).toBe(0);
+    const line = await menu.locator('hr').boundingBox();
+    await page.mouse.click(line.x + line.width / 2, line.y);
+    expect(await item('Open').evaluate(row => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))).toBe(false);
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
     await expect(card).toBeFocused();

@@ -87,6 +87,8 @@ function popupMenu(owner, { label, rows, point = null, find = '', page = null, m
     closePopup();
     if (row.run) Promise.resolve().then(row.run).catch(fail);
   });
+  box.addEventListener('mousedown', (e) => { if (e.target !== input) e.preventDefault(); });
+  box.addEventListener('contextmenu', (e) => e.preventDefault());
   box.addEventListener('keydown', (e) => {
     const buttons = [...list.querySelectorAll('button:not(:disabled)')];
     const stops = input ? [input, ...buttons] : buttons;

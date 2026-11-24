@@ -1105,6 +1105,19 @@ test('words typed for a task that could not be saved survive another click, anot
   });
 });
 
+test('a new task being typed is saved when the page is changed under it', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const at = await point(page, '2026-11-06', 14 * 60);
+    await page.mouse.click(at.x, at.y);
+    await page.locator('.cal-compose-input').fill('Left in a hurry');
+    await page.evaluate(() => { location.hash = '#/boards'; document.querySelector('#app').innerHTML = ''; });
+    await expect.poll(() => page.evaluate(() => window.db.tasks.some(t => t.title === 'Left in a hurry'))).toBe(true);
+    await settled(page);
+    expect(await page.evaluate(() => window.calls.filter(c => c.method === 'POST').length)).toBe(1);
+    expect(await page.evaluate(() => Boolean(cal.compose))).toBe(false);
+  });
+});
+
 test('a press interrupted by the window, a cancel, another pointer or a release elsewhere never leaves the calendar stuck', async ({ browser }) => {
   await calendarFixture(browser, async page => {
     const grip = await page.locator('.cal-item[data-id="task-study"] .cal-grip').boundingBox();
