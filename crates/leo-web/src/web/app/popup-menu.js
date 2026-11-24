@@ -87,6 +87,8 @@ function popupMenu(owner, { label, rows, point = null, find = '', page = null, m
     closePopup();
     if (row.run) Promise.resolve().then(row.run).catch(fail);
   });
+  box.addEventListener('mousedown', (e) => { if (e.target !== input) e.preventDefault(); });
+  box.addEventListener('contextmenu', (e) => e.preventDefault());
   box.addEventListener('keydown', (e) => {
     const buttons = [...list.querySelectorAll('button:not(:disabled)')];
     const stops = input ? [input, ...buttons] : buttons;
@@ -112,6 +114,11 @@ document.addEventListener('pointerdown', (event) => {
 document.addEventListener('click', (event) => {
   const kept = armed;
   armed = null;
+  if (popup?.point && popup.owner.contains(event.target)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
   if (kept && kept.owner.contains(event.target)) setTimeout(() => popup === kept && closePopup(false));
 }, true);
 addEventListener('hashchange', () => closePopup(false));

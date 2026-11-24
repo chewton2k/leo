@@ -181,11 +181,30 @@
     };
   }
 
+  const LATEX_DISPLAY = /\\\[([\s\S]+?)\\\]/g;
+  const LATEX_INLINE = /\\\(([\s\S]+?)\\\)/g;
+  const DOLLAR_DISPLAY = /(^|[^\\])\$\$([^$\n]+?)\$\$/g;
+  const DOLLAR_INLINE = /(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g;
+
   function closedMath(s, closer, pattern, change) {
     const last = s.lastIndexOf(closer);
     if (last < 0) return s;
     const end = last + closer.length;
     return s.slice(0, end).replace(pattern, change) + s.slice(end);
+  }
+
+  function mathSpans(text) {
+    const spans = [];
+    if (!/[$\\]/.test(text)) return spans;
+    const take = (at, whole) => {
+      spans.push([at, at + whole.length]);
+      return '\u0001'.repeat(whole.length);
+    };
+    let s = text.replace(/`[^`]+`/g, (code) => '\u0001'.repeat(code.length));
+    s = closedMath(s, '\\]', LATEX_DISPLAY, (whole, tex, at) => take(at, whole));
+    s = closedMath(s, '\\)', LATEX_INLINE, (whole, tex, at) => take(at, whole));
+    for (const pattern of [DOLLAR_DISPLAY, DOLLAR_INLINE]) s = s.replace(pattern, (whole, lead, tex, at) => lead + take(at + lead.length, whole.slice(lead.length)));
+    return spans;
   }
 
   function inline(text) {
@@ -199,10 +218,10 @@
       const source = raw(tex).trim();
       return keep(`<span class="math${block ? ' math-block' : ''}" data-tex="${escape(source)}">${escape(source)}</span>`, whole);
     };
-    s = closedMath(s, '\\]', /\\\[([\s\S]+?)\\\]/g, (whole, tex) => shown(tex, true, whole));
-    s = closedMath(s, '\\)', /\\\(([\s\S]+?)\\\)/g, (whole, tex) => shown(tex, false, whole));
-    s = s.replace(/(^|[^\\])\$\$([^$\n]+?)\$\$/g, (whole, lead, tex) => lead + shown(tex, true, whole.slice(lead.length)));
-    s = s.replace(/(^|[^\\$])\$(?!\s)([^$\n]+?)(?<!\s)\$(?!\d)/g, (whole, lead, tex) => lead + shown(tex, false, whole.slice(lead.length)));
+    s = closedMath(s, '\\]', LATEX_DISPLAY, (whole, tex) => shown(tex, true, whole));
+    s = closedMath(s, '\\)', LATEX_INLINE, (whole, tex) => shown(tex, false, whole));
+    s = s.replace(DOLLAR_DISPLAY, (whole, lead, tex) => lead + shown(tex, true, whole.slice(lead.length)));
+    s = s.replace(DOLLAR_INLINE, (whole, lead, tex) => lead + shown(tex, false, whole.slice(lead.length)));
     s = bracketed(s, '![[', /!\[\[([^\]|\[]+)(?:\|([^\]]*))?\](\])?/y, (whole, name, option, closed) => {
       if (!closed) return whole;
       const file = raw(name).trim();
@@ -710,7 +729,7 @@
     return `<div style="color:inherit">${copyHtml(box.innerHTML)}</div>`;
   }
 
-  const api = { render, caption, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
+  const api = { render, mathSpans, caption, copyHtml, selectionCopy, unescapeHtml, plain, readTime, wordCount, escape, MARKER, MATH_ENV, MATH_THEN, listKind, listable, NOTE_ICONS, noteIcon, wordDiff };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoMarkdown = api;
 })(typeof window !== 'undefined' ? window : globalThis);

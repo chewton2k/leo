@@ -111,6 +111,8 @@ body.on-calendar main { max-width: none; margin: 0; padding: 0 0 var(--bottom); 
 .cal-check { flex: none; width: 24px; height: 24px; margin: -4px -5px -5px; }
 :is(.cal-item, .cal-tray-row) input.cal-check::before, :is(.cal-item, .cal-tray-row) input.cal-check::after { inset: 5px; }
 .cal-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 1px; padding: 0; border: 0; background: none; font: inherit; color: var(--text); text-align: left; cursor: inherit; }
+.cal-open::after { content: ''; position: absolute; inset: 0; }
+:is(.cal-item, .cal-tray-row) .cal-check { z-index: 1; }
 .cal-title { max-width: 100%; font-weight: 600; }
 .cal-sub { max-width: 100%; font-size: var(--fs-xs); color: var(--muted); font-variant-numeric: tabular-nums; }
 .cal-col .cal-item.tall .cal-title { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
@@ -172,7 +174,7 @@ body.cal-dragging, body.cal-dragging * { cursor: grabbing !important; user-selec
 .cal-tray-list h2 { display: flex; align-items: center; gap: 6px; margin: 0 0 4px; font-size: var(--fs-xs); font-weight: 600; color: var(--muted); }
 .cal-tray-list h2.late { color: var(--danger); }
 .cal-count { font-variant-numeric: tabular-nums; font-weight: 400; color: var(--faint); }
-.cal-tray-row { display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: var(--fs-sm); }
+.cal-tray-row { position: relative; display: flex; align-items: center; gap: 8px; padding: 8px 4px; font-size: var(--fs-sm); }
 .cal-tray-row + .cal-tray-row { box-shadow: 0 -1px 0 color-mix(in srgb, var(--text) 8%, transparent); }
 .cal-tray-row[data-drag] { cursor: grab; }
 .cal-tray-row[data-drag]:hover { background: var(--wash); }

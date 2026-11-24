@@ -1,5 +1,5 @@
 const S = window.leoSchedule;
-const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, peek: null, more: '', scrolled: '', suppressClick: false };
+const cal = { view: 'week', selected: null, data: null, loadedAt: 0, timer: 0, polls: 0, showDone: true, failed: false, drag: null, compose: null, stale: false, redraw: false, peek: null, more: '', scrolled: '', suppressClick: false };
 const CAL_TRAY_ROWS = 50;
 const CAL_DONE_KEY = 'leo-calendar-hide-done';
 const CAL_VIEW_KEY = 'leo-calendar-view';
@@ -19,6 +19,7 @@ const CAL_HOUR_PX = 48;
 const CAL_DUE_MIN = Math.ceil(62 / CAL_HOUR_PX * 60);
 const CAL_SNAP = 15;
 const CAL_HOLD_MS = 300;
+const CAL_STILL = ['cell', 'press'];
 const CAL_MONTH_CHIPS = 3;
 const KIND_LABEL = { assignment: 'Assignment', exam: 'Exam', meeting: 'Meeting', 'follow-up': 'Follow-up', deadline: 'Deadline', other: 'Other' };
 const KIND_ORDER = ['assignment', 'exam', 'meeting', 'follow-up', 'deadline', 'other'];
@@ -58,6 +59,8 @@ async function showCalendar() {
   chrome();
   document.title = 'Calendar · leo';
   if (!cal.selected) cal.selected = S.dayKey(new Date());
+  calDragEnd();
+  if (!cal.compose?.failed) cal.compose = null;
   cal.peek = null;
   cal.scrolled = '';
   cal.ringAt = null;
@@ -98,7 +101,7 @@ async function loadSchedule(mine = seq) {
       else cal.missed = true;
     }, CAL_POLL_MS);
   }
-  if (cal.drag || cal.compose) {
+  if (cal.drag || (cal.compose && !cal.compose.failed)) {
     cal.stale = true;
     return;
   }
@@ -115,7 +118,9 @@ async function loadSchedule(mine = seq) {
 }
 
 function calSettled() {
-  if (!cal.stale || cal.drag || cal.compose) return;
+  if (cal.drag || (cal.compose && !cal.compose.failed)) return;
+  if (cal.redraw) drawCalendar();
+  if (!cal.stale) return;
   cal.stale = false;
   loadSchedule(seq);
 }
@@ -395,7 +400,7 @@ function calRoom(count) {
 }
 
 function calFit() {
-  if (state.view !== 'calendar' || cal.view === 'month' || cal.drag || cal.compose || !document.querySelector('#cal-scroll .cal-cols')) return;
+  if (state.view !== 'calendar' || cal.view === 'month' || cal.drag || (cal.compose && !cal.compose.failed) || !document.querySelector('#cal-scroll .cal-cols')) return;
   if (calRoom(calDays().length) !== cal.drawnRoom) drawCalendar();
 }
 
@@ -472,6 +477,8 @@ async function calTrayMore() {
 function drawCalendar() {
   const main = $('#cal-main');
   if (!main) return;
+  cal.redraw = Boolean(cal.drag || (cal.compose && !cal.compose.sent && !cal.compose.failed));
+  if (cal.redraw) return;
   const today = S.dayKey(new Date());
   const days = calDays();
   const plan = calPlan(days.includes(today) ? days : [...days, today].sort());
@@ -479,6 +486,8 @@ function drawCalendar() {
   const scroll = $('#cal-scroll') || $('.cal-month-grid');
   const keep = scroll ? scroll.scrollTop : null;
   const views = main.querySelector('.cal-views');
+  const failed = cal.compose?.failed ? cal.compose.box : null;
+  const typing = failed?.contains(document.activeElement);
   main.innerHTML = `${calHead(days)}${body}`;
   if (views?.querySelector('.segment.on')?.dataset.view === cal.view) main.querySelector('.cal-views').replaceWith(views);
   main.dataset.view = cal.view;
@@ -502,6 +511,8 @@ function drawCalendar() {
       side.innerHTML = calTray(plan, today);
     }
   }
+  if (failed) calComposeHost(cal.compose)?.appendChild(failed);
+  if (typing) failed.querySelector('input').focus({ preventScroll: true });
   inkSettle((id) => app.querySelectorAll(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
   requestAnimationFrame(calFit);
 }
@@ -547,6 +558,12 @@ document.addEventListener('keydown', (e) => {
       e.preventDefault();
       e.stopImmediatePropagation();
       calDragCancel();
+      return;
+    }
+    if (cal.compose?.failed && cal.compose.box.isConnected && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cal.compose.box.querySelector('input').focus({ preventScroll: true });
       return;
     }
     if (cal.more && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
@@ -718,6 +735,11 @@ function calDragEnd() {
   cal.drag = null;
 }
 
+function calRelease() {
+  calDragEnd();
+  setTimeout(calSettled, 0);
+}
+
 function calDragCancel() {
   const d = cal.drag;
   calDragEnd();
@@ -738,6 +760,7 @@ function calDrop() {
   }
   if (d.mode === 'create') {
     drawCalendar();
+    calClosePeek();
     return calCompose(target.day, target.minutes, target.end);
   }
   const task = d.task;
@@ -836,10 +859,15 @@ async function calSave(base, task, next, scope) {
   calSettled();
 }
 
+function calComposeHost({ day, start }) {
+  return app.querySelector(start === null ? `.cal-cell[data-day="${CSS.escape(day)}"], .cal-allday-cell[data-day="${CSS.escape(day)}"]` : `.cal-col[data-day="${CSS.escape(day)}"]`);
+}
+
 function calCompose(day, start, end) {
+  const kept = cal.compose?.failed ? cal.compose.box.querySelector('input').value : '';
   calCloseCompose();
   const timed = start !== null && start !== undefined;
-  const host = timed ? app.querySelector(`.cal-col[data-day="${CSS.escape(day)}"]`) : app.querySelector(`.cal-cell[data-day="${CSS.escape(day)}"], .cal-allday-cell[data-day="${CSS.escape(day)}"]`);
+  const host = calComposeHost({ day, start: timed ? start : null });
   if (!host) return calSettled();
   const box = document.createElement('form');
   box.className = `cal-compose${timed ? '' : ' all-day'}`;
@@ -850,7 +878,6 @@ function calCompose(day, start, end) {
   box.innerHTML = `<input class="cal-compose-input" placeholder="New task" aria-label="New task${timed ? `, ${esc(calRange(start, end))}` : ''}" autocomplete="off">${timed ? `<span class="cal-sub">${esc(calRange(start, end))}</span>` : ''}`;
   host.appendChild(box);
   const input = box.querySelector('input');
-  cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false };
   const finish = async () => {
     const c = cal.compose;
     if (!c || c.box !== box || c.sent) return;
@@ -858,18 +885,31 @@ function calCompose(day, start, end) {
     if (!title) return calCloseCompose();
     c.sent = true;
     const body = { title, date: day, time: timed ? S.timeOf(start) : null, end: timed ? S.timeOf(end) : null, kind: 'other' };
-    try {
+    const save = async () => {
       const made = await api('/api/tasks', { method: 'POST', body });
       inkLand(made.id);
       toast(`Added “${made.title}”`, { action: 'Undo', run: () => api(`/api/tasks/${enc(made.id)}`, { method: 'DELETE' }).then(() => loadSchedule(seq)).catch(fail) });
       loadTasksWindow().catch(() => {});
       cal.stale = true;
+    };
+    try {
+      await save();
     } catch (e) {
       if (e instanceof Locked) throw e;
-      toast(e.message, { bad: true });
+      if (cal.compose === c) {
+        toast(e.message, { bad: true });
+        Object.assign(c, { sent: false, failed: true });
+        if (!box.isConnected) drawCalendar();
+        return calSettled();
+      }
+      toast(e.message, { bad: true, action: 'Try again', run: () => save().then(calSettled).catch(fail) });
     }
-    calCloseCompose();
+    if (cal.compose === c) calCloseCompose();
+    else calSettled();
   };
+  cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false, failed: Boolean(kept), finish };
+  input.value = kept;
+  input.addEventListener('input', () => { if (cal.compose?.box === box) cal.compose.failed = false; });
   box.addEventListener('submit', (e) => { e.preventDefault(); finish().catch(fail); });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -878,7 +918,7 @@ function calCompose(day, start, end) {
       calCloseCompose();
     }
   });
-  input.addEventListener('blur', () => setTimeout(() => finish().catch(fail), 0));
+  input.addEventListener('blur', () => setTimeout(() => cal.compose?.failed || finish().catch(fail), 0));
   input.focus({ preventScroll: true });
 }
 
@@ -891,16 +931,16 @@ function calCloseCompose() {
 }
 
 document.addEventListener('pointerdown', (e) => {
-  if (state.view !== 'calendar' || e.button !== 0 || cal.drag || !e.isPrimary) return;
+  if (state.view !== 'calendar' || e.button !== 0 || !e.isPrimary) return;
+  if (cal.drag?.live && cal.drag.pointer !== e.pointerId) return;
+  calDragEnd();
   if (e.target.closest('.cal-compose')) return;
   const grip = e.target.closest('.cal-grip');
   const item = grip ? grip.closest('.cal-item') : e.target.closest('.cal-item[data-drag], .cal-tray-row[data-drag]');
   const touch = e.pointerType === 'touch';
   let d = null;
-  if (item) {
-    if (!grip && e.target.closest('input, a, select, textarea')) return;
-    const task = calDragTask({ id: item.dataset.id, on: item.dataset.on || null, day: item.dataset.day || null });
-    if (!task) return;
+  const task = item && (grip || !e.target.closest('input, a, select, textarea')) ? calDragTask({ id: item.dataset.id, on: item.dataset.on || null, day: item.dataset.day || null }) : null;
+  if (task) {
     const col = item.closest('.cal-col');
     const span = col ? S.spanOn({ type: 'task', task }, col.dataset.day, calLeast({ type: 'task', task })) : null;
     const length = span ? span.end - span.start : task.end && task.time ? S.minutesOf(task.end) - S.minutesOf(task.time) : 60;
@@ -912,12 +952,12 @@ document.addEventListener('pointerdown', (e) => {
     d = { mode: 'create', col, day: col.dataset.day, start: Math.min(24 * 60 - CAL_SNAP, Math.floor((raw + slack) / CAL_SNAP) * CAL_SNAP) };
   } else if (e.target.classList.contains('cal-cell') || e.target.classList.contains('cal-allday-cell')) {
     d = { mode: 'cell', day: e.target.dataset.day };
-  }
+  } else if (e.target.closest('#cal-main, #cal-side:not(.peek)')) d = { mode: 'press' };
   if (!d) return;
-  if (cal.compose) calCloseCompose();
   cal.drag = { ...d, pointer: e.pointerId, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, live: false, timer: 0, touch };
-  if (touch && d.mode !== 'cell') cal.drag.timer = setTimeout(calLift, CAL_HOLD_MS);
-  else if (!touch) e.preventDefault();
+  if (cal.compose && !cal.compose.failed) cal.compose.finish().catch(fail);
+  if (touch && !CAL_STILL.includes(d.mode)) cal.drag.timer = setTimeout(calLift, CAL_HOLD_MS);
+  else if (!touch && d.mode !== 'press') e.preventDefault();
 });
 
 document.addEventListener('pointermove', (e) => {
@@ -927,9 +967,8 @@ document.addEventListener('pointermove', (e) => {
   d.y = e.clientY;
   if (!d.live) {
     const far = Math.hypot(d.x - d.startX, d.y - d.startY);
-    if (d.touch) { if (far > 8) calDragEnd(); return; }
-    if (far < 5 || d.mode === 'cell') return;
-    if (!e.buttons) { calDragEnd(); return; }
+    if (d.touch ? far > 8 : !e.buttons) { calRelease(); return; }
+    if (d.touch || far < 5 || CAL_STILL.includes(d.mode)) return;
     calLift();
     return;
   }
@@ -941,17 +980,31 @@ document.addEventListener('pointerup', (e) => {
   const d = cal.drag;
   if (!d || e.pointerId !== d.pointer) return;
   if (d.live) return Promise.resolve(calDrop()).catch(fail);
-  calDragEnd();
+  calRelease();
+  if (d.mode === 'resize') return calOpenPeek('task', d.id, d.on);
+  if (d.mode !== 'create' && d.mode !== 'cell') return;
+  if (cal.more) {
+    cal.more = '';
+    drawCalendar();
+  }
+  calClosePeek();
   if (d.mode === 'create') calCompose(d.day, d.start, Math.min(24 * 60, d.start + 60));
-  else if (d.mode === 'cell') calCompose(d.day, null, null);
-  else calSettled();
+  else calCompose(d.day, null, null);
 });
 
 document.addEventListener('pointercancel', (e) => {
   const d = cal.drag;
   if (!d || e.pointerId !== d.pointer) return;
   if (d.live) calDragCancel();
-  else calDragEnd();
+  else calRelease();
+});
+
+window.addEventListener('hashchange', () => {
+  if (cal.compose && !cal.compose.failed) cal.compose.finish().catch(fail);
+});
+
+window.addEventListener('blur', () => {
+  if (cal.drag && !cal.drag.live && !cal.drag.source) calRelease();
 });
 
 app.addEventListener('lostpointercapture', (e) => {
@@ -992,6 +1045,7 @@ function calClosePeek() {
   const flush = cal.peek.flush;
   cal.peek = null;
   if (flush) flush();
+  $('#cal-side')?.classList.remove('peek');
   drawCalendar();
 }
 

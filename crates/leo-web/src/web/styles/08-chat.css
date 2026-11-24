@@ -64,16 +64,20 @@ html.page-bar-on::-webkit-scrollbar { display: none; }
 .chat-history-item { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; border: 0; background: none; text-align: left; padding: 7px 8px; font-size: var(--fs-base); color: var(--muted); }
 .chat-history-row.on .chat-history-item, .chat-history-row:hover .chat-history-item { color: var(--text); }
 .chat-history-title { display: block; min-width: 0; font-size: var(--fs-sm); font-weight: 500; }
-.chat-history-x { flex: none; display: grid; place-items: center; width: 30px; height: 28px; margin-right: 4px; padding: 0; position: relative; overflow: hidden; overflow: clip; overflow-clip-margin: 6px; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; border-radius: var(--r-tile); opacity: 0; transition: width var(--t-follow) var(--ease-arrive), background-color var(--t-fade) ease-out, color var(--t-fade) ease-out, opacity var(--t-press) var(--ease-arrive); }
+.chat-history-x, .chat-history-pin { flex: none; display: grid; place-items: center; width: 30px; height: 28px; margin-right: 4px; padding: 0; position: relative; overflow: hidden; overflow: clip; overflow-clip-margin: 6px; border: 0; background: none; color: var(--muted); font-size: 16px; line-height: 1; border-radius: var(--r-tile); opacity: 0; transition: width var(--t-follow) var(--ease-arrive), background-color var(--t-fade) ease-out, color var(--t-fade) ease-out, opacity var(--t-press) var(--ease-arrive); }
 .chat-delete-x, .chat-delete-label { grid-area: 1 / 1; white-space: nowrap; transition: opacity var(--t-fade) ease-out; }
 .chat-delete-label { opacity: 0; font-size: var(--fs-xs); font-weight: 650; }
-.chat-history-row:hover .chat-history-x, .chat-history-row.on .chat-history-x, .chat-history-x.sure, .chat-history-x:focus-visible { opacity: 1; }
+.chat-history-row:hover :is(.chat-history-x, .chat-history-pin), .chat-history-row.on :is(.chat-history-x, .chat-history-pin), .chat-history-x.sure, .chat-history-pin[aria-pressed="true"], :is(.chat-history-x, .chat-history-pin):focus-visible { opacity: 1; }
+.chat-history-pin { width: 24px; margin-right: 0; }
+.chat-history-pin svg { width: 15px; height: 15px; }
+.chat-history-pin[aria-pressed="true"] { color: var(--text); }
+.chat-history-pin[aria-pressed="true"] svg path:nth-of-type(2) { fill: currentColor; }
 .chat-history-x.sure { width: 60px; background: var(--danger); color: var(--accent-text); }
 .chat-history-x.sure .chat-delete-x { opacity: 0; }
 .chat-history-x.sure .chat-delete-label { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .chat-history-x, .chat-delete-x, .chat-delete-label { transition: none; } }
-@media (forced-colors: active) { .chat-history-x.sure { forced-color-adjust: none; background: Highlight; color: HighlightText; } .chat-history-x:focus-visible { outline-color: Highlight; } }
-@media (hover: none) { .chat-history-x { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .chat-history-x, .chat-history-pin, .chat-delete-x, .chat-delete-label { transition: none; } }
+@media (forced-colors: active) { .chat-history-x.sure { forced-color-adjust: none; background: Highlight; color: HighlightText; } :is(.chat-history-x, .chat-history-pin):focus-visible { outline-color: Highlight; } }
+@media (hover: none) { .chat-history-x, .chat-history-pin { opacity: 1; } }
 .chat-history-none { color: var(--muted); font-size: var(--fs-sm); line-height: 1.5; padding: 12px 8px; }
 .chat-head .chat-history-toggle { margin-left: -6px; }
 .chat.with-history .chat-history-toggle { color: var(--accent); }

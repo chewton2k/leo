@@ -446,6 +446,69 @@ test('a long recording keeps a handful of transcript nodes, and never folds unde
   assert.equal(text.textContent, s.view.transcript);
 });
 
+function fakeElement(tag) {
+  const el = { tag, className: '', kids: [], parent: null, tone: '', scrollTop: 0, scrollHeight: 0, clientHeight: 0, style: { setProperty: (_, tone) => { el.tone = tone; } } };
+  const adopt = (node) => Object.assign(typeof node === 'string' ? fakeText(node) : node, { parent: el });
+  Object.defineProperties(el, {
+    firstChild: { get: () => el.kids[0] || null },
+    lastChild: { get: () => el.kids[el.kids.length - 1] || null },
+    childNodes: { get: () => el.kids },
+    textContent: { get: () => el.kids.map((k) => k.textContent).join(''), set: (v) => { el.kids = v ? [adopt(v)] : []; } },
+    innerHTML: { set: (v) => { el.kids = [adopt(v)]; } },
+  });
+  el.append = (...nodes) => el.kids.push(...nodes.map(adopt));
+  el.prepend = (node) => el.kids.unshift(adopt(node));
+  el.after = (node) => el.parent.kids.splice(el.parent.kids.indexOf(el) + 1, 0, Object.assign(node, { parent: el.parent }));
+  el.remove = () => el.parent.kids.splice(el.parent.kids.indexOf(el), 1);
+  el.replaceWith = (...nodes) => el.parent.kids.splice(el.parent.kids.indexOf(el), 1, ...nodes.map((n) => Object.assign(n, { parent: el.parent })));
+  el.querySelectorAll = (at) => el.kids.filter((k) => k.kids).flatMap((k) => [...(`.${k.className}` === at ? [k] : []), ...k.querySelectorAll(at)]);
+  el.normalize = () => el.kids.forEach((k, i) => { if (k.kids) k.normalize(); else while (el.kids[i + 1] && !el.kids[i + 1].kids) k.data += el.kids.splice(i + 1, 1)[0].data; });
+  el.addEventListener = () => {};
+  return el;
+}
+
+function fakeText(data) {
+  const node = { data, firstChild: null, get textContent() { return this.data; }, deleteData(at, count) { this.data = this.data.slice(0, at) + this.data.slice(at + count); } };
+  node.remove = () => node.parent.kids.splice(node.parent.kids.indexOf(node), 1);
+  return node;
+}
+
+test('a live call is drawn in named turns, and each poll changes only the words that changed', () => {
+  const text = fakeElement('div');
+  const box = { querySelector: (at) => (at === '#rec-transcript' ? text : { hidden: true, addEventListener() {} }) };
+  const turn = (n, speaker, said) => ({ n, speaker, text: said });
+  const s = { view: { id: 'a', state: 'recording', transcript: 'x', turns: [turn(0, 'You', 'Shall we start?'), turn(1, 'Others', 'Yes. The')] } };
+  const show = piece('showTranscript', 'draw', 'showTranscript', { s, root: { document: { createElement: fakeElement, createTextNode: fakeText } }, tailMerge: L.tailMerge, toneOf: L.toneOf });
+  const rows = () => text.kids.map((row) => [row.kids[0].kids[0].tone, row.kids[0].textContent, row.kids[1].textContent]);
+  show(box);
+  assert.equal(text.className, 'rec-transcript transcript-flow');
+  assert.deepEqual(rows(), [['var(--text)', 'You', 'Shall we start?'], ['var(--hue-0)', 'Others', 'Yes. The']]);
+  assert.equal(text.querySelectorAll('.rec-new').length, 0, 'what was already said arrives without a fade');
+  const kept = [...text.kids];
+  const said = kept[1].kids[1].firstChild;
+  s.view.turns = [turn(0, 'You', 'Shall we start?'), turn(1, 'Others', 'Yes. The parser'), turn(2, 'You', 'Good')];
+  show(box);
+  assert.deepEqual(rows().map((r) => r.slice(1)), [['You', 'Shall we start?'], ['Others', 'Yes. The parser'], ['You', 'Good']]);
+  assert.equal(text.kids[0], kept[0]);
+  assert.equal(text.kids[1].kids[1].firstChild, said, 'words already shown stay the same node');
+  assert.deepEqual(text.querySelectorAll('.rec-new').map((k) => k.textContent), [' parser', 'Good']);
+  s.view.turns = [turn(1, 'Others', 'The parser is done'), turn(2, 'You', 'Good')];
+  show(box);
+  assert.deepEqual(rows().map((r) => r.slice(1)), [['Others', 'The parser is done'], ['You', 'Good']], 'a trimmed head leaves from the front');
+  assert.equal(text.kids[0], kept[1]);
+  s.view.turns = [turn(1, 'Others', 'The parser is done'), turn(3, 'Others', 'Late'), turn(2, 'You', 'Good')];
+  show(box);
+  assert.deepEqual(rows().map((r) => r[2]), ['The parser is done', 'Late', 'Good'], 'a turn that comes back takes its place');
+  s.view.turns = [turn(1, 'Others', 'The parser is done'), turn(2, 'You', 'Good')];
+  show(box);
+  assert.deepEqual(rows().map((r) => r[2]), ['The parser is done', 'Good']);
+  s.view = { id: 'b', state: 'recording', transcript: 'You: plain words' };
+  show(box);
+  assert.equal(text.className, 'rec-transcript');
+  assert.equal(text.textContent, 'You: plain words', 'another recording starts clean');
+  assert.equal(text.kids.length, 1);
+});
+
 test('a live redraw replaces the cards around the transcript and Felix\'s questions, at any depth, and never those two', () => {
   const el = (id, children = [], className = '') => {
     const node = { id, className, children };

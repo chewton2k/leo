@@ -374,6 +374,23 @@ pub(crate) async fn delete_chat(
 }
 
 #[derive(serde::Deserialize)]
+pub(crate) struct PinBody {
+    pub(crate) pinned: bool,
+}
+
+pub(crate) async fn pin_chat(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<PinBody>,
+) -> StatusCode {
+    let dir = state.chats.clone();
+    match tokio::task::spawn_blocking(move || chats::set_pinned(&dir, &id, body.pinned)).await {
+        Ok(true) => StatusCode::NO_CONTENT,
+        _ => StatusCode::NOT_FOUND,
+    }
+}
+
+#[derive(serde::Deserialize)]
 pub(crate) struct CompactBody {
     pub(crate) chat: String,
     pub(crate) messages: Vec<chat::Turn>,

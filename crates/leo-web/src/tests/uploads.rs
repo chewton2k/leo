@@ -489,6 +489,7 @@ fn background_work_is_listed_until_it_is_done() {
         step: "Writing the notes".into(),
         steps: Some((2, 4)),
         transcript: String::new(),
+        turns: vec![],
         warnings: vec![],
         points: vec![],
         points_total: 0,

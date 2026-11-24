@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
 
-  const { MARKER, MATH_ENV, MATH_THEN, listKind, listable, caption } = root.leoMarkdown || require('./markdown.js');
+  const { MARKER, MATH_ENV, MATH_THEN, listKind, listable, caption, mathSpans } = root.leoMarkdown || require('./markdown.js');
   const FENCE = /^\s*(```|~~~)/;
   const TABLE_RULE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
   const QUOTE = /^\s*>/;
@@ -271,10 +271,18 @@
   function visibleIndices(raw, isItem) {
     const out = [];
     const prefix = hiddenHead(raw, isItem);
+    const math = new Map(mathSpans(raw));
     let first = -1;
     let i = prefix;
     while (i < raw.length) {
       const c = raw[i];
+      const formula = math.get(i);
+      if (formula) {
+        if (!out.length) first = i;
+        out.push(formula - 1);
+        i = formula;
+        continue;
+      }
       const embed = c === '!' && raw.slice(i).match(EMBED);
       if (c === '[' || (c === '!' && raw[i + 1] === '[')) {
         const open = c === '!' ? i + 1 : i;
@@ -284,7 +292,13 @@
           if (embed || (c === '!' && DRAWN.test(raw.slice(close + 2, end)))) {
             if (!out.length) first = i;
             out.push(end);
-          } else for (let k = open + 1; k < close; k++) out.push(k);
+          } else for (let k = open + 1; k < close; k++) {
+            const formula = math.get(k);
+            if (formula && formula <= close) {
+              out.push(formula - 1);
+              k = formula - 1;
+            } else out.push(k);
+          }
           i = end + 1;
           continue;
         }

@@ -518,6 +518,24 @@ test('Tab walks table cells and a new row stays a table', () => {
   assert.equal(ed.nextCell('a | b \\| c | d\n--|--|--', 0).from, 4);
 });
 
+test('a formula is one place in the shown text, drawn or not', () => {
+  const F = '￼';
+  const line = String.raw`area $\int_0^1 x^2$ and the sum`;
+  assert.equal(ed.rawOffset(line, 'area '), 5);
+  assert.equal(ed.rawOffset(line, `area ${F}`), 19);
+  assert.equal(ed.rawOffset(line, `area ${F} and`), 23);
+  assert.equal(ed.rawOffset(line, 'area ' + F + ' and the sum'), line.length);
+  assert.equal(ed.rawOffset(String.raw`$x_{i}$ then`, ''), 0);
+  assert.equal(ed.rawOffset(String.raw`$x_{i}$ then`, F), 7);
+  assert.equal(ed.rawOffset(String.raw`$a_1$ and $b^2$ then`, `${F} and ${F} th`), 18);
+  assert.equal(ed.rawOffset(String.raw`cost \$5 and \$6 then $y$ end`, String.raw`cost \$5 and \$6 then ${F} e`), 27);
+  assert.equal(ed.rawOffset('- item $E$ then', `item ${F} th`, true), 13);
+  assert.equal(ed.rawOffset('## head $\\alpha_i$ then', `head ${F} th`, false), 21);
+  assert.equal(ed.rawOffset('see [a $x_i$ b](https://x.y) after', `see a ${F} b af`), 31);
+  assert.equal(ed.rawOffset('a `$x$` b $y$', 'a $x$ b '), 10);
+  assert.equal(ed.rawOffset('a **$x$** b', `a ${F} b`), 11);
+});
+
 test('a tap lands on the same spot in the raw text', () => {
   assert.equal(ed.rawOffset('see [link](https://x.y)', 'see link'), 'see [link](https://x.y)'.length, 'the end of a link is past its address');
   assert.equal(ed.rawOffset('**bold**', 'bold'), 8);

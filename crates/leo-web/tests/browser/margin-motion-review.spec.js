@@ -26,7 +26,7 @@ const on = (id, i, text) => ({ id, quote: PASSAGES[i], prefix: 'Before it, ', su
 
 const MODE_MARKUP = `<div class="margin-mode-wrap"><button type="button" id="margin-mode" class="margin-mode" aria-haspopup="menu" aria-expanded="false" aria-controls="margin-mode-menu" disabled><span id="margin-mode-icon" class="margin-mode-icon" aria-hidden="true">{{pen}}</span><span id="margin-mode-label">When you ask</span>{{chevron}}</button><div id="margin-mode-menu" class="margin-mode-menu" role="menu" aria-label="Note reading mode" hidden><button type="button" role="menuitemradio" aria-checked="false" data-margin-mode="along">Reads along<small>Reads changes after a pause.</small></button><button type="button" role="menuitemradio" aria-checked="true" data-margin-mode="ask">When you ask<small>Reads nothing until you ask.</small></button></div></div>`;
 
-async function fixture(browser, run, { width = 1280, height = 800, layout = 'right', mode = 'ask', threads = [THREADS.short, THREADS.long], context = {}, source = SOURCE } = {}) {
+async function fixture(browser, run, { width = 1280, height = 800, layout = 'right', mode = 'ask', threads = [THREADS.short, THREADS.long], context = {}, source = SOURCE, katex: katexState = 'ok' } = {}) {
   const core = read('app/core.js');
   const icons = core.slice(core.indexOf('const svg ='), core.indexOf('const recorder ='));
   const motion = core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('));
@@ -55,7 +55,8 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     const drawSide=()=>{};const sideRedrawSoon=()=>{};
     const askFloat={hidden:true};const placeAskFloat=()=>{};
     window.leoTheme={noteWidth:()=>'wide'};
-    window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[]};
+    function expandDiagrams(button){window.expanded=button.closest('.margin-note').dataset.id;}
+    window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[],calls:[]};
     async function api(url,{method='GET',body}={}){
       await new Promise(r=>setTimeout(r,fake.delay||2));
       if(url==='/api/margin')return {layout:fake.layout,pace:'regular',default_mode:'ask'};
@@ -63,11 +64,15 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
       if(url.endsWith('/margin/threads')&&method==='POST'){fake.posts.push(body);return {id:'t9',quote:body.quote,prefix:body.prefix,suffix:body.suffix,status:'open',source:'ask',messages:[{from:'felix',text:'A fake answer.'}]};}
       if(method==='PATCH'&&url.includes('/margin/threads/')){fake.posts.push(body);const t=fake.threads.find(x=>url.endsWith('/'+x.id));t.pinned=body.pinned;return structuredClone(t);}
       if(url.endsWith('/reply')&&method==='POST'){const t=fake.threads.find(x=>url.includes('/'+x.id+'/'));t.messages.push({from:'you',text:body.text},{from:'felix',text:'Latest answer.'});return structuredClone(t);}
+      if(url.endsWith('/weave')){fake.calls.push('weave');return {from:1,to:2,before:'',version:'v2'};}
+      if(/\\/margin\\/threads\\/[^/]+$/.test(url)&&method==='POST'){fake.calls.push(body.status);return {};}
       if(url.endsWith('/margin/read')){fake.posts.push(body);return new Promise(r=>{fake.answer=r;});}
       if(url.endsWith('/margin')&&method==='POST'){fake.posts.push(body);if(fake.failMode){const e=new Error('Try again.');e.status=503;throw e;}fake.mode=body.mode;return {mode:body.mode};}
       throw new Error('No fake for '+method+' '+url);
     }
+    ${read('app/popup-menu.js')}
     ${read('app/margin-notes.js')}
+    ${read('app/math.js')}
     window.start=async()=>{
       app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
       const s={note:{id:'n1',version:'v1',title:'Test'},title:$('#title'),edit:{}};
@@ -79,9 +84,18 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     window.arrive=thread=>{marginPage.threads.push(thread);marginPage.arriving.add(thread.id);marginRedraw();};
     window.dots=id=>[...document.querySelectorAll('.margin-ink path.squiggle[data-id="'+id+'"]')].sort((a,b)=>a.dataset.line-b.dataset.line).map(p=>{const cs=getComputedStyle(p);const m=cs.clipPath.match(/inset\\(([^)]*)\\)/);let progress=1;if(m){const right=m[1].trim().split(/\\s+/)[1];progress=right.endsWith('%')?1-parseFloat(right)/100:1;}const width=parseFloat(cs.strokeWidth);const n=Math.floor(p.getTotalLength()/4)+1;const pts=[];for(let k=0;k<n&&pts.length<400;k++){const pt=p.getPointAtLength(Math.min(k*4,p.getTotalLength()));pts.push([+pt.x.toFixed(2),+pt.y.toFixed(2)]);}return {progress,width,d:p.getAttribute('d'),pts,clip:cs.clipPath,anim:cs.animationName};});
     window.start().catch(fail);`;
+  const held = [];
   const server = http.createServer((req, res) => {
     if (req.url === '/fixture.js') { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(fixtureScript); }
     if (req.url === '/style.css') { res.setHeader('Content-Type', 'text/css; charset=utf-8'); return res.end(css()); }
+    const katex = req.url.match(/^\/vendor\/katex-0\.16\.11\/([\w./-]+)$/);
+    if (req.url === '/release') { held.splice(0).forEach((send) => send()); return res.end('ok'); }
+    if (katex) {
+      const send = () => { res.setHeader('Content-Type', { js: 'text/javascript', css: 'text/css', woff2: 'font/woff2' }[katex[1].split('.').pop()]); res.end(fs.readFileSync(path.join(web, 'vendor/katex', katex[1]))); };
+      if (katexState === 'missing') { res.statusCode = 404; return res.end(); }
+      if (katexState === 'held' && katex[1] === 'katex.min.js') return held.push(send);
+      return send();
+    }
     const lib = req.url.match(/^\/lib\/(.+)$/);
     if (lib) { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(read(lib[1])); }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -1172,6 +1186,207 @@ test.describe('settings layout surface', () => {
   });
 });
 
+test.describe('marks stay off the words', () => {
+  const source = '- Opening item.\n    - it has a json file that uses those bullet points to write it.\n    - The next item.\n\n> A quote with delta four passage and more words.\n\n```\nconst echo = five; after();\n```\n\n| one | two |\n| --- | --- |\n| foxtrot six cell | other |\n\nClosing words.';
+  const thread = (id, quote, text = source) => {
+    const at = text.indexOf(quote);
+    return { id, quote, prefix: text.slice(Math.max(0, at - 12), at), suffix: text.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
+  };
+  const threads = [thread('t1', 'a json file'), thread('t2', 'uses those bullet points'), thread('t3', 'delta four passage'), thread('t4', 'echo = five'), thread('t5', 'foxtrot six')];
+  const look = (page) => page.evaluate(() => {
+    const area = document.querySelector('#doc .line-edit');
+    const top = document.querySelector('#doc').getBoundingClientRect().top;
+    const pieces = [];
+    const read = (root, dx, dy) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) for (const word of node.data.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        for (const r of range.getClientRects()) pieces.push({ word: word[0], left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
+      }
+    };
+    read(document.querySelector('#doc'), 0, 0);
+    let spare = 0;
+    if (area) {
+      const copy = document.createElement('div');
+      const style = getComputedStyle(area);
+      for (const p of ['boxSizing', 'width', 'padding', 'font', 'letterSpacing', 'lineHeight']) copy.style[p] = style[p];
+      Object.assign(copy.style, { position: 'absolute', top: 0, left: 0, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' });
+      copy.textContent = area.value;
+      document.body.append(copy);
+      const from = copy.getBoundingClientRect();
+      const to = area.getBoundingClientRect();
+      read(copy, to.left - from.left, to.top - from.top);
+      spare = to.height - from.height;
+      copy.remove();
+    }
+    const marks = [...document.querySelectorAll('.margin-mark .margin-anchor')].map((el) => el.getBoundingClientRect());
+    const first = (word) => pieces.find((p) => p.word === word);
+    const ink = (id) => document.querySelector(`.margin-ink path.solid[data-id="${id}"]`).getBoundingClientRect();
+    return {
+      marks: marks.length,
+      covered: pieces.filter((p) => marks.some((m) => m.left < p.right - 1 && m.right > p.left + 1 && m.top < p.bottom && m.bottom > p.top)).map((p) => p.word),
+      astray: [['t1', 'a', 'file'], ['t2', 'uses', 'points']].some(([id, from, to]) => Math.abs(ink(id).left - first(from).left) > 2 || Math.abs(ink(id).right - first(to).right) > 2),
+      spare: Math.round(spare),
+      tops: [...document.querySelectorAll('#doc .blk')].map((el) => Math.round(el.getBoundingClientRect().top - top)),
+      wide: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+
+  for (const spare of [4, 200]) {
+    test(`opening and closing a line with ${spare} px left on it moves no block, adds no blank line and keeps every blot off the words`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        await page.evaluate((room) => {
+          const hide = document.createElement('style');
+          hide.textContent = '.margin-slot { display: none !important; }';
+          document.head.append(hide);
+          const range = document.createRange();
+          range.selectNodeContents(document.querySelectorAll('#doc .blk')[1].querySelector('li'));
+          const note = document.querySelector('article.note');
+          const start = note.getBoundingClientRect().left;
+          note.style.maxWidth = `${Math.ceil(range.getBoundingClientRect().right - start) + room}px`;
+          hide.remove();
+        }, spare);
+        await expect.poll(() => look(page)).toMatchObject({ marks: 5, covered: [], astray: false, wide: false });
+        const closed = await look(page);
+        for (let time = 0; time < 2; time++) {
+          for (const block of [1, 3, 4, 5]) {
+            await page.locator('#doc .blk').nth(block).click({ position: { x: 60, y: 14 } });
+            await expect(page.locator('#doc .line-edit')).toBeFocused();
+            await expect.poll(() => look(page)).toMatchObject({ covered: [], tops: closed.tops, ...(block === 1 && { spare: 0, astray: false, wide: false }) });
+          }
+          await page.mouse.click(640, 20);
+          await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+          await expect.poll(() => look(page)).toEqual(closed);
+        }
+        await page.locator('#doc .blk').nth(1).click({ position: { x: 60, y: 14 } });
+        await page.keyboard.press('End');
+        await page.keyboard.type(' Then more words.');
+        await expect.poll(async () => (await look(page)).covered).toEqual([]);
+        await page.locator('.margin-mark[data-id="t2"]').click();
+        await expect(page.locator('.margin-note[data-id="t2"]')).toHaveAttribute('data-open', '');
+        await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+        await expect.poll(async () => (await look(page)).covered).toEqual([]);
+      }, { layout: 'marks', source, threads });
+    });
+  }
+
+  test('a passage that ends inside a word that wraps is marked on that word in an open line', async ({ browser }) => {
+    const text = 'Some words that go on until the passage ends with (extraordinarily), then goes on.';
+    await fixture(browser, async (page) => {
+      await page.locator('#doc .blk').first().click({ position: { x: 60, y: 14 } });
+      await page.evaluate(() => {
+        const note = document.querySelector('article.note');
+        const line = document.createElement('span');
+        line.style.font = getComputedStyle(document.querySelector('.line-edit')).font;
+        line.style.whiteSpace = 'nowrap';
+        line.textContent = 'Some words that go on until the passage ends with (extraordinarily)';
+        document.body.append(line);
+        note.style.maxWidth = `${line.getBoundingClientRect().width}px`;
+        line.remove();
+      });
+      expect((await page.evaluate(() => rectsOf('t1'))).length).toBe(2);
+    }, { source: text, threads: [{ ...THREADS.short, quote: 'ends with (extraordinarily', prefix: 'the passage ', suffix: '), then' }] });
+  });
+
+  test('a passage over several lines of an open line is marked on each of them', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const closed = await page.evaluate(() => rectsOf('t2').map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+      expect(closed.length).toBeGreaterThan(3);
+      await page.evaluate(() => session.doc.stop());
+      await page.locator('#doc .blk', { hasText: 'A long paragraph' }).click({ position: { x: 40, y: 14 } });
+      await expect(page.locator('#doc .line-edit')).toBeFocused();
+      const open = await page.evaluate(() => rectsOf('t2').map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+      expect(open.length).toBe(closed.length);
+      for (const [line, rect] of open.entries()) for (const [side, value] of rect.entries()) expect(Math.abs(value - closed[line][side])).toBeLessThanOrEqual(side === 1 ? 6 : 1);
+    });
+  });
+
+  const stray = () => {
+    const words = [];
+    const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) for (const word of node.data.matchAll(/\S+/g)) {
+      const range = document.createRange();
+      range.setStart(node, word.index);
+      range.setEnd(node, word.index + word[0].length);
+      for (const r of range.getClientRects()) words.push({ word: word[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    const inks = [...document.querySelectorAll('.margin-mark .margin-anchor, .margin-mark .margin-count, .margin-mark .margin-drop')].map((el) => el.getBoundingClientRect());
+    return words.filter((p) => inks.some((m) => m.left < p.right - 1 && m.right > p.left + 1 && m.top < p.bottom && m.bottom > p.top)).map((p) => p.word);
+  };
+  const flow = 'Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega again and again and $x^2$ more and more and more words until the end of it all.';
+  const narrow = (page, width) => page.evaluate((w) => {
+    document.querySelector('.note-columns').style.width = `${w}px`;
+    marginDraw();
+  }, width);
+
+  test('a blot whose slot hangs past the end of its line is drawn beside the column, never on the last word', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      let beside = 0;
+      for (let width = 120; width <= 520; width++) {
+        await narrow(page, width);
+        expect(await page.evaluate(stray), `${width} px`).toEqual([]);
+        beside += await page.locator('.margin-mark[data-aside]').count();
+      }
+      expect(beside).toBeGreaterThan(0);
+    }, { width: 900, layout: 'marks', source: flow, threads: [{ ...thread('t1', 'x^2', flow), messages: Array.from({ length: 4 }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: 'More.' })) }] });
+  });
+
+  test('the reading blot follows the last word of its block and goes beside the column when the line leaves no room', async ({ browser }) => {
+    const text = 'Opening line.\n\nA closing block of words that Felix reads and whose last line reaches the right edge at some widths.';
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => {
+        const source = session.doc.source();
+        const at = source.indexOf(leoMargin.blocksOf(source)[1]);
+        marginPage.readingAt = at;
+        marginPage.readingSpan = { from: at, to: source.length };
+      });
+      const sides = new Set();
+      for (let width = 160; width <= 640; width++) {
+        await narrow(page, width);
+        expect(await page.evaluate(stray), `${width} px`).toEqual([]);
+        sides.add(await page.locator('.margin-mark.reading').evaluate((el) => el.hasAttribute('data-aside')));
+      }
+      expect([...sides]).toEqual(expect.arrayContaining([false, true]));
+    }, { width: 900, layout: 'marks', source: text, threads: [] });
+  });
+
+  test('changing the page width leaves every slot as a fresh look would', async ({ browser }) => {
+    const source = Array.from({ length: 30 }, (_, i) => `Paragraph ${i} ${'runs on '.repeat(4 + (i % 7))}to passage${i}x here.`).join('\n\n');
+    const threads = Array.from({ length: 30 }, (_, i) => ({ id: `w${i}`, quote: `passage${i}x`, prefix: 'to ', suffix: ' here.', status: 'open', messages: [{ from: 'felix', text: 'Why?' }] }));
+    await fixture(browser, async (page) => {
+      expect(await page.evaluate(() => {
+        const shown = () => [...document.querySelectorAll('.margin-slot')].map((slot) => `${slot.dataset.id} ${slot.hidden}`).join();
+        const wrong = [];
+        for (let width = 420; width <= 760; width += 3) {
+          document.querySelector('article.note').style.maxWidth = `${width}px`;
+          marginDraw();
+          const kept = shown();
+          for (const slot of document.querySelectorAll('.margin-slot')) delete slot.dataset.fit;
+          marginDraw();
+          if (shown() !== kept) wrong.push(width);
+        }
+        return wrong;
+      })).toEqual([]);
+    }, { layout: 'marks', source, threads });
+  });
+
+  test('resizing the window never paints a blot over a word', async ({ browser }) => {
+    const quotes = ['beta', 'delta', 'zeta', 'iota', 'mu', 'omicron', 'rho', 'upsilon', 'psi'];
+    await fixture(browser, async (page) => {
+      await page.evaluate(`window.stray = ${stray}; window.painted = []; new ResizeObserver(() => window.painted.push(window.stray())).observe(document.querySelector('#doc'));`);
+      for (let width = 900; width >= 340; width -= 12) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.waitForTimeout(30);
+      }
+      const painted = await page.evaluate(() => window.painted);
+      expect(painted.length).toBeGreaterThan(10);
+      expect(painted.filter((words) => words.length)).toEqual([]);
+    }, { layout: 'marks', source: flow, threads: quotes.map((quote, i) => thread(`t${i + 1}`, quote, flow)) });
+  });
+});
+
 test('margin replies expand as borderless retained controls and collapse out of the tab order', async ({ browser }) => {
   await fixture(browser, async page => {
     const note = page.locator('.margin-note[data-id="t1"]');
@@ -1307,4 +1522,330 @@ test('a note in the left margin is right-aligned toward the page while closed an
     expect(await note.locator('.margin-said').evaluate((el) => getComputedStyle(el).textAlign)).not.toBe('right');
     expect(await page.locator('.margin-note[data-id="t2"]').getAttribute('data-side')).toBe('right');
   }, { width: 1600, height: 900, layout: 'both' });
+});
+
+test.describe('quick actions', () => {
+  const menuOf = (page, id) => page.locator(`.margin-note[data-id="${id}"] .margin-menu`);
+  const rows = (page) => page.locator('.popup-menu [role="menuitem"]');
+
+  for (const [width, layout] of [[1280, 'right'], [1600, 'both']]) {
+    test(`the options button shows on hover inside the window, opens a menu without opening the note, and Escape gives focus back (${width} ${layout})`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        await page.evaluate(() => { marginPage.sides = { t1: 'left', t2: 'right' }; marginRedraw(); });
+        for (const id of layout === 'both' ? ['t1', 't2'] : ['t2']) {
+          const note = page.locator(`.margin-note[data-id="${id}"]`);
+          const menu = menuOf(page, id);
+          await page.mouse.move(0, 0);
+          await expect.poll(() => menu.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
+          const before = await note.evaluate((el) => el.offsetHeight);
+          await note.locator('.margin-toggle').hover();
+          await expect.poll(() => menu.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+          const box = await menu.boundingBox();
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(width);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(await menu.evaluate((el) => [getComputedStyle(el).width, getComputedStyle(el).borderRadius, getComputedStyle(el).boxShadow !== 'none'])).toEqual(['28px', '50%', true]);
+          expect(await note.evaluate((el) => el.offsetHeight)).toBe(before);
+          await menu.hover();
+          await menu.click();
+          await expect(menu).toHaveAttribute('aria-expanded', 'true');
+          await expect(note).not.toHaveAttribute('data-open', '');
+          await expect(rows(page)).toHaveText(['Resolve', 'Copy', 'Pin open', 'Add to note', 'Dismiss']);
+          await page.mouse.move(width / 2, 700);
+          await expect.poll(() => note.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+          await page.keyboard.press('Escape');
+          await expect(page.locator('.popup-menu')).toHaveCount(0);
+          await expect(menu).toBeFocused();
+          await expect(menu).toHaveAttribute('aria-expanded', 'false');
+          await expect(note).not.toHaveAttribute('data-open', '');
+        }
+      }, { width, layout });
+    });
+  }
+
+  test('each row does its job, and a redraw while the menu is open keeps it', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't2').click();
+      await page.evaluate(() => marginRedraw());
+      await expect(rows(page)).toHaveCount(5);
+      await expect(menuOf(page, 't2')).toHaveAttribute('aria-expanded', 'true');
+      await page.getByRole('menuitem', { name: 'Pin open' }).click();
+      const second = page.locator('.margin-note[data-id="t2"]');
+      await expect(second).toHaveAttribute('data-open', '');
+      await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
+      await expect(second.locator('.margin-toggle')).toBeFocused();
+      await expect(menuOf(page, 't2')).toBeHidden();
+      await page.mouse.move(5, 5);
+      await menuOf(page, 't1').click();
+      await page.evaluate(() => marginOpen('t1'));
+      await expect(page.locator('.popup-menu')).toHaveCount(0);
+      await page.evaluate(() => marginClose());
+      await expect(page.locator('.margin-note[data-id="t1"]')).not.toHaveAttribute('data-open', '');
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Resolve' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['resolved']);
+      await expect(second).toHaveAttribute('data-open', '');
+      await expect(menuOf(page, 't1')).toBeHidden();
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-resolved', 't1');
+    });
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Add to note' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['weave', 'resolved']);
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-open', '');
+    }, { threads: [THREADS.short] });
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Dismiss' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['dismissed']);
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveCount(0);
+    }, { threads: [THREADS.short] });
+  });
+
+  test('Open full screen is offered only for a drawn figure, and the button hides on a draft and while an answer is pending', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => {
+        const said = document.querySelector('.margin-note[data-id="t1"] .margin-felix');
+        said.insertAdjacentHTML('beforeend', '<figure class="drawing"></figure>');
+      });
+      await menuOf(page, 't1').click();
+      await expect(rows(page)).toHaveText(['Open full screen', 'Resolve', 'Copy', 'Pin open', 'Add to note', 'Dismiss']);
+      await page.getByRole('menuitem', { name: 'Open full screen' }).click();
+      await expect.poll(() => page.evaluate(() => window.expanded)).toBe('t1');
+      await page.evaluate(() => marginPage.thinking.set('t1', { text: 'q' }) && marginRedraw());
+      await expect(menuOf(page, 't1')).toBeHidden();
+      await page.evaluate(() => { marginPage.thinking.delete('t1'); marginAskFirst(session, { text: session.doc.source().slice(0, 12), from: 0, to: 12 }); });
+      await expect(page.locator('.margin-note[data-id="draft"]')).toHaveAttribute('data-open', '');
+      await expect(menuOf(page, 'draft')).toBeHidden();
+    }, { threads: [THREADS.short] });
+  });
+});
+
+test.describe('marks around formulas', () => {
+  const F = '\ufffc';
+  const tex = String.raw;
+  const paragraphs = [
+    {
+      source: tex`The area under the curve is $\int_0^1 x^2\,dx = \frac13$ and the sum of the squares is finite.`,
+      quotes: [
+        ['the sum of the squares'],
+        ['area under the curve'],
+        [tex`curve is $\int_0^1 x^2\,dx = \frac13$ and the sum`, `curve is ${F} and the sum`],
+        [tex`$\int_0^1 x^2\,dx = \frac13$`, F],
+        [tex`\frac13`, F, 'inside'],
+        [tex`x^2\,dx = \frac13$ and the sum`, `${F} and the sum`, 'inside'],
+        [tex`curve is $\int_0^1`, `curve is ${F}`, 'inside'],
+      ],
+      carets: ['finite', 'sum'],
+    },
+    {
+      source: tex`Both $a_1$ and $b^2$ then $c_3+d_4$ end near the final word zeta.`,
+      quotes: [['and'], ['then'], ['end near the final word zeta'], [tex`$b^2$ then $c_3+d_4$ end`, `${F} then ${F} end`], [tex`Both $a_1$`, `Both ${F}`]],
+      carets: ['zeta', 'then'],
+    },
+    { source: tex`- Item one has $E=mc^2$ then plain words kilo.`, quotes: [['then plain words kilo'], [tex`has $E=mc^2$ then`, `has ${F} then`]], carets: ['kilo'] },
+    { source: tex`3. Numbered $y_n$ then lima item.`, quotes: [['then lima item']], carets: ['lima'] },
+    { source: tex`## Heading with $\alpha_i$ then mike`, quotes: [['then mike'], [tex`with $\alpha_i$`, `with ${F}`]], carets: ['mike'] },
+    { source: tex`- [ ] Todo $x_1$ then november`, quotes: [['then november']], carets: ['november'] },
+    { source: tex`Display $$\sum_{k=1}^n k$$ then oscar words here.`, quotes: [['then oscar words here'], [tex`$$\sum_{k=1}^n k$$`, F, 'display']], carets: ['oscar'] },
+    { source: tex`It costs \$5 and \$6 then $x_2$ and papa words.`, quotes: [['and papa words'], [tex`It costs \$5`], [tex`\$6 then $x_2$`, `\\$6 then ${F}`]], carets: ['papa'] },
+    { source: tex`See [the guide $z_1$ here](https://example.com/a) then ` + '`code $not$ here`' + tex` and $w_2$ quebec words.`, quotes: [['quebec words'], ['$not$ he'], [tex`and $w_2$ quebec`, `and ${F} quebec`], [tex`guide $z_1$ here`, `guide ${F} here`]], carets: ['quebec'] },
+    { source: tex`Bad $\badmacro{x}$ then sierra words.`, quotes: [['then sierra words']], carets: ['sierra'] },
+    { source: '$$\n\\sum_{k=1}^n k^2 = \\frac{n(n+1)}{2}\n$$', quotes: [[tex`\sum_{k=1}^n k^2`, F, 'display']] },
+    { source: tex`After the display, $r_1$ then uniform words.`, quotes: [['then uniform words']], carets: ['uniform'] },
+    { source: tex`> Quoted $q_1$ then tango words.`, quotes: [['then tango words', 'then tango words', 'block']] },
+  ];
+  const source = paragraphs.map((p) => p.source).join('\n\n');
+  let place = 0;
+  const cases = [];
+  for (const p of paragraphs) {
+    place = source.indexOf(p.source, place);
+    for (const [quote, shown = quote, kind = ''] of p.quotes) {
+      const at = source.indexOf(quote, place);
+      cases.push({ id: `q${cases.length}`, quote, shown, kind, thread: { id: `q${cases.length}`, quote, prefix: source.slice(Math.max(0, at - 12), at), suffix: source.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] } });
+    }
+  }
+  const carets = paragraphs.flatMap((p) => p.carets || []);
+
+  const check = (page) => page.evaluate(({ list }) => {
+    const out = [];
+    const fail = (c, what, detail) => out.push(`${c.id} ${JSON.stringify(c.quote)} ${what} ${JSON.stringify(detail)}`);
+    const unitsOf = (blk) => {
+      const units = [];
+      const walk = (node) => {
+        for (const child of node.childNodes) {
+          if (child.nodeType === 3) for (let i = 0; i < child.data.length; i++) units.push({ node: child, i, ch: child.data[i] });
+          else if (child.matches?.('.math')) units.push({ math: child, ch: '\ufffc' });
+          else if (child.nodeType === 1 && !child.matches('.margin-slot')) walk(child);
+        }
+      };
+      walk(blk);
+      return units;
+    };
+    const boxOf = (u) => {
+      if (u.math) return (u.math.querySelector('.katex-html') || u.math).getBoundingClientRect();
+      const r = document.createRange();
+      r.setStart(u.node, u.i);
+      r.setEnd(u.node, u.i + 1);
+      return r.getClientRects()[0] || r.getBoundingClientRect();
+    };
+    const doc = session.doc;
+    for (const slot of document.querySelectorAll('.margin-slot')) slot.remove();
+    for (const c of list) {
+      const t = marginPage.threads.find((x) => x.id === c.id);
+      const at = leoMargin.find(doc.source(), t);
+      if (!at) {
+        fail(c, 'not found', null);
+        continue;
+      }
+      const blk = doc.blockAt(at.from);
+      const rects = doc.spanRects(at.from, at.to);
+      if (!rects.length) {
+        fail(c, 'no rects', null);
+        continue;
+      }
+      if (c.kind === 'block' || c.kind === 'display') {
+        const frame = (c.kind === 'display' ? blk.querySelector('.katex-display, .math-block') : blk).getBoundingClientRect();
+        if (rects.some((r) => r.left < frame.left - 4 || r.right > frame.right + 4 || r.top < frame.top - 4 || r.bottom > frame.bottom + 4)) fail(c, 'outside its block', rects.map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+        continue;
+      }
+      const units = unitsOf(blk);
+      const text = units.map((u) => u.ch).join('');
+      const start = text.indexOf(c.shown);
+      if (start < 0) {
+        fail(c, 'shown text not in the block', text);
+        continue;
+      }
+      const first = boxOf(units[start]);
+      const last = boxOf(units[start + c.shown.length - 1]);
+      const near = (a, b) => Math.abs(a - b) <= 4;
+      const level = (r, box) => r.bottom > box.top && r.top < box.bottom;
+      const a = rects[0];
+      const z = rects[rects.length - 1];
+      if (!near(a.left, first.left) || !level(a, first)) fail(c, 'starts wrong', { got: [a.left, a.top].map(Math.round), want: [first.left, first.top].map(Math.round) });
+      if (!near(z.right, last.right) || !level(z, last)) fail(c, 'ends wrong', { got: [z.right, z.top].map(Math.round), want: [last.right, last.top].map(Math.round) });
+      const point = doc.domPoint(at.to);
+      const kids = point.node.childNodes;
+      let x;
+      if (point.node.nodeType === 3) {
+        const r = document.createRange();
+        if (point.offset > 0) {
+          r.setStart(point.node, point.offset - 1);
+          r.setEnd(point.node, point.offset);
+          x = r.getBoundingClientRect().right;
+        } else {
+          r.setStart(point.node, 0);
+          r.setEnd(point.node, 1);
+          x = r.getBoundingClientRect().left;
+        }
+      } else x = point.offset > 0 ? kids[point.offset - 1].getBoundingClientRect().right : kids[point.offset]?.getBoundingClientRect().left;
+      if (!near(x, last.right)) fail(c, 'slot point wrong', { got: Math.round(x), want: Math.round(last.right) });
+      if (c.kind !== 'inside') {
+        const sel = getSelection();
+        const open = (u, after) => (u.math ? [u.math.parentNode, [...u.math.parentNode.childNodes].indexOf(u.math) + (after ? 1 : 0)] : [u.node, u.i + (after ? 1 : 0)]);
+        const [an, ao] = open(units[start], false);
+        const [fn, fo] = open(units[start + c.shown.length - 1], true);
+        sel.setBaseAndExtent(an, ao, fn, fo);
+        const got = doc.selection();
+        if (!got || got.text !== c.quote) fail(c, 'selection reads wrong', got && got.text);
+        sel.removeAllRanges();
+      }
+    }
+    return out;
+  }, { list: cases });
+
+  const click = async (page, token) => {
+    const spot = await page.evaluate((word) => {
+      const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.math, .margin-slot') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const i = node.data.search(new RegExp(`\\b${word}\\b`));
+        if (i < 0) continue;
+        const r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + 1);
+        const box = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + box.top - 300, behavior: 'instant' });
+        const again = r.getBoundingClientRect();
+        return { x: again.left + 1, y: (again.top + again.bottom) / 2 };
+      }
+      return null;
+    }, token);
+    const seen = await page.evaluate(([x, y]) => { const r = document.caretRangeFromPoint(x, y); return `${JSON.stringify(r.startContainer.data)}@${r.startOffset}`; }, [spot.x, spot.y]);
+    await page.mouse.click(spot.x, spot.y);
+    await expect(page.locator('#doc .line-edit')).toBeFocused();
+    const got = await page.evaluate(() => ({ at: document.querySelector('#doc .line-edit').selectionStart, value: document.querySelector('#doc .line-edit').value }));
+    await page.evaluate(() => session.doc.stop());
+    await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+    return got.at === got.value.indexOf(token) ? null : `caret on ${token} is at ${got.at}, wanted ${got.value.indexOf(token)} in ${JSON.stringify(got.value)} click at ${seen}`;
+  };
+
+  const drawn = (page, state) => page.waitForFunction((want) => [...document.querySelectorAll('#doc .math')].every((m) => m.dataset.drawn === want), state).then(() => page.evaluate(() => document.fonts.ready)).then(() => page.waitForTimeout(500));
+  const options = (katex) => ({ layout: 'marks', width: 1280, height: 1800, source, threads: cases.map((c) => c.thread), katex });
+
+  for (const [state, katex, want] of [['drawn', 'ok', 'yes'], ['not drawn yet', 'held', undefined], ['failed to draw', 'missing', 'failed']]) {
+    test(`a passage is marked, selected and clicked where it reads with formulas ${state}`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        if (want) await drawn(page, want);
+        else await page.waitForTimeout(500);
+        expect(await check(page)).toEqual([]);
+        await page.addStyleTag({ content: '.margin-ink *, .margin-mark { pointer-events: none !important; } .margin-slot { display: none !important; }' });
+        const wrong = [];
+        for (const token of carets) wrong.push(await click(page, token));
+        expect(wrong.filter(Boolean)).toEqual([]);
+        const spot = await page.evaluate(() => {
+          window.scrollTo({ top: 0, behavior: 'instant' });
+          const box = document.querySelector('#doc .math').getBoundingClientRect();
+          return { x: (box.left + box.right) / 2, y: (box.top + box.bottom) / 2 };
+        });
+        await page.mouse.click(spot.x, spot.y);
+        await expect(page.locator('#doc .line-edit')).toBeFocused();
+        const [at, open, shut] = await page.evaluate(() => {
+          const area = document.querySelector('#doc .line-edit');
+          return [area.selectionStart, area.value.indexOf('$'), area.value.lastIndexOf('$', area.value.indexOf(' and the sum')) + 1];
+        });
+        expect(at >= open && at <= shut).toBe(true);
+        await page.evaluate(() => session.doc.stop());
+        if (!want) {
+          await page.evaluate(() => fetch('/release'));
+          await drawn(page, 'yes');
+          expect(await check(page)).toEqual([]);
+        }
+      }, options(katex));
+    });
+  }
+
+  test('the wash, underline and blot of a passage after a formula sit on its words, not on the formula', async ({ browser }) => {
+    const text = tex`The area under the curve is $\int_0^1 x^2\,dx = \frac13$ and the sum of the squares is finite.`;
+    const quote = 'the sum of the squares';
+    const at = text.indexOf(quote);
+    const thread = { id: 't1', quote, prefix: text.slice(at - 12, at), suffix: text.slice(at + quote.length), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
+    await fixture(browser, async (page) => {
+      await drawn(page, 'yes');
+      await expect.poll(() => page.locator('.margin-slot[data-id="t1"]').count()).toBe(1);
+      if (process.env.SHOTS) await page.screenshot({ path: path.join(process.env.SHOTS, `${test.info().project.name}.png`), clip: { x: 300, y: 100, width: 900, height: 120 } });
+      const got = await page.evaluate(() => {
+        const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.parentElement.closest('.math') ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
+        const range = document.createRange();
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          const i = node.data.indexOf('the sum of the squares');
+          if (i < 0) continue;
+          range.setStart(node, i);
+          range.setEnd(node, i + 22);
+          break;
+        }
+        const words = range.getBoundingClientRect();
+        const box = (el) => el.getBoundingClientRect();
+        const paths = [...document.querySelectorAll('.margin-ink path.wash[data-id="t1"], .margin-ink path.solid[data-id="t1"]')].map(box);
+        const slot = box(document.querySelector('.margin-slot[data-id="t1"]'));
+        const formula = box(document.querySelector('#doc .katex-html'));
+        return { words: { left: words.left, right: words.right }, paths: paths.map((r) => ({ left: r.left, right: r.right })), slot: slot.left, formula: { left: formula.left, right: formula.right } };
+      });
+      expect(got.paths.length).toBeGreaterThan(0);
+      for (const path of got.paths) {
+        expect(Math.abs(path.left - got.words.left)).toBeLessThanOrEqual(4);
+        expect(Math.abs(path.right - got.words.right)).toBeLessThanOrEqual(4);
+      }
+      expect(Math.abs(got.slot - got.words.right)).toBeLessThanOrEqual(4);
+    }, { layout: 'marks', source: text, threads: [thread] });
+  });
 });

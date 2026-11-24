@@ -240,7 +240,8 @@ Decided: one app, window only (2026-10-31).
   the toast surface with a red alert mark in front, never a red fill (2026-11-21, the user's call). Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). Clicking its owner again closes it, as does a click
-  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. Side
+  outside (2026-11-16); a context menu (`point`) reopens at the new point instead, and the click
+  WebKit sends after a Control-click never reaches what the menu belongs to. Side
   panels opened from a card or row (the card panel, the calendar peek) close on a click outside
   through `closeOnOutsidePress(inside, leave)` in `popup-menu.js` (2026-11-21, the user's call):
   it acts on the click after a primary press outside the panel, its opener, menus, sheets and toasts,
@@ -400,7 +401,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `![[file|400]]`, 16–4000 px). Nesting and list styles change only the page,
   never the file. A click or a double-click on a picture frames it and never opens its
   Markdown (2026-11-21, the user's call; Shift-click or a double-click beside it does). A
-  picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js); in a list or
+  picture is one caret position (`ed.rawOffset`, `shownBefore` in doc.js), and so is a formula, drawn or not (`markdown.mathSpans`, `.math`); in a list or
   checkbox item a click on the picture frames it like any other, and a click beside it, left
   or right of its box on its row, puts the caret before or after it (2026-11-21, the user's
   call). Backspace or Delete on a framed picture removes it and leaves the caret in its place
@@ -747,6 +748,13 @@ read (root CLAUDE.md, 2026-11-17).
   chosen model. No AI call routes. A chat moves up once when needed, never down while warm
   (`routing::choose`, `Slot::light`); a failing light writer gives way on the last try, so `Auto`
   names who really answered. `Prefs.auto_model` turns it off.
+- Pinned chats (2026-11-23, the user's call): `chats.pinned` (an added column, `VERSION` stays 7),
+  PATCH `/api/chats/{id}` `{pinned}` (204, 404). They head the history in a Pinned group, newest first;
+  a pin never moves `updated_at`, and Keeping's Chats choice and its count skip pinned chats.
+- With a note open, a This note group follows Pinned (2026-11-24, the user's call): chats with a question
+  asked on that note (`note` on the user message: the note Felix was reading), with it attached (`refs`) or about a
+  passage in it (`selection`); never a search source. `chats.notes` is a JSON list of ids, added to by each
+  save, worked out again when messages are dropped, and filled once from stored messages when the column is first added; `note` reaches no prompt or hash.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
 - Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed
@@ -840,7 +848,9 @@ Felix (2026-10-19).
   messages sit right of a 1 px `--line` rule; its one action row is Resolve,
   Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
   row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
-  closed opener and focus target and takes no clicks while open.
+  closed opener and focus target and takes no clicks while open. A closed note shows a round ⋯
+  (`.margin-menu`, 2026-11-23, the user's call) at its outer top corner while hovered or focused:
+  Open full screen (with a drawing), Resolve, Copy, Pin open, Add to note and Dismiss in `popupMenu`.
 - Width: `marginLayout` sets `--margin-w` each pass from `marginKit.arrangement`
   and `marginWidth`: notes autosize to the room beside the note's `max-width`
   (Right 240–360 px beside a column of at least `LEAST_COLUMN` 600; Both 180–360 px
@@ -852,12 +862,18 @@ Felix (2026-10-19).
   in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
   are a 13 px ink blot just after the passage's last word, never over the text (a thread with replies
   shows their count beside the blot, `9+` past nine, in the mark's aria-label too, and its slot is
-  32 px wide, 2026-11-21, the user's call): `marginSlots`
+  36 px wide, 2026-11-21, the user's call): `marginSlots`
   puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
   the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
   editor or a code, table or maths block) before anything is measured, and the blot sits on
-  it; side by side when two end together. A read's blot, and any passage without a slot,
-  sits just after the last word instead (`marginPassageEnd`). An open or pinned note sits
+  it; side by side when two end together. A slot that would make its block taller is hidden, so
+  opening a line never moves a block or leaves a blank line. A passage without a usable slot (an open
+  line, a quote, code, table or maths block, or a slot that hangs past the end of its line) has its blot
+  in the 16 px right of the column (`data-aside`), level with its last line and stacked down when two
+  meet; a read's blot sits just after the last word (`marginPassageEnd`), or beside the column when that
+  would not fit in it. No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
+  measured again only when its block's size or the fonts changed (`data-fit`). A window resize
+  redraws in the same frame. Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
   holding its height (pinned cards stack, placed in document order); it unfolds with a
   clip and the room over `OPEN_MS` only when the user opens it (not on load or a layout
@@ -1066,18 +1082,22 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   and Delete look one up with `pending_recording`); a recovery job carries its session id.
 - Live transcript (2026-11-21, the user's call): the 1 s poll redraws the live page
   around the kept nodes (`paintLive`/`graft` swap what surrounds them, at any depth; a kept node is never
-  rebuilt), and `showTranscript` patches `#rec-transcript` with `tailMerge(shown, next)`: a trimmed head
+  rebuilt), and `showTranscript` patches `#rec-transcript`, or on a call each
+  turn's words (rows keyed by the turn's `n`, so a kept row is never rebuilt), with `tailMerge(shown, next)`: a trimmed head
   (`keep_tail`) is dropped from the front, the stable prefix stays, and only the changed
   tail (backed up to its word) is replaced, so selection and scroll survive. New words are
-  a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes; text already said when
+  a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes (a call, a few per turn); text already said when
   the node is made arrives plain. Scrolled up, the view stays put and Back to latest
   (`#rec-latest`) scrolls down and resumes following. `aria-live="off"`: the node now
   persists, so polite would read every update. The `[data-keep]` nodes are the transcript
   panel `#rec-heard`, the tab list `#rec-tabs` (its count and selection are set in place by
-  `syncTabs`, so keyboard focus stays) and Felix's column. The live string is untimed, one
-  track at a time for calls, and a microphone recording's speaker labels exist only once it is
-  saved, so the Transcript tab stays plain text, also after Stop; turns are drawn only for a
-  saved transcript.
+  `syncTabs`, so keyboard focus stays) and Felix's column. A call's view carries `turns`
+  (`live_turns.rs`, 2026-11-23, the user's call: live looks like the saved transcript; You and Others only,
+  untimed): each side's whole text is aligned word by word with what it said before, so a rewrite keeps
+  every word in its own turn; new words go on in the side's latest turn until their sentence ends or the
+  other side has said 12 words, then begin a new one. `transcript` is the same turns as `You: …` /
+  `Others: …` lines. Microphone and screen recordings stay plain text, since their speaker labels exist
+  only once saved.
 - Record page (2026-11-22, the owner's call: lectures and meetings share it; speaker UI only
   where speaker data exists; Start and the live controls stay red). Before Start: the title
   field first (`#rec-title`, note-title type, "Untitled recording"), then the event and folder
@@ -1233,6 +1253,13 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 - Calendar page lays out in normal flow beside the rail and explorer, never
   `position: fixed` over `--side`. Saved task times never change for layout;
   a zero-height resize never writes an end. Polls wait during drags (`cal.stale`).
+- The whole of a calendar item or tray row opens it (`.cal-open::after` covers it; the checkbox sits
+  above, and a press on the resize edge without a drag opens it too). Every press on the grid or tray
+  is a `cal.drag` (`press` mode for what cannot be dragged), so `drawCalendar` never replaces what is
+  being clicked: it waits (`cal.redraw`) until the click has happened, and while a new task is being
+  typed. A press elsewhere saves the typed task, and empty time starts one with a panel or day open.
+  Words that could not be saved stay (`cal.compose.failed`): the box returns after redraws and other
+  pages, a new box takes them, and only Enter or an edit tries again.
 - Task blocks are as tall as their time (min 15 min, 18 px; `calLeast`): 2 to 3 PM
   ends at the 3 PM line and a resize shrinks the block live. Only a task with no end
   keeps a default span (`CAL_DUE_MIN`, 78 min). Under an hour a block takes `inline`:
@@ -1343,6 +1370,9 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   first, then save; a failed save puts the card, chip or tick back and shows the error toast.
   Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
+- A right click on a card, Shift+F10 or the menu key opens `kanbanCardMenu` (2026-11-23, the user's
+  call): Open, Move to…, Priority…, Move to board… (with more than one board) and Delete card, in
+  `popupMenu` at the pointer; Priority goes through the open card's panel when it is open.
 - Card priority (2026-11-15) is one to three slanted pencil strokes
   (`KANBAN_STROKES`, 14 px) before the title, coloured by level (2026-11-16: low `--hue-0`,
   medium `--hue-amber`, high `--hue-red`), the title indented by
@@ -1542,7 +1572,7 @@ keys and downloaded runtimes stay untouched.
   pointed at missing fixture binaries, so detection never inspects the
   developer's accounts. The `phone` project runs only
   the "on a phone" test in flows.spec.js. There is no visual suite.
-- Fixture specs (boards.spec.js, calendar.spec.js) run the real CSS and page code
+- Fixture specs (boards.spec.js, calendar.spec.js, live-turns.spec.js) run the real CSS and page code
   over an in-memory API; flows.spec.js joins the page to the real routes.
   The manual search paging test disables the scroll observer in the signed-in
   document before changing the hash and moves its fixture notes to trash in one request.

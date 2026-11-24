@@ -156,6 +156,7 @@ for (const width of [390]) test(`compact Folders at ${width} shares rows, traps 
   const nested = await createFolder(page, `${dir}/Child`);
   const current = await createNote(page, nested);
   await openNote(page, current);
+  await expect(noteRow(page, current.id)).toBeVisible();
   await page.setViewportSize({ width, height: 844 });
   await folders(page);
   const host = '#folders-sheet';

@@ -30,7 +30,7 @@ use crate::routes::auth::{auth_middleware, note_peer, security_headers};
 use crate::routes::downloads::{export_zip, originals_zip};
 use crate::routes::felix::{
     apply_suggestion, change_answer_access, chat_reply, delete_chat, drop_last_messages, get_chat,
-    get_review, list_chat_files, list_chats, mark_reviewed, put_chat, put_chat_file,
+    get_review, list_chat_files, list_chats, mark_reviewed, pin_chat, put_chat, put_chat_file,
     remove_chat_file, steer_answer,
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
@@ -266,9 +266,13 @@ pub(crate) fn router(state: AppState) -> Router {
         .route("/api/chats/{id}/drop", post(drop_last_messages))
         .route(
             "/api/chats/{id}",
-            get(get_chat).put(put_chat).delete(delete_chat).layer(
-                axum::extract::DefaultBodyLimit::max(crate::chats::CHAT_BYTES),
-            ),
+            get(get_chat)
+                .put(put_chat)
+                .patch(pin_chat)
+                .delete(delete_chat)
+                .layer(axum::extract::DefaultBodyLimit::max(
+                    crate::chats::CHAT_BYTES,
+                )),
         )
         .route("/api/settings", get(get_settings).post(change_setting))
         .route("/api/settings/test", post(test_setting))

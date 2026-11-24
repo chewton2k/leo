@@ -50,6 +50,8 @@ impl Chat {
             about: self.about.clone(),
             count: self.messages.len(),
             updated_at: self.updated_at,
+            pinned: false,
+            notes: Vec::new(),
         }
     }
 
@@ -66,6 +68,8 @@ pub struct Summary {
     pub about: String,
     pub count: usize,
     pub updated_at: DateTime<Utc>,
+    pub pinned: bool,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -313,23 +317,32 @@ impl std::error::Error for Conflict {}
 pub struct Saved {
     pub chat: Chat,
     pub count: usize,
+    pub pinned: bool,
+    pub notes: Vec<String>,
 }
 
 impl Saved {
     pub fn summary(&self) -> Summary {
         Summary {
             count: self.count,
+            pinned: self.pinned,
+            notes: self.notes.clone(),
             ..self.chat.summary()
         }
     }
 }
 
-fn write_facts(c: &rusqlite::Connection, chat: &Chat, count: usize) -> rusqlite::Result<()> {
+fn write_facts(
+    c: &rusqlite::Connection,
+    chat: &Chat,
+    count: usize,
+    notes: &[String],
+) -> rusqlite::Result<()> {
     c.execute(
-        "INSERT INTO chats (id, title, mode, refs, messages, named, about, memory, count, created_at, updated_at, rows)
-         VALUES (?1, ?2, 'chat', ?3, '[]', ?4, ?5, ?6, ?7, ?8, ?9, 1)
+        "INSERT INTO chats (id, title, mode, refs, messages, named, about, memory, count, created_at, updated_at, rows, notes)
+         VALUES (?1, ?2, 'chat', ?3, '[]', ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10)
          ON CONFLICT(id) DO UPDATE SET title = ?2, refs = ?3, named = ?4, about = ?5, memory = ?6,
-             count = ?7, created_at = ?8, updated_at = ?9, rows = 1",
+             count = ?7, created_at = ?8, updated_at = ?9, rows = 1, notes = ?10",
         rusqlite::params![
             chat.id,
             chat.title,
@@ -340,8 +353,73 @@ fn write_facts(c: &rusqlite::Connection, chat: &Chat, count: usize) -> rusqlite:
             count as i64,
             stamp(chat.created_at),
             stamp(chat.updated_at),
+            json(notes),
         ],
     )?;
+    Ok(())
+}
+
+fn note_ids(messages: &[serde_json::Value], into: &mut std::collections::BTreeSet<String>) {
+    for message in messages
+        .iter()
+        .filter(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
+    {
+        let attached = message
+            .get("refs")
+            .and_then(|r| r.as_array())
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r.get("id"));
+        let selected = message.get("selection").and_then(|s| s.get("note"));
+        let ids = attached.chain(message.get("note")).chain(selected);
+        into.extend(
+            ids.filter_map(|id| id.as_str())
+                .filter(|id| !id.is_empty())
+                .map(str::to_string),
+        );
+    }
+}
+
+fn notes_kept(
+    c: &rusqlite::Connection,
+    id: &str,
+) -> rusqlite::Result<std::collections::BTreeSet<String>> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut kept = c.prepare("SELECT message FROM chat_messages WHERE chat = ?1")?;
+    let mut rows = kept.query([id])?;
+    while let Some(row) = rows.next()? {
+        if let Ok(message) = serde_json::from_str(&row.get::<_, String>(0)?) {
+            note_ids(&[message], &mut found);
+        }
+    }
+    Ok(found)
+}
+
+pub(crate) fn fill_notes(c: &rusqlite::Connection) -> rusqlite::Result<()> {
+    let mut found: std::collections::HashMap<String, std::collections::BTreeSet<String>> =
+        std::collections::HashMap::new();
+    let mut asked = c.prepare(
+        "SELECT chat, message FROM chat_messages WHERE message LIKE '%\"refs\":[{%' OR message LIKE '%\"selection\"%'",
+    )?;
+    let mut rows = asked.query([])?;
+    while let Some(row) = rows.next()? {
+        if let Ok(message) = serde_json::from_str(&row.get::<_, String>(1)?) {
+            note_ids(&[message], found.entry(row.get(0)?).or_default());
+        }
+    }
+    let mut older = c.prepare("SELECT id, messages FROM chats WHERE rows = 0")?;
+    let mut rows = older.query([])?;
+    while let Some(row) = rows.next()? {
+        if let Ok(messages) =
+            serde_json::from_str::<Vec<serde_json::Value>>(&row.get::<_, String>(1)?)
+        {
+            note_ids(&messages, found.entry(row.get(0)?).or_default());
+        }
+    }
+    let mut set = c.prepare("UPDATE chats SET notes = ?1 WHERE id = ?2")?;
+    for (id, ids) in found.into_iter().filter(|(_, ids)| !ids.is_empty()) {
+        set.execute(rusqlite::params![json(&ids), id])?;
+    }
     Ok(())
 }
 
@@ -532,6 +610,8 @@ struct Facts {
     last: Option<serde_json::Value>,
     created_at: DateTime<Utc>,
     updated_at: DateTime<Utc>,
+    pinned: bool,
+    notes: Vec<String>,
 }
 
 fn facts_in(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Facts>> {
@@ -540,7 +620,8 @@ fn facts_in(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Facts
         "SELECT title, named, memory, count, created_at, updated_at, rows,
                 CASE WHEN rows = 1
                      THEN (SELECT message FROM chat_messages m WHERE m.chat = chats.id ORDER BY m.n DESC LIMIT 1)
-                     WHEN json_valid(messages) THEN json_extract(messages, '$[#-1]') END
+                     WHEN json_valid(messages) THEN json_extract(messages, '$[#-1]') END,
+                pinned, notes
          FROM chats WHERE id = ?1",
         [id],
         |row| {
@@ -557,6 +638,8 @@ fn facts_in(c: &rusqlite::Connection, id: &str) -> rusqlite::Result<Option<Facts
                 last: row
                     .get::<_, Option<String>>(7)?
                     .and_then(|m| serde_json::from_str(&m).ok()),
+                pinned: row.get(8)?,
+                notes: serde_json::from_str(&row.get::<_, String>(9)?).unwrap_or_default(),
             })
         },
     )
@@ -588,6 +671,8 @@ fn summary_of(row: &rusqlite::Row) -> rusqlite::Result<Summary> {
         about: row.get(3)?,
         count: row.get::<_, i64>(4)? as usize,
         updated_at: when(&row.get::<_, String>(5)?),
+        pinned: row.get(6)?,
+        notes: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
     })
 }
 
@@ -617,7 +702,7 @@ pub fn list(dir: &Path) -> Vec<Summary> {
     db_of(dir)
         .with(|c| {
             let mut found = c.prepare(
-                "SELECT id, title, named, about, count, updated_at FROM chats ORDER BY updated_at DESC, id",
+                "SELECT id, title, named, about, count, updated_at, pinned, notes FROM chats ORDER BY updated_at DESC, id",
             )?;
             let rows = found.query_map([], summary_of)?;
             rows.collect()
@@ -675,7 +760,7 @@ pub fn search(dir: &Path, query: &str) -> Vec<Summary> {
             }
             let mut summaries = Vec::new();
             let mut one = c.prepare_cached(
-                "SELECT id, title, named, about, count, updated_at FROM chats WHERE id = ?1",
+                "SELECT id, title, named, about, count, updated_at, pinned, notes FROM chats WHERE id = ?1",
             )?;
             for (id, (title, n)) in found.unwrap_or_default() {
                 use rusqlite::OptionalExtension;
@@ -776,6 +861,13 @@ pub fn save_from(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Re
             _ => now,
         };
         let old_title = old.as_ref().map(|old| old.title.clone());
+        let pinned = old.as_ref().is_some_and(|old| old.pinned);
+        let mut notes: std::collections::BTreeSet<String> = old
+            .as_ref()
+            .map(|old| old.notes.iter().cloned().collect())
+            .unwrap_or_default();
+        note_ids(&tail, &mut notes);
+        let notes: Vec<String> = notes.into_iter().collect();
         let kept_name = old
             .filter(|old| old.named && saving.title.trim().is_empty())
             .map(|old| old.title);
@@ -797,7 +889,7 @@ pub fn save_from(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Re
         };
         rows_from(&tx, id, start)?;
         add_rows(&tx, id, start, &tail)?;
-        write_facts(&tx, &chat, total)?;
+        write_facts(&tx, &chat, total, &notes)?;
         if matches!(column, Some(Some(_))) {
             tx.execute("UPDATE chats SET messages = '[]' WHERE id = ?1", [id])?;
         }
@@ -805,7 +897,12 @@ pub fn save_from(dir: &Path, id: &str, saving: Saving, now: DateTime<Utc>) -> Re
             write_title(&tx, id, &chat.title, old_title.is_none())?;
         }
         tx.commit()?;
-        Ok(Ok(Saved { chat, count: total }))
+        Ok(Ok(Saved {
+            chat,
+            count: total,
+            pinned,
+            notes,
+        }))
     })?;
     match saved {
         Ok(saved) => Ok(saved),
@@ -835,16 +932,25 @@ pub fn drop_last(dir: &Path, id: &str, count: usize, total: usize) -> Result<Opt
             None => {
                 rows_from(&tx, id, left)?;
                 let about = about_of(&head_of(&tx, id, left)?);
+                let notes = notes_kept(&tx, id)?;
                 tx.execute(
-                    "UPDATE chats SET count = ?1, about = ?2 WHERE id = ?3",
-                    rusqlite::params![left as i64, about, id],
+                    "UPDATE chats SET count = ?1, about = ?2, notes = ?3 WHERE id = ?4",
+                    rusqlite::params![left as i64, about, json(&notes), id],
                 )?;
             }
             Some(mut messages) => {
                 messages.truncate(left);
+                let mut notes = std::collections::BTreeSet::new();
+                note_ids(&messages, &mut notes);
                 tx.execute(
-                    "UPDATE chats SET messages = ?1, count = ?2, about = ?3 WHERE id = ?4",
-                    rusqlite::params![json(&messages), left as i64, about_of(&messages), id],
+                    "UPDATE chats SET messages = ?1, count = ?2, about = ?3, notes = ?4 WHERE id = ?5",
+                    rusqlite::params![
+                        json(&messages),
+                        left as i64,
+                        about_of(&messages),
+                        json(&notes),
+                        id
+                    ],
                 )?;
                 tx.execute("DELETE FROM chats_text WHERE id = ?1", [id])?;
                 tx.execute(
@@ -892,8 +998,9 @@ pub fn tidy(dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
         .with(|c| {
             let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
             let old: Vec<(String, String)> = {
-                let mut found =
-                    tx.prepare("SELECT id, updated_at FROM chats WHERE updated_at < ?1")?;
+                let mut found = tx.prepare(
+                    "SELECT id, updated_at FROM chats WHERE updated_at < ?1 AND pinned = 0",
+                )?;
                 let rows = found.query_map([&cutoff], |r| Ok((r.get(0)?, r.get(1)?)))?;
                 rows.collect::<rusqlite::Result<_>>()?
             };
@@ -912,6 +1019,18 @@ pub fn tidy(dir: &Path, days: Option<u32>, now: DateTime<Utc>) -> usize {
             Ok(gone)
         })
         .unwrap_or(0)
+}
+
+pub fn set_pinned(dir: &Path, id: &str, pinned: bool) -> bool {
+    valid_id(id)
+        && db_of(dir)
+            .with(|c| {
+                c.execute(
+                    "UPDATE chats SET pinned = ?1 WHERE id = ?2",
+                    rusqlite::params![pinned, id],
+                )
+            })
+            .is_ok_and(|changed| changed > 0)
 }
 
 pub fn remove(dir: &Path, id: &str) -> bool {
@@ -1501,6 +1620,119 @@ mod tests {
         left.sort();
         assert_eq!(left, ["chat-tidy-after1", "chat-tidy-exactly"]);
         assert_eq!(tidy(&dir, Some(30), now), 0);
+    }
+
+    #[test]
+    fn a_pin_survives_every_write_and_never_moves_the_date() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let id = "chat-pin-0001";
+        let turns = vec![said("user", "hi"), said("assistant", "hello")];
+        save(&dir, id, saving(turns.clone()), at(1)).unwrap();
+        assert!(!list(&dir)[0].pinned);
+        assert!(set_pinned(&dir, id, true));
+        assert_eq!(list(&dir)[0].updated_at, at(1));
+        assert!(list(&dir)[0].pinned);
+        assert!(search(&dir, "hello")[0].pinned);
+        assert!(rename(&dir, id, "A name"));
+        let mut more = turns.clone();
+        more.push(said("user", "again"));
+        let saved = save_from(&dir, id, saving(more.clone()), at(9)).unwrap();
+        assert!(saved.summary().pinned);
+        assert_eq!(saved.chat.updated_at, at(9));
+        assert!(set_memory(
+            &dir,
+            id,
+            Memory {
+                upto: 1,
+                hash: "h".into(),
+                text: "t".into()
+            }
+        ));
+        assert!(drop_last(&dir, id, 1, 3).unwrap().is_some());
+        as_column(&dir, id);
+        save(&dir, id, saving(more), at(10)).unwrap();
+        assert!(list(&dir)[0].pinned);
+        assert!(set_pinned(&dir, id, false));
+        assert!(!list(&dir)[0].pinned);
+        assert!(!set_pinned(&dir, "chat-pin-none1", true));
+        assert!(!set_pinned(&dir, "../x", true));
+    }
+
+    #[test]
+    fn expiry_skips_a_pinned_chat_and_a_deleted_one_still_goes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        for id in ["chat-pin-old01", "chat-pin-old02", "chat-pin-old03"] {
+            save(&dir, id, saving(vec![said("user", "hi")]), at(0)).unwrap();
+        }
+        assert!(set_pinned(&dir, "chat-pin-old02", true));
+        let now = at(0) + chrono::Duration::days(31);
+        assert_eq!(tidy(&dir, Some(30), now), 2);
+        assert_eq!(list(&dir).len(), 1);
+        assert_eq!(list(&dir)[0].id, "chat-pin-old02");
+        assert_eq!(tidy(&dir, Some(30), now), 0);
+        assert!(remove(&dir, "chat-pin-old02"));
+        assert!(list(&dir).is_empty());
+    }
+
+    #[test]
+    fn a_chat_remembers_the_notes_its_questions_named_through_every_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("chats");
+        let id = "chat-note-0001";
+        let first = serde_json::json!({ "role": "user", "text": "hi", "note": "n-open", "refs": [{ "id": "n-ref", "title": "R" }], "selection": { "note": "n-sel", "text": "x" } });
+        let reply = serde_json::json!({ "role": "assistant", "text": "hello", "refs": [{ "id": "n-no" }], "sources": [{ "id": "n-src" }], "note": "n-no" });
+        let turns = vec![first, reply];
+        let saved = save_from(&dir, id, saving(turns.clone()), at(1)).unwrap();
+        let three = vec!["n-open", "n-ref", "n-sel"];
+        assert_eq!(saved.summary().notes, three);
+        assert_eq!(list(&dir)[0].notes, three);
+        assert_eq!(search(&dir, "hello")[0].notes, three);
+        let mut more = turns.clone();
+        more.push(
+            serde_json::json!({ "role": "user", "text": "again", "note": "n-two", "refs": [] }),
+        );
+        more.push(serde_json::json!({ "role": "user", "text": "bare", "note": "", "selection": { "note": "" } }));
+        let mut next = saving(more[2..].to_vec());
+        next.from = Some(2);
+        let saved = save_from(&dir, id, next, at(2)).unwrap();
+        let four = vec!["n-open", "n-ref", "n-sel", "n-two"];
+        assert_eq!(saved.summary().notes, four);
+        assert!(rename(&dir, id, "A name"));
+        assert!(set_pinned(&dir, id, true));
+        assert!(set_memory(
+            &dir,
+            id,
+            Memory {
+                upto: 1,
+                hash: "h".into(),
+                text: "t".into()
+            }
+        ));
+        assert_eq!(list(&dir)[0].notes, four);
+        assert!(save_from(&dir, id, saving(turns), at(3)).is_err());
+        assert_eq!(
+            save_from(&dir, id, saving(more.clone()), at(3))
+                .unwrap()
+                .summary()
+                .notes,
+            four
+        );
+        assert!(drop_last(&dir, id, 2, 4).unwrap().is_some());
+        assert_eq!(list(&dir)[0].notes, three);
+        as_column(&dir, id);
+        let mut again = more.clone();
+        again.push(
+            serde_json::json!({ "role": "user", "text": "last", "refs": [{ "id": "n-late" }] }),
+        );
+        let saved = save_from(&dir, id, saving(again), at(4)).unwrap();
+        assert_eq!(
+            saved.summary().notes,
+            ["n-late", "n-open", "n-ref", "n-sel", "n-two"]
+        );
+        assert!(remove(&dir, id));
+        assert!(list(&dir).is_empty());
     }
 
     #[test]

@@ -1472,7 +1472,8 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   Saves are optimistic with rollback and Undo; a 409 goes through `saveDate`;
   repeating tasks ask Only this one / Every time (Every time shifts `date` and
   the weekdays by the day moved). Polls that land mid-drag or mid-compose wait
-  (`cal.stale`). Clicking an item opens a side peek in the tray's place
+  (`cal.stale`), and so does every redraw while the pointer is down or a new task is being typed
+  (`cal.redraw`). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are

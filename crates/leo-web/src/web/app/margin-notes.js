@@ -153,6 +153,7 @@ async function marginMount(s, mine) {
     marginPage.watch = new MutationObserver(() => marginRedraw());
     marginPage.watch.observe($('#doc'), { childList: true });
   }
+  $('#doc').addEventListener('focusin', marginRedraw);
   if (s.note.id) return marginLoad(s, () => mine === seq);
   const prefs = await marginLoadPrefs();
   if (mine !== seq || marginPage.s !== s) return;
@@ -529,9 +530,15 @@ function marginRedraw() {
   marginPage.frame = requestAnimationFrame(marginDraw);
 }
 
+let marginFonts = 0;
+function marginFontsIn() {
+  marginFonts++;
+  marginRedraw();
+}
+
 if (document.fonts) {
-  Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
-  document.fonts.addEventListener('loading', () => document.fonts.ready.then(marginRedraw));
+  Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginFontsIn, () => {});
+  document.fonts.addEventListener('loading', () => document.fonts.ready.then(marginFontsIn));
 }
 
 function marginPrintable() {
@@ -598,7 +605,7 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><button type="button" class="margin-menu" data-margin-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Note options">${ICON.more}</button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
     <form class="margin-reply"><textarea rows="1" data-reads="${MARGIN_MESSAGE_READS}" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
     <p class="margin-hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_MESSAGE_READS.toLocaleString('en')} characters of this.</p>
     <p class="margin-hint" data-passage-hint hidden>Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.</p>
@@ -691,6 +698,7 @@ function marginFill(el, t, arriving, changed) {
   toggle.setAttribute('aria-label', resolved ? `Reopen Felix’s resolved note on “${t.quote.slice(0, 80)}”` : `${open ? 'Close' : 'Open'} Felix’s note on “${t.quote.slice(0, 80)}”`);
   const pin = $('.margin-pin', el);
   pin.hidden = draft;
+  $('.margin-menu', el).hidden = draft || resolved || open || Boolean(waiting);
   pin.setAttribute('aria-pressed', String(Boolean(t.pinned)));
   pin.setAttribute('aria-label', t.pinned ? 'Unpin' : 'Pin open');
   el.toggleAttribute('data-pinned', Boolean(t.pinned));
@@ -931,6 +939,7 @@ function marginDraw() {
   }
   marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at), edit);
   marginPaint();
+  if (popup?.owner.matches('.margin-menu') && (popup.owner.hidden || !popup.owner.isConnected)) closePopup(false);
   inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
     const done = [...marginPage.arriving];
@@ -1176,6 +1185,19 @@ function marginSlots(placed, columns) {
     slots.set(id, slot);
   }
   for (const { t } of placed) slots.get(t.id)?.toggleAttribute('data-more', marginReplies(t) > 0);
+  const blockOf = (slot) => slot.closest('.blk');
+  const fit = (slot) => {
+    const block = blockOf(slot);
+    return `${block.clientWidth} ${block.offsetHeight} ${block.querySelectorAll('.margin-slot').length} ${block.querySelectorAll('.margin-slot[data-more]').length} ${marginFonts}`;
+  };
+  const stale = new Set([...slots.values()].filter((slot) => slot.dataset.fit !== fit(slot)).map(blockOf));
+  const each = [...slots.values()].filter((slot) => stale.has(blockOf(slot)));
+  const heights = () => each.map((slot) => blockOf(slot).offsetHeight);
+  for (const slot of each) slot.hidden = true;
+  const bare = heights();
+  for (const slot of each) slot.hidden = false;
+  heights().forEach((height, i) => { each[i].hidden = height > bare[i]; });
+  for (const slot of each) slot.dataset.fit = fit(slot);
   return slots;
 }
 
@@ -1226,19 +1248,30 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
       count.textContent = replies > 9 ? '9+' : replies || '';
       mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”${replies ? `, ${plural(replies, 'reply', 'replies')}` : ''}`);
     }
-    const size = mark.offsetWidth;
     const slot = slots.get(t.id)?.getBoundingClientRect();
+    const end = marginPassageEnd(t, rects, origin);
+    const room = page.right - origin.left;
+    const inline = slot?.height && slot.right <= page.right;
+    let aside = t.id !== 'reading' && !inline;
+    mark.toggleAttribute('data-aside', aside);
+    let size = mark.offsetWidth;
     let x, y;
-    if (slot?.height) {
+    if (inline) {
       x = slot.left - origin.left + slot.width / 2 - size / 2;
       y = slot.top - origin.top + slot.height / 2 - mark.offsetHeight / 2;
-    } else {
-      const end = marginPassageEnd(t, rects, origin);
+    } else if (!aside) {
       x = end.right + 13 - size / 2;
       y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
       while (taken.some((at) => Math.abs(at.x - x) < 14 && Math.abs(at.y - y) < 8)) x += 14;
+      aside = x + size / 2 + 6 > room;
+      mark.toggleAttribute('data-aside', aside);
+      size = mark.offsetWidth;
     }
-    x = Math.min(x, edge - size);
+    if (aside) {
+      x = room + 16 - size;
+      y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
+      while (taken.some((at) => Math.abs(at.x - x) < size && Math.abs(at.y - y) < mark.offsetHeight)) y += mark.offsetHeight;
+    }
     taken.push({ x, y });
     mark.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
@@ -1308,6 +1341,7 @@ function marginFocus(e) {
 }
 
 document.addEventListener('pointermove', marginHover, { passive: true });
+addEventListener('resize', marginRedraw);
 document.documentElement.addEventListener('pointerleave', () => {
   if (!marginPage.hover) return;
   marginPage.hover = null;
@@ -1359,7 +1393,8 @@ function marginClick(e) {
       marginPage.els.get(id).dataset.all = '1';
       marginDraw();
       $('.margin-reply textarea', marginPage.els.get(id)).focus({ preventScroll: true });
-    } else if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
+    } else if (action.dataset.marginAct === 'menu') marginActions(t, action);
+    else if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
     else if (action.dataset.marginAct === 'add') marginAdd(t).catch(fail);
     else if (action.dataset.marginAct === 'copy') marginCopy(t).catch(fail);
     else if (action.dataset.marginAct === 'chat') marginToChat(t);
@@ -1369,6 +1404,34 @@ function marginClick(e) {
     return;
   }
   if (marginPage.open !== id || marginPage.folds.has(id)) marginOpen(id, true);
+}
+
+function marginActions(t, owner) {
+  const said = Boolean(marginNow(t));
+  const drawn = $('.margin-felix figure.diagram[data-drawn="yes"], .margin-felix figure.drawing:not(.pending)', marginPage.els.get(t.id));
+  const now = (act) => () => {
+    const live = marginThread(t.id);
+    if (live) return act(live);
+  };
+  popupMenu(owner, {
+    label: 'Felix’s note',
+    rows: [
+      ...(drawn ? [{ text: 'Open full screen', run: () => expandDiagrams(owner) }] : []),
+      { text: 'Resolve', run: now((live) => marginStatus(live, 'resolved')) },
+      ...(said ? [{ text: 'Copy', run: now(marginCopy) }] : []),
+      { text: 'Pin open', run: now((live) => {
+        const pinned = marginPin(live);
+        $('.margin-toggle', marginPage.els.get(live.id))?.focus({ preventScroll: true });
+        return pinned;
+      }) },
+      ...(said ? [{ text: 'Add to note', run: now((live) => {
+        marginOpen(live.id, true);
+        return marginAdd(live);
+      }) }] : []),
+      { line: true },
+      { text: 'Dismiss', run: now((live) => marginStatus(live, 'dismissed')) },
+    ],
+  });
 }
 
 function marginKey(e) {
@@ -1388,7 +1451,7 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 document.addEventListener('pointerdown', (e) => {
-  if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .scrim, .scrim-gone')) return;
+  if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .popup-menu, .scrim, .scrim-gone')) return;
   if (marginPage.open === 'draft' && $('textarea', marginPage.els.get('draft'))?.value.trim()) return;
   const id = marginPage.open;
   marginFoldAway(id, () => {

@@ -1151,6 +1151,79 @@ fn recovering_a_leftover_call_track_keeps_the_other_sides_passages() {
     );
 }
 
+fn saying(said: Vec<record::Heard>) -> record::Listener {
+    let said = std::sync::Mutex::new(said);
+    Arc::new(
+        move |listening: record::Listening, heard: &mut dyn FnMut(record::Heard)| {
+            use std::sync::atomic::Ordering;
+            for said in said.lock().unwrap().drain(..) {
+                heard(said);
+            }
+            heard(record::Heard::Clock {
+                secs: 1,
+                paused: false,
+                level: 0.25,
+            });
+            while !listening.stop.load(Ordering::Relaxed) {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            Ok(record::Recorded {
+                title: "Call".into(),
+                body: "notes".into(),
+                ..Default::default()
+            })
+        },
+    )
+}
+
+#[test]
+fn a_call_shows_both_sides_in_turns_and_a_microphone_recording_stays_plain() {
+    let said = |speaker, text: &str| record::Heard::Said {
+        speaker,
+        text: text.into(),
+    };
+    let (mut state, _d, _ids) = state_with(&[]);
+    state.listener = Some(saying(vec![
+        said("You", "Shall we start?"),
+        said("Others", "Yes."),
+        said("You", "Shall we start? Great."),
+    ]));
+    let id = json_of(start_recording(&state, record::Source::Nativecall))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(&state, |s| s == "recording");
+    let view = json_of(run(record::status(State(state.clone()), Path(id.clone()))));
+    assert_eq!(
+        view["transcript"],
+        "You: Shall we start?\nOthers: Yes.\nYou: Great."
+    );
+    assert_eq!(
+        view["turns"],
+        serde_json::json!([
+            { "n": 0, "speaker": "You", "text": "Shall we start?" },
+            { "n": 1, "speaker": "Others", "text": "Yes." },
+            { "n": 2, "speaker": "You", "text": "Great." },
+        ])
+    );
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done" || s == "failed");
+
+    state.listener = Some(saying(vec![record::Heard::Transcript(
+        "You: is only a word here.".into(),
+    )]));
+    let id = json_of(start_recording(&state, record::Source::Microphone))["id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    recording_until(&state, |s| s == "recording");
+    let view = json_of(run(record::status(State(state.clone()), Path(id.clone()))));
+    assert_eq!(view["transcript"], "You: is only a word here.");
+    assert!(view.get("turns").is_none());
+    run(record::stop(State(state.clone()), Path(id)));
+    recording_until(&state, |s| s == "done" || s == "failed");
+}
+
 fn saving_quickly() -> record::Listener {
     Arc::new(
         |listening: record::Listening, heard: &mut dyn FnMut(record::Heard)| {
