@@ -1233,6 +1233,11 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 - Calendar page lays out in normal flow beside the rail and explorer, never
   `position: fixed` over `--side`. Saved task times never change for layout;
   a zero-height resize never writes an end. Polls wait during drags (`cal.stale`).
+- The whole of a calendar item or tray row opens it (`.cal-open::after` covers it; the checkbox sits
+  above, and a press on the resize edge without a drag opens it too). Every press on the grid or tray
+  is a `cal.drag` (`press` mode for what cannot be dragged), so `drawCalendar` never replaces what is
+  being clicked: it waits (`cal.redraw`) until the click has happened, and while a new task is being
+  typed. A press elsewhere saves the typed task, and empty time starts one with a panel or day open.
 - Task blocks are as tall as their time (min 15 min, 18 px; `calLeast`): 2 to 3 PM
   ends at the 3 PM line and a resize shrinks the block live. Only a task with no end
   keeps a default span (`CAL_DUE_MIN`, 78 min). Under an hour a block takes `inline`:

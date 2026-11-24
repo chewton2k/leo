@@ -909,3 +909,117 @@ test('a click outside the side peek closes it and returns focus, and another ite
     await expect(page.locator('.cal-item[data-id="task-study"] .cal-open')).toBeFocused();
   });
 });
+
+test('every part of a calendar item but its checkbox opens it, the resize edge included', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const dead = () => page.evaluate(() => [...document.querySelectorAll('.cal-item, .cal-tray-row')].flatMap(item => {
+      const box = item.getBoundingClientRect();
+      const misses = [];
+      for (let x = box.left + 2; x < box.right - 2; x += 3) {
+        for (let y = box.top + 2; y < box.bottom - 2; y += 3) {
+          const hit = document.elementFromPoint(x, y);
+          if (hit && item.contains(hit) && !hit.closest('.cal-open, .cal-check, .cal-grip')) misses.push(`${item.dataset.id} ${Math.round(x - box.left)},${Math.round(y - box.top)}`);
+        }
+      }
+      return misses;
+    }));
+    const checks = () => page.evaluate(() => [...document.querySelectorAll(':is(.cal-item, .cal-tray-row) .cal-check')].every(check => {
+      const box = check.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      return hit === check || !hit.closest('.cal-item, .cal-tray-row')?.contains(check);
+    }));
+    for (const view of ['week', 'day', 'month']) {
+      await page.locator(`.cal-views [data-view="${view}"]`).click();
+      await settled(page);
+      expect(await dead()).toEqual([]);
+      expect(await checks()).toBe(true);
+    }
+    await page.locator('.cal-views [data-view="week"]').click();
+    await settled(page);
+    const side = page.locator('#cal-side.peek');
+    const week = await page.locator('.cal-item[data-id="e-week"]').boundingBox();
+    await page.mouse.click(week.x + week.width - 6, week.y + week.height - 6);
+    await expect(side.locator('.cal-peek-title')).toHaveText('Reading week');
+    const grip = await page.locator('.cal-item[data-id="task-study"] .cal-grip').boundingBox();
+    await page.mouse.click(grip.x + grip.width / 2, grip.y + grip.height / 2);
+    await expect(side.locator('#cal-peek-title')).toHaveValue('Study group');
+    expect(await patches(page, 'task-study')).toEqual([]);
+  });
+});
+
+test('a redraw that lands while the mouse is down waits for the click', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const side = page.locator('#cal-side.peek');
+    const press = async id => {
+      const box = await page.locator(`.cal-item[data-id="${id}"]`).boundingBox();
+      await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2);
+      await page.mouse.down();
+    };
+    for (const [id, title] of [['e-lecture', 'CS 241 lecture'], ['task-study', 'Study group']]) {
+      await press(id);
+      await page.evaluate(() => { drawCalendar(); return loadSchedule(); });
+      await page.mouse.up();
+      await expect(side).toContainText(id === 'e-lecture' ? title : 'Task');
+      expect(await page.evaluate(() => cal.peek.id)).toBe(id);
+      await page.evaluate(() => calClosePeek());
+    }
+    await expect.poll(() => page.evaluate(() => cal.redraw || cal.stale)).toBe(false);
+
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await page.locator('#cal-peek-about').fill('Bring goggles');
+    await press('e-lecture');
+    await expect.poll(async () => (await task(page, 'task-lab')).description).toBe('Bring goggles');
+    await settled(page);
+    await page.mouse.up();
+    await expect(side.locator('.cal-peek-title')).toHaveText('CS 241 lecture');
+
+    await page.evaluate(() => document.querySelector('.cal-dayhead').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1, isPrimary: true, pointerId: 77, pointerType: 'touch' })));
+    await page.evaluate(() => drawCalendar());
+    expect(await page.evaluate(() => cal.redraw)).toBe(true);
+    await page.locator('.cal-item[data-id="e-maya"] .cal-open').click();
+    await expect(side.locator('.cal-peek-title')).toHaveText('1:1 Maya');
+    expect(await page.evaluate(() => Boolean(cal.drag || cal.redraw))).toBe(false);
+  });
+});
+
+test('one click on empty time starts a task while a panel or a month day is open, and typed words are never dropped', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const input = page.locator('.cal-compose-input');
+    const posts = () => page.evaluate(() => window.calls.filter(c => c.method === 'POST').map(c => c.body.title));
+    const clickAt = async (day, minutes) => {
+      const at = await point(page, day, minutes);
+      await page.mouse.click(at.x, at.y);
+    };
+    await page.locator('.cal-item[data-id="task-lab"] .cal-open').click();
+    await clickAt('2026-11-06', 14 * 60);
+    await expect(page.locator('#cal-side.peek')).toHaveCount(0);
+    await expect(input).toBeFocused();
+
+    await input.fill('First');
+    await clickAt('2026-11-07', 14 * 60);
+    await expect.poll(posts).toEqual(['First']);
+    await settled(page);
+    await expect(input).toBeFocused();
+    await expect(input).toHaveValue('');
+    await input.fill('Second');
+    await page.evaluate(() => drawCalendar());
+    await expect(input).toHaveValue('Second');
+    await page.locator('.cal-item[data-id="e-lecture"]').click();
+    await expect.poll(posts).toEqual(['First', 'Second']);
+    await expect(page.locator('.cal-side.peek .cal-peek-title')).toHaveText('CS 241 lecture');
+    await expect(page.locator('.cal-compose')).toHaveCount(0);
+    await expect(page.locator('.cal-item', { hasText: /First|Second/ })).toHaveCount(2);
+
+    await page.evaluate(() => {
+      const lab = window.db.tasks.find(t => t.id === 'task-lab');
+      for (let index = 0; index < 4; index++) window.db.tasks.push({ ...lab, id: 'more-' + index });
+    });
+    await page.locator('.cal-views [data-view="month"]').click();
+    await page.evaluate(() => loadSchedule());
+    await page.locator('.cal-cell[data-day="2026-11-05"] .cal-more').click();
+    const cell = await page.locator('.cal-cell[data-day="2026-11-10"]').boundingBox();
+    await page.mouse.click(cell.x + cell.width / 2, cell.y + cell.height / 2);
+    await expect(page.locator('.cal-cell.open')).toHaveCount(0);
+    await expect(page.locator('.cal-cell[data-day="2026-11-10"] .cal-compose-input')).toBeFocused();
+  });
+});
