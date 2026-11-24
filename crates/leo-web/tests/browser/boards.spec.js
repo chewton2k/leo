@@ -1225,6 +1225,13 @@ test('a right click on a card, or Shift+F10, opens its quick actions and never t
     await page.evaluate(() => { window.slow = 0; window.errors.length = 0; });
 
     await card.click({ button: 'right' });
+    await item('Priority…').click();
+    await page.evaluate(() => { window.db.cards.find(c => c.id === 'cread00001').priority = 'low'; return kanbanRefresh(); });
+    await radio('High').click();
+    await settled(page);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').priority)).toBe('high');
+
+    await card.click({ button: 'right' });
     await item('Open').click();
     await expect(page.locator('#kanban-card-title')).toHaveValue('Read chapter 3');
     await card.click({ button: 'right' });

@@ -833,9 +833,9 @@ test('chats pin into their own group, keep the pin through a refresh, roll back 
     await expect(row('Gamma')).toBeVisible();
     expect(await groups()).toEqual(['Pinned','Today']);
     await expect(pin('Gamma')).toHaveAttribute('aria-pressed','true');
-    await expect(pin('Gamma')).toHaveAttribute('aria-label','Unpin chat');
+    await expect(pin('Gamma')).toHaveAttribute('aria-label','Unpin Gamma');
     await expect(pin('Gamma')).toHaveAttribute('title','Unpin chat');
-    await expect(pin('Alpha')).toHaveAttribute('aria-label','Pin chat');
+    await expect(pin('Alpha')).toHaveAttribute('aria-label','Pin Alpha');
     expect(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-history-pin[aria-pressed="true"]')).opacity)).toBe('1');
     expect(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-history-pin[aria-pressed="false"]')).opacity)).toBe('0');
 
@@ -849,7 +849,7 @@ test('chats pin into their own group, keep the pin through a refresh, roll back 
     await pin('Alpha').focus();
     await page.keyboard.press('Enter');
     await expect(pin('Alpha')).toBeFocused();
-    await expect(pin('Alpha')).toHaveAttribute('aria-label','Unpin chat');
+    await expect(pin('Alpha')).toHaveAttribute('aria-label','Unpin Alpha');
     expect(await list.locator('.chat-history-title').allTextContents()).toEqual(['Alpha',chats[1].title,'Gamma']);
     expect(await groups()).toEqual(['Pinned']);
 

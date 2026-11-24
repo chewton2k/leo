@@ -493,8 +493,8 @@ test('conversation rows display only escaped titles, including search results', 
     assert.ok(html.includes('data-chat="resume"') && html.includes('data-chat="forget"'));
   }
   const unpinned = context.chatRow({ id: 'chat-one', title: 'A' });
-  assert.match(unpinned, /<button class="chat-history-pin" data-chat="pin" data-id="chat-one" aria-pressed="false" aria-label="Pin chat" title="Pin chat"><svg><\/svg><\/button><button class="chat-history-x"/);
-  assert.match(context.chatRow({ id: 'chat-one', title: 'A', pinned: true }), /aria-pressed="true" aria-label="Unpin chat" title="Unpin chat"/);
+  assert.match(unpinned, /<button class="chat-history-pin" data-chat="pin" data-id="chat-one" aria-pressed="false" aria-label="Pin A" title="Pin chat"><svg><\/svg><\/button><button class="chat-history-x"/);
+  assert.match(context.chatRow({ id: 'chat-one', title: 'A', pinned: true }), /aria-pressed="true" aria-label="Unpin A" title="Unpin chat"/);
   assert.ok(!context.chatRow({ id: 'chat-new', title: 'New chat', ghost: true }).includes('data-chat="pin"'));
 });
 

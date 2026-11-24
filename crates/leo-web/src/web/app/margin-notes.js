@@ -933,6 +933,7 @@ function marginDraw() {
   }
   marginRevisits(source, origin, placed.filter(({ t }) => marginPage.threads.includes(t)).map(({ at }) => at), edit);
   marginPaint();
+  if (popup?.owner.matches('.margin-menu') && (popup.owner.hidden || !popup.owner.isConnected)) closePopup(false);
   inkSettle((id) => marginPage.els.get(id)?.querySelectorAll('.margin-felix') || []);
   if (marginPage.arriving.size && !stillMotion()) {
     const done = [...marginPage.arriving];

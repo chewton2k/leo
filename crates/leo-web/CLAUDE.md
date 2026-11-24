@@ -1359,7 +1359,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
 - A right click on a card, Shift+F10 or the menu key opens `kanbanCardMenu` (2026-11-23, the user's
   call): Open, Move to…, Priority…, Move to board… (with more than one board) and Delete card, in
-  `popupMenu` at the pointer; Priority and Delete go through the open card's panel when it is open.
+  `popupMenu` at the pointer; Priority goes through the open card's panel when it is open.
 - Card priority (2026-11-15) is one to three slanted pencil strokes
   (`KANBAN_STROKES`, 14 px) before the title, coloured by level (2026-11-16: low `--hue-0`,
   medium `--hue-amber`, high `--hue-red`), the title indented by

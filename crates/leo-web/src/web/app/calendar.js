@@ -750,6 +750,7 @@ function calDrop() {
   }
   if (d.mode === 'create') {
     drawCalendar();
+    calClosePeek();
     return calCompose(target.day, target.minutes, target.end);
   }
   const task = d.task;
@@ -878,6 +879,10 @@ function calCompose(day, start, end) {
     } catch (e) {
       if (e instanceof Locked) throw e;
       toast(e.message, { bad: true });
+      if (cal.compose === c && box.isConnected) {
+        c.sent = false;
+        return;
+      }
     }
     if (cal.compose === c) calCloseCompose();
     else calSettled();
@@ -970,6 +975,10 @@ document.addEventListener('pointercancel', (e) => {
   if (!d || e.pointerId !== d.pointer) return;
   if (d.live) calDragCancel();
   else calRelease();
+});
+
+window.addEventListener('blur', () => {
+  if (cal.drag && !cal.drag.live) calRelease();
 });
 
 app.addEventListener('lostpointercapture', (e) => {

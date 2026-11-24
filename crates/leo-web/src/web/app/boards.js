@@ -983,6 +983,7 @@ async function kanbanDeleteCard(card) {
 }
 
 async function kanbanSetPriority(card, priority) {
+  card = kanbanCard(card.id) || card;
   const back = card.priority || '';
   if (priority === back) return;
   const chip = kanban.panel?.id === card.id && $(`#kanban-panel [data-priority="${priority}"]`);
@@ -1005,15 +1006,16 @@ function kanbanCardMenu(el, point = null) {
   const card = kanbanCard(el.dataset.card);
   if (!card) return;
   const open = () => kanban.panel?.id === card.id;
+  const live = () => kanbanCard(card.id) || card;
   const boards = kanban.boards.filter((b) => b.id !== card.board);
   popupMenu(el, {
     label: 'Card options',
     point,
     rows: [
       { text: 'Open', icon: ICON.note, run: () => kanbanCardPanel(card.id) },
-      { text: 'Move to…', icon: ICON.move, off: kanban.board.columns.length < 2, next: kanban.board.columns.map((c) => ({ text: c.name, checked: c.id === card.column, run: () => c.id !== card.column && kanbanMove(card, { column: c.id }) })) },
+      { text: 'Move to…', icon: ICON.move, off: kanban.board.columns.length < 2, next: kanban.board.columns.map((c) => ({ text: c.name, checked: c.id === card.column, run: () => c.id !== live().column && kanbanMove(live(), { column: c.id }) })) },
       { text: 'Priority…', icon: KANBAN_ICON.priority, next: KANBAN_PRIORITIES.map(([id, text]) => ({ text, checked: id === (card.priority || ''), run: () => kanbanSetPriority(card, id) })) },
-      ...(boards.length ? [{ text: 'Move to board…', icon: ICON.board, next: boards.map((b) => ({ text: b.name, run: async () => (!open() || await kanbanLeavePanel(false)) && kanbanMoveToBoard(card, b.id) })) }] : []),
+      ...(boards.length ? [{ text: 'Move to board…', icon: ICON.board, next: boards.map((b) => ({ text: b.name, run: async () => (!open() || await kanbanLeavePanel(false)) && kanbanMoveToBoard(live(), b.id) })) }] : []),
       { line: true },
       {
         text: 'Delete card',
@@ -1021,7 +1023,7 @@ function kanbanCardMenu(el, point = null) {
         danger: true,
         run: () => {
           if (open()) kanbanClosePanel(false);
-          return kanbanDeleteCard(card);
+          return kanbanDeleteCard(live());
         },
       },
     ],

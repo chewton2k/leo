@@ -973,6 +973,13 @@ test('a redraw that lands while the mouse is down waits for the click', async ({
     await page.mouse.up();
     await expect(side.locator('.cal-peek-title')).toHaveText('CS 241 lecture');
 
+    for (const [end, id] of [['blur', 78], ['', 77]]) {
+      await page.evaluate(([end, id]) => {
+        document.querySelector('.cal-dayhead').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1, isPrimary: true, pointerId: id, pointerType: 'touch' }));
+        if (end) window.dispatchEvent(new Event(end));
+      }, [end, id]);
+      expect(await page.evaluate(() => Boolean(cal.drag))).toBe(!end);
+    }
     await page.evaluate(() => document.querySelector('.cal-dayhead').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1, isPrimary: true, pointerId: 77, pointerType: 'touch' })));
     await page.evaluate(() => drawCalendar());
     expect(await page.evaluate(() => cal.redraw)).toBe(true);
@@ -1009,6 +1016,18 @@ test('one click on empty time starts a task while a panel or a month day is open
     await expect(page.locator('.cal-side.peek .cal-peek-title')).toHaveText('CS 241 lecture');
     await expect(page.locator('.cal-compose')).toHaveCount(0);
     await expect(page.locator('.cal-item', { hasText: /First|Second/ })).toHaveCount(2);
+
+    await dragTo(page, await point(page, '2026-11-06', 11 * 60), await point(page, '2026-11-06', 12 * 60));
+    await expect(page.locator('#cal-side.peek')).toHaveCount(0);
+    await input.fill('Third');
+    await page.evaluate(() => { window.failNext = 'Leo could not save the task.'; });
+    await input.press('Enter');
+    await settled(page);
+    expect(await page.evaluate(() => window.toasts.at(-1))).toEqual({ message: 'Leo could not save the task.', bad: true });
+    await expect(input).toHaveValue('Third');
+    await input.press('Enter');
+    await expect(page.locator('.cal-item', { hasText: 'Third' })).toHaveCount(1);
+    await expect(page.locator('.cal-compose')).toHaveCount(0);
 
     await page.evaluate(() => {
       const lab = window.db.tasks.find(t => t.id === 'task-lab');

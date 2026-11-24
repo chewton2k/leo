@@ -1484,6 +1484,11 @@ test.describe('quick actions', () => {
       await expect(menuOf(page, 't2')).toBeHidden();
       await page.mouse.move(5, 5);
       await menuOf(page, 't1').click();
+      await page.evaluate(() => marginOpen('t1'));
+      await expect(page.locator('.popup-menu')).toHaveCount(0);
+      await page.evaluate(() => marginClose());
+      await expect(page.locator('.margin-note[data-id="t1"]')).not.toHaveAttribute('data-open', '');
+      await menuOf(page, 't1').click();
       await page.getByRole('menuitem', { name: 'Resolve' }).click();
       await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['resolved']);
       await expect(second).toHaveAttribute('data-open', '');

@@ -111,6 +111,7 @@
 .margin-note[data-side="left"] .margin-menu { right: auto; left: -12px; }
 .margin-menu svg { width: 16px; height: 16px; }
 .margin-menu:hover { color: var(--text); }
+@media (pointer: coarse) { .margin-menu { display: none; } }
 .margin-note:is(:hover, :focus-within) .margin-menu, .margin-menu[aria-expanded="true"] { opacity: 1; }
 .margin-tools { display: flex; gap: 2px; margin-left: auto; }
 .margin-chat, .margin-pin, .margin-copy { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
