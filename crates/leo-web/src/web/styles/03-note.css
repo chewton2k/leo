@@ -88,7 +88,7 @@
 .margin-note { position: absolute; left: 0; top: 0; width: var(--margin-w); color: var(--text); border-radius: var(--r-md); }
 .margin-note[hidden] { display: none; }
 .margin-note { transition: background-color var(--t-fade) ease-out, box-shadow var(--t-fade) ease-out, opacity var(--t-fade) ease-out; }
-.margin-note:not([data-open], [data-pinned], [data-newest], [data-active]) { opacity: .7; }
+.margin-note:not([data-open], [data-pinned], [data-newest], [data-active], :has(.margin-menu[aria-expanded="true"])) { opacity: .7; }
 .margin-note:not([data-open]) :is(.margin-felix:not(.prose), .margin-felix.prose > :is(p, ul, ol, blockquote)) { max-height: var(--room, none); overflow: hidden; }
 .margin-note:not([data-open]) .margin-over { margin-block: 0; }
 .margin-cut { mask-image: linear-gradient(to bottom, #000 calc(100% - 3em), transparent); }
@@ -107,6 +107,11 @@
 @keyframes margin-breathe { from { opacity: .45; } to { opacity: 1; } }
 .margin-toggle { position: absolute; inset: -4px; z-index: 1; padding: 0; border: 0; border-radius: var(--r-md); background: none; cursor: pointer; }
 .margin-note[data-open] .margin-toggle { pointer-events: none; }
+.margin-menu { position: absolute; top: -14px; right: -12px; z-index: 2; display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 50%; background: var(--raised); color: var(--muted); box-shadow: var(--shadow); cursor: pointer; opacity: 0; transition: opacity var(--t-fade) ease-out; }
+.margin-note[data-side="left"] .margin-menu { right: auto; left: -12px; }
+.margin-menu svg { width: 16px; height: 16px; }
+.margin-menu:hover { color: var(--text); }
+.margin-note:is(:hover, :focus-within) .margin-menu, .margin-menu[aria-expanded="true"] { opacity: 1; }
 .margin-tools { display: flex; gap: 2px; margin-left: auto; }
 .margin-chat, .margin-pin, .margin-copy { width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--r-tile); background: none; color: var(--muted); display: grid; place-items: center; cursor: pointer; }
 .margin-pin[hidden], .margin-copy[hidden] { display: none; }

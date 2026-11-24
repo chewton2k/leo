@@ -598,7 +598,7 @@ function marginElement(t) {
   el.className = 'margin-note';
   el.dataset.id = t.id;
   el.setAttribute('aria-label', `Felix, about “${t.quote.slice(0, 80)}”`);
-  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
+  el.innerHTML = `<button type="button" class="margin-toggle" aria-expanded="false" aria-controls="${esc(more)}"></button><button type="button" class="margin-menu" data-margin-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Note options">${ICON.more}</button><div class="margin-said"></div><p class="margin-changed" hidden>The passage changed since Felix wrote this.</p><div class="margin-pending" hidden></div><div class="margin-more" id="${esc(more)}" aria-hidden="true" inert><div class="margin-more-body" data-read-field>
     <form class="margin-reply"><textarea rows="1" data-reads="${MARGIN_MESSAGE_READS}" aria-label="Reply to Felix" placeholder="Reply"></textarea><button type="submit" class="margin-send" aria-label="Send" disabled>${ICON.send}</button></form>
     <p class="margin-hint" data-read-hint role="status" hidden>Felix reads the first ${MARGIN_MESSAGE_READS.toLocaleString('en')} characters of this.</p>
     <p class="margin-hint" data-passage-hint hidden>Felix reads the first ${MARGIN_PASSAGE_READS.toLocaleString('en')} characters of the selected passage.</p>
@@ -691,6 +691,7 @@ function marginFill(el, t, arriving, changed) {
   toggle.setAttribute('aria-label', resolved ? `Reopen Felix’s resolved note on “${t.quote.slice(0, 80)}”` : `${open ? 'Close' : 'Open'} Felix’s note on “${t.quote.slice(0, 80)}”`);
   const pin = $('.margin-pin', el);
   pin.hidden = draft;
+  $('.margin-menu', el).hidden = draft || resolved || open || Boolean(waiting);
   pin.setAttribute('aria-pressed', String(Boolean(t.pinned)));
   pin.setAttribute('aria-label', t.pinned ? 'Unpin' : 'Pin open');
   el.toggleAttribute('data-pinned', Boolean(t.pinned));
@@ -1359,7 +1360,8 @@ function marginClick(e) {
       marginPage.els.get(id).dataset.all = '1';
       marginDraw();
       $('.margin-reply textarea', marginPage.els.get(id)).focus({ preventScroll: true });
-    } else if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
+    } else if (action.dataset.marginAct === 'menu') marginActions(t, action);
+    else if (action.dataset.marginAct === 'pin') marginPin(t).catch(fail);
     else if (action.dataset.marginAct === 'add') marginAdd(t).catch(fail);
     else if (action.dataset.marginAct === 'copy') marginCopy(t).catch(fail);
     else if (action.dataset.marginAct === 'chat') marginToChat(t);
@@ -1369,6 +1371,34 @@ function marginClick(e) {
     return;
   }
   if (marginPage.open !== id || marginPage.folds.has(id)) marginOpen(id, true);
+}
+
+function marginActions(t, owner) {
+  const said = Boolean(marginNow(t));
+  const drawn = $('.margin-felix figure.diagram[data-drawn="yes"], .margin-felix figure.drawing:not(.pending)', marginPage.els.get(t.id));
+  const now = (act) => () => {
+    const live = marginThread(t.id);
+    if (live) return act(live);
+  };
+  popupMenu(owner, {
+    label: 'Felix’s note',
+    rows: [
+      ...(drawn ? [{ text: 'Open full screen', run: () => expandDiagrams(owner) }] : []),
+      { text: 'Resolve', run: now((live) => marginStatus(live, 'resolved')) },
+      ...(said ? [{ text: 'Copy', run: now(marginCopy) }] : []),
+      { text: 'Pin open', run: now((live) => {
+        const pinned = marginPin(live);
+        $('.margin-toggle', marginPage.els.get(live.id))?.focus({ preventScroll: true });
+        return pinned;
+      }) },
+      ...(said ? [{ text: 'Add to note', run: now((live) => {
+        marginOpen(live.id, true);
+        return marginAdd(live);
+      }) }] : []),
+      { line: true },
+      { text: 'Dismiss', run: now((live) => marginStatus(live, 'dismissed')) },
+    ],
+  });
 }
 
 function marginKey(e) {
@@ -1388,7 +1418,7 @@ document.addEventListener('keydown', (e) => {
 }, true);
 
 document.addEventListener('pointerdown', (e) => {
-  if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .scrim, .scrim-gone')) return;
+  if (!marginPage.open || e.target.closest?.('.margin-note, .margin-mark, .popup-menu, .scrim, .scrim-gone')) return;
   if (marginPage.open === 'draft' && $('textarea', marginPage.els.get('draft'))?.value.trim()) return;
   const id = marginPage.open;
   marginFoldAway(id, () => {

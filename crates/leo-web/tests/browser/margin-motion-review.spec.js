@@ -55,7 +55,8 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
     const drawSide=()=>{};const sideRedrawSoon=()=>{};
     const askFloat={hidden:true};const placeAskFloat=()=>{};
     window.leoTheme={noteWidth:()=>'wide'};
-    window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[]};
+    function expandDiagrams(button){window.expanded=button.closest('.margin-note').dataset.id;}
+    window.fake={mode:${JSON.stringify(mode)},layout:${JSON.stringify(layout)},threads:${JSON.stringify(threads)},failMode:false,posts:[],calls:[]};
     async function api(url,{method='GET',body}={}){
       await new Promise(r=>setTimeout(r,fake.delay||2));
       if(url==='/api/margin')return {layout:fake.layout,pace:'regular',default_mode:'ask'};
@@ -63,10 +64,13 @@ async function fixture(browser, run, { width = 1280, height = 800, layout = 'rig
       if(url.endsWith('/margin/threads')&&method==='POST'){fake.posts.push(body);return {id:'t9',quote:body.quote,prefix:body.prefix,suffix:body.suffix,status:'open',source:'ask',messages:[{from:'felix',text:'A fake answer.'}]};}
       if(method==='PATCH'&&url.includes('/margin/threads/')){fake.posts.push(body);const t=fake.threads.find(x=>url.endsWith('/'+x.id));t.pinned=body.pinned;return structuredClone(t);}
       if(url.endsWith('/reply')&&method==='POST'){const t=fake.threads.find(x=>url.includes('/'+x.id+'/'));t.messages.push({from:'you',text:body.text},{from:'felix',text:'Latest answer.'});return structuredClone(t);}
+      if(url.endsWith('/weave')){fake.calls.push('weave');return {from:1,to:2,before:'',version:'v2'};}
+      if(/\\/margin\\/threads\\/[^/]+$/.test(url)&&method==='POST'){fake.calls.push(body.status);return {};}
       if(url.endsWith('/margin/read')){fake.posts.push(body);return new Promise(r=>{fake.answer=r;});}
       if(url.endsWith('/margin')&&method==='POST'){fake.posts.push(body);if(fake.failMode){const e=new Error('Try again.');e.status=503;throw e;}fake.mode=body.mode;return {mode:body.mode};}
       throw new Error('No fake for '+method+' '+url);
     }
+    ${read('app/popup-menu.js')}
     ${read('app/margin-notes.js')}
     window.start=async()=>{
       app.innerHTML='<div class="note-layout"><div class="note-columns"><article class="note"><header class="note-head"><div class="note-meta">${MODE_MARKUP}<span id="margin-status" role="status" class="hint"></span></div><h1 id="title">Test</h1></header><div class="prose doc" id="doc"></div></article></div></div>'.replace(/\\{\\{(\\w+)\\}\\}/g,(m,k)=>ICON[k]);
@@ -1307,4 +1311,96 @@ test('a note in the left margin is right-aligned toward the page while closed an
     expect(await note.locator('.margin-said').evaluate((el) => getComputedStyle(el).textAlign)).not.toBe('right');
     expect(await page.locator('.margin-note[data-id="t2"]').getAttribute('data-side')).toBe('right');
   }, { width: 1600, height: 900, layout: 'both' });
+});
+
+test.describe('quick actions', () => {
+  const menuOf = (page, id) => page.locator(`.margin-note[data-id="${id}"] .margin-menu`);
+  const rows = (page) => page.locator('.popup-menu [role="menuitem"]');
+
+  for (const [width, layout] of [[1280, 'right'], [1600, 'both']]) {
+    test(`the options button shows on hover inside the window, opens a menu without opening the note, and Escape gives focus back (${width} ${layout})`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        await page.evaluate(() => { marginPage.sides = { t1: 'left', t2: 'right' }; marginRedraw(); });
+        for (const id of layout === 'both' ? ['t1', 't2'] : ['t2']) {
+          const note = page.locator(`.margin-note[data-id="${id}"]`);
+          const menu = menuOf(page, id);
+          await page.mouse.move(0, 0);
+          await expect.poll(() => menu.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(0);
+          const before = await note.evaluate((el) => el.offsetHeight);
+          await note.locator('.margin-toggle').hover();
+          await expect.poll(() => menu.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+          const box = await menu.boundingBox();
+          expect(box.x).toBeGreaterThanOrEqual(0);
+          expect(box.x + box.width).toBeLessThanOrEqual(width);
+          expect(box.y).toBeGreaterThanOrEqual(0);
+          expect(await menu.evaluate((el) => [getComputedStyle(el).width, getComputedStyle(el).borderRadius, getComputedStyle(el).boxShadow !== 'none'])).toEqual(['28px', '50%', true]);
+          expect(await note.evaluate((el) => el.offsetHeight)).toBe(before);
+          await menu.hover();
+          await menu.click();
+          await expect(menu).toHaveAttribute('aria-expanded', 'true');
+          await expect(note).not.toHaveAttribute('data-open', '');
+          await expect(rows(page)).toHaveText(['Resolve', 'Copy', 'Pin open', 'Add to note', 'Dismiss']);
+          await page.mouse.move(width / 2, 700);
+          await expect.poll(() => note.evaluate((el) => Number(getComputedStyle(el).opacity))).toBe(1);
+          await page.keyboard.press('Escape');
+          await expect(page.locator('.popup-menu')).toHaveCount(0);
+          await expect(menu).toBeFocused();
+          await expect(menu).toHaveAttribute('aria-expanded', 'false');
+          await expect(note).not.toHaveAttribute('data-open', '');
+        }
+      }, { width, layout });
+    });
+  }
+
+  test('each row does its job, and a redraw while the menu is open keeps it', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't2').click();
+      await page.evaluate(() => marginRedraw());
+      await expect(rows(page)).toHaveCount(5);
+      await expect(menuOf(page, 't2')).toHaveAttribute('aria-expanded', 'true');
+      await page.getByRole('menuitem', { name: 'Pin open' }).click();
+      const second = page.locator('.margin-note[data-id="t2"]');
+      await expect(second).toHaveAttribute('data-open', '');
+      await expect.poll(() => page.evaluate(() => fake.posts.at(-1))).toEqual({ pinned: true });
+      await expect(second.locator('.margin-toggle')).toBeFocused();
+      await expect(menuOf(page, 't2')).toBeHidden();
+      await page.mouse.move(5, 5);
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Resolve' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['resolved']);
+      await expect(second).toHaveAttribute('data-open', '');
+      await expect(menuOf(page, 't1')).toBeHidden();
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-resolved', 't1');
+    });
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Add to note' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['weave', 'resolved']);
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveAttribute('data-open', '');
+    }, { threads: [THREADS.short] });
+    await fixture(browser, async (page) => {
+      await menuOf(page, 't1').click();
+      await page.getByRole('menuitem', { name: 'Dismiss' }).click();
+      await expect.poll(() => page.evaluate(() => fake.calls)).toEqual(['dismissed']);
+      await expect(page.locator('.margin-note[data-id="t1"]')).toHaveCount(0);
+    }, { threads: [THREADS.short] });
+  });
+
+  test('Open full screen is offered only for a drawn figure, and the button hides on a draft and while an answer is pending', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => {
+        const said = document.querySelector('.margin-note[data-id="t1"] .margin-felix');
+        said.insertAdjacentHTML('beforeend', '<figure class="drawing"></figure>');
+      });
+      await menuOf(page, 't1').click();
+      await expect(rows(page)).toHaveText(['Open full screen', 'Resolve', 'Copy', 'Pin open', 'Add to note', 'Dismiss']);
+      await page.getByRole('menuitem', { name: 'Open full screen' }).click();
+      await expect.poll(() => page.evaluate(() => window.expanded)).toBe('t1');
+      await page.evaluate(() => marginPage.thinking.set('t1', { text: 'q' }) && marginRedraw());
+      await expect(menuOf(page, 't1')).toBeHidden();
+      await page.evaluate(() => { marginPage.thinking.delete('t1'); marginAskFirst(session, { text: session.doc.source().slice(0, 12), from: 0, to: 12 }); });
+      await expect(page.locator('.margin-note[data-id="draft"]')).toHaveAttribute('data-open', '');
+      await expect(menuOf(page, 'draft')).toBeHidden();
+    }, { threads: [THREADS.short] });
+  });
 });

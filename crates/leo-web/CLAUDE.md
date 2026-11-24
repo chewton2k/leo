@@ -748,6 +748,9 @@ read (root CLAUDE.md, 2026-11-17).
   chosen model. No AI call routes. A chat moves up once when needed, never down while warm
   (`routing::choose`, `Slot::light`); a failing light writer gives way on the last try, so `Auto`
   names who really answered. `Prefs.auto_model` turns it off.
+- Pinned chats (2026-11-23, the user's call): `chats.pinned` (an added column, `VERSION` stays 7),
+  PATCH `/api/chats/{id}` `{pinned}` (204, 404). They head the history in a Pinned group, newest first;
+  a pin never moves `updated_at`, and Keeping's Chats choice and its count skip pinned chats.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
 - Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed
@@ -841,7 +844,9 @@ Felix (2026-10-19).
   messages sit right of a 1 px `--line` rule; its one action row is Resolve,
   Dismiss, Add to note, expand, then pin and chat in `.margin-tools` at the
   row's end. No ×: Esc (anywhere, a sheet or menu first) or a click outside closes, a typed reply staying put; `.margin-toggle` is the
-  closed opener and focus target and takes no clicks while open.
+  closed opener and focus target and takes no clicks while open. A closed note shows a round ⋯
+  (`.margin-menu`, 2026-11-23, the user's call) at its outer top corner while hovered or focused:
+  Open full screen (with a drawing), Resolve, Copy, Pin open, Add to note and Dismiss in `popupMenu`.
 - Width: `marginLayout` sets `--margin-w` each pass from `marginKit.arrangement`
   and `marginWidth`: notes autosize to the room beside the note's `max-width`
   (Right 240–360 px beside a column of at least `LEAST_COLUMN` 600; Both 180–360 px
