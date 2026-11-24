@@ -380,6 +380,21 @@ fn note_ids(messages: &[serde_json::Value], into: &mut std::collections::BTreeSe
     }
 }
 
+fn notes_kept(
+    c: &rusqlite::Connection,
+    id: &str,
+) -> rusqlite::Result<std::collections::BTreeSet<String>> {
+    let mut found = std::collections::BTreeSet::new();
+    let mut kept = c.prepare("SELECT message FROM chat_messages WHERE chat = ?1")?;
+    let mut rows = kept.query([id])?;
+    while let Some(row) = rows.next()? {
+        if let Ok(message) = serde_json::from_str(&row.get::<_, String>(0)?) {
+            note_ids(&[message], &mut found);
+        }
+    }
+    Ok(found)
+}
+
 pub(crate) fn fill_notes(c: &rusqlite::Connection) -> rusqlite::Result<()> {
     let mut found: std::collections::HashMap<String, std::collections::BTreeSet<String>> =
         std::collections::HashMap::new();
@@ -917,16 +932,25 @@ pub fn drop_last(dir: &Path, id: &str, count: usize, total: usize) -> Result<Opt
             None => {
                 rows_from(&tx, id, left)?;
                 let about = about_of(&head_of(&tx, id, left)?);
+                let notes = notes_kept(&tx, id)?;
                 tx.execute(
-                    "UPDATE chats SET count = ?1, about = ?2 WHERE id = ?3",
-                    rusqlite::params![left as i64, about, id],
+                    "UPDATE chats SET count = ?1, about = ?2, notes = ?3 WHERE id = ?4",
+                    rusqlite::params![left as i64, about, json(&notes), id],
                 )?;
             }
             Some(mut messages) => {
                 messages.truncate(left);
+                let mut notes = std::collections::BTreeSet::new();
+                note_ids(&messages, &mut notes);
                 tx.execute(
-                    "UPDATE chats SET messages = ?1, count = ?2, about = ?3 WHERE id = ?4",
-                    rusqlite::params![json(&messages), left as i64, about_of(&messages), id],
+                    "UPDATE chats SET messages = ?1, count = ?2, about = ?3, notes = ?4 WHERE id = ?5",
+                    rusqlite::params![
+                        json(&messages),
+                        left as i64,
+                        about_of(&messages),
+                        json(&notes),
+                        id
+                    ],
                 )?;
                 tx.execute("DELETE FROM chats_text WHERE id = ?1", [id])?;
                 tx.execute(
@@ -1696,7 +1720,7 @@ mod tests {
             four
         );
         assert!(drop_last(&dir, id, 2, 4).unwrap().is_some());
-        assert_eq!(list(&dir)[0].notes, four);
+        assert_eq!(list(&dir)[0].notes, three);
         as_column(&dir, id);
         let mut again = more.clone();
         again.push(
