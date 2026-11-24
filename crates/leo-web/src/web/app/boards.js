@@ -13,6 +13,7 @@ const KANBAN_RETRY_MS = 3000;
 const KANBAN_PRIORITIES = [['', 'None'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']];
 const KANBAN_ICON = {
   pencil: svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>'),
+  priority: svg('<path d="M4 18.5L7 5.5"/><path d="M10.5 18.5l3-13"/><path d="M17 18.5l3-13"/>'),
 };
 const KANBAN_STROKES = ['<path d="M2.2 11.6 Q3.1 7.4 4.3 3.1"/>', '<path d="M6.1 11.8 Q7.2 7.6 8.2 3.3"/>', '<path d="M10.1 11.5 Q11.1 7.2 12.3 3.2"/>'];
 const KANBAN_TONES = [
@@ -981,6 +982,52 @@ async function kanbanDeleteCard(card) {
   });
 }
 
+async function kanbanSetPriority(card, priority) {
+  const back = card.priority || '';
+  if (priority === back) return;
+  const chip = kanban.panel?.id === card.id && $(`#kanban-panel [data-priority="${priority}"]`);
+  if (chip) return chip.click();
+  const newest = () => (kanbanCard(card.id) || card).priority === priority;
+  kanbanUpdate(card, { priority });
+  try {
+    const saved = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { priority } });
+    if (newest()) kanbanUpdate(card, saved);
+  } catch (e) {
+    if (newest()) {
+      kanbanUpdate(card, { priority: back });
+      await kanbanRefresh().catch(() => {});
+    }
+    throw e;
+  }
+}
+
+function kanbanCardMenu(el, point = null) {
+  const card = kanbanCard(el.dataset.card);
+  if (!card) return;
+  const open = () => kanban.panel?.id === card.id;
+  const boards = kanban.boards.filter((b) => b.id !== card.board);
+  popupMenu(el, {
+    label: 'Card options',
+    point,
+    rows: [
+      { text: 'Open', icon: ICON.note, run: () => kanbanCardPanel(card.id) },
+      { text: 'Move to…', icon: ICON.move, off: kanban.board.columns.length < 2, next: kanban.board.columns.map((c) => ({ text: c.name, checked: c.id === card.column, run: () => c.id !== card.column && kanbanMove(card, { column: c.id }) })) },
+      { text: 'Priority…', icon: KANBAN_ICON.priority, next: KANBAN_PRIORITIES.map(([id, text]) => ({ text, checked: id === (card.priority || ''), run: () => kanbanSetPriority(card, id) })) },
+      ...(boards.length ? [{ text: 'Move to board…', icon: ICON.board, next: boards.map((b) => ({ text: b.name, run: async () => (!open() || await kanbanLeavePanel(false)) && kanbanMoveToBoard(card, b.id) })) }] : []),
+      { line: true },
+      {
+        text: 'Delete card',
+        icon: ICON.trash,
+        danger: true,
+        run: () => {
+          if (open()) kanbanClosePanel(false);
+          return kanbanDeleteCard(card);
+        },
+      },
+    ],
+  });
+}
+
 // Dragging. Mouse and pen lift past a few pixels; touch lifts after a short hold, so a
 // swipe still scrolls the board. The real card (or column) moves through the page as
 // the placeholder while a copy follows the pointer.
@@ -1222,7 +1269,11 @@ function kanbanHoldStill(e) {
 }
 
 document.addEventListener('contextmenu', (e) => {
-  if (kanban.drag) e.preventDefault();
+  const card = state.view === 'boards' && e.target.closest('.kanban-cards .kanban-card');
+  if (kanban.drag || card) e.preventDefault();
+  if (!card || kanban.drag?.live || kanban.drag?.touch) return;
+  kanbanEnd();
+  kanbanCardMenu(card, { x: e.clientX, y: e.clientY });
 });
 
 // A drop ends with a click on the card; it must not open it.
@@ -1270,6 +1321,9 @@ document.addEventListener('keydown', (e) => {
   if ((e.key === 'Enter' || e.key === ' ') && !e.altKey && !e.metaKey && !e.ctrlKey) {
     e.preventDefault();
     kanbanCardPanel(card.id).catch(fail);
+  } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+    e.preventDefault();
+    kanbanCardMenu(el);
   } else if (e.altKey && !e.metaKey && !e.ctrlKey && ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
     e.preventDefault();
     kanbanKeyMove(card, e.key).catch(fail);

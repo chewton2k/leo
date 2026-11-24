@@ -1190,3 +1190,77 @@ test('a click outside keeps the card panel and its text when the save fails', as
     expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').description)).toBe('Keep me');
   });
 });
+
+test('a right click on a card, or Shift+F10, opens its quick actions and never the card', async ({ browser }) => {
+  await boardsFixture(browser, async page => {
+    const card = page.locator('[data-card="cread00001"]');
+    const menu = page.getByRole('menu', { name: 'Card options' });
+    const item = name => menu.getByRole('menuitem', { name });
+    const radio = name => menu.getByRole('menuitemradio', { name, exact: true });
+    const box = await card.boundingBox();
+    await card.click({ button: 'right', position: { x: 40, y: 12 } });
+    await expect(menu.getByRole('menuitem')).toHaveText(['Open', 'Move to…', 'Priority…', 'Move to board…', 'Delete card']);
+    const at = await menu.boundingBox();
+    expect([Math.abs(at.x - box.x - 40), Math.abs(at.y - box.y - 12)].every(gap => gap < 3)).toBe(true);
+    await expect(page.locator('#kanban-panel')).toBeHidden();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(card).toBeFocused();
+
+    await page.keyboard.press('Shift+F10');
+    await item('Priority…').click();
+    await expect(radio('None')).toHaveAttribute('aria-checked', 'true');
+    await radio('High').click();
+    await expect(card.locator('.kanban-priority.high')).toHaveCount(1);
+    await settled(page);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cread00001').priority)).toBe('high');
+    await page.evaluate(() => { window.slow = 300; window.failNext = 'Leo could not save the card.'; });
+    await card.click({ button: 'right' });
+    await item('Priority…').click();
+    await radio('Low').click();
+    await expect(card.locator('.kanban-priority.low')).toHaveCount(1);
+    await expect(card.locator('.kanban-priority.high')).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => window.errors)).toEqual(['Leo could not save the card.']);
+    await settled(page);
+    await page.evaluate(() => { window.slow = 0; window.errors.length = 0; });
+
+    await card.click({ button: 'right' });
+    await item('Open').click();
+    await expect(page.locator('#kanban-card-title')).toHaveValue('Read chapter 3');
+    await card.click({ button: 'right' });
+    await item('Priority…').click();
+    await radio('Medium').click();
+    await expect(page.locator('#kanban-panel [data-priority="medium"]')).toHaveAttribute('aria-pressed', 'true');
+    await settled(page);
+    await card.click({ button: 'right' });
+    await item('Move to…').click();
+    await expect(radio('To do')).toHaveAttribute('aria-checked', 'true');
+    await radio('Done').click();
+    await expect.poll(() => titles(page, 'kdone00001')).toEqual(['Read chapter 3']);
+    await expect(page.locator('#kanban-card-column')).toHaveValue('kdone00001');
+    await settled(page);
+    await card.click({ button: 'right' });
+    await item('Delete card').click();
+    await expect(card).toHaveCount(0);
+    await expect(page.locator('#kanban-panel')).toBeHidden();
+    await settled(page);
+    await page.locator('.toast button').click();
+    await expect(card).toHaveCount(1);
+
+    await page.locator('[data-card="cessay0001"]').click({ button: 'right' });
+    await item('Move to board…').click();
+    await item('Home').click();
+    await expect(page.locator('[data-card="cessay0001"]')).toHaveCount(0);
+    await settled(page);
+    expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').board)).toBe('bhome00001');
+
+    const mail = page.locator('[data-card="cemail0001"]');
+    await mail.click({ modifiers: ['Control'] });
+    await page.waitForTimeout(100);
+    await expect(page.locator('#kanban-panel')).toBeHidden();
+    expect(await page.evaluate(() => kanban.drag)).toBe(null);
+    await page.keyboard.press('Escape');
+    await mail.click();
+    await expect(page.locator('#kanban-card-title')).toHaveValue('Email tutor <b>now</b>');
+  });
+});

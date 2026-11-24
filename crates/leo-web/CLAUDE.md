@@ -240,7 +240,8 @@ Decided: one app, window only (2026-10-31).
   the toast surface with a red alert mark in front, never a red fill (2026-11-21, the user's call). Removing a key or speech model is a two-row `popupMenu`.
 - Menus: `popupMenu(owner, { label, rows, point, find })` is the one dropdown
   (a row's `next` is a second step). Clicking its owner again closes it, as does a click
-  outside (2026-11-16); a context menu (`point`) reopens at the new point instead. Side
+  outside (2026-11-16); a context menu (`point`) reopens at the new point instead, and the click
+  WebKit sends after a Control-click never reaches what the menu belongs to. Side
   panels opened from a card or row (the card panel, the calendar peek) close on a click outside
   through `closeOnOutsidePress(inside, leave)` in `popup-menu.js` (2026-11-21, the user's call):
   it acts on the click after a primary press outside the panel, its opener, menus, sheets and toasts,
@@ -1348,6 +1349,9 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   first, then save; a failed save puts the card, chip or tick back and shows the error toast.
   Each move carries a per-card number (a delete bumps it too, so an earlier pending move cannot bring the card back): only the latest move's answer or rollback is applied, and the board is fetched once when the last pending move settles.
 - Dragging is pointer events (5 px, or a 300 ms touch hold), capture on `#app`.
+- A right click on a card, Shift+F10 or the menu key opens `kanbanCardMenu` (2026-11-23, the user's
+  call): Open, Move to…, Priority…, Move to board… (with more than one board) and Delete card, in
+  `popupMenu` at the pointer; Priority and Delete go through the open card's panel when it is open.
 - Card priority (2026-11-15) is one to three slanted pencil strokes
   (`KANBAN_STROKES`, 14 px) before the title, coloured by level (2026-11-16: low `--hue-0`,
   medium `--hue-amber`, high `--hue-red`), the title indented by

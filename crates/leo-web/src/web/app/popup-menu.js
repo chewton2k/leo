@@ -112,6 +112,11 @@ document.addEventListener('pointerdown', (event) => {
 document.addEventListener('click', (event) => {
   const kept = armed;
   armed = null;
+  if (popup?.point && popup.owner.contains(event.target)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
   if (kept && kept.owner.contains(event.target)) setTimeout(() => popup === kept && closePopup(false));
 }, true);
 addEventListener('hashchange', () => closePopup(false));
