@@ -1022,7 +1022,7 @@ function foldHarness(...threads) {
   Object.assign(h.context, { OPEN_MS: 200, EXIT_SHARE: .8, EASE_EXIT: 'linear', getComputedStyle: () => ({ marginBottom: '64px' }) });
   h.context.marginDraw = () => draws.push(h.state.open);
   const columns = { dataset: {}, clientWidth: 800, appendChild() {} };
-  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : sel === '.note-columns' ? columns : sel === '#doc' ? {} : null);
+  h.context.$ = (sel, root) => (sel === 'textarea' && root ? root.area : sel === '.note-columns' ? columns : sel === '#doc' ? { addEventListener() {} } : null);
   let observed;
   const watch = { watched: null, ended: false };
   h.context.ResizeObserver = h.context.window.ResizeObserver = class { constructor(fn) { observed = fn; } observe() {} disconnect() {} };

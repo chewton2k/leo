@@ -1176,6 +1176,124 @@ test.describe('settings layout surface', () => {
   });
 });
 
+test.describe('marks stay off the words', () => {
+  const source = '- Opening item.\n    - it has a json file that uses those bullet points to write it.\n    - The next item.\n\n> A quote with delta four passage and more words.\n\n```\nconst echo = five; after();\n```\n\n| one | two |\n| --- | --- |\n| foxtrot six cell | other |\n\nClosing words.';
+  const thread = (id, quote) => {
+    const at = source.indexOf(quote);
+    return { id, quote, prefix: source.slice(Math.max(0, at - 12), at), suffix: source.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
+  };
+  const threads = [thread('t1', 'a json file'), thread('t2', 'uses those bullet points'), thread('t3', 'delta four passage'), thread('t4', 'echo = five'), thread('t5', 'foxtrot six')];
+  const look = (page) => page.evaluate(() => {
+    const area = document.querySelector('#doc .line-edit');
+    const top = document.querySelector('#doc').getBoundingClientRect().top;
+    const pieces = [];
+    const read = (root, dx, dy) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) for (const word of node.data.matchAll(/\S+/g)) {
+        const range = document.createRange();
+        range.setStart(node, word.index);
+        range.setEnd(node, word.index + word[0].length);
+        for (const r of range.getClientRects()) pieces.push({ word: word[0], left: r.left + dx, right: r.right + dx, top: r.top + dy, bottom: r.bottom + dy });
+      }
+    };
+    read(document.querySelector('#doc'), 0, 0);
+    let spare = 0;
+    if (area) {
+      const copy = document.createElement('div');
+      const style = getComputedStyle(area);
+      for (const p of ['boxSizing', 'width', 'padding', 'font', 'letterSpacing', 'lineHeight']) copy.style[p] = style[p];
+      Object.assign(copy.style, { position: 'absolute', top: 0, left: 0, whiteSpace: 'pre-wrap', overflowWrap: 'break-word' });
+      copy.textContent = area.value;
+      document.body.append(copy);
+      const from = copy.getBoundingClientRect();
+      const to = area.getBoundingClientRect();
+      read(copy, to.left - from.left, to.top - from.top);
+      spare = to.height - from.height;
+      copy.remove();
+    }
+    const marks = [...document.querySelectorAll('.margin-mark .margin-anchor')].map((el) => el.getBoundingClientRect());
+    const first = (word) => pieces.find((p) => p.word === word);
+    const ink = (id) => document.querySelector(`.margin-ink path.solid[data-id="${id}"]`).getBoundingClientRect();
+    return {
+      marks: marks.length,
+      covered: pieces.filter((p) => marks.some((m) => m.left < p.right - 1 && m.right > p.left + 1 && m.top < p.bottom && m.bottom > p.top)).map((p) => p.word),
+      astray: [['t1', 'a', 'file'], ['t2', 'uses', 'points']].some(([id, from, to]) => Math.abs(ink(id).left - first(from).left) > 2 || Math.abs(ink(id).right - first(to).right) > 2),
+      spare: Math.round(spare),
+      tops: [...document.querySelectorAll('#doc .blk')].map((el) => Math.round(el.getBoundingClientRect().top - top)),
+      wide: document.documentElement.scrollWidth > innerWidth,
+    };
+  });
+
+  for (const spare of [4, 200]) {
+    test(`opening and closing a line with ${spare} px left on it moves no block, adds no blank line and keeps every blot off the words`, async ({ browser }) => {
+      await fixture(browser, async (page) => {
+        await page.evaluate((room) => {
+          const hide = document.createElement('style');
+          hide.textContent = '.margin-slot { display: none !important; }';
+          document.head.append(hide);
+          const range = document.createRange();
+          range.selectNodeContents(document.querySelectorAll('#doc .blk')[1].querySelector('li'));
+          const note = document.querySelector('article.note');
+          const start = note.getBoundingClientRect().left;
+          note.style.maxWidth = `${Math.ceil(range.getBoundingClientRect().right - start) + room}px`;
+          hide.remove();
+        }, spare);
+        await expect.poll(() => look(page)).toMatchObject({ marks: 5, covered: [], astray: false, wide: false });
+        const closed = await look(page);
+        for (let time = 0; time < 2; time++) {
+          for (const block of [1, 3, 4, 5]) {
+            await page.locator('#doc .blk').nth(block).click({ position: { x: 60, y: 14 } });
+            await expect(page.locator('#doc .line-edit')).toBeFocused();
+            await expect.poll(() => look(page)).toMatchObject({ covered: [], tops: closed.tops, ...(block === 1 && { spare: 0, astray: false, wide: false }) });
+          }
+          await page.mouse.click(640, 20);
+          await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+          await expect.poll(() => look(page)).toEqual(closed);
+        }
+        await page.locator('#doc .blk').nth(1).click({ position: { x: 60, y: 14 } });
+        await page.keyboard.press('End');
+        await page.keyboard.type(' Then more words.');
+        await expect.poll(async () => (await look(page)).covered).toEqual([]);
+        await page.locator('.margin-mark[data-id="t2"]').click();
+        await expect(page.locator('.margin-note[data-id="t2"]')).toHaveAttribute('data-open', '');
+        await expect(page.locator('#doc .line-edit')).toHaveCount(0);
+        await expect.poll(async () => (await look(page)).covered).toEqual([]);
+      }, { layout: 'marks', source, threads });
+    });
+  }
+
+  test('a passage that ends inside a word that wraps is marked on that word in an open line', async ({ browser }) => {
+    const text = 'Some words that go on until the passage ends with (extraordinarily), then goes on.';
+    await fixture(browser, async (page) => {
+      await page.locator('#doc .blk').first().click({ position: { x: 60, y: 14 } });
+      await page.evaluate(() => {
+        const note = document.querySelector('article.note');
+        const line = document.createElement('span');
+        line.style.font = getComputedStyle(document.querySelector('.line-edit')).font;
+        line.style.whiteSpace = 'nowrap';
+        line.textContent = 'Some words that go on until the passage ends with (extraordinarily)';
+        document.body.append(line);
+        note.style.maxWidth = `${line.getBoundingClientRect().width}px`;
+        line.remove();
+      });
+      expect((await page.evaluate(() => rectsOf('t1'))).length).toBe(2);
+    }, { source: text, threads: [{ ...THREADS.short, quote: 'ends with (extraordinarily', prefix: 'the passage ', suffix: '), then' }] });
+  });
+
+  test('a passage over several lines of an open line is marked on each of them', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      const closed = await page.evaluate(() => rectsOf('t2').map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+      expect(closed.length).toBeGreaterThan(3);
+      await page.evaluate(() => session.doc.stop());
+      await page.locator('#doc .blk', { hasText: 'A long paragraph' }).click({ position: { x: 40, y: 14 } });
+      await expect(page.locator('#doc .line-edit')).toBeFocused();
+      const open = await page.evaluate(() => rectsOf('t2').map((r) => [r.left, r.right, r.top, r.bottom].map(Math.round)));
+      expect(open.length).toBe(closed.length);
+      for (const [line, rect] of open.entries()) for (const [side, value] of rect.entries()) expect(Math.abs(value - closed[line][side])).toBeLessThanOrEqual(side === 1 ? 6 : 1);
+    });
+  });
+});
+
 test('margin replies expand as borderless retained controls and collapse out of the tab order', async ({ browser }) => {
   await fixture(browser, async page => {
     const note = page.locator('.margin-note[data-id="t1"]');

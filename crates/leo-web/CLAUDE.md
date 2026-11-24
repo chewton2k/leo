@@ -862,8 +862,11 @@ Felix (2026-10-19).
   puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
   the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
   editor or a code, table or maths block) before anything is measured, and the blot sits on
-  it; side by side when two end together. A read's blot, and any passage without a slot,
-  sits just after the last word instead (`marginPassageEnd`). An open or pinned note sits
+  it; side by side when two end together. A slot that would make its block taller is hidden, so
+  opening a line never moves a block or leaves a blank line. A passage without a shown slot (an open
+  line, a quote, code, table or maths block) has its blot in the 16 px right of the column
+  (`data-aside`), level with its last line and stacked down when two meet; a read's blot sits just
+  after the last word (`marginPassageEnd`). Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
   holding its height (pinned cards stack, placed in document order); it unfolds with a
   clip and the room over `OPEN_MS` only when the user opens it (not on load or a layout

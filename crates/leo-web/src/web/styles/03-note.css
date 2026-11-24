@@ -226,7 +226,8 @@ textarea.set-input:focus { outline: 2px solid var(--focus); outline-offset: 1px;
 .margin-anchor svg { width: 100%; height: 100%; }
 .margin-mark:hover, .margin-mark[data-active], .margin-mark[data-more] { color: var(--text); }
 .margin-mark[data-active] .margin-anchor { transform: scale(1.2); }
-@media (pointer: coarse) { .margin-mark { min-width: 44px; height: 44px; } }
+.margin-mark[data-aside] { min-width: 16px; padding: 0 1px; grid-auto-flow: row; justify-content: end; }
+@media (pointer: coarse) { .margin-mark, .margin-mark[data-aside] { min-width: 44px; height: 44px; } }
 :where(.note-layout[data-wide]) .note-columns[data-margin="marks"] { padding-left: 48px; }
 .blk.margin-room { margin-bottom: var(--margin-room, 0px); }
 .note-meta .margin-mode { font-size: var(--fs-sm); }

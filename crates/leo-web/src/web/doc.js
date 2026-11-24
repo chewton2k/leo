@@ -4,22 +4,29 @@
   const md = root.leoMarkdown;
   const ed = root.leoEditing;
 
-  function caretBox(area, at) {
+  function caretBox(area, at, to = at + 1) {
     const style = getComputedStyle(area);
     const mirror = document.createElement('div');
     for (const p of ['boxSizing', 'width', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight', 'textTransform', 'wordSpacing', 'tabSize', 'textIndent']) mirror.style[p] = style[p];
     Object.assign(mirror.style, { position: 'absolute', visibility: 'hidden', whiteSpace: 'pre-wrap', overflowWrap: 'break-word', top: '0', left: '-9999px' });
     mirror.textContent = area.value.slice(0, at);
     const mark = document.createElement('span');
-    mark.textContent = area.value.slice(at, at + 1) || '.';
-    mirror.appendChild(mark);
+    mark.textContent = area.value.slice(at, to) || '.';
+    mirror.append(mark, area.value.slice(to));
     document.body.appendChild(mirror);
     const box = area.getBoundingClientRect();
     const frame = mirror.getBoundingClientRect();
     const spot = mark.getBoundingClientRect();
-    const point = { x: box.left + spot.left - frame.left - area.scrollLeft, y: box.top + spot.bottom - frame.top - area.scrollTop };
+    const dx = box.left - frame.left - area.scrollLeft;
+    const dy = box.top - frame.top - area.scrollTop;
+    const rects = [];
+    for (const { left, right, top, bottom } of mark.getClientRects()) {
+      const line = rects.at(-1);
+      if (line && top + dy < line.bottom) line.right = Math.max(line.right, right + dx);
+      else if (right > left) rects.push({ left: left + dx, right: right + dx, top: top + dy, bottom: bottom + dy });
+    }
     mirror.remove();
-    return point;
+    return { x: spot.left + dx, y: spot.bottom + dy, rects };
   }
 
   function caretMenu({ id, label, pick }) {
@@ -2170,14 +2177,7 @@
         if (editing && !editing.selectionText) {
           const base = lineStart(editing.start) + editing.prefix.length;
           const { area } = editing;
-          if (from >= base && from <= base + area.value.length) {
-            const a = caretBox(area, from - base);
-            const b = caretBox(area, Math.min(to, base + area.value.length) - base);
-            const tall = parseFloat(getComputedStyle(area).lineHeight) || 24;
-            const box = area.getBoundingClientRect();
-            if (a.y === b.y) return [{ left: a.x, right: b.x, top: a.y - tall, bottom: a.y }];
-            return [{ left: a.x, right: box.right, top: a.y - tall, bottom: a.y }, { left: box.left, right: b.x, top: b.y - tall, bottom: b.y }];
-          }
+          if (from >= base && from <= base + area.value.length) return caretBox(area, from - base, Math.min(to - base, area.value.length)).rects;
         }
         const a = pointFor(from);
         const b = pointFor(to);

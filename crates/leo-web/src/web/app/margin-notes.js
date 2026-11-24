@@ -153,6 +153,7 @@ async function marginMount(s, mine) {
     marginPage.watch = new MutationObserver(() => marginRedraw());
     marginPage.watch.observe($('#doc'), { childList: true });
   }
+  $('#doc').addEventListener('focusin', marginRedraw);
   if (s.note.id) return marginLoad(s, () => mine === seq);
   const prefs = await marginLoadPrefs();
   if (mine !== seq || marginPage.s !== s) return;
@@ -1177,6 +1178,12 @@ function marginSlots(placed, columns) {
     slots.set(id, slot);
   }
   for (const { t } of placed) slots.get(t.id)?.toggleAttribute('data-more', marginReplies(t) > 0);
+  const each = [...slots.values()];
+  const heights = () => each.map((slot) => slot.closest('.blk').offsetHeight);
+  for (const slot of each) slot.hidden = true;
+  const bare = heights();
+  for (const slot of each) slot.hidden = false;
+  heights().forEach((height, i) => { each[i].hidden = height > bare[i]; });
   return slots;
 }
 
@@ -1227,10 +1234,17 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
       count.textContent = replies > 9 ? '9+' : replies || '';
       mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”${replies ? `, ${plural(replies, 'reply', 'replies')}` : ''}`);
     }
-    const size = mark.offsetWidth;
     const slot = slots.get(t.id)?.getBoundingClientRect();
+    const aside = !slot?.height && t.id !== 'reading';
+    mark.toggleAttribute('data-aside', aside);
+    const size = mark.offsetWidth;
     let x, y;
-    if (slot?.height) {
+    if (aside) {
+      const end = rects[rects.length - 1];
+      x = page.right - origin.left + 16 - size;
+      y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
+      while (taken.some((at) => Math.abs(at.x - x) < size && Math.abs(at.y - y) < mark.offsetHeight)) y += mark.offsetHeight;
+    } else if (slot?.height) {
       x = slot.left - origin.left + slot.width / 2 - size / 2;
       y = slot.top - origin.top + slot.height / 2 - mark.offsetHeight / 2;
     } else {
@@ -1239,7 +1253,7 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
       y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
       while (taken.some((at) => Math.abs(at.x - x) < 14 && Math.abs(at.y - y) < 8)) x += 14;
     }
-    x = Math.min(x, edge - size);
+    if (!aside) x = Math.min(x, edge - size);
     taken.push({ x, y });
     mark.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
