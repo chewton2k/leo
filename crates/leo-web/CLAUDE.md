@@ -862,15 +862,18 @@ Felix (2026-10-19).
   in the left margin is right-aligned toward the page (`data-side`). Marks (2026-11-16)
   are a 13 px ink blot just after the passage's last word, never over the text (a thread with replies
   shows their count beside the blot, `9+` past nine, in the mark's aria-label too, and its slot is
-  32 px wide, 2026-11-21, the user's call): `marginSlots`
+  36 px wide, 2026-11-21, the user's call): `marginSlots`
   puts an empty aria-hidden `.margin-slot` (inline, 21 px of padding, hidden in print) into
   the rendered text at the passage's end (`doc.domPoint`, text nodes only, never in a line
   editor or a code, table or maths block) before anything is measured, and the blot sits on
   it; side by side when two end together. A slot that would make its block taller is hidden, so
-  opening a line never moves a block or leaves a blank line. A passage without a shown slot (an open
-  line, a quote, code, table or maths block) has its blot in the 16 px right of the column
-  (`data-aside`), level with its last line and stacked down when two meet; a read's blot sits just
-  after the last word (`marginPassageEnd`). Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
+  opening a line never moves a block or leaves a blank line. A passage without a usable slot (an open
+  line, a quote, code, table or maths block, or a slot that hangs past the end of its line) has its blot
+  in the 16 px right of the column (`data-aside`), level with its last line and stacked down when two
+  meet; a read's blot sits just after the last word (`marginPassageEnd`), or beside the column when that
+  would not fit in it. No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
+  measured again only when its block, the column width or the fonts changed (`data-fit`). A window resize
+  redraws in the same frame. Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
   holding its height (pinned cards stack, placed in document order); it unfolds with a
   clip and the room over `OPEN_MS` only when the user opens it (not on load or a layout

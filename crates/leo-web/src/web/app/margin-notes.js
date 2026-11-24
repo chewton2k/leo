@@ -530,9 +530,15 @@ function marginRedraw() {
   marginPage.frame = requestAnimationFrame(marginDraw);
 }
 
+let marginFonts = 0;
+function marginFontsIn() {
+  marginFonts++;
+  marginRedraw();
+}
+
 if (document.fonts) {
-  Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginRedraw, () => {});
-  document.fonts.addEventListener('loading', () => document.fonts.ready.then(marginRedraw));
+  Promise.all(['500 1em "Instrument Sans"', 'italic 1em "Instrument Sans"', '1em Newsreader', 'italic 1em Newsreader'].map((face) => document.fonts.load(face))).then(marginFontsIn, () => {});
+  document.fonts.addEventListener('loading', () => document.fonts.ready.then(marginFontsIn));
 }
 
 function marginPrintable() {
@@ -1179,12 +1185,19 @@ function marginSlots(placed, columns) {
     slots.set(id, slot);
   }
   for (const { t } of placed) slots.get(t.id)?.toggleAttribute('data-more', marginReplies(t) > 0);
-  const each = [...slots.values()];
-  const heights = () => each.map((slot) => slot.closest('.blk').offsetHeight);
+  const blockOf = (slot) => slot.closest('.blk');
+  const fit = (slot) => {
+    const block = blockOf(slot);
+    return `${columns.clientWidth} ${block.offsetHeight} ${block.querySelectorAll('.margin-slot').length} ${block.querySelectorAll('.margin-slot[data-more]').length} ${marginFonts}`;
+  };
+  const stale = new Set([...slots.values()].filter((slot) => slot.dataset.fit !== fit(slot)).map(blockOf));
+  const each = [...slots.values()].filter((slot) => stale.has(blockOf(slot)));
+  const heights = () => each.map((slot) => blockOf(slot).offsetHeight);
   for (const slot of each) slot.hidden = true;
   const bare = heights();
   for (const slot of each) slot.hidden = false;
   heights().forEach((height, i) => { each[i].hidden = height > bare[i]; });
+  for (const slot of each) slot.dataset.fit = fit(slot);
   return slots;
 }
 
@@ -1236,25 +1249,29 @@ function marginPlaceAsMarks(boxes, page, origin, slots) {
       mark.setAttribute('aria-label', `Felix’s note on “${t.quote.slice(0, 80)}”${replies ? `, ${plural(replies, 'reply', 'replies')}` : ''}`);
     }
     const slot = slots.get(t.id)?.getBoundingClientRect();
-    const aside = !slot?.height && t.id !== 'reading';
+    const end = marginPassageEnd(t, rects, origin);
+    const room = page.right - origin.left;
+    const inline = slot?.height && slot.right <= page.right;
+    let aside = t.id !== 'reading' && !inline;
     mark.toggleAttribute('data-aside', aside);
-    const size = mark.offsetWidth;
+    let size = mark.offsetWidth;
     let x, y;
-    if (aside) {
-      const end = rects[rects.length - 1];
-      x = page.right - origin.left + 16 - size;
-      y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
-      while (taken.some((at) => Math.abs(at.x - x) < size && Math.abs(at.y - y) < mark.offsetHeight)) y += mark.offsetHeight;
-    } else if (slot?.height) {
+    if (inline) {
       x = slot.left - origin.left + slot.width / 2 - size / 2;
       y = slot.top - origin.top + slot.height / 2 - mark.offsetHeight / 2;
-    } else {
-      const end = marginPassageEnd(t, rects, origin);
+    } else if (!aside) {
       x = end.right + 13 - size / 2;
       y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
       while (taken.some((at) => Math.abs(at.x - x) < 14 && Math.abs(at.y - y) < 8)) x += 14;
+      aside = x + size / 2 + 6 > room;
+      mark.toggleAttribute('data-aside', aside);
+      size = mark.offsetWidth;
     }
-    if (!aside) x = Math.min(x, edge - size);
+    if (aside) {
+      x = room + 16 - size;
+      y = (end.top + end.bottom) / 2 - mark.offsetHeight / 2;
+      while (taken.some((at) => Math.abs(at.x - x) < size && Math.abs(at.y - y) < mark.offsetHeight)) y += mark.offsetHeight;
+    }
     taken.push({ x, y });
     mark.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
   }
@@ -1324,6 +1341,7 @@ function marginFocus(e) {
 }
 
 document.addEventListener('pointermove', marginHover, { passive: true });
+addEventListener('resize', marginRedraw);
 document.documentElement.addEventListener('pointerleave', () => {
   if (!marginPage.hover) return;
   marginPage.hover = null;

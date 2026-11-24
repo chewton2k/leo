@@ -1178,9 +1178,9 @@ test.describe('settings layout surface', () => {
 
 test.describe('marks stay off the words', () => {
   const source = '- Opening item.\n    - it has a json file that uses those bullet points to write it.\n    - The next item.\n\n> A quote with delta four passage and more words.\n\n```\nconst echo = five; after();\n```\n\n| one | two |\n| --- | --- |\n| foxtrot six cell | other |\n\nClosing words.';
-  const thread = (id, quote) => {
-    const at = source.indexOf(quote);
-    return { id, quote, prefix: source.slice(Math.max(0, at - 12), at), suffix: source.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
+  const thread = (id, quote, text = source) => {
+    const at = text.indexOf(quote);
+    return { id, quote, prefix: text.slice(Math.max(0, at - 12), at), suffix: text.slice(at + quote.length, at + quote.length + 12), status: 'open', messages: [{ from: 'felix', text: 'Why?' }] };
   };
   const threads = [thread('t1', 'a json file'), thread('t2', 'uses those bullet points'), thread('t3', 'delta four passage'), thread('t4', 'echo = five'), thread('t5', 'foxtrot six')];
   const look = (page) => page.evaluate(() => {
@@ -1291,6 +1291,69 @@ test.describe('marks stay off the words', () => {
       expect(open.length).toBe(closed.length);
       for (const [line, rect] of open.entries()) for (const [side, value] of rect.entries()) expect(Math.abs(value - closed[line][side])).toBeLessThanOrEqual(side === 1 ? 6 : 1);
     });
+  });
+
+  const stray = () => {
+    const words = [];
+    const walker = document.createTreeWalker(document.querySelector('#doc'), NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) for (const word of node.data.matchAll(/\S+/g)) {
+      const range = document.createRange();
+      range.setStart(node, word.index);
+      range.setEnd(node, word.index + word[0].length);
+      for (const r of range.getClientRects()) words.push({ word: word[0], left: r.left, right: r.right, top: r.top, bottom: r.bottom });
+    }
+    const inks = [...document.querySelectorAll('.margin-mark .margin-anchor, .margin-mark .margin-count, .margin-mark .margin-drop')].map((el) => el.getBoundingClientRect());
+    return words.filter((p) => inks.some((m) => m.left < p.right - 1 && m.right > p.left + 1 && m.top < p.bottom && m.bottom > p.top)).map((p) => p.word);
+  };
+  const flow = 'Alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigma tau upsilon phi chi psi omega again and again and $x^2$ more and more and more words until the end of it all.';
+  const narrow = (page, width) => page.evaluate((w) => {
+    document.querySelector('.note-columns').style.width = `${w}px`;
+    marginDraw();
+  }, width);
+
+  test('a blot whose slot hangs past the end of its line is drawn beside the column, never on the last word', async ({ browser }) => {
+    await fixture(browser, async (page) => {
+      let beside = 0;
+      for (let width = 120; width <= 520; width++) {
+        await narrow(page, width);
+        expect(await page.evaluate(stray), `${width} px`).toEqual([]);
+        beside += await page.locator('.margin-mark[data-aside]').count();
+      }
+      expect(beside).toBeGreaterThan(0);
+    }, { width: 900, layout: 'marks', source: flow, threads: [{ ...thread('t1', 'x^2', flow), messages: Array.from({ length: 4 }, (_, i) => ({ from: i % 2 ? 'you' : 'felix', text: 'More.' })) }] });
+  });
+
+  test('the reading blot follows the last word of its block and goes beside the column when the line leaves no room', async ({ browser }) => {
+    const text = 'Opening line.\n\nA closing block of words that Felix reads and whose last line reaches the right edge at some widths.';
+    await fixture(browser, async (page) => {
+      await page.evaluate(() => {
+        const source = session.doc.source();
+        const at = source.indexOf(leoMargin.blocksOf(source)[1]);
+        marginPage.readingAt = at;
+        marginPage.readingSpan = { from: at, to: source.length };
+      });
+      const sides = new Set();
+      for (let width = 160; width <= 640; width++) {
+        await narrow(page, width);
+        expect(await page.evaluate(stray), `${width} px`).toEqual([]);
+        sides.add(await page.locator('.margin-mark.reading').evaluate((el) => el.hasAttribute('data-aside')));
+      }
+      expect([...sides]).toEqual(expect.arrayContaining([false, true]));
+    }, { width: 900, layout: 'marks', source: text, threads: [] });
+  });
+
+  test('resizing the window never paints a blot over a word', async ({ browser }) => {
+    const quotes = ['beta', 'delta', 'zeta', 'iota', 'mu', 'omicron', 'rho', 'upsilon', 'psi'];
+    await fixture(browser, async (page) => {
+      await page.evaluate(`window.stray = ${stray}; window.painted = []; new ResizeObserver(() => window.painted.push(window.stray())).observe(document.querySelector('#doc'));`);
+      for (let width = 900; width >= 340; width -= 12) {
+        await page.setViewportSize({ width, height: 800 });
+        await page.waitForTimeout(30);
+      }
+      const painted = await page.evaluate(() => window.painted);
+      expect(painted.length).toBeGreaterThan(10);
+      expect(painted.filter((words) => words.length)).toEqual([]);
+    }, { layout: 'marks', source: flow, threads: quotes.map((quote, i) => thread(`t${i + 1}`, quote, flow)) });
   });
 });
 
