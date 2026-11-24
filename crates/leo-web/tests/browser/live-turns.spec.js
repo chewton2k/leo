@@ -23,8 +23,8 @@ async function fixture(browser, run, { turns = START, transcript, context = {}, 
     const recorder = leoRecording.create({ api, esc, toast() {}, go() {}, noteHash: (id) => id, felix: { felix: () => '' }, icons: new Proxy({}, { get: () => '<svg></svg>' }), encodePicture() {}, choiceCards: () => '', syncChoiceCards() {}, bytes: String, chat: () => ({ isBusy: () => false, attachSelection: (a) => window.asked.push(a.text), askNew() {} }) });
     recorder.show(document.querySelector('#rec-box'), { dir: '', folders: [] }).then(() => document.querySelector('[data-rec-tab="heard"]').click());`;
   const server = http.createServer((req, res) => {
-    const js = { '/fixture.js': () => script, '/recording.js': () => fs.readFileSync(path.join(web, 'recording.js'), 'utf8') }[req.url];
-    if (js) { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(js()); }
+    const js = req.url === '/fixture.js' ? script : req.url === '/recording.js' ? fs.readFileSync(path.join(web, 'recording.js'), 'utf8') : null;
+    if (js !== null) { res.setHeader('Content-Type', 'text/javascript; charset=utf-8'); return res.end(js); }
     if (req.url === '/style.css') { res.setHeader('Content-Type', 'text/css; charset=utf-8'); return res.end(pageCss()); }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.end(`<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><link rel="stylesheet" href="/style.css"></head><body><main style="padding: 24px"><div id="rec-box"></div><div id="saved" class="note-transcript"><div class="source-list transcript-flow">${savedRows}</div></div></main><script src="/recording.js"></script><script src="/fixture.js"></script></body></html>`);
