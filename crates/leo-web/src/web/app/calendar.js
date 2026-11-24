@@ -60,7 +60,7 @@ async function showCalendar() {
   document.title = 'Calendar · leo';
   if (!cal.selected) cal.selected = S.dayKey(new Date());
   calDragEnd();
-  cal.compose = null;
+  if (!cal.compose?.failed) cal.compose = null;
   cal.peek = null;
   cal.scrolled = '';
   cal.ringAt = null;
@@ -101,7 +101,7 @@ async function loadSchedule(mine = seq) {
       else cal.missed = true;
     }, CAL_POLL_MS);
   }
-  if (cal.drag || cal.compose) {
+  if (cal.drag || (cal.compose && !cal.compose.failed)) {
     cal.stale = true;
     return;
   }
@@ -118,7 +118,7 @@ async function loadSchedule(mine = seq) {
 }
 
 function calSettled() {
-  if (cal.drag || cal.compose) return;
+  if (cal.drag || (cal.compose && !cal.compose.failed)) return;
   if (cal.redraw) drawCalendar();
   if (!cal.stale) return;
   cal.stale = false;
@@ -400,7 +400,7 @@ function calRoom(count) {
 }
 
 function calFit() {
-  if (state.view !== 'calendar' || cal.view === 'month' || cal.drag || cal.compose || !document.querySelector('#cal-scroll .cal-cols')) return;
+  if (state.view !== 'calendar' || cal.view === 'month' || cal.drag || (cal.compose && !cal.compose.failed) || !document.querySelector('#cal-scroll .cal-cols')) return;
   if (calRoom(calDays().length) !== cal.drawnRoom) drawCalendar();
 }
 
@@ -477,7 +477,7 @@ async function calTrayMore() {
 function drawCalendar() {
   const main = $('#cal-main');
   if (!main) return;
-  cal.redraw = Boolean(cal.drag || (cal.compose && !cal.compose.sent));
+  cal.redraw = Boolean(cal.drag || (cal.compose && !cal.compose.sent && !cal.compose.failed));
   if (cal.redraw) return;
   const today = S.dayKey(new Date());
   const days = calDays();
@@ -486,6 +486,8 @@ function drawCalendar() {
   const scroll = $('#cal-scroll') || $('.cal-month-grid');
   const keep = scroll ? scroll.scrollTop : null;
   const views = main.querySelector('.cal-views');
+  const failed = cal.compose?.failed ? cal.compose.box : null;
+  const typing = failed?.contains(document.activeElement);
   main.innerHTML = `${calHead(days)}${body}`;
   if (views?.querySelector('.segment.on')?.dataset.view === cal.view) main.querySelector('.cal-views').replaceWith(views);
   main.dataset.view = cal.view;
@@ -509,6 +511,8 @@ function drawCalendar() {
       side.innerHTML = calTray(plan, today);
     }
   }
+  if (failed) calComposeHost(cal.compose)?.appendChild(failed);
+  if (typing) failed.querySelector('input').focus({ preventScroll: true });
   inkSettle((id) => app.querySelectorAll(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
   requestAnimationFrame(calFit);
 }
@@ -849,10 +853,15 @@ async function calSave(base, task, next, scope) {
   calSettled();
 }
 
+function calComposeHost({ day, start }) {
+  return app.querySelector(start === null ? `.cal-cell[data-day="${CSS.escape(day)}"], .cal-allday-cell[data-day="${CSS.escape(day)}"]` : `.cal-col[data-day="${CSS.escape(day)}"]`);
+}
+
 function calCompose(day, start, end) {
+  const kept = cal.compose?.failed ? cal.compose.box.querySelector('input').value : '';
   calCloseCompose();
   const timed = start !== null && start !== undefined;
-  const host = timed ? app.querySelector(`.cal-col[data-day="${CSS.escape(day)}"]`) : app.querySelector(`.cal-cell[data-day="${CSS.escape(day)}"], .cal-allday-cell[data-day="${CSS.escape(day)}"]`);
+  const host = calComposeHost({ day, start: timed ? start : null });
   if (!host) return calSettled();
   const box = document.createElement('form');
   box.className = `cal-compose${timed ? '' : ' all-day'}`;
@@ -870,24 +879,31 @@ function calCompose(day, start, end) {
     if (!title) return calCloseCompose();
     c.sent = true;
     const body = { title, date: day, time: timed ? S.timeOf(start) : null, end: timed ? S.timeOf(end) : null, kind: 'other' };
-    try {
+    const save = async () => {
       const made = await api('/api/tasks', { method: 'POST', body });
       inkLand(made.id);
       toast(`Added “${made.title}”`, { action: 'Undo', run: () => api(`/api/tasks/${enc(made.id)}`, { method: 'DELETE' }).then(() => loadSchedule(seq)).catch(fail) });
       loadTasksWindow().catch(() => {});
       cal.stale = true;
+    };
+    try {
+      await save();
     } catch (e) {
       if (e instanceof Locked) throw e;
-      toast(e.message, { bad: true });
-      if (cal.compose === c && box.isConnected) {
-        c.sent = false;
-        return;
+      if (cal.compose === c) {
+        toast(e.message, { bad: true });
+        Object.assign(c, { sent: false, failed: true });
+        if (!box.isConnected) drawCalendar();
+        return calSettled();
       }
+      toast(e.message, { bad: true, action: 'Try again', run: () => save().then(calSettled).catch(fail) });
     }
     if (cal.compose === c) calCloseCompose();
     else calSettled();
   };
-  cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false, finish };
+  cal.compose = { day, start: timed ? start : null, end: timed ? end : null, box, sent: false, failed: Boolean(kept), finish };
+  input.value = kept;
+  input.addEventListener('input', () => { if (cal.compose?.box === box) cal.compose.failed = false; });
   box.addEventListener('submit', (e) => { e.preventDefault(); finish().catch(fail); });
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
@@ -896,7 +912,7 @@ function calCompose(day, start, end) {
       calCloseCompose();
     }
   });
-  input.addEventListener('blur', () => setTimeout(() => finish().catch(fail), 0));
+  input.addEventListener('blur', () => setTimeout(() => cal.compose?.failed || finish().catch(fail), 0));
   input.focus({ preventScroll: true });
 }
 
@@ -933,7 +949,7 @@ document.addEventListener('pointerdown', (e) => {
   } else if (e.target.closest('#cal-main, #cal-side:not(.peek)')) d = { mode: 'press' };
   if (!d) return;
   cal.drag = { ...d, pointer: e.pointerId, startX: e.clientX, startY: e.clientY, x: e.clientX, y: e.clientY, live: false, timer: 0, touch };
-  if (cal.compose) cal.compose.finish().catch(fail);
+  if (cal.compose && !cal.compose.failed) cal.compose.finish().catch(fail);
   if (touch && !CAL_STILL.includes(d.mode)) cal.drag.timer = setTimeout(calLift, CAL_HOLD_MS);
   else if (!touch && d.mode !== 'press') e.preventDefault();
 });
@@ -978,7 +994,7 @@ document.addEventListener('pointercancel', (e) => {
 });
 
 window.addEventListener('blur', () => {
-  if (cal.drag && !cal.drag.live) calRelease();
+  if (cal.drag && !cal.drag.live && !cal.drag.source) calRelease();
 });
 
 app.addEventListener('lostpointercapture', (e) => {

@@ -983,12 +983,11 @@ async function kanbanDeleteCard(card) {
 }
 
 async function kanbanSetPriority(card, priority) {
-  card = kanbanCard(card.id) || card;
   const back = card.priority || '';
   if (priority === back) return;
   const chip = kanban.panel?.id === card.id && $(`#kanban-panel [data-priority="${priority}"]`);
   if (chip) return chip.click();
-  const newest = () => (kanbanCard(card.id) || card).priority === priority;
+  const newest = () => kanbanCard(card.id)?.priority === priority;
   kanbanUpdate(card, { priority });
   try {
     const saved = await kanbanWrite(`/api/cards/${enc(card.id)}`, { method: 'PATCH', body: { priority } });
@@ -1006,25 +1005,28 @@ function kanbanCardMenu(el, point = null) {
   const card = kanbanCard(el.dataset.card);
   if (!card) return;
   const open = () => kanban.panel?.id === card.id;
-  const live = () => kanbanCard(card.id) || card;
+  const now = (act) => () => {
+    const live = kanbanCard(card.id);
+    if (live) return act(live);
+  };
   const boards = kanban.boards.filter((b) => b.id !== card.board);
   popupMenu(el, {
     label: 'Card options',
     point,
     rows: [
       { text: 'Open', icon: ICON.note, run: () => kanbanCardPanel(card.id) },
-      { text: 'Move to…', icon: ICON.move, off: kanban.board.columns.length < 2, next: kanban.board.columns.map((c) => ({ text: c.name, checked: c.id === card.column, run: () => c.id !== live().column && kanbanMove(live(), { column: c.id }) })) },
-      { text: 'Priority…', icon: KANBAN_ICON.priority, next: KANBAN_PRIORITIES.map(([id, text]) => ({ text, checked: id === (card.priority || ''), run: () => kanbanSetPriority(card, id) })) },
-      ...(boards.length ? [{ text: 'Move to board…', icon: ICON.board, next: boards.map((b) => ({ text: b.name, run: async () => (!open() || await kanbanLeavePanel(false)) && kanbanMoveToBoard(live(), b.id) })) }] : []),
+      { text: 'Move to…', icon: ICON.move, off: kanban.board.columns.length < 2, next: kanban.board.columns.map((c) => ({ text: c.name, checked: c.id === card.column, run: now((live) => c.id !== live.column && kanbanMove(live, { column: c.id })) })) },
+      { text: 'Priority…', icon: KANBAN_ICON.priority, next: KANBAN_PRIORITIES.map(([id, text]) => ({ text, checked: id === (card.priority || ''), run: now((live) => kanbanSetPriority(live, id)) })) },
+      ...(boards.length ? [{ text: 'Move to board…', icon: ICON.board, next: boards.map((b) => ({ text: b.name, run: now(async (live) => (!open() || await kanbanLeavePanel(false)) && kanbanMoveToBoard(live, b.id)) })) }] : []),
       { line: true },
       {
         text: 'Delete card',
         icon: ICON.trash,
         danger: true,
-        run: () => {
+        run: now((live) => {
           if (open()) kanbanClosePanel(false);
-          return kanbanDeleteCard(live());
-        },
+          return kanbanDeleteCard(live);
+        }),
       },
     ],
   });

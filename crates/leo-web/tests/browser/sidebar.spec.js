@@ -972,6 +972,21 @@ test('chats about the open note gather in This note, follow the open note and ke
     await page.evaluate(()=>fixtureChat.setContext({id:'n1',title:'One'}));
     await page.locator('.chat-history-toggle').click();
     await expect.poll(async()=>(await titles()).slice(0,4)).toEqual(['Gamma','Alpha','Beta','Delta']);
+
+    const puts=[];
+    await page.route('**/api/chat',route=>route.fulfill({contentType:'application/x-ndjson',body:'{"t":"Hello."}\n{"done":true}\n'}));
+    await page.route('**/api/chats/**',route=>{
+      if(route.request().method()!=='PUT') return route.fallback();
+      const body=JSON.parse(route.request().postData());
+      puts.push(body);
+      return route.fulfill({status:503,contentType:'application/json',body:'{"error":"no"}'});
+    });
+    await page.locator('[data-chat="new"]').first().click();
+    await page.locator('#chat-input').fill('Is this one?');
+    await page.locator('#chat-input').press('Enter');
+    await expect.poll(()=>puts.length).toBeGreaterThan(0);
+    expect(puts.at(-1).messages[0]).toMatchObject({role:'user',text:'Is this one?',note:'n1'});
+    await expect.poll(async()=>(await titles()).slice(0,3)).toEqual(['Gamma','Is this one?','Alpha']);
   });
 });
 

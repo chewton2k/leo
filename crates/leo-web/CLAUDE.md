@@ -872,7 +872,7 @@ Felix (2026-10-19).
   in the 16 px right of the column (`data-aside`), level with its last line and stacked down when two
   meet; a read's blot sits just after the last word (`marginPassageEnd`), or beside the column when that
   would not fit in it. No blot or count is ever over text (2026-11-24, the user's call). A slot's fit is
-  measured again only when its block, the column width or the fonts changed (`data-fit`). A window resize
+  measured again only when its block's size or the fonts changed (`data-fit`). A window resize
   redraws in the same frame. Opening a line redraws (`focusin` on `#doc`). An open or pinned note sits
   under its block as a raised card (`--raised`, `--shadow-pop`), the block's `--margin-room`
   holding its height (pinned cards stack, placed in document order); it unfolds with a
@@ -1254,6 +1254,8 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   is a `cal.drag` (`press` mode for what cannot be dragged), so `drawCalendar` never replaces what is
   being clicked: it waits (`cal.redraw`) until the click has happened, and while a new task is being
   typed. A press elsewhere saves the typed task, and empty time starts one with a panel or day open.
+  Words that could not be saved stay (`cal.compose.failed`): the box returns after redraws and other
+  pages, a new box takes them, and only Enter or an edit tries again.
 - Task blocks are as tall as their time (min 15 min, 18 px; `calLeast`): 2 to 3 PM
   ends at the 3 PM line and a resize shrinks the block live. Only a task with no end
   keeps a default span (`CAL_DUE_MIN`, 78 min). Under an hour a block takes `inline`:

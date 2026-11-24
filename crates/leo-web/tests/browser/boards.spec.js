@@ -1262,6 +1262,25 @@ test('a right click on a card, or Shift+F10, opens its quick actions and never t
     expect(await page.evaluate(() => window.db.cards.find(c => c.id === 'cessay0001').board)).toBe('bhome00001');
 
     const mail = page.locator('[data-card="cemail0001"]');
+    await mail.click({ button: 'right' });
+    await mail.evaluate(el => el.click());
+    await expect(page.locator('#kanban-panel')).toBeHidden();
+    await expect(menu).toBeVisible();
+    await page.evaluate(() => { window.gone = window.db.cards.find(c => c.id === 'cemail0001'); window.db.cards = window.db.cards.filter(c => c !== window.gone); return kanbanRefresh(); });
+    await item('Delete card').click();
+    expect(await page.evaluate(() => window.errors)).toEqual([]);
+    await page.evaluate(() => { window.db.cards.push(window.gone); return kanbanRefresh(); });
+    await mail.click();
+    await page.locator('#kanban-card-sub').fill('Half typed');
+    await mail.click({ button: 'right' });
+    await item('Move to board…').click();
+    await item('Home').click();
+    await expect(page.locator('#kanban-panel')).toBeHidden();
+    await settled(page);
+    expect(await page.evaluate(() => { const c = window.db.cards.find(c => c.id === 'cemail0001'); return [c.board, c.subheading]; })).toEqual(['bhome00001', 'Half typed']);
+    await page.locator('.toast button').click();
+    await expect(mail).toHaveCount(1);
+    await settled(page);
     await mail.click({ modifiers: ['Control'] });
     await page.waitForTimeout(100);
     await expect(page.locator('#kanban-panel')).toBeHidden();

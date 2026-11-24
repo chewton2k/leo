@@ -1188,7 +1188,7 @@ function marginSlots(placed, columns) {
   const blockOf = (slot) => slot.closest('.blk');
   const fit = (slot) => {
     const block = blockOf(slot);
-    return `${columns.clientWidth} ${block.offsetHeight} ${block.querySelectorAll('.margin-slot').length} ${block.querySelectorAll('.margin-slot[data-more]').length} ${marginFonts}`;
+    return `${block.clientWidth} ${block.offsetHeight} ${block.querySelectorAll('.margin-slot').length} ${block.querySelectorAll('.margin-slot[data-more]').length} ${marginFonts}`;
   };
   const stale = new Set([...slots.values()].filter((slot) => slot.dataset.fit !== fit(slot)).map(blockOf));
   const each = [...slots.values()].filter((slot) => stale.has(blockOf(slot)));

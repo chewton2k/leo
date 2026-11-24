@@ -1342,6 +1342,26 @@ test.describe('marks stay off the words', () => {
     }, { width: 900, layout: 'marks', source: text, threads: [] });
   });
 
+  test('changing the page width leaves every slot as a fresh look would', async ({ browser }) => {
+    const source = Array.from({ length: 30 }, (_, i) => `Paragraph ${i} ${'runs on '.repeat(4 + (i % 7))}to passage${i}x here.`).join('\n\n');
+    const threads = Array.from({ length: 30 }, (_, i) => ({ id: `w${i}`, quote: `passage${i}x`, prefix: 'to ', suffix: ' here.', status: 'open', messages: [{ from: 'felix', text: 'Why?' }] }));
+    await fixture(browser, async (page) => {
+      expect(await page.evaluate(() => {
+        const shown = () => [...document.querySelectorAll('.margin-slot')].map((slot) => `${slot.dataset.id} ${slot.hidden}`).join();
+        const wrong = [];
+        for (let width = 420; width <= 760; width += 3) {
+          document.querySelector('article.note').style.maxWidth = `${width}px`;
+          marginDraw();
+          const kept = shown();
+          for (const slot of document.querySelectorAll('.margin-slot')) delete slot.dataset.fit;
+          marginDraw();
+          if (shown() !== kept) wrong.push(width);
+        }
+        return wrong;
+      })).toEqual([]);
+    }, { layout: 'marks', source, threads });
+  });
+
   test('resizing the window never paints a blot over a word', async ({ browser }) => {
     const quotes = ['beta', 'delta', 'zeta', 'iota', 'mu', 'omicron', 'rho', 'upsilon', 'psi'];
     await fixture(browser, async (page) => {

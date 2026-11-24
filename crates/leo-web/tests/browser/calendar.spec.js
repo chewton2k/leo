@@ -951,6 +951,7 @@ test('a redraw that lands while the mouse is down waits for the click', async ({
   await calendarFixture(browser, async page => {
     const side = page.locator('#cal-side.peek');
     const press = async id => {
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
       const box = await page.locator(`.cal-item[data-id="${id}"]`).boundingBox();
       await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2);
       await page.mouse.down();
@@ -985,7 +986,7 @@ test('a redraw that lands while the mouse is down waits for the click', async ({
     expect(await page.evaluate(() => cal.redraw)).toBe(true);
     await page.locator('.cal-item[data-id="e-maya"] .cal-open').click();
     await expect(side.locator('.cal-peek-title')).toHaveText('1:1 Maya');
-    expect(await page.evaluate(() => Boolean(cal.drag || cal.redraw))).toBe(false);
+    await expect.poll(() => page.evaluate(() => Boolean(cal.drag || cal.redraw))).toBe(false);
   });
 });
 
@@ -1040,5 +1041,107 @@ test('one click on empty time starts a task while a panel or a month day is open
     await page.mouse.click(cell.x + cell.width / 2, cell.y + cell.height / 2);
     await expect(page.locator('.cal-cell.open')).toHaveCount(0);
     await expect(page.locator('.cal-cell[data-day="2026-11-10"] .cal-compose-input')).toBeFocused();
+  });
+});
+
+test('words typed for a task that could not be saved survive another click, another week and a redraw until they are saved', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const input = page.locator('.cal-compose-input');
+    const posts = () => page.evaluate(() => window.calls.filter(c => c.method === 'POST').map(c => [c.body.title, c.body.date]));
+    const failing = () => page.evaluate(() => { window.failNext = 'Leo could not save the task.'; });
+    const click = async (day, minutes) => {
+      const at = await point(page, day, minutes);
+      await page.mouse.click(at.x, at.y);
+    };
+    await click('2026-11-06', 14 * 60);
+    await input.fill('Kept words');
+    await failing();
+    await input.press('Enter');
+    await settled(page);
+    await page.evaluate(() => loadSchedule());
+    await expect(input).toHaveValue('Kept words');
+    await expect(input).toBeFocused();
+    await page.locator('[data-action="cal-next"]').click();
+    await settled(page);
+    await expect(input).toHaveCount(0);
+    await page.locator('[data-action="cal-prev"]').click();
+    await settled(page);
+    await expect(input).toHaveValue('Kept words');
+    await page.evaluate(() => showCalendar());
+    await settled(page);
+    await expect(input).toHaveValue('Kept words');
+    await click('2026-11-07', 12 * 60);
+    await expect(input).toHaveValue('Kept words');
+    await expect(page.locator('.cal-col[data-day="2026-11-07"] .cal-compose')).toHaveCount(1);
+    expect(await posts()).toEqual([['Kept words', '2026-11-06']]);
+    await input.fill('Kept words too');
+    await failing();
+    await page.locator('.cal-name').click();
+    await settled(page);
+    await expect(input).toHaveValue('Kept words too');
+    await page.evaluate(() => { window.slow = 200; });
+    await failing();
+    await input.press('Enter');
+    await page.locator('.cal-views [data-view="month"]').click();
+    await expect(page.locator('.cal-cell')).toHaveCount(42);
+    await settled(page);
+    await page.evaluate(() => { window.slow = 0; });
+    await page.locator('.cal-views [data-view="week"]').click();
+    await settled(page);
+    await expect(input).toHaveValue('Kept words too');
+
+    await page.evaluate(() => { window.slow = 200; });
+    await input.fill('First of two');
+    await failing();
+    await click('2026-11-02', 12 * 60);
+    await expect(input).toHaveValue('');
+    await settled(page);
+    await page.evaluate(() => { window.slow = 0; });
+    await page.locator('.toast button', { hasText: 'Try again' }).click();
+    await settled(page);
+    await expect(page.locator('.cal-item', { hasText: 'First of two' })).toHaveCount(1);
+    await expect(page.locator('.cal-compose')).toHaveCount(0);
+    expect(await page.evaluate(() => Boolean(cal.drag || cal.compose || cal.redraw || cal.stale))).toBe(false);
+  });
+});
+
+test('a press interrupted by the window, a cancel, another pointer or a release elsewhere never leaves the calendar stuck', async ({ browser }) => {
+  await calendarFixture(browser, async page => {
+    const grip = await page.locator('.cal-item[data-id="task-study"] .cal-grip').boundingBox();
+    await page.mouse.move(grip.x + grip.width / 2, grip.y + 3);
+    await page.mouse.down();
+    await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+    await page.mouse.up();
+    await expect(page.locator('#cal-side.peek #cal-peek-title')).toHaveValue('Study group');
+    await page.evaluate(() => calClosePeek());
+
+    const head = await page.locator('.cal-dayhead').first().boundingBox();
+    await page.mouse.move(head.x + 10, head.y + 10);
+    await page.mouse.down();
+    await page.evaluate(() => { window.db.tasks.find(t => t.id === 'task-lab').title = 'Renamed lab'; return loadSchedule(); });
+    await expect(page.locator('.cal-item', { hasText: 'Renamed lab' })).toHaveCount(0);
+    await page.mouse.move(5, 5);
+    await page.mouse.up();
+    await expect(page.locator('.cal-item', { hasText: 'Renamed lab' })).toHaveCount(1);
+
+    const fire = (type, id, more = {}) => page.evaluate(([type, id, more]) => document.querySelector('.cal-dayhead').dispatchEvent(new PointerEvent(type, { bubbles: true, button: 0, buttons: 1, isPrimary: true, pointerId: id, pointerType: 'touch', ...more })), [type, id, more]);
+    const stuck = () => page.evaluate(() => Boolean(cal.drag || cal.redraw));
+    await fire('pointerdown', 81);
+    await fire('pointercancel', 81);
+    expect(await stuck()).toBe(false);
+    await fire('pointerdown', 82);
+    await fire('pointermove', 82, { clientX: 40, clientY: 40 });
+    expect(await stuck()).toBe(false);
+
+    const study = await page.locator('.cal-item[data-id="task-study"] .cal-open').boundingBox();
+    await page.mouse.move(study.x + 50, study.y + 30);
+    await page.mouse.down();
+    await page.mouse.move(study.x + 50, study.y + 60, { steps: 4 });
+    await fire('pointerdown', 83);
+    expect(await page.evaluate(() => cal.drag?.live)).toBe(true);
+    await page.mouse.up();
+    await settled(page);
+    expect(await patches(page, 'task-study')).toHaveLength(1);
+    expect(await stuck()).toBe(false);
   });
 });

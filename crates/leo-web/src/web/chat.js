@@ -1581,7 +1581,7 @@
       }
       const first = state.messages.find((m) => m.role === 'user' && m.text);
       const ghost = state.fresh && !state.chats.some((c) => c.id === state.id)
-        ? [{ id: state.id, title: first ? draftTitle(first) : 'New chat', updated_at: new Date().toISOString(), ghost: true }]
+        ? [{ id: state.id, title: first ? draftTitle(first) : 'New chat', updated_at: new Date().toISOString(), notes: state.messages.flatMap((m) => m.note || []), ghost: true }]
         : [];
       const list = [...ghost, ...state.chats];
       if (!list.length) {
