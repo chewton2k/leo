@@ -44,6 +44,9 @@ fn keeping_choices_are_saved_and_applied_right_away() {
     };
     assert_eq!(json_of(preview("chat_days", Some(30)))["count"], 1);
     assert_eq!(json_of(preview("chat_days", Some(90)))["count"], 0);
+    assert!(chats::set_pinned(&state.chats, "chat-old-0001", true));
+    assert_eq!(json_of(preview("chat_days", Some(30)))["count"], 0);
+    assert!(chats::set_pinned(&state.chats, "chat-old-0001", false));
     assert_eq!(json_of(preview("chat_days", None))["count"], 0);
     assert_eq!(json_of(preview("upload_days", Some(7)))["count"], 0);
     assert_eq!(

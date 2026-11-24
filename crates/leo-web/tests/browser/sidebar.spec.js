@@ -793,6 +793,114 @@ test('Chats divider resizes independently, keeps drafts and restores its width',
 });
 
 
+test('chats pin into their own group, keep the pin through a refresh, roll back a failed save and fit the narrowest list', async ({ browser }) => {
+  await sidebarFixture(browser,async(context,url)=>{
+    const page=await context.newPage();
+    const now=Date.now(), at=minutes=>new Date(now-minutes*60000).toISOString();
+    const chats=[
+      {id:'chat-pin-aaaa1',title:'Alpha',named:true,about:'',count:2,updated_at:at(1),pinned:false},
+      {id:'chat-pin-bbbb1',title:'Beta with a title long enough to need cutting off at the narrowest list width',named:true,about:'',count:2,updated_at:at(60),pinned:false},
+      {id:'chat-pin-cccc1',title:'Gamma',named:true,about:'',count:2,updated_at:at(60*24*40),pinned:true}
+    ];
+    const patches=[], notes=[];
+    let status=204, hold=null;
+    await page.route('**/api/chats**',async route=>{
+      const req=route.request(), found=new URL(req.url());
+      if(req.method()==='PATCH'){
+        const id=decodeURIComponent(found.pathname.split('/').pop()), body=JSON.parse(req.postData());
+        patches.push([id,body.pinned]);
+        if(status===204) chats.find(c=>c.id===id).pinned=body.pinned;
+        return route.fulfill({status});
+      }
+      if(req.method()==='GET'&&found.pathname==='/api/chats'){
+        const body=JSON.stringify(chats), wait=hold;
+        if(wait) await wait;
+        return route.fulfill({contentType:'application/json',body});
+      }
+      return route.fallback();
+    });
+    await page.exposeFunction('noted',message=>notes.push(message));
+    await page.setViewportSize({width:1600,height:900});
+    await page.goto(url);
+    await page.emulateMedia({reducedMotion:'reduce'});
+    await page.evaluate(()=>{
+      window.fixtureChat=window.leoChat.create({render:text=>'<p>'+text+'</p>',escape:text=>String(text).replace(/[&<>"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])),icons:ICON,notify:message=>window.noted(message)});
+      fixtureChat.toggle(true);
+    });
+    await page.locator('.chat-history-toggle').click();
+    const list=page.locator('#chat-history-list'), row=title=>list.locator('.chat-history-row',{hasText:title}), pin=title=>row(title).locator('.chat-history-pin');
+    const groups=()=>list.locator('.chat-history-group').allTextContents();
+    await expect(row('Gamma')).toBeVisible();
+    expect(await groups()).toEqual(['Pinned','Today']);
+    await expect(pin('Gamma')).toHaveAttribute('aria-pressed','true');
+    await expect(pin('Gamma')).toHaveAttribute('aria-label','Unpin chat');
+    await expect(pin('Gamma')).toHaveAttribute('title','Unpin chat');
+    await expect(pin('Alpha')).toHaveAttribute('aria-label','Pin chat');
+    expect(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-history-pin[aria-pressed="true"]')).opacity)).toBe('1');
+    expect(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-history-pin[aria-pressed="false"]')).opacity)).toBe('0');
+
+    await pin('Beta').click();
+    await expect(pin('Beta')).toHaveAttribute('aria-pressed','true');
+    expect(patches).toEqual([['chat-pin-bbbb1',true]]);
+    expect(await groups()).toEqual(['Pinned','Today']);
+    expect(await list.locator('.chat-history-title').allTextContents()).toEqual([chats[1].title,'Gamma','Alpha']);
+    await expect(page.locator('.chat-history-row.on')).toHaveCount(0);
+
+    await pin('Alpha').focus();
+    await page.keyboard.press('Enter');
+    await expect(pin('Alpha')).toBeFocused();
+    await expect(pin('Alpha')).toHaveAttribute('aria-label','Unpin chat');
+    expect(await list.locator('.chat-history-title').allTextContents()).toEqual(['Alpha',chats[1].title,'Gamma']);
+    expect(await groups()).toEqual(['Pinned']);
+
+    status=500;
+    await pin('Alpha').click();
+    await expect(pin('Alpha')).toHaveAttribute('aria-pressed','true');
+    await expect.poll(()=>notes).toEqual(['leo could not unpin that conversation. Try again.']);
+    status=204;
+
+    let release;
+    hold=new Promise(resolve=>{release=resolve;});
+    await page.evaluate(()=>{fixtureChat.toggle(false);fixtureChat.toggle(true);});
+    await pin('Gamma').click();
+    await expect(pin('Gamma')).toHaveAttribute('aria-pressed','false');
+    await expect.poll(()=>patches.length).toBe(4);
+    release();
+    hold=null;
+    await page.waitForTimeout(150);
+    await expect(pin('Gamma')).toHaveAttribute('aria-pressed','false');
+    expect(await groups()).toEqual(['Pinned','Older']);
+    await expect(page.locator('.chat-history-toggle')).toBeVisible();
+
+    await page.locator('#chat-history-search').fill('a');
+    await expect(pin('Gamma')).toHaveAttribute('aria-pressed','false');
+    await expect(list.locator('.chat-history-group')).toHaveCount(0);
+    await page.locator('#chat-history-search').fill('');
+    await expect(list.locator('.chat-history-group').first()).toBeVisible();
+
+    for(const theme of ['light','dark']) {
+      await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+      for(const width of [null,190]) {
+        await page.evaluate(width=>{const chat=document.querySelector('.chat');if(width===null)chat.style.removeProperty('--chat-history-w');else chat.style.setProperty('--chat-history-w',width+'px');},width);
+        for(const one of await list.locator('.chat-history-row').all()) {
+          await one.hover();
+          const [item,title,pinBox,x,box]=await Promise.all(['.chat-history-item','.chat-history-title','.chat-history-pin','.chat-history-x',null].map(sel=>sel?one.locator(sel).boundingBox():one.boundingBox()));
+          expect(item.x+item.width,'the title stops before the pin').toBeLessThanOrEqual(pinBox.x+0.5);
+          expect(pinBox.x+pinBox.width,'the pin stops before the delete button').toBeLessThanOrEqual(x.x+0.5);
+          expect(x.x+x.width).toBeLessThanOrEqual(box.x+box.width+0.5);
+          expect(title.x+title.width).toBeLessThanOrEqual(item.x+item.width+0.5);
+        }
+        expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+        expect(await list.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+      }
+    }
+    expect(await row('Beta').locator('.chat-history-title').evaluate(el=>el.scrollWidth>el.clientWidth)).toBe(true);
+    await row('Gamma').locator('.chat-history-x').click();
+    await expect(row('Gamma').locator('.chat-history-x')).toHaveClass(/sure/);
+    await expect(list.locator('.chat-history-row.on')).toHaveCount(0);
+  });
+});
+
 test('a narrow Felix panel lays Chats over the chat without saving it, and slims the chat column', async ({ browser }) => {
   await sidebarFixture(browser,async(context,url)=>{
     const page=await context.newPage();

@@ -1,6 +1,6 @@
 const KEEPING_ROWS = [
   ['trash_days', 'Trash', 'notes in the trash', 'keeping-trash', 'Notes you deleted. Once their time is up they cannot be restored.', 'note'],
-  ['chat_days', 'Chats with Felix', 'chats with Felix', 'keeping-chat', 'Conversations in Felix’s chat panel. Your notes are not touched.', 'chat'],
+  ['chat_days', 'Chats with Felix', 'chats with Felix', 'keeping-chat', 'Conversations in Felix’s chat panel. Pinned chats stay. Your notes are not touched.', 'chat'],
   ['upload_days', 'Uploaded files', 'uploaded files', 'keeping-upload', 'The PDFs, slides and documents you turned into notes. The notes stay; opening the original stops working once it has gone.', 'file'],
   ['transcript_days', 'Recording transcripts', 'recording transcripts', 'keeping-transcript', 'What was said in a recording, kept beside its note so Felix can quote it. The note stays.', 'transcript'],
   ['audio_days', 'Unfinished recording audio', 'unfinished recording audio', 'keeping-audio', 'Audio from a recording that stopped before it became a note. Recover it on the Record page before its time is up.', 'recording'],

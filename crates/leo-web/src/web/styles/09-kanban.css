@@ -18,6 +18,7 @@ body.kanban-dragging .kanban-tab.kanban-over { display: inline-flex; }
 .side-tree .side-row:focus-visible,
 .chat-pick-search:focus-visible,
 .kanban-tab:focus-visible,
+.chat-history-pin:focus-visible,
 .kanban-tab.on:focus-within,
 .kanban-head .btn.plain:focus-visible,
 .icon-btn.kanban-col-more:focus-visible,

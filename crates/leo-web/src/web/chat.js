@@ -824,11 +824,11 @@
   function groups(list, now = new Date()) {
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const day = 86400000;
-    const order = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
+    const order = ['Pinned', 'Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
     const out = new Map(order.map((name) => [name, []]));
     for (const chat of list) {
       const t = new Date(chat.updated_at).getTime();
-      const name = t >= start ? 'Today' : t >= start - day ? 'Yesterday' : t >= start - 7 * day ? 'Previous 7 days' : t >= start - 30 * day ? 'Previous 30 days' : 'Older';
+      const name = chat.pinned ? 'Pinned' : t >= start ? 'Today' : t >= start - day ? 'Yesterday' : t >= start - 7 * day ? 'Previous 7 days' : t >= start - 30 * day ? 'Previous 30 days' : 'Older';
       out.get(name).push(chat);
     }
     return order.filter((name) => out.get(name).length).map((name) => ({ name, chats: out.get(name) }));
@@ -944,6 +944,9 @@
     const gone = new Set();
     const marks = new Map();
     const stepChevron = (icons.chevron || '').replace('<svg ', '<svg class="msg-step-chevron" ');
+    const pinIcon = icons.pin || '';
+    const pinLog = new Map();
+    let pinTurn = 0;
     const state = { open: false, id: saved.id || newId(), messages: saved.messages, refs: saved.refs, context: null, dropped: null, fresh: false, busy: null, streak: 0, pick: null, chats: null, sidebar: null, doomed: null, asking: null, files: [], sent: [], filesFor: null, review: [], drafts: {}, found: null, selection: null };
     if (Number.isInteger(saved.first)) marks.set(state.id, { first: saved.first, saved: saved.saved, held: [] });
     else if (!known.has(state.id)) marks.set(state.id, { first: 0, saved: 0, held: [] });
@@ -1426,7 +1429,7 @@
           const summary = await response.json();
           marks.set(id, savedAs(mark || { first: 0 }, local, summary.count));
           if (state.chats) {
-            state.chats = [summary, ...state.chats.filter((c) => c.id !== summary.id)].sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
+            state.chats = [{ ...summary, pinned: state.chats.some((c) => c.id === summary.id && c.pinned) }, ...state.chats.filter((c) => c.id !== summary.id)].sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
             drawChats();
           }
           if (!summary.named && summary.count >= 2 && !naming.has(summary.id)) {
@@ -1525,9 +1528,10 @@
     const NAME_CHECKS = [8000, 25000, 60000];
 
     async function loadChats() {
+      const began = pinTurn;
       try {
         const response = await request('/api/chats');
-        if (response.ok) state.chats = await response.json();
+        if (response.ok) state.chats = holdPins(await response.json(), began);
       } catch (e) {
         state.chats = state.chats || [];
       }
@@ -1538,6 +1542,7 @@
     let findTurn = 0;
     async function findChats(query) {
       const turn = ++findTurn;
+      const began = pinTurn;
       if (!query.trim()) {
         state.found = null;
         drawChats();
@@ -1546,7 +1551,7 @@
       try {
         const response = await request(`/api/chats?q=${encodeURIComponent(query.trim())}`);
         if (!response.ok || turn !== findTurn) return;
-        state.found = await response.json();
+        state.found = holdPins(await response.json(), began);
       } catch (e) {
         state.found = [];
       }
@@ -1584,7 +1589,7 @@
     }
 
     function chatRow(c) {
-      return `<div class="chat-history-row${c.id === state.id ? ' on' : ''}"><button class="chat-history-item" data-chat="resume" data-id="${escape(c.id)}" title="${escape(c.title)}"><span class="chat-history-title">${escape(c.title)}</span></button>${c.ghost ? '' : `<button class="chat-history-x${state.doomed === c.id ? ' sure' : ''}" data-chat="forget" data-id="${escape(c.id)}" aria-label="${state.doomed === c.id ? 'Confirm delete' : 'Delete'} ${escape(c.title)}"><span class="chat-delete-x" aria-hidden="true">×</span><span class="chat-delete-label" aria-hidden="true">Delete</span></button>`}</div>`;
+      return `<div class="chat-history-row${c.id === state.id ? ' on' : ''}"><button class="chat-history-item" data-chat="resume" data-id="${escape(c.id)}" title="${escape(c.title)}"><span class="chat-history-title">${escape(c.title)}</span></button>${c.ghost ? '' : `<button class="chat-history-pin" data-chat="pin" data-id="${escape(c.id)}" aria-pressed="${c.pinned ? 'true' : 'false'}" aria-label="${c.pinned ? 'Unpin chat' : 'Pin chat'}" title="${c.pinned ? 'Unpin chat' : 'Pin chat'}">${pinIcon}</button><button class="chat-history-x${state.doomed === c.id ? ' sure' : ''}" data-chat="forget" data-id="${escape(c.id)}" aria-label="${state.doomed === c.id ? 'Confirm delete' : 'Delete'} ${escape(c.title)}"><span class="chat-delete-x" aria-hidden="true">×</span><span class="chat-delete-label" aria-hidden="true">Delete</span></button>`}</div>`;
     }
 
     let resumeSeq = 0;
@@ -1725,6 +1730,47 @@
     }, true);
     document.addEventListener('pointerdown', spare, true);
     document.addEventListener('focusin', spare, true);
+
+    function holdPins(list, began) {
+      for (const c of list) {
+        const log = pinLog.get(c.id);
+        if (log && (log.pending || log.turn > began)) c.pinned = log.want;
+      }
+      return list;
+    }
+
+    function showPinned(id, pinned) {
+      const focused = document.activeElement?.dataset?.chat === 'pin' && document.activeElement.dataset.id === id;
+      for (const c of [...(state.chats || []), ...(state.found || [])]) if (c.id === id) c.pinned = pinned;
+      drawChats();
+      if (focused) [...panel.querySelectorAll('.chat-history-pin')].find((item) => item.dataset.id === id)?.focus({ preventScroll: true });
+    }
+
+    async function pinChat(id) {
+      const chat = [...(state.chats || []), ...(state.found || [])].find((c) => c.id === id);
+      if (!chat) return;
+      const log = pinLog.get(id) || { saved: Boolean(chat.pinned), pending: 0 };
+      pinLog.set(id, log);
+      const mine = ++pinTurn;
+      const pinned = !chat.pinned;
+      log.turn = mine;
+      log.want = pinned;
+      log.pending++;
+      showPinned(id, pinned);
+      try {
+        const response = await request(`/api/chats/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pinned }) });
+        if (!response.ok) throw new Error('pin failed');
+        log.saved = pinned;
+      } catch (e) {
+        if (mine === log.turn) {
+          log.want = log.saved;
+          showPinned(id, log.saved);
+          notify(`leo could not ${pinned ? 'pin' : 'unpin'} that conversation. Try again.`);
+        }
+      } finally {
+        log.pending--;
+      }
+    }
 
     const excerpts = new Map();
     function excerptOf(r) {
@@ -3301,6 +3347,7 @@
       }
       else if (what === 'review') startReview();
       else if (what === 'forget') forget(el.dataset.id);
+      else if (what === 'pin') pinChat(el.dataset.id);
       else if (what === 'starter') startWith(STARTERS[Number(el.dataset.i)]);
       else if (what === 'ask-cancel') {
         state.asking = null;

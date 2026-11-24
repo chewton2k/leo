@@ -743,6 +743,7 @@ fn set_up(conn: &mut Connection, stored: i64) -> rusqlite::Result<()> {
     add_column(&tx, "dictations", "edited", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "dictations", "original", "TEXT")?;
     add_column(&tx, "chats", "rows", "INTEGER NOT NULL DEFAULT 0")?;
+    add_column(&tx, "chats", "pinned", "INTEGER NOT NULL DEFAULT 0")?;
     add_column(&tx, "chat_docs", "chars", "INTEGER")?;
     add_column(&tx, "chat_docs", "bytes", "INTEGER")?;
     add_column(&tx, "chat_docs", "excerpt", "TEXT")?;
@@ -1481,6 +1482,49 @@ mod task_descriptions {
 }
 
 #[cfg(test)]
+mod chat_pins {
+    use super::*;
+
+    #[test]
+    fn existing_chats_gain_a_pinned_mark_and_keep_their_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(FILE);
+        drop(Db::open(&path).unwrap());
+        let old = Connection::open(&path).unwrap();
+        old.execute_batch("ALTER TABLE chats DROP COLUMN pinned;")
+            .unwrap();
+        old.execute(
+            "INSERT INTO chats (id, title, mode, refs, messages, named, about, memory, count, created_at, updated_at, rows)
+             VALUES ('chat-pin-000001', 'Heaps', 'chat', '[]', '[]', 1, 'about heaps', NULL, 0, '2026-11-01T00:00:00.000000Z', '2026-11-02T00:00:00.000000Z', 1)",
+            [],
+        )
+        .unwrap();
+        drop(old);
+        for _ in 0..2 {
+            let db = Db::open(&path).unwrap();
+            db.with(|c| {
+                let row: (String, i64, String) = c.query_row(
+                    "SELECT title, pinned, updated_at FROM chats WHERE id = 'chat-pin-000001'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )?;
+                assert_eq!(
+                    row,
+                    ("Heaps".into(), 0, "2026-11-02T00:00:00.000000Z".into())
+                );
+                let version: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0))?;
+                assert_eq!(version, VERSION);
+                Ok(())
+            })
+            .unwrap();
+        }
+        let chats = dir.path().join("chats");
+        assert!(crate::chats::set_pinned(&chats, "chat-pin-000001", true));
+        assert!(crate::chats::list(&chats)[0].pinned);
+    }
+}
+
+#[cfg(test)]
 mod chat_rows {
     use super::*;
 
@@ -1814,11 +1858,19 @@ mod rewriting {
         let _one = hooks::Clear;
         let dir = tempfile::tempdir().unwrap();
         let (path, db) = old_leo(dir.path());
+        db.with(|c| {
+            c.execute(
+                "UPDATE chats SET pinned = 1 WHERE id = 'chat-old-04999'",
+                [],
+            )
+        })
+        .unwrap();
         let before = std::fs::metadata(&path).unwrap().len()
             + std::fs::metadata(named(&path, "-wal")).map_or(0, |m| m.len());
         assert_eq!(db.rewrite(&quiet()).unwrap(), Rewritten::Done);
         assert_eq!(mode(&path), 2);
         assert_eq!(rows(&db, "chats"), 1_000);
+        assert_eq!(rows(&db, "chats WHERE pinned = 1"), 1);
         assert_eq!(rows(&db, "vectors"), 1);
         assert_eq!(rows(&db, "dictations"), 1);
         let found: String = db

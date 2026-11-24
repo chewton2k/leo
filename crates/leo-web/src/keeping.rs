@@ -268,7 +268,7 @@ pub(crate) async fn would_delete(state: &AppState, field: &str, days: Option<u32
     tokio::task::spawn_blocking(move || match field.as_str() {
         "chat_days" => crate::chats::list(&chats_dir)
             .iter()
-            .filter(|c| c.updated_at < before)
+            .filter(|c| c.updated_at < before && !c.pinned)
             .count(),
         "upload_days" => {
             leo_core::children::with_stop(stop, || old_upload_count(&notes_dir, Some(days), now))

@@ -142,6 +142,11 @@ test('past chats are grouped the way chat apps group them', () => {
   assert.deepEqual(g.map((x) => x.name), ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older']);
   assert.deepEqual(C.groups([at(0, 1), at(0, 9)], now).map((x) => x.chats.length), [2]);
   assert.deepEqual(C.groups([], now), []);
+  const pinned = (id, days, on = true) => ({ ...at(days), id, pinned: on });
+  const mixed = C.groups([at(0), pinned('p1', 3), pinned('p2', 90), pinned('off', 3, false)], now);
+  assert.deepEqual(mixed.map((x) => x.name), ['Pinned', 'Today', 'Previous 7 days']);
+  assert.deepEqual(mixed[0].chats.map((x) => x.id), ['p1', 'p2']);
+  assert.deepEqual(mixed.flatMap((x) => x.chats).map((x) => x.id), ['p1', 'p2', 'c0', 'off']);
 });
 
 test('a chat id is safe in a file name even without randomUUID', () => {
@@ -478,7 +483,7 @@ test('conversation rows display only escaped titles, including search results', 
   const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
   const row = source.slice(source.indexOf('    function chatRow(c) {'), source.indexOf('\n    let resumeSeq', source.indexOf('    function chatRow(c) {')));
-  const context = vm.createContext({ state: { id: 'chat-one', doomed: null }, escape: esc });
+  const context = vm.createContext({ state: { id: 'chat-one', doomed: null }, escape: esc, pinIcon: '<svg></svg>' });
   vm.runInContext(row, context);
   for (const about of ['', 'A response preview that should stay hidden', '<script>bad()</script>']) {
     const html = context.chatRow({ id: 'chat-one', title: 'Graphs <review>', about });
@@ -487,6 +492,10 @@ test('conversation rows display only escaped titles, including search results', 
     if (about) assert.ok(!html.includes(about));
     assert.ok(html.includes('data-chat="resume"') && html.includes('data-chat="forget"'));
   }
+  const unpinned = context.chatRow({ id: 'chat-one', title: 'A' });
+  assert.match(unpinned, /<button class="chat-history-pin" data-chat="pin" data-id="chat-one" aria-pressed="false" aria-label="Pin chat" title="Pin chat"><svg><\/svg><\/button><button class="chat-history-x"/);
+  assert.match(context.chatRow({ id: 'chat-one', title: 'A', pinned: true }), /aria-pressed="true" aria-label="Unpin chat" title="Unpin chat"/);
+  assert.ok(!context.chatRow({ id: 'chat-new', title: 'New chat', ghost: true }).includes('data-chat="pin"'));
 });
 
 
@@ -1953,4 +1962,84 @@ test('a marked quiz offers Visualize, asking with the selection toolbar\'s words
   assert.equal(said, /draw: '([^']+)'/.exec(fs.readFileSync(path.join(__dirname, '../src/web/app/passages.js'), 'utf8'))[1]);
   const seeing = /SEE_WORDS: \[&str; \d+\] = \[([^\]]+)\]/.exec(fs.readFileSync(path.join(__dirname, '../src/drawing.rs'), 'utf8'))[1].match(/"(\w+)"/g).map((w) => w.slice(1, -1));
   assert.ok(said.toLowerCase().split(/\W+/).some((w) => seeing.includes(w)), 'the server knows the user asked to see something');
+});
+
+function pinning({ reply = async () => ({ ok: true, status: 204 }), chats = [{ id: 'chat-a', title: 'A', pinned: false }, { id: 'chat-b', title: 'B', pinned: false }] } = {}) {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../src/web/chat.js'), 'utf8').replace(/\r\n/g, '\n');
+  const start = source.indexOf('    function holdPins(');
+  const code = source.slice(start, source.indexOf('\n    const excerpts = new Map();', start));
+  const calls = [], told = [];
+  const state = { chats, found: null };
+  const context = vm.createContext({
+    state, pinLog: new Map(), pinTurn: 0, calls, told, JSON, encodeURIComponent, Boolean,
+    document: { activeElement: null }, panel: { querySelectorAll: () => [] }, drawChats() {}, notify: (t) => told.push(t),
+    request: async (url, init) => { calls.push([init.method, url, JSON.parse(init.body)]); return reply(calls.length); },
+  });
+  vm.runInContext(`${code}\nthis.pinChat = pinChat; this.holdPins = holdPins; this.turn = () => pinTurn;`, context);
+  return { context, state, calls, told };
+}
+
+test('pinning shows at once, sends PATCH {pinned} and keeps the result', async () => {
+  const f = pinning();
+  const done = f.context.pinChat('chat-a');
+  assert.equal(f.state.chats[0].pinned, true);
+  await done;
+  assert.deepEqual(f.calls, [['PATCH', '/api/chats/chat-a', { pinned: true }]]);
+  assert.equal(f.state.chats[0].pinned, true);
+  assert.equal(f.state.chats[1].pinned, false);
+  assert.deepEqual(f.told, []);
+  await f.context.pinChat('chat-a');
+  assert.deepEqual(f.calls[1], ['PATCH', '/api/chats/chat-a', { pinned: false }]);
+  assert.equal(f.state.chats[0].pinned, false);
+});
+
+test('a failed pin goes back and says so; only the newest toggle rolls back', async () => {
+  const failed = pinning({ reply: async () => ({ ok: false, status: 500 }) });
+  await failed.context.pinChat('chat-a');
+  assert.equal(failed.state.chats[0].pinned, false);
+  assert.deepEqual(failed.told, ['leo could not pin that conversation. Try again.']);
+  const gates = [];
+  const slow = pinning({ reply: (n) => new Promise((resolve) => gates.push((ok) => resolve({ ok, status: ok ? 204 : 500 }))) });
+  const first = slow.context.pinChat('chat-a');
+  const second = slow.context.pinChat('chat-a');
+  assert.equal(slow.state.chats[0].pinned, false);
+  gates[0](false);
+  await first;
+  assert.equal(slow.state.chats[0].pinned, false, 'an older failure leaves the newer toggle alone');
+  assert.deepEqual(slow.told, []);
+  gates[1](false);
+  await second;
+  assert.equal(slow.state.chats[0].pinned, false);
+  assert.deepEqual(slow.told, ['leo could not unpin that conversation. Try again.']);
+});
+
+test('a history read that began before a pin cannot undo it, and one that began after can trust the server', async () => {
+  const f = pinning();
+  const before = f.context.turn();
+  await f.context.pinChat('chat-a');
+  const stale = f.context.holdPins([{ id: 'chat-a', pinned: false }, { id: 'chat-b', pinned: false }], before);
+  assert.deepEqual(stale.map((c) => c.pinned), [true, false]);
+  const later = f.context.holdPins([{ id: 'chat-a', pinned: false }], f.context.turn());
+  assert.equal(later[0].pinned, false);
+  let release;
+  const open = pinning({ reply: () => new Promise((resolve) => { release = () => resolve({ ok: true, status: 204 }); }) });
+  const pending = open.context.pinChat('chat-b');
+  assert.equal(open.context.holdPins([{ id: 'chat-b', pinned: false }], open.context.turn())[0].pinned, true, 'a save still in flight wins');
+  release();
+  await pending;
+});
+
+test('the pin button keeps keyboard focus on the same chat after the list is redrawn', async () => {
+  const f = pinning();
+  const buttons = [];
+  const button = { dataset: { chat: 'pin', id: 'chat-a' }, focus: () => buttons.push('focus') };
+  f.context.document.activeElement = button;
+  f.context.panel.querySelectorAll = () => [{ dataset: { id: 'chat-b' }, focus() {} }, button];
+  await f.context.pinChat('chat-a');
+  assert.deepEqual(buttons, ['focus']);
+  f.context.document.activeElement = { dataset: {} };
+  await f.context.pinChat('chat-a');
+  assert.deepEqual(buttons, ['focus']);
 });
