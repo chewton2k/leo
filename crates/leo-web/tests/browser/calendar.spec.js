@@ -952,7 +952,7 @@ test('a redraw that lands while the mouse is down waits for the click', async ({
     const side = page.locator('#cal-side.peek');
     const press = async id => {
       await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
-      const box = await page.locator(`.cal-item[data-id="${id}"]`).boundingBox();
+      const box = await page.evaluate(id => document.querySelector(`.cal-item[data-id="${id}"]`).getBoundingClientRect().toJSON(), id);
       await page.mouse.move(box.x + box.width - 10, box.y + box.height / 2);
       await page.mouse.down();
     };
@@ -1070,6 +1070,8 @@ test('words typed for a task that could not be saved survive another click, anot
     await page.evaluate(() => showCalendar());
     await settled(page);
     await expect(input).toHaveValue('Kept words');
+    await page.keyboard.press('Escape');
+    await expect(input).toBeFocused();
     await click('2026-11-07', 12 * 60);
     await expect(input).toHaveValue('Kept words');
     await expect(page.locator('.cal-col[data-day="2026-11-07"] .cal-compose')).toHaveCount(1);

@@ -6,6 +6,7 @@ use crate::record::MOST_TRANSCRIPT_CHARS;
 
 const PASSED_WORDS: usize = 12;
 const MOST_ALIGNED: usize = 1 << 22;
+const WINDOW_WORDS: usize = 1 << 10;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Turn {
@@ -263,33 +264,58 @@ fn align(old: &[&str], new: &[&str]) -> Vec<Option<usize>> {
         key(&old[head..old.len() - tail]),
         key(&new[head..new.len() - tail]),
     );
-    if a.len().saturating_mul(b.len()) > MOST_ALIGNED {
-        return found;
+    let window = if a.len().saturating_mul(b.len()) > MOST_ALIGNED {
+        WINDOW_WORDS
+    } else {
+        a.len().max(b.len())
+    };
+    let (mut i, mut j) = (0, 0);
+    while i < a.len() && j < b.len() {
+        let x = &a[i..a.len().min(i + window)];
+        let y = &b[j..b.len().min(j + window)];
+        let last = i + x.len() == a.len() && j + y.len() == b.len();
+        let until = if last { x.len() } else { x.len().div_ceil(2) };
+        let pairs = common(x, y);
+        let (kept, rest) = pairs.split_at(pairs.partition_point(|(p, _)| *p < until));
+        for (p, q) in kept {
+            found[head + i + p] = Some(head + j + q);
+        }
+        i += until;
+        j += match (kept.last(), rest.first()) {
+            (Some((_, q)), _) => q + 1,
+            (None, Some((_, q))) => (*q).min(y.len() / 2),
+            (None, None) => y.len() / 2,
+        };
     }
+    found
+}
+
+fn common(a: &[String], b: &[String]) -> Vec<(usize, usize)> {
     let wide = b.len() + 1;
-    let mut common = vec![0u16; (a.len() + 1) * wide];
+    let mut held = vec![0u16; (a.len() + 1) * wide];
     for i in (0..a.len()).rev() {
         for j in (0..b.len()).rev() {
-            common[i * wide + j] = if a[i] == b[j] {
-                common[(i + 1) * wide + j + 1] + 1
+            held[i * wide + j] = if a[i] == b[j] {
+                held[(i + 1) * wide + j + 1] + 1
             } else {
-                common[(i + 1) * wide + j].max(common[i * wide + j + 1])
+                held[(i + 1) * wide + j].max(held[i * wide + j + 1])
             };
         }
     }
+    let mut pairs = Vec::new();
     let (mut i, mut j) = (0, 0);
     while i < a.len() && j < b.len() {
         if a[i] == b[j] {
-            found[head + i] = Some(head + j);
+            pairs.push((i, j));
             i += 1;
             j += 1;
-        } else if common[(i + 1) * wide + j] >= common[i * wide + j + 1] {
+        } else if held[(i + 1) * wide + j] >= held[i * wide + j + 1] {
             i += 1;
         } else {
             j += 1;
         }
     }
-    found
+    pairs
 }
 
 #[cfg(test)]
@@ -524,6 +550,30 @@ mod tests {
         turns.hear("You", &you);
         assert!(one_side(&turns, "You").ends_with("Last words"));
         assert!(turns.turns().iter().any(|t| t.n == first));
+    }
+
+    #[test]
+    fn a_long_call_rewritten_at_both_ends_keeps_every_turn() {
+        let said = |n: usize| format!("Sentence number {n} about the parser.");
+        let mut turns = Turns::default();
+        let (mut you, mut others) = (String::new(), String::new());
+        for n in 0..600 {
+            you.push_str(&format!("{} ", said(n)));
+            turns.hear("You", &you);
+            others.push_str(&format!("Reply {n} says a few more words than that. "));
+            turns.hear("Others", &others);
+        }
+        turns.hear("You", &format!("Um {you} and more."));
+        let heard: Vec<String> = turns
+            .turns()
+            .into_iter()
+            .filter(|t| t.speaker == "You")
+            .map(|t| t.text)
+            .collect();
+        assert_eq!(heard.len(), 601);
+        assert_eq!(heard[0], format!("Um {}", said(0)));
+        assert!((1..600).all(|n| heard[n] == said(n)));
+        assert_eq!(heard[600], "and more.");
     }
 
     #[test]

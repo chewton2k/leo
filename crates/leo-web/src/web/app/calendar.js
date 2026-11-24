@@ -560,6 +560,12 @@ document.addEventListener('keydown', (e) => {
       calDragCancel();
       return;
     }
+    if (cal.compose?.failed && cal.compose.box.isConnected && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      cal.compose.box.querySelector('input').focus({ preventScroll: true });
+      return;
+    }
     if (cal.more && !$('.scrim') && !e.target.closest?.('input, textarea, select')) {
       e.preventDefault();
       e.stopImmediatePropagation();
