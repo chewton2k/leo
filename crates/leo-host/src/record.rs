@@ -386,7 +386,7 @@ fn listen_call(
                 continue;
             }
             match event {
-                Event::Transcript(text) => heard(Heard::Transcript(format!("{speaker}: {text}"))),
+                Event::Transcript(text) => heard(Heard::Said { speaker, text }),
                 Event::Warning(text) | Event::Failed(text) => {
                     warnings.push(format!("{speaker}: {text}"))
                 }

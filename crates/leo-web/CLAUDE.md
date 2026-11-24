@@ -754,7 +754,7 @@ read (root CLAUDE.md, 2026-11-17).
 - With a note open, a This note group follows Pinned (2026-11-24, the user's call): chats with a question
   asked on that note (`note` on the user message: the note Felix was reading), with it attached (`refs`) or about a
   passage in it (`selection`); never a search source. `chats.notes` is a JSON list of ids, added to by each
-  save and filled once from stored messages when the column is first added; `note` reaches no prompt or hash.
+  save, worked out again when messages are dropped, and filled once from stored messages when the column is first added; `note` reaches no prompt or hash.
 - Copy/Retry/Edit drop the last pair with POST `/api/chats/{id}/drop`
   `{count, total}` (409 unless the saved chat has `total` messages).
 - Files for Felix (`chat_files`): any number per chat (2026-11-17, the owner's principle 1); a message's documents share `DOCS_CHARS` and only each share is read (`chat_files::texts` reads each head and `part` any part from the database; past ten, `documents_within` charges names and wrapping to the budget and counts the rest, reached by `read_document` `document: "list"`); text only, of any size (2026-11-18, the owner's principle 1): the file arrives as a streamed
@@ -1082,18 +1082,22 @@ notes (2026-11-08); one note per sentence (2026-11-09); no lost-place box
   and Delete look one up with `pending_recording`); a recovery job carries its session id.
 - Live transcript (2026-11-21, the user's call): the 1 s poll redraws the live page
   around the kept nodes (`paintLive`/`graft` swap what surrounds them, at any depth; a kept node is never
-  rebuilt), and `showTranscript` patches `#rec-transcript` with `tailMerge(shown, next)`: a trimmed head
+  rebuilt), and `showTranscript` patches `#rec-transcript`, or on a call each
+  turn's words (rows keyed by the turn's `n`, so a kept row is never rebuilt), with `tailMerge(shown, next)`: a trimmed head
   (`keep_tail`) is dropped from the front, the stable prefix stays, and only the changed
   tail (backed up to its word) is replaced, so selection and scroll survive. New words are
-  a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes; text already said when
+  a `.rec-new` span (`fade`, `--t-open`, none under reduced motion), folded back into the plain text on the next poll once its fade has ended and no selection touches the transcript, so a long recording keeps a few nodes (a call, a few per turn); text already said when
   the node is made arrives plain. Scrolled up, the view stays put and Back to latest
   (`#rec-latest`) scrolls down and resumes following. `aria-live="off"`: the node now
   persists, so polite would read every update. The `[data-keep]` nodes are the transcript
   panel `#rec-heard`, the tab list `#rec-tabs` (its count and selection are set in place by
-  `syncTabs`, so keyboard focus stays) and Felix's column. The live string is untimed, one
-  track at a time for calls, and a microphone recording's speaker labels exist only once it is
-  saved, so the Transcript tab stays plain text, also after Stop; turns are drawn only for a
-  saved transcript.
+  `syncTabs`, so keyboard focus stays) and Felix's column. A call's view carries `turns`
+  (`live_turns.rs`, 2026-11-23, the user's call: live looks like the saved transcript; You and Others only,
+  untimed): each side's whole text is aligned word by word with what it said before, so a rewrite keeps
+  every word in its own turn; new words go on in the side's latest turn until their sentence ends or the
+  other side has said 12 words, then begin a new one. `transcript` is the same turns as `You: …` /
+  `Others: …` lines. Microphone and screen recordings stay plain text, since their speaker labels exist
+  only once saved.
 - Record page (2026-11-22, the owner's call: lectures and meetings share it; speaker UI only
   where speaker data exists; Start and the live controls stay red). Before Start: the title
   field first (`#rec-title`, note-title type, "Untitled recording"), then the event and folder
@@ -1568,7 +1572,7 @@ keys and downloaded runtimes stay untouched.
   pointed at missing fixture binaries, so detection never inspects the
   developer's accounts. The `phone` project runs only
   the "on a phone" test in flows.spec.js. There is no visual suite.
-- Fixture specs (boards.spec.js, calendar.spec.js) run the real CSS and page code
+- Fixture specs (boards.spec.js, calendar.spec.js, live-turns.spec.js) run the real CSS and page code
   over an in-memory API; flows.spec.js joins the page to the real routes.
   The manual search paging test disables the scroll observer in the signed-in
   document before changing the hash and moves its fixture notes to trash in one request.

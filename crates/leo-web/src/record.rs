@@ -204,6 +204,10 @@ pub enum Heard {
         steps: Option<(usize, usize)>,
     },
     Transcript(String),
+    Said {
+        speaker: &'static str,
+        text: String,
+    },
     Warning(String),
 }
 
@@ -238,6 +242,8 @@ pub struct RecordView {
     pub step: String,
     pub steps: Option<(usize, usize)>,
     pub transcript: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub turns: Vec<crate::live_turns::Turn>,
     pub warnings: Vec<String>,
     pub points: Vec<(u64, String)>,
     pub points_total: usize,
@@ -272,6 +278,7 @@ impl RecordView {
 
 pub(crate) struct RecordJob {
     view: RecordView,
+    turns: crate::live_turns::Turns,
     writing: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     finish_now: Arc<AtomicBool>,
@@ -558,6 +565,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
         }
         *held = Some(RecordJob {
             writing: Default::default(),
+            turns: Default::default(),
             view: RecordView {
                 id: id.clone(),
                 session: body.recover.clone().unwrap_or_else(|| id.clone()),
@@ -578,6 +586,7 @@ pub(crate) async fn start(State(state): State<AppState>, Json(body): Json<StartB
                 .into(),
                 steps: None,
                 transcript: String::new(),
+                turns: Vec::new(),
                 warnings: Vec::new(),
                 points: Vec::new(),
                 points_total: 0,
@@ -676,6 +685,17 @@ fn run(
                     }
                 }
                 Heard::Transcript(text) => job.view.transcript = keep_tail(text),
+                Heard::Said { speaker, text } => {
+                    job.turns.hear(speaker, &text);
+                    job.view.turns = job.turns.turns();
+                    job.view.transcript = job
+                        .view
+                        .turns
+                        .iter()
+                        .map(|t| format!("{}: {}", t.speaker, t.text))
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                }
                 Heard::Warning(text) => {
                     job.view.warn(text);
                 }
@@ -1083,6 +1103,7 @@ mod tests {
             step: String::new(),
             steps: None,
             transcript: String::new(),
+            turns: Vec::new(),
             warnings: Vec::new(),
             points: Vec::new(),
             points_total: 0,

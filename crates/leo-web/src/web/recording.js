@@ -784,7 +784,7 @@
       const latest = box.querySelector('#rec-latest');
       const fresh = s.shownIn !== text;
       if (fresh) {
-        Object.assign(s, { shownIn: text, shownText: '', follow: true });
+        Object.assign(s, { shownIn: text, shownFor: null, follow: true });
         text.addEventListener('scroll', () => {
           s.follow = text.scrollTop + text.clientHeight >= text.scrollHeight - 24;
           latest.hidden = s.follow;
@@ -796,10 +796,14 @@
           text.scrollTop = text.scrollHeight;
         });
       }
-      const next = s.view.transcript || '';
-      const shown = s.shownText;
-      s.shownText = next;
-      if (!next) {
+      const turns = s.view.turns || [];
+      const next = turns.length ? turns : s.view.transcript ? [{ n: 0, text: s.view.transcript }] : [];
+      const anew = fresh || s.shownFor !== s.view.id;
+      if (anew) Object.assign(s, { shownFor: s.view.id, parts: new Map() });
+      const { parts } = s;
+      text.className = `rec-transcript${turns.length ? ' transcript-flow' : ''}`;
+      if (!next.length) {
+        parts.clear();
         text.innerHTML = `<span class="hint">${s.view.state === 'paused' ? 'Paused.' : s.view.state === 'writing' ? 'Nothing was heard while recording.' : 'Listening… words appear here after a few seconds.'}</span>`;
         return;
       }
@@ -808,29 +812,68 @@
         text.querySelectorAll('.rec-new').forEach((span) => { if (!(span.getAnimations && span.getAnimations().length)) span.replaceWith(...span.childNodes); });
         text.normalize();
       }
-      if (!shown) text.textContent = '';
-      const { drop, keep, tail } = tailMerge(shown, next);
+      if (!parts.size) text.textContent = '';
       const height = text.scrollHeight;
-      let left = drop;
-      while (left > 0 && text.firstChild) {
-        const node = text.firstChild;
+      const keeps = new Set(next.map((part) => part.n));
+      const forget = (n) => { parts.get(n).row.remove(); parts.delete(n); };
+      [...parts.keys()].filter((n) => n < next[0].n).forEach(forget);
+      const first = parts.get(next[0].n);
+      if (first) dropWords(first, tailMerge(first.text, next[0].text).drop);
+      const lost = height - text.scrollHeight;
+      if (lost && !s.follow) text.scrollTop -= lost;
+      [...parts.keys()].filter((n) => !keeps.has(n)).forEach(forget);
+      let above = null;
+      for (const { n, speaker, text: said } of next) {
+        let part = parts.get(n);
+        if (!part) {
+          part = turns.length ? turnRow(speaker) : { row: text, words: text, text: '' };
+          parts.set(n, part);
+          if (above) above.after(part.row);
+          else if (turns.length) text.prepend(part.row);
+        }
+        if (part.text !== said) setWords(part, said, anew);
+        above = part.row;
+      }
+      if (s.follow) text.scrollTop = text.scrollHeight;
+      latest.hidden = s.follow;
+    }
+
+    function turnRow(speaker) {
+      const make = (tag, className, ...inside) => {
+        const el = Object.assign(root.document.createElement(tag), { className });
+        el.append(...inside);
+        return el;
+      };
+      const dot = make('span', 'tone-dot');
+      dot.style.setProperty('--tone', toneOf([speaker], speaker));
+      const words = make('p', 'spoken');
+      return { row: make('div', 'turn', make('div', 'turn-who', dot, make('span', 'turn-name', speaker)), words), words, text: '' };
+    }
+
+    function dropWords(part, left) {
+      part.text = part.text.slice(left);
+      while (left > 0 && part.words.firstChild) {
+        const node = part.words.firstChild;
         const size = node.textContent.length;
         if (size > left) (node.firstChild || node).deleteData(0, left);
         else node.remove();
         left -= Math.min(size, left);
       }
-      if (drop && !s.follow) text.scrollTop -= height - text.scrollHeight;
-      let size = shown.length - drop;
-      while (size > keep && text.lastChild) {
-        const node = text.lastChild;
-        const part = node.textContent.length;
-        if (size - part >= keep) node.remove();
-        else (node.firstChild || node).deleteData(part - (size - keep), size - keep);
-        size = Math.max(keep, size - part);
+    }
+
+    function setWords(part, next, plain) {
+      const { drop, keep, tail } = tailMerge(part.text, next);
+      dropWords(part, drop);
+      let size = part.text.length;
+      while (size > keep && part.words.lastChild) {
+        const node = part.words.lastChild;
+        const length = node.textContent.length;
+        if (size - length >= keep) node.remove();
+        else (node.firstChild || node).deleteData(length - (size - keep), size - keep);
+        size = Math.max(keep, size - length);
       }
-      if (tail) text.append(fresh ? root.document.createTextNode(tail) : Object.assign(root.document.createElement('span'), { className: 'rec-new', textContent: tail }));
-      if (s.follow) text.scrollTop = text.scrollHeight;
-      latest.hidden = s.follow;
+      part.text = next;
+      if (tail) part.words.append(plain ? root.document.createTextNode(tail) : Object.assign(root.document.createElement('span'), { className: 'rec-new', textContent: tail }));
     }
 
     function syncTabs(box) {
