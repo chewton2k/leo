@@ -799,8 +799,8 @@ test('chats pin into their own group, keep the pin through a refresh, roll back 
     const page=await context.newPage();
     const now=Date.now(), at=minutes=>new Date(now-minutes*60000).toISOString();
     const chats=[
-      {id:'chat-pin-aaaa1',title:'Alpha',named:true,about:'',count:2,updated_at:at(1),pinned:false},
-      {id:'chat-pin-bbbb1',title:'Beta with a title long enough to need cutting off at the narrowest list width',named:true,about:'',count:2,updated_at:at(60),pinned:false},
+      {id:'chat-pin-aaaa1',title:'Alpha',named:true,about:'',count:2,updated_at:at(0),pinned:false},
+      {id:'chat-pin-bbbb1',title:'Beta with a title long enough to need cutting off at the narrowest list width',named:true,about:'',count:2,updated_at:at(1/60),pinned:false},
       {id:'chat-pin-cccc1',title:'Gamma',named:true,about:'',count:2,updated_at:at(60*24*40),pinned:true}
     ];
     const patches=[], notes=[];
