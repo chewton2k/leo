@@ -311,18 +311,20 @@ pub fn effort_for(provider: &str, model: &str, configured: Option<&str>) -> Opti
     )
 }
 
-pub fn write_effort(doc: &mut DocumentMut, provider: &str, effort: Option<&str>) {
+fn provider_table<'a>(doc: &'a mut DocumentMut, provider: &str) -> Option<&'a mut Table> {
     let providers = doc
         .entry("providers")
-        .or_insert(Item::Table(implicit_table()));
-    let Some(providers) = providers.as_table_mut() else {
-        return;
-    };
+        .or_insert(Item::Table(implicit_table()))
+        .as_table_mut()?;
     providers.set_implicit(true);
-    let block = providers
+    providers
         .entry(provider)
-        .or_insert_with(|| Item::Table(Table::new()));
-    if let Some(table) = block.as_table_mut() {
+        .or_insert_with(|| Item::Table(Table::new()))
+        .as_table_mut()
+}
+
+pub fn write_effort(doc: &mut DocumentMut, provider: &str, effort: Option<&str>) {
+    if let Some(table) = provider_table(doc, provider) {
         match effort {
             Some(effort) => {
                 table.insert("effort", toml_edit::value(effort));
@@ -339,17 +341,7 @@ pub fn write_model(doc: &mut DocumentMut, provider: &str, model: &str) {
         Some(pc) if pc.kind == Some(ProviderKind::Parakeet) => "model_path",
         _ => "model",
     };
-    let providers = doc
-        .entry("providers")
-        .or_insert(Item::Table(implicit_table()));
-    let Some(providers) = providers.as_table_mut() else {
-        return;
-    };
-    providers.set_implicit(true);
-    let block = providers
-        .entry(provider)
-        .or_insert_with(|| Item::Table(Table::new()));
-    if let Some(table) = block.as_table_mut() {
+    if let Some(table) = provider_table(doc, provider) {
         table.insert(field, toml_edit::value(model));
     }
 }

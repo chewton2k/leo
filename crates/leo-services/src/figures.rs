@@ -3,12 +3,13 @@ mod pdf;
 pub(crate) use pdf::{figure as pdf_figure, MOST_PIXELS as MOST_PDF_PIXELS};
 
 use std::collections::HashMap;
-use std::io::{Read, Write as _};
+use std::io::Read;
 use std::path::PathBuf;
 
 use anyhow::Result;
 use leo_core::attachments;
 
+use crate::import::office::joined;
 use crate::import::{ImageFile, Scratch};
 
 const LEAST_WIDE: u32 = 150;
@@ -123,32 +124,6 @@ fn image_links(rels: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-fn joined(base: &str, target: &str) -> String {
-    if target.contains(['\\', ':', '\0', '?', '#']) {
-        return String::new();
-    }
-    let mut parts: Vec<&str> = if target.starts_with('/') {
-        Vec::new()
-    } else {
-        base.split('/').filter(|p| !p.is_empty()).collect()
-    };
-    for part in target.split('/') {
-        match part {
-            ".." => {
-                if parts.pop().is_none() {
-                    return String::new();
-                }
-            }
-            "." | "" => {}
-            other => parts.push(other),
-        }
-    }
-    if !matches!(parts.first(), Some(&"word" | &"ppt")) {
-        return String::new();
-    }
-    parts.join("/")
-}
-
 struct Written<'a> {
     scratch: &'a Scratch,
     files: HashMap<String, Stored>,
@@ -165,7 +140,7 @@ fn embedded_in(
     let mut used: Vec<(usize, String)> = image_links(rels)
         .into_iter()
         .filter_map(|(id, target)| {
-            let path = joined(folder, &target);
+            let path = joined(folder, &target).unwrap_or_default();
             if path.is_empty() {
                 return None;
             }
@@ -290,6 +265,7 @@ pub fn png(width: u32, height: u32, channels: u8, idat: &[u8]) -> Vec<u8> {
 
 #[cfg(test)]
 pub fn filtered_rows(raw: &[u8], width: usize, height: usize, channels: usize) -> Option<Vec<u8>> {
+    use std::io::Write as _;
     let row = width.checked_mul(channels)?;
     if raw.len() < row.checked_mul(height)? {
         return None;
@@ -345,6 +321,7 @@ pub(crate) fn from_pdf_prepared(
 mod tests {
     use super::*;
     use lopdf::dictionary;
+    use std::io::Write as _;
 
     fn picture(width: u32, height: u32, shade: u8) -> Vec<u8> {
         let mut raw = Vec::new();
@@ -436,9 +413,12 @@ mod tests {
         assert_eq!(found[0].place, "slide 1");
         assert_eq!(read(&found[0]), diagram);
         assert!(from_pptx(b"not a zip", &scratch).unwrap().is_empty());
-        assert_eq!(joined("ppt/slides", "../media/a.png"), "ppt/media/a.png");
-        assert_eq!(joined("word", "media/a.png"), "word/media/a.png");
-        assert_eq!(joined("word", "../../etc/passwd"), "");
+        assert_eq!(
+            joined("ppt/slides", "../media/a.png").unwrap(),
+            "ppt/media/a.png"
+        );
+        assert_eq!(joined("word", "media/a.png").unwrap(), "word/media/a.png");
+        assert!(joined("word", "../../etc/passwd").is_err());
     }
 
     #[test]
