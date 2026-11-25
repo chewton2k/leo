@@ -749,6 +749,7 @@ pub fn hear(line: &str, heard: &mut Heard, sink: Sink<'_>) -> bool {
 
 pub struct ClaudeSession {
     name: String,
+    bin: String,
     child: Process,
     stdin: Option<std::process::ChildStdin>,
     lines: std::sync::mpsc::Receiver<super::mcp::Incoming>,
@@ -899,9 +900,9 @@ impl ClaudeSession {
                 | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     self.child.stop();
                     return Err(ProviderError::Retryable(format!(
-                        "{}: claude ended the session. If it is not signed in, {}.",
+                        "{}: claude ended the session{}",
                         self.name,
-                        Agent::ClaudeCode.sign_in()
+                        with_sign_in(Agent::ClaudeCode, &self.bin, "")
                     )));
                 }
             }
@@ -917,7 +918,7 @@ impl ClaudeSession {
                 return Err(ProviderError::Retryable(format!(
                     "{}: claude stopped: {}",
                     self.name,
-                    last_words(said)
+                    with_sign_in(Agent::ClaudeCode, &self.bin, &last_words(said))
                 )));
             }
             Some((false, said)) if heard.answer.trim().is_empty() => said.trim().to_string(),
@@ -931,6 +932,7 @@ impl ClaudeSession {
                 true,
             ),
         };
+        answered(&self.bin);
         Ok((
             answer,
             Spent {
@@ -1097,6 +1099,7 @@ impl AgentCli {
         });
         Ok(ClaudeSession {
             name: self.name.clone(),
+            bin: self.bin.clone(),
             child,
             stdin,
             lines,
@@ -1423,14 +1426,11 @@ impl AgentCli {
                 _ if !stderr.trim().is_empty() => last_words(&stderr),
                 _ => last_words(&heard.answer),
             };
-            let hint = if signed_out(&said) {
-                format!(" If it is not signed in, {}.", self.agent.sign_in())
-            } else {
-                String::new()
-            };
             return Err(ProviderError::Retryable(format!(
-                "{}: {} stopped ({status}): {said}.{hint}",
-                self.name, self.bin
+                "{}: {} stopped ({status}): {}",
+                self.name,
+                self.bin,
+                with_sign_in(self.agent, &self.bin, &said)
             )));
         }
         let mut answer = heard.answer.trim().to_string();
@@ -1443,6 +1443,7 @@ impl AgentCli {
             return Err(ProviderError::Retryable(self.no_answer()));
         }
         self.note_spent(&heard, &stderr, input_len, &answer);
+        answered(&self.bin);
         Ok(answer)
     }
 }
@@ -1513,6 +1514,8 @@ fn signed_out(said: &str) -> bool {
         || [
             "logged in",
             "signed in",
+            "sign in again",
+            "signing in again",
             "/login",
             "codex login",
             "unauthorized",
@@ -1521,6 +1524,37 @@ fn signed_out(said: &str) -> bool {
         ]
         .iter()
         .any(|marker| said.contains(marker))
+}
+
+static REFUSED: Mutex<Vec<(String, Option<bool>)>> = Mutex::new(Vec::new());
+
+pub(super) fn with_sign_in(agent: Agent, bin: &str, said: &str) -> String {
+    let said = said.trim().trim_end_matches('.');
+    if !signed_out(said) {
+        return format!("{said}.");
+    }
+    let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    if !said.is_empty() {
+        seen.retain(|(was, _)| was != bin);
+        seen.push((bin.to_string(), Some(false)));
+    } else if !seen.iter().any(|(was, _)| was == bin) {
+        seen.push((bin.to_string(), None));
+    }
+    format!("{said}. If it is not signed in, {}.", agent.sign_in())
+}
+
+pub(super) fn answered(bin: &str) {
+    let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    seen.retain(|(was, _)| was != bin);
+}
+
+pub fn refused(bin: &str) -> Option<Option<bool>> {
+    REFUSED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+        .find(|(was, _)| was == bin)
+        .map(|(_, found)| *found)
 }
 
 const SIGN_IN_FRESH: Duration = Duration::from_secs(600);
@@ -1535,6 +1569,9 @@ pub fn signed_in(agent: Agent, bin: &str) -> Option<bool> {
             evidence
         }
     });
+    if found == Some(false) {
+        answered(bin);
+    }
     let mut seen = SIGN_INS.lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|(was, _, _)| was != bin);
     if let Some(found) = found {
@@ -2757,6 +2794,64 @@ printf '%s\n' '{{"type":"turn.completed","usage":{{"input_tokens":3,"output_toke
 
     #[cfg(unix)]
     #[test]
+    fn a_claude_session_remembers_a_refused_login_until_it_answers() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bin = script(
+            dir.path(),
+            r##"while IFS= read -r line; do
+  case "$line" in
+    *refuse*) printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 OAuth access token is invalid."}' ;;
+    *limit*) printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"usage limit reached"}' ;;
+    *leave*) exit 1 ;;
+    *) printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"hello"}' ;;
+  esac
+done"##,
+        );
+        let cfg = config(ProviderKind::ClaudeCode, &bin, None);
+        let agent = AgentCli::new("claude_code".into(), Agent::ClaudeCode, &cfg);
+        let mut session = agent.claude_session("x").unwrap();
+        let mut say = |text: &str| session.say(text, &mut |_| {}).map_err(|e| e.to_string());
+        assert_eq!(
+            say("limit").unwrap_err(),
+            "claude_code: claude stopped: usage limit reached."
+        );
+        assert_eq!(refused(&bin), None);
+        let message = say("refuse").unwrap_err();
+        assert!(message.contains("press Sign in"), "{message}");
+        assert_eq!(refused(&bin), Some(Some(false)));
+        say("limit").unwrap_err();
+        assert_eq!(refused(&bin), Some(Some(false)));
+        assert_eq!(say("hi").unwrap().0, "hello");
+        assert_eq!(refused(&bin), None);
+        let message = say("leave").unwrap_err();
+        assert_eq!(
+            message,
+            "claude_code: claude ended the session. If it is not signed in, choose Claude Code in Writing AI and press Sign in."
+        );
+        assert_eq!(refused(&bin), Some(None));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_claude_session_leo_stopped_says_nothing_about_sign_in() {
+        for (quiet, total) in [(100, 30_000), (30_000, 100)] {
+            let dir = tempfile::TempDir::new().unwrap();
+            let bin = script(dir.path(), "read -r line\nsleep 30");
+            let cfg = config(ProviderKind::ClaudeCode, &bin, None);
+            let agent = AgentCli::new("claude_code".into(), Agent::ClaudeCode, &cfg)
+                .with_limits(Duration::from_millis(quiet), Duration::from_millis(total));
+            let mut session = agent.claude_session("x").unwrap();
+            let message = session.say("hello", &mut |_| {}).unwrap_err().to_string();
+            assert_eq!(
+                message,
+                "claude_code: claude stopped answering and was stopped"
+            );
+            assert_eq!(refused(&bin), None);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn native_claude_has_an_absolute_deadline_despite_steady_messages() {
         let dir = tempfile::TempDir::new().unwrap();
         let bin = script(
@@ -3138,6 +3233,40 @@ mod sign_in_tests {
             Some(false)
         );
         assert_eq!(super::last_signed_in(path.to_str().unwrap()), Some(false));
+    }
+
+    #[test]
+    fn only_a_programs_own_sign_in_words_mark_its_login_refused() {
+        use super::{answered, refused, with_sign_in, Agent};
+        let bin = "/fake/login/401/sign-in-words";
+        for said in [
+            "usage limit reached, 429",
+            "unknown error",
+            "open the sign in page",
+        ] {
+            assert_eq!(with_sign_in(Agent::Codex, bin, said), format!("{said}."));
+            assert_eq!(refused(bin), None, "{said}");
+        }
+        for said in [
+            "Your access token could not be refreshed. Please log out and sign in again.",
+            "Could not parse your authentication token. Please try signing in again.",
+            "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
+            "Not logged in · Please run /login",
+        ] {
+            let text = with_sign_in(Agent::Codex, bin, said);
+            let end = " If it is not signed in, choose Codex in Writing AI and press Sign in.";
+            assert!(text.ends_with(end) && !text.contains(".."), "{text}");
+            assert_eq!(refused(bin), Some(Some(false)), "{said}");
+            with_sign_in(Agent::Codex, bin, "");
+            assert_eq!(refused(bin), Some(Some(false)), "{said}");
+            answered(bin);
+            assert_eq!(refused(bin), None);
+        }
+        with_sign_in(Agent::Codex, bin, " ");
+        assert_eq!(refused(bin), Some(None));
+        with_sign_in(Agent::Codex, bin, "Not logged in");
+        assert_eq!(refused(bin), Some(Some(false)));
+        answered(bin);
     }
 
     #[test]
