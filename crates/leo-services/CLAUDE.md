@@ -352,8 +352,8 @@ writer, never makes a model call; an installed CLI alone is not sign-in;
 availability and sign-in use the same normalized `AgentCli::bin`. A probe says yes
 to a login the server refuses, so `with_sign_in` (the one place a run's failure gets
 its sign-in step) also remembers the program as refused, in memory, until it answers
-or its probe says signed out; only `coding_plans` reads that (`refused`), so setup
-and the checks before a run never wait on it.
+or its probe says signed out; only `coding_plans` reads that (`refused`), so setup,
+the checks before a run and Health's sign-in row stay on the probe. A run that ends without words names no sign-in step.
 
 ### Plan limits (`usage.rs`)
 

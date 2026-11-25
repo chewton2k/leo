@@ -211,13 +211,13 @@ pub fn coding_plans(cfg: &Config, usage: &crate::usage::Seen) -> Vec<Value> {
     agents(cfg, true)
         .into_iter()
         .map(|(choice, cli, installed, signed_in)| {
-            let refused = installed.then(|| agent_cli::refused(cli.bin())).flatten();
+            let refused = installed && agent_cli::refused(cli.bin());
             json!({
                 "provider": choice.provider,
                 "name": choice.name,
                 "installed": installed,
-                "signed_in": refused.unwrap_or(signed_in),
-                "refused": refused.is_some(),
+                "signed_in": if refused { Some(false) } else { signed_in },
+                "refused": refused,
                 "limits": usage.get(choice.provider),
             })
         })

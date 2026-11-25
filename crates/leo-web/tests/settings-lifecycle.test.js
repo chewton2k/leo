@@ -291,8 +291,33 @@ test('a refused login shows Sign in until Test connection passes', async () => {
   await leaving;
   assert.match(card, />Ready</);
   context.state = { view: 'settings', section: 'writing', settings: page() };
-  context.state.settings.plans[0].signed_in = null;
-  assert.match(context.taskCard(task), />Sign-in unknown<[\s\S]*Sign in, then press Test connection/);
+  context.state.settings.plans[0].signed_in = false;
+  context.state.settings.plans[0].refused = false;
+  refused = fail = false;
+  await test();
+  assert.match(card, />Ready</);
+});
+
+test('a sign-in check under way never turns a refused login Ready', async () => {
+  const timers = [];
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: (text) => String(text), choiceCards: () => '', seq: 1, Date: { now: () => 0 },
+    setTimeout: (fn) => timers.push(fn), clearTimeout() {}, appChange: async () => {},
+    api: async () => ({ writing: { state: 'ready' }, candidates: [{ id: 'codex', installed: true, signed_in: true }] }) };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const plan = { provider: 'codex', installed: true, signed_in: null, refused: false };
+  const card = () => context.taskCard({ task: 'writing', provider: 'codex', choices: [], models: [] });
+  context.state = { view: 'settings', section: 'writing', settings: { writing: { state: 'ready' }, plans: [plan] } };
+  context.drawSettings = () => {};
+  await context.writingSignIn({ dataset: { provider: 'codex' } });
+  assert.match(card(), /Waiting for sign-in/);
+  Object.assign(plan, { signed_in: false, refused: true });
+  for (const late of [false, true]) {
+    vm.runInContext(`signInWait.late = ${late}`, context);
+    assert.match(card(), /Sign in needed[\s\S]*Sign in, then press Test connection[\s\S]*data-provider="codex">Sign in</);
+  }
+  await timers.shift()();
+  assert.match(card(), /Sign in needed/);
 });
 
 test('leaving Settings stops the sign-in check', async () => {

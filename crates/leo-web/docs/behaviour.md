@@ -1746,7 +1746,7 @@ Sign in and Install (2026-11-09): onboarding's writing status row and Settings â
 Sign in (POST `/api/app` `sign_in`, provider checked in `app_settings::call`) or an Install link (`INSTALL_URL`);
 after Sign in, `signIn` polls `/api/writing?probe=signin` every 3 s for at most 2 minutes, then offers Check again
 (one probe), and stops when the view closes. The card offers Sign in only when the plan is not signed in; for a
-refused login (`plan.refused`) Sign in starts no check, since the probe cannot tell: Test connection, or any answer, clears it.
+refused login (`plan.refused`) Sign in starts no check, since the probe cannot tell: Test connection, any answer, or a probe that says signed out clears it.
 Writing AI shows detected Codex/Claude accounts with bounded CLI sign-in checks,
 5-hour/7-day meters, reset times and the age of saved usage. Detection never
 changes the chosen provider; unknown or absent limits are stated explicitly.

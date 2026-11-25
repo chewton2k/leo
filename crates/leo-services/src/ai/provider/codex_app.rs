@@ -232,9 +232,8 @@ impl CodexThread {
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(ProviderError::Retryable(format!(
-                        "{}: codex ended{}",
-                        self.name,
-                        self.said("")
+                        "{}: codex ended",
+                        self.name
                     )))
                 }
             }
@@ -666,20 +665,16 @@ done
         for text in ["refuse", "request", "finish"] {
             let message = say(&mut thread, text).unwrap_err();
             assert!(message.contains("press Sign in"), "{text}: {message}");
-            assert_eq!(refused(&bin), Some(Some(false)), "{text}");
+            assert!(refused(&bin), "{text}");
             super::super::agent_cli::answered(&bin);
         }
         say(&mut thread, "refuse").unwrap_err();
         assert!(say(&mut thread, "what is a heap?")
             .unwrap()
             .contains("Heaps"));
-        assert_eq!(refused(&bin), None);
-        assert_eq!(
-            say(&mut thread, "leave").unwrap_err(),
-            "codex: codex ended. If it is not signed in, choose Codex in Writing AI and press Sign in."
-        );
-        assert_eq!(refused(&bin), Some(None));
-        super::super::agent_cli::answered(&bin);
+        assert!(!refused(&bin));
+        assert_eq!(say(&mut thread, "leave").unwrap_err(), "codex: codex ended");
+        assert!(!refused(&bin));
         for (quiet, total) in [(400, 30_000), (30_000, 400)] {
             let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg)
                 .with_limits(Duration::from_millis(quiet), Duration::from_millis(total));
@@ -688,7 +683,7 @@ done
                 say(&mut thread, "silent").unwrap_err(),
                 "codex: codex stopped answering and was stopped"
             );
-            assert_eq!(refused(&bin), None);
+            assert!(!refused(&bin));
         }
     }
 

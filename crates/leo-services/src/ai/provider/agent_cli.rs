@@ -900,9 +900,8 @@ impl ClaudeSession {
                 | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     self.child.stop();
                     return Err(ProviderError::Retryable(format!(
-                        "{}: claude ended the session{}",
-                        self.name,
-                        with_sign_in(Agent::ClaudeCode, &self.bin, "")
+                        "{}: claude ended the session",
+                        self.name
                     )));
                 }
             }
@@ -1421,16 +1420,18 @@ impl AgentCli {
         }
         let failed_in_result = matches!(heard.result, Some((true, _)));
         if (!status.success() && !forced) || failed_in_result {
-            let said = match &heard.result {
+            let told = match &heard.result {
                 Some((true, said)) if !said.trim().is_empty() => last_words(said),
-                _ if !stderr.trim().is_empty() => last_words(&stderr),
-                _ => last_words(&heard.answer),
+                _ => last_words(&stderr),
+            };
+            let said = if told.is_empty() {
+                format!("{}.", last_words(&heard.answer).trim_end_matches('.'))
+            } else {
+                with_sign_in(self.agent, &self.bin, &told)
             };
             return Err(ProviderError::Retryable(format!(
-                "{}: {} stopped ({status}): {}",
-                self.name,
-                self.bin,
-                with_sign_in(self.agent, &self.bin, &said)
+                "{}: {} stopped ({status}): {said}",
+                self.name, self.bin
             )));
         }
         let mut answer = heard.answer.trim().to_string();
@@ -1510,7 +1511,8 @@ fn auth_probe(agent: Agent, bin: &str) -> Option<(bool, String)> {
 
 fn signed_out(said: &str) -> bool {
     let said = said.to_lowercase();
-    said.trim().is_empty()
+    said.split(|c: char| !c.is_alphanumeric())
+        .any(|word| word == "401")
         || [
             "logged in",
             "signed in",
@@ -1519,42 +1521,34 @@ fn signed_out(said: &str) -> bool {
             "/login",
             "codex login",
             "unauthorized",
-            "401",
             "authenticat",
         ]
         .iter()
         .any(|marker| said.contains(marker))
 }
 
-static REFUSED: Mutex<Vec<(String, Option<bool>)>> = Mutex::new(Vec::new());
+static REFUSED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
 pub(super) fn with_sign_in(agent: Agent, bin: &str, said: &str) -> String {
     let said = said.trim().trim_end_matches('.');
     if !signed_out(said) {
         return format!("{said}.");
     }
-    let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    if !said.is_empty() {
-        seen.retain(|(was, _)| was != bin);
-        seen.push((bin.to_string(), Some(false)));
-    } else if !seen.iter().any(|(was, _)| was == bin) {
-        seen.push((bin.to_string(), None));
+    if !refused(bin) {
+        let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+        seen.push(bin.to_string());
     }
     format!("{said}. If it is not signed in, {}.", agent.sign_in())
 }
 
 pub(super) fn answered(bin: &str) {
     let mut seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
-    seen.retain(|(was, _)| was != bin);
+    seen.retain(|was| was != bin);
 }
 
-pub fn refused(bin: &str) -> Option<Option<bool>> {
-    REFUSED
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .iter()
-        .find(|(was, _)| was == bin)
-        .map(|(_, found)| *found)
+pub fn refused(bin: &str) -> bool {
+    let seen = REFUSED.lock().unwrap_or_else(|e| e.into_inner());
+    seen.iter().any(|was| was == bin)
 }
 
 const SIGN_IN_FRESH: Duration = Duration::from_secs(600);
@@ -2815,20 +2809,40 @@ done"##,
             say("limit").unwrap_err(),
             "claude_code: claude stopped: usage limit reached."
         );
-        assert_eq!(refused(&bin), None);
+        assert!(!refused(&bin));
         let message = say("refuse").unwrap_err();
         assert!(message.contains("press Sign in"), "{message}");
-        assert_eq!(refused(&bin), Some(Some(false)));
+        assert!(refused(&bin));
         say("limit").unwrap_err();
-        assert_eq!(refused(&bin), Some(Some(false)));
+        assert!(refused(&bin));
         assert_eq!(say("hi").unwrap().0, "hello");
-        assert_eq!(refused(&bin), None);
-        let message = say("leave").unwrap_err();
+        assert!(!refused(&bin));
         assert_eq!(
-            message,
-            "claude_code: claude ended the session. If it is not signed in, choose Claude Code in Writing AI and press Sign in."
+            say("leave").unwrap_err(),
+            "claude_code: claude ended the session"
         );
-        assert_eq!(refused(&bin), Some(None));
+        assert!(!refused(&bin));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_answer_cut_off_midway_never_counts_as_a_sign_in_problem() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bin = script(
+            dir.path(),
+            r##"[ "$1" = features ] && exit 0
+cat >/dev/null
+printf '%s\n' '{"type":"item.completed","item":{"type":"agent_message","text":"A server authenticates whoever is signed in, else 401."}}'
+exit 1"##,
+        );
+        let cfg = config(ProviderKind::Codex, &bin, None);
+        let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg);
+        let message = agent.complete(&request()).unwrap_err().to_string();
+        assert!(
+            message.ends_with(": A server authenticates whoever is signed in, else 401."),
+            "{message}"
+        );
+        assert!(!refused(&bin));
     }
 
     #[cfg(unix)]
@@ -2846,7 +2860,7 @@ done"##,
                 message,
                 "claude_code: claude stopped answering and was stopped"
             );
-            assert_eq!(refused(&bin), None);
+            assert!(!refused(&bin));
         }
     }
 
@@ -3243,9 +3257,11 @@ mod sign_in_tests {
             "usage limit reached, 429",
             "unknown error",
             "open the sign in page",
+            "busy, request id 4401b, ray a401-9",
+            "",
         ] {
             assert_eq!(with_sign_in(Agent::Codex, bin, said), format!("{said}."));
-            assert_eq!(refused(bin), None, "{said}");
+            assert!(!refused(bin), "{said}");
         }
         for said in [
             "Your access token could not be refreshed. Please log out and sign in again.",
@@ -3256,17 +3272,11 @@ mod sign_in_tests {
             let text = with_sign_in(Agent::Codex, bin, said);
             let end = " If it is not signed in, choose Codex in Writing AI and press Sign in.";
             assert!(text.ends_with(end) && !text.contains(".."), "{text}");
-            assert_eq!(refused(bin), Some(Some(false)), "{said}");
-            with_sign_in(Agent::Codex, bin, "");
-            assert_eq!(refused(bin), Some(Some(false)), "{said}");
+            assert!(refused(bin), "{said}");
+            with_sign_in(Agent::Codex, bin, said);
             answered(bin);
-            assert_eq!(refused(bin), None);
+            assert!(!refused(bin), "{said}");
         }
-        with_sign_in(Agent::Codex, bin, " ");
-        assert_eq!(refused(bin), Some(None));
-        with_sign_in(Agent::Codex, bin, "Not logged in");
-        assert_eq!(refused(bin), Some(Some(false)));
-        answered(bin);
     }
 
     #[test]
