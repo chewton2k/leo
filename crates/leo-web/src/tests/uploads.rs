@@ -210,6 +210,10 @@ fn several_files_make_a_note_each_named_from_its_own_file_and_one_failure_spares
         .collect();
     assert_eq!(made[0].0, "lecture 1");
     assert_eq!(made[1].0, "lecture 2");
+    assert!(job
+        .notes
+        .iter()
+        .all(|id| crate::record::unopened(&state.chats, id)));
     assert!(made.iter().all(|(_, dir, _)| dir == "ma161"));
     assert!(made[0].2.contains("*From lecture 1.pdf, uploaded"));
     assert!(made[1].2.contains("*From lecture 2.pdf, uploaded"));

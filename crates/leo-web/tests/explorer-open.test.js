@@ -68,7 +68,7 @@ const settle = async (done) => { for (let i = 0; i < 200 && !done(); i++) await 
 
 function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, created_at: '2020-01-01T00:00:00Z' }]) {
   const source = fs.readFileSync(path.join(web, 'app/side.js'), 'utf8');
-  const lines = source.split('\n').filter((line) => /^const (side|SIDE_NOTES_\w+|SIDE_SORTS|SIDE_NEW_MS|SIDE_REV_MS) =/.test(line)).join('\n');
+  const lines = source.split('\n').filter((line) => /^const (side|SIDE_NOTES_\w+|SIDE_SORTS|SIDE_NEW_MS|SIDE_REV_MS|SIDE_UNOPENED) =/.test(line)).join('\n');
   const drawHead = between(source, 'function drawSide()', "  const scrolled = box.querySelector('.side-tree');");
   const pieces = [
     lines,
@@ -84,7 +84,7 @@ function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, crea
   const frames = [];
   const reads = new Map();
   const asked = { folders: 0, probes: 0 };
-  const disk = { rev: 'one', probe: 'answers', folders: 'answers' };
+  const disk = { rev: 'one', probe: 'answers', folders: 'answers', unopened: {} };
   const clock = { now: Date.now() };
   const folders = open.map((name) => ({ name, notes: 0 }));
   const context = {
@@ -104,6 +104,10 @@ function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, crea
         if (disk.folders === 'fails') throw new Error('Offline');
         return folders;
       }
+      if (url === '/api/notes/unopened') {
+        if (disk.unopened === 'fails') throw new Error('Offline');
+        return disk.unopened;
+      }
       if (url.startsWith('/api/notes?')) {
         const dir = new URLSearchParams(url.split('?')[1]).get('dir');
         const count = (reads.get(dir) || 0) + 1;
@@ -115,7 +119,7 @@ function explorer(open, answer = (name) => [{ id: `${name}-1`, title: name, crea
     },
   };
   vm.createContext(context);
-  vm.runInContext(`let seq = 1, drawn = 0; let state = { view: 'note', dir: '', session: { note: { id: 'n' } } };\n${pieces}\n;globalThis.h = { side, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
+  vm.runInContext(`let seq = 1, drawn = 0; let state = { view: 'note', dir: '', session: { note: { id: 'n' } } };\n${pieces}\n;globalThis.h = { side, drawSide, folderTree, loadSideFolders, refreshSideTree, bump: () => ++seq, draws: () => drawn, resetDraws: () => { drawn = 0; } };`, context);
   context.h.side.open = new Set(open);
   Object.assign(context.h, { reads, asked, disk, clock });
   context.h.flush = () => { while (frames.length) frames.shift()(); };
@@ -268,4 +272,65 @@ test('refreshing the tree after a change leo made reads everything even under an
   await h.refreshSideTree();
   await idle(h);
   assert.deepEqual([sent(h).folders - before.folders, sent(h).notes - before.notes], [1, 3]);
+});
+
+const madeNote = (id) => ({ id, title: id, created_at: '2020-01-01T00:00:00Z' });
+const idsIn = (h, path) => Array.from(h.side.notes.get(path).items, (note) => note.id);
+
+test('a note made in a closed folder is there when the folder opens, however many pages were visited since', async () => {
+  let made = false;
+  const h = await settled(['Lectures'], (name) => (made && name === 'Lectures' ? [madeNote('old'), madeNote('recorded')] : [madeNote('old')]));
+  h.side.open.delete('Lectures');
+  h.side.shut.add('Lectures');
+  made = true;
+  h.disk.rev = 'two';
+  await h.loadSideFolders();
+  await idle(h);
+  for (let page = 0; page < 3; page++) {
+    h.bump();
+    await h.loadSideFolders();
+    await idle(h);
+  }
+  h.side.shut.delete('Lectures');
+  h.side.open.add('Lectures');
+  h.drawSide();
+  await idle(h);
+  assert.deepEqual(idsIn(h, 'Lectures'), ['old', 'recorded']);
+});
+
+test('a read dropped by a page change is sent again under the same stamp', async () => {
+  let made = false;
+  const h = await settled(['Lectures'], () => (made ? [madeNote('old'), madeNote('recorded')] : [madeNote('old')]));
+  made = true;
+  h.disk.rev = 'two';
+  await h.loadSideFolders();
+  h.bump();
+  await idle(h);
+  assert.deepEqual(idsIn(h, 'Lectures'), ['old'], 'the answer came after the page changed');
+  await h.loadSideFolders();
+  await idle(h);
+  assert.deepEqual(idsIn(h, 'Lectures'), ['old', 'recorded']);
+});
+
+test('a closed folder marks the unopened note inside it, at any depth, until it opens or the note does', async () => {
+  const h = explorer(['Lectures', 'Lectures/Week 1', 'Other']);
+  h.side.open.clear();
+  h.disk.unopened = { 'rec-1': 'Lectures/Week 1', n: 'Other' };
+  await h.loadSideFolders();
+  await idle(h);
+  const marked = () => h.folderTree('').split('data-refresh-key="').slice(1).filter((row) => row.includes('side-unopened')).map((row) => row.split('"')[0]);
+  assert.deepEqual(marked(), ['Lectures'], 'the note that is open is never marked');
+  h.side.open.add('Lectures');
+  assert.deepEqual(marked(), ['Lectures/Week 1']);
+  h.side.open.add('Lectures/Week 1');
+  assert.deepEqual(marked(), []);
+  h.side.open.clear();
+  h.disk.unopened = 'fails';
+  await h.refreshSideTree();
+  await idle(h);
+  assert.deepEqual(marked(), ['Lectures'], 'a failed read keeps the marks');
+  h.disk.unopened = {};
+  await h.refreshSideTree();
+  await idle(h);
+  assert.deepEqual(marked(), []);
 });

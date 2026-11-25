@@ -4,7 +4,7 @@ const sideNarrow = () => Boolean(window.matchMedia && window.matchMedia('(min-wi
 const sideDrawerOpen = () => document.body.classList.contains('side-drawer');
 const sideActive = () => sideWide() && !side.mini || sideDrawerOpen() || Boolean(document.querySelector('#folders-sheet'));
 const creationDir = (explicit) => explicit ?? side.target ?? (state.view === 'note' ? state.dir || '' : '');
-const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0 };
+const side = { sort: 'title', flip: false, tasks: false, filter: '', focusKey: '', folders: [], loaded: false, mini: false, open: new Set(), revealed: new Set(), shut: new Set(), here: null, target: null, twisted: null, notes: new Map(), pending: [], reading: 0, visible: [], automatic: new Set(), generation: 0, sig: [], lastSig: '', pill: '', closing: new Set(), growing: null, freshUntil: Infinity, freshTimer: 0, quietTimer: 0, making: null, frame: 0, rev: null, revAt: 0, unopened: new Map() };
 // Folders the user opened with their own hands, kept across restarts. Folders
 // unfolded only to show the open note or folder (`side.revealed`) are not
 // kept, so the explorer reopens exactly as the user left it, closed by default.
@@ -20,6 +20,7 @@ const SIDE_NEW_MS = 60000;
 const SIDE_REV_MS = 60000;
 const SIDE_FRESH_MS = 30 * 60000;
 const SIDE_FRESH_GROUP = 1000;
+const SIDE_UNOPENED = '<svg class="side-unopened" viewBox="0 0 13 13" fill="currentColor" role="img" aria-label="New"><title>New, not opened yet</title><path d="M6 2.2c1.7-.5 3.3.3 3.9 1.8.4 1-.1 1.6.3 2.6.6 1.5-.3 2.9-1.8 3.2-1.1.2-1.6-.4-2.7-.1-1.6.4-3.2-.5-3.4-2.2-.1-1.1.6-1.6.5-2.7C2.7 3.4 4.3 2.7 6 2.2z"/><circle cx="11.5" cy="10.6" r="1.3"/></svg>';
 
 try {
   side.open = new Set(JSON.parse(localStorage.getItem(SIDE_OPEN_KEY) || '[]'));
@@ -216,6 +217,8 @@ function folderTree(here) {
   });
   const rows = [];
   const twisted = side.twisted;
+  const unopened = new Set();
+  for (const dir of side.unopened.values()) for (let path = dir; path; path = path.slice(0, Math.max(0, path.lastIndexOf('/')))) unopened.add(path);
   const walk = (parent, depth) => {
     if (side.making && side.making.parent === parent) rows.push(`<div class="side-making" data-refresh-key="side-making" style="--depth:${depth}" aria-hidden="true">${ICON.folder}</div>`);
     for (const d of children(parent)) {
@@ -226,7 +229,7 @@ function folderTree(here) {
       const shown = twisted && twisted.path === d.name ? twisted.was : open;
       const toggle = `<button class="side-twist${shown ? ' open' : ''}" data-action="side-twist" data-dir="${esc(d.name)}" aria-expanded="${open}" aria-label="${open ? 'Close' : 'Open'} ${esc(name)}">${ICON.chevron}</button>`;
       side.sig.push(`d:${d.name}`);
-      rows.push(`<div data-refresh-key="${esc(d.name)}" class="side-folder${on ? ' on' : ''}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">${on ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${toggle}<button class="side-row" tabindex="-1" data-action="open-folder" data-dir="${esc(d.name)}" draggable="true" title="${esc(d.notes ? `${d.name} · ${d.notes} ${d.notes === 1 ? 'note' : 'notes'}` : d.name)}" aria-expanded="${open}"${current ? ' aria-current="page"' : ''}>${ICON.folder}<span class="side-label">${esc(name)}</span>${d.notes ? `<span class="side-count">${d.notes}</span>` : ''}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="folder" data-dir="${esc(d.name)}" aria-label="Options for ${esc(name)}" title="Folder options" aria-haspopup="menu">${ICON.more}</button></div>`);
+      rows.push(`<div data-refresh-key="${esc(d.name)}" class="side-folder${on ? ' on' : ''}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">${on ? '<span class="side-pill" aria-hidden="true"></span>' : ''}${toggle}<button class="side-row" tabindex="-1" data-action="open-folder" data-dir="${esc(d.name)}" draggable="true" title="${esc(d.notes ? `${d.name} · ${d.notes} ${d.notes === 1 ? 'note' : 'notes'}` : d.name)}" aria-expanded="${open}"${current ? ' aria-current="page"' : ''}>${ICON.folder}<span class="side-label">${esc(name)}</span>${!open && unopened.has(d.name) ? SIDE_UNOPENED : ''}${d.notes ? `<span class="side-count">${d.notes}</span>` : ''}</button><button class="side-add side-sub" tabindex="-1" data-action="explorer-menu" data-kind="folder" data-dir="${esc(d.name)}" aria-label="Options for ${esc(name)}" title="Folder options" aria-haspopup="menu">${ICON.more}</button></div>`);
       if (open || side.closing.has(d.name)) {
         if (open) side.visible.push(d.name);
         rows.push(`<div class="side-kids" data-kids="${esc(d.name)}" data-drop-dir="${esc(d.name)}" style="--depth:${depth}">`);
@@ -309,15 +312,17 @@ async function loadSideFolders() {
   if (mine !== seq || generation !== side.generation) return;
   if (rev && rev === side.rev && Date.now() - side.revAt < SIDE_REV_MS) {
     const order = sideReadOrder();
-    for (const entry of side.notes.values()) if (entry.loaded && !entry.error && !entry.loading && entry.order === order) entry.seq = seq;
+    for (const entry of side.notes.values()) if (entry.loaded && !entry.error && !entry.loading && entry.order === order && entry.rev === rev) entry.seq = seq;
     return drawSide();
   }
   try {
-    const folders = await api('/api/folders');
+    const [folders, unopened] = await Promise.all([api('/api/folders'), api('/api/notes/unopened').catch(() => null)]);
     if (mine !== seq || generation !== side.generation) return;
     side.rev = rev;
     side.revAt = Date.now();
     side.folders = folders;
+    if (unopened) side.unopened = new Map(Object.entries(unopened));
+    side.unopened.delete(state.session?.note?.id);
     if (side.target && !folders.some((folder) => folder.name === side.target)) side.target = null;
     side.loaded = true;
     for (const [path, entry] of side.notes) {
@@ -434,6 +439,11 @@ function sideNoteRows(path, depth) {
   return rows + (status || pages ? `<div class="side-note-status" data-drop-dir="${esc(path)}" style="--depth:${depth}">${status}${pages}</div>` : '');
 }
 
+function noteOpened(id) {
+  side.unopened.delete(id);
+  api(`/api/notes/${enc(id)}/unopened`, { method: 'DELETE' }).catch(() => {});
+}
+
 async function refreshSideTree() {
   side.rev = null;
   await loadSideFolders();
@@ -478,6 +488,7 @@ function sideDrawSoon() {
 async function readSideNotes(path, entry) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SIDE_NOTES_TIMEOUT);
+  const rev = side.rev;
   try {
     const [sort, show] = entry.order.split(' ');
     const query = new URLSearchParams({ dir: path, offset: String(entry.offset), limit: String(SIDE_NOTES_PAGE), rows: 'true', sort, show });
@@ -490,6 +501,7 @@ async function readSideNotes(path, entry) {
     entry.total = Number.isSafeInteger(page.total) && page.total >= 0 ? page.total : entry.items.length;
     entry.quiet = before !== null && before === JSON.stringify([entry.items, entry.total]);
     entry.loaded = true;
+    entry.rev = rev;
     if (had) for (const note of entry.items) if (!had.has(note.id) && Date.now() - Date.parse(note.created_at) < SIDE_NEW_MS) inkLand(note.id);
     if (!entry.items.length && entry.offset && entry.total) setTimeout(() => loadSideNotes(path, Math.floor((entry.total - 1) / SIDE_NOTES_PAGE) * SIDE_NOTES_PAGE, true));
   } catch (e) {
@@ -512,6 +524,7 @@ function sideNoteMark(note, open) {
   const fresh = side.sort !== 'updated' && until > Date.now() && until - Date.now() <= SIDE_FRESH_MS + SIDE_NEW_MS;
   if (fresh) side.freshUntil = Math.min(side.freshUntil, until);
   if (open && marginPage.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
+  if (side.unopened.has(note.id)) return SIDE_UNOPENED;
   return fresh ? '<i class="side-fresh" aria-hidden="true" title="Edited in the last 30 minutes"></i>' : '';
 }
 

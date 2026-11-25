@@ -760,6 +760,7 @@ fn run(
         }
     }
     let joined = into.clone();
+    let chats = state.chats.clone();
     let made = store_now(&state, move |store| {
         if let Some(into) = joined {
             return match store.find_note(&into) {
@@ -788,6 +789,7 @@ fn run(
             }
             store.find_note_mut(&note);
         }
+        set_unopened(&chats, &note, true);
         save(store)?;
         Ok((note, store.notes_dir.clone()))
     });
@@ -827,11 +829,11 @@ fn run(
     });
 }
 
-pub(crate) fn writeup_pending(chats: &std::path::Path, note: &str) -> bool {
+fn marked(chats: &std::path::Path, table: &str, note: &str) -> bool {
     crate::db::for_chats(chats)
         .with(|c| {
             c.query_row(
-                "SELECT EXISTS(SELECT 1 FROM writeup_pending WHERE note = ?1)",
+                &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE note = ?1)"),
                 [note],
                 |r| r.get(0),
             )
@@ -839,13 +841,29 @@ pub(crate) fn writeup_pending(chats: &std::path::Path, note: &str) -> bool {
         .unwrap_or(false)
 }
 
-pub(crate) fn set_writeup_pending(chats: &std::path::Path, note: &str, pending: bool) {
-    let sql = if pending {
-        "INSERT OR IGNORE INTO writeup_pending (note) VALUES (?1)"
+fn set_mark(chats: &std::path::Path, table: &str, note: &str, on: bool) {
+    let sql = if on {
+        format!("INSERT OR IGNORE INTO {table} (note) VALUES (?1)")
     } else {
-        "DELETE FROM writeup_pending WHERE note = ?1"
+        format!("DELETE FROM {table} WHERE note = ?1")
     };
-    let _ = crate::db::for_chats(chats).with(|c| c.execute(sql, [note]));
+    let _ = crate::db::for_chats(chats).with(|c| c.execute(&sql, [note]));
+}
+
+pub(crate) fn writeup_pending(chats: &std::path::Path, note: &str) -> bool {
+    marked(chats, "writeup_pending", note)
+}
+
+pub(crate) fn set_writeup_pending(chats: &std::path::Path, note: &str, pending: bool) {
+    set_mark(chats, "writeup_pending", note, pending);
+}
+
+pub(crate) fn unopened(chats: &std::path::Path, note: &str) -> bool {
+    marked(chats, "unopened_notes", note)
+}
+
+pub(crate) fn set_unopened(chats: &std::path::Path, note: &str, unopened: bool) {
+    set_mark(chats, "unopened_notes", note, unopened);
 }
 
 pub(crate) async fn status(State(state): State<AppState>, Path(id): Path<String>) -> Response {

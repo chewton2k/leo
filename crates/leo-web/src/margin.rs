@@ -979,6 +979,7 @@ const DEPENDENT_ROWS: &[(&str, &str, &[&str])] = &[
     ("margin_personas", "note = ?1", &["note"]),
     ("margin_instructions", "note = ?1", &["note"]),
     ("writeup_pending", "note = ?1", &["note"]),
+    ("unopened_notes", "note = ?1", &["note"]),
     ("note_tasks", "note = ?1", &["id"]),
     ("reading", "note = ?1", &["note"]),
     ("vectors", "note = ?1", &["note", "at"]),
@@ -1203,7 +1204,7 @@ fn sweep_with(
 ) -> Vec<String> {
     let Ok(rows) = db_of(chats).with(|c| {
         let mut query = c.prepare(
-            "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM note_tasks UNION SELECT note FROM reading UNION SELECT note FROM vectors UNION SELECT id FROM graph_notes",
+            "SELECT note FROM margin_threads UNION SELECT note FROM margin_modes UNION SELECT note FROM margin_personas UNION SELECT note FROM margin_instructions UNION SELECT note FROM writeup_pending UNION SELECT note FROM unopened_notes UNION SELECT note FROM note_tasks UNION SELECT note FROM reading UNION SELECT note FROM vectors UNION SELECT id FROM graph_notes",
         )?;
         let rows = query.query_map([], |r| r.get::<_, String>(0))?;
         rows.collect::<rusqlite::Result<Vec<String>>>()

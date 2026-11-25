@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -91,6 +92,8 @@ pub(crate) struct NoteResponse {
     pub(crate) recorded: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub(crate) writeup_pending: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) unopened: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) summary: Option<String>,
 }
@@ -123,6 +126,7 @@ impl NoteResponse {
             tasks: None,
             recorded: false,
             writeup_pending: false,
+            unopened: false,
             summary: None,
         }
     }
@@ -270,10 +274,48 @@ pub(crate) async fn get_note(
             Ok(Json(NoteResponse {
                 recorded: crate::tools::has_transcript(&store.notes_dir, &note.id),
                 writeup_pending: crate::record::writeup_pending(&chats, &note.id),
+                unopened: crate::record::unopened(&chats, &note.id),
                 ..NoteResponse::from_note(note)
             }))
         })
         .await
+}
+
+pub(crate) async fn list_unopened(
+    State(state): State<AppState>,
+) -> Result<Json<BTreeMap<String, String>>, StatusCode> {
+    let chats = state.chats.clone();
+    state
+        .read_store(move |store| {
+            let ids = crate::db::for_chats(&chats)
+                .with(|c| {
+                    let mut query = c.prepare("SELECT note FROM unopened_notes")?;
+                    let rows = query.query_map([], |r| r.get::<_, String>(0))?;
+                    rows.collect::<rusqlite::Result<HashSet<String>>>()
+                })
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            Ok(Json(
+                store
+                    .notes
+                    .iter()
+                    .filter(|note| ids.contains(&note.id))
+                    .map(|note| (note.id.clone(), note.directory.clone()))
+                    .collect(),
+            ))
+        })
+        .await
+}
+
+pub(crate) async fn note_opened(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> StatusCode {
+    let chats = state.chats.clone();
+    match tokio::task::spawn_blocking(move || crate::record::set_unopened(&chats, &id, false)).await
+    {
+        Ok(()) => StatusCode::NO_CONTENT,
+        Err(_) => StatusCode::INTERNAL_SERVER_ERROR,
+    }
 }
 
 pub(crate) fn make_note(
