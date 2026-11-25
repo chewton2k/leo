@@ -550,5 +550,18 @@ mod tests {
         assert_eq!(set_box("  - [ ] Read", true).unwrap(), "  - [x] Read");
         assert_eq!(set_box("1. [x] Read", false).unwrap(), "1. [ ] Read");
         assert_eq!(set_box("plain", true), None);
+        for (open, done) in [
+            ("* [ ] star", "* [x] star"),
+            ("+ [ ] plus", "+ [x] plus"),
+            ("2) [ ] two", "2) [x] two"),
+            ("  - [ ]", "  - [x]"),
+            ("-   [ ] wide", "-   [x] wide"),
+            ("a) [ ] one", "a) [x] one"),
+            ("bb. [ ] two", "bb. [x] two"),
+            ("B.  [ ] four", "B.  [x] four"),
+        ] {
+            assert_eq!(set_box(open, true).as_deref(), Some(done));
+            assert_eq!(set_box(done, false).as_deref(), Some(open));
+        }
     }
 }

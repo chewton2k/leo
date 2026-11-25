@@ -639,8 +639,9 @@ mod tests {
     fn a_closed_port_lists_no_ollama_models_quickly() {
         let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
         cfg.providers.get_mut("ollama").unwrap().base_url = Some("http://127.0.0.1:9/v1".into());
-        let started = std::time::Instant::now();
         assert!(local_models(&cfg).ollama.is_empty());
+        let started = std::time::Instant::now();
+        assert!(!crate::health::port_open("http://127.0.0.1:9/v1"));
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 

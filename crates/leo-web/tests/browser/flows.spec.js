@@ -4885,10 +4885,11 @@ test.describe('passages', () => {
     expect(new Set(names)).toEqual(new Set(['ink-in']));
   });
 
-  test('the selection shortcut explains when nothing is selected', async ({ page }) => {
+  test('the selection shortcut explains when nothing is selected without a bottom Ask button', async ({ page }) => {
     const note = await (await page.request.post('/api/notes', { data: { title: 'Toolbar ask', body: 'Only line here' } })).json();
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#doc .blk').first()).toBeVisible();
+    await expect(page.locator('nav.actions [data-action="ask-selection"]')).toHaveCount(0);
     await page.keyboard.press('ControlOrMeta+Shift+e');
     await expect(page.locator('.toast')).toContainText('Select some text in the note first');
   });
@@ -5057,7 +5058,14 @@ test.describe('calendar', () => {
     const made = await (await page.request.post('/api/tasks', { data: { title, description: '', date: null, time: null, kind: 'other', repeat: [] } })).json();
     const saved = async () => (await (await page.request.get('/api/tasks')).json()).tasks.find((t) => t.id === made.id);
     await page.goto('/#/calendar');
-    await page.evaluate((id) => taskSheet(id), made.id);
+    await page.evaluate((id) => {
+      const open = document.createElement('button');
+      open.dataset.action = 'task-open-here';
+      open.dataset.id = id;
+      document.body.append(open);
+      open.click();
+      open.remove();
+    }, made.id);
     const description = page.locator('#task-description');
     await description.fill('First draft');
     await expect.poll(async () => (await saved()).description).toBe('First draft');
