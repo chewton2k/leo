@@ -67,8 +67,11 @@ impl Ask<'_> {
 pub const SLOW: &str = "the call app answered too slowly";
 pub const HIDDEN: &str =
     "the call window is covered, minimized or on another desktop, so what it shows is frozen";
+pub const TOO_BIG: &str = "the call window is too large to read whole";
 pub const STALE_SECS: f64 = 3.0;
 const SHORT_LINE_SECS: f64 = 1.2;
+const LONG_LINE_SECS: f64 = 3.0;
+const CLOSE_SECS: f64 = 0.4;
 const GRID: usize = 24;
 
 #[repr(C)]
@@ -104,11 +107,21 @@ impl Rect {
     }
 }
 
-pub fn covered(pid: i32, area: Rect, front_to_back: &[Shown], screens: &[Rect]) -> bool {
-    let Some(at) = front_to_back
+pub fn place(pid: i32, area: Rect, main: bool, front_to_back: &[Shown]) -> Option<usize> {
+    let mut same = front_to_back
         .iter()
-        .rposition(|s| s.pid == pid && s.area.near(&area))
-    else {
+        .enumerate()
+        .filter(|(_, s)| s.pid == pid && s.area.near(&area))
+        .map(|(at, _)| at);
+    if main {
+        same.next()
+    } else {
+        same.next_back()
+    }
+}
+
+pub fn covered(at: Option<usize>, area: Rect, front_to_back: &[Shown], screens: &[Rect]) -> bool {
+    let Some(at) = at else {
         return true;
     };
     let above: Vec<Rect> = front_to_back[..at]
@@ -204,6 +217,8 @@ pub enum Mark {
         who: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         mark: bool,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        outlasts: bool,
     },
     Me {
         me: String,
@@ -215,7 +230,31 @@ struct Run {
     from: f64,
     to: f64,
     who: String,
-    mark: bool,
+    basis: Basis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Basis {
+    OnlyOther,
+    Mark { outlasts: bool },
+}
+
+impl Basis {
+    fn of(mark: bool, outlasts: bool) -> Self {
+        if mark {
+            Basis::Mark { outlasts }
+        } else {
+            Basis::OnlyOther
+        }
+    }
+
+    fn mark(self) -> bool {
+        self != Basis::OnlyOther
+    }
+
+    fn outlasts(self) -> bool {
+        self == Basis::Mark { outlasts: true }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -223,7 +262,9 @@ pub struct Timeline {
     runs: Vec<Run>,
     me: Vec<String>,
     own: Option<String>,
-    open: Option<(f64, String, bool)>,
+    open: Option<(f64, String, Basis)>,
+    marks: Vec<(String, f64)>,
+    lingering: Vec<String>,
     last: Option<f64>,
     longest: f64,
 }
@@ -258,6 +299,7 @@ impl Timeline {
                     to,
                     who,
                     mark,
+                    outlasts,
                 } if from.is_finite() && to > from => match timeline.runs.last_mut() {
                     Some(last) if last.from == from && last.who == who => {
                         last.to = last.to.max(to);
@@ -266,7 +308,7 @@ impl Timeline {
                         from,
                         to,
                         who,
-                        mark,
+                        basis: Basis::of(mark, outlasts),
                     }),
                 },
                 Mark::Me { me } => {
@@ -290,27 +332,30 @@ impl Timeline {
 
     pub fn doubt_marks_through_silence(&mut self, sound: &[(f64, f64)], lines: &[(f64, f64)]) {
         let sound = union(sound.to_vec());
-        for run in self.runs.iter_mut().filter(|run| run.mark) {
+        let doubtful = |run: &&mut Run| run.basis.mark() && !run.basis.outlasts();
+        for run in self.runs.iter_mut().filter(doubtful) {
             let first = sound.partition_point(|(_, end)| *end <= run.from);
             let mut quiet_from = run.from;
-            let mut stale = false;
+            let mut gap: Option<f64> = None;
             for (start, end) in sound[first..]
                 .iter()
                 .take_while(|(start, _)| *start < run.to)
             {
-                stale |= start - quiet_from > STALE_SECS;
+                if start - quiet_from > STALE_SECS {
+                    gap = gap.or(Some(quiet_from));
+                }
                 quiet_from = *end;
             }
-            stale |= run.to - quiet_from > STALE_SECS;
-            if stale {
-                let late = |(start, _): &&(f64, f64)| *start - run.from <= STALE_SECS;
+            if run.to - quiet_from > STALE_SECS {
+                gap = gap.or(Some(quiet_from));
+            }
+            if let Some(gap) = gap {
                 let came_with = lines
                     .iter()
-                    .filter(|(_, end)| *end > run.from)
-                    .filter(late)
+                    .filter(|(start, end)| *end > run.from && *start - run.from <= STALE_SECS)
                     .map(|(_, end)| *end)
                     .min_by(f64::total_cmp);
-                run.to = came_with.map_or(run.from, |end| run.to.min(end));
+                run.to = came_with.map_or(run.from, |end| run.to.min(end)).min(gap);
             }
         }
         self.measure_longest();
@@ -339,7 +384,7 @@ impl Timeline {
         true
     }
 
-    fn who(&self, reading: &Reading) -> Option<(String, bool)> {
+    fn who(&self, reading: &Reading) -> Option<(String, Basis)> {
         let marked = |name: &str| {
             self.me.contains(&norm(name))
                 || reading.me.as_deref().is_some_and(|m| norm(m) == norm(name))
@@ -355,7 +400,7 @@ impl Timeline {
             let others: Vec<&String> = people.iter().filter(|p| !marked(p)).collect();
             if let [other] = others.as_slice() {
                 if !mine(other) {
-                    return usable(other).map(|who| (who, false));
+                    return usable(other).map(|who| (who, Basis::OnlyOther));
                 }
             }
         }
@@ -366,9 +411,42 @@ impl Timeline {
             .into_iter()
             .filter(|p| !mine(p))
             .collect();
+        let outlasts = reading.marks_outlast_speech;
         match talking.as_slice() {
-            [one] => usable(one).map(|who| (who, !reading.marks_outlast_speech)),
+            [one] if !self.lingering.contains(&norm(one)) => {
+                usable(one).map(|who| (who, Basis::Mark { outlasts }))
+            }
             _ => None,
+        }
+    }
+
+    fn follow_marks(&mut self, at: f64, reading: Option<&Reading>) {
+        let Some(reading) = reading else {
+            return;
+        };
+        let now: Vec<String> = reading
+            .speaking
+            .iter()
+            .filter(|name| !self.is_me(name))
+            .map(|name| norm(name))
+            .collect();
+        let gone: Vec<f64> = self
+            .marks
+            .iter()
+            .filter(|(name, _)| !now.contains(name))
+            .map(|(_, since)| *since)
+            .collect();
+        self.marks.retain(|(name, _)| now.contains(name));
+        for (name, since) in &self.marks {
+            if gone.iter().any(|other| other >= since) && !self.lingering.contains(name) {
+                self.lingering.push(name.clone());
+            }
+        }
+        self.lingering.retain(|name| now.contains(name));
+        for name in now {
+            if !self.marks.iter().any(|(known, _)| *known == name) {
+                self.marks.push((name, at));
+            }
         }
     }
 
@@ -384,32 +462,34 @@ impl Timeline {
                 });
             }
         }
+        self.follow_marks(at, reading);
         let who = reading.and_then(|r| self.who(r));
         let goes_on = match (&self.open, &who, self.last) {
-            (Some((_, open, was)), Some((who, mark)), Some(last)) => {
-                open == who && was == mark && at - last <= HOLD_SECS
+            (Some((_, open, was)), Some((who, basis)), Some(last)) => {
+                open == who && was == basis && at - last <= HOLD_SECS
             }
             _ => false,
         };
         if goes_on {
-            if let Some((from, who, mark)) = &self.open {
+            if let Some((from, who, basis)) = &self.open {
                 marks.push(Mark::Run {
                     from: *from,
                     to: at,
                     who: who.clone(),
-                    mark: *mark,
+                    mark: basis.mark(),
+                    outlasts: basis.outlasts(),
                 });
             }
         } else {
             marks.extend(self.close(at));
-            self.open = who.map(|(who, mark)| (at, who, mark));
+            self.open = who.map(|(who, basis)| (at, who, basis));
         }
         self.last = Some(at);
         marks
     }
 
     fn close(&mut self, next: f64) -> Option<Mark> {
-        let (from, who, mark) = self.open.take()?;
+        let (from, who, basis) = self.open.take()?;
         let to = next.min(self.last.unwrap_or(from) + HOLD_SECS);
         if to <= from {
             return None;
@@ -418,14 +498,15 @@ impl Timeline {
             from,
             to,
             who: who.clone(),
-            mark,
+            basis,
         });
         self.longest = self.longest.max(to - from);
         Some(Mark::Run {
             from,
             to,
             who,
-            mark,
+            mark: basis.mark(),
+            outlasts: basis.outlasts(),
         })
     }
 
@@ -487,17 +568,23 @@ impl Timeline {
             .map(|(who, _)| who)
             .filter(|who| {
                 let ours = |run: &&Run| norm(&run.who) == norm(who);
-                whole >= SHORT_LINE_SECS
-                    || spans.iter().all(|&(start, end)| {
-                        let mut near = self.reaching(start).iter().filter(ours);
-                        near.any(|run| self.sure_of(run, start, end))
-                    })
+                spans.iter().all(|&(start, end)| {
+                    let mut over = self
+                        .reaching(start)
+                        .iter()
+                        .take_while(|run| run.from < end)
+                        .filter(|run| run.to > start)
+                        .filter(ours);
+                    whole >= LONG_LINE_SECS || over.any(|run| self.sure_of(run, start, end))
+                })
             })
     }
 
     fn sure_of(&self, run: &Run, start: f64, end: f64) -> bool {
-        !run.mark
-            || end - start >= SHORT_LINE_SECS
+        let length = end - start;
+        !run.basis.mark()
+            || length >= LONG_LINE_SECS
+            || (length >= SHORT_LINE_SECS && run.to >= end - CLOSE_SECS)
             || (run.from <= start - LAG_SECS && run.to >= end + LAG_SECS)
     }
 }

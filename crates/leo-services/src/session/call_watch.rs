@@ -630,7 +630,7 @@ mod tests {
             .all(|s| s.as_ref().is_some_and(|s| s.pid == 41)));
         let trace = std::fs::read_to_string(temp.path().join("trace.jsonl")).unwrap();
         assert!(trace.contains("started it again"));
-        assert!(named(temp.path()).name(50.1, 50.3).is_some());
+        assert!(named(temp.path()).name(49.5, 50.8).is_some());
     }
 
     #[test]

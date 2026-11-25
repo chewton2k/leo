@@ -323,6 +323,7 @@ fn zoom(windows: &[Window]) -> Reading {
 }
 
 pub const MEET_TALKING_CLASSES: &[&str] = &["v5h6Xc"];
+const MEET_SOUND_CLASSES: &[&str] = &["Oaajhc", "wEsLMd", "HX2H7", "OgVli", "BlxGDf"];
 const TILE_UP: usize = 7;
 const MEET_WORDS: &[&str] = &[
     "meet",
@@ -517,24 +518,34 @@ fn meet(windows: &[Window]) -> Reading {
             stray |= !known && (groups.iter().any(|(root, _)| at(root)) || has_wording(node));
         });
     }
-    if stray {
+    let sounding = tiles
+        .iter()
+        .any(|(root, one)| !has_mark(root) && reading.me.as_ref() != Some(one) && sounds(root));
+    if stray || sounding {
         reading.speaking.clear();
     }
     reading
 }
 
 fn marked(node: &Node) -> bool {
-    node.classes
-        .iter()
-        .any(|c| MEET_TALKING_CLASSES.contains(&c.as_str()))
+    has_class(node, MEET_TALKING_CLASSES)
+}
+
+fn has_class(node: &Node, classes: &[&str]) -> bool {
+    node.classes.iter().any(|c| classes.contains(&c.as_str()))
 }
 
 fn has_mark(node: &Node) -> bool {
     marked(node) || node.children.iter().any(has_mark)
 }
 
+fn sounds(node: &Node) -> bool {
+    has_class(node, MEET_SOUND_CLASSES) || node.children.iter().any(sounds)
+}
+
 fn wording(text: &str) -> bool {
-    text.chars().any(char::is_alphabetic)
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    (text.chars().any(char::is_alphabetic) || digits > 4)
         && !MEET_WORDS.contains(&low(text).as_str())
         && !meeting_code(text.trim())
 }

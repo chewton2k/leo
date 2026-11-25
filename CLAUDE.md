@@ -247,8 +247,11 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   a locked screen) is not read and a Meet or Teams mark that stays on through 3 s
   without sound (`echo::sound`, the track's own levels) names only the line it came
   with (`doubt_marks_through_silence`). A Meet line is named only once the user's tile
-  is known, a mark on a tile whose name cannot be read names nobody, and a line under
-  1.2 s is named only well inside one person's marks.
+  is known, a mark on a tile whose name cannot be read names nobody, a mark that outlives
+  a later one is doubted until it goes off (a pinned or presenting tile keeps its mark),
+  another tile that shows sound (`MEET_SOUND_CLASSES`) leaves the line unnamed, a line
+  under 1.2 s is named only well inside one person's marks and one under 3 s only when
+  their mark lasts to its end.
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
   described by their scripts and workflow, and uninstall retains the existing

@@ -278,16 +278,17 @@ mod mac {
         let session = Owned(unsafe { CGSessionCopyCurrentDictionary() });
         is_a(session.0, unsafe { CFDictionaryGetTypeID() }) && {
             let key = cf_string("CGSSessionScreenIsLocked");
-            let value = unsafe { CFDictionaryGetValue(session.0, key.0) };
-            is_a(value, unsafe { CFBooleanGetTypeID() }) && unsafe { CFBooleanGetValue(value) } != 0
+            truth(unsafe { CFDictionaryGetValue(session.0, key.0) })
+                || number(session.0, "CGSSessionScreenIsLocked").is_some_and(|on| on != 0.0)
         }
     }
 
+    fn truth(value: Ref) -> bool {
+        is_a(value, unsafe { CFBooleanGetTypeID() }) && unsafe { CFBooleanGetValue(value) } != 0
+    }
+
     fn hidden(window: Ref, pid: i32, shown: &[Shown], screens: &[Rect]) -> bool {
-        let minimized = attribute(window, "AXMinimized");
-        if is_a(minimized.0, unsafe { CFBooleanGetTypeID() })
-            && unsafe { CFBooleanGetValue(minimized.0) } != 0
-        {
+        if truth(attribute(window, "AXMinimized").0) {
             return true;
         }
         let (Some([x, y]), Some([w, h])) = (
@@ -296,7 +297,9 @@ mod mac {
         ) else {
             return true;
         };
-        names::covered(pid, Rect { x, y, w, h }, shown, screens)
+        let area = Rect { x, y, w, h };
+        let main = truth(attribute(window, "AXMain").0);
+        names::covered(names::place(pid, area, main, shown), area, shown, screens)
     }
 
     pub struct Mac {
@@ -538,6 +541,9 @@ mod mac {
                     Some(tree) => tree,
                     None => window(self, c, &mut budget),
                 };
+                if kind == Kind::Meet && budget == 0 {
+                    return Look::Unreadable(names::TOO_BIG.into());
+                }
                 if names::same_call(&seat, names::page(&read).as_deref()) {
                     windows.push(read);
                 }
@@ -579,6 +585,9 @@ mod win {
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_MULTITHREADED,
+    };
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
     };
     use windows::Win32::System::Threading::{
         OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32,
@@ -821,18 +830,31 @@ mod win {
         })
     }
 
-    fn shown_windows(front_to_back: &[HWND]) -> Vec<Shown> {
+    fn locked() -> bool {
+        unsafe {
+            match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) {
+                Ok(desktop) => {
+                    let _ = CloseDesktop(desktop);
+                    false
+                }
+                Err(_) => true,
+            }
+        }
+    }
+
+    fn shown_windows(front_to_back: &[HWND]) -> Vec<(HWND, Shown)> {
         let see_through = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as i32;
         front_to_back
             .iter()
             .filter_map(|&hwnd| {
                 let mut pid = 0;
                 unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-                Some(Shown {
+                let shown = Shown {
                     pid: pid as i32,
                     solid: unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } & see_through == 0,
                     area: area(hwnd)?,
-                })
+                };
+                Some((hwnd, shown))
             })
             .collect()
     }
@@ -888,8 +910,9 @@ mod win {
             let mut seen: Vec<Seen> = Vec::new();
             let mut handles: Vec<HWND> = Vec::new();
             let mut names_of: Vec<(u32, Option<String>)> = Vec::new();
-            let shown = shown_windows(&list);
-            let screens = screens();
+            let (handles_shown, shown): (Vec<HWND>, Vec<Shown>) =
+                shown_windows(&list).into_iter().unzip();
+            let (screens, locked) = (screens(), locked());
             for hwnd in list {
                 let mut pid = 0;
                 unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
@@ -959,11 +982,10 @@ mod win {
             for i in at {
                 let zoom = names::app_kind(&seen[i].app) == Some(Kind::Zoom);
                 let hidden = || {
-                    area(handles[i]).is_none_or(|area| {
-                        names::covered(seen[i].pid as i32, area, &shown, &screens)
-                    })
+                    let at = handles_shown.iter().position(|shown| *shown == handles[i]);
+                    area(handles[i]).is_none_or(|area| names::covered(at, area, &shown, &screens))
                 };
-                if !zoom && hidden() {
+                if !zoom && (locked || hidden()) {
                     continue;
                 }
                 let window = match trees.get_mut(i).and_then(Option::take) {
@@ -974,6 +996,9 @@ mod win {
                         tree,
                     }),
                 };
+                if budget == 0 && names::app_kind(&seen[i].app) == Some(Kind::Meet) {
+                    return Look::Unreadable(names::TOO_BIG.into());
+                }
                 windows
                     .extend(window.filter(|w| names::same_call(&seat, names::page(w).as_deref())));
             }

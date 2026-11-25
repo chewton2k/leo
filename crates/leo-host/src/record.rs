@@ -517,13 +517,14 @@ fn merged(
         let offset = late.num_seconds().max(0) as u64;
         let late_ms = late.num_milliseconds().max(0) as u64;
         let archive = session.archive();
+        let spans = session.spans_ms();
         let heard = if *speaker == "You" {
             echo.as_slice()
         } else {
             &[]
         };
         said.extend(archive.passages.into_iter().enumerate().map(|(i, p)| {
-            let at = p.turns.first().map_or(p.start_secs * 1000, |turn| turn.ms) + late_ms;
+            let at = spans.get(i).map_or(p.start_secs * 1000, |(from, _)| *from) + late_ms;
             let mut p = labelled(speaker, session.label(), p);
             p.echo = heard.get(i).copied().unwrap_or(false);
             for turn in &mut p.turns {

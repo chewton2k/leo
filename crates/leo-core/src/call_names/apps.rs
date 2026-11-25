@@ -117,8 +117,8 @@ pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'
         .unwrap_or(&seen[first]);
     let title = browser(&one.app).then(|| call_page(one));
     let of_call = |s: &Seen| {
-        title.as_ref().is_none_or(|t| match &s.page {
-            Some(page) if page.contains(" - ") || page.contains(" – ") => page.trim() == t,
+        title.as_ref().is_none_or(|t| match (&s.page, &one.page) {
+            (Some(page), Some(chosen)) => page.trim() == chosen.trim(),
             _ => of_page(&s.title, t),
         })
     };
