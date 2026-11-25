@@ -235,7 +235,8 @@ the note "Claude Code reported no limits.". Settings' writing row appends `label
 age past `STALE_AFTER`, a window past its reset reads 0%); the Usage action in
 Settings asks Codex. Never `--bare` (it skips the
 OAuth login). Usable = program on PATH (`locate`, `.cmd` on Windows), else
-the copy inside the Claude or ChatGPT app; failures are retryable and name the sign-in step; `health::writing` is SignInNeeded only from
+the copy the Claude or ChatGPT app keeps; failures are retryable and name the sign-in step
+when the program's own words say it is signed out (or it said nothing); `health::writing` is SignInNeeded only from
 the last sign-in probe's result (`agent_cli::last_signed_in`, ten minutes), never a new probe; settings shows a sign-in fact row,
 no key row.
 

@@ -228,7 +228,7 @@ impl CodexThread {
                     return Err(ProviderError::Retryable(format!(
                         "{}: codex ended. If it is not signed in, {}.",
                         self.name,
-                        super::agent_cli::SIGN_IN
+                        Agent::Codex.sign_in()
                     )))
                 }
             }

@@ -47,9 +47,9 @@ irm https://github.com/chewton2k/leo-cli/releases/latest/download/install.ps1 | 
 
 Speech never leaves your computer: recording and dictation use a local model you
 pick in Settings. Writing AI uses your signed-in Claude Code or Codex plan
-(the CLI, or the copy inside the Claude or ChatGPT app), or a local Ollama model.
-Notes are Markdown files with front matter, so Obsidian, git and any editor can
-read them.
+(the CLI or, on a Mac, the copy the Claude or ChatGPT app keeps), or a local
+Ollama model. Notes are Markdown files with front matter, so Obsidian, git and
+any editor can read them.
 
 [Contributing](CONTRIBUTING.md) · [Developer guide](DEVELOPER.md)
 

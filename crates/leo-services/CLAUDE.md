@@ -102,8 +102,9 @@ reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
 signals the watcher before capture stops and waits at most 1 s for it. Each read gets an `Ask`: a
 deadline (`MOST_READ`, 2 s for the whole poll, checked between native calls), the
 stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
-for a browser, the window title), which every later read and a restarted reader
-keep; `call_names::pick` binds only when exactly one app (one window, for a
+for a browser, the page title its window titles start with, so a title that gains
+"Microphone recording" or Meet's pop-out window stays the same call), which every later read and a restarted reader
+keep; `call_names::pick` binds only when exactly one app (one page, for a
 browser) shows a call tree, and a bound call that is gone reads as unreadable, so
 its lines stay unnamed. At most two reader threads are alive in the whole process
 (a counted slot held for a thread's life; 2026-11-22, the orchestrator's call), so a
@@ -332,14 +333,16 @@ more. `Process::stop` reaps children after killing the group. A caller's stop
 long-recording and import worker threads) reaches every launch; the margin read
 runs under `READ_LIMIT`.
 
-Usable = `locate`: program on PATH (`.cmd` on Windows), else, for the plain names
-`claude` and `codex`, the copy a desktop app keeps (2026-11-24, the owner's call:
-the CLI first): Codex inside ChatGPT.app or Codex.app, or on Windows
-`%LOCALAPPDATA%\OpenAI\Codex\bin\<16 hex>`; the highest version with `.verified`
-under the Claude app's `claude-code` folder. The apps delete old versions, so the
-path is found again at each launch and never stored. The app's own Claude sign-in
-is never read (Anthropic forbids it); Codex shares `~/.codex`. The Windows places
-are untested. Failures are retryable and name the sign-in step. `health::writing` is SignInNeeded only from the last
+Usable = `locate`: program on the PATH leo knows (`.cmd` on Windows; a PATH
+refreshed in the background counts from the next launch), else, for the plain
+names `claude` and `codex`, the copy a desktop app keeps (2026-11-24, the owner's
+call: the CLI first). Codex: inside ChatGPT.app or Codex.app, Mac only (on Windows
+the app runs a package copy other programs may not). Claude: the highest version
+with `.verified` under the app's `claude-code` folder, the one finished last when
+two builds share a version; on a Mac only while Claude.app is there; the Windows
+places come from the app's code and are untested. The apps delete old versions, so
+the path is found again at each launch and never stored. The app's own Claude
+sign-in is never read (Anthropic forbids it); Codex shares `~/.codex`. Failures are retryable and name the sign-in step. `health::writing` is SignInNeeded only from the last
 sign-in probe's result (`agent_cli::last_signed_in`, ten minutes), never a new
 probe. Sign-in probes accept only recognized status output, honor exit status and
 share the bounded watchdog; raw output never leaves. `coding_plans` reports

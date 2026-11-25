@@ -109,6 +109,7 @@ fn task_view(
         let installed = pc.is_some_and(|p| AgentCli::new(provider.clone(), agent, p).available());
         json!({
             "installed": installed,
+            "missing": !located,
             "text": if installed {
                 format!("Uses {}. Sign in with the Sign in button if leo asks.", agent.plan())
             } else if located {
@@ -433,6 +434,7 @@ mod tests {
         assert_eq!(page["writing"]["state"], "not_installed");
         assert_eq!(page["writing"]["provider"], "codex");
         assert_eq!(writing["signin"]["installed"], false);
+        assert_eq!(writing["signin"]["missing"], true);
         let text = writing["signin"]["text"].as_str().unwrap();
         assert!(
             text.ends_with(" is not installed on this computer."),

@@ -51,10 +51,10 @@ three skippable steps: microphone access (for recording), Accessibility access
 
 Dictation defaults to Option+Space on macOS and Ctrl+Space on Windows; rebind it
 in Settings. Speech and models stay on this computer. Writing AI (notes from
-recordings, Felix) uses your signed-in Claude Code or Codex plan (the CLI,
-or the copy inside the Claude or ChatGPT app), or a local Ollama model; choose it
-in Settings when you need it. Dictation uses writing AI only if you turn on its
-AI writing switch.
+recordings, Felix) uses your signed-in Claude Code or Codex plan (the CLI
+or, on a Mac, the copy the Claude or ChatGPT app keeps), or a local Ollama model;
+choose it in Settings when you need it. Dictation uses writing AI only if you turn
+on its AI writing switch.
 
 ## Updates and removal
 

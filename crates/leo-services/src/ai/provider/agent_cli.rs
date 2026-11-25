@@ -48,17 +48,21 @@ impl Agent {
 
     pub fn install(self) -> &'static str {
         match self {
-            Agent::ClaudeCode => "install Claude Code: https://claude.com/claude-code",
-            Agent::Codex => "install Codex: npm install -g @openai/codex",
+            Agent::ClaudeCode => {
+                "install Claude Code or the Claude app: https://claude.com/claude-code"
+            }
+            Agent::Codex => "install Codex or the ChatGPT app: https://github.com/openai/codex",
         }
+    }
+
+    pub fn sign_in(self) -> String {
+        format!("choose {} in Writing AI and press Sign in", self.kind())
     }
 
     pub fn missing(self, provider: &str, bin: &str) -> String {
         format!("{provider}: `{bin}` is not installed; {}", self.install())
     }
 }
-
-pub const SIGN_IN: &str = "use Sign in in Writing AI";
 
 pub fn locate(bin: &str) -> Option<PathBuf> {
     let given = Path::new(bin);
@@ -68,76 +72,89 @@ pub fn locate(bin: &str) -> Option<PathBuf> {
     leo_core::paths::find(bin).or_else(|| in_app(bin))
 }
 
-const CODEX_IN_APPS: [&str; 4] = [
-    "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
-    "ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
-    "ChatGPT.app/Contents/Resources/codex",
-    "Codex.app/Contents/Resources/codex",
+const CODEX_APPS: [&str; 2] = ["ChatGPT.app", "Codex.app"];
+const CODEX_INSIDE: [&str; 2] = [
+    "Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "Contents/Resources/codex",
 ];
-const CLAUDE_IN_COPY: &str = if cfg!(windows) {
-    "claude.exe"
+const CLAUDE_INSIDE: &[&str] = if cfg!(windows) {
+    &["claude.exe"]
 } else {
-    "claude.app/Contents/MacOS/claude"
+    &["claude.app/Contents/MacOS/claude", "claude"]
 };
 const CLAUDE_PACKAGES: [&str; 2] = ["Claude_pzs8sxrjxfjjc", "AnthropicPBC.Claude_fnn82j28hfe8t"];
 
 fn in_app(bin: &str) -> Option<PathBuf> {
-    match bin {
-        "codex" if cfg!(target_os = "macos") => codex_in(&[
+    if cfg!(target_os = "macos") {
+        let apps = [
             "/Applications".into(),
             dirs::home_dir()?.join("Applications"),
-        ]),
-        "codex" if cfg!(windows) => codex_copy(&dirs::data_local_dir()?.join("OpenAI/Codex/bin")),
-        "claude" if cfg!(target_os = "macos") => claude_copy(&[dirs::data_dir()?]),
-        "claude" if cfg!(windows) => {
-            let packages = dirs::data_local_dir()?.join("Packages");
-            let mut roots = vec![dirs::data_dir()?];
-            roots.extend(CLAUDE_PACKAGES.map(|p| packages.join(p).join("LocalCache/Roaming")));
-            claude_copy(&roots)
+        ];
+        match bin {
+            "codex" => codex_in(&apps),
+            "claude" if apps.iter().any(|dir| dir.join("Claude.app").is_dir()) => {
+                claude_copy(&[dirs::data_dir()?])
+            }
+            _ => None,
         }
-        _ => None,
+    } else if cfg!(windows) && bin == "claude" {
+        claude_copy(&claude_roots(dirs::data_dir()?, &dirs::data_local_dir()?))
+    } else {
+        None
     }
 }
 
 fn codex_in(apps: &[PathBuf]) -> Option<PathBuf> {
     apps.iter()
-        .flat_map(|dir| CODEX_IN_APPS.map(|inner| dir.join(inner)))
+        .flat_map(|dir| CODEX_APPS.map(|app| dir.join(app)))
+        .flat_map(|app| CODEX_INSIDE.map(|inner| app.join(inner)))
         .find(|program| program.is_file())
 }
 
-fn entries(dir: &Path) -> impl Iterator<Item = (String, PathBuf)> {
+fn claude_roots(roaming: PathBuf, local: &Path) -> Vec<PathBuf> {
+    let packages = local.join("Packages");
+    std::iter::once(roaming)
+        .chain(CLAUDE_PACKAGES.map(|p| packages.join(p).join("LocalCache/Roaming")))
+        .collect()
+}
+
+fn entries(dir: &Path) -> impl Iterator<Item = PathBuf> {
     std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
-        .filter_map(|entry| Some((entry.file_name().into_string().ok()?, entry.path())))
-}
-
-fn codex_copy(root: &Path) -> Option<PathBuf> {
-    entries(root)
-        .filter(|(name, _)| name.len() == 16 && name.bytes().all(|b| b.is_ascii_hexdigit()))
-        .map(|(_, dir)| dir.join("codex.exe"))
-        .filter(|program| program.is_file())
-        .max_by_key(|program| program.metadata().and_then(|m| m.modified()).ok())
+        .map(|entry| entry.path())
 }
 
 fn claude_copy(roots: &[PathBuf]) -> Option<PathBuf> {
     roots
         .iter()
         .flat_map(|root| entries(&root.join("Claude/claude-code")))
-        .filter_map(|(name, dir)| {
-            let version: Vec<u64> = name
+        .filter_map(|dir| {
+            let version: Vec<u64> = dir
+                .file_name()?
+                .to_str()?
                 .split('.')
-                .map(|n| n.parse().ok())
+                .map(|part| part.parse().ok())
                 .collect::<Option<_>>()?;
             Some((version, dir))
         })
-        .flat_map(|(version, dir)| entries(&dir).map(move |(_, copy)| (version.clone(), copy)))
-        .filter(|(_, copy)| copy.join(".verified").is_file())
-        .map(|(version, copy)| (version, copy.join(CLAUDE_IN_COPY)))
-        .filter(|(_, program)| program.is_file())
+        .flat_map(|(version, dir)| {
+            let copies = entries(&dir).chain([dir.clone()]);
+            copies
+                .map(move |copy| (version.clone(), copy))
+                .collect::<Vec<_>>()
+        })
+        .filter_map(|(version, copy)| {
+            let verified = std::fs::metadata(copy.join(".verified")).ok()?;
+            let program = CLAUDE_INSIDE
+                .iter()
+                .map(|inner| copy.join(inner))
+                .find(|program| program.is_file())?;
+            Some((version, verified.modified().ok(), program))
+        })
         .max()
-        .map(|(_, program)| program)
+        .map(|(_, _, program)| program)
 }
 
 const CODEX_OFF: [&str; 19] = [
@@ -195,14 +212,16 @@ pub(crate) fn probe_command(command: Command) -> ProviderResult<String> {
     if success {
         Ok(text)
     } else {
-        Err(ProviderError::Retryable("The writing program could not be checked safely. Run its --help command, then try again.".into()))
+        Err(ProviderError::Retryable(
+            "The writing program could not be checked safely. Try again in a moment.".into(),
+        ))
     }
 }
 fn probe_status(mut command: Command) -> ProviderResult<(bool, String)> {
     let failed = || {
         ProviderError::Retryable(
-        "The writing program could not be checked safely. Run its `--help` command, then try again.".into(),
-    )
+            "The writing program could not be checked safely. Try again in a moment.".into(),
+        )
     };
     let (output, writer) = std::io::pipe().map_err(|_| failed())?;
     let errors = writer.try_clone().map_err(|_| failed())?;
@@ -230,14 +249,14 @@ fn probe_status(mut command: Command) -> ProviderResult<(bool, String)> {
         if watch.remaining(PROBE_LIMIT).is_none() {
             child.stop();
             return Err(ProviderError::Retryable(
-                "The writing program took too long to check. Run its `--help` command, then try again.".into(),
+                "The writing program took too long to check. Try again in a moment.".into(),
             ));
         }
         std::thread::sleep(Duration::from_millis(10));
     };
     if exceeded || watch.stalled.load(Ordering::Relaxed) {
         return Err(ProviderError::Retryable(
-            "The writing program could not be checked safely. Run its `--help` command, then try again.".into(),
+            "The writing program could not be checked safely. Try again in a moment.".into(),
         ));
     }
     Ok((status.success(), text))
@@ -263,7 +282,7 @@ pub(crate) fn codex_disables(program: &Path) -> ProviderResult<Vec<String>> {
         let found = known_features(&listing);
         if !found.iter().any(|f| f == "shell_tool") {
             return Err(ProviderError::Retryable(
-                "Codex did not report its safety controls. Update Codex, then try again.".into(),
+                "Codex did not report its safety controls. Update Codex or the ChatGPT app, then try again.".into(),
             ));
         }
         Ok(found)
@@ -881,7 +900,8 @@ impl ClaudeSession {
                     self.child.stop();
                     return Err(ProviderError::Retryable(format!(
                         "{}: claude ended the session. If it is not signed in, {}.",
-                        self.name, SIGN_IN
+                        self.name,
+                        Agent::ClaudeCode.sign_in()
                     )));
                 }
             }
@@ -1403,9 +1423,14 @@ impl AgentCli {
                 _ if !stderr.trim().is_empty() => last_words(&stderr),
                 _ => last_words(&heard.answer),
             };
+            let hint = if signed_out(&said) {
+                format!(" If it is not signed in, {}.", self.agent.sign_in())
+            } else {
+                String::new()
+            };
             return Err(ProviderError::Retryable(format!(
-                "{}: {} stopped ({}): {said}. If it is not signed in, {}.",
-                self.name, self.bin, status, SIGN_IN
+                "{}: {} stopped ({status}): {said}.{hint}",
+                self.name, self.bin
             )));
         }
         let mut answer = heard.answer.trim().to_string();
@@ -1480,6 +1505,22 @@ fn auth_probe(agent: Agent, bin: &str) -> Option<(bool, String)> {
         .current_dir(std::env::temp_dir())
         .env("NO_COLOR", "1");
     probe_status(command).ok()
+}
+
+fn signed_out(said: &str) -> bool {
+    let said = said.to_lowercase();
+    said.trim().is_empty()
+        || [
+            "logged in",
+            "signed in",
+            "/login",
+            "codex login",
+            "unauthorized",
+            "401",
+            "authenticat",
+        ]
+        .iter()
+        .any(|marker| said.contains(marker))
 }
 
 const SIGN_IN_FRESH: Duration = Duration::from_secs(600);
@@ -1895,56 +1936,79 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let apps = [dir.path().join("all"), dir.path().join("mine")];
         assert_eq!(codex_in(&apps), None);
-        let order: Vec<(&PathBuf, &str)> = apps
-            .iter()
-            .flat_map(|app| CODEX_IN_APPS.map(|inner| (app, inner)))
-            .collect();
-        for (app, inner) in order.into_iter().rev() {
-            let program = put(app, inner);
-            assert_eq!(codex_in(&apps), Some(program));
+        for dir in apps.iter().rev() {
+            for app in CODEX_APPS.iter().rev() {
+                for inner in CODEX_INSIDE.iter().rev() {
+                    let program = put(&dir.join(app), inner);
+                    assert_eq!(codex_in(&apps), Some(program));
+                }
+            }
         }
     }
 
-    #[test]
-    fn the_codex_copy_is_the_newest_finished_one() {
-        let dir = tempfile::tempdir().unwrap();
-        assert_eq!(codex_copy(dir.path()), None);
-        put(dir.path(), ".staging-0123456789abcdef-x/codex.exe");
-        put(dir.path(), "0123456789abcde/codex.exe");
-        std::fs::create_dir_all(dir.path().join("ffffffffffffffff")).unwrap();
-        assert_eq!(codex_copy(dir.path()), None);
-        let new = put(dir.path(), "0123456789abcdef/codex.exe");
-        let old = put(dir.path(), "fedcba9876543210/codex.exe");
-        std::fs::File::options()
-            .write(true)
-            .open(&old)
-            .unwrap()
-            .set_modified(std::time::SystemTime::UNIX_EPOCH)
-            .unwrap();
-        assert_eq!(codex_copy(dir.path()), Some(new));
+    fn verified(root: &Path, at: &str, inner: &str, age: u64) -> PathBuf {
+        let at = root.join("Claude/claude-code").join(at);
+        let mark = put(&at, ".verified");
+        let when = std::time::SystemTime::now() - Duration::from_secs(age);
+        let mark = std::fs::File::options().write(true).open(mark).unwrap();
+        mark.set_modified(when).unwrap();
+        put(&at, inner)
     }
 
     #[test]
     fn the_claude_copy_is_the_highest_verified_version_in_any_folder() {
         let dir = tempfile::tempdir().unwrap();
         let roots = [dir.path().join("one"), dir.path().join("two")];
-        let copy = |root: &PathBuf, at: &str, verified: bool| {
-            let at = format!("Claude/claude-code/{at}");
-            if verified {
-                put(root, &format!("{at}/.verified"));
-            }
-            put(root, &format!("{at}/{CLAUDE_IN_COPY}"))
-        };
+        let inner = CLAUDE_INSIDE[0];
         assert_eq!(claude_copy(&roots), None);
-        copy(&roots[0], "2.1.400/aaaa", false);
+        put(
+            &roots[0],
+            &format!("Claude/claude-code/2.1.400/aaaa/{inner}"),
+        );
         put(&roots[0], "Claude/claude-code/2.1.401/aaaa/.verified");
-        copy(&roots[0], "next/aaaa", true);
+        verified(&roots[0], "next/aaaa", inner, 0);
         put(&roots[0], "Claude/claude-code/auto-update-state.json");
         assert_eq!(claude_copy(&roots), None);
-        let old = copy(&roots[0], "2.1.99/bbbb", true);
+        let old = verified(&roots[0], "2.1.99/bbbb", inner, 0);
         assert_eq!(claude_copy(&roots), Some(old));
-        let new = copy(&roots[1], "2.1.330/cccc", true);
+        let new = verified(&roots[1], "2.1.330/cccc", inner, 9);
         assert_eq!(claude_copy(&roots), Some(new));
+    }
+
+    #[test]
+    fn two_builds_of_one_claude_version_go_by_the_one_the_app_finished_last() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = [dir.path().to_path_buf()];
+        verified(dir.path(), "2.1.330/ffff", CLAUDE_INSIDE[0], 60);
+        let last = verified(dir.path(), "2.1.330/1111", CLAUDE_INSIDE[0], 0);
+        assert_eq!(claude_copy(&roots), Some(last));
+    }
+
+    #[test]
+    fn a_claude_copy_without_a_build_folder_or_a_bundle_is_found_too() {
+        for at in ["2.1.330", "2.1.330/aaaa"] {
+            for inner in CLAUDE_INSIDE {
+                let dir = tempfile::tempdir().unwrap();
+                let program = verified(dir.path(), at, inner, 0);
+                assert_eq!(claude_copy(&[dir.path().to_path_buf()]), Some(program));
+            }
+        }
+    }
+
+    #[test]
+    fn a_pc_keeps_claude_in_the_roaming_folder_or_a_packaged_copy_of_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (roaming, local) = (dir.path().join("Roaming"), dir.path().join("Local"));
+        let roots = claude_roots(roaming.clone(), &local);
+        assert_eq!(roots[0], roaming);
+        for (root, package) in roots[1..]
+            .iter()
+            .zip(["Claude_pzs8sxrjxfjjc", "AnthropicPBC.Claude_fnn82j28hfe8t"])
+        {
+            let folder = local.join("Packages").join(package);
+            assert_eq!(*root, folder.join("LocalCache").join("Roaming"));
+        }
+        assert_eq!(roots.len(), 3);
     }
 
     #[test]
@@ -1961,9 +2025,9 @@ mod tests {
     fn the_cli_on_path_comes_before_the_copy_in_an_app() {
         const CHILD: &str = "LEO_TEST_APP_COPY_HOME";
         if let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) {
-            let copy = home.join(format!(
-                "Library/Application Support/Claude/claude-code/2.1.330/aaaa/{CLAUDE_IN_COPY}"
-            ));
+            let copy = home
+                .join("Library/Application Support/Claude/claude-code/2.1.330/aaaa")
+                .join(CLAUDE_INSIDE[0]);
             let cli = home.join("bin/claude");
             assert_eq!(locate("claude"), Some(cli.clone()));
             std::fs::remove_file(cli).unwrap();
@@ -1972,18 +2036,18 @@ mod tests {
             assert_eq!(locate("claude"), None);
             assert_eq!(locate("codex"), Some(home.join("bin/codex")));
             std::fs::remove_file(home.join("bin/codex")).unwrap();
-            assert!(CODEX_IN_APPS
-                .iter()
-                .any(|inner| locate("codex").unwrap().ends_with(inner)));
+            let codex = locate("codex").unwrap();
+            assert!(CODEX_INSIDE.iter().any(|inner| codex.ends_with(inner)));
             return;
         }
         let home = tempfile::tempdir().unwrap();
         put(home.path(), "bin/claude");
         put(home.path(), "bin/codex");
-        let copies = "Library/Application Support/Claude/claude-code/2.1.330/aaaa";
-        put(home.path(), &format!("{copies}/.verified"));
-        put(home.path(), &format!("{copies}/{CLAUDE_IN_COPY}"));
-        put(home.path(), &format!("Applications/{}", CODEX_IN_APPS[0]));
+        let support = home.path().join("Library/Application Support");
+        verified(&support, "2.1.330/aaaa", CLAUDE_INSIDE[0], 0);
+        let apps = home.path().join("Applications");
+        std::fs::create_dir_all(apps.join("Claude.app")).unwrap();
+        put(&apps.join(CODEX_APPS[0]), CODEX_INSIDE[0]);
         let output = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -2076,7 +2140,7 @@ mod tests {
         assert!(!agent.available());
         assert!(agent
             .unavailable_reason()
-            .contains("npm install -g @openai/codex"));
+            .contains("install Codex or the ChatGPT app"));
         assert!(matches!(
             agent.complete(&request()),
             Err(ProviderError::Retryable(_))
@@ -2512,7 +2576,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"No
         match agent.complete(&request()) {
             Err(ProviderError::Retryable(message)) => {
                 assert!(message.contains("Not logged in"), "{message}");
-                assert!(message.contains(SIGN_IN), "{message}");
+                assert!(message.contains("press Sign in"), "{message}");
             }
             other => panic!("expected a retryable failure, got {other:?}"),
         }
@@ -2964,10 +3028,33 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"x
         match agent.complete(&request()) {
             Err(ProviderError::Retryable(message)) => {
                 assert!(message.contains("Not logged in"), "{message}");
-                assert!(message.contains(SIGN_IN), "{message}");
+                assert!(message.contains("press Sign in"), "{message}");
+                assert_eq!(
+                    crate::ai::why(crate::health::WritingState::Ready, Some("Codex"), &message),
+                    "leo can't write yet: Codex needs you to sign in."
+                );
             }
             other => panic!("expected a retryable failure, got {other:?}"),
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failure_that_is_not_about_sign_in_never_asks_for_one() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let bin = script(
+            dir.path(),
+            "cat >/dev/null\necho 'usage limit reached, 429' >&2\nexit 1",
+        );
+        let cfg = config(ProviderKind::Codex, &bin, None);
+        let agent = AgentCli::new("codex".into(), Agent::Codex, &cfg);
+        let message = agent.complete(&request()).unwrap_err().to_string();
+        assert!(message.contains("usage limit reached"), "{message}");
+        assert!(!message.contains("Sign in"), "{message}");
+        assert_eq!(
+            crate::ai::why(crate::health::WritingState::Ready, Some("Codex"), &message),
+            "Your writing AI didn't answer just now (busy). Try again in a moment."
+        );
     }
 
     #[test]

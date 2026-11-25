@@ -97,10 +97,10 @@ a test, or leave it unset to see the user's own data.
 - Sign in (2026-11-09, `sign_in.rs`, AppApi `{action:"sign_in",provider}`, only
   `claude_code`/`codex`): Codex runs `codex login` quietly (it opens the browser; one at
   a time, reaped, stopped after 10 min); Claude Code opens a terminal running the resolved
-  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
-  `open` on macOS, and on Windows `cmd /c start "" cmd /k <path>` in the program's own
-  folder (so the bare `claude` used for a path with cmd metacharacters is found there),
-  the one intentional visible console. The command lines are pure functions with unit tests.
+  `claude auth login` (never plain `claude`, whose updater would install a CLI beside an app's copy): a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
+  `open` on macOS, and on Windows `cmd /c start "" cmd /k <path> auth login` (bare
+  `claude`, from its own folder, for a path with cmd metacharacters), the one
+  intentional visible console. The command lines are pure functions with unit tests.
 - Downloads save to `~/Downloads` under a free name (`links::download_path`)
   and are revealed when done.
 - `window.print` calls `print_page` on macOS; Windows retains its original
@@ -122,8 +122,9 @@ own name, a veto only) is handed to
 until a call is bound it copies them all and `call_names::pick` binds the one app
 (or browser window) that shows a call (`call_names::shows_call`: a call control,
 or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
-control), after which only that pid (and title) is
-read; front-most order plays no part. macOS reads through Accessibility (no
+control), after which only that pid (and page title) is
+read; a Mac app's main and focused windows are read too, since AXWindows is empty
+while the call is on another Space; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
 every element before it is messaged, 4,000 elements a read, a Zoom window at most
 1,500 to depth 14, others to depth 40, the read's deadline checked between

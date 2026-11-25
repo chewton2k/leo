@@ -18,7 +18,7 @@ test('coding accounts distinguish signed in, signed out, unknown and unavailable
     const page = { tasks: [{ task: 'writing', provider: 'ollama' }], plans: [{ provider: 'codex', name: 'Codex <img>', installed, signed_in }] };
     const html = value.codingPlans(page);
     assert.ok(html.includes(label));
-    assert.equal(html.includes('Choose it in Writing AI to sign in.'), installed && signed_in !== true);
+    assert.equal(html.includes('Choose Codex &lt;img&gt; in Writing AI and press Sign in.'), installed && signed_in !== true);
     assert.ok(!html.includes('<img>'));
     assert.ok(!html.includes('data-action="use-plan"'));
   }

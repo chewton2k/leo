@@ -152,12 +152,12 @@ test('a missing coding app names the desktop app it comes with, on a Mac only', 
   const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: (text) => String(text), choiceCards: () => '', ON_MAC: true, state: { settings: {} } };
   vm.createContext(context);
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
-  const card = (provider, installed) => context.taskCard({ task: 'writing', provider, choices: [], models: [], signin: { installed, text: installed ? 'Uses your plan.' : 'It is not installed on this computer.' } });
-  assert.match(card('codex', false), /It is not installed on this computer\. It also comes with the ChatGPT app\.</);
-  assert.match(card('claude_code', false), /It also comes with the Claude app: open Code there once\.</);
-  for (const provider of ['codex', 'claude_code']) assert.doesNotMatch(card(provider, true), /also comes with/);
+  const card = (provider, installed, missing = !installed) => context.taskCard({ task: 'writing', provider, choices: [], models: [], signin: { installed, missing, text: installed ? 'Uses your plan.' : 'It is not installed on this computer.' } });
+  assert.match(card('codex', false), /It is not installed on this computer\. Installing the ChatGPT app also works\.</);
+  assert.match(card('claude_code', false), /Opening Code in the Claude app once also works\.</);
+  for (const provider of ['codex', 'claude_code']) for (const html of [card(provider, true), card(provider, false, false)]) assert.doesNotMatch(html, /also works/);
   context.ON_MAC = false;
-  for (const provider of ['codex', 'claude_code']) assert.doesNotMatch(card(provider, false), /also comes with/);
+  for (const provider of ['codex', 'claude_code']) assert.doesNotMatch(card(provider, false), /also works/);
 });
 
 test('Ollama setup guides an install, waits for the app, and lists models that fit', () => {
@@ -238,7 +238,8 @@ test('Settings → Writing AI signs in, waits for the probe and turns the status
   clock += 3000;
   await timers.shift()[0]();
   assert.match(card, /set-status ok">Ready/);
-  assert.doesNotMatch(card, /writing-sign-in|Waiting/);
+  assert.match(card, /data-provider="claude_code">Sign in again</);
+  assert.doesNotMatch(card, /Waiting/);
   assert.equal(timers.length, 0);
   Object.assign(context.state.settings.plans[0], { installed: false, signed_in: null });
   assert.ok(context.taskCard(task).includes('href="https://claude.com/claude-code"'));
