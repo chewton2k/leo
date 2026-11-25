@@ -294,6 +294,9 @@ pub(crate) async fn list_unopened(
                     rows.collect::<rusqlite::Result<HashSet<String>>>()
                 })
                 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            if ids.is_empty() {
+                return Ok(Json(BTreeMap::new()));
+            }
             Ok(Json(
                 store
                     .notes

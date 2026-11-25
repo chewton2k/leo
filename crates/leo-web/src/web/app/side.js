@@ -524,7 +524,7 @@ function sideNoteMark(note, open) {
   const fresh = side.sort !== 'updated' && until > Date.now() && until - Date.now() <= SIDE_FRESH_MS + SIDE_NEW_MS;
   if (fresh) side.freshUntil = Math.min(side.freshUntil, until);
   if (open && marginPage.reading) return '<i class="side-reading" aria-hidden="true" title="Felix is reading this note"></i>';
-  if (side.unopened.has(note.id)) return SIDE_UNOPENED;
+  if (!open && side.unopened.has(note.id)) return SIDE_UNOPENED;
   return fresh ? '<i class="side-fresh" aria-hidden="true" title="Edited in the last 30 minutes"></i>' : '';
 }
 

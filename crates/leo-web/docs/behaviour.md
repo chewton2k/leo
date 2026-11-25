@@ -145,7 +145,8 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   edit, while composing or when locked). Both are customizable in Settings →
   Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
   New folder, icons level and no Folders label (2026-11-16); each folder row ends with its quiet note count and note rows
-  carry no icon (2026-11-21, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
+  carry no icon (2026-11-21, the user's call); a note leo wrote from a recording or file carries a blue ink blot until opened,
+  on its closed folder when it is out of sight (2026-11-24, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
   opens a row in place that slides the rows below down. The explorer
   also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
