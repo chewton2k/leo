@@ -749,8 +749,8 @@ test('R4 Settings stays centered and is captured in both themes at every width',
 });
 
 const PLANS = () => [
-  { provider: 'codex', name: 'Codex', installed: true, signed_in: true, signin: 'codex login', limits: { five_hour: { used: 0.39, resets_at: Math.floor(Date.now() / 1000) + 3 * 3600 + 300 }, seven_day: { used: 0.06, resets_at: Math.floor(Date.now() / 1000) + 4 * 86400 }, seen_at: new Date(Date.now() - 60000).toISOString() } },
-  { provider: 'claude_code', name: 'Claude Code', installed: true, signed_in: true, signin: 'claude', limits: { five_hour: { used: 0.95, resets_at: Math.floor(Date.now() / 1000) + 2 * 3600 }, seven_day: { used: 0.4, resets_at: Math.floor(Date.now() / 1000) + 5 * 86400 }, seen_at: new Date(Date.now() - 60000).toISOString() } },
+  { provider: 'codex', name: 'Codex', installed: true, signed_in: true, limits: { five_hour: { used: 0.39, resets_at: Math.floor(Date.now() / 1000) + 3 * 3600 + 300 }, seven_day: { used: 0.06, resets_at: Math.floor(Date.now() / 1000) + 4 * 86400 }, seen_at: new Date(Date.now() - 60000).toISOString() } },
+  { provider: 'claude_code', name: 'Claude Code', installed: true, signed_in: true, limits: { five_hour: { used: 0.95, resets_at: Math.floor(Date.now() / 1000) + 2 * 3600 }, seven_day: { used: 0.4, resets_at: Math.floor(Date.now() / 1000) + 5 * 86400 }, seen_at: new Date(Date.now() - 60000).toISOString() } },
 ];
 
 test('R3/R12 Usage keeps its layout and returns to the pre-redesign provider colors in both themes', async ({ page }) => {

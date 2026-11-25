@@ -62,7 +62,7 @@ pub fn scan(notes: &Path, facts: leo_core::store::Facts, fresh: bool) -> Result<
         let agent=leo_services::ai::provider::agent_cli::Agent::of(provider)?;
         let cli=leo_services::ai::provider::agent_cli::AgentCli::new(agent.program().into(),agent,provider);
         let signed_in=signed_in_now(agent,cli.bin(),fresh);
-        Some(json!({"title":"Writing AI sign-in","checks":[{"name":format!("{} sign-in",agent.program()),"state":match signed_in { Some(true)=>"ready",Some(false)=>"missing",None=>"warn" },"fix":format!("If sign-in is needed, {}. You can also use Test in Writing AI.",agent.sign_in()),"section":"writing"}]}))
+        Some(json!({"title":"Writing AI sign-in","checks":[{"name":format!("{} sign-in",agent.program()),"state":match signed_in { Some(true)=>"ready",Some(false)=>"missing",None=>"warn" },"fix":"If sign-in is needed, use Sign in in Writing AI.","section":"writing"}]}))
     });
     let mut sections:Vec<Value>=sections.into_iter().map(|section| {
         let checks:Vec<Value>=section.checks.into_iter().map(|check| {

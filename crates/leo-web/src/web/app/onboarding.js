@@ -258,7 +258,7 @@ function onboardingWriterStatus(c) {
   const row = (text, label, ok = false) => `<div class="set-row"><span class="grow">${text}</span>${ok ? '' : signInControl(c, 'onboarding-sign-in')}<span class="set-status ${ok ? 'ok' : 'missing'}">${label}</span></div>`;
   if (onboardingWriterReady(c)) return c.id === 'ollama' ? row(`Ollama is running on ${where}.`, 'Ready', true) + ollamaSetup(onboardingOllama, onboardingOllamaPick) : row(`${name} is signed in on ${where}.`, 'Ready', true);
   if (onboardingWriterUsable(c)) return row(`${name} is installed on ${where}. leo couldn’t tell whether you’re signed in.`, 'Sign-in unknown');
-  if (c.id !== 'ollama') return c.installed ? row(signInLate(c.id) ? SIGN_IN_LATE : `Sign in to ${name}, then come back.`, 'Sign in needed') : row(`${name} is not installed on ${where}.`, 'Not installed');
+  if (c.id !== 'ollama') return c.installed ? row(signInLate(c.id) ? SIGN_IN_LATE : `Sign in to ${name}, then come back.`, 'Sign in needed') : row(`${name} is not installed on ${where}.${inApp(c.id)}`, 'Not installed');
   if (!c.installed) return ollamaSetup({ installed: false }, '');
   if (!c.running) return row('Open Ollama to start it.', 'Not running');
   return row('Choose a model for Ollama to download.', 'No model') + ollamaSetup(onboardingOllama, '');

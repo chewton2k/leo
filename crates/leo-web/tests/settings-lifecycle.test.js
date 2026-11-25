@@ -148,6 +148,18 @@ test('the calendar card offers to record when an event starts, on by default onc
   assert.equal(context.state.calendar.offer, false);
 });
 
+test('a missing coding app names the desktop app it comes with, on a Mac only', () => {
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: (text) => String(text), choiceCards: () => '', ON_MAC: true, state: { settings: {} } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const card = (provider, installed) => context.taskCard({ task: 'writing', provider, choices: [], models: [], signin: { installed, text: installed ? 'Uses your plan.' : 'It is not installed on this computer.' } });
+  assert.match(card('codex', false), /It is not installed on this computer\. It also comes with the ChatGPT app\.</);
+  assert.match(card('claude_code', false), /It also comes with the Claude app: open Code there once\.</);
+  for (const provider of ['codex', 'claude_code']) assert.doesNotMatch(card(provider, true), /also comes with/);
+  context.ON_MAC = false;
+  for (const provider of ['codex', 'claude_code']) assert.doesNotMatch(card(provider, false), /also comes with/);
+});
+
 test('Ollama setup guides an install, waits for the app, and lists models that fit', () => {
   const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, {get: () => ''}), esc: text => String(text), choiceCards: () => '', ON_MAC: true };
   vm.createContext(context);

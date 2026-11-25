@@ -209,13 +209,12 @@ fn agents(cfg: &Config, probe: bool) -> Vec<(choice::Choice, Agent, bool, Option
 pub fn coding_plans(cfg: &Config, usage: &crate::usage::Seen) -> Vec<Value> {
     agents(cfg, true)
         .into_iter()
-        .map(|(choice, agent, installed, signed_in)| {
+        .map(|(choice, _, installed, signed_in)| {
             json!({
                 "provider": choice.provider,
                 "name": choice.name,
                 "installed": installed,
                 "signed_in": signed_in,
-                "signin": agent.sign_in(),
                 "limits": usage.get(choice.provider),
             })
         })

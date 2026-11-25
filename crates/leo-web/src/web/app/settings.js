@@ -252,6 +252,8 @@ function providerCard(c) {
 const SIGN_IN_POLL_MS = 3000, SIGN_IN_WAIT_MS = 120000;
 const SIGN_IN_LATE = 'Still waiting. Finish signing in, then press Check again.';
 const INSTALL_URL = { claude_code: 'https://claude.com/claude-code', codex: 'https://github.com/openai/codex' };
+const IN_APP = { claude_code: ' It also comes with the Claude app: open Code there once.', codex: ' It also comes with the ChatGPT app.' };
+function inApp(id) { return ON_MAC && IN_APP[id] || ''; }
 let signInWait = null;
 function signInLate(id) { return signInWait?.provider === id && signInWait.late; }
 function signInControl(c, action) {
@@ -316,7 +318,7 @@ function taskCard(t) {
     const form = `<div class="set-key-form"><input type="password" autocomplete="off" spellcheck="false"${has ? ` class="has-key" placeholder="${esc(t.key.hint || '••••••••')}" aria-label="${esc(t.key.name)} key is stored; type a new one to replace it"` : ` placeholder="Paste your ${esc(t.key.name)} API key" aria-label="${esc(t.key.name)} key"`} data-key-input="${esc(t.key.account)}"><button class="btn primary sm" data-action="set-key" data-account="${esc(t.key.account)}">${has ? 'Replace key' : 'Save key'}</button></div>`;
     key = `<div class="set-row column" data-find="writing-key"><div class="set-line"><span class="set-label">${esc(t.key.name)} key</span><span class="set-value">${has ? '' : '<span class="set-status missing">Not added</span>'}${has ? `<button class="btn plain sm" data-action="remove-key" data-account="${esc(t.key.account)}" data-name="${esc(t.key.name)}">Remove</button>` : ''}</span></div>${form}${t.key.ignored ? `<p class="hint">leo does not read $${esc(t.key.ignored)}; add the key here instead.</p>` : ''}</div>`;
   }
-  const signin = t.signin ? `<p class="set-note${t.signin.installed ? '' : ' warn'}">${esc(t.signin.text).replace(/`([^`]+)`/g, '<code>$1</code>')}</p>` : '';
+  const signin = t.signin ? `<p class="set-note${t.signin.installed ? '' : ' warn'}">${esc(t.signin.text).replace(/`([^`]+)`/g, '<code>$1</code>')}${t.signin.installed ? '' : inApp(t.provider)}</p>` : '';
   const signInRow = plan && plan.signed_in !== true && INSTALL_URL[plan.provider] ? `<div class="set-row"><span class="grow hint">${signInLate(plan.provider) ? SIGN_IN_LATE : ''}</span>${signInControl({ id: plan.provider, installed: plan.installed }, 'writing-sign-in')}</div>` : '';
   const usage = t.usage && !plan ? `<p class="set-note">Plan used: ${esc(t.usage)}</p>` : '';
   const ollama = t.task === 'writing' && t.provider === 'ollama';
@@ -451,7 +453,7 @@ function codingPlans(page) {
     const connected = plan.installed && plan.signed_in === true;
     const status = !plan.installed ? 'Not available' : connected ? 'Signed in' : plan.signed_in === false ? 'Signed out' : 'Sign-in unknown';
     const updated = planUpdated(plan);
-    return `<section class="coding-plan" data-provider="${esc(plan.provider)}" aria-label="${esc(plan.name)} account"><header><div class="plan-title"><h4>${esc(plan.name)}</h4>${updated ? `<span class="hint plan-updated">${esc(updated)}</span>` : ''}</div><span class="set-status${connected ? ' ok' : ' missing'}">${status}</span></header>${planLimits(plan)}${!connected ? `<p class="hint">${plan.installed ? `Check sign-in with ${esc(plan.signin)}.` : 'Install or update this coding app, then refresh Usage.'}</p>` : ''}</section>`;
+    return `<section class="coding-plan" data-provider="${esc(plan.provider)}" aria-label="${esc(plan.name)} account"><header><div class="plan-title"><h4>${esc(plan.name)}</h4>${updated ? `<span class="hint plan-updated">${esc(updated)}</span>` : ''}</div><span class="set-status${connected ? ' ok' : ' missing'}">${status}</span></header>${planLimits(plan)}${!connected ? `<p class="hint">${plan.installed ? 'Choose it in Writing AI to sign in.' : 'Install or update this coding app, then refresh Usage.'}</p>` : ''}</section>`;
   }).join('')}</div>`;
 }
 

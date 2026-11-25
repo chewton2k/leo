@@ -74,7 +74,7 @@ test('coding accounts show readable usage and sign-in states in both themes and 
       await page.evaluate(theme => {
         document.documentElement.dataset.theme = theme;
         const limits = { five_hour: { used: .25, resets_at: Date.now() / 1000 + 3600 }, seven_day: { used: .93, resets_at: Date.now() / 1000 + 86400 }, seen_at: new Date().toISOString() };
-        document.querySelector('#plans').innerHTML = codingPlans({ tasks: [{ task: 'writing', provider: 'codex' }], plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true, limits }, { provider: 'claude_code', name: 'Claude Code', installed: true, signed_in: false, signin: 'claude auth login', limits: null }] });
+        document.querySelector('#plans').innerHTML = codingPlans({ tasks: [{ task: 'writing', provider: 'codex' }], plans: [{ provider: 'codex', name: 'Codex', installed: true, signed_in: true, limits }, { provider: 'claude_code', name: 'Claude Code', installed: true, signed_in: false, limits: null }] });
       }, theme);
       await expect(page.getByRole('meter')).toHaveCount(4);
       await expect(page.getByRole('meter', { name: 'Codex 5 hour remaining' })).toHaveAttribute('aria-valuenow', '75');

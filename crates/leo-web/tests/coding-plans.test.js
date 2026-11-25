@@ -15,9 +15,10 @@ function context() {
 test('coding accounts distinguish signed in, signed out, unknown and unavailable without changing the selection', () => {
   const value = context();
   for (const [installed, signed_in, label] of [[true, true, 'Signed in'], [true, false, 'Signed out'], [true, null, 'Sign-in unknown'], [false, null, 'Not available']]) {
-    const page = { tasks: [{ task: 'writing', provider: 'ollama' }], plans: [{ provider: 'codex', name: 'Codex <img>', installed, signed_in, signin: 'codex login' }] };
+    const page = { tasks: [{ task: 'writing', provider: 'ollama' }], plans: [{ provider: 'codex', name: 'Codex <img>', installed, signed_in }] };
     const html = value.codingPlans(page);
     assert.ok(html.includes(label));
+    assert.equal(html.includes('Choose it in Writing AI to sign in.'), installed && signed_in !== true);
     assert.ok(!html.includes('<img>'));
     assert.ok(!html.includes('data-action="use-plan"'));
   }
