@@ -75,6 +75,9 @@ const COUNTED: &[&str] = &[
 ];
 
 fn shown_count(text: &str) -> Option<usize> {
+    if let Some(count) = low(text).strip_prefix("contributors ") {
+        return count.parse().ok();
+    }
     let body = text.trim().strip_suffix(')')?;
     let open = body.rfind('(')?;
     let head = low(&body[..open]);
@@ -111,7 +114,8 @@ pub fn read_windows(kind: Kind, windows: &[Window]) -> Reading {
         participants: unique(&reading.participants),
         me: reading.me,
         shown: shown(&looked),
-        unmarked_self: kind == Kind::Zoom,
+        unmarked_self: kind != Kind::Teams,
+        marks_outlast_speech: kind == Kind::Zoom,
     }
 }
 
@@ -319,6 +323,7 @@ fn zoom(windows: &[Window]) -> Reading {
 }
 
 pub const MEET_TALKING_CLASSES: &[&str] = &["v5h6Xc"];
+const MEET_SOUND_CLASSES: &[&str] = &["Oaajhc", "wEsLMd", "HX2H7", "OgVli", "BlxGDf"];
 const TILE_UP: usize = 7;
 const MEET_WORDS: &[&str] = &[
     "meet",
@@ -415,8 +420,24 @@ fn chat_panel(node: &Node) -> bool {
         })
 }
 
+fn only_name(node: &Node, one: &str) -> bool {
+    let other = is(node, TEXTS)
+        && text(node)
+            .and_then(meet_name)
+            .is_some_and(|name| norm(&name) != norm(one));
+    !other && node.children.iter().all(|child| only_name(child, one))
+}
+
+const MEET_OWN_CONTROLS: &[&str] = &["backgrounds and effects", "you’re continuously framed"];
+
+fn own_controls(node: &Node) -> bool {
+    label(node).is_some_and(|l| MEET_OWN_CONTROLS.contains(&low(l).as_str()))
+        || node.children.iter().any(own_controls)
+}
+
 fn meet(windows: &[Window]) -> Reading {
-    let mut groups: Vec<(&Node, Vec<String>)> = Vec::new();
+    let mut reading = Reading::default();
+    let mut groups: Vec<(&Node, Vec<Option<String>>)> = Vec::new();
     for window in windows {
         let titled = window
             .title
@@ -433,14 +454,24 @@ fn meet(windows: &[Window]) -> Reading {
             .map(low)
             .collect();
         walk(&window.tree, &mut Vec::new(), &mut |node, up| {
-            if !is(node, TEXTS) || up.len() < TILE_UP || up.iter().any(|a| live(a) || chat_panel(a))
+            if !is(node, TEXTS)
+                || up.len() < TILE_UP
+                || up
+                    .iter()
+                    .any(|a| live(a) || chat_panel(a) || a.role == "AXHeading")
             {
                 return;
             }
-            let Some(name) = text(node).and_then(meet_name) else {
+            if text(node).is_some_and(|t| low(t) == "(you)") {
+                let row = up.iter().rev().find_map(|a| label(a));
+                reading.me = row.and_then(meet_name).or(reading.me.take());
+                return;
+            }
+            let Some(said) = text(node).filter(|said| wording(said)) else {
                 return;
             };
-            if skip.contains(&low(&name)) {
+            let name = meet_name(said);
+            if name.as_ref().is_some_and(|name| skip.contains(&low(name))) {
                 return;
             }
             let root = up[up.len() - TILE_UP];
@@ -450,30 +481,77 @@ fn meet(windows: &[Window]) -> Reading {
             }
         });
     }
-    let mut reading = Reading::default();
-    for (root, names) in groups {
-        let names = unique(&names);
-        let [one] = names.as_slice() else {
+    let mut tiles: Vec<(&Node, String)> = Vec::new();
+    for (root, names) in &groups {
+        let named: Vec<String> = names.iter().flatten().cloned().collect();
+        let named = unique(&named);
+        let [one] = named.as_slice() else {
             continue;
         };
-        if norm(one) == "you" {
+        if names.iter().any(Option::is_none) || !only_name(root, one) {
+            continue;
+        }
+        tiles.push((root, one.clone()));
+    }
+    for (root, one) in &tiles {
+        if norm(one) == "you" || own_controls(root) {
             reading.me = Some(one.clone());
         }
-        let mut talking = false;
-        walk(root, &mut Vec::new(), &mut |x, _| {
-            if x.classes
-                .iter()
-                .any(|c| MEET_TALKING_CLASSES.contains(&c.as_str()))
-            {
-                talking = true;
-            }
-        });
-        if talking {
+        if has_mark(root) {
             reading.speaking.push(one.clone());
         }
         reading.participants.push(one.clone());
     }
+    let mut stray = false;
+    for window in windows {
+        walk(&window.tree, &mut Vec::new(), &mut |node, up| {
+            if !marked(node) {
+                return;
+            }
+            let at = |other: &Node| {
+                std::ptr::eq(other, node) || up.iter().any(|a| std::ptr::eq(*a, other))
+            };
+            let row = up.iter().rev().find_map(|a| label(a)).and_then(meet_name);
+            let known = tiles.iter().any(|(root, name)| {
+                at(root) || row.as_ref().is_some_and(|row| norm(row) == norm(name))
+            });
+            stray |= !known && (groups.iter().any(|(root, _)| at(root)) || has_wording(node));
+        });
+    }
+    let sounding = tiles
+        .iter()
+        .any(|(root, one)| !has_mark(root) && reading.me.as_ref() != Some(one) && sounds(root));
+    if stray || sounding {
+        reading.speaking.clear();
+    }
     reading
+}
+
+fn marked(node: &Node) -> bool {
+    has_class(node, MEET_TALKING_CLASSES)
+}
+
+fn has_class(node: &Node, classes: &[&str]) -> bool {
+    node.classes.iter().any(|c| classes.contains(&c.as_str()))
+}
+
+fn has_mark(node: &Node) -> bool {
+    marked(node) || node.children.iter().any(has_mark)
+}
+
+fn sounds(node: &Node) -> bool {
+    has_class(node, MEET_SOUND_CLASSES) || node.children.iter().any(sounds)
+}
+
+fn wording(text: &str) -> bool {
+    let digits = text.chars().filter(char::is_ascii_digit).count();
+    (text.chars().any(char::is_alphabetic) || digits > 4)
+        && !MEET_WORDS.contains(&low(text).as_str())
+        && !meeting_code(text.trim())
+}
+
+fn has_wording(node: &Node) -> bool {
+    (is(node, TEXTS) && text(node).is_some_and(wording)) || node.children.iter().any(has_wording)
 }
 
 const TEAMS_STATUS: &[&str] = &[

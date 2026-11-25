@@ -89,7 +89,7 @@
     ].filter(Boolean);
   }
 
-  const tipWords = (platform) => `Keeps recording if you close the window. Open leo from the ${platform === 'windows' ? 'system tray' : 'menu bar'} to return.`;
+  const tipWords = (platform) => `Keeps recording if you close the window. Open leo from the ${platform === 'windows' ? 'taskbar' : 'Dock'} to return.`;
 
   function eventNow(events, now = Date.now()) {
     return (events || []).findIndex((e) => Date.parse(e.start) - SOON_MS <= now && now <= Date.parse(e.end));

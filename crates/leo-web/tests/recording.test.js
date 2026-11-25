@@ -196,10 +196,10 @@ test('a denied microphone is said above Start with a way to the system settings,
   assert.doesNotMatch(idle({}, 'macos'), /microphone access is off/);
 });
 
-test('the idle tip says system tray on Windows', () => {
-  assert.match(idle({}, 'windows'), /Open leo from the system tray to return\./);
-  assert.match(idle({}, 'macos'), /Open leo from the menu bar to return\./);
-  assert.match(idle({}, undefined), /menu bar/);
+test('the idle tip names the taskbar on Windows and the Dock elsewhere', () => {
+  assert.match(idle({}, 'windows'), /Open leo from the taskbar to return\./);
+  assert.match(idle({}, 'macos'), /Open leo from the Dock to return\./);
+  assert.match(idle({}, undefined), /the Dock/);
 });
 
 test('a denied microphone is said plainly with a way to the system settings', () => {

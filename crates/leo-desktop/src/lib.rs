@@ -17,7 +17,6 @@ mod shell_path;
 mod shortcut;
 mod shortcut_events;
 mod sign_in;
-mod tray;
 mod update_window;
 mod updates;
 
@@ -169,10 +168,9 @@ pub fn run() {
     let mut quitting = quit::Confirm::default();
     app.run(move |app, event| match event {
         RunEvent::Ready => {
-            if app
-                .get_webview_window(MAIN)
-                .is_some_and(|w| w.is_visible().unwrap_or(false))
-            {
+            if app.get_webview_window(MAIN).is_some_and(|w| {
+                w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
+            }) {
                 show(app);
             }
         }
@@ -227,7 +225,6 @@ fn set_up(
 ) -> anyhow::Result<()> {
     let foreground = config.as_deref().is_some_and(update_window::take);
     let hidden = update_window::hidden(hidden, foreground);
-    let mut parts: Vec<(&str, Option<String>)> = Vec::new();
     #[cfg(target_os = "macos")]
     overlay::plugin_registered(app.handle().plugin(tauri_nspanel::init()).is_ok());
     notify::listen(app.handle());
@@ -363,11 +360,17 @@ fn set_up(
         .traffic_light_position(tauri::LogicalPosition::new(18.0, 31.0))
         .initialization_script("window.__LEO_APP__ = 'mac';");
     let window = builder.build()?;
+    if cfg!(windows) && hidden {
+        let _ = window.minimize();
+        let _ = window.show();
+    }
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            if cfg!(target_os = "macos") && handle.is_fullscreen().unwrap_or(false) {
+            if cfg!(windows) {
+                let _ = handle.minimize();
+            } else if handle.is_fullscreen().unwrap_or(false) {
                 leave_fullscreen_then_hide(&handle);
             } else {
                 hide_window(&handle);
@@ -390,20 +393,13 @@ fn set_up(
         }
     });
     #[cfg(target_os = "macos")]
-    parts.push((
-        "Quit menu",
-        quit::menu(app.handle()).err().map(|e| format!("{e:#}")),
-    ));
-    parts.push((
-        "menu bar icon",
-        tray::build(app.handle()).err().map(|e| e.to_string()),
-    ));
-    open_at_login_once(app.handle(), config.as_deref(), &app_settings);
-    app_settings.apply_startup();
-    if let Some(sentence) = startup_problem(&parts) {
+    if let Err(error) = quit::menu(app.handle()) {
+        let sentence = startup_problem("Quit menu", &format!("{error:#}"));
         eprintln!("  {sentence}");
         app_settings.note(sentence);
     }
+    open_at_login_once(app.handle(), config.as_deref(), &app_settings);
+    app_settings.apply_startup();
     if let (true, Some(config)) = (saved, config) {
         std::thread::spawn(move || {
             if let Some(path) = shell_path::login_path(&login_shell(), Duration::from_secs(3)) {
@@ -418,20 +414,8 @@ fn problem_address(text: &str) -> WebviewUrl {
     WebviewUrl::App(format!("index.html?problem={}", url_text(text)).into())
 }
 
-pub(crate) fn startup_problem(parts: &[(&str, Option<String>)]) -> Option<String> {
-    let failed: Vec<String> = parts
-        .iter()
-        .filter_map(|(name, why)| why.as_ref().map(|why| format!("the {name} ({why})")))
-        .collect();
-    let (last, rest) = failed.split_last()?;
-    let named = if rest.is_empty() {
-        last.clone()
-    } else {
-        format!("{} and {last}", rest.join(", "))
-    };
-    Some(format!(
-        "leo could not start {named}. The rest of leo works."
-    ))
+pub(crate) fn startup_problem(name: &str, why: &str) -> String {
+    format!("leo could not start the {name} ({why}). The rest of leo works.")
 }
 
 const PRINT: &str = "(() => { const nativePrint = window.print.bind(window); window.print = () => window.__LEO_APP__ === 'mac' ? new Promise(done => setTimeout(done)).then(() => window.__TAURI_INTERNALS__.invoke('print_page')) : nativePrint(); })();";
@@ -722,28 +706,6 @@ mod tests {
         let silent = Instant::now();
         assert!(!wait_settled(Duration::from_millis(50)));
         assert!(silent.elapsed() >= Duration::from_millis(50));
-    }
-
-    #[test]
-    fn a_failed_part_is_named_in_one_sentence() {
-        let both = [
-            (
-                "dictation popup",
-                Some("its plugin did not start".to_string()),
-            ),
-            ("Quit menu", None),
-            ("menu bar icon", Some("no icon".to_string())),
-        ];
-        assert_eq!(
-            startup_problem(&both).unwrap(),
-            "leo could not start the dictation popup (its plugin did not start) and the menu bar icon (no icon). The rest of leo works."
-        );
-        assert_eq!(
-            startup_problem(&[("Quit menu", Some("bad".to_string()))]).unwrap(),
-            "leo could not start the Quit menu (bad). The rest of leo works."
-        );
-        assert_eq!(startup_problem(&[("Quit menu", None)]), None);
-        assert_eq!(startup_problem(&[]), None);
     }
 
     #[test]

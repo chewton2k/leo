@@ -105,7 +105,13 @@ fn meet_reads_named_tiles_and_the_talking_class_only() {
 fn meet_skips_windows_that_are_not_a_call() {
     let mut list = windows(include_str!("fixtures/meet-chrome.json"));
     list[0].title = "Meeting notes - Google Chrome".into();
-    assert_eq!(read_windows(Kind::Meet, &list), Reading::default());
+    assert_eq!(
+        read_windows(Kind::Meet, &list),
+        Reading {
+            unmarked_self: true,
+            ..Reading::default()
+        }
+    );
 }
 
 #[test]
@@ -193,6 +199,7 @@ fn the_call_chosen_first_stays_the_one_read() {
         pid,
         app: app.into(),
         title: title.into(),
+        page: None,
         call,
     };
     let start = [
@@ -229,6 +236,466 @@ fn the_call_chosen_first_stays_the_one_read() {
 }
 
 #[test]
+fn a_meet_call_stays_bound_when_its_window_title_changes_or_it_pops_out() {
+    let seen = |title: &str, page: Option<&str>, call: bool| Seen {
+        pid: 7,
+        app: "com.google.Chrome".into(),
+        title: title.into(),
+        page: page.map(Into::into),
+        call,
+    };
+    let call = "Meet - abc-defg-hij";
+    let main = format!("{call} - Microphone recording - Google Chrome - Juno");
+    let popped = format!("{call} - Juno");
+    let (seat, at) = pick(None, &[seen(&main, Some(call), true)]).unwrap();
+    assert_eq!((seat.title.as_deref(), at), (Some(call), vec![0]));
+    for later in [
+        format!("{call} - Camera and microphone recording - Google Chrome - Juno"),
+        format!("{call} – Google Chrome"),
+        format!("{call} — Mozilla Firefox"),
+        popped.clone(),
+        call.to_owned(),
+    ] {
+        let now = [
+            seen("Docs - Google Chrome", None, false),
+            seen(&later, None, false),
+        ];
+        assert_eq!(pick(Some(&seat), &now).unwrap().1, [1], "{later}");
+    }
+    for other in ["Meet - abc-defg-hijk - Juno", "Meet - xyz-wxyz-xyz - Juno"] {
+        let now = [seen(other, None, false)];
+        assert_eq!(pick(Some(&seat), &now), Err("the call window closed"));
+    }
+    let both = [seen(&popped, None, true), seen(&main, Some(call), true)];
+    let (seat, at) = pick(None, &both).unwrap();
+    assert_eq!((seat.title.as_deref(), at), (Some(call), vec![0, 1]));
+    let vague = [seen("Meet - Google Chrome", Some("Meet"), true)];
+    let (seat, _) = pick(None, &vague).unwrap();
+    assert_eq!(seat.title.as_deref(), Some("Meet - Google Chrome"));
+}
+
+#[test]
+fn a_meet_window_as_it_is_in_november_2026_gives_the_people_and_who_is_me() {
+    for (fixture, me, shown) in [
+        (include_str!("fixtures/meet-live-main.json"), true, None),
+        (
+            include_str!("fixtures/meet-live-people.json"),
+            true,
+            Some(2),
+        ),
+        (include_str!("fixtures/meet-live-popout.json"), false, None),
+    ] {
+        let list = windows(fixture);
+        assert!(shows_call("com.google.Chrome", &list[0]));
+        assert!(call_window(Kind::Meet, &list[0].title, ""));
+        let read = read_windows(Kind::Meet, &list);
+        assert_eq!(read.participants, ["Juno Halvorsen", "Rowan Ellery"]);
+        assert_eq!(read.me.as_deref(), me.then_some("Juno Halvorsen"));
+        assert_eq!(read.shown, shown);
+    }
+    let main = windows(include_str!("fixtures/meet-live-main.json")).remove(0);
+    assert_eq!(page(&main).as_deref(), Some("Meet - abc-defg-hij"));
+    let popped = windows(include_str!("fixtures/meet-live-popout.json")).remove(0);
+    assert_eq!(page(&popped), None);
+}
+
+#[test]
+fn a_mark_left_on_the_users_own_meet_tile_never_hides_who_is_talking() {
+    let mut main = windows(include_str!("fixtures/meet-live-main.json"));
+    fn mark(node: &mut Node) {
+        if node.classes.iter().any(|c| c == "dkjMxf") {
+            node.classes.push("v5h6Xc".into());
+        }
+        node.children.iter_mut().for_each(mark);
+    }
+    mark(&mut main[0].tree);
+    let read = read_windows(Kind::Meet, &main);
+    assert_eq!(read.speaking, ["Juno Halvorsen", "Rowan Ellery"]);
+    let t = timeline(&every(0.0, 6.0, Some(read)));
+    assert_eq!(t.name(1.0, 5.0).as_deref(), Some("Rowan Ellery"));
+}
+
+fn on(from: f64, to: f64, who: &str, mark: bool) -> Mark {
+    Mark::Run {
+        from,
+        to,
+        who: who.into(),
+        mark,
+        outlasts: false,
+    }
+}
+
+#[test]
+fn a_mark_that_stays_on_through_silence_names_only_the_line_it_came_with() {
+    let lines = [(4.2, 11.0), (11.0, 18.0), (23.0, 30.0), (31.0, 40.0)];
+    let frozen = |mark: bool| {
+        let mut t = Timeline::from_marks([on(4.0, 60.0, "Rowan Ellery", mark)]);
+        t.doubt_marks_through_silence(&lines, &lines);
+        lines.map(|(a, b)| t.name(a, b).is_some())
+    };
+    assert_eq!(frozen(true), [true, false, false, false]);
+    assert_eq!(frozen(false), [true; 4]);
+}
+
+#[test]
+fn silence_inside_one_long_row_still_gives_a_frozen_mark_away() {
+    let mut t = Timeline::from_marks([on(4.0, 60.0, "Rowan Ellery", true)]);
+    let heard = [(4.2, 11.0), (19.0, 30.0)];
+    t.doubt_marks_through_silence(&heard, &[(4.2, 30.0), (30.0, 60.0)]);
+    assert_eq!(t.name(30.0, 60.0), None);
+}
+
+#[test]
+fn a_mark_is_believed_while_the_talking_goes_on() {
+    let mut t = Timeline::from_marks([on(4.0, 41.0, "Rowan Ellery", true)]);
+    let spoken = [(4.2, 11.0), (12.0, 18.0), (20.5, 30.0), (31.0, 40.0)];
+    t.doubt_marks_through_silence(&spoken, &spoken);
+    for (from, to) in spoken {
+        assert_eq!(t.name(from, to).as_deref(), Some("Rowan Ellery"));
+    }
+}
+
+#[test]
+fn a_mark_that_was_on_long_before_anyone_spoke_names_nobody() {
+    let mut t = Timeline::from_marks([on(0.0, 60.0, "Rowan Ellery", true)]);
+    let spoken = [(8.0, 12.0), (13.0, 20.0)];
+    t.doubt_marks_through_silence(&spoken, &spoken);
+    assert_eq!(t.name(8.0, 12.0), None);
+    let mut silent = Timeline::from_marks([on(0.0, 60.0, "Rowan Ellery", true)]);
+    silent.doubt_marks_through_silence(&[], &[]);
+    assert_eq!(silent.name(8.0, 12.0), None);
+}
+
+#[test]
+fn a_short_line_is_named_only_well_inside_one_persons_marks() {
+    let t = Timeline::from_marks([on(4.0, 10.0, "Rowan Ellery", true)]);
+    assert_eq!(t.name(6.0, 6.8).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(t.name(4.2, 5.0), None);
+    assert_eq!(t.name(9.2, 9.8), None);
+    assert_eq!(t.name(9.6, 9.6), None);
+    assert_eq!(t.name(6.0, 6.0).as_deref(), Some("Rowan Ellery"));
+    let sole = Timeline::from_marks([on(4.0, 10.0, "Rowan Ellery", false)]);
+    assert_eq!(sole.name(4.2, 5.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn rows_written_before_marks_were_told_apart_are_read_as_they_were() {
+    let mut t = Timeline::parse(r#"{"from":4.0,"to":60.0,"who":"Rowan Ellery"}"#);
+    t.doubt_marks_through_silence(&[(4.2, 11.0), (30.0, 40.0)], &[(4.2, 11.0)]);
+    assert_eq!(t.name(30.0, 40.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn a_run_ends_when_the_two_person_rule_gives_way_to_a_mark() {
+    let two = Reading {
+        shown: Some(2),
+        ..reading(
+            &["Rowan Ellery"],
+            &["Juno Halvorsen", "Rowan Ellery"],
+            Some("Juno Halvorsen"),
+        )
+    };
+    let three = reading(
+        &["Rowan Ellery"],
+        &["Juno Halvorsen", "Rowan Ellery", "Tamsin Okafor"],
+        Some("Juno Halvorsen"),
+    );
+    let mut samples = every(0.0, 10.0, Some(two));
+    samples.extend(every(10.0, 60.0, Some(three)));
+    let mut t = timeline(&samples);
+    t.doubt_marks_through_silence(&[(1.0, 14.0), (30.0, 40.0)], &[(1.0, 14.0), (30.0, 40.0)]);
+    assert_eq!(t.name(2.0, 8.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(t.name(30.0, 40.0), None);
+}
+
+#[test]
+fn a_zoom_mark_may_outlast_the_speech() {
+    let zoom = read(&look("us.zoom.xos", include_str!("fixtures/zoom-mac.json"))).unwrap();
+    let mut t = timeline(&every(0.0, 60.0, Some(zoom)));
+    t.doubt_marks_through_silence(&[(1.0, 9.0), (30.0, 40.0)], &[(1.0, 9.0), (30.0, 40.0)]);
+    assert_eq!(t.name(30.0, 40.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn a_call_window_is_covered_only_when_no_part_of_it_can_be_seen() {
+    let area = |x: f64, y: f64, w: f64, h: f64| Rect { x, y, w, h };
+    let shown = |pid: i32, solid: bool, area: Rect| Shown { pid, solid, area };
+    let screens = [area(0.0, 0.0, 2000.0, 1200.0)];
+    let covered =
+        |call: Rect, list: &[Shown]| covered(place(7, call, false, list), call, list, &screens);
+    let call = area(100.0, 100.0, 800.0, 600.0);
+    let mine = shown(7, true, area(101.0, 100.0, 800.0, 599.0));
+    assert!(!covered(call, &[mine]));
+    assert!(covered(call, &[]));
+    assert!(covered(call, &[shown(8, true, call)]));
+    let over = shown(8, true, area(0.0, 0.0, 2000.0, 2000.0));
+    assert!(covered(call, &[over, mine]));
+    assert!(!covered(call, &[mine, over]));
+    let glass = Shown {
+        solid: false,
+        ..over
+    };
+    assert!(!covered(call, &[glass, mine]));
+    let left = shown(8, true, area(0.0, 0.0, 500.0, 2000.0));
+    let right = shown(9, true, area(500.0, 0.0, 500.0, 2000.0));
+    assert!(!covered(call, &[left, mine]));
+    assert!(covered(call, &[left, right, mine]));
+    let twin = shown(7, true, call);
+    assert!(
+        covered(call, &[twin, twin]),
+        "one of two alike may be behind"
+    );
+    let front = place(7, call, true, &[twin, twin]);
+    assert_eq!(front, Some(0), "the main window is in front of its twin");
+    let hanging = area(1600.0, 100.0, 800.0, 600.0);
+    let edge = shown(8, true, area(1500.0, 0.0, 500.0, 1200.0));
+    assert!(covered(hanging, &[edge, shown(7, true, hanging)]));
+}
+
+#[test]
+fn two_meet_calls_whose_names_start_alike_are_never_read_as_one() {
+    let seen = |title: &str, page: Option<&str>| Seen {
+        pid: 7,
+        app: "com.google.Chrome".into(),
+        title: title.into(),
+        page: page.map(Into::into),
+        call: true,
+    };
+    let weekly = seen("Meet - Weekly - Google Chrome", Some("Meet - Weekly"));
+    let design = seen(
+        "Meet - Weekly - Design - Google Chrome",
+        Some("Meet - Weekly - Design"),
+    );
+    assert_eq!(
+        pick(None, &[weekly.clone(), design]),
+        Err("more than one call is open")
+    );
+    let (seat, _) = pick(None, &[weekly]).unwrap();
+    assert!(same_call(&seat, Some("Meet - Weekly")));
+    assert!(same_call(&seat, None));
+    assert!(!same_call(&seat, Some("Meet - Weekly - Design")));
+}
+
+#[test]
+fn a_mark_that_outlives_a_later_one_is_doubted_until_it_goes_off() {
+    let with = |speaking: &[&str]| Some(reading(speaking, GROUP, Some("Juno Halvorsen")));
+    let (pinned, other) = ("Rowan Ellery", "Tamsin Okafor");
+    let mut samples = every(0.0, 4.0, with(&[pinned]));
+    samples.extend(every(4.0, 8.0, with(&[pinned, other])));
+    samples.extend(every(8.0, 16.0, with(&[pinned])));
+    samples.extend(every(16.0, 18.0, with(&[])));
+    samples.extend(every(18.0, 26.0, with(&[pinned])));
+    let t = timeline(&samples);
+    assert_eq!(t.name(4.5, 7.8), None);
+    assert_eq!(t.name(9.0, 15.0), None);
+    assert_eq!(t.name(19.0, 25.0).as_deref(), Some(pinned));
+    let mut handover = every(0.0, 6.0, with(&[pinned]));
+    handover.extend(every(6.0, 6.8, with(&[pinned, other])));
+    handover.extend(every(6.8, 14.0, with(&[other])));
+    let t = timeline(&handover);
+    assert_eq!(t.name(1.0, 5.0).as_deref(), Some(pinned));
+    assert_eq!(t.name(7.5, 13.0).as_deref(), Some(other));
+}
+
+#[test]
+fn a_short_line_is_not_vouched_for_by_a_run_elsewhere_in_the_call() {
+    let t = Timeline::from_marks([
+        on(4.0, 5.0, "Rowan Ellery", true),
+        on(40.0, 60.0, "Rowan Ellery", false),
+    ]);
+    assert_eq!(t.name(4.2, 4.9), None);
+    assert_eq!(t.name(41.0, 41.8).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn a_reply_that_outlasts_the_last_speakers_mark_is_not_theirs() {
+    let t = Timeline::from_marks([
+        on(0.0, 7.4, "Rowan Ellery", true),
+        on(7.4, 12.0, "Tamsin Okafor", true),
+    ]);
+    assert_eq!(t.name(6.0, 8.0), None);
+    assert_eq!(t.name(1.0, 3.0).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(t.name(8.0, 10.0).as_deref(), Some("Tamsin Okafor"));
+}
+
+#[test]
+fn a_short_zoom_line_needs_the_mark_around_it_too() {
+    let zoom = read(&look("us.zoom.xos", include_str!("fixtures/zoom-mac.json"))).unwrap();
+    let t = timeline(&every(10.0, 20.0, Some(zoom)));
+    assert_eq!(t.name(10.0, 10.6), None);
+    assert_eq!(t.name(14.0, 14.6).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn another_tile_that_sounds_leaves_the_line_unnamed() {
+    let with = |class: &str, name: &str| {
+        let mut other = tile(name, false);
+        other.children[0].classes = vec![class.into()];
+        stage(vec![tile("You", false), tile("Rowan Ellery", true), other])
+    };
+    for class in ["Oaajhc", "BlxGDf", "HX2H7"] {
+        let heard = read_windows(Kind::Meet, &with(class, "Tamsin Okafor"));
+        assert!(heard.speaking.is_empty(), "{class}");
+    }
+    let silent = read_windows(Kind::Meet, &with("gjg47c", "Tamsin Okafor"));
+    assert_eq!(silent.speaking, ["Rowan Ellery"]);
+    let mut mine = tile("You", false);
+    mine.children[0].classes = vec!["Oaajhc".into()];
+    let own = stage(vec![mine, tile("Rowan Ellery", true)]);
+    assert_eq!(read_windows(Kind::Meet, &own).speaking, ["Rowan Ellery"]);
+}
+
+#[test]
+fn a_mark_inside_the_tile_of_someone_who_dialed_in_leaves_the_line_unnamed() {
+    let mut caller = tile("+1 555-010-0199", false);
+    caller.children[0].children.push(Node {
+        role: "AXGroup".into(),
+        classes: vec!["v5h6Xc".into()],
+        ..Node::default()
+    });
+    let list = stage(vec![tile("You", false), tile("Rowan Ellery", true), caller]);
+    assert!(read_windows(Kind::Meet, &list).speaking.is_empty());
+}
+
+#[test]
+fn a_window_title_with_more_after_the_page_is_still_one_call() {
+    let seen = Seen {
+        pid: 7,
+        app: "com.microsoft.edgemac".into(),
+        title: "Meet - abc-defg-hij and 3 more pages - Personal - Microsoft Edge".into(),
+        page: Some("Meet - abc-defg-hij".into()),
+        call: true,
+    };
+    let (_, at) = pick(None, &[seen]).unwrap();
+    assert_eq!(at, [0]);
+}
+
+fn tile(name: &str, talking: bool) -> Node {
+    let text = Node {
+        role: "AXStaticText".into(),
+        value: Some(name.into()),
+        ..Node::default()
+    };
+    let mut tile = (0..7).fold(text, |child, _| Node {
+        role: "AXGroup".into(),
+        children: vec![child],
+        ..Node::default()
+    });
+    if talking {
+        tile.classes = vec!["v5h6Xc".into()];
+    }
+    tile
+}
+
+fn stage(tiles: Vec<Node>) -> Vec<Window> {
+    vec![Window {
+        title: "Meet - abc-defg-hij".into(),
+        id: String::new(),
+        tree: Node {
+            role: "AXGroup".into(),
+            children: tiles,
+            ..Node::default()
+        },
+    }]
+}
+
+#[test]
+fn a_mark_on_a_tile_whose_name_cannot_be_read_leaves_the_line_unnamed() {
+    let you = || tile("You", false);
+    let both = read_windows(
+        Kind::Meet,
+        &stage(vec![
+            you(),
+            tile("Rowan Ellery", true),
+            tile("tamsin okafor", true),
+        ]),
+    );
+    assert!(both.speaking.is_empty());
+    for odd in [
+        "tamsin okafor",
+        "Tamsin2",
+        "Tamsin - Acme",
+        "One Two Three Four Five Six",
+    ] {
+        let list = stage(vec![you(), tile("Rowan Ellery", false), tile(odd, true)]);
+        assert!(read_windows(Kind::Meet, &list).speaking.is_empty(), "{odd}");
+    }
+    let plain = stage(vec![
+        you(),
+        tile("Rowan Ellery", true),
+        tile("tamsin okafor", false),
+    ]);
+    assert_eq!(read_windows(Kind::Meet, &plain).speaking, ["Rowan Ellery"]);
+}
+
+#[test]
+fn a_meet_speaker_is_named_only_once_the_user_is_known() {
+    let unknown = stage(vec![
+        tile("Juno Halvorsen", true),
+        tile("Rowan Ellery", false),
+    ]);
+    let t = timeline(&every(0.0, 8.0, Some(read_windows(Kind::Meet, &unknown))));
+    assert_eq!(t.name(1.0, 6.0), None);
+    let known = stage(vec![tile("You", false), tile("Rowan Ellery", true)]);
+    let t = timeline(&every(0.0, 8.0, Some(read_windows(Kind::Meet, &known))));
+    assert_eq!(t.name(1.0, 6.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn a_people_row_beside_the_stage_is_never_taken_for_the_users_tile() {
+    let group = |children: Vec<Node>| Node {
+        role: "AXGroup".into(),
+        children,
+        ..Node::default()
+    };
+    let text = |value: &str| Node {
+        role: "AXStaticText".into(),
+        value: Some(value.into()),
+        ..Node::default()
+    };
+    let deep = |leaf: Node, by: usize| (0..by).fold(leaf, |node, _| group(vec![node]));
+    let labelled = |role: &str, label: &str, children: Vec<Node>| Node {
+        role: role.into(),
+        description: Some(label.into()),
+        children,
+        ..Node::default()
+    };
+    let own = labelled("AXButton", "Backgrounds and effects", Vec::new());
+    for by in 0..12 {
+        let mut mine = deep(text("Juno Halvorsen"), 7);
+        mine.children.push(own.clone());
+        let mut other = deep(text("Rowan Ellery"), 7);
+        other.classes = vec!["v5h6Xc".into()];
+        let row = labelled(
+            "AXGroup",
+            "Rowan Ellery",
+            vec![deep(text("Rowan Ellery"), by)],
+        );
+        let list = labelled("AXList", "Participants", vec![row]);
+        let page = group(vec![group(vec![mine, other]), group(vec![list])]);
+        let window = Window {
+            title: "Meet - abc-defg-hij".into(),
+            id: String::new(),
+            tree: page,
+        };
+        let read = read_windows(Kind::Meet, &[window]);
+        assert_eq!(read.me.as_deref(), Some("Juno Halvorsen"), "{by}");
+        assert_eq!(read.speaking, ["Rowan Ellery"], "{by}");
+    }
+}
+
+#[test]
+fn a_meet_call_of_two_is_named_from_the_open_people_panel() {
+    let read = read_windows(
+        Kind::Meet,
+        &windows(include_str!("fixtures/meet-live-people.json")),
+    );
+    assert!(read.speaking.is_empty());
+    let t = timeline(&every(0.0, 6.0, Some(read)));
+    assert_eq!(t.name(1.0, 5.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
 fn a_call_without_an_english_leave_button_can_still_be_chosen() {
     let window = |title: &str, tree: Node| Window {
         title: title.into(),
@@ -249,6 +716,7 @@ fn a_call_without_an_english_leave_button_can_still_be_chosen() {
         pid: 9,
         app: "us.zoom.xos".into(),
         title: german.title.clone(),
+        page: page(&german),
         call: shows_call("us.zoom.xos", &german),
     }];
     assert!(pick(None, &seen).is_ok());
@@ -570,7 +1038,7 @@ fn a_run_still_open_when_leo_stops_is_kept_up_to_its_last_reading() {
     }
     let crashed = Timeline::parse(&text);
     assert_eq!(crashed.name(0.5, 5.0).as_deref(), Some("Rowan Ellery"));
-    assert_eq!(crashed.name(0.0, 0.4).as_deref(), Some("Rowan Ellery"));
+    assert_eq!(crashed.name(0.0, 1.4).as_deref(), Some("Rowan Ellery"));
     let closed = t.end().unwrap();
     text += &(serde_json::to_string(&closed).unwrap() + "\n");
     let whole = Timeline::parse(&text);
@@ -629,6 +1097,8 @@ fn overlapping_rows_count_their_time_once_and_a_long_run_across_the_start_is_fou
         from,
         to,
         who: who.into(),
+        mark: false,
+        outlasts: false,
     };
     let rolled = Timeline::from_marks([
         run(0.0, 10.0, "Rowan Ellery"),

@@ -248,6 +248,10 @@ test('a missing coding app offers its install page', async () => {
     const status = nodes['#onboarding-writer-status'].innerHTML;
     assert.ok(status.includes(`<a class="btn plain sm" href="${href}" target="_blank" rel="noopener noreferrer">${name}</a>`), status);
     assert.match(status, /Not installed/);
+    const app = { claude_code: 'Opening Code in the Claude app once also works.', codex: 'Installing the ChatGPT app also works.' }[c.id];
+    assert.ok(status.includes(`${name.replace('Install ', '')} is not installed on this Mac. ${app}`), status);
+    context.ON_MAC = false;
+    assert.ok(context.onboardingWriterStatus(c).includes('is not installed on this computer.<'), context.onboardingWriterStatus(c));
   }
 });
 

@@ -796,16 +796,6 @@ impl Running {
         format!("http://127.0.0.1:{}/?token={}", self.port, self.token)
     }
 
-    /// What Felix and leo's other AI work used since leo started, for the menu
-    /// bar: "12 AI requests · 340k tokens (210k cached)".
-    pub fn usage_line(&self) -> String {
-        self.state.usage.line()
-    }
-
-    pub fn recording_live(&self) -> bool {
-        record::live(&self.state.recording)
-    }
-
     pub async fn stop(self) {
         let Running {
             state,

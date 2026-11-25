@@ -107,7 +107,7 @@ class ScopeTests(unittest.TestCase):
         self.assert_scope(self.scope('crates/leo-core/src/store.rs'), 'rust', 'browser')
 
     def test_desktop_and_cli_changes_keep_cross_platform_coverage(self):
-        self.assert_scope(self.scope('crates/leo-desktop/src/tray.rs', 'src/main.rs'), 'rust')
+        self.assert_scope(self.scope('crates/leo-desktop/src/notify.rs', 'src/main.rs'), 'rust')
 
     def test_rust_integration_tests_run_without_browsers(self):
         self.assert_scope(self.scope('tests/e2e.rs', 'crates/leo-web/tests/markdown.rs'), 'rust')

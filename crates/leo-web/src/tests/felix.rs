@@ -3223,7 +3223,7 @@ fn structured_study_verdicts_avoid_hidden_grading_on_both_protocols_and_do_not_m
                     lines.iter().find_map(|l| l["verdict"].as_str()),
                     marking.then_some(verdict)
                 );
-                let usage = serde_json::to_value(state.usage.snapshot()).unwrap();
+                let usage = serde_json::to_value(state.usage.saved().kinds).unwrap();
                 assert!(!usage
                     .as_array()
                     .unwrap()
@@ -3292,7 +3292,7 @@ fn repeated_note_reads_reuse_only_identical_results_and_fresh_can_repeat_the_bod
                     > prompts[2].matches("Grounded material").count()
             );
         }
-        let tools = serde_json::to_value(state.usage.tools()).unwrap();
+        let tools = serde_json::to_value(state.usage.saved().tools).unwrap();
         assert_eq!(
             (tools["calls"].as_u64(), tools["reused"].as_u64()),
             (Some(3), Some(1))
@@ -3391,7 +3391,7 @@ fn conflicting_study_verdicts_are_checked_and_an_invalid_check_does_not_assign_a
             !state.warm.holding(),
             "the inconsistent provider history must not be reused"
         );
-        let usage = serde_json::to_value(state.usage.snapshot()).unwrap();
+        let usage = serde_json::to_value(state.usage.saved().kinds).unwrap();
         assert_eq!(
             usage
                 .as_array()

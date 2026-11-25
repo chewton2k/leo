@@ -1,13 +1,12 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
 use crate::chat::Spent;
 
-const LATENCIES: usize = 64;
 const KEPT_DAYS: u64 = 90;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
@@ -59,18 +58,15 @@ struct Counts {
     output: u64,
     unreported: u64,
     estimated: u64,
-    latency: VecDeque<u64>,
+    latency: Vec<u64>,
 }
 
 #[derive(Default)]
 pub struct Usage {
-    rows: Mutex<BTreeMap<Purpose, Counts>>,
-    #[cfg(test)]
-    tools: Mutex<Tools>,
     saved_in: OnceLock<PathBuf>,
 }
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Default, Serialize)]
 pub struct Tools {
     calls: u64,
     failures: u64,
@@ -205,14 +201,14 @@ impl Counts {
         self.input = self.input.saturating_add(call.input);
         self.cached = self.cached.saturating_add(call.cached);
         self.output = self.output.saturating_add(call.output);
-        self.latency.push_back(call.ms);
+        self.latency.push(call.ms);
     }
 }
 
 fn rows_of(held: &BTreeMap<Purpose, Counts>) -> Vec<Row> {
     held.iter()
         .map(|(purpose, row)| {
-            let (median_ms, p95_ms) = timing(row.latency.iter().copied().collect());
+            let (median_ms, p95_ms) = timing(row.latency.clone());
             Row {
                 purpose: *purpose,
                 calls: row.calls,
@@ -418,13 +414,6 @@ impl Usage {
     }
 
     pub(crate) fn tool(&self, failed: bool, reused: bool) {
-        #[cfg(test)]
-        {
-            let mut held = self.tools.lock().unwrap_or_else(|e| e.into_inner());
-            held.calls = held.calls.saturating_add(1);
-            held.failures = held.failures.saturating_add(u64::from(failed));
-            held.reused = held.reused.saturating_add(u64::from(reused));
-        }
         let Some(chats) = self.saved_in.get() else {
             return;
         };
@@ -444,54 +433,15 @@ impl Usage {
         }
     }
 
-    #[cfg(test)]
-    pub fn tools(&self) -> Tools {
-        self.tools.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
     pub fn record(&self, purpose: Purpose, spent: Option<&Spent>, elapsed: Duration, failed: bool) {
         let ms = elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
         let call = Call::of(purpose, spent, ms, failed);
         self.save(&call);
-        let mut held = self.rows.lock().unwrap_or_else(|e| e.into_inner());
-        let row = held.entry(purpose).or_default();
-        row.add(&call);
-        if row.latency.len() > LATENCIES {
-            row.latency.pop_front();
-        }
-    }
-
-    pub fn line(&self) -> String {
-        let held = self.rows.lock().unwrap_or_else(|e| e.into_inner());
-        let (calls, input, cached, output) =
-            held.values().fold((0u64, 0u64, 0u64, 0u64), |t, r| {
-                (t.0 + r.calls, t.1 + r.input, t.2 + r.cached, t.3 + r.output)
-            });
-        drop(held);
-        if calls == 0 {
-            return "No AI requests since Leo started".into();
-        }
-        let tokens = input.saturating_add(output);
-        let kind = if calls == 1 { "request" } else { "requests" };
-        let cache = if cached > 0 {
-            format!(" ({} cached)", short(cached))
-        } else {
-            String::new()
-        };
-        format!("{calls} AI {kind} · {} tokens{cache}", short(tokens))
     }
 
     #[cfg(test)]
-    pub fn snapshot(&self) -> Vec<Row> {
-        rows_of(&self.rows.lock().unwrap_or_else(|e| e.into_inner()))
-    }
-}
-
-fn short(n: u64) -> String {
-    match n {
-        n if n >= 1_000_000 => format!("{:.1}M", n as f64 / 1_000_000.0),
-        n if n >= 1_000 => format!("{}k", n / 1_000),
-        n => n.to_string(),
+    pub fn saved(&self) -> Span {
+        self.recent().spans.remove(&1).unwrap_or_default()
     }
 }
 
@@ -500,28 +450,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_menu_bar_line_adds_up_every_kind_of_work() {
+    fn usage_separates_work_and_counts_failures() {
+        let home = tempfile::tempdir().unwrap();
         let usage = Usage::default();
-        assert_eq!(usage.line(), "No AI requests since Leo started");
-        let spent = Spent {
-            input: 300_000,
-            cached: 210_000,
-            output: 40_000,
-            ..Default::default()
-        };
-        usage.record(
-            Purpose::Answer,
-            Some(&spent),
-            Duration::from_millis(5),
-            false,
-        );
-        usage.record(Purpose::QuickReview, None, Duration::from_millis(5), false);
-        assert_eq!(usage.line(), "2 AI requests · 340k tokens (210k cached)");
-    }
-
-    #[test]
-    fn usage_separates_work_and_bounds_samples_without_retaining_content() {
-        let usage = Usage::default();
+        usage.save_in(home.path().join("chats"));
         for i in 0..100 {
             usage.record(
                 Purpose::Answer,
@@ -536,15 +468,12 @@ mod tests {
             );
         }
         usage.record(Purpose::Retry, None, Duration::from_secs(1), true);
-        let held = usage.rows.lock().unwrap();
-        assert_eq!(held[&Purpose::Answer].latency.len(), LATENCIES);
-        drop(held);
-        let rows = usage.snapshot();
+        let rows = usage.saved().kinds;
         assert_eq!(
             (rows[0].calls, rows[0].input, rows[0].cached, rows[0].output),
             (100, 10_000, 8_000, 1_000)
         );
-        assert_eq!((rows[0].median_ms, rows[0].p95_ms), (67, 96));
+        assert_eq!((rows[0].median_ms, rows[0].p95_ms), (49, 94));
         assert_eq!(
             (rows[1].calls, rows[1].failures, rows[1].unreported),
             (1, 1, 1)
@@ -750,10 +679,9 @@ mod tests {
     }
 
     #[test]
-    fn usage_without_a_place_to_save_still_counts_in_memory() {
+    fn usage_without_a_place_to_save_keeps_nothing() {
         let usage = Usage::default();
         usage.record(Purpose::Answer, None, Duration::ZERO, false);
-        assert_eq!(usage.snapshot().len(), 1);
         assert!(usage.days().models.is_empty());
     }
 }

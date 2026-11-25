@@ -79,7 +79,7 @@ never gives up while recording, gives up after `attempts_after_stop` (writes
 fail. `Session::finish` deletes the folder unless a segment failed. Unfinished
 sessions are resumed by the app (`recorder::resume`). `session/stress.rs`
 simulates 3 h and (ignored) 24 h.
-Call tracks (`Manifest.turns`) keep the speech model's segment start and end times (or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a side's consecutive call turns within 300 s for the writing AI), so the two sides interleave turn by turn.
+Call tracks (`Manifest.turns`) keep the start and end times of each line (a segment is cut at sentence ends and 0.7 s pauses by the model's word times, a word counted at most 1 s, so one long segment never holds several speakers; or the segment's own times without word times; or, for a model without times or an echo-filtered piece, the piece's first and last speech) in `seg-NNNNN.turns.json` as `[from_ms, to_ms, text]` rows (older `[from_ms, text]` rows still load); `archive` gives one passage per entry, each stamped with its `Passage.turns` id (track, part, start ms on the track's own clock); the call merge keeps one passage per turn (2026-11-22, the orchestrator's call: joining is a display concern; the page groups a speaker's lines and leo-host's `Parts` joins a side's consecutive call turns within 300 s for the writing AI), so the two sides interleave turn by turn.
 
 Call names (2026-11-22): `Request.names` (the Others track only; `None` in
 `powers()`, the test server and tests) starts `session/call_watch.rs`: a reader
@@ -102,8 +102,9 @@ reading (same `from`, the longest `to` wins on read), so a crash keeps it. Stop
 signals the watcher before capture stops and waits at most 1 s for it. Each read gets an `Ask`: a
 deadline (`MOST_READ`, 2 s for the whole poll, checked between native calls), the
 stop flag, and the call bound at the first good reading (`Seat`: pid, app and,
-for a browser, the window title), which every later read and a restarted reader
-keep; `call_names::pick` binds only when exactly one app (one window, for a
+for a browser, the page title its window titles start with, so a title that gains
+"Microphone recording" or Meet's pop-out window stays the same call), which every later read and a restarted reader
+keep; `call_names::pick` binds only when exactly one app (one page, for a
 browser) shows a call tree, and a bound call that is gone reads as unreadable, so
 its lines stay unnamed. At most two reader threads are alive in the whole process
 (a counted slot held for a thread's life; 2026-11-22, the orchestrator's call), so a
@@ -187,7 +188,8 @@ nearest steady lag, with the leak's level the median of the steady windows withi
 track's floor) is a copy when the other side is at or above its floor (the
 loudest within 20 ms of the lag) and the block is no more than 6 dB over the
 leak's level; the line is echo only when at most 5% of its sound blocks are not
-copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
+copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5 (a line with 12
+to 49 sound blocks only between two echoed lines, when every block copies), so a short
 line of yours before or under an echo is never hidden; under 0.5 s of sound stays
 unmarked. Lines are never marked when the search is cut short (finish now), and a
 part with a transcript whose levels file is missing or cut short is traced, and
@@ -332,8 +334,16 @@ more. `Process::stop` reaps children after killing the group. A caller's stop
 long-recording and import worker threads) reaches every launch; the margin read
 runs under `READ_LIMIT`.
 
-Usable = program on PATH (`locate`, `.cmd` on Windows); failures are retryable and
-name the sign-in step. `health::writing` is SignInNeeded only from the last
+Usable = `locate`: program on the PATH leo knows (`.cmd` on Windows; a PATH
+refreshed in the background counts from the next launch), else, for the plain
+names `claude` and `codex`, the copy a desktop app keeps (2026-11-24, the owner's
+call: the CLI first). Codex: inside ChatGPT.app or Codex.app, Mac only (on Windows
+the app runs a package copy other programs may not). Claude: the highest version
+with `.verified` under the app's `claude-code` folder, the one finished last when
+two builds share a version; on a Mac only while Claude.app is there; the Windows
+places come from the app's code and are untested. The apps delete old versions, so
+the path is found again at each launch and never stored. The app's own Claude
+sign-in is never read (Anthropic forbids it); Codex shares `~/.codex`. Failures are retryable and name the sign-in step. `health::writing` is SignInNeeded only from the last
 sign-in probe's result (`agent_cli::last_signed_in`, ten minutes), never a new
 probe. Sign-in probes accept only recognized status output, honor exit status and
 share the bounded watchdog; raw output never leaves. `coding_plans` reports

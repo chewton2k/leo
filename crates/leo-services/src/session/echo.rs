@@ -19,6 +19,8 @@ const SLACK: i64 = 2;
 const LEAST_RATE: f32 = 0.2;
 const LEAST_STEADY: usize = 3;
 const LEAST_LINE: usize = 50;
+const LEAST_SHORT: usize = 12;
+const BREATH: i64 = 30;
 const OWN_SHARE: f32 = 0.05;
 const OWN_RUN: usize = 20;
 const LINE_CORR: f32 = 0.5;
@@ -225,30 +227,42 @@ pub fn leak(
     Some(Leak { steady, floors })
 }
 
-pub fn is_echo(
-    leak: &Leak,
-    mic: &mut dyn FnMut(i64) -> Option<u8>,
-    far: &mut dyn FnMut(i64) -> Option<u8>,
-    from: i64,
-    to: i64,
-) -> bool {
+type Levels<'a> = &'a mut dyn FnMut(i64) -> Option<u8>;
+
+struct Judged {
+    heard: usize,
+    own: usize,
+    longest: usize,
+    corr: f32,
+}
+
+pub fn is_echo(leak: &Leak, mic: Levels, far: Levels, from: i64, to: i64) -> bool {
+    judge(leak, mic, far, from, to).is_some_and(|line| {
+        line.heard >= LEAST_LINE
+            && line.longest < OWN_RUN
+            && line.own as f32 <= OWN_SHARE * line.heard as f32
+            && line.corr >= LINE_CORR
+    })
+}
+
+fn is_short_echo(leak: &Leak, mic: Levels, far: Levels, from: i64, to: i64) -> bool {
+    judge(leak, mic, far, from, to).is_some_and(|line| {
+        (LEAST_SHORT..LEAST_LINE).contains(&line.heard) && line.own == 0 && line.corr >= LINE_CORR
+    })
+}
+
+fn judge(leak: &Leak, mic: Levels, far: Levels, from: i64, to: i64) -> Option<Judged> {
     if to <= from {
-        return false;
+        return None;
     }
     let (lag, gain) = leak.near((from + to) / 2);
     let (mic_floor, far_floor) = leak.floors;
-    let Some(near) = (from..to)
+    let near = (from..to)
         .map(|t| mic(t).map(f32::from))
-        .collect::<Option<Vec<f32>>>()
-    else {
-        return false;
-    };
-    let Some(wide) = (from - SLACK..to + SLACK)
+        .collect::<Option<Vec<f32>>>()?;
+    let wide = (from - SLACK..to + SLACK)
         .map(|t| far(t - lag).map(f32::from))
-        .collect::<Option<Vec<f32>>>()
-    else {
-        return false;
-    };
+        .collect::<Option<Vec<f32>>>()?;
     let other = &wide[SLACK as usize..wide.len() - SLACK as usize];
     let (mut heard, mut own, mut run, mut longest) = (0usize, 0usize, 0usize, 0usize);
     for (m, f) in near.iter().zip(
@@ -267,10 +281,33 @@ pub fn is_echo(
             longest = longest.max(run);
         }
     }
-    heard >= LEAST_LINE
-        && longest < OWN_RUN
-        && own as f32 <= OWN_SHARE * heard as f32
-        && pearson(&near, other) >= LINE_CORR
+    Some(Judged {
+        heard,
+        own,
+        longest,
+        corr: pearson(&near, other),
+    })
+}
+
+pub fn sound(session: &Session) -> Option<Vec<(f64, f64)>> {
+    let mut track = Track::of(session);
+    if track.per_part == 0 || !track.unmeasured(&session.segments()).is_empty() {
+        return None;
+    }
+    let blocks = track
+        .end
+        .unwrap_or_else(|| track.blocks())
+        .min(track.blocks());
+    let floor = floor_of(&mut |t| track.at(t), blocks);
+    let secs = |block: i64| (block as u64 * BLOCK_MS) as f64 / 1000.0;
+    let mut spans: Vec<(i64, i64)> = Vec::new();
+    for t in (0..blocks).filter(|t| f32::from(track.at(*t)) >= floor) {
+        match spans.last_mut() {
+            Some((_, to)) if t - *to <= BREATH => *to = t + 1,
+            _ => spans.push((t, t + 1)),
+        }
+    }
+    Some(spans.into_iter().map(|(a, b)| (secs(a), secs(b))).collect())
 }
 
 struct Track {
@@ -384,21 +421,24 @@ pub fn marks(you: &Session, others: &Session, halt: &AtomicBool) -> Vec<bool> {
     let end = mic.end;
     let mut near = |t: i64| mic.level(t);
     let mut other = |t: i64| far.level(t - shift);
+    let blocks_of = |(from, to): &(u64, u64)| {
+        let to = to.div_ceil(BLOCK_MS) as i64;
+        ((from / BLOCK_MS) as i64, end.map_or(to, |end| end.min(to)))
+    };
     let mut marked = Vec::with_capacity(spans.len());
-    for (from, to) in &spans {
+    for span in &spans {
         if halt.load(Ordering::Relaxed) {
             you.trace("echo", "finishing now, echo not judged");
             return vec![false; spans.len()];
         }
-        marked.push(is_echo(
-            &found,
-            &mut near,
-            &mut other,
-            (from / BLOCK_MS) as i64,
-            end.map_or(to.div_ceil(BLOCK_MS) as i64, |end| {
-                end.min(to.div_ceil(BLOCK_MS) as i64)
-            }),
-        ));
+        let (from, to) = blocks_of(span);
+        marked.push(is_echo(&found, &mut near, &mut other, from, to));
+    }
+    for i in 1..spans.len().saturating_sub(1) {
+        if !marked[i] && marked[i - 1] && marked[i + 1] {
+            let (from, to) = blocks_of(&spans[i]);
+            marked[i] = is_short_echo(&found, &mut near, &mut other, from, to);
+        }
     }
     you.trace(
         "echo",
@@ -601,6 +641,27 @@ mod tests {
         let leak = call.leak().unwrap();
         assert!(!call.echo(&leak, 18, 18 + 30));
         assert!(!call.echo(&leak, 18, 18));
+    }
+
+    #[test]
+    fn a_short_line_is_echo_only_when_every_sound_in_it_copies_the_other_side() {
+        let call = turns(|_| 18, false);
+        let leak = call.leak().unwrap();
+        let onset = 4 * TURN + 18;
+        let judged = |call: &Call, from: i64, to: i64| {
+            is_short_echo(
+                &leak,
+                &mut |t| call.mic.get(t as usize).copied(),
+                &mut |t| call.far.get(t as usize).copied(),
+                from,
+                to,
+            )
+        };
+        assert!((0..20).any(|k| judged(&call, onset + 20 * k, onset + 20 * k + 40)));
+        let yours = pad(&call, onset, onset + TURN - 40);
+        assert!((0..20).all(|k| !judged(&yours, onset + 20 * k, onset + 20 * k + 40)));
+        assert!(!judged(&call, onset, onset + 5));
+        assert!(!judged(&call, onset, onset));
     }
 
     fn pad(call: &Call, from: i64, own_to: i64) -> Call {
