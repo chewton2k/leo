@@ -1073,8 +1073,23 @@ impl Session {
     }
 
     fn timed(&self, assembled: &Assembled) -> Vec<((u64, u64), leo_core::recording::Passage)> {
-        let names = self.call_names();
         let secs = |from: u64, to: u64| (from as f64 / 1000.0, to as f64 / 1000.0);
+        let mut names = self.call_names();
+        if let (Some(names), Some(turns)) = (&mut names, self.turns(assembled)) {
+            let spoken: Vec<(f64, f64)> = assembled
+                .parts
+                .iter()
+                .zip(turns)
+                .flat_map(|(p, entries)| {
+                    let base = (p.start_secs * 1000).saturating_sub(lead_ms(p.index));
+                    entries
+                        .into_iter()
+                        .filter_map(move |(from, to, _)| Some((base + from, base + to?)))
+                })
+                .map(|(from, to)| secs(from, to))
+                .collect();
+            names.doubt_marks_through_silence(&spoken);
+        }
         let named = |from: u64, to: u64| {
             let (from, to) = secs(from, to);
             names.as_ref().and_then(|t| t.name(from, to))

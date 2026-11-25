@@ -65,6 +65,63 @@ impl Ask<'_> {
 }
 
 pub const SLOW: &str = "the call app answered too slowly";
+pub const HIDDEN: &str =
+    "the call window is covered, minimized or on another desktop, so what it shows is frozen";
+pub const STALE_SECS: f64 = 3.0;
+const GRID: usize = 24;
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Shown {
+    pub pid: i32,
+    pub plain: bool,
+    pub area: Rect,
+}
+
+impl Rect {
+    fn holds(&self, x: f64, y: f64) -> bool {
+        (self.x..self.x + self.w).contains(&x) && (self.y..self.y + self.h).contains(&y)
+    }
+
+    fn near(&self, other: &Rect) -> bool {
+        [
+            self.x - other.x,
+            self.y - other.y,
+            self.w - other.w,
+            self.h - other.h,
+        ]
+        .iter()
+        .all(|off| off.abs() <= 2.0)
+    }
+}
+
+pub fn covered(pid: i32, area: Rect, front_to_back: &[Shown]) -> bool {
+    let Some(at) = front_to_back
+        .iter()
+        .position(|s| s.pid == pid && s.area.near(&area))
+    else {
+        return true;
+    };
+    let above: Vec<Rect> = front_to_back[..at]
+        .iter()
+        .filter(|s| s.plain)
+        .map(|s| s.area)
+        .collect();
+    let step = |start: f64, length: f64, i: usize| start + length * (i as f64 + 0.5) / GRID as f64;
+    (0..GRID * GRID).all(|i| {
+        let x = step(area.x, area.w, i % GRID);
+        let y = step(area.y, area.h, i / GRID);
+        above.iter().any(|r| r.holds(x, y))
+    })
+}
 
 pub trait Reader {
     fn read(&mut self, ask: &Ask) -> Look;
@@ -139,16 +196,32 @@ pub fn clip(text: &str) -> Option<String> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum Mark {
-    Run { from: f64, to: f64, who: String },
-    Me { me: String },
+    Run {
+        from: f64,
+        to: f64,
+        who: String,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        alone: bool,
+    },
+    Me {
+        me: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct Run {
+    from: f64,
+    to: f64,
+    who: String,
+    alone: bool,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct Timeline {
-    runs: Vec<(f64, f64, String)>,
+    runs: Vec<Run>,
     me: Vec<String>,
     own: Option<String>,
-    open: Option<(f64, String)>,
+    open: Option<(f64, String, bool)>,
     last: Option<f64>,
     longest: f64,
 }
@@ -178,25 +251,63 @@ impl Timeline {
         let mut timeline = Self::default();
         for mark in marks {
             match mark {
-                Mark::Run { from, to, who } if from.is_finite() && to > from => {
-                    match timeline.runs.last_mut() {
-                        Some(last) if last.0 == from && last.2 == who => last.1 = last.1.max(to),
-                        _ => timeline.runs.push((from, to, who)),
+                Mark::Run {
+                    from,
+                    to,
+                    who,
+                    alone,
+                } if from.is_finite() && to > from => match timeline.runs.last_mut() {
+                    Some(last) if last.from == from && last.who == who => {
+                        last.to = last.to.max(to);
                     }
-                }
+                    _ => timeline.runs.push(Run {
+                        from,
+                        to,
+                        who,
+                        alone,
+                    }),
+                },
                 Mark::Me { me } => {
                     timeline.learn(&me);
                 }
                 Mark::Run { .. } => {}
             }
         }
-        timeline.runs.sort_by(|a, b| a.0.total_cmp(&b.0));
-        timeline.longest = timeline
+        timeline.runs.sort_by(|a, b| a.from.total_cmp(&b.from));
+        timeline.measure_longest();
+        timeline
+    }
+
+    fn measure_longest(&mut self) {
+        self.longest = self
             .runs
             .iter()
-            .map(|(from, to, _)| to - from)
+            .map(|run| run.to - run.from)
             .fold(0.0, f64::max);
-        timeline
+    }
+
+    pub fn doubt_marks_through_silence(&mut self, spoken: &[(f64, f64)]) {
+        let spoken = union(spoken.to_vec());
+        for run in self.runs.iter_mut().filter(|run| !run.alone) {
+            let first = spoken.partition_point(|(_, end)| *end <= run.from);
+            let inside = spoken[first..]
+                .iter()
+                .take_while(|(start, _)| *start < run.to);
+            let mut quiet_from = run.from;
+            let mut stale = false;
+            for (start, end) in inside {
+                stale |= start - quiet_from > STALE_SECS;
+                quiet_from = *end;
+            }
+            stale |= quiet_from > run.from && run.to - quiet_from > STALE_SECS;
+            if stale {
+                run.to = match spoken[first] {
+                    (start, _) if start - run.from > STALE_SECS => run.from,
+                    (_, end) => run.to.min(end),
+                };
+            }
+        }
+        self.measure_longest();
     }
 
     pub fn parse(text: &str) -> Self {
@@ -222,7 +333,7 @@ impl Timeline {
         true
     }
 
-    fn who(&self, reading: &Reading) -> Option<String> {
+    fn who(&self, reading: &Reading) -> Option<(String, bool)> {
         let marked = |name: &str| {
             self.me.contains(&norm(name))
                 || reading.me.as_deref().is_some_and(|m| norm(m) == norm(name))
@@ -238,7 +349,7 @@ impl Timeline {
             let others: Vec<&String> = people.iter().filter(|p| !marked(p)).collect();
             if let [other] = others.as_slice() {
                 if !mine(other) {
-                    return usable(other);
+                    return usable(other).map(|who| (who, true));
                 }
             }
         }
@@ -250,7 +361,7 @@ impl Timeline {
             .filter(|p| !mine(p))
             .collect();
         match talking.as_slice() {
-            [one] => usable(one),
+            [one] => usable(one).map(|who| (who, false)),
             _ => None,
         }
     }
@@ -269,34 +380,47 @@ impl Timeline {
         }
         let who = reading.and_then(|r| self.who(r));
         let goes_on = match (&self.open, &who, self.last) {
-            (Some((_, open)), Some(who), Some(last)) => open == who && at - last <= HOLD_SECS,
+            (Some((_, open, _)), Some((who, _)), Some(last)) => {
+                open == who && at - last <= HOLD_SECS
+            }
             _ => false,
         };
         if goes_on {
-            if let Some((from, who)) = &self.open {
+            if let Some((from, who, alone)) = &self.open {
                 marks.push(Mark::Run {
                     from: *from,
                     to: at,
                     who: who.clone(),
+                    alone: *alone,
                 });
             }
         } else {
             marks.extend(self.close(at));
-            self.open = who.map(|who| (at, who));
+            self.open = who.map(|(who, alone)| (at, who, alone));
         }
         self.last = Some(at);
         marks
     }
 
     fn close(&mut self, next: f64) -> Option<Mark> {
-        let (from, who) = self.open.take()?;
+        let (from, who, alone) = self.open.take()?;
         let to = next.min(self.last.unwrap_or(from) + HOLD_SECS);
         if to <= from {
             return None;
         }
-        self.runs.push((from, to, who.clone()));
+        self.runs.push(Run {
+            from,
+            to,
+            who: who.clone(),
+            alone,
+        });
         self.longest = self.longest.max(to - from);
-        Some(Mark::Run { from, to, who })
+        Some(Mark::Run {
+            from,
+            to,
+            who,
+            alone,
+        })
     }
 
     pub fn cut(&mut self, at: f64) -> Option<Mark> {
@@ -307,9 +431,9 @@ impl Timeline {
         self.close(f64::INFINITY)
     }
 
-    fn reaching(&self, start: f64) -> &[(f64, f64, String)] {
+    fn reaching(&self, start: f64) -> &[Run] {
         let reach = start - self.longest;
-        &self.runs[self.runs.partition_point(|(from, _, _)| *from < reach)..]
+        &self.runs[self.runs.partition_point(|run| run.from < reach)..]
     }
 
     pub fn name(&self, start: f64, end: f64) -> Option<String> {
@@ -317,9 +441,9 @@ impl Timeline {
             return self
                 .reaching(start)
                 .iter()
-                .take_while(|(from, _, _)| *from <= start)
-                .find(|(_, to, who)| start < *to && !self.is_me(who))
-                .map(|(_, _, who)| who.clone());
+                .take_while(|run| run.from <= start)
+                .find(|run| start < run.to && !self.is_me(&run.who))
+                .map(|run| run.who.clone());
         }
         self.name_over(&[(start, end)])
     }
@@ -335,10 +459,8 @@ impl Timeline {
         let whole = measure(&spans);
         let mut time: Vec<(String, String, Spans)> = Vec::new();
         for &(start, end) in &spans {
-            for (from, to, who) in self
-                .reaching(start)
-                .iter()
-                .take_while(|(from, _, _)| *from < end)
+            for Run { from, to, who, .. } in
+                self.reaching(start).iter().take_while(|run| run.from < end)
             {
                 if *to <= start || self.is_me(who) {
                     continue;

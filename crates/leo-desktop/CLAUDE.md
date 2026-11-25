@@ -123,8 +123,11 @@ until a call is bound it copies them all and `call_names::pick` binds the one ap
 (or browser window) that shows a call (`call_names::shows_call`: a call control,
 or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
 control), after which only that pid (and page title) is
-read; a Mac app's main and focused windows are read too, since AXWindows is empty
-while the call is on another Space; front-most order plays no part. macOS reads through Accessibility (no
+read; a window that is minimized, on another Space or wholly covered is not read
+(`call_names::covered`, CGWindowList; Zoom excepted), because Chromium then freezes
+its tree with the last talking mark on it; Chromium turns page accessibility on two
+seconds after the last `AXEnhancedUserInterface` request, so it is asked at most
+every 10 s; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
 every element before it is messaged, 4,000 elements a read, a Zoom window at most
 1,500 to depth 14, others to depth 40, the read's deadline checked between

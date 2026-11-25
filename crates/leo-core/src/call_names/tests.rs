@@ -310,6 +310,116 @@ fn a_mark_left_on_the_users_own_meet_tile_never_hides_who_is_talking() {
 }
 
 #[test]
+fn a_mark_that_stays_on_through_silence_names_only_the_line_it_came_with() {
+    let frozen = |alone: bool| {
+        let mut t = Timeline::from_marks([Mark::Run {
+            from: 4.0,
+            to: 60.0,
+            who: "Rowan Ellery".into(),
+            alone,
+        }]);
+        t.doubt_marks_through_silence(&[(4.2, 11.0), (12.0, 18.0), (23.0, 30.0), (31.0, 40.0)]);
+        [(4.2, 11.0), (12.0, 18.0), (23.0, 30.0), (31.0, 40.0)].map(|(a, b)| t.name(a, b).is_some())
+    };
+    assert_eq!(frozen(false), [true, false, false, false]);
+    assert_eq!(frozen(true), [true; 4]);
+}
+
+#[test]
+fn a_mark_is_believed_while_the_talking_goes_on() {
+    let mut t = Timeline::from_marks([Mark::Run {
+        from: 4.0,
+        to: 41.0,
+        who: "Rowan Ellery".into(),
+        alone: false,
+    }]);
+    let spoken = [(4.2, 11.0), (12.0, 18.0), (20.5, 30.0), (31.0, 40.0)];
+    t.doubt_marks_through_silence(&spoken);
+    for (from, to) in spoken {
+        assert_eq!(t.name(from, to).as_deref(), Some("Rowan Ellery"));
+    }
+}
+
+#[test]
+fn a_mark_that_was_on_long_before_anyone_spoke_names_nobody() {
+    let mut t = Timeline::from_marks([Mark::Run {
+        from: 0.0,
+        to: 60.0,
+        who: "Rowan Ellery".into(),
+        alone: false,
+    }]);
+    t.doubt_marks_through_silence(&[(8.0, 12.0), (13.0, 20.0)]);
+    assert_eq!(t.name(8.0, 12.0), None);
+    t.doubt_marks_through_silence(&[]);
+}
+
+#[test]
+fn a_call_window_is_covered_only_when_no_part_of_it_can_be_seen() {
+    let area = |x: f64, y: f64, w: f64, h: f64| Rect { x, y, w, h };
+    let shown = |pid: i32, plain: bool, area: Rect| Shown { pid, plain, area };
+    let call = area(100.0, 100.0, 800.0, 600.0);
+    let mine = shown(7, true, area(101.0, 100.0, 800.0, 599.0));
+    assert!(!covered(7, call, &[mine]));
+    assert!(covered(7, call, &[]));
+    assert!(covered(7, call, &[shown(8, true, call)]));
+    let over = shown(8, true, area(0.0, 0.0, 2000.0, 2000.0));
+    assert!(covered(7, call, &[over, mine]));
+    assert!(!covered(7, call, &[mine, over]));
+    let glass = Shown {
+        plain: false,
+        ..over
+    };
+    assert!(!covered(7, call, &[glass, mine]));
+    let left = shown(8, true, area(0.0, 0.0, 500.0, 2000.0));
+    let right = shown(9, true, area(500.0, 0.0, 500.0, 2000.0));
+    assert!(!covered(7, call, &[left, mine]));
+    assert!(covered(7, call, &[left, right, mine]));
+}
+
+#[test]
+fn a_people_row_beside_the_stage_is_never_taken_for_the_users_tile() {
+    let group = |children: Vec<Node>| Node {
+        role: "AXGroup".into(),
+        children,
+        ..Node::default()
+    };
+    let text = |value: &str| Node {
+        role: "AXStaticText".into(),
+        value: Some(value.into()),
+        ..Node::default()
+    };
+    let deep = |leaf: Node, by: usize| (0..by).fold(leaf, |node, _| group(vec![node]));
+    let labelled = |role: &str, label: &str, children: Vec<Node>| Node {
+        role: role.into(),
+        description: Some(label.into()),
+        children,
+        ..Node::default()
+    };
+    let own = labelled("AXButton", "Backgrounds and effects", Vec::new());
+    for by in 0..12 {
+        let mut mine = deep(text("Juno Halvorsen"), 7);
+        mine.children.push(own.clone());
+        let mut other = deep(text("Rowan Ellery"), 7);
+        other.classes = vec!["v5h6Xc".into()];
+        let row = labelled(
+            "AXGroup",
+            "Rowan Ellery",
+            vec![deep(text("Rowan Ellery"), by)],
+        );
+        let list = labelled("AXList", "Participants", vec![row]);
+        let page = group(vec![group(vec![mine, other]), group(vec![list])]);
+        let window = Window {
+            title: "Meet - abc-defg-hij".into(),
+            id: String::new(),
+            tree: page,
+        };
+        let read = read_windows(Kind::Meet, &[window]);
+        assert_eq!(read.me.as_deref(), Some("Juno Halvorsen"), "{by}");
+        assert_eq!(read.speaking, ["Rowan Ellery"], "{by}");
+    }
+}
+
+#[test]
 fn a_meet_call_of_two_is_named_from_the_open_people_panel() {
     let read = read_windows(
         Kind::Meet,
@@ -722,6 +832,7 @@ fn overlapping_rows_count_their_time_once_and_a_long_run_across_the_start_is_fou
         from,
         to,
         who: who.into(),
+        alone: false,
     };
     let rolled = Timeline::from_marks([
         run(0.0, 10.0, "Rowan Ellery"),

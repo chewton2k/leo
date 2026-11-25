@@ -29,10 +29,11 @@ pub fn names() -> Option<Names> {
 mod mac {
     use std::ffi::c_void;
     use std::ptr::{null, null_mut};
+    use std::time::{Duration, Instant};
 
     use leo_core::call_names::{
-        self as names, Ask, Kind, Look, Node, Reader, Seat, Seen, Window, BROWSERS, MOST_WINDOWS,
-        TEAMS_APPS, ZOOM_APPS,
+        self as names, Ask, Kind, Look, Node, Reader, Rect, Seat, Seen, Shown, Window, BROWSERS,
+        MOST_WINDOWS, TEAMS_APPS, ZOOM_APPS,
     };
     use objc2_app_kit::NSRunningApplication;
     use objc2_foundation::NSString;
@@ -58,6 +59,7 @@ mod mac {
         ) -> i32;
         fn AXUIElementSetAttributeValue(element: Ref, attribute: Ref, value: Ref) -> i32;
         fn AXUIElementSetMessagingTimeout(element: Ref, seconds: f32) -> i32;
+        fn AXValueGetValue(value: Ref, kind: i32, out: *mut c_void) -> bool;
     }
 
     #[link(name = "CoreFoundation", kind = "framework")]
@@ -66,7 +68,9 @@ mod mac {
         static kCFBooleanFalse: Ref;
         static kCFTypeArrayCallBacks: u8;
         fn CFRelease(value: Ref);
-        fn CFEqual(one: Ref, other: Ref) -> u8;
+        fn CFDictionaryGetValue(dictionary: Ref, key: Ref) -> Ref;
+        fn CFNumberGetValue(number: Ref, kind: isize, value: *mut c_void) -> u8;
+        fn CFBooleanGetValue(boolean: Ref) -> u8;
         fn CFGetTypeID(value: Ref) -> usize;
         fn CFStringGetTypeID() -> usize;
         fn CFArrayGetTypeID() -> usize;
@@ -98,8 +102,20 @@ mod mac {
         ) -> isize;
     }
 
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGWindowListCopyWindowInfo(option: u32, relative: u32) -> Ref;
+        fn CGRectMakeWithDictionaryRepresentation(dictionary: Ref, rect: *mut Rect) -> u8;
+    }
+
+    const ON_SCREEN: u32 = 1 | 1 << 4;
+    const NUMBER_F64: isize = 13;
+    const AX_POINT: i32 = 1;
+    const AX_SIZE: i32 = 2;
+
     const UTF8: u32 = 0x0800_0100;
     const TIMEOUT: f32 = 0.3;
+    const ASK_AGAIN: Duration = Duration::from_secs(10);
     const KEYS: [&str; 7] = [
         "AXRole",
         "AXSubrole",
@@ -189,16 +205,69 @@ mod mac {
         }
     }
 
+    fn pair(window: Ref, name: &str, kind: i32) -> Option<[f64; 2]> {
+        let value = attribute(window, name);
+        let mut out = [0.0f64; 2];
+        let read = !value.0.is_null()
+            && unsafe { AXValueGetValue(value.0, kind, out.as_mut_ptr().cast()) };
+        read.then_some(out)
+    }
+
+    fn number(of: Ref, key: &str) -> Option<f64> {
+        let key = cf_string(key);
+        let value = unsafe { CFDictionaryGetValue(of, key.0) };
+        let mut out = 0.0f64;
+        let read = !value.is_null()
+            && unsafe { CFNumberGetValue(value, NUMBER_F64, (&raw mut out).cast()) != 0 };
+        read.then_some(out)
+    }
+
+    fn shown_windows() -> Vec<Shown> {
+        let list = Owned(unsafe { CGWindowListCopyWindowInfo(ON_SCREEN, 0) });
+        let key = cf_string("kCGWindowBounds");
+        items(list.0)
+            .into_iter()
+            .filter_map(|window| {
+                let mut area = Rect::default();
+                let bounds = unsafe { CFDictionaryGetValue(window, key.0) };
+                if bounds.is_null()
+                    || unsafe { CGRectMakeWithDictionaryRepresentation(bounds, &mut area) } == 0
+                {
+                    return None;
+                }
+                Some(Shown {
+                    pid: number(window, "kCGWindowOwnerPID")? as i32,
+                    plain: number(window, "kCGWindowLayer") == Some(0.0)
+                        && number(window, "kCGWindowAlpha") == Some(1.0),
+                    area,
+                })
+            })
+            .collect()
+    }
+
+    fn hidden(window: Ref, pid: i32, shown: &[Shown]) -> bool {
+        let minimized = attribute(window, "AXMinimized");
+        if !minimized.0.is_null() && unsafe { CFBooleanGetValue(minimized.0) } != 0 {
+            return true;
+        }
+        let (Some([x, y]), Some([w, h])) = (
+            pair(window, "AXPosition", AX_POINT),
+            pair(window, "AXSize", AX_SIZE),
+        ) else {
+            return false;
+        };
+        names::covered(pid, Rect { x, y, w, h }, shown)
+    }
+
     pub struct Mac {
         keys: Owned,
-        asked: Vec<i32>,
+        asked: Vec<(i32, Instant)>,
         enhanced: Vec<i32>,
     }
 
     struct Found {
         _app: Owned,
         _windows: Owned,
-        _front: [Owned; 2],
         pid: i32,
         id: &'static str,
         kind: Kind,
@@ -283,17 +352,21 @@ mod mac {
             node
         }
 
-        fn ask(&mut self, app: Ref, pid: i32, enhance: bool) {
-            if !self.asked.contains(&pid) {
-                set(app, "AXManualAccessibility", true);
-                self.asked.push(pid);
+        fn ask(&mut self, app: Ref, pid: i32, enhance: bool) -> bool {
+            let now = Instant::now();
+            match self.asked.iter_mut().find(|(asked, _)| *asked == pid) {
+                Some((_, at)) if now.duration_since(*at) < ASK_AGAIN => return false,
+                Some((_, at)) => *at = now,
+                None => self.asked.push((pid, now)),
             }
+            set(app, "AXManualAccessibility", true);
             if enhance {
                 set(app, "AXEnhancedUserInterface", true);
                 if !self.enhanced.contains(&pid) {
                     self.enhanced.push(pid);
                 }
             }
+            true
         }
 
         fn running(seat: Option<&Seat>) -> Vec<(i32, &'static str)> {
@@ -339,6 +412,8 @@ mod mac {
             }
             let mut found: Vec<Found> = Vec::new();
             let mut candidates: Vec<Candidate> = Vec::new();
+            let shown = shown_windows();
+            let mut out_of_sight = false;
             for (pid, id) in running {
                 if ask.over() {
                     return Look::Unreadable(names::SLOW.into());
@@ -355,15 +430,7 @@ mod mac {
                     self.ask(app.0, pid, false);
                 }
                 let windows = attribute(app.0, "AXWindows");
-                let front = ["AXMainWindow", "AXFocusedWindow"].map(|k| attribute(app.0, k));
-                let mut listed = items(windows.0);
-                for Owned(window) in &front {
-                    let known = |other: &Ref| unsafe { CFEqual(*other, *window) != 0 };
-                    if !window.is_null() && !listed.iter().any(known) {
-                        listed.push(*window);
-                    }
-                }
-                let mine: Vec<Candidate> = listed
+                let mine: Vec<Candidate> = items(windows.0)
                     .into_iter()
                     .map(|w| Candidate {
                         found: found.len(),
@@ -372,13 +439,17 @@ mod mac {
                         ident: text_of(attribute(w, "AXIdentifier").0).unwrap_or_default(),
                     })
                     .filter(|c| names::call_window(kind, &c.title, &c.ident))
+                    .filter(|c| {
+                        let frozen = kind != Kind::Zoom && hidden(c.window, pid, &shown);
+                        out_of_sight |= frozen;
+                        !frozen
+                    })
                     .take(MOST_WINDOWS)
                     .collect();
                 if mine.is_empty() {
                     continue;
                 }
-                if chromium && kind != Kind::Teams {
-                    self.ask(app.0, pid, true);
+                if chromium && kind != Kind::Teams && self.ask(app.0, pid, true) {
                     for c in &mine {
                         set(c.window, "AXManualAccessibility", true);
                     }
@@ -387,11 +458,13 @@ mod mac {
                 found.push(Found {
                     _app: app,
                     _windows: windows,
-                    _front: front,
                     pid,
                     id,
                     kind,
                 });
+            }
+            if candidates.is_empty() && out_of_sight {
+                return Look::Unreadable(names::HIDDEN.into());
             }
             let mut budget = 4000;
             let window = |this: &Self, c: &Candidate, budget: &mut usize| Window {

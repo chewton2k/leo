@@ -418,6 +418,14 @@ fn chat_panel(node: &Node) -> bool {
         })
 }
 
+fn only_name(node: &Node, one: &str) -> bool {
+    let other = is(node, TEXTS)
+        && text(node)
+            .and_then(meet_name)
+            .is_some_and(|name| norm(&name) != norm(one));
+    !other && node.children.iter().all(|child| only_name(child, one))
+}
+
 const MEET_OWN_CONTROLS: &[&str] = &["backgrounds and effects", "you’re continuously framed"];
 
 fn own_controls(node: &Node) -> bool {
@@ -475,6 +483,9 @@ fn meet(windows: &[Window]) -> Reading {
         let [one] = names.as_slice() else {
             continue;
         };
+        if !only_name(root, one) {
+            continue;
+        }
         if norm(one) == "you" || own_controls(root) {
             reading.me = Some(one.clone());
         }
