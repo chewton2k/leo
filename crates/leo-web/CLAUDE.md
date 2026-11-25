@@ -512,7 +512,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   explorer redraws (expiry, Felix's read starting and ending, queued off the read)
   go through `sideRedrawSoon`, which waits while any menu is open.
   A note leo writes in the background (a recording, an uploaded file) carries a still blue
-  ink blot after its title (`.side-unopened`, replacing the dot) until it is opened, also
+  ink blot (9 px, the user's call: subtle) after its title (`.side-unopened`, replacing the dot) until it is opened, also
   after a restart; a closed folder holding one carries it instead (2026-11-24, the user's
   call). leo.db `unopened_notes` is written under the notes lock before the note is saved,
   so the stamp change that shows the note shows its mark; it is a dependent row of the note.
@@ -1530,8 +1530,8 @@ a modal.
   Settings → Note width only says the current width with a Reset (`width-reset`; no size
   cards since 2026-11-16, the user's call); an older Comfortable or Full choice still applies until reset.
 
-Decided: Keeping replaces Storage (2026-11-05); Quit leo is not in Settings; Writing
-AI uses a pen icon, never a sparkle.
+Decided: Keeping replaces Storage (2026-11-05); Quit leo is in Settings only on
+Windows (2026-11-25); Writing AI uses a pen icon, never a sparkle.
 
 ## Idle work and freshness
 

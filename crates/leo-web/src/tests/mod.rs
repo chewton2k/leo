@@ -74,8 +74,11 @@ fn state_with(notes: &[(&str, &str)]) -> (AppState, tempfile::TempDir, Vec<Strin
     store.save().unwrap();
     let graphs = Arc::new(graph::Graphs::for_notes(&store.notes_dir, None));
     let notes_dir = store.notes_dir.clone();
+    let usage = Arc::new(crate::usage::Usage::default());
+    usage.save_in(crate::chats::dir_for(&notes_dir));
     let state = AppState {
         powers: Powers {
+            usage,
             lighter: Some(Arc::new(|| true)),
             ..Default::default()
         },

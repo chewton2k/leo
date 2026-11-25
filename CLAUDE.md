@@ -14,7 +14,7 @@ the compiler enforces it — do not add an upward dependency:
 | `crates/leo-services` | `ai/` (chains, prompts, live transcription), `config/` (providers, credentials), `health`, `providers`, `speech`, `dictation`, `session`, `update`, `usage`, `import` | core |
 | `crates/leo-web` | leo's engine and pages: `lib.rs` (`start` → `Running`, router), `routes/` (handlers by area), `token.rs`, and the page in `src/web/` (`page-head.html` + `styles/*.css` + `page-tail.html` joined at compile time, `app/*.js` served as `/app.js`, `markdown.js`, …) | core |
 | `crates/leo-host` | `powers()` (the AI, speech, settings, recording housekeeping and import powers handed to the engine) and `leo-test-server` (Playwright's engine) | core, services, web |
-| `crates/leo-desktop` | The Tauri app `leo-app`: window, menu bar icon, single instance, open at login, PATH from the login shell, links/downloads/print | core, services, host, web |
+| `crates/leo-desktop` | The Tauri app `leo-app`: window, single instance, open at login, PATH from the login shell, links/downloads/print | core, services, host, web |
 | root `leo` | `main.rs` and `cli/`: `leo` opens the app, `leo uninstall`, `--version` | core, services |
 
 Verify with `cargo test` at the root (runs every crate but `leo-desktop`, which
@@ -70,8 +70,8 @@ changes and quit never commit or push. Existing repositories/remotes and legacy
 the pre-flight before recording agree, and every gap arrives with what fixes it
 rather than as a failure discovered mid-use.
 `health::writing` is the one writing-AI answer (Ready, NotInstalled,
-NotRunning, NoModel, NotChosen, with its fix): `ai::writing_ready` and the
-tray use its cheap path (no HTTP, never NoModel); the doctor's chat check
+NotRunning, NoModel, NotChosen, with its fix): `ai::writing_ready`
+uses its cheap path (no HTTP, never NoModel); the doctor's chat check
 (`health::chain_check`), the recording pre-flight (leo-host's
 `Housekeeping::checks`) and Settings (`web_settings::describe`'s `writing`) pass
 the listed local models (`choice::local_models`: one loopback Ollama `/api/tags`
@@ -237,7 +237,21 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   shows; anything else stays "Others". Never guessed, never the user's own name (as the call app marks it, or the computer account's full name), nothing leaves the
   computer (the account's full name only vetoes; the one-other-person rule needs
   the call app's own marker of the user); tests use fixtures and fake readers. The name lands in `speaker`.
-  Credited in NOTICE (its name appears only there).
+  Credited in NOTICE (its name appears only there). Meet, measured on a live call of
+  one on 2026-11-24 (`fixtures/meet-live-*.json`, names invented, the second person
+  and the talking class added by hand): the user's tile carries their Meet name, not
+  "You", and is told by its own controls ("Backgrounds and effects", English) or the
+  People panel's "(You)" row; "Contributors N" is the count. Whether the talking class
+  still marks the speaker is not yet seen on a call of two. FaceTime is not read.
+  Chromium freezes the tree of a hidden window, mark and all, so a hidden window (or
+  a locked screen) is not read and a Meet or Teams mark that stays on through 3 s
+  without sound (`echo::sound`, the track's own levels) names only the line it came
+  with (`doubt_marks_through_silence`). A Meet line is named only once the user's tile
+  is known, a mark on a tile whose name cannot be read names nobody, a mark that outlives
+  a later one is doubted until it goes off (a pinned or presenting tile keeps its mark),
+  another tile that shows sound (`MEET_SOUND_CLASSES`) leaves the line unnamed, a line
+  under 1.2 s is named only well inside one person's marks and one under 3 s only when
+  their mark lasts to its end.
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
   described by their scripts and workflow, and uninstall retains the existing
@@ -252,9 +266,9 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   front-matter property leo does not own; `#word` searches the word.
 - Felix in the margin: threads in `leo.db`, never note files or git; reads use
   `Powers.toolless` (no tools at all). See crates/leo-web/CLAUDE.md.
-- Menu bar, study order, idle compaction and in-app drag and drop
-  (2026-11-02, the user's notes): see crates/leo-desktop/CLAUDE.md (tray,
-  `disable_drag_drop_handler`) and crates/leo-web/CLAUDE.md (Felix study order,
+- Study order, idle compaction and in-app drag and drop
+  (2026-11-02, the user's notes): see crates/leo-desktop/CLAUDE.md
+  (`disable_drag_drop_handler`) and crates/leo-web/CLAUDE.md (Felix study order,
   idle compaction).
 - Keeping: `leo_core::keep` (`<data>/keep.json`, beside notes, not synced):
   `trash_days` (default 30) drives `tidy_trash`; `chat_days`, `upload_days`,

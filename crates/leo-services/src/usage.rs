@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::config::provider::ProviderConfig;
 
-pub const STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+const STALE_AFTER: Duration = Duration::from_secs(5 * 60);
 pub const CODEX_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]

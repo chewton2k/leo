@@ -364,11 +364,20 @@ fn a_streamed_combine_is_counted_in_usage() {
             })
         },
     ));
-    assert_eq!(state.usage.line(), "No AI requests since Leo started");
+    assert!(state.usage.saved().kinds.is_empty());
     let job = json_of(started(&state, &ids[0], &ids[1]));
     let done = finished(&state, job["id"].as_str().unwrap());
     assert_eq!(done["state"], "ready", "{done}");
-    assert_eq!(state.usage.line(), "1 AI request · 1k tokens");
+    let used = serde_json::to_value(state.usage.saved().kinds).unwrap();
+    assert_eq!(used.as_array().unwrap().len(), 1);
+    assert_eq!(
+        (&used[0]["calls"], &used[0]["input"], &used[0]["output"]),
+        (
+            &serde_json::json!(1),
+            &serde_json::json!(1_200),
+            &serde_json::json!(300)
+        )
+    );
 }
 
 #[test]

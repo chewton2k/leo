@@ -104,7 +104,7 @@ function tail(extra) {
   const messages = [];
   const calls = [];
   const scope = { window, toast: (text, options) => messages.push([text, options]), go: (hash) => calls.push(hash), location: { hash: '#/' }, setTimeout, saveWebsiteWork() {}, ...extra };
-  vm.runInNewContext(events.slice(events.indexOf('const APP_SETTINGS =')) + '\nwindow.warnUnsaved = warnUnsaved;', scope);
+  vm.runInNewContext(events.slice(events.indexOf('const QUIT_TEXT =')) + '\nwindow.warnUnsaved = warnUnsaved; window.confirmQuit = confirmQuit;', scope);
   return { window, messages, calls };
 }
 test('a native quit confirmation explains both ways to quit without navigating', async () => {
@@ -124,6 +124,21 @@ test('quitting says what is lost while a recording is live or its note is being 
   assert.equal(await text(async () => ({ job: { state: 'writing' } })), 'Press ⌘Q again to quit. A note is still being written; you can recover it from Record next time.');
   for (const state of ['starting', 'recording', 'paused']) assert.equal(await text(async () => ({ job: { state } })), 'Press ⌘Q again to quit. The recording stops and you can recover it from Record next time.');
   for (const job of [null, { state: 'done' }, { state: 'failed' }]) assert.ok((await text(async () => ({ job }))).includes('within 3 seconds'));
+});
+test('only Windows draws Quit leo, and it says what a live recording loses', async () => {
+  const { value } = context();
+  assert.ok(value.nativeGeneralCard({ platform: 'windows' }).includes('data-action="quit-leo"'));
+  assert.ok(!value.nativeGeneralCard({ platform: 'macos' }).includes('quit-leo'));
+  const asked = async (job) => {
+    let sheet;
+    const { window } = tail({ api: async () => ({ job }), confirmSheet: (made) => { sheet = made; } });
+    await window.confirmQuit();
+    return sheet;
+  };
+  const idle = await asked(null);
+  assert.ok(idle.text.includes('Dictation and reminders stop') && !idle.danger && idle.data.includes('data-app-action="quit"'));
+  const live = await asked({ state: 'recording' });
+  assert.ok(live.text.startsWith('The recording stops') && live.danger);
 });
 test('a failed or slow recording check keeps the usual quit text', async () => {
   const usual = async (api) => { const { window, messages } = tail({ api }); await window.leoFromApp('quit', ''); return messages[0][0].includes('within 3 seconds'); };

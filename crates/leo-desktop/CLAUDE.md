@@ -31,17 +31,19 @@ a test, or leave it unset to see the user's own data.
    header row: to the right of the window controls when windowed, flush left in
    full screen (`lib.rs` tells the page on load and on every resize). Folded on
    a windowed Mac, the toggle drops into the rail below the window controls.
-5. A part that cannot start (the menu bar icon, the Quit menu, the dictation popup)
+5. A part that cannot start (the Quit menu, the dictation popup)
    is named in Health under App preferences and the window still opens; a failure
    of dictation, app settings or the main window opens `index.html?problem=…`.
 
 ## Behaviour
 
-- Close hides the window; in macOS full screen it first leaves full screen (`set_fullscreen(false)`) and hides on the first `Resized` that reports windowed, or after 1 s if none arrives, because hiding a full-screen window left a black Space (`LEAVING_FULLSCREEN`, `show` clears it); Dock click and "Open leo" show
+- Close minimizes the window to the taskbar on Windows, and a login launch (`--hidden`)
+  starts minimized there, so leo always has a button to come back from (2026-11-25, the
+  owner's call: the menu bar and tray icon are gone). On macOS close hides it; in macOS full screen it first leaves full screen (`set_fullscreen(false)`) and hides on the first `Resized` that reports windowed, or after 1 s if none arrives, because hiding a full-screen window left a black Space (`LEAVING_FULLSCREEN`, `show` clears it); a Dock click shows
   it; on macOS, Leo's Quit menu items or ⌘Q need a second attempt within three seconds
   (the first shows a prompt). Update restarts and error exits bypass this guard.
-  Every quit leo sees (menu, ⌘Q, menu bar, Dock, the page's Quit, an update restart;
-  on Windows the menu bar and the page's Quit) first asks the page to settle its saves
+  Every quit leo sees (menu, ⌘Q, Dock, an update restart;
+  on Windows Quit leo in Settings, General) first asks the page to settle its saves
   (`leoFromApp('quit', 'now')`, answered by `POST /api/app {action: 'settled'}`) and
   waits up to 3 s (`QuitGate`, `QUIT_WAIT`), before an update on quit installs and
   before the engine stops (2026-11-17).
@@ -53,27 +55,12 @@ a test, or leave it unset to see the user's own data.
 - `links::stays_inside`: only `http://127.0.0.1|localhost:<port>` and the
   bundled page stay in the window; navigation and new windows elsewhere open in
   the default browser.
-- Menu bar icon (`tray.rs`, 2026-11-02, the user's request): Open Leo, Record a
-  lecture / Record a call (shows the window and calls the page's
-  `window.leoFromApp('record', kind)`, which presses Start for that kind; a
-  running recording is just shown), Copy last dictation (`leo_web::dictation::newest`,
-  whole, native clipboard), status rows (speech model
-  `Library::selected_name`, writing AI and model plus 5h/7d plan use from
-  `web_settings::writing_status`, AI use since launch `Running::usage_line`),
-  Settings…, Check for updates… (queues a check, opens Updates & about), the
-  version, Quit. A `leo-tray-status` thread refreshes the rows when the icon is
-  clicked and otherwise every 5 min (2026-11-06, the user's call: no idle
-  polling); Codex limits are asked from its app-server only after a click, at
-  most every 5 min and only when Codex is the chosen writing AI and its saved
-  use is stale (`writing_status(may_ask)`).
-  Page commands are offered for 5 s (the page may still be loading) and run once
-  per click (`__leoAsked`); copying runs off the main thread. A speech model that
-  is chosen but not on disk reads "(not downloaded)".
 - Calendar events (2026-11-09, `notify.rs`): `AppApi::event_starting` posts
   "<title> is starting"; a tap (Windows: the plugin's `on_action` with uid and kind in
   `extra`; macOS: `post`) shows the window and navigates to
   `#/record?event=<uid>&kind=<call|microphone>` through
-  `leoFromApp('event', '<kind>:<uid>')` (`page` JSON-quotes its argument). `call`
+  `leoFromApp('event', '<kind>:<uid>')` (`notify::open` JSON-quotes its argument, offers it for 5 s while the page may still be
+  loading, and runs it once per click with `__leoAsked`). `call`
   when the event's location or description holds an http(s) link
   (`EventStarting.online`), else `microphone`. The page only opens Record ready;
   it never starts. macOS (2026-11-16): `notify::post` sends through
@@ -87,9 +74,7 @@ a test, or leave it unset to see the user's own data.
   onboarding; an unbundled run has no bundle id and posts nothing; only one
   reminder waits on the question at a time. `permissions::notifications` reads the
   setting with a 500 ms bound; the status poll reuses the last answer for 10 s and never waits on it; Health shows a Notifications row (warn) only once
-  it is denied, whose button opens System Settings → Notifications. The tray always adds "Get ready to record <title>" (`&` doubled, title cut at 40
-  characters with an ellipsis) under Record a call until start+10 min, hidden while a recording is live
-  (`Running::recording_live`), so a denied or missed notification still has a way in.
+  it is denied, whose button opens System Settings → Notifications.
 - The window disables Tauri's drag-drop handler (`disable_drag_drop_handler`):
   left on, it swallows the webview's HTML drag events, so moving notes and
   folders and combining notes did nothing in the app (2026-11-02). Dropped
@@ -97,9 +82,10 @@ a test, or leave it unset to see the user's own data.
 - Sign in (2026-11-09, `sign_in.rs`, AppApi `{action:"sign_in",provider}`, only
   `claude_code`/`codex`): Codex runs `codex login` quietly (it opens the browser; one at
   a time, reaped, stopped after 10 min); Claude Code opens a terminal running the resolved
-  `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
-  `open` on macOS, and on Windows `cmd /c start "" cmd /k claude`, the one intentional
-  visible console. The command lines are pure functions with unit tests.
+  `claude auth login` (never plain `claude`, whose updater would install a CLI beside an app's copy): a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
+  `open` on macOS, and on Windows `cmd /c start "" cmd /k <path> auth login` (bare
+  `claude`, from its own folder, for a path with cmd metacharacters), the one
+  intentional visible console. The command lines are pure functions with unit tests.
 - Downloads save to `~/Downloads` under a free name (`links::download_path`)
   and are revealed when done.
 - `window.print` calls `print_page` on macOS; Windows retains its original
@@ -121,8 +107,15 @@ own name, a veto only) is handed to
 until a call is bound it copies them all and `call_names::pick` binds the one app
 (or browser window) that shows a call (`call_names::shows_call`: a call control,
 or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
-control), after which only that pid (and title) is
-read; front-most order plays no part. macOS reads through Accessibility (no
+control), after which only that pid (and page title) is
+read; a window that is minimized, on another Space or wholly covered is not read
+(`call_names::covered` by a grid on the screens: CGWindowList on macOS, EnumWindows
+order, cloaked and minimized windows on Windows; Zoom excepted; when leo cannot tell,
+it counts as hidden), because Chromium then freezes its tree with the last talking
+mark on it; hidden windows still count when the call is chosen, and a window whose own
+page is another call's is dropped (`same_call`); Chromium turns page accessibility on two
+seconds after the last `AXEnhancedUserInterface` request, so it is asked at most
+every 10 s; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
 every element before it is messaged, 4,000 elements a read, a Zoom window at most
 1,500 to depth 14, others to depth 40, the read's deadline checked between
@@ -201,7 +194,7 @@ before the chord, waits for post-injection reads and a 200 ms quiet period, with
 an 8 s cap. A failed chord is an error and leaves the text on the clipboard; a
 paste no app read is reported as unsure. Restoration checks ownership again; a
 newer copy wins. The clipboard/paste preference types are gone. Explicit copies
-(Recent dictations, tray) write plain text; the manual-paste fallback and a
+(Recent dictations) write plain text; the manual-paste fallback and a
 failed chord leave the text as Leo's own copy (`write_secret`, marked private,
 on macOS), and a concealed or transient snapshot is not restored unless it is Leo's own copy (the pasteboard change count or clipboard
 sequence number after the copy is compared). A pending restore is flushed on exit.
@@ -246,14 +239,14 @@ under 4 minutes it runs in one piece, unchanged. With AI writing on, Escape stay
 polishing step (its own `escape` flag, separate from `capturing`), and a
 fallback shows a four-second "Pasted without AI writing" notice with the
 reason. Settings warns when no writing AI is set up (`writing_ready`, which is
-`health::writing`'s cheap state; the tray's plan-use line reads the same state).
+`health::writing`'s cheap state).
 `CHORD_HOLD_MS` stays 100 (the user's call). Shutdown cancels dictation/shortcuts and stops the speech worker before the
 loopback engine finishes.
 
 ## Settings and updates
 
 `app_settings.rs` serializes atomic private app preferences through a bounded
-actor; native login/tray failures restore the previous file and cached state.
+actor; native login failures restore the previous file and cached state.
 First-launch microphone, Accessibility and model completion flags persist
 independently; the page groups both permissions before the model choice.
 `finish_step(3)` is the writing AI step (`writing_done = Some(true)`); any earlier
@@ -331,7 +324,7 @@ minimize/restore and page-load completion. Hidden/minimized lecture previews pau
 native capture, final transcription and dictation remain active. A finished page
 load resynchronizes visibility in case hide/show happened during navigation.
 
-Foreground requests (single instance, Dock and tray page commands) are refused
+Foreground requests (single instance, Dock and notification clicks) are refused
 while the core installation lease is held. Every successful update reopens Leo,
 including install-on-quit. Installations leave a
 private atomic one-use `update-foreground` marker, consumed only after the
@@ -343,16 +336,7 @@ updater command. Installation replaces the running bundle; the staged previous
 bundle is removed, and unrelated application copies are never deleted.
 Foreground requests run on the main thread, move the main window to the active
 macOS Space and explicitly make it the main/key window. Initial activation runs
-at Ready, never after an arbitrary page reload; hidden login launches stay hidden.
-The macOS tray opens its menu through NSStatusItem directly for either mouse button
-(`popUpStatusItemMenu`, not tray-icon's simulated click). Spike on a Mac (2026-11-06): a
-Regular app shows no status menu over another app's full-screen Space by any path
-(popUp, performClick, permanent menu, activating first); an Accessory app shows it, with
-or without a window, and Regular flipped to Accessory for the life of the menu shows it
-too. So `popup()` (`tray.rs`) sets Accessory before the menu and Regular after only when
-Leo is not active, its main window is not on the active Space (`isOnActiveSpace`, false
-when hidden, `needs_flip`); a click within a second of the last flip waits out the gap, so rapid changes never leave extra Dock icons; Leo in front or beside
-you never flips. `setCanHide` was not needed in the spike. Only the gate is tested; the
-real behaviour needs a release and a full-screen Space.
+at Ready, never after an arbitrary page reload; hidden login launches stay hidden
+(on Windows minimized: Ready skips a minimized window).
 
 App-owned paths use the shared `leo_core::paths::own` registry used by uninstall.

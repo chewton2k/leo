@@ -12,7 +12,6 @@ use tauri_plugin_autostart::ManagerExt;
 #[serde(default)]
 pub struct Preferences {
     pub open_at_login: bool,
-    pub show_tray: bool,
     pub automatic_updates: bool,
     pub install_on_quit: bool,
     pub onboarding: [bool; 3],
@@ -22,7 +21,6 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             open_at_login: true,
-            show_tray: true,
             automatic_updates: true,
             install_on_quit: true,
             onboarding: [false; 3],
@@ -113,7 +111,6 @@ impl PreferenceStore {
                         PreferenceChange::Finish(step) => next.finish_step(step)?,
                         PreferenceChange::Set(field, enabled) => match field.as_str() {
                             "open_at_login" => next.open_at_login = enabled,
-                            "show_tray" => next.show_tray = enabled,
                             "automatic_updates" => next.automatic_updates = enabled,
                             "install_on_quit" => next.install_on_quit = enabled,
                             _ => anyhow::bail!(
@@ -197,6 +194,15 @@ pub struct AppSettings {
     dictation: Arc<crate::dictation::Dictation>,
     pub updates: OnceLock<Arc<dyn UpdateApi>>,
 }
+fn open_at_login(app: &AppHandle, on: bool) -> Result<()> {
+    let login = app.autolaunch();
+    if on {
+        login.enable()?;
+    } else {
+        login.disable()?;
+    }
+    Ok(())
+}
 impl AppSettings {
     pub fn new(app: AppHandle, dictation: Arc<crate::dictation::Dictation>) -> Result<Arc<Self>> {
         let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::APP_SETTINGS);
@@ -205,16 +211,7 @@ impl AppSettings {
             path.clone(),
             Arc::new(move |before, after| {
                 if before.open_at_login != after.open_at_login {
-                    if after.open_at_login {
-                        native.autolaunch().enable()?;
-                    } else {
-                        native.autolaunch().disable()?;
-                    }
-                }
-                if before.show_tray != after.show_tray {
-                    if let Some(tray) = native.tray_by_id("leo") {
-                        tray.set_visible(after.show_tray)?;
-                    }
+                    open_at_login(&native, after.open_at_login)?;
                 }
                 Ok(())
             }),
@@ -242,21 +239,9 @@ impl AppSettings {
     }
     pub fn apply_startup(&self) {
         let preferences = self.preferences();
-        self.preferences.record(|| {
-            if let Some(tray) = self.app.tray_by_id("leo") {
-                tray.set_visible(preferences.show_tray)?;
-            }
-            Ok(())
-        });
         if self.path.exists() && !cfg!(debug_assertions) {
-            self.preferences.record(|| {
-                if preferences.open_at_login {
-                    self.app.autolaunch().enable()?;
-                } else {
-                    self.app.autolaunch().disable()?;
-                }
-                Ok(())
-            });
+            self.preferences
+                .record(|| open_at_login(&self.app, preferences.open_at_login));
         }
     }
     fn permission_view(&self, fresh: bool) -> Value {
@@ -372,13 +357,13 @@ mod tests {
         });
         let b = std::thread::spawn(move || {
             second
-                .change(PreferenceChange::Set("show_tray".into(), false))
+                .change(PreferenceChange::Set("install_on_quit".into(), false))
                 .unwrap()
         });
         a.join().unwrap();
         b.join().unwrap();
         let saved = Preferences::load(&path).unwrap();
-        assert!(!saved.automatic_updates && !saved.show_tray);
+        assert!(!saved.automatic_updates && !saved.install_on_quit);
         drop(store);
         let failed = PreferenceStore::new(
             path.clone(),
@@ -401,7 +386,7 @@ mod tests {
         assert!(store.problem().is_none());
         store.record(|| anyhow::bail!("login item blocked"));
         assert!(store.problem().unwrap().contains("login item blocked"));
-        store.record(|| anyhow::bail!("tray blocked"));
+        store.record(|| anyhow::bail!("updates blocked"));
         assert!(store.problem().unwrap().contains("login item blocked"));
     }
     #[test]
@@ -420,9 +405,7 @@ mod tests {
     #[test]
     fn app_preferences_default_to_safe_updates_and_independent_onboarding_steps() {
         let mut preferences = Preferences::default();
-        assert!(
-            preferences.automatic_updates && preferences.install_on_quit && preferences.show_tray
-        );
+        assert!(preferences.automatic_updates && preferences.install_on_quit);
         preferences.finish_step(1).unwrap();
         assert_eq!(preferences.onboarding, [false, true, false]);
         preferences.finish_step(0).unwrap();

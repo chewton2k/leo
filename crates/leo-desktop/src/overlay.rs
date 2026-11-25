@@ -64,8 +64,7 @@ pub fn popup(app: &AppHandle, when: &str) -> Option<tauri::WebviewWindow> {
         }
         Err(why) => {
             FAILED.store(true, Ordering::Release);
-            let sentence =
-                crate::startup_problem(&[("dictation popup", Some(why))]).unwrap_or_default();
+            let sentence = crate::startup_problem("dictation popup", &why);
             eprintln!("  {sentence}");
             if let Some(settings) =
                 app.try_state::<std::sync::Arc<crate::app_settings::AppSettings>>()

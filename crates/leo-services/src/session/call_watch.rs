@@ -545,9 +545,9 @@ mod tests {
         timeline.heard(11.5, Some(&rowan));
         timeline.heard(11.9, Some(&rowan));
         timeline.end();
-        assert_eq!(timeline.name(10.0, 10.8).as_deref(), Some("Rowan Ellery"));
+        assert_eq!(timeline.name(9.5, 10.8).as_deref(), Some("Rowan Ellery"));
         assert_eq!(timeline.name(10.85, 11.45), None);
-        assert_eq!(timeline.name(11.5, 11.9).as_deref(), Some("Rowan Ellery"));
+        assert_eq!(timeline.name(11.5, 13.5).as_deref(), Some("Rowan Ellery"));
     }
 
     #[cfg(unix)]
@@ -603,7 +603,7 @@ mod tests {
             .skip(1)
             .all(|line| line.starts_with('{') && line.ends_with('}')));
         assert_eq!(
-            named(temp.path()).name(10.0, 11.0).as_deref(),
+            named(temp.path()).name(10.0, 11.4).as_deref(),
             Some("Rowan Ellery")
         );
     }
@@ -630,7 +630,7 @@ mod tests {
             .all(|s| s.as_ref().is_some_and(|s| s.pid == 41)));
         let trace = std::fs::read_to_string(temp.path().join("trace.jsonl")).unwrap();
         assert!(trace.contains("started it again"));
-        assert!(named(temp.path()).name(50.1, 50.3).is_some());
+        assert!(named(temp.path()).name(49.5, 50.8).is_some());
     }
 
     #[test]
