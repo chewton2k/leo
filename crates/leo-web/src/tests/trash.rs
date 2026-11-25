@@ -391,6 +391,7 @@ fn p02_deleting_a_note_for_good_leaves_nothing_behind_for_its_id() {
     )
     .unwrap();
     crate::record::set_writeup_pending(&state.chats, &id, true);
+    crate::record::set_unopened(&state.chats, &id, true);
 
     assert_eq!(
         run(delete_note(State(state.clone()), Path(id.clone()))),
@@ -437,6 +438,9 @@ fn p02_deleting_a_note_for_good_leaves_nothing_behind_for_its_id() {
     }
     if writeups > 0 {
         left.push(format!("leo.db writeup_pending rows: {writeups}"));
+    }
+    if crate::record::unopened(&state.chats, &id) {
+        left.push("leo.db unopened_notes row".into());
     }
     println!(
         "data dir {}: left for the deleted note: {left:#?}",

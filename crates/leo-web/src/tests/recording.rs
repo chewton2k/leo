@@ -104,6 +104,33 @@ fn a_recording_keeps_its_points_pauses_and_becomes_a_note() {
     assert_eq!(note.title, "Lecture");
     assert_eq!(note.directory, "cs130");
     assert_eq!(note.body, "points: exam is on BFS");
+    let unopened = || {
+        run(crate::routes::notes::list_unopened(State(state.clone())))
+            .unwrap()
+            .0
+    };
+    let says_unopened = || {
+        run(crate::routes::notes::get_note(
+            State(state.clone()),
+            Path(note.id.clone()),
+        ))
+        .unwrap()
+        .unopened
+    };
+    assert_eq!(
+        unopened(),
+        std::collections::BTreeMap::from([(note.id.clone(), "cs130".to_string())])
+    );
+    assert!(says_unopened());
+    assert_eq!(
+        run(crate::routes::notes::note_opened(
+            State(state.clone()),
+            Path(note.id.clone()),
+        )),
+        StatusCode::NO_CONTENT
+    );
+    assert!(unopened().is_empty());
+    assert!(!says_unopened());
     assert!(!view.levels.is_empty());
     assert!(
         view.levels.len() <= record::LEVELS_KEPT,
@@ -645,6 +672,7 @@ fn joined_the_note(
     assert_eq!(sources[0].id, KEPT_SAVED);
     assert_eq!(sources[0].passages[0].text, "the part that failed before");
     assert_eq!(*committed.lock().unwrap(), [into]);
+    assert!(!crate::record::unopened(&state.chats, into));
 }
 
 fn trash(state: &AppState, id: &str, for_good: bool) {

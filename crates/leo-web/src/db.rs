@@ -173,6 +173,9 @@ CREATE TABLE IF NOT EXISTS margin_instructions (
 CREATE TABLE IF NOT EXISTS writeup_pending (
     note TEXT PRIMARY KEY
 );
+CREATE TABLE IF NOT EXISTS unopened_notes (
+    note TEXT PRIMARY KEY
+);
 CREATE TABLE IF NOT EXISTS margin_state (
     key TEXT PRIMARY KEY,
     data TEXT NOT NULL

@@ -145,7 +145,8 @@ New note buttons stay. Focus rings and the indigo tone are Felix blue (2026-11-1
   edit, while composing or when locked). Both are customizable in Settings →
   Shortcuts, stored per window in `leo-shortcuts`. The explorer starts with one row holding New note (with its shortcut) and
   New folder, icons level and no Folders label (2026-11-16); each folder row ends with its quiet note count and note rows
-  carry no icon (2026-11-21, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
+  carry no icon (2026-11-21, the user's call); a note leo wrote from a recording or file carries a blue ink blot until opened,
+  on its closed folder when it is out of sight (2026-11-24, the user's call); one sort button's menu holds the sort, its order and open tasks only. New folder
   opens a row in place that slides the rows below down. The explorer
   also has a Filter field (`#side-filter`, survives repaints) and arrow, Home/End and
   type-ahead keys with one tab stop (`sideRoving`). The sidebar
@@ -1063,7 +1064,7 @@ target. Check the page sequence after loading preferences.
   Instructions for this note… opens `#margin-instructions` under the meta line (shown while the note has some); Enter or
   blur saves, Escape restores, and the margin status says Instructions saved/removed.
 - Read-along (`POST /api/notes/{id}/margin/read`, `{version, blocks}`): the page
-  sends changed blocks after a pause (fast 2 s, regular 4 s, slow 8 s, ×1.5 while the last block ends without `.`, `!`, `?`, `。`, `！` or `？`; headings, list items and code blocks count as finished: `marginKit.pauseFor`). Silence is the normal answer:
+  sends changed lines, each run of them a block (`marginKit.changedBlocks`, 2026-11-24: never a line whose words did not change), after a pause (fast 2 s, regular 4 s, slow 8 s, ×1.5 while the last block ends without `.`, `!`, `?`, `。`, `！` or `？`; headings, list items and code blocks count as finished: `marginKit.pauseFor`). Silence is the normal answer:
   `{}` or empty output is success; malformed JSON or prose is a failed read. The server refuses, whatever the page
   does: a stale version (409), a note not in `along` or not edited in this engine
   run (403, `Reads::edited` is set by the PATCH route, so browsing can never read),

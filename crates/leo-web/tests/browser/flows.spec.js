@@ -5190,14 +5190,15 @@ test.describe('beside the note', () => {
     await expect(body, 'folded at start').toBeHidden();
     await expect(box.locator('.tasks-badge')).toHaveText(/^\d+\+?$/);
     await expect(box).toHaveAttribute('aria-label', /^Tasks: .*to do$/);
-    expect((await box.boundingBox()).width).toBeLessThan(90);
+    const pill = await box.boundingBox();
+    expect(pill.width).toBeLessThan(90);
     expect(await page.evaluate(() => localStorage.getItem('leo-tasks-folded'))).toBeNull();
     await expect(page.locator('#side [data-action="tasks-toggle"]')).toHaveCount(0);
     await box.hover();
     await expect(body, 'hovering opens the panel').toContainText(`Panel task ${tag}`);
     await expect(box).toHaveClass(/\bopen\b/);
     await page.mouse.move(640, 300);
-    await box.hover();
+    await page.mouse.move(pill.x + pill.width / 2, pill.y + pill.height / 2);
     await expect(box, 'coming back while it folds opens it again').toHaveClass(/\bopen\b/);
     await expect(body).toBeVisible();
     await expect.poll(() => box.evaluate((el) => el.getAnimations().length), 'the reveal finishes').toBe(0);

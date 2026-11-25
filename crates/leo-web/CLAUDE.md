@@ -304,7 +304,8 @@ Decided: one app, window only (2026-10-31).
   and the still 6 px
   dot after the open note's explorer row while he reads along (`.side-reading`,
   from `marginPage.reading`; margin-notes.js redraws the explorer when a read
-  starts and ends; 2026-11-15). Never links,
+  starts and ends; 2026-11-15), and the ink blot on a note leo wrote that has not been
+  opened (`.side-unopened`; 2026-11-24, the user's call). Never links,
   buttons, selection, tags or text (his name in the head excepted).
 - Surfaces (2026-11-14, the user's call: modern, no outlines): separate by tone
   (`--ground` < `--page` < `--raised`) and warm two-layer shadows (`--shadow` at
@@ -510,6 +511,13 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   fires early, checked again on focus and visibilitychange (2026-11-15). Unprompted
   explorer redraws (expiry, Felix's read starting and ending, queued off the read)
   go through `sideRedrawSoon`, which waits while any menu is open.
+  A note leo writes in the background (a recording, an uploaded file) carries a still blue
+  ink blot after its title (`.side-unopened`, replacing the dot) until it is opened, also
+  after a restart; a closed folder holding one carries it instead (2026-11-24, the user's
+  call). leo.db `unopened_notes` is written under the notes lock before the note is saved,
+  so the stamp change that shows the note shows its mark; it is a dependent row of the note.
+  `GET /api/notes/unopened` answers id to folder, read with the folder list; a note's GET
+  says `unopened` and `showNote` then sends DELETE `/api/notes/{id}/unopened`.
   Beside Filter: one sort button whose menu holds Sort by (Name, Last edited, Created),
   Order (the sort's two directions, e.g. A to Z / Z to A) and only open tasks
   (2026-11-16, replacing the flip button), driving `/api/notes` `sort`/`show` for every
@@ -540,7 +548,8 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   `leo-last-place` restores only on a new window session.
 - Explorer reads (`/api/notes?rows=true`: no note text, hash or summary): 100 per page, four concurrent reads with ten-second aborts, 64
   cached folders, 32 automatic visible reads; late reads check generation and
-  entry identity.
+  entry identity. An unchanged `/api/rev` stamp keeps a cached folder only if its last
+  successful read happened under that stamp (`entry.rev`).
 - Folders: create, rename, move, trash with Undo (POST `/api/trash/move`,
   `/api/trash/restore {ids, dirs}`, `/api/dirs/rename`); `Store::move_dir`
   refuses itself, its own subfolder or a taken name. New folders must pass
@@ -906,6 +915,10 @@ Felix (2026-10-19).
   headerless file) or `ask`. A note's own row wins; turning the default off pins
   notes made while it was on (`margin::pin_modes`, before prefs are written). A
   fresh install stores `since = now` on its first `prefs()` read.
+- A read-along sends only changed lines (2026-11-24, the user's call: a line whose words did not change is never
+  read again): `marginKit.changedBlocks` compares sentences without list, checkbox and quote markers or whitespace,
+  so Enter, an empty bullet, a ticked box, a renumbered list and split or joined lines send nothing; each run of
+  changed lines (20 characters or more) is one block, and code, maths and tables go whole.
 - Read-along POST `/api/notes/{id}/margin/read` `{version, blocks}`: the server
   refuses a stale version (409), a note not `along` or not edited in this engine
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a

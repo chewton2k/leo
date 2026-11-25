@@ -35,8 +35,8 @@ use crate::routes::felix::{
 };
 use crate::routes::housekeeping::{get_keep, set_keep};
 use crate::routes::notes::{
-    create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes, move_dir,
-    move_note, rename_dir, search_notes, update_note,
+    create_dir, create_note, delete_note, get_note, get_rev, list_folders, list_notes,
+    list_unopened, move_dir, move_note, note_opened, rename_dir, search_notes, update_note,
 };
 use crate::routes::pictures::{get_picture, put_picture};
 use crate::routes::settings::{change_setting, get_settings, test_setting};
@@ -153,6 +153,11 @@ pub(crate) fn router(state: AppState) -> Router {
             get(margin::settings).post(margin::change_settings),
         )
         .route("/api/notes/{id}/related", get(related::related_notes))
+        .route("/api/notes/unopened", get(list_unopened))
+        .route(
+            "/api/notes/{id}/unopened",
+            axum::routing::delete(note_opened),
+        )
         .route(
             "/api/notes/{id}/reading",
             get(related::get_reading).put(related::put_reading),

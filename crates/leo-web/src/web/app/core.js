@@ -877,6 +877,10 @@ async function showNote(id, { fresh = null, draft = null } = {}) {
   await marginLoadPrefs();
   await saving.ready;
   if (mine !== seq) return;
+  if (note.unopened) {
+    delete note.unopened;
+    noteOpened(note.id);
+  }
   const held = note.id && state.view === 'note' && state.session && state.session.note.id === note.id ? holdAside(note.id) : null;
   let s;
   const opened = swap(`n:${note.id || 'new'}`, () => {

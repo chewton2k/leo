@@ -28,12 +28,13 @@ async function sidebarFixture(browser, run) {
       'Course/Week 1':[{id:'week-note',title:'Lecture 1',directory:'Course/Week 1'}],
       Personal:Array.from({length:105},(_,i)=>({id:'personal-'+i,title:'Personal note '+i,directory:'Personal'}))
     };
-    let pending=null, broken=null, steady=null, revision=0;
+    let pending=null, broken=null, steady=null, revision=0, unopened={};
     const asked=[];
     async function api(url,options={}) {
       asked.push(url.split('?')[0]);
       if(url==='/api/rev')return {rev:steady||'r'+(++revision)};
       if(url==='/api/folders')return structuredClone(folders);
+      if(url==='/api/notes/unopened')return structuredClone(unopened);
       if(options.method==='POST'){moves.push({url,body:options.body});return url==='/api/dirs/move'?{path:(options.body.into?options.body.into+'/':'')+options.body.from.split('/').pop()}:{};}
       const query=new URL(url,location.origin).searchParams, dir=query.get('dir'), offset=Number(query.get('offset')||0);
       const all=notes[dir]||[], result={items:structuredClone(all.slice(offset,offset+100)),total:all.length};
@@ -798,8 +799,8 @@ test('chats pin into their own group, keep the pin through a refresh, roll back 
     const page=await context.newPage();
     const now=Date.now(), at=minutes=>new Date(now-minutes*60000).toISOString();
     const chats=[
-      {id:'chat-pin-aaaa1',title:'Alpha',named:true,about:'',count:2,updated_at:at(1),pinned:false},
-      {id:'chat-pin-bbbb1',title:'Beta with a title long enough to need cutting off at the narrowest list width',named:true,about:'',count:2,updated_at:at(60),pinned:false},
+      {id:'chat-pin-aaaa1',title:'Alpha',named:true,about:'',count:2,updated_at:at(0),pinned:false},
+      {id:'chat-pin-bbbb1',title:'Beta with a title long enough to need cutting off at the narrowest list width',named:true,about:'',count:2,updated_at:at(1/60),pinned:false},
       {id:'chat-pin-cccc1',title:'Gamma',named:true,about:'',count:2,updated_at:at(60*24*40),pinned:true}
     ];
     const patches=[], notes=[];
@@ -1234,6 +1235,42 @@ test('New note and New folder share one row with their icons level, notes edited
     await expect(page.locator('.popup-menu')).toHaveCount(0);
     await expect(page.locator('.side-tree .side-reading')).toHaveCount(0);
     await expect(page.locator('.side-note[data-id="course-note"] .side-fresh')).toBeVisible();
+    expect(await page.evaluate(() => window.errors)).toEqual([]);
+  });
+});
+
+test('an unopened note carries a blue ink blot, its closed folder carries it instead, and opening the note clears both', async ({ browser }) => {
+  await sidebarFixture(browser, async (context, url) => {
+    const page = await context.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(url);
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    const row = page.locator('.side-note[data-id="course-note"]');
+    const blot = row.locator('.side-unopened');
+    const folder = page.locator('.side-folder[data-refresh-key="Course"] .side-unopened');
+    await expect(row).toBeVisible();
+    await expect(page.locator('.side-tree .side-unopened')).toHaveCount(0);
+    await page.evaluate(() => {
+      notes.Course[0].updated_at = new Date().toISOString();
+      unopened = { 'course-note': 'Course' };
+      return refreshSideTree();
+    });
+    await expect(blot).toBeVisible();
+    await expect(row.locator('.side-fresh'), 'one mark at a time').toHaveCount(0);
+    await expect(row).toHaveAccessibleName('Course overview New');
+    await expect(folder, 'an open folder leaves the mark to its note').toHaveCount(0);
+    for (const [theme, felix] of [['light', 'rgb(63, 109, 151)'], ['dark', 'rgb(180, 207, 231)']]) {
+      await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
+      expect(await blot.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).animationName, el.getBoundingClientRect().width])).toEqual([felix, 'none', 16]);
+    }
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    await expect(row).toHaveCount(0);
+    await expect(folder).toBeVisible();
+    await page.locator('.side-tree .side-row[data-dir="Course"]').click();
+    await expect(folder).toHaveCount(0);
+    await page.evaluate(() => { noteOpened('course-note'); drawSide(); });
+    await expect(blot).toHaveCount(0);
+    await expect(row.locator('.side-fresh')).toBeVisible();
+    expect(await page.evaluate(() => audit.asked.includes('/api/notes/course-note/unopened'))).toBe(true);
     expect(await page.evaluate(() => window.errors)).toEqual([]);
   });
 });

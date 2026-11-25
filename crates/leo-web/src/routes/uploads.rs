@@ -711,6 +711,7 @@ fn write_upload(
                     .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
                     .id
                     .clone();
+                crate::record::set_unopened(&state.chats, &note, true);
                 save(store)?;
                 Wrote {
                     note,
