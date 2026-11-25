@@ -367,7 +367,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   line lands past its raw marks.
 
 - `markdown.js` escapes first, numbers checkboxes exactly like
-  `Note::toggle_checkbox`, draws `[[Title]]` links, callouts (`> [!type]`,
+  `notes::checkbox_line`, draws `[[Title]]` links, callouts (`> [!type]`,
   `-`/`+` dropdowns), ```mermaid (`diagrams.js`), math (`math.js`), ```svg as
   a sandboxed `<img src="data:…">`, and local pictures (`/api/image`; outside
   images stay links). `interactive: false` makes task boxes read-only.
@@ -1028,7 +1028,7 @@ target. Check the page sequence after loading preferences.
   answers 409 `replaceable`), so a new read-along note still replaces them on a reworded sentence.
   An open thread with more than 6 messages folds the older ones behind a "Show N earlier" button.
 - Deletes: a note in the trash keeps its threads, so a restore finds them. Deleting
-  from the trash removes them at once (`forget_notes`) and its task details, recording
+  from the trash removes them at once (`finish_held_rows`) and its task details, recording
   sources and original uploads, reading place, meaning vectors and summary, and so does
   the end of the trash period; a removal that fails is retried on the next delete and
   daily, a recording in use is skipped, and nothing is removed while a note or a trashed
@@ -1178,7 +1178,7 @@ target. Check the page sequence after loading preferences.
   passage falls back to `/insert` with one request id per thread (`/insert` and `/weave` dedupe on note
   and request), which re-finds the passage or says it went to the end and skips the
   glow. Other open threads anchored in a rewritten block may lose their place. Ask in chat attaches the quote. `add_margin_note`'s Undo is refused
-  once the user has replied. `chat::gather_seeing` adds the open threads of the open note
+  once the user has replied. `chat::gather_indexed` adds the open threads of the open note
   the page can still place (words found exactly, or between their old surroundings: `margin::shown`)
   after the notes (`margin::context`, at most 3,000 characters and an eighth of the
   note room); the block's fence is keyed per process and stable while its content is,
