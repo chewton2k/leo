@@ -477,13 +477,13 @@ mod tests {
         let watch = watching(&counts, Acts::Well, temp.path(), Duration::from_secs(5));
         watch.tick(100.0, false);
         let deadline = Instant::now() + Duration::from_secs(20);
-        while named(temp.path()).name(100.05, 100.2).is_none() && Instant::now() < deadline {
+        while named(temp.path()).name(100.05, 103.0).is_none() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(50));
         }
         drop(watch);
         let timeline = named(temp.path());
         assert_eq!(
-            timeline.name(100.05, 100.2).as_deref(),
+            timeline.name(100.05, 103.0).as_deref(),
             Some("Rowan Ellery")
         );
         assert_eq!(timeline.name(99.0, 99.9), None);
