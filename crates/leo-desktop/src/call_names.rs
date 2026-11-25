@@ -66,6 +66,7 @@ mod mac {
         static kCFBooleanFalse: Ref;
         static kCFTypeArrayCallBacks: u8;
         fn CFRelease(value: Ref);
+        fn CFEqual(one: Ref, other: Ref) -> u8;
         fn CFGetTypeID(value: Ref) -> usize;
         fn CFStringGetTypeID() -> usize;
         fn CFArrayGetTypeID() -> usize;
@@ -197,6 +198,7 @@ mod mac {
     struct Found {
         _app: Owned,
         _windows: Owned,
+        _front: [Owned; 2],
         pid: i32,
         id: &'static str,
         kind: Kind,
@@ -353,7 +355,15 @@ mod mac {
                     self.ask(app.0, pid, false);
                 }
                 let windows = attribute(app.0, "AXWindows");
-                let mine: Vec<Candidate> = items(windows.0)
+                let front = ["AXMainWindow", "AXFocusedWindow"].map(|k| attribute(app.0, k));
+                let mut listed = items(windows.0);
+                for Owned(window) in &front {
+                    let known = |other: &Ref| unsafe { CFEqual(*other, *window) != 0 };
+                    if !window.is_null() && !listed.iter().any(known) {
+                        listed.push(*window);
+                    }
+                }
+                let mine: Vec<Candidate> = listed
                     .into_iter()
                     .map(|w| Candidate {
                         found: found.len(),
@@ -377,6 +387,7 @@ mod mac {
                 found.push(Found {
                     _app: app,
                     _windows: windows,
+                    _front: front,
                     pid,
                     id,
                     kind,
@@ -401,6 +412,7 @@ mod mac {
                     pid: found[c.found].pid as u32,
                     app: found[c.found].id.to_owned(),
                     title: c.title.clone(),
+                    page: trees.get(i).and_then(Option::as_ref).and_then(names::page),
                     call: trees
                         .get(i)
                         .and_then(Option::as_ref)
@@ -742,6 +754,7 @@ mod win {
                     pid,
                     app: program,
                     title,
+                    page: None,
                     call: false,
                 });
                 handles.push(hwnd);
@@ -762,6 +775,7 @@ mod win {
                         .as_ref()
                         .is_some_and(|w| names::shows_call(&seen[i].app, w));
                     seen[i].call = call;
+                    seen[i].page = tree.as_ref().and_then(names::page);
                     trees.push(tree);
                 }
             }

@@ -53,11 +53,31 @@ pub struct Seen {
     pub pid: u32,
     pub app: String,
     pub title: String,
+    pub page: Option<String>,
     pub call: bool,
 }
 
 fn browser(app: &str) -> bool {
     BROWSERS.iter().any(|id| id.eq_ignore_ascii_case(app))
+}
+
+fn of_page(title: &str, page: &str) -> bool {
+    title.strip_prefix(page).is_some_and(|rest| {
+        rest.is_empty()
+            || [" - ", " – ", " — "]
+                .iter()
+                .any(|dash| rest.starts_with(dash))
+    })
+}
+
+fn call_page(one: &Seen) -> String {
+    one.page
+        .as_deref()
+        .map(str::trim)
+        .filter(|page| page.contains(" - ") || page.contains(" – "))
+        .filter(|page| of_page(&one.title, page))
+        .unwrap_or(&one.title)
+        .to_owned()
 }
 
 pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'static str> {
@@ -66,7 +86,10 @@ pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'
         let at: Vec<usize> = (0..seen.len())
             .filter(|&i| {
                 same(&seen[i], seat.pid, &seat.app)
-                    && seat.title.as_ref().is_none_or(|t| *t == seen[i].title)
+                    && seat
+                        .title
+                        .as_ref()
+                        .is_none_or(|t| of_page(&seen[i].title, t))
             })
             .collect();
         if at.is_empty() {
@@ -78,15 +101,23 @@ pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'
     let Some(&first) = calls.first() else {
         return Err("no call window is open");
     };
-    let one = &seen[first];
-    let alone = calls.iter().all(|&i| same(&seen[i], one.pid, &one.app));
-    if !alone || (browser(&one.app) && calls.len() > 1) {
+    let one = calls
+        .iter()
+        .map(|&i| &seen[i])
+        .find(|one| one.page.is_some())
+        .unwrap_or(&seen[first]);
+    let title = browser(&one.app).then(|| call_page(one));
+    let alone = calls.iter().all(|&i| {
+        same(&seen[i], one.pid, &one.app)
+            && title.as_ref().is_none_or(|t| of_page(&seen[i].title, t))
+    });
+    if !alone {
         return Err("more than one call is open");
     }
-    let title = browser(&one.app).then(|| one.title.clone());
     let at = (0..seen.len())
         .filter(|&i| {
-            same(&seen[i], one.pid, &one.app) && title.as_ref().is_none_or(|t| *t == seen[i].title)
+            same(&seen[i], one.pid, &one.app)
+                && title.as_ref().is_none_or(|t| of_page(&seen[i].title, t))
         })
         .collect();
     Ok((

@@ -103,6 +103,16 @@ pub fn shows_call(app: &str, window: &Window) -> bool {
     }
 }
 
+pub fn page(window: &Window) -> Option<String> {
+    fn find(node: &Node) -> Option<&str> {
+        if ["AXWebArea", "Document"].contains(&node.role.as_str()) {
+            return node.title.as_deref().or(node.description.as_deref());
+        }
+        node.children.iter().find_map(find)
+    }
+    find(&window.tree).map(str::to_owned)
+}
+
 pub fn read(look: &Look) -> Option<Reading> {
     let Look::Call { app, windows, .. } = look else {
         return None;

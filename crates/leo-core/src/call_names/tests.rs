@@ -193,6 +193,7 @@ fn the_call_chosen_first_stays_the_one_read() {
         pid,
         app: app.into(),
         title: title.into(),
+        page: None,
         call,
     };
     let start = [
@@ -229,6 +230,97 @@ fn the_call_chosen_first_stays_the_one_read() {
 }
 
 #[test]
+fn a_meet_call_stays_bound_when_its_window_title_changes_or_it_pops_out() {
+    let seen = |title: &str, page: Option<&str>, call: bool| Seen {
+        pid: 7,
+        app: "com.google.Chrome".into(),
+        title: title.into(),
+        page: page.map(Into::into),
+        call,
+    };
+    let call = "Meet - abc-defg-hij";
+    let main = format!("{call} - Microphone recording - Google Chrome - Juno");
+    let popped = format!("{call} - Juno");
+    let (seat, at) = pick(None, &[seen(&main, Some(call), true)]).unwrap();
+    assert_eq!((seat.title.as_deref(), at), (Some(call), vec![0]));
+    for later in [
+        format!("{call} - Camera and microphone recording - Google Chrome - Juno"),
+        format!("{call} – Google Chrome"),
+        format!("{call} — Mozilla Firefox"),
+        popped.clone(),
+        call.to_owned(),
+    ] {
+        let now = [
+            seen("Docs - Google Chrome", None, false),
+            seen(&later, None, false),
+        ];
+        assert_eq!(pick(Some(&seat), &now).unwrap().1, [1], "{later}");
+    }
+    for other in ["Meet - abc-defg-hijk - Juno", "Meet - xyz-wxyz-xyz - Juno"] {
+        let now = [seen(other, None, false)];
+        assert_eq!(pick(Some(&seat), &now), Err("the call window closed"));
+    }
+    let both = [seen(&popped, None, true), seen(&main, Some(call), true)];
+    let (seat, at) = pick(None, &both).unwrap();
+    assert_eq!((seat.title.as_deref(), at), (Some(call), vec![0, 1]));
+    let vague = [seen("Meet - Google Chrome", Some("Meet"), true)];
+    let (seat, _) = pick(None, &vague).unwrap();
+    assert_eq!(seat.title.as_deref(), Some("Meet - Google Chrome"));
+}
+
+#[test]
+fn a_meet_window_as_it_is_in_november_2026_gives_the_people_and_who_is_me() {
+    for (fixture, me, shown) in [
+        (include_str!("fixtures/meet-live-main.json"), true, None),
+        (
+            include_str!("fixtures/meet-live-people.json"),
+            true,
+            Some(2),
+        ),
+        (include_str!("fixtures/meet-live-popout.json"), false, None),
+    ] {
+        let list = windows(fixture);
+        assert!(shows_call("com.google.Chrome", &list[0]));
+        assert!(call_window(Kind::Meet, &list[0].title, ""));
+        let read = read_windows(Kind::Meet, &list);
+        assert_eq!(read.participants, ["Juno Halvorsen", "Rowan Ellery"]);
+        assert_eq!(read.me.as_deref(), me.then_some("Juno Halvorsen"));
+        assert_eq!(read.shown, shown);
+    }
+    let main = windows(include_str!("fixtures/meet-live-main.json")).remove(0);
+    assert_eq!(page(&main).as_deref(), Some("Meet - abc-defg-hij"));
+    let popped = windows(include_str!("fixtures/meet-live-popout.json")).remove(0);
+    assert_eq!(page(&popped), None);
+}
+
+#[test]
+fn a_mark_left_on_the_users_own_meet_tile_never_hides_who_is_talking() {
+    let mut main = windows(include_str!("fixtures/meet-live-main.json"));
+    fn mark(node: &mut Node) {
+        if node.classes.iter().any(|c| c == "dkjMxf") {
+            node.classes.push("v5h6Xc".into());
+        }
+        node.children.iter_mut().for_each(mark);
+    }
+    mark(&mut main[0].tree);
+    let read = read_windows(Kind::Meet, &main);
+    assert_eq!(read.speaking, ["Juno Halvorsen", "Rowan Ellery"]);
+    let t = timeline(&every(0.0, 6.0, Some(read)));
+    assert_eq!(t.name(1.0, 5.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
+fn a_meet_call_of_two_is_named_from_the_open_people_panel() {
+    let read = read_windows(
+        Kind::Meet,
+        &windows(include_str!("fixtures/meet-live-people.json")),
+    );
+    assert!(read.speaking.is_empty());
+    let t = timeline(&every(0.0, 6.0, Some(read)));
+    assert_eq!(t.name(1.0, 5.0).as_deref(), Some("Rowan Ellery"));
+}
+
+#[test]
 fn a_call_without_an_english_leave_button_can_still_be_chosen() {
     let window = |title: &str, tree: Node| Window {
         title: title.into(),
@@ -249,6 +341,7 @@ fn a_call_without_an_english_leave_button_can_still_be_chosen() {
         pid: 9,
         app: "us.zoom.xos".into(),
         title: german.title.clone(),
+        page: page(&german),
         call: shows_call("us.zoom.xos", &german),
     }];
     assert!(pick(None, &seen).is_ok());

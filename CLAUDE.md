@@ -237,7 +237,12 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   shows; anything else stays "Others". Never guessed, never the user's own name (as the call app marks it, or the computer account's full name), nothing leaves the
   computer (the account's full name only vetoes; the one-other-person rule needs
   the call app's own marker of the user); tests use fixtures and fake readers. The name lands in `speaker`.
-  Credited in NOTICE (its name appears only there).
+  Credited in NOTICE (its name appears only there). Meet, measured on a live call of
+  one on 2026-11-24 (`fixtures/meet-live-*.json`, names invented, the second person
+  and the talking class added by hand): the user's tile carries their Meet name, not
+  "You", and is told by its own controls ("Backgrounds and effects", English) or the
+  People panel's "(You)" row; "Contributors N" is the count. Whether the talking class
+  still marks the speaker is not yet seen on a call of two. FaceTime is not read.
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
   described by their scripts and workflow, and uninstall retains the existing

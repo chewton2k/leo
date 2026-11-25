@@ -75,6 +75,9 @@ const COUNTED: &[&str] = &[
 ];
 
 fn shown_count(text: &str) -> Option<usize> {
+    if let Some(count) = low(text).strip_prefix("contributors ") {
+        return count.parse().ok();
+    }
     let body = text.trim().strip_suffix(')')?;
     let open = body.rfind('(')?;
     let head = low(&body[..open]);
@@ -415,7 +418,15 @@ fn chat_panel(node: &Node) -> bool {
         })
 }
 
+const MEET_OWN_CONTROLS: &[&str] = &["backgrounds and effects", "you’re continuously framed"];
+
+fn own_controls(node: &Node) -> bool {
+    label(node).is_some_and(|l| MEET_OWN_CONTROLS.contains(&low(l).as_str()))
+        || node.children.iter().any(own_controls)
+}
+
 fn meet(windows: &[Window]) -> Reading {
+    let mut reading = Reading::default();
     let mut groups: Vec<(&Node, Vec<String>)> = Vec::new();
     for window in windows {
         let titled = window
@@ -433,8 +444,17 @@ fn meet(windows: &[Window]) -> Reading {
             .map(low)
             .collect();
         walk(&window.tree, &mut Vec::new(), &mut |node, up| {
-            if !is(node, TEXTS) || up.len() < TILE_UP || up.iter().any(|a| live(a) || chat_panel(a))
+            if !is(node, TEXTS)
+                || up.len() < TILE_UP
+                || up
+                    .iter()
+                    .any(|a| live(a) || chat_panel(a) || a.role == "AXHeading")
             {
+                return;
+            }
+            if text(node).is_some_and(|t| low(t) == "(you)") {
+                let row = up.iter().rev().find_map(|a| label(a));
+                reading.me = row.and_then(meet_name).or(reading.me.take());
                 return;
             }
             let Some(name) = text(node).and_then(meet_name) else {
@@ -450,13 +470,12 @@ fn meet(windows: &[Window]) -> Reading {
             }
         });
     }
-    let mut reading = Reading::default();
     for (root, names) in groups {
         let names = unique(&names);
         let [one] = names.as_slice() else {
             continue;
         };
-        if norm(one) == "you" {
+        if norm(one) == "you" || own_controls(root) {
             reading.me = Some(one.clone());
         }
         let mut talking = false;
