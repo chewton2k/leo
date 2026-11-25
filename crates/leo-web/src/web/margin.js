@@ -15,6 +15,8 @@
   const READ_BLOCK_CHARS = 4000;
   const READ_CHARS = 8000;
   const LEAST_BLOCK_CHARS = 20;
+  const LINE_HEAD = /^[\s>]*(?:(?:[-*+]|\d{1,3}[.)])(?:\s+\[[ xX]\])?(?:\s+|$))?/;
+  const WHOLE_BLOCK = /^(```|~~~|\$\$|\\\[|\\begin\{|\|)/;
   const MOST_PASSES = 8;
   const NEAR = 120;
   const AROUND = 48;
@@ -211,14 +213,33 @@
     return finished ? base : base * UNFINISHED_PAUSE;
   }
 
+  const lineText = (line) => line.replace(LINE_HEAD, '').replace(/\s+/g, ' ').trim();
+  const sentencesOf = (line) => (lineText(line).match(/[^.!?。！？]+[.!?。！？]*|[.!?。！？]+/g) || []).map((part) => part.trim()).filter(Boolean);
+  const wordsOf = (blocks) => blocks.flatMap((block) => block.split('\n').map(lineText)).join('').replace(/\s+/g, '');
+
   function changedBlocks(before, source) {
+    const now = blocksOf(source);
+    if (wordsOf(before) === wordsOf(now)) return [];
     const known = new Map();
-    for (const block of before) known.set(block, (known.get(block) || 0) + 1);
+    for (const block of before) for (const line of block.split('\n')) for (const said of sentencesOf(line)) known.set(said, (known.get(said) || 0) + 1);
+    const isNew = (said) => {
+      const left = known.get(said) || 0;
+      if (left) known.set(said, left - 1);
+      return !left;
+    };
     const fresh = [];
-    for (const block of blocksOf(source)) {
-      const left = known.get(block) || 0;
-      if (left) known.set(block, left - 1);
-      else if ([...block].length >= LEAST_BLOCK_CHARS) fresh.push(block);
+    for (const block of now) {
+      const lines = block.split('\n');
+      const changed = lines.map((line) => sentencesOf(line).filter(isNew).length > 0);
+      if (!changed.includes(true)) continue;
+      const runs = [];
+      if (WHOLE_BLOCK.test(block)) runs.push(block);
+      else lines.forEach((line, i) => {
+        if (!changed[i]) return;
+        if (changed[i - 1]) runs[runs.length - 1] += `\n${line}`;
+        else runs.push(line);
+      });
+      for (const run of runs.map((run) => run.trim())) if ([...run].length >= LEAST_BLOCK_CHARS) fresh.push(run);
     }
     const out = [];
     let used = 0;

@@ -915,6 +915,10 @@ Felix (2026-10-19).
   headerless file) or `ask`. A note's own row wins; turning the default off pins
   notes made while it was on (`margin::pin_modes`, before prefs are written). A
   fresh install stores `since = now` on its first `prefs()` read.
+- A read-along sends only changed lines (2026-11-24, the user's call: a line whose words did not change is never
+  read again): `marginKit.changedBlocks` compares sentences without list, checkbox and quote markers or whitespace,
+  so Enter, an empty bullet, a ticked box, a renumbered list and split or joined lines send nothing; each run of
+  changed lines (20 characters or more) is one block, and code, maths and tables go whole.
 - Read-along POST `/api/notes/{id}/margin/read` `{version, blocks}`: the server
   refuses a stale version (409), a note not `along` or not edited in this engine
   run (403, `Reads::edited` set only by PATCH, so browsing never reads), a

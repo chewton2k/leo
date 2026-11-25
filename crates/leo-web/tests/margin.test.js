@@ -303,6 +303,30 @@ test('changed blocks: only new or edited blocks, each counted once', () => {
   assert.deepEqual(M.changedBlocks(['Repeated block long enough.'], 'Repeated block long enough.\n\nRepeated block long enough.'), ['Repeated block long enough.']);
 });
 
+test('changed blocks: a line whose words did not change is never read again', () => {
+  const said = 'Photosynthesis turns light into chemical energy.';
+  const also = 'Chlorophyll sits inside the chloroplast.';
+  const changed = (before, after) => M.changedBlocks(M.blocksOf(before), after);
+  for (const head of ['', '- ', '* ', '1. ', '- [ ] ', '> ', '  - ', '> - ']) {
+    for (const next of ['', head, head.trim(), head.replace('1', '2')]) assert.deepEqual(changed(`${head}${said}`, `${head}${said}\n${next}`), [], JSON.stringify([head, next]));
+    assert.deepEqual(changed(`${head}${said}`, `${head}${said}\n${head}${also}`), [`${head}${also}`.trim()], JSON.stringify(head));
+  }
+  assert.deepEqual(changed(`${said} ${also}`, `${said}\n${also}`), [], 'Enter between sentences');
+  assert.deepEqual(changed(`${said} ${also}`, `${said}\n\n${also}`), [], 'a new paragraph');
+  assert.deepEqual(changed(said, said.replace(' light', '\nlight')), [], 'Enter inside a sentence');
+  assert.deepEqual(changed(`${said}\n${also}`, `${said} ${also}`), [], 'lines joined');
+  assert.deepEqual(changed(`- [ ] ${said}`, `- [x] ${said}`), [], 'a ticked box');
+  assert.deepEqual(changed(`1. ${said}`, `1. ${also}\n2. ${said}`), [`1. ${also}`], 'a renumbered list');
+  assert.deepEqual(changed(`- ${said}`, `- ${said.replace('light', 'sunlight')}`), [`- ${said.replace('light', 'sunlight')}`], 'an edited line');
+  assert.deepEqual(changed(`${said}\n${also}`, `${said}\nA line in the middle of both.\n${also}`), ['A line in the middle of both.']);
+  assert.deepEqual(changed(`In 2024 ${said}`, `In 2025 ${said}`), [`In 2025 ${said}`], 'a changed number');
+  assert.deepEqual(changed(`2024. ${said}`, `2025. ${said}`), [`2025. ${said}`], 'a year is not a list number');
+});
+
+test('changed blocks: code, maths and tables are read whole when a line in them changes', () => {
+  for (const [before, after] of [['```js\nconst a = 1;\nconst b = 2;\n```', '```js\nconst a = 1;\nconst b = 3;\n```'], ['| Cell | Size |\n|---|---|\n| Plant | 10 |', '| Cell | Size |\n|---|---|\n| Plant | 12 |'], ['$$\na^2 + b^2 = c^2\n$$', '$$\na^2 + b^2 = d^2\n$$'], ['\\[\na^2 + b^2 = c^2\n\\]', '\\[\na^2 + b^2 = d^2\n\\]']]) assert.deepEqual(M.changedBlocks(M.blocksOf(before), after), [after]);
+});
+
 test('changed blocks: short scraps wait and the amount sent is bounded', () => {
   assert.deepEqual(M.changedBlocks([], 'ok\n\nfine'), []);
   const many = Array.from({ length: 9 }, (_, i) => `Block number ${i} long enough to read.`).join('\n\n');

@@ -1064,7 +1064,7 @@ target. Check the page sequence after loading preferences.
   Instructions for this note… opens `#margin-instructions` under the meta line (shown while the note has some); Enter or
   blur saves, Escape restores, and the margin status says Instructions saved/removed.
 - Read-along (`POST /api/notes/{id}/margin/read`, `{version, blocks}`): the page
-  sends changed blocks after a pause (fast 2 s, regular 4 s, slow 8 s, ×1.5 while the last block ends without `.`, `!`, `?`, `。`, `！` or `？`; headings, list items and code blocks count as finished: `marginKit.pauseFor`). Silence is the normal answer:
+  sends changed lines, each run of them a block (`marginKit.changedBlocks`, 2026-11-24: never a line whose words did not change), after a pause (fast 2 s, regular 4 s, slow 8 s, ×1.5 while the last block ends without `.`, `!`, `?`, `。`, `！` or `？`; headings, list items and code blocks count as finished: `marginKit.pauseFor`). Silence is the normal answer:
   `{}` or empty output is success; malformed JSON or prose is a failed read. The server refuses, whatever the page
   does: a stale version (409), a note not in `along` or not edited in this engine
   run (403, `Reads::edited` is set by the PATCH route, so browsing can never read),
