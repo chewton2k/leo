@@ -59,6 +59,7 @@ mod mac {
         ) -> i32;
         fn AXUIElementSetAttributeValue(element: Ref, attribute: Ref, value: Ref) -> i32;
         fn AXUIElementSetMessagingTimeout(element: Ref, seconds: f32) -> i32;
+        fn AXValueGetTypeID() -> usize;
         fn AXValueGetValue(value: Ref, kind: i32, out: *mut c_void) -> bool;
     }
 
@@ -71,6 +72,9 @@ mod mac {
         fn CFDictionaryGetValue(dictionary: Ref, key: Ref) -> Ref;
         fn CFNumberGetValue(number: Ref, kind: isize, value: *mut c_void) -> u8;
         fn CFBooleanGetValue(boolean: Ref) -> u8;
+        fn CFBooleanGetTypeID() -> usize;
+        fn CFNumberGetTypeID() -> usize;
+        fn CFDictionaryGetTypeID() -> usize;
         fn CFGetTypeID(value: Ref) -> usize;
         fn CFStringGetTypeID() -> usize;
         fn CFArrayGetTypeID() -> usize;
@@ -106,9 +110,13 @@ mod mac {
     unsafe extern "C" {
         fn CGWindowListCopyWindowInfo(option: u32, relative: u32) -> Ref;
         fn CGRectMakeWithDictionaryRepresentation(dictionary: Ref, rect: *mut Rect) -> u8;
+        fn CGGetActiveDisplayList(most: u32, displays: *mut u32, count: *mut u32) -> i32;
+        fn CGDisplayBounds(display: u32) -> Rect;
+        fn CGSessionCopyCurrentDictionary() -> Ref;
     }
 
     const ON_SCREEN: u32 = 1 | 1 << 4;
+    const SYSTEM_BARS: std::ops::RangeInclusive<f64> = 20.0..=25.0;
     const NUMBER_F64: isize = 13;
     const AX_POINT: i32 = 1;
     const AX_SIZE: i32 = 2;
@@ -208,16 +216,20 @@ mod mac {
     fn pair(window: Ref, name: &str, kind: i32) -> Option<[f64; 2]> {
         let value = attribute(window, name);
         let mut out = [0.0f64; 2];
-        let read = !value.0.is_null()
+        let read = is_a(value.0, unsafe { AXValueGetTypeID() })
             && unsafe { AXValueGetValue(value.0, kind, out.as_mut_ptr().cast()) };
         read.then_some(out)
+    }
+
+    fn is_a(value: Ref, kind: usize) -> bool {
+        !value.is_null() && unsafe { CFGetTypeID(value) == kind }
     }
 
     fn number(of: Ref, key: &str) -> Option<f64> {
         let key = cf_string(key);
         let value = unsafe { CFDictionaryGetValue(of, key.0) };
         let mut out = 0.0f64;
-        let read = !value.is_null()
+        let read = is_a(value, unsafe { CFNumberGetTypeID() })
             && unsafe { CFNumberGetValue(value, NUMBER_F64, (&raw mut out).cast()) != 0 };
         read.then_some(out)
     }
@@ -230,14 +242,16 @@ mod mac {
             .filter_map(|window| {
                 let mut area = Rect::default();
                 let bounds = unsafe { CFDictionaryGetValue(window, key.0) };
-                if bounds.is_null()
+                if !is_a(bounds, unsafe { CFDictionaryGetTypeID() })
                     || unsafe { CGRectMakeWithDictionaryRepresentation(bounds, &mut area) } == 0
                 {
                     return None;
                 }
+                let layer = number(window, "kCGWindowLayer")?;
                 Some(Shown {
                     pid: number(window, "kCGWindowOwnerPID")? as i32,
-                    plain: number(window, "kCGWindowLayer") == Some(0.0)
+                    solid: layer >= 0.0
+                        && !SYSTEM_BARS.contains(&layer)
                         && number(window, "kCGWindowAlpha") == Some(1.0),
                     area,
                 })
@@ -245,18 +259,44 @@ mod mac {
             .collect()
     }
 
-    fn hidden(window: Ref, pid: i32, shown: &[Shown]) -> bool {
+    fn screens() -> Vec<Rect> {
+        let mut displays = [0u32; 16];
+        let mut count = 0;
+        let listed = unsafe {
+            CGGetActiveDisplayList(displays.len() as u32, displays.as_mut_ptr(), &mut count)
+        };
+        if listed != 0 {
+            return Vec::new();
+        }
+        displays[..(count as usize).min(displays.len())]
+            .iter()
+            .map(|display| unsafe { CGDisplayBounds(*display) })
+            .collect()
+    }
+
+    fn locked() -> bool {
+        let session = Owned(unsafe { CGSessionCopyCurrentDictionary() });
+        is_a(session.0, unsafe { CFDictionaryGetTypeID() }) && {
+            let key = cf_string("CGSSessionScreenIsLocked");
+            let value = unsafe { CFDictionaryGetValue(session.0, key.0) };
+            is_a(value, unsafe { CFBooleanGetTypeID() }) && unsafe { CFBooleanGetValue(value) } != 0
+        }
+    }
+
+    fn hidden(window: Ref, pid: i32, shown: &[Shown], screens: &[Rect]) -> bool {
         let minimized = attribute(window, "AXMinimized");
-        if !minimized.0.is_null() && unsafe { CFBooleanGetValue(minimized.0) } != 0 {
+        if is_a(minimized.0, unsafe { CFBooleanGetTypeID() })
+            && unsafe { CFBooleanGetValue(minimized.0) } != 0
+        {
             return true;
         }
         let (Some([x, y]), Some([w, h])) = (
             pair(window, "AXPosition", AX_POINT),
             pair(window, "AXSize", AX_SIZE),
         ) else {
-            return false;
+            return true;
         };
-        names::covered(pid, Rect { x, y, w, h }, shown)
+        names::covered(pid, Rect { x, y, w, h }, shown, screens)
     }
 
     pub struct Mac {
@@ -412,8 +452,6 @@ mod mac {
             }
             let mut found: Vec<Found> = Vec::new();
             let mut candidates: Vec<Candidate> = Vec::new();
-            let shown = shown_windows();
-            let mut out_of_sight = false;
             for (pid, id) in running {
                 if ask.over() {
                     return Look::Unreadable(names::SLOW.into());
@@ -439,11 +477,6 @@ mod mac {
                         ident: text_of(attribute(w, "AXIdentifier").0).unwrap_or_default(),
                     })
                     .filter(|c| names::call_window(kind, &c.title, &c.ident))
-                    .filter(|c| {
-                        let frozen = kind != Kind::Zoom && hidden(c.window, pid, &shown);
-                        out_of_sight |= frozen;
-                        !frozen
-                    })
                     .take(MOST_WINDOWS)
                     .collect();
                 if mine.is_empty() {
@@ -462,9 +495,6 @@ mod mac {
                     id,
                     kind,
                 });
-            }
-            if candidates.is_empty() && out_of_sight {
-                return Look::Unreadable(names::HIDDEN.into());
             }
             let mut budget = 4000;
             let window = |this: &Self, c: &Candidate, budget: &mut usize| Window {
@@ -496,15 +526,27 @@ mod mac {
                 Ok(picked) => picked,
                 Err(why) => return Look::Unreadable(why.into()),
             };
+            let (shown, screens, locked) = (shown_windows(), screens(), locked());
             let mut windows = Vec::new();
             for i in at {
-                windows.push(match trees.get_mut(i).and_then(Option::take) {
+                let c = &candidates[i];
+                let Found { pid, kind, .. } = found[c.found];
+                if kind != Kind::Zoom && (locked || hidden(c.window, pid, &shown, &screens)) {
+                    continue;
+                }
+                let read = match trees.get_mut(i).and_then(Option::take) {
                     Some(tree) => tree,
-                    None => window(self, &candidates[i], &mut budget),
-                });
+                    None => window(self, c, &mut budget),
+                };
+                if names::same_call(&seat, names::page(&read).as_deref()) {
+                    windows.push(read);
+                }
             }
             if ask.over() {
                 return Look::Unreadable(names::SLOW.into());
+            }
+            if windows.is_empty() {
+                return Look::Unreadable(names::HIDDEN.into());
             }
             Look::Call {
                 app: seat.app.clone(),
@@ -529,10 +571,11 @@ mod mac {
 #[cfg(windows)]
 mod win {
     use leo_core::call_names::{
-        self as names, Ask, Look, Node, Reader, Seen, Window, MOST_WINDOWS,
+        self as names, Ask, Kind, Look, Node, Reader, Rect, Seen, Shown, Window, MOST_WINDOWS,
     };
     use windows::core::{Interface, BOOL};
-    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+    use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, RECT};
+    use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
     use windows::Win32::System::Com::{
         CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_MULTITHREADED,
@@ -548,7 +591,9 @@ mod win {
         UIA_HelpTextPropertyId, UIA_NamePropertyId,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        EnumWindows, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
+        EnumWindows, GetSystemMetrics, GetWindowLongW, GetWindowRect, GetWindowTextW,
+        GetWindowThreadProcessId, IsIconic, IsWindowVisible, GWL_EXSTYLE, SM_CXVIRTUALSCREEN,
+        SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, WS_EX_LAYERED, WS_EX_TRANSPARENT,
     };
 
     const MOST_DEPTH: usize = 40;
@@ -753,6 +798,55 @@ mod win {
         true.into()
     }
 
+    fn area(hwnd: HWND) -> Option<Rect> {
+        let mut cloaked = 0u32;
+        let mut rect = RECT::default();
+        unsafe {
+            let _ = DwmGetWindowAttribute(
+                hwnd,
+                DWMWA_CLOAKED,
+                (&raw mut cloaked).cast(),
+                std::mem::size_of::<u32>() as u32,
+            );
+            if cloaked != 0 || IsIconic(hwnd).as_bool() {
+                return None;
+            }
+            GetWindowRect(hwnd, &mut rect).ok()?;
+        }
+        Some(Rect {
+            x: rect.left.into(),
+            y: rect.top.into(),
+            w: (rect.right - rect.left).into(),
+            h: (rect.bottom - rect.top).into(),
+        })
+    }
+
+    fn shown_windows(front_to_back: &[HWND]) -> Vec<Shown> {
+        let see_through = (WS_EX_LAYERED | WS_EX_TRANSPARENT).0 as i32;
+        front_to_back
+            .iter()
+            .filter_map(|&hwnd| {
+                let mut pid = 0;
+                unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+                Some(Shown {
+                    pid: pid as i32,
+                    solid: unsafe { GetWindowLongW(hwnd, GWL_EXSTYLE) } & see_through == 0,
+                    area: area(hwnd)?,
+                })
+            })
+            .collect()
+    }
+
+    fn screens() -> Vec<Rect> {
+        let size = |metric| f64::from(unsafe { GetSystemMetrics(metric) });
+        vec![Rect {
+            x: size(SM_XVIRTUALSCREEN),
+            y: size(SM_YVIRTUALSCREEN),
+            w: size(SM_CXVIRTUALSCREEN),
+            h: size(SM_CYVIRTUALSCREEN),
+        }]
+    }
+
     fn exe(pid: u32) -> Option<String> {
         unsafe {
             let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
@@ -794,6 +888,8 @@ mod win {
             let mut seen: Vec<Seen> = Vec::new();
             let mut handles: Vec<HWND> = Vec::new();
             let mut names_of: Vec<(u32, Option<String>)> = Vec::new();
+            let shown = shown_windows(&list);
+            let screens = screens();
             for hwnd in list {
                 let mut pid = 0;
                 unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
@@ -861,6 +957,15 @@ mod win {
             };
             let mut windows = Vec::new();
             for i in at {
+                let zoom = names::app_kind(&seen[i].app) == Some(Kind::Zoom);
+                let hidden = || {
+                    area(handles[i]).is_none_or(|area| {
+                        names::covered(seen[i].pid as i32, area, &shown, &screens)
+                    })
+                };
+                if !zoom && hidden() {
+                    continue;
+                }
                 let window = match trees.get_mut(i).and_then(Option::take) {
                     Some(window) => Some(window),
                     None => window_tree(uia, handles[i], &mut budget, ask).map(|tree| Window {
@@ -869,10 +974,14 @@ mod win {
                         tree,
                     }),
                 };
-                windows.extend(window);
+                windows
+                    .extend(window.filter(|w| names::same_call(&seat, names::page(w).as_deref())));
             }
             if ask.over() {
                 return Look::Unreadable(names::SLOW.into());
+            }
+            if windows.is_empty() {
+                return Look::Unreadable(names::HIDDEN.into());
             }
             Look::Call {
                 app: seat.app.clone(),

@@ -243,9 +243,12 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   "You", and is told by its own controls ("Backgrounds and effects", English) or the
   People panel's "(You)" row; "Contributors N" is the count. Whether the talking class
   still marks the speaker is not yet seen on a call of two. FaceTime is not read.
-  Chromium freezes the tree of a hidden window, mark and all, so a hidden window is
-  not read and a mark that stays on through 3 s without speech names only the line it
-  came with (`doubt_marks_through_silence`).
+  Chromium freezes the tree of a hidden window, mark and all, so a hidden window (or
+  a locked screen) is not read and a Meet or Teams mark that stays on through 3 s
+  without sound (`echo::sound`, the track's own levels) names only the line it came
+  with (`doubt_marks_through_silence`). A Meet line is named only once the user's tile
+  is known, a mark on a tile whose name cannot be read names nobody, and a line under
+  1.2 s is named only well inside one person's marks.
 - Windows child programs stay quiet. Model and toolchain caches stay under the
   existing models directory. Platform installers and release bundles are
   described by their scripts and workflow, and uninstall retains the existing

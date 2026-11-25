@@ -511,30 +511,33 @@ fn merged(
         (Some(you), Some(others)) => leo_services::session::echo::marks(you, others, finish_now),
         _ => Vec::new(),
     };
+    let mut said: Vec<(u64, leo_core::recording::Passage)> = Vec::new();
     for (speaker, session) in &sessions {
-        let offset = (session.manifest.started - earliest).num_seconds().max(0) as u64;
+        let late = session.manifest.started - earliest;
+        let offset = late.num_seconds().max(0) as u64;
+        let late_ms = late.num_milliseconds().max(0) as u64;
         let archive = session.archive();
         let heard = if *speaker == "You" {
             echo.as_slice()
         } else {
             &[]
         };
-        source
-            .passages
-            .extend(archive.passages.into_iter().enumerate().map(|(i, p)| {
-                let mut p = labelled(speaker, session.label(), p);
-                p.echo = heard.get(i).copied().unwrap_or(false);
-                for turn in &mut p.turns {
-                    turn.track = (*speaker).into();
-                }
-                p.start_secs += offset;
-                p.end_secs += offset;
-                p
-            }));
+        said.extend(archive.passages.into_iter().enumerate().map(|(i, p)| {
+            let at = p.turns.first().map_or(p.start_secs * 1000, |turn| turn.ms) + late_ms;
+            let mut p = labelled(speaker, session.label(), p);
+            p.echo = heard.get(i).copied().unwrap_or(false);
+            for turn in &mut p.turns {
+                turn.track = (*speaker).into();
+            }
+            p.start_secs += offset;
+            p.end_secs += offset;
+            (at, p)
+        }));
         source.points.extend(archive.points);
         source.warnings.extend(archive.warnings);
     }
-    source.passages.sort_by_key(|p| p.start_secs);
+    said.sort_by_key(|(at, _)| *at);
+    source.passages = said.into_iter().map(|(_, p)| p).collect();
     Ok(source)
 }
 
@@ -850,6 +853,28 @@ mod tests {
             super::labelled("Others", far, named).speaker,
             "Rowan Ellery"
         );
+    }
+
+    #[test]
+    fn lines_within_one_second_stay_in_the_order_they_were_said() {
+        use leo_services::session::{turns_name, Manifest, Session};
+        let root = tempfile::tempdir().unwrap();
+        let track = |rows: &str| {
+            let mut manifest = Manifest::new(None, None, "", true);
+            manifest.duration_secs = Some(60);
+            manifest.turns = true;
+            manifest.started = "2026-11-25T06:00:00Z".parse().unwrap();
+            let session = Session::create(root.path(), manifest).unwrap();
+            std::fs::write(session.dir.join("seg-00000.txt"), "said").unwrap();
+            std::fs::write(session.dir.join(turns_name(0)), rows).unwrap();
+            session.dir
+        };
+        let you = track(r#"[[5900,6100,"Yes."]]"#);
+        let others = track(r#"[[5100,5700,"Is it done?"],[6200,6900,"Good."]]"#);
+        let merged =
+            super::merged(&[("You", you), ("Others", others)], &AtomicBool::new(false)).unwrap();
+        let said: Vec<&str> = merged.passages.iter().map(|p| p.text.as_str()).collect();
+        assert_eq!(said, ["Is it done?", "Yes.", "Good."]);
     }
 
     #[test]

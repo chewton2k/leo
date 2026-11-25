@@ -653,18 +653,31 @@ fn spoken_lines(segment: &Segment, words: &[Word]) -> Option<Vec<(i64, i64, Stri
     let first = usize::try_from(segment.first_word).ok()?;
     let count = usize::try_from(segment.n_words).ok()?;
     let words = words.get(first..first.checked_add(count)?)?;
-    let same = words
-        .iter()
-        .flat_map(|word| word.text.split_whitespace())
-        .eq(segment.text.split_whitespace());
     let in_order = words.windows(2).all(|pair| pair[0].t0_ms <= pair[1].t0_ms);
-    if words.last()?.t1_ms <= 0 || !same || !in_order {
+    if words.last()?.t1_ms <= 0 || !in_order {
+        return None;
+    }
+    let mut letters = segment
+        .text
+        .char_indices()
+        .filter(|(_, c)| !c.is_whitespace())
+        .map(|(at, c)| (at, at + c.len_utf8(), c));
+    let mut places: Vec<(usize, usize)> = Vec::with_capacity(words.len());
+    for word in words {
+        let mut place: Option<(usize, usize)> = None;
+        for c in word.text.chars().filter(|c| !c.is_whitespace()) {
+            let (from, to, _) = letters.next().filter(|(_, _, letter)| *letter == c)?;
+            place = Some((place.map_or(from, |(from, _)| from), to));
+        }
+        places.push(place.or_else(|| places.last().map(|(_, to)| (*to, *to)))?);
+    }
+    if letters.next().is_some() {
         return None;
     }
     let said = |word: &Word| word.t1_ms.min(word.t0_ms + LONGEST_WORD_MS);
-    let mut lines: Vec<(i64, i64, String)> = Vec::new();
+    let mut lines: Vec<(i64, i64, (usize, usize))> = Vec::new();
     let mut last: Option<&Word> = None;
-    for word in words {
+    for (word, place) in words.iter().zip(places) {
         let goes_on = last.is_some_and(|last| {
             word.t0_ms == last.t0_ms
                 || (!ends_sentence(last.text.trim()) && word.t0_ms - said(last) < LINE_PAUSE_MS)
@@ -672,14 +685,19 @@ fn spoken_lines(segment: &Segment, words: &[Word]) -> Option<Vec<(i64, i64, Stri
         match lines.last_mut().filter(|_| goes_on) {
             Some((_, to, text)) => {
                 *to = said(word).max(*to);
-                text.push(' ');
-                text.push_str(word.text.trim());
+                text.1 = place.1;
             }
-            None => lines.push((word.t0_ms, said(word), word.text.trim().to_string())),
+            None => lines.push((word.t0_ms, said(word), place)),
         }
         last = Some(word);
     }
-    Some(lines)
+    lines
+        .into_iter()
+        .map(|(from, to, (start, end))| {
+            let text = segment.text.get(start..end)?.trim().to_string();
+            Some((from, to, text))
+        })
+        .collect()
 }
 
 fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, speech: (u64, u64)) -> Timed {
@@ -1257,6 +1275,55 @@ mod audio_level_tests {
                 [(0, 30_000, "Is it done?".to_string())]
             );
         }
+    }
+
+    #[test]
+    fn a_language_written_without_spaces_is_cut_too_and_keeps_its_text() {
+        let heard = with_words(
+            "我昨天发了预算。周四是设计评审。",
+            &[
+                (0, 900, "我昨天"),
+                (900, 2_000, " 发了预算。"),
+                (2_100, 3_000, "周四是"),
+                (3_000, 4_000, "设计评审。"),
+            ],
+        );
+        assert_eq!(
+            timed_of(&heard, &heard.text, 0, (0, 30_000)),
+            [
+                (0, 1_900, "我昨天发了预算。".to_string()),
+                (2_100, 4_000, "周四是设计评审。".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn every_letter_of_a_segment_is_in_exactly_one_line() {
+        let text = "It costs 3.5 dollars.  Dr. Li said \"yes.\"\tOk… 2 p.m.?";
+        let words: Vec<(i64, i64, &str)> = text
+            .split_whitespace()
+            .enumerate()
+            .map(|(i, word)| (i as i64 * 400, i as i64 * 400 + 300, word))
+            .collect();
+        let heard = with_words(text, &words);
+        let lines = timed_of(&heard, text, 0, (0, 30_000));
+        assert!(lines.len() > 1 && lines.windows(2).all(|pair| pair[0].0 < pair[1].0));
+        let joined: Vec<&str> = lines
+            .iter()
+            .flat_map(|(_, _, text)| text.split_whitespace())
+            .collect();
+        assert_eq!(joined, text.split_whitespace().collect::<Vec<_>>());
+        let pieces = with_words(
+            "don't stop",
+            &[(0, 100, "don"), (100, 200, "'t"), (900, 999, "stop")],
+        );
+        assert_eq!(
+            timed_of(&pieces, &pieces.text, 0, (0, 30_000)),
+            [
+                (0, 200, "don't".to_string()),
+                (900, 999, "stop".to_string())
+            ]
+        );
     }
 
     #[test]

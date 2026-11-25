@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 pub use apps::{
-    app_kind, call_window, is_call_tree, kind_of, pick, Kind, Seat, Seen, BROWSERS, TEAMS_APPS,
-    ZOOM_APPS,
+    app_kind, call_window, is_call_tree, kind_of, pick, same_call, Kind, Seat, Seen, BROWSERS,
+    TEAMS_APPS, ZOOM_APPS,
 };
 pub use parse::read_windows;
 
@@ -68,6 +68,7 @@ pub const SLOW: &str = "the call app answered too slowly";
 pub const HIDDEN: &str =
     "the call window is covered, minimized or on another desktop, so what it shows is frozen";
 pub const STALE_SECS: f64 = 3.0;
+const SHORT_LINE_SECS: f64 = 1.2;
 const GRID: usize = 24;
 
 #[repr(C)]
@@ -82,7 +83,7 @@ pub struct Rect {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Shown {
     pub pid: i32,
-    pub plain: bool,
+    pub solid: bool,
     pub area: Rect,
 }
 
@@ -103,23 +104,23 @@ impl Rect {
     }
 }
 
-pub fn covered(pid: i32, area: Rect, front_to_back: &[Shown]) -> bool {
+pub fn covered(pid: i32, area: Rect, front_to_back: &[Shown], screens: &[Rect]) -> bool {
     let Some(at) = front_to_back
         .iter()
-        .position(|s| s.pid == pid && s.area.near(&area))
+        .rposition(|s| s.pid == pid && s.area.near(&area))
     else {
         return true;
     };
     let above: Vec<Rect> = front_to_back[..at]
         .iter()
-        .filter(|s| s.plain)
+        .filter(|s| s.solid)
         .map(|s| s.area)
         .collect();
     let step = |start: f64, length: f64, i: usize| start + length * (i as f64 + 0.5) / GRID as f64;
     (0..GRID * GRID).all(|i| {
         let x = step(area.x, area.w, i % GRID);
         let y = step(area.y, area.h, i / GRID);
-        above.iter().any(|r| r.holds(x, y))
+        !screens.iter().any(|r| r.holds(x, y)) || above.iter().any(|r| r.holds(x, y))
     })
 }
 
@@ -142,6 +143,7 @@ pub struct Reading {
     pub me: Option<String>,
     pub shown: Option<usize>,
     pub unmarked_self: bool,
+    pub marks_outlast_speech: bool,
 }
 
 pub fn shows_call(app: &str, window: &Window) -> bool {
@@ -201,7 +203,7 @@ pub enum Mark {
         to: f64,
         who: String,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        alone: bool,
+        mark: bool,
     },
     Me {
         me: String,
@@ -213,7 +215,7 @@ struct Run {
     from: f64,
     to: f64,
     who: String,
-    alone: bool,
+    mark: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -255,7 +257,7 @@ impl Timeline {
                     from,
                     to,
                     who,
-                    alone,
+                    mark,
                 } if from.is_finite() && to > from => match timeline.runs.last_mut() {
                     Some(last) if last.from == from && last.who == who => {
                         last.to = last.to.max(to);
@@ -264,7 +266,7 @@ impl Timeline {
                         from,
                         to,
                         who,
-                        alone,
+                        mark,
                     }),
                 },
                 Mark::Me { me } => {
@@ -286,25 +288,29 @@ impl Timeline {
             .fold(0.0, f64::max);
     }
 
-    pub fn doubt_marks_through_silence(&mut self, spoken: &[(f64, f64)]) {
-        let spoken = union(spoken.to_vec());
-        for run in self.runs.iter_mut().filter(|run| !run.alone) {
-            let first = spoken.partition_point(|(_, end)| *end <= run.from);
-            let inside = spoken[first..]
-                .iter()
-                .take_while(|(start, _)| *start < run.to);
+    pub fn doubt_marks_through_silence(&mut self, sound: &[(f64, f64)], lines: &[(f64, f64)]) {
+        let sound = union(sound.to_vec());
+        for run in self.runs.iter_mut().filter(|run| run.mark) {
+            let first = sound.partition_point(|(_, end)| *end <= run.from);
             let mut quiet_from = run.from;
             let mut stale = false;
-            for (start, end) in inside {
+            for (start, end) in sound[first..]
+                .iter()
+                .take_while(|(start, _)| *start < run.to)
+            {
                 stale |= start - quiet_from > STALE_SECS;
                 quiet_from = *end;
             }
-            stale |= quiet_from > run.from && run.to - quiet_from > STALE_SECS;
+            stale |= run.to - quiet_from > STALE_SECS;
             if stale {
-                run.to = match spoken[first] {
-                    (start, _) if start - run.from > STALE_SECS => run.from,
-                    (_, end) => run.to.min(end),
-                };
+                let late = |(start, _): &&(f64, f64)| *start - run.from <= STALE_SECS;
+                let came_with = lines
+                    .iter()
+                    .filter(|(_, end)| *end > run.from)
+                    .filter(late)
+                    .map(|(_, end)| *end)
+                    .min_by(f64::total_cmp);
+                run.to = came_with.map_or(run.from, |end| run.to.min(end));
             }
         }
         self.measure_longest();
@@ -349,7 +355,7 @@ impl Timeline {
             let others: Vec<&String> = people.iter().filter(|p| !marked(p)).collect();
             if let [other] = others.as_slice() {
                 if !mine(other) {
-                    return usable(other).map(|who| (who, true));
+                    return usable(other).map(|who| (who, false));
                 }
             }
         }
@@ -361,7 +367,7 @@ impl Timeline {
             .filter(|p| !mine(p))
             .collect();
         match talking.as_slice() {
-            [one] => usable(one).map(|who| (who, false)),
+            [one] => usable(one).map(|who| (who, !reading.marks_outlast_speech)),
             _ => None,
         }
     }
@@ -380,30 +386,30 @@ impl Timeline {
         }
         let who = reading.and_then(|r| self.who(r));
         let goes_on = match (&self.open, &who, self.last) {
-            (Some((_, open, _)), Some((who, _)), Some(last)) => {
-                open == who && at - last <= HOLD_SECS
+            (Some((_, open, was)), Some((who, mark)), Some(last)) => {
+                open == who && was == mark && at - last <= HOLD_SECS
             }
             _ => false,
         };
         if goes_on {
-            if let Some((from, who, alone)) = &self.open {
+            if let Some((from, who, mark)) = &self.open {
                 marks.push(Mark::Run {
                     from: *from,
                     to: at,
                     who: who.clone(),
-                    alone: *alone,
+                    mark: *mark,
                 });
             }
         } else {
             marks.extend(self.close(at));
-            self.open = who.map(|(who, alone)| (at, who, alone));
+            self.open = who.map(|(who, mark)| (at, who, mark));
         }
         self.last = Some(at);
         marks
     }
 
     fn close(&mut self, next: f64) -> Option<Mark> {
-        let (from, who, alone) = self.open.take()?;
+        let (from, who, mark) = self.open.take()?;
         let to = next.min(self.last.unwrap_or(from) + HOLD_SECS);
         if to <= from {
             return None;
@@ -412,14 +418,14 @@ impl Timeline {
             from,
             to,
             who: who.clone(),
-            alone,
+            mark,
         });
         self.longest = self.longest.max(to - from);
         Some(Mark::Run {
             from,
             to,
             who,
-            alone,
+            mark,
         })
     }
 
@@ -443,6 +449,7 @@ impl Timeline {
                 .iter()
                 .take_while(|run| run.from <= start)
                 .find(|run| start < run.to && !self.is_me(&run.who))
+                .filter(|run| self.sure_of(run, start, end))
                 .map(|run| run.who.clone());
         }
         self.name_over(&[(start, end)])
@@ -478,6 +485,20 @@ impl Timeline {
             .max_by(|a, b| a.1.total_cmp(&b.1))
             .filter(|(_, spent)| *spent > 0.5 * whole)
             .map(|(who, _)| who)
+            .filter(|who| {
+                let ours = |run: &&Run| norm(&run.who) == norm(who);
+                whole >= SHORT_LINE_SECS
+                    || spans.iter().all(|&(start, end)| {
+                        let mut near = self.reaching(start).iter().filter(ours);
+                        near.any(|run| self.sure_of(run, start, end))
+                    })
+            })
+    }
+
+    fn sure_of(&self, run: &Run, start: f64, end: f64) -> bool {
+        !run.mark
+            || end - start >= SHORT_LINE_SECS
+            || (run.from <= start - LAG_SECS && run.to >= end + LAG_SECS)
     }
 }
 

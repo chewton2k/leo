@@ -1088,7 +1088,8 @@ impl Session {
                 })
                 .map(|(from, to)| secs(from, to))
                 .collect();
-            names.doubt_marks_through_silence(&spoken);
+            let sound = echo::sound(self).unwrap_or_else(|| spoken.clone());
+            names.doubt_marks_through_silence(&sound, &spoken);
         }
         let named = |from: u64, to: u64| {
             let (from, to) = secs(from, to);
@@ -2086,6 +2087,36 @@ mod tests {
                 (320, 600, "Then more."),
             ]
         );
+    }
+
+    #[test]
+    fn a_frozen_mark_is_doubted_by_the_sound_itself() {
+        let heard = |levels: Option<Vec<u8>>| -> Vec<String> {
+            let root = tempfile::tempdir().unwrap();
+            let mut manifest = Manifest::new(None, None, "", true);
+            manifest.duration_secs = Some(40);
+            manifest.turns = true;
+            let session = Session::create(root.path(), manifest).unwrap();
+            std::fs::write(session.dir.join("seg-00000.txt"), "said").unwrap();
+            let rows = r#"[[1000,16000,"a"],[16000,30000,"b"]]"#;
+            std::fs::write(session.dir.join(turns_name(0)), rows).unwrap();
+            let mark = "{\"from\":1.0,\"to\":39.0,\"who\":\"Rowan Ellery\",\"mark\":true}\n";
+            std::fs::write(session.dir.join(leo_core::call_names::FILE), mark).unwrap();
+            if let Some(levels) = levels {
+                std::fs::write(session.dir.join(echo::levels_name(0)), levels).unwrap();
+            }
+            let archive = session.archive();
+            archive.passages.into_iter().map(|p| p.speaker).collect()
+        };
+        let level = |t: usize| match t {
+            100..1_000 | 1_600..3_000 => 60,
+            _ => 12,
+        };
+        assert_eq!(
+            heard(Some((0..4_000).map(level).collect())),
+            ["Rowan Ellery", "Computer audio"]
+        );
+        assert_eq!(heard(None), ["Rowan Ellery", "Computer audio"]);
     }
 
     #[test]

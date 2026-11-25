@@ -80,6 +80,15 @@ fn call_page(one: &Seen) -> String {
         .to_owned()
 }
 
+pub fn same_call(seat: &Seat, page: Option<&str>) -> bool {
+    match (&seat.title, page) {
+        (Some(title), Some(page)) if page.contains(" - ") || page.contains(" – ") => {
+            page.trim() == title || !of_page(page.trim(), title)
+        }
+        _ => true,
+    }
+}
+
 pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'static str> {
     let same = |s: &Seen, pid: u32, app: &str| s.pid == pid && s.app == app;
     if let Some(seat) = seat {
@@ -107,18 +116,20 @@ pub fn pick(seat: Option<&Seat>, seen: &[Seen]) -> Result<(Seat, Vec<usize>), &'
         .find(|one| one.page.is_some())
         .unwrap_or(&seen[first]);
     let title = browser(&one.app).then(|| call_page(one));
-    let alone = calls.iter().all(|&i| {
-        same(&seen[i], one.pid, &one.app)
-            && title.as_ref().is_none_or(|t| of_page(&seen[i].title, t))
-    });
+    let of_call = |s: &Seen| {
+        title.as_ref().is_none_or(|t| match &s.page {
+            Some(page) if page.contains(" - ") || page.contains(" – ") => page.trim() == t,
+            _ => of_page(&s.title, t),
+        })
+    };
+    let alone = calls
+        .iter()
+        .all(|&i| same(&seen[i], one.pid, &one.app) && of_call(&seen[i]));
     if !alone {
         return Err("more than one call is open");
     }
     let at = (0..seen.len())
-        .filter(|&i| {
-            same(&seen[i], one.pid, &one.app)
-                && title.as_ref().is_none_or(|t| of_page(&seen[i].title, t))
-        })
+        .filter(|&i| same(&seen[i], one.pid, &one.app) && of_call(&seen[i]))
         .collect();
     Ok((
         Seat {

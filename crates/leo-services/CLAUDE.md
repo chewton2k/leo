@@ -188,7 +188,8 @@ nearest steady lag, with the leak's level the median of the steady windows withi
 track's floor) is a copy when the other side is at or above its floor (the
 loudest within 20 ms of the lag) and the block is no more than 6 dB over the
 leak's level; the line is echo only when at most 5% of its sound blocks are not
-copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5, so a short
+copies, no 20 sound blocks in a row are not, and correlation ≥ 0.5 (a line with 12
+to 49 sound blocks only between two echoed lines, when every block copies), so a short
 line of yours before or under an echo is never hidden; under 0.5 s of sound stays
 unmarked. Lines are never marked when the search is cut short (finish now), and a
 part with a transcript whose levels file is missing or cut short is traced, and

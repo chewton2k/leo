@@ -124,8 +124,11 @@ until a call is bound it copies them all and `call_names::pick` binds the one ap
 or for Zoom a named tile or roster row, for Meet a speaking tile; Teams needs the
 control), after which only that pid (and page title) is
 read; a window that is minimized, on another Space or wholly covered is not read
-(`call_names::covered`, CGWindowList; Zoom excepted), because Chromium then freezes
-its tree with the last talking mark on it; Chromium turns page accessibility on two
+(`call_names::covered` by a grid on the screens: CGWindowList on macOS, EnumWindows
+order, cloaked and minimized windows on Windows; Zoom excepted; when leo cannot tell,
+it counts as hidden), because Chromium then freezes its tree with the last talking
+mark on it; hidden windows still count when the call is chosen, and a window whose own
+page is another call's is dropped (`same_call`); Chromium turns page accessibility on two
 seconds after the last `AXEnhancedUserInterface` request, so it is asked at most
 every 10 s; front-most order plays no part. macOS reads through Accessibility (no
 permission: "Others", no prompt; raw AX/CF FFI, a 0.3 s messaging timeout set on
