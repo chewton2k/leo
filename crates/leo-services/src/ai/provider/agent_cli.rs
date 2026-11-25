@@ -70,7 +70,79 @@ pub fn locate(bin: &str) -> Option<PathBuf> {
     if given.components().count() > 1 {
         return given.is_file().then(|| given.to_path_buf());
     }
-    leo_core::paths::find(bin)
+    leo_core::paths::find(bin).or_else(|| in_app(bin))
+}
+
+const CODEX_IN_APPS: [&str; 4] = [
+    "ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex",
+    "ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
+    "ChatGPT.app/Contents/Resources/codex",
+    "Codex.app/Contents/Resources/codex",
+];
+const CLAUDE_IN_COPY: &str = if cfg!(windows) {
+    "claude.exe"
+} else {
+    "claude.app/Contents/MacOS/claude"
+};
+const CLAUDE_PACKAGES: [&str; 2] = ["Claude_pzs8sxrjxfjjc", "AnthropicPBC.Claude_fnn82j28hfe8t"];
+
+fn in_app(bin: &str) -> Option<PathBuf> {
+    match bin {
+        "codex" if cfg!(target_os = "macos") => codex_in(&[
+            "/Applications".into(),
+            dirs::home_dir()?.join("Applications"),
+        ]),
+        "codex" if cfg!(windows) => codex_copy(&dirs::data_local_dir()?.join("OpenAI/Codex/bin")),
+        "claude" if cfg!(target_os = "macos") => claude_copy(&[dirs::data_dir()?]),
+        "claude" if cfg!(windows) => {
+            let packages = dirs::data_local_dir()?.join("Packages");
+            let mut roots = vec![dirs::data_dir()?];
+            roots.extend(CLAUDE_PACKAGES.map(|p| packages.join(p).join("LocalCache/Roaming")));
+            claude_copy(&roots)
+        }
+        _ => None,
+    }
+}
+
+fn codex_in(apps: &[PathBuf]) -> Option<PathBuf> {
+    apps.iter()
+        .flat_map(|dir| CODEX_IN_APPS.map(|inner| dir.join(inner)))
+        .find(|program| program.is_file())
+}
+
+fn entries(dir: &Path) -> impl Iterator<Item = (String, PathBuf)> {
+    std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| Some((entry.file_name().into_string().ok()?, entry.path())))
+}
+
+fn codex_copy(root: &Path) -> Option<PathBuf> {
+    entries(root)
+        .filter(|(name, _)| name.len() == 16 && name.bytes().all(|b| b.is_ascii_hexdigit()))
+        .map(|(_, dir)| dir.join("codex.exe"))
+        .filter(|program| program.is_file())
+        .max_by_key(|program| program.metadata().and_then(|m| m.modified()).ok())
+}
+
+fn claude_copy(roots: &[PathBuf]) -> Option<PathBuf> {
+    roots
+        .iter()
+        .flat_map(|root| entries(&root.join("Claude/claude-code")))
+        .filter_map(|(name, dir)| {
+            let version: Vec<u64> = name
+                .split('.')
+                .map(|n| n.parse().ok())
+                .collect::<Option<_>>()?;
+            Some((version, dir))
+        })
+        .flat_map(|(version, dir)| entries(&dir).map(move |(_, copy)| (version.clone(), copy)))
+        .filter(|(_, copy)| copy.join(".verified").is_file())
+        .map(|(version, copy)| (version, copy.join(CLAUDE_IN_COPY)))
+        .filter(|(_, program)| program.is_file())
+        .max()
+        .map(|(_, program)| program)
 }
 
 const CODEX_OFF: [&str; 19] = [
@@ -1818,6 +1890,124 @@ mod tests {
             r#"{"loggedIn":false,"authMethod":"claude.ai"}"#
         ));
         assert!(!claude_on_plan("not json"));
+    }
+
+    fn put(dir: &Path, path: &str) -> PathBuf {
+        let path = dir.join(path);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        path
+    }
+
+    #[test]
+    fn codex_is_found_in_either_app_the_first_folder_and_newest_place_winning() {
+        let dir = tempfile::tempdir().unwrap();
+        let apps = [dir.path().join("all"), dir.path().join("mine")];
+        assert_eq!(codex_in(&apps), None);
+        let order: Vec<(&PathBuf, &str)> = apps
+            .iter()
+            .flat_map(|app| CODEX_IN_APPS.map(|inner| (app, inner)))
+            .collect();
+        for (app, inner) in order.into_iter().rev() {
+            let program = put(app, inner);
+            assert_eq!(codex_in(&apps), Some(program));
+        }
+    }
+
+    #[test]
+    fn the_codex_copy_is_the_newest_finished_one() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(codex_copy(dir.path()), None);
+        put(dir.path(), ".staging-0123456789abcdef-x/codex.exe");
+        put(dir.path(), "0123456789abcde/codex.exe");
+        std::fs::create_dir_all(dir.path().join("ffffffffffffffff")).unwrap();
+        assert_eq!(codex_copy(dir.path()), None);
+        let new = put(dir.path(), "0123456789abcdef/codex.exe");
+        let old = put(dir.path(), "fedcba9876543210/codex.exe");
+        std::fs::File::options()
+            .write(true)
+            .open(&old)
+            .unwrap()
+            .set_modified(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap();
+        assert_eq!(codex_copy(dir.path()), Some(new));
+    }
+
+    #[test]
+    fn the_claude_copy_is_the_highest_verified_version_in_any_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let roots = [dir.path().join("one"), dir.path().join("two")];
+        let copy = |root: &PathBuf, at: &str, verified: bool| {
+            let at = format!("Claude/claude-code/{at}");
+            if verified {
+                put(root, &format!("{at}/.verified"));
+            }
+            put(root, &format!("{at}/{CLAUDE_IN_COPY}"))
+        };
+        assert_eq!(claude_copy(&roots), None);
+        copy(&roots[0], "2.1.400/aaaa", false);
+        put(&roots[0], "Claude/claude-code/2.1.401/aaaa/.verified");
+        copy(&roots[0], "next/aaaa", true);
+        put(&roots[0], "Claude/claude-code/auto-update-state.json");
+        assert_eq!(claude_copy(&roots), None);
+        let old = copy(&roots[0], "2.1.99/bbbb", true);
+        assert_eq!(claude_copy(&roots), Some(old));
+        let new = copy(&roots[1], "2.1.330/cccc", true);
+        assert_eq!(claude_copy(&roots), Some(new));
+    }
+
+    #[test]
+    fn only_the_plain_program_names_are_looked_for_in_the_apps() {
+        let gone = tempfile::tempdir().unwrap().path().join("codex");
+        assert_eq!(locate(&gone.to_string_lossy()), None);
+        for other in ["leo-no-such-codex", "codex.exe", "Claude", "node", ""] {
+            assert_eq!(in_app(other), None, "{other}");
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_cli_on_path_comes_before_the_copy_in_an_app() {
+        const CHILD: &str = "LEO_TEST_APP_COPY_HOME";
+        if let Some(home) = std::env::var_os(CHILD).map(PathBuf::from) {
+            let copy = home.join(format!(
+                "Library/Application Support/Claude/claude-code/2.1.330/aaaa/{CLAUDE_IN_COPY}"
+            ));
+            let cli = home.join("bin/claude");
+            assert_eq!(locate("claude"), Some(cli.clone()));
+            std::fs::remove_file(cli).unwrap();
+            assert_eq!(locate("claude"), Some(copy.clone()));
+            std::fs::remove_file(copy).unwrap();
+            assert_eq!(locate("claude"), None);
+            assert_eq!(locate("codex"), Some(home.join("bin/codex")));
+            std::fs::remove_file(home.join("bin/codex")).unwrap();
+            assert!(CODEX_IN_APPS
+                .iter()
+                .any(|inner| locate("codex").unwrap().ends_with(inner)));
+            return;
+        }
+        let home = tempfile::tempdir().unwrap();
+        put(home.path(), "bin/claude");
+        put(home.path(), "bin/codex");
+        let copies = "Library/Application Support/Claude/claude-code/2.1.330/aaaa";
+        put(home.path(), &format!("{copies}/.verified"));
+        put(home.path(), &format!("{copies}/{CLAUDE_IN_COPY}"));
+        put(home.path(), &format!("Applications/{}", CODEX_IN_APPS[0]));
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "ai::provider::agent_cli::tests::the_cli_on_path_comes_before_the_copy_in_an_app",
+            ])
+            .env(CHILD, home.path())
+            .env("HOME", home.path())
+            .env("PATH", home.path().join("bin"))
+            .output()
+            .unwrap();
+        let said = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && said.contains("1 passed"),
+            "{said}"
+        );
     }
 
     #[test]

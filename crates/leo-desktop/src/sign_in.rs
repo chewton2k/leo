@@ -157,6 +157,12 @@ mod tests {
             "#!/bin/zsh -l\nrm -f -- \"$0\"\nexec '/Users/me/.local/bin/claude'\n"
         );
         assert_eq!(
+            mac_script(Path::new(
+                "/Users/me/Library/Application Support/Claude/claude-code/2.1.330/4262a1273231/claude.app/Contents/MacOS/claude"
+            )),
+            "#!/bin/zsh -l\nrm -f -- \"$0\"\nexec '/Users/me/Library/Application Support/Claude/claude-code/2.1.330/4262a1273231/claude.app/Contents/MacOS/claude'\n"
+        );
+        assert_eq!(
             mac_script(Path::new("/Users/o'neil/$(touch x)/claude")),
             "#!/bin/zsh -l\nrm -f -- \"$0\"\nexec '/Users/o'\\''neil/$(touch x)/claude'\n"
         );

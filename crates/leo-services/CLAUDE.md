@@ -332,8 +332,14 @@ more. `Process::stop` reaps children after killing the group. A caller's stop
 long-recording and import worker threads) reaches every launch; the margin read
 runs under `READ_LIMIT`.
 
-Usable = program on PATH (`locate`, `.cmd` on Windows); failures are retryable and
-name the sign-in step. `health::writing` is SignInNeeded only from the last
+Usable = `locate`: program on PATH (`.cmd` on Windows), else, for the plain names
+`claude` and `codex`, the copy a desktop app keeps (2026-11-24, the owner's call:
+the CLI first): Codex inside ChatGPT.app or Codex.app, or on Windows
+`%LOCALAPPDATA%\OpenAI\Codex\bin\<16 hex>`; the highest version with `.verified`
+under the Claude app's `claude-code` folder. The apps delete old versions, so the
+path is found again at each launch and never stored. The app's own Claude sign-in
+is never read (Anthropic forbids it); Codex shares `~/.codex`. The Windows places
+are untested. Failures are retryable and name the sign-in step. `health::writing` is SignInNeeded only from the last
 sign-in probe's result (`agent_cli::last_signed_in`, ten minutes), never a new
 probe. Sign-in probes accept only recognized status output, honor exit status and
 share the bounded watchdog; raw output never leaves. `coding_plans` reports
