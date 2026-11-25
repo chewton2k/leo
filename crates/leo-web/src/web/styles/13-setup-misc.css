@@ -65,6 +65,7 @@
 .set-note { margin: 8px 0 0; font-size: var(--fs-base); color: var(--muted); }
 .set-note.warn { color: var(--danger); }
 .set-test { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.set-test .btn { flex: none; }
 .set-result { font-size: var(--fs-sm); color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
 .set-result.ok { color: var(--good); }
 .set-result.bad { color: var(--danger); }

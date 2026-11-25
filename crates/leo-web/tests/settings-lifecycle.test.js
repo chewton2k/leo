@@ -238,13 +238,61 @@ test('Settings → Writing AI signs in, waits for the probe and turns the status
   clock += 3000;
   await timers.shift()[0]();
   assert.match(card, /set-status ok">Ready/);
-  assert.match(card, /data-provider="claude_code">Sign in again</);
+  assert.doesNotMatch(card, /writing-sign-in/);
   assert.doesNotMatch(card, /Waiting/);
   assert.equal(timers.length, 0);
   Object.assign(context.state.settings.plans[0], { installed: false, signed_in: null });
   assert.ok(context.taskCard(task).includes('href="https://claude.com/claude-code"'));
   context.state.settings.plans[0] = { provider: 'codex', installed: false };
   assert.ok(context.taskCard({ ...task, provider: 'codex' }).includes('<a class="btn plain sm" href="https://github.com/openai/codex" target="_blank" rel="noopener noreferrer">Install Codex</a>'));
+});
+
+test('a refused login shows Sign in until Test connection passes', async () => {
+  const timers = [], calls = [];
+  let refused = false, fail = true, plans = 0;
+  const out = { id: 'test-writing', className: '', textContent: '' };
+  const page = () => ({ writing: { state: 'ready' }, plans: [{ provider: 'codex', installed: true, signed_in: !refused, refused }] });
+  const context = { app: { addEventListener() {} }, document: { addEventListener() {} }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: (text) => String(text), choiceCards: () => '', ON_MAC: true, seq: 1,
+    $: () => out, setTimeout: (fn) => timers.push(fn), clearTimeout() {}, appChange: async (change) => { calls.push(change.action); },
+    api: async (url) => {
+      calls.push(url);
+      if (url === '/api/settings') { plans++; return page(); }
+      refused = fail;
+      if (fail) throw new Error('Please log out and sign in again.');
+      return { message: 'codex answered' };
+    } };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const task = { task: 'writing', provider: 'codex', choices: [], models: [], signin: { installed: true, text: 'Uses your ChatGPT plan.' } };
+  context.state = { view: 'settings', section: 'writing', settings: page() };
+  let card = context.taskCard(task);
+  context.drawSettings = () => { card = context.taskCard(task); Object.assign(out, { className: 'set-result', textContent: '' }); };
+  assert.match(card, />Ready</);
+  assert.doesNotMatch(card, /Sign in|sign-in/);
+  const test = () => context.testAi({ dataset: { task: 'writing' } });
+  await test();
+  assert.match(card, />Sign in needed</);
+  assert.match(card, /Sign in, then press Test connection\.<\/span><button [^>]*data-action="writing-sign-in" data-provider="codex">Sign in</);
+  assert.deepEqual([out.className, out.textContent], ['set-result bad', 'Please log out and sign in again.']);
+  calls.length = 0;
+  await context.writingSignIn({ dataset: { provider: 'codex' } });
+  assert.deepEqual([calls, timers.length], [['sign_in'], 0]);
+  assert.match(card, />Sign in needed</);
+  fail = false;
+  await test();
+  assert.match(card, />Ready</);
+  assert.doesNotMatch(card, /writing-sign-in/);
+  assert.deepEqual([out.className, out.textContent, plans], ['set-result ok', 'codex answered', 2]);
+  await test();
+  assert.equal(plans, 2);
+  fail = true;
+  const leaving = test();
+  context.state = { view: 'note' };
+  await leaving;
+  assert.match(card, />Ready</);
+  context.state = { view: 'settings', section: 'writing', settings: page() };
+  context.state.settings.plans[0].signed_in = null;
+  assert.match(context.taskCard(task), />Sign-in unknown<[\s\S]*Sign in, then press Test connection/);
 });
 
 test('leaving Settings stops the sign-in check', async () => {
