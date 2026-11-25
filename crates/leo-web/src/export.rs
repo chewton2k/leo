@@ -552,6 +552,7 @@ pub fn write_zip<W: Write + Seek>(
     Ok(walk.packed)
 }
 
+#[cfg(test)]
 pub fn write_folder<W: Write + Seek>(out: W, folder: &Path, under: &str) -> Result<Packed> {
     write_folder_from(out, folder.parent().unwrap_or(folder), folder, under)
 }

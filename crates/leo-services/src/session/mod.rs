@@ -980,6 +980,7 @@ impl Session {
         assembled
     }
 
+    #[cfg(test)]
     pub fn spoken(&self) -> Option<Vec<speakers::Spoken>> {
         self.labels(&assemble(&self.segments(), self.manifest.segment_secs))
     }

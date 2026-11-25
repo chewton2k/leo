@@ -20,6 +20,7 @@ pub enum State {
 }
 
 impl State {
+    #[cfg(test)]
     pub fn is_ready(&self) -> bool {
         matches!(self, State::Ready)
     }

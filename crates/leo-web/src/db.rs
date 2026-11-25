@@ -342,6 +342,7 @@ impl Db {
         })
     }
 
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -355,14 +356,11 @@ impl Db {
         Ok(work(conn)?)
     }
 
+    #[cfg(test)]
     pub fn bytes(&self) -> u64 {
         ["", "-wal", "-shm"]
             .iter()
-            .filter_map(|end| {
-                let mut name = self.path.as_os_str().to_owned();
-                name.push(end);
-                std::fs::metadata(PathBuf::from(name)).ok()
-            })
+            .filter_map(|end| std::fs::metadata(named(&self.path, end)).ok())
             .map(|m| m.len())
             .sum()
     }
@@ -887,29 +885,15 @@ pub fn set_aside() -> Option<PathBuf> {
 }
 
 fn put_damaged_aside(path: &Path) -> Result<()> {
-    let named = |base: &std::ffi::OsStr, end: &str| {
-        let mut name = base.to_owned();
-        name.push(end);
-        PathBuf::from(name)
-    };
-    let mut stamp = path.as_os_str().to_owned();
-    stamp.push(format!(
-        ".damaged-{}",
-        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
-    ));
+    use leo_core::paths::own;
+    let stamp = own::damaged_stamp(chrono::Utc::now());
     let ends = ["", "-wal", "-shm"];
     let base = (1..)
-        .map(|n| {
-            if n == 1 {
-                stamp.clone()
-            } else {
-                named(&stamp, &format!("-{n}")).into_os_string()
-            }
-        })
+        .map(|n| named(path, &own::damaged_end(&stamp, n)))
         .find(|base| ends.iter().all(|end| !named(base, end).exists()))
-        .unwrap_or(stamp);
+        .unwrap_or_else(|| named(path, &own::damaged_end(&stamp, 1)));
     for end in ends {
-        let from = named(path.as_os_str(), end);
+        let from = named(path, end);
         if from.exists() {
             let to = named(&base, end);
             std::fs::rename(&from, &to).with_context(|| {
@@ -920,7 +904,7 @@ fn put_damaged_aside(path: &Path) -> Result<()> {
             })?;
         }
     }
-    *SET_ASIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(PathBuf::from(base));
+    *SET_ASIDE.lock().unwrap_or_else(|e| e.into_inner()) = Some(base);
     Ok(())
 }
 
@@ -1154,12 +1138,6 @@ mod opening_trouble {
             .unwrap()
     }
 
-    fn with_end(path: &Path, end: &str) -> PathBuf {
-        let mut name = path.as_os_str().to_owned();
-        name.push(end);
-        PathBuf::from(name)
-    }
-
     fn damaged_beside(dir: &Path) -> Vec<String> {
         let mut names: Vec<String> = std::fs::read_dir(dir)
             .unwrap()
@@ -1191,14 +1169,14 @@ mod opening_trouble {
         let large = tempfile::tempdir().unwrap();
         let path = large.path().join(FILE);
         std::fs::write(&path, vec![0xa5u8; 8192]).unwrap();
-        std::fs::write(with_end(&path, "-wal"), b"stale").unwrap();
+        std::fs::write(named(&path, "-wal"), b"stale").unwrap();
         let db = try_at(&path).unwrap();
         let aside = damaged_beside(large.path());
         assert_eq!(aside.len(), 2, "{aside:?}");
         let main = large.path().join(&aside[0]);
         assert_eq!(set_aside(), Some(main.clone()));
         assert_eq!(std::fs::read(&main).unwrap(), vec![0xa5u8; 8192]);
-        assert_eq!(std::fs::read(with_end(&main, "-wal")).unwrap(), b"stale");
+        assert_eq!(std::fs::read(named(&main, "-wal")).unwrap(), b"stale");
         assert_eq!(user_version(db.path()), VERSION);
     }
 
@@ -1251,7 +1229,7 @@ mod opening_trouble {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join(FILE);
             future_db(&path, matching);
-            std::fs::write(with_end(&path, "-wal"), b"from the newer leo").unwrap();
+            std::fs::write(named(&path, "-wal"), b"from the newer leo").unwrap();
             let before = std::fs::read(&path).unwrap();
             let said = format!("{:#}", try_at(&path).err().unwrap());
             assert!(said.contains("newer version"), "{said}");
@@ -1262,10 +1240,10 @@ mod opening_trouble {
             assert!(said.chars().count() < 300, "{said}");
             assert_eq!(std::fs::read(&path).unwrap(), before);
             assert_eq!(
-                std::fs::read(with_end(&path, "-wal")).unwrap(),
+                std::fs::read(named(&path, "-wal")).unwrap(),
                 b"from the newer leo"
             );
-            assert!(!with_end(&path, "-shm").exists());
+            assert!(!named(&path, "-shm").exists());
             assert!(damaged_beside(dir.path()).is_empty());
         }
     }

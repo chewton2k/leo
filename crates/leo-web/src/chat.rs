@@ -491,6 +491,7 @@ pub fn gather_with(
     )
 }
 
+#[cfg(test)]
 #[allow(clippy::too_many_arguments)]
 pub fn gather_seeing(
     store: &Store,
@@ -943,6 +944,7 @@ fn documents_within(docs: &[(String, String)], budget: usize) -> String {
     out
 }
 
+#[cfg(test)]
 pub fn prompt(notes: &str, documents: &[(String, String)], messages: &[Turn]) -> (String, String) {
     prompt_within(notes, documents, messages, ROOM, None)
 }
@@ -1073,6 +1075,7 @@ pub fn today_line(now: chrono::DateTime<chrono::Local>, zone: Option<&str>) -> S
     )
 }
 
+#[cfg(test)]
 pub fn prompt_within(
     notes: &str,
     documents: &[(String, String)],

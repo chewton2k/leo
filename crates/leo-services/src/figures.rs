@@ -288,6 +288,7 @@ pub fn png(width: u32, height: u32, channels: u8, idat: &[u8]) -> Vec<u8> {
     out
 }
 
+#[cfg(test)]
 pub fn filtered_rows(raw: &[u8], width: usize, height: usize, channels: usize) -> Option<Vec<u8>> {
     let row = width.checked_mul(channels)?;
     if raw.len() < row.checked_mul(height)? {

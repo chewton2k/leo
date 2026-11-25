@@ -182,13 +182,6 @@ pub fn local_models(cfg: &Config) -> Local {
     }
 }
 
-pub fn ollama_models(base_url: &str) -> Vec<String> {
-    if !crate::ai::loopback(base_url) || !crate::health::port_open(base_url) {
-        return Vec::new();
-    }
-    tags(base_url)
-}
-
 pub(crate) fn tags(base_url: &str) -> Vec<String> {
     let root = crate::ollama::root(base_url);
     static CLIENT: std::sync::LazyLock<reqwest::Result<reqwest::blocking::Client>> =
@@ -652,8 +645,10 @@ mod tests {
 
     #[test]
     fn a_closed_port_lists_no_ollama_models_quickly() {
+        let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
+        cfg.providers.get_mut("ollama").unwrap().base_url = Some("http://127.0.0.1:9/v1".into());
         let started = std::time::Instant::now();
-        assert!(ollama_models("http://127.0.0.1:9/v1").is_empty());
+        assert!(local_models(&cfg).ollama.is_empty());
         assert!(started.elapsed() < std::time::Duration::from_secs(2));
     }
 
@@ -705,7 +700,6 @@ mod tests {
     #[test]
     fn an_ollama_on_another_computer_is_never_probed() {
         let remote = "http://192.0.2.1:11434/v1".to_string();
-        assert!(ollama_models(&remote).is_empty());
         let mut cfg = load("[chat]\nchain = [\"ollama\"]\n");
         let ollama = cfg.providers.get_mut("ollama").unwrap();
         ollama.base_url = Some(remote);

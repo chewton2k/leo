@@ -750,11 +750,11 @@ pub mod own {
         at.format("%Y%m%dT%H%M%SZ").to_string()
     }
 
-    pub fn damaged_copy(database: &str, stamp: &str, n: usize) -> String {
+    pub fn damaged_end(stamp: &str, n: usize) -> String {
         if n > 1 {
-            format!("{database}.damaged-{stamp}-{n}")
+            format!(".damaged-{stamp}-{n}")
         } else {
-            format!("{database}.damaged-{stamp}")
+            format!(".damaged-{stamp}")
         }
     }
 
@@ -943,7 +943,7 @@ mod tests {
         let stamp = own::damaged_stamp(chrono::Utc::now());
         for n in [1, 2, 3, 12] {
             for side in ["", "-wal", "-shm"] {
-                let name = own::damaged_copy("leo.db", &stamp, n) + side;
+                let name = format!("leo.db{}{side}", own::damaged_end(&stamp, n));
                 assert!(own::listed(&name), "{name}");
             }
         }

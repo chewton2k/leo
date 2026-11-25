@@ -49,44 +49,6 @@ impl Note {
             extra: serde_yaml::Mapping::new(),
         }
     }
-
-    /// Each checkbox in the body, in order: true when ticked. The same lines
-    /// [`Note::toggle_checkbox`] counts, so an index here is an index there.
-    pub fn checkboxes(&self) -> Vec<bool> {
-        self.body
-            .lines()
-            .filter_map(|l| checkbox_line(l).map(|b| b.ticked))
-            .collect()
-    }
-
-    pub fn toggle_checkbox(&mut self, n: usize) -> Option<bool> {
-        let mut seen = 0usize;
-        let mut out = String::with_capacity(self.body.len());
-        let mut result = None;
-        for piece in self.body.split_inclusive('\n') {
-            let line = piece.trim_end_matches(['\n', '\r']);
-            let found = result.is_none();
-            let hit = checkbox_line(line).filter(|_| {
-                seen += 1;
-                found && seen == n
-            });
-            match hit {
-                Some(b) => {
-                    let flipped = if b.ticked { ' ' } else { 'x' };
-                    out.push_str(&line[..b.state]);
-                    out.push(flipped);
-                    out.push_str(&piece[b.state + 1..]);
-                    result = Some(!b.ticked);
-                }
-                None => out.push_str(piece),
-            }
-        }
-        if result.is_some() {
-            self.body = out;
-            self.updated_at = Utc::now();
-        }
-        result
-    }
 }
 
 pub struct Checkbox<'a> {
@@ -165,40 +127,33 @@ pub fn question_words(question: &str) -> Vec<String> {
 mod tests {
     use super::*;
 
+    fn ticked(body: &str) -> Vec<bool> {
+        body.lines()
+            .filter_map(|line| checkbox_line(line).map(|found| found.ticked))
+            .collect()
+    }
+
     #[test]
-    fn every_list_style_of_checkbox_counts_and_toggles() {
-        let mut note = Note::new(
-            "T",
-            "- [ ] dash\n* [ ] star\n+ [x] plus\n1. [ ] one\n2) [X] two\n  - [ ]\n-   [ ] wide\n*  [x] wide\n-[ ] not\n-     [ ] code\n- [y] not\ncode [ ] not\n",
-            "",
-        );
+    fn every_list_style_of_checkbox_counts() {
         assert_eq!(
-            note.checkboxes(),
+            ticked("- [ ] dash\n* [ ] star\n+ [x] plus\n1. [ ] one\n2) [X] two\n  - [ ]\n-   [ ] wide\n*  [x] wide\n-[ ] not\n-     [ ] code\n- [y] not\ncode [ ] not\n"),
             vec![false, false, true, false, true, false, false, true]
         );
-        for n in 1..=8 {
-            assert!(note.toggle_checkbox(n).is_some(), "box {n}");
-        }
-        assert_eq!(
-            note.body,
-            "- [x] dash\n* [x] star\n+ [ ] plus\n1. [x] one\n2) [ ] two\n  - [x]\n-   [x] wide\n*  [ ] wide\n-[ ] not\n-     [ ] code\n- [y] not\ncode [ ] not\n"
-        );
-        assert!(note.toggle_checkbox(9).is_none());
     }
 
     #[test]
     fn lettered_checkboxes_count_like_the_page_counts_them() {
-        let note = Note::new(
-            "T",
-            "a) [ ] one\nbb. [x] two\nA) [ ] three\nB.  [x] four\nC. [ ] name\nabc) [ ] no\nab) [ ] no\naaa. [ ] no\n",
-            "",
+        assert_eq!(
+            ticked("a) [ ] one\nbb. [x] two\nA) [ ] three\nB.  [x] four\nC. [ ] name\nabc) [ ] no\nab) [ ] no\naaa. [ ] no\n"),
+            vec![false, true, false, true]
         );
-        assert_eq!(note.checkboxes(), vec![false, true, false, true]);
     }
 
     #[test]
-    fn checkboxes_lists_each_box_in_order() {
-        let note = Note::new("T", "- [ ] a\ntext\n  - [x] b\n- [X] c\n- [ ]\n", "");
-        assert_eq!(note.checkboxes(), vec![false, true, true, false]);
+    fn checkboxes_are_found_in_order() {
+        assert_eq!(
+            ticked("- [ ] a\ntext\n  - [x] b\n- [X] c\n- [ ]\n"),
+            vec![false, true, true, false]
+        );
     }
 }
