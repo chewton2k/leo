@@ -6,7 +6,7 @@ use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::{ensure, Context, Result};
-use transcribe_cpp::{Backend, RunOptions, TimestampKind, Transcript};
+use transcribe_cpp::{Backend, RunOptions, Segment, TimestampKind, Transcript, Word};
 
 use super::chunking::Piece;
 use super::library::Selected;
@@ -641,6 +641,47 @@ fn ms(samples: u64) -> u64 {
     samples * 1000 / super::constants::WHISPER_SAMPLE_RATE as u64
 }
 
+const LINE_PAUSE_MS: i64 = 700;
+const LONGEST_WORD_MS: i64 = 1_000;
+
+fn ends_sentence(word: &str) -> bool {
+    word.trim_end_matches(['"', '\'', ')', '”', '’', '»'])
+        .ends_with(['.', '?', '!', '…', '。', '？', '！'])
+}
+
+fn spoken_lines(segment: &Segment, words: &[Word]) -> Option<Vec<(i64, i64, String)>> {
+    let first = usize::try_from(segment.first_word).ok()?;
+    let count = usize::try_from(segment.n_words).ok()?;
+    let words = words.get(first..first.checked_add(count)?)?;
+    let same = words
+        .iter()
+        .flat_map(|word| word.text.split_whitespace())
+        .eq(segment.text.split_whitespace());
+    let in_order = words.windows(2).all(|pair| pair[0].t0_ms <= pair[1].t0_ms);
+    if words.last()?.t1_ms <= 0 || !same || !in_order {
+        return None;
+    }
+    let said = |word: &Word| word.t1_ms.min(word.t0_ms + LONGEST_WORD_MS);
+    let mut lines: Vec<(i64, i64, String)> = Vec::new();
+    let mut last: Option<&Word> = None;
+    for word in words {
+        let goes_on = last.is_some_and(|last| {
+            word.t0_ms == last.t0_ms
+                || (!ends_sentence(last.text.trim()) && word.t0_ms - said(last) < LINE_PAUSE_MS)
+        });
+        match lines.last_mut().filter(|_| goes_on) {
+            Some((_, to, text)) => {
+                *to = said(word).max(*to);
+                text.push(' ');
+                text.push_str(word.text.trim());
+            }
+            None => lines.push((word.t0_ms, said(word), word.text.trim().to_string())),
+        }
+        last = Some(word);
+    }
+    Some(lines)
+}
+
 fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, speech: (u64, u64)) -> Timed {
     if filtered == transcript.text
         && transcript.timestamp_kind != TimestampKind::None
@@ -649,13 +690,21 @@ fn timed_of(transcript: &Transcript, filtered: &str, start_ms: u64, speech: (u64
         transcript
             .segments
             .iter()
-            .map(|segment| {
-                let from = segment.t0_ms.max(0) as u64;
-                let to = (segment.t1_ms.max(0) as u64).max(from);
-                (start_ms + from, start_ms + to, segment.text.trim())
+            .flat_map(|segment| {
+                spoken_lines(segment, &transcript.words).unwrap_or_else(|| {
+                    vec![(
+                        segment.t0_ms,
+                        segment.t1_ms,
+                        segment.text.trim().to_string(),
+                    )]
+                })
             })
             .filter(|(_, _, text)| !text.is_empty())
-            .map(|(from, to, text)| (from, to, text.to_string()))
+            .map(|(from, to, text)| {
+                let from = from.max(0) as u64;
+                let to = (to.max(0) as u64).max(from);
+                (start_ms + from, start_ms + to, text)
+            })
             .collect()
     } else if filtered.trim().is_empty() {
         Vec::new()
@@ -1120,6 +1169,105 @@ mod audio_level_tests {
                 (70_000, 71_500, "turn at 10000".to_string()),
                 (75_000, 76_500, "turn at 15000".to_string()),
             ]
+        );
+    }
+
+    fn with_words(text: &str, words: &[(i64, i64, &str)]) -> Transcript {
+        Transcript {
+            text: text.into(),
+            timestamp_kind: TimestampKind::Word,
+            segments: vec![transcribe_cpp::Segment {
+                t0_ms: 0,
+                t1_ms: 30_000,
+                n_words: words.len() as i32,
+                text: text.into(),
+                ..Default::default()
+            }],
+            words: words
+                .iter()
+                .map(|(t0_ms, t1_ms, text)| transcribe_cpp::Word {
+                    t0_ms: *t0_ms,
+                    t1_ms: *t1_ms,
+                    text: (*text).into(),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn a_long_segment_with_word_times_becomes_a_line_per_sentence_and_pause() {
+        let heard = with_words(
+            "Is it done? Yes it is, I think so.",
+            &[
+                (0, 200, "Is"),
+                (200, 400, "it"),
+                (400, 700, "done?"),
+                (720, 900, "Yes"),
+                (900, 1_000, "it"),
+                (1_000, 1_200, "is,"),
+                (1_900, 2_000, "I"),
+                (2_000, 2_300, "think"),
+                (2_300, 2_600, "so."),
+            ],
+        );
+        assert_eq!(
+            timed_of(&heard, &heard.text, 10_000, (10_000, 40_000)),
+            [
+                (10_000, 10_700, "Is it done?".to_string()),
+                (10_720, 11_200, "Yes it is,".to_string()),
+                (11_900, 12_600, "I think so.".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_word_stretched_over_the_silence_after_it_ends_when_it_was_said() {
+        let heard = with_words(
+            "That is all I have",
+            &[
+                (0, 200, "That"),
+                (200, 400, "is"),
+                (400, 4_000, "all"),
+                (4_000, 4_200, "I"),
+                (4_200, 9_000, "have"),
+            ],
+        );
+        assert_eq!(
+            timed_of(&heard, &heard.text, 0, (0, 30_000)),
+            [
+                (0, 1_400, "That is all".to_string()),
+                (4_000, 5_200, "I have".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn words_that_do_not_make_up_the_segment_never_change_its_text() {
+        for words in [
+            vec![(0, 200, "Is"), (200, 400, "it"), (400, 700, "gone?")],
+            vec![(0, 200, "Is"), (500, 600, "it"), (400, 700, "done?")],
+            vec![(0, 0, "Is"), (0, 0, "it"), (0, 0, "done?")],
+            vec![],
+        ] {
+            let heard = with_words("Is it done?", &words);
+            assert_eq!(
+                timed_of(&heard, &heard.text, 0, (0, 30_000)),
+                [(0, 30_000, "Is it done?".to_string())]
+            );
+        }
+    }
+
+    #[test]
+    fn lines_never_share_a_start() {
+        let heard = with_words(
+            "A. B. C.",
+            &[(0, 80, "A."), (0, 160, "B."), (160, 240, "C.")],
+        );
+        assert_eq!(
+            timed_of(&heard, &heard.text, 0, (0, 30_000)),
+            [(0, 160, "A. B.".to_string()), (160, 240, "C.".to_string())]
         );
     }
 
