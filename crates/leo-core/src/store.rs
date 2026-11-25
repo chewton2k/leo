@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::filename;
 use crate::notes::Note;
-use crate::paths::write_atomic;
+use crate::paths::{file_stamp, write_atomic, FileStamp};
 
 // ── Frontmatter serialization ───────────────────────────────────────────────
 
@@ -281,31 +281,11 @@ struct Seen {
     fields: u64,
     place: u64,
     copy: Option<(PathBuf, u64)>,
-    stamp: Option<Stamp>,
+    stamp: Option<FileStamp>,
     renamed: bool,
     pictures: Vec<String>,
     device: Option<u64>,
     created_at: DateTime<Utc>,
-}
-
-type Stamp = (u64, u128, i64);
-
-fn stamp_of(meta: &fs::Metadata) -> Stamp {
-    let nanos = meta
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_nanos());
-    #[cfg(unix)]
-    let changed = {
-        use std::os::unix::fs::MetadataExt;
-        meta.ctime()
-            .saturating_mul(1_000_000_000)
-            .saturating_add(meta.ctime_nsec())
-    };
-    #[cfg(not(unix))]
-    let changed = 0;
-    (meta.len(), nanos, changed)
 }
 
 const TIDY_TRASH_EVERY: std::time::Duration = std::time::Duration::from_secs(60 * 60);
@@ -621,7 +601,7 @@ const MOST_TRASH_NOTE_BYTES: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, Serialize, Deserialize)]
 struct Indexed {
-    stamp: Stamp,
+    stamp: FileStamp,
     #[serde(default)]
     digest: Option<crate::paths::FileDigest>,
     deleted_at: DateTime<Utc>,
@@ -723,7 +703,7 @@ impl TrashIndex {
                 self.incomplete = true;
                 continue;
             };
-            let stamp = stamp_of(&meta);
+            let stamp = file_stamp(&meta);
             let mut entry = match known.remove(relative) {
                 Some(entry) if entry.stamp == stamp => entry,
                 _ => {
@@ -1031,7 +1011,7 @@ fn pictures_read(path: &Path) -> Option<Vec<String>> {
 pub struct Owed {
     pub path: PathBuf,
     relative: PathBuf,
-    stamp: Stamp,
+    stamp: FileStamp,
 }
 
 impl Owed {
@@ -1170,7 +1150,7 @@ struct Found {
     renamed: bool,
     disk: u64,
     digest: crate::paths::FileDigest,
-    stamp: Stamp,
+    stamp: FileStamp,
     kept: Option<Seen>,
     pictures: Vec<String>,
 }
@@ -1204,7 +1184,7 @@ fn read_found(
             note,
             modified: modified.unwrap_or(std::time::UNIX_EPOCH),
             renamed,
-            stamp: stamp_of(meta),
+            stamp: file_stamp(meta),
             kept: None,
         }),
         Err(e) => {
@@ -1443,7 +1423,7 @@ impl Store {
                     renamed: seen.renamed,
                     disk: seen.disk,
                     digest: seen.digest,
-                    stamp: stamp_of(&meta),
+                    stamp: file_stamp(&meta),
                     note,
                     kept: Some(seen),
                     pictures: Vec::new(),
@@ -1662,7 +1642,7 @@ impl Store {
                     fields,
                     place: place_of(note),
                     copy: previous.and_then(|previous| previous.copy),
-                    stamp: exact.then(|| stamp_of(&written)),
+                    stamp: exact.then(|| file_stamp(&written)),
                     renamed,
                     pictures,
                     device: target.parent().and_then(device_of),
@@ -1973,9 +1953,9 @@ impl Store {
         &mut self,
         files: &[(PathBuf, PathBuf, fs::Metadata)],
     ) -> HashMap<PathBuf, (Note, Seen)> {
-        let stamps: HashMap<&Path, Stamp> = files
+        let stamps: HashMap<&Path, FileStamp> = files
             .iter()
-            .map(|(_, relative, meta)| (relative.as_path(), stamp_of(meta)))
+            .map(|(_, relative, meta)| (relative.as_path(), file_stamp(meta)))
             .collect();
         let seen = self.seen.get_mut();
         let dirty = self.dirty.get_mut();
@@ -2123,7 +2103,7 @@ impl Store {
                 })
                 .unzip();
             let entry = Indexed {
-                stamp: stamp_of(&meta),
+                stamp: file_stamp(&meta),
                 digest: Some(crate::paths::digest(text.as_bytes())),
                 deleted_at: meta.modified().ok()?.into(),
                 head,
@@ -2523,7 +2503,7 @@ impl Store {
             .map_err(std::io::Error::other)?;
         let changed = || std::io::Error::other("the trashed file changed");
         let meta = fs::symlink_metadata(&path)?;
-        if !meta.is_file() || stamp_of(&meta) != entry.stamp {
+        if !meta.is_file() || file_stamp(&meta) != entry.stamp {
             return Err(changed());
         }
         let (digest, stamp) = crate::paths::digest_stamped(&path, MOST_TRASH_NOTE_BYTES)?;
@@ -8299,7 +8279,7 @@ mod tests {
         fs::write(&path, &replacement).unwrap();
         store.with_trash(false, |index| {
             index.files.values_mut().next().unwrap().stamp =
-                stamp_of(&fs::metadata(&path).unwrap());
+                file_stamp(&fs::metadata(&path).unwrap());
         });
         assert!(store.tidy_trash_now().is_empty());
         assert_eq!(fs::read_to_string(path).unwrap(), replacement);

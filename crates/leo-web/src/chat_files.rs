@@ -88,10 +88,6 @@ pub fn add(dir: &Path, chat: &str, name: &str, text: &str, now: DateTime<Utc>) -
     Ok(doc)
 }
 
-fn added_at(stamp: &str) -> DateTime<Utc> {
-    DateTime::parse_from_rfc3339(stamp).map_or_else(|_| Utc::now(), |t| t.with_timezone(&Utc))
-}
-
 type Listed = (
     String,
     String,
@@ -124,7 +120,7 @@ pub fn list(dir: &Path, chat: &str) -> Vec<Doc> {
                         name,
                         chars: chars as usize,
                         bytes: bytes as u64,
-                        added_at: added_at(&stamp),
+                        added_at: crate::chats::when(&stamp),
                         excerpt,
                     },
                     _ => {
@@ -133,7 +129,7 @@ pub fn list(dir: &Path, chat: &str) -> Vec<Doc> {
                             [&id],
                             |r| r.get(0),
                         )?;
-                        let doc = described(id, name, added_at(&stamp), &text);
+                        let doc = described(id, name, crate::chats::when(&stamp), &text);
                         c.execute(
                             "UPDATE chat_docs SET chars = ?2, bytes = ?3, excerpt = ?4 WHERE id = ?1",
                             rusqlite::params![doc.id, doc.chars as i64, doc.bytes as i64, doc.excerpt],

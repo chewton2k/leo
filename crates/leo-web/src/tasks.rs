@@ -188,12 +188,11 @@ pub fn clean_kind(kind: &str) -> String {
     }
 }
 
-fn fnv(text: &str) -> u64 {
-    crate::vectors::fnv64(text.bytes())
-}
-
 pub fn note_task_id(note: &str, text: &str) -> String {
-    format!("n{:016x}", fnv(&format!("{note}\0{}", text.trim())))
+    format!(
+        "n{}",
+        crate::vectors::fnv(format!("{note}\0{}", text.trim()).bytes())
+    )
 }
 
 pub use crate::jsonline::valid_id;
@@ -600,19 +599,7 @@ pub fn tasks_dir(chats: &Path) -> std::path::PathBuf {
         .join("tasks")
 }
 
-impl jsonline::Line for Task {
-    const DIR: &'static str = "tasks";
-    fn id(&self) -> &str {
-        &self.id
-    }
-    fn stamp(&self) -> DateTime<Utc> {
-        self.updated_at
-    }
-    fn deleted_at(&mut self, now: DateTime<Utc>) {
-        self.deleted = true;
-        self.updated_at = now;
-    }
-}
+crate::jsonline::line!(Task, "tasks");
 
 #[derive(Default)]
 struct Table {
@@ -621,13 +608,8 @@ struct Table {
 }
 
 fn table(chats: &Path) -> Arc<Table> {
-    static TABLES: OnceLock<Mutex<HashMap<std::path::PathBuf, Arc<Table>>>> = OnceLock::new();
-    let key = crate::db::beside_of(chats, None).to_path_buf();
-    let mut all = TABLES
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    Arc::clone(all.entry(key).or_default())
+    static TABLES: jsonline::PerFolder<Table> = OnceLock::new();
+    jsonline::per_folder(&TABLES, chats)
 }
 
 pub fn generation(chats: &Path) -> u64 {

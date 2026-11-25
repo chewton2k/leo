@@ -991,7 +991,7 @@ pub fn hash_of(messages: &[Turn]) -> String {
             .chain(turn.text.bytes())
             .chain([0])
     });
-    format!("{:016x}", crate::vectors::fnv64(bytes))
+    crate::vectors::fnv(bytes)
 }
 
 pub fn memory_fits(memory: &crate::chats::Memory, messages: &[Turn], start: usize) -> bool {

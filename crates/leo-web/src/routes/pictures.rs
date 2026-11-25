@@ -14,7 +14,6 @@ pub(crate) struct PictureAt {
     pub(crate) from: String,
 }
 
-const PICTURE_PIECE: usize = 64 * 1024;
 const PICTURE_IDLE: std::time::Duration = std::time::Duration::from_secs(60);
 
 pub(crate) async fn get_picture(
@@ -42,19 +41,8 @@ pub(crate) async fn get_picture(
     .await;
     match found {
         Ok(Some((mime, file, size))) => {
-            let stream = futures_util::stream::try_unfold(
-                (tokio::fs::File::from_std(file), vec![0u8; PICTURE_PIECE]),
-                |(mut file, mut piece)| async move {
-                    use tokio::io::AsyncReadExt;
-                    let read = file.read(&mut piece).await?;
-                    Ok::<_, std::io::Error>(
-                        (read > 0).then(|| (piece[..read].to_vec(), (file, piece))),
-                    )
-                },
-            );
-            let mut response = axum::body::Body::from_stream(stream).into_response();
+            let mut response = crate::reply::streamed(file, size);
             let headers = response.headers_mut();
-            headers.insert(header::CONTENT_LENGTH, HeaderValue::from(size));
             headers.insert(header::CONTENT_TYPE, HeaderValue::from_static(mime));
             headers.insert(
                 header::CACHE_CONTROL,

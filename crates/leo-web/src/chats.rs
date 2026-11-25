@@ -245,7 +245,7 @@ fn stamp(at: DateTime<Utc>) -> String {
     at.to_rfc3339_opts(chrono::SecondsFormat::Micros, true)
 }
 
-fn when(text: &str) -> DateTime<Utc> {
+pub(crate) fn when(text: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(text).map_or_else(|_| Utc::now(), |t| t.with_timezone(&Utc))
 }
 

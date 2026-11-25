@@ -44,12 +44,8 @@ pub struct Missed {
     pub due: bool,
 }
 
-fn fnv(text: &str) -> u64 {
-    crate::vectors::fnv64(text.bytes())
-}
-
 pub fn key_of(chat: &str, reply: &str) -> String {
-    format!("{chat}:{:016x}", fnv(reply))
+    format!("{chat}:{}", crate::vectors::fnv(reply.bytes()))
 }
 
 pub fn valid_key(key: &str) -> bool {

@@ -151,7 +151,7 @@ pub(crate) fn fnv64(bytes: impl IntoIterator<Item = u8>) -> u64 {
     })
 }
 
-fn fnv(bytes: impl Iterator<Item = u8>) -> String {
+pub(crate) fn fnv(bytes: impl IntoIterator<Item = u8>) -> String {
     format!("{:016x}", fnv64(bytes))
 }
 

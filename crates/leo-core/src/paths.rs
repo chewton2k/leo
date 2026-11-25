@@ -320,6 +320,26 @@ pub fn parse_digest(text: &str) -> Option<FileDigest> {
     Some(digest)
 }
 
+pub type FileStamp = (u64, u128, i64);
+
+pub fn file_stamp(meta: &std::fs::Metadata) -> FileStamp {
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |since| since.as_nanos());
+    #[cfg(unix)]
+    let changed = {
+        use std::os::unix::fs::MetadataExt;
+        meta.ctime()
+            .saturating_mul(1_000_000_000)
+            .saturating_add(meta.ctime_nsec())
+    };
+    #[cfg(not(unix))]
+    let changed = 0;
+    (meta.len(), modified, changed)
+}
+
 pub type EntryStamp = (bool, u64, u128, u128, u64, u128);
 
 pub type FolderStamps = Vec<(String, EntryStamp)>;

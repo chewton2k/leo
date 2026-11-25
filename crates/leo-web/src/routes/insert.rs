@@ -12,7 +12,7 @@ use crate::routes::notes::save;
 use crate::AppState;
 
 const REMEMBERED: usize = 32;
-pub(crate) const MOST_REQUEST: usize = 64;
+const MOST_REQUEST: usize = 64;
 
 type Done = Mutex<VecDeque<(String, String, serde_json::Value)>>;
 
