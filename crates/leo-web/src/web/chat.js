@@ -3648,14 +3648,6 @@
         if (opened) toggle(true);
         return opened;
       },
-      forgetBrowserCache() {
-        if (state.busy || state.preparingSend) return false;
-        begin();
-        input.value = '';
-        state.drafts = {};
-        storage.removeItem(KEY);
-        return true;
-      },
       send,
       setContext(ctx) {
         const next = ctx && ctx.id ? { id: ctx.id, title: ctx.title, directory: ctx.directory || '', recorded: Boolean(ctx.recorded) } : null;

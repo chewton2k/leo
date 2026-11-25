@@ -2291,7 +2291,6 @@
         return index < 0 ? null : container.querySelector(`.blk[data-i="${index}"]`);
       },
       editStart: () => editLine(0, 'start'),
-      editEnd: () => editLine(lines.length - 1, 'end'),
       editAt: (line) => editLine(line, 'end'),
     };
   }
