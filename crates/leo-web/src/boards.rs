@@ -66,9 +66,9 @@ pub struct Card {
     pub deleted: bool,
 }
 
-crate::jsonline::line!(Board, "boards");
+crate::jsonline::json_line!(Board, "boards");
 
-crate::jsonline::line!(Card, "cards");
+crate::jsonline::json_line!(Card, "cards");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(from = "Card")]
@@ -111,7 +111,7 @@ impl From<Card> for Placed {
     }
 }
 
-crate::jsonline::line!(Placed, "cards");
+crate::jsonline::json_line!(Placed, "cards");
 
 pub trait Seat: Clone {
     fn seat_column(&self) -> &str;

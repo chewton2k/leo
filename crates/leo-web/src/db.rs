@@ -320,9 +320,8 @@ fn connect(path: &Path) -> Result<Connection> {
     {
         use std::os::unix::fs::PermissionsExt;
         for end in ["", "-wal", "-shm"] {
-            let mut name = path.as_os_str().to_owned();
-            name.push(end);
-            let _ = std::fs::set_permissions(name, std::fs::Permissions::from_mode(0o600));
+            let _ =
+                std::fs::set_permissions(named(path, end), std::fs::Permissions::from_mode(0o600));
         }
     }
     Ok(conn)
@@ -933,9 +932,7 @@ pub fn try_for_chats(chats_dir: &Path) -> Result<Arc<Db>> {
 }
 
 pub fn put_aside(path: &Path) {
-    let mut name = path.as_os_str().to_owned();
-    name.push(BEFORE);
-    let aside = PathBuf::from(name);
+    let aside = named(path, BEFORE);
     if std::fs::rename(path, &aside).is_ok() {
         let _ = std::fs::File::options()
             .write(true)

@@ -140,10 +140,7 @@ fn embedded_in(
     let mut used: Vec<(usize, String)> = image_links(rels)
         .into_iter()
         .filter_map(|(id, target)| {
-            let path = joined(folder, &target).unwrap_or_default();
-            if path.is_empty() {
-                return None;
-            }
+            let path = joined(folder, &target).ok()?;
             let at = xml
                 .find(&format!("r:embed=\"{id}\""))
                 .or_else(|| xml.find(&format!("r:id=\"{id}\"")))?;

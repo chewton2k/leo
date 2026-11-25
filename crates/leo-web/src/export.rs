@@ -307,7 +307,7 @@ impl Serialize for WholeChat<'_> {
 fn paged(
     chats: &Path,
     sql: &str,
-    owner: Option<&str>,
+    owner: &[&dyn rusqlite::ToSql],
     mut visit: impl FnMut(&str) -> Result<()>,
 ) -> Result<()> {
     let mut after: Option<(String, String)> = None;
@@ -315,10 +315,9 @@ fn paged(
         let (stamp, id) = after.clone().unwrap_or_default();
         let page: Vec<(String, String)> = crate::chats::db_of(chats).with(|connection| {
             let mut query = connection.prepare(sql)?;
-            let rows = query
-                .query_map(rusqlite::params![stamp, id, IDS_AT_A_TIME, owner], |row| {
-                    Ok((row.get(0)?, row.get(1)?))
-                })?;
+            let mut given: Vec<&dyn rusqlite::ToSql> = vec![&stamp, &id, &IDS_AT_A_TIME];
+            given.extend(owner);
+            let rows = query.query_map(given.as_slice(), |row| Ok((row.get(0)?, row.get(1)?)))?;
             rows.collect()
         })?;
         for (id, _) in &page {
@@ -337,9 +336,9 @@ fn each_chat(chats: &Path, visit: impl FnMut(&str) -> Result<()>) -> Result<()> 
     paged(
         chats,
         "SELECT id, updated_at FROM chats
-         WHERE ?4 IS NULL AND (?1 = '' OR updated_at < ?1 OR (updated_at = ?1 AND id > ?2))
+         WHERE ?1 = '' OR updated_at < ?1 OR (updated_at = ?1 AND id > ?2)
          ORDER BY updated_at DESC, id LIMIT ?3",
-        None,
+        &[],
         visit,
     )
 }
@@ -350,7 +349,7 @@ fn each_document(chats: &Path, chat: &str, visit: impl FnMut(&str) -> Result<()>
         "SELECT id, added_at FROM chat_docs
          WHERE chat = ?4 AND (?1 = '' OR added_at > ?1 OR (added_at = ?1 AND id > ?2))
          ORDER BY added_at, id LIMIT ?3",
-        Some(chat),
+        &[&chat],
         visit,
     )
 }

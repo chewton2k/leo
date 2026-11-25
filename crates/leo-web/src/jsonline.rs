@@ -29,7 +29,7 @@ pub(crate) trait Line: Serialize + DeserializeOwned {
     fn deleted_at(&mut self, now: DateTime<Utc>);
 }
 
-macro_rules! line {
+macro_rules! json_line {
     ($kind:ty, $dir:literal) => {
         impl $crate::jsonline::Line for $kind {
             const DIR: &'static str = $dir;
@@ -46,16 +46,17 @@ macro_rules! line {
         }
     };
 }
-pub(crate) use line;
+pub(crate) use json_line;
 
 pub(crate) type PerFolder<T> = OnceLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
 
 pub(crate) fn per_folder<T: Default>(all: &PerFolder<T>, chats: &Path) -> Arc<T> {
-    let mut all = all
-        .get_or_init(Default::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    Arc::clone(all.entry(root(chats).to_path_buf()).or_default())
+    kept_at(all, root(chats))
+}
+
+fn kept_at<T: Default>(all: &PerFolder<T>, data: &Path) -> Arc<T> {
+    let mut all = lock(all.get_or_init(Default::default));
+    Arc::clone(all.entry(data.to_path_buf()).or_default())
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -157,17 +158,13 @@ impl Hub {
     }
 }
 
-fn hubs() -> &'static Mutex<HashMap<PathBuf, Arc<Hub>>> {
-    static HUBS: OnceLock<Mutex<HashMap<PathBuf, Arc<Hub>>>> = OnceLock::new();
-    HUBS.get_or_init(Default::default)
-}
-
 pub(crate) fn hub(chats: &Path) -> Arc<Hub> {
     hub_at(root(chats))
 }
 
 fn hub_at(data: &Path) -> Arc<Hub> {
-    Arc::clone(lock(hubs()).entry(data.to_path_buf()).or_default())
+    static HUBS: PerFolder<Hub> = OnceLock::new();
+    kept_at(&HUBS, data)
 }
 
 pub(crate) fn watched(notes: &Path, leo: Arc<Leo>) {

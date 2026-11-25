@@ -300,7 +300,7 @@ note's strong highlight stays as it is, since it must be spotted while scrolling
   A lettered list begins at `a` or `A`, continues an item on the line above, or has a box
   (`listable`; `after` is the option for a note's one-line blocks), so `p. 12`, `c. 1900` and
   `e. coli` stay prose everywhere, editing included. `listLevels` is the one forward pass over a
-  note; `listed` answers for one line. `Note::checkbox_line` in leo-core stays context-free and
+  note; `listed` answers for one line. `notes::checkbox_line` in leo-core stays context-free and
   counts the same lines, which is why a box always makes an item. Enter continues with `continueLine`,
   keeping the marker's gap; on an empty item it steps out one level, then leaves the list;
   Backspace at the start of an item's text does the same through `stepBack`, keeping the

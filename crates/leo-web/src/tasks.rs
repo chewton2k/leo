@@ -599,7 +599,7 @@ pub fn tasks_dir(chats: &Path) -> std::path::PathBuf {
         .join("tasks")
 }
 
-crate::jsonline::line!(Task, "tasks");
+crate::jsonline::json_line!(Task, "tasks");
 
 #[derive(Default)]
 struct Table {

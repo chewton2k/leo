@@ -467,7 +467,7 @@ Decided: the owner's motion list (2026-11-06); only quick functional motion.
   less to ask Felix" in the Felix bar.
 - `markdown.js` escapes first and numbers checkboxes exactly like
   `notes::checkbox_line`; `MARKER` is the one list-marker definition and
-  `listLevels` the one forward pass; leo-core's `Note::checkbox_line` stays
+  `listLevels` the one forward pass; leo-core's `notes::checkbox_line` stays
   context-free and counts the same lines (a box always makes an item).
   `interactive: false` makes boxes read-only. ```svg is a sandboxed
   `<img src="data:…">`; outside images stay links.
