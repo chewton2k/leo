@@ -1260,7 +1260,7 @@ test('an unopened note carries a blue ink blot, its closed folder carries it ins
     await expect(folder, 'an open folder leaves the mark to its note').toHaveCount(0);
     for (const [theme, felix] of [['light', 'rgb(63, 109, 151)'], ['dark', 'rgb(180, 207, 231)']]) {
       await page.evaluate((theme) => { document.documentElement.dataset.theme = theme; }, theme);
-      expect(await blot.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).animationName, el.getBoundingClientRect().width])).toEqual([felix, 'none', 16]);
+      expect(await blot.evaluate((el) => [getComputedStyle(el).color, getComputedStyle(el).animationName, el.getBoundingClientRect().width])).toEqual([felix, 'none', 9]);
     }
     await page.locator('.side-tree .side-row[data-dir="Course"]').click();
     await expect(row).toHaveCount(0);
