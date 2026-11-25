@@ -98,8 +98,9 @@ a test, or leave it unset to see the user's own data.
   `claude_code`/`codex`): Codex runs `codex login` quietly (it opens the browser; one at
   a time, reaped, stopped after 10 min); Claude Code opens a terminal running the resolved
   `claude`: a private 0700 `.command` file (`#!/bin/zsh -l`, removes itself; one that never ran is removed by the launch sweep after 24 hours) opened with
-  `open` on macOS, and on Windows `cmd /c start "" cmd /k claude`, the one intentional
-  visible console. The command lines are pure functions with unit tests.
+  `open` on macOS, and on Windows `cmd /c start "" cmd /k <path>` in the program's own
+  folder (so the bare `claude` used for a path with cmd metacharacters is found there),
+  the one intentional visible console. The command lines are pure functions with unit tests.
 - Downloads save to `~/Downloads` under a free name (`links::download_path`)
   and are revealed when done.
 - `window.print` calls `print_page` on macOS; Windows retains its original

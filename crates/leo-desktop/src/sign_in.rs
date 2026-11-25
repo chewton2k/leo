@@ -119,7 +119,7 @@ fn claude_terminal(bin: &Path) -> Result<()> {
         .status();
     if !opened.is_ok_and(|status| status.success()) {
         let _ = std::fs::remove_file(&script);
-        anyhow::bail!("Terminal could not be opened. Open Terminal, run `claude` and sign in.");
+        anyhow::bail!("Terminal could not be opened. Try Sign in again in a moment.");
     }
     Ok(())
 }
@@ -129,11 +129,12 @@ fn claude_terminal(bin: &Path) -> Result<()> {
     use std::os::windows::process::CommandExt;
     leo_core::children::quiet_command("cmd")
         .raw_arg(windows_line(bin))
+        .current_dir(bin.parent().unwrap_or(Path::new(".")))
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .context("A command window could not be opened. Open one, run `claude` and sign in.")?
+        .context("A command window could not be opened. Try Sign in again in a moment.")?
         .wait()?;
     Ok(())
 }

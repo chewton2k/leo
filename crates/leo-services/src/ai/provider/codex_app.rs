@@ -226,8 +226,9 @@ impl CodexThread {
                 }
                 Err(RecvTimeoutError::Disconnected) => {
                     return Err(ProviderError::Retryable(format!(
-                        "{}: codex ended. If it is not signed in, run `codex login`.",
-                        self.name
+                        "{}: codex ended. If it is not signed in, {}.",
+                        self.name,
+                        super::agent_cli::SIGN_IN
                     )))
                 }
             }

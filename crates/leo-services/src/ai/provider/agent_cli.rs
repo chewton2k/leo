@@ -56,14 +56,9 @@ impl Agent {
     pub fn missing(self, provider: &str, bin: &str) -> String {
         format!("{provider}: `{bin}` is not installed; {}", self.install())
     }
-
-    pub fn sign_in(self) -> &'static str {
-        match self {
-            Agent::ClaudeCode => "run `claude` once and sign in",
-            Agent::Codex => "run `codex login`",
-        }
-    }
 }
+
+pub const SIGN_IN: &str = "use Sign in in Writing AI";
 
 pub fn locate(bin: &str) -> Option<PathBuf> {
     let given = Path::new(bin);
@@ -886,8 +881,7 @@ impl ClaudeSession {
                     self.child.stop();
                     return Err(ProviderError::Retryable(format!(
                         "{}: claude ended the session. If it is not signed in, {}.",
-                        self.name,
-                        Agent::ClaudeCode.sign_in()
+                        self.name, SIGN_IN
                     )));
                 }
             }
@@ -1411,10 +1405,7 @@ impl AgentCli {
             };
             return Err(ProviderError::Retryable(format!(
                 "{}: {} stopped ({}): {said}. If it is not signed in, {}.",
-                self.name,
-                self.bin,
-                status,
-                self.agent.sign_in()
+                self.name, self.bin, status, SIGN_IN
             )));
         }
         let mut answer = heard.answer.trim().to_string();
@@ -2521,7 +2512,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"No
         match agent.complete(&request()) {
             Err(ProviderError::Retryable(message)) => {
                 assert!(message.contains("Not logged in"), "{message}");
-                assert!(message.contains("sign in"), "{message}");
+                assert!(message.contains(SIGN_IN), "{message}");
             }
             other => panic!("expected a retryable failure, got {other:?}"),
         }
@@ -2973,7 +2964,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"result":"x
         match agent.complete(&request()) {
             Err(ProviderError::Retryable(message)) => {
                 assert!(message.contains("Not logged in"), "{message}");
-                assert!(message.contains("codex login"), "{message}");
+                assert!(message.contains(SIGN_IN), "{message}");
             }
             other => panic!("expected a retryable failure, got {other:?}"),
         }
