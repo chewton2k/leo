@@ -1,7 +1,5 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-#[cfg(test)]
-use std::sync::Mutex;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -65,14 +63,10 @@ struct Counts {
 
 #[derive(Default)]
 pub struct Usage {
-    #[cfg(test)]
-    rows: Mutex<BTreeMap<Purpose, Counts>>,
-    #[cfg(test)]
-    tools: Mutex<Tools>,
     saved_in: OnceLock<PathBuf>,
 }
 
-#[derive(Clone, Default, Serialize)]
+#[derive(Default, Serialize)]
 pub struct Tools {
     calls: u64,
     failures: u64,
@@ -420,13 +414,6 @@ impl Usage {
     }
 
     pub(crate) fn tool(&self, failed: bool, reused: bool) {
-        #[cfg(test)]
-        {
-            let mut held = self.tools.lock().unwrap_or_else(|e| e.into_inner());
-            held.calls = held.calls.saturating_add(1);
-            held.failures = held.failures.saturating_add(u64::from(failed));
-            held.reused = held.reused.saturating_add(u64::from(reused));
-        }
         let Some(chats) = self.saved_in.get() else {
             return;
         };
@@ -446,27 +433,15 @@ impl Usage {
         }
     }
 
-    #[cfg(test)]
-    pub fn tools(&self) -> Tools {
-        self.tools.lock().unwrap_or_else(|e| e.into_inner()).clone()
-    }
-
     pub fn record(&self, purpose: Purpose, spent: Option<&Spent>, elapsed: Duration, failed: bool) {
         let ms = elapsed.as_millis().min(u128::from(u64::MAX)) as u64;
         let call = Call::of(purpose, spent, ms, failed);
         self.save(&call);
-        #[cfg(test)]
-        self.rows
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .entry(purpose)
-            .or_default()
-            .add(&call);
     }
 
     #[cfg(test)]
-    pub fn snapshot(&self) -> Vec<Row> {
-        rows_of(&self.rows.lock().unwrap_or_else(|e| e.into_inner()))
+    pub fn saved(&self) -> Span {
+        self.recent().spans.remove(&1).unwrap_or_default()
     }
 }
 
@@ -476,7 +451,9 @@ mod tests {
 
     #[test]
     fn usage_separates_work_and_counts_failures() {
+        let home = tempfile::tempdir().unwrap();
         let usage = Usage::default();
+        usage.save_in(home.path().join("chats"));
         for i in 0..100 {
             usage.record(
                 Purpose::Answer,
@@ -491,7 +468,7 @@ mod tests {
             );
         }
         usage.record(Purpose::Retry, None, Duration::from_secs(1), true);
-        let rows = usage.snapshot();
+        let rows = usage.saved().kinds;
         assert_eq!(
             (rows[0].calls, rows[0].input, rows[0].cached, rows[0].output),
             (100, 10_000, 8_000, 1_000)

@@ -194,6 +194,15 @@ pub struct AppSettings {
     dictation: Arc<crate::dictation::Dictation>,
     pub updates: OnceLock<Arc<dyn UpdateApi>>,
 }
+fn open_at_login(app: &AppHandle, on: bool) -> Result<()> {
+    let login = app.autolaunch();
+    if on {
+        login.enable()?;
+    } else {
+        login.disable()?;
+    }
+    Ok(())
+}
 impl AppSettings {
     pub fn new(app: AppHandle, dictation: Arc<crate::dictation::Dictation>) -> Result<Arc<Self>> {
         let path = leo_core::paths::config_dir()?.join(leo_core::paths::own::APP_SETTINGS);
@@ -202,11 +211,7 @@ impl AppSettings {
             path.clone(),
             Arc::new(move |before, after| {
                 if before.open_at_login != after.open_at_login {
-                    if after.open_at_login {
-                        native.autolaunch().enable()?;
-                    } else {
-                        native.autolaunch().disable()?;
-                    }
+                    open_at_login(&native, after.open_at_login)?;
                 }
                 Ok(())
             }),
@@ -235,14 +240,8 @@ impl AppSettings {
     pub fn apply_startup(&self) {
         let preferences = self.preferences();
         if self.path.exists() && !cfg!(debug_assertions) {
-            self.preferences.record(|| {
-                if preferences.open_at_login {
-                    self.app.autolaunch().enable()?;
-                } else {
-                    self.app.autolaunch().disable()?;
-                }
-                Ok(())
-            });
+            self.preferences
+                .record(|| open_at_login(&self.app, preferences.open_at_login));
         }
     }
     fn permission_view(&self, fresh: bool) -> Value {

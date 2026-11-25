@@ -1530,8 +1530,8 @@ a modal.
   Settings → Note width only says the current width with a Reset (`width-reset`; no size
   cards since 2026-11-16, the user's call); an older Comfortable or Full choice still applies until reset.
 
-Decided: Keeping replaces Storage (2026-11-05); Quit leo is not in Settings; Writing
-AI uses a pen icon, never a sparkle.
+Decided: Keeping replaces Storage (2026-11-05); Quit leo is in Settings only on
+Windows (2026-11-25); Writing AI uses a pen icon, never a sparkle.
 
 ## Idle work and freshness
 

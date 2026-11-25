@@ -336,6 +336,7 @@ updater command. Installation replaces the running bundle; the staged previous
 bundle is removed, and unrelated application copies are never deleted.
 Foreground requests run on the main thread, move the main window to the active
 macOS Space and explicitly make it the main/key window. Initial activation runs
-at Ready, never after an arbitrary page reload; hidden login launches stay hidden.
+at Ready, never after an arbitrary page reload; hidden login launches stay hidden
+(on Windows minimized: Ready skips a minimized window).
 
 App-owned paths use the shared `leo_core::paths::own` registry used by uninstall.

@@ -54,9 +54,6 @@ pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
 
 fn open(app: &AppHandle, event: &str) {
     static CLICKS: AtomicU64 = AtomicU64::new(0);
-    if !crate::update_window::may_open(leo_core::activity::global()) {
-        return;
-    }
     crate::show(app);
     let click = CLICKS.fetch_add(1, Ordering::Relaxed);
     let app = app.clone();
