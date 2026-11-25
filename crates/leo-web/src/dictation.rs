@@ -45,16 +45,6 @@ pub fn text_of(data: &Path, id: i64) -> Result<Option<(String, Option<String>)>>
         .optional()
     })
 }
-pub fn newest(data: &Path) -> Result<Option<String>> {
-    crate::db::at(&data.join(crate::db::FILE)).with(|db| {
-        db.query_row(
-            "SELECT text FROM dictations ORDER BY id DESC LIMIT 1",
-            [],
-            |r| r.get(0),
-        )
-        .optional()
-    })
-}
 pub fn edit(data: &Path, id: i64, text: &str) -> Result<()> {
     let text = text.trim();
     ensure!(!text.is_empty(), NOTHING_TO_KEEP);
@@ -220,7 +210,6 @@ mod tests {
             text_of(dir.path(), id).unwrap().unwrap(),
             (changed.clone(), Some(text.clone()))
         );
-        assert_eq!(newest(dir.path()).unwrap().unwrap(), changed);
         for _ in 0..20 {
             remember(dir.path(), &text).unwrap();
         }

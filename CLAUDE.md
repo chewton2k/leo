@@ -14,7 +14,7 @@ the compiler enforces it — do not add an upward dependency:
 | `crates/leo-services` | `ai/` (chains, prompts, live transcription), `config/` (providers, credentials), `health`, `providers`, `speech`, `dictation`, `session`, `update`, `usage`, `import` | core |
 | `crates/leo-web` | leo's engine and pages: `lib.rs` (`start` → `Running`, router), `routes/` (handlers by area), `token.rs`, and the page in `src/web/` (`page-head.html` + `styles/*.css` + `page-tail.html` joined at compile time, `app/*.js` served as `/app.js`, `markdown.js`, …) | core |
 | `crates/leo-host` | `powers()` (the AI, speech, settings, recording housekeeping and import powers handed to the engine) and `leo-test-server` (Playwright's engine) | core, services, web |
-| `crates/leo-desktop` | The Tauri app `leo-app`: window, menu bar icon, single instance, open at login, PATH from the login shell, links/downloads/print | core, services, host, web |
+| `crates/leo-desktop` | The Tauri app `leo-app`: window, single instance, open at login, PATH from the login shell, links/downloads/print | core, services, host, web |
 | root `leo` | `main.rs` and `cli/`: `leo` opens the app, `leo uninstall`, `--version` | core, services |
 
 Verify with `cargo test` at the root (runs every crate but `leo-desktop`, which
@@ -70,8 +70,8 @@ changes and quit never commit or push. Existing repositories/remotes and legacy
 the pre-flight before recording agree, and every gap arrives with what fixes it
 rather than as a failure discovered mid-use.
 `health::writing` is the one writing-AI answer (Ready, NotInstalled,
-NotRunning, NoModel, NotChosen, with its fix): `ai::writing_ready` and the
-tray use its cheap path (no HTTP, never NoModel); the doctor's chat check
+NotRunning, NoModel, NotChosen, with its fix): `ai::writing_ready`
+uses its cheap path (no HTTP, never NoModel); the doctor's chat check
 (`health::chain_check`), the recording pre-flight (leo-host's
 `Housekeeping::checks`) and Settings (`web_settings::describe`'s `writing`) pass
 the listed local models (`choice::local_models`: one loopback Ollama `/api/tags`
@@ -266,9 +266,9 @@ the user turns on the AI writing switch (2026-11-02, the user's call; off by def
   front-matter property leo does not own; `#word` searches the word.
 - Felix in the margin: threads in `leo.db`, never note files or git; reads use
   `Powers.toolless` (no tools at all). See crates/leo-web/CLAUDE.md.
-- Menu bar, study order, idle compaction and in-app drag and drop
-  (2026-11-02, the user's notes): see crates/leo-desktop/CLAUDE.md (tray,
-  `disable_drag_drop_handler`) and crates/leo-web/CLAUDE.md (Felix study order,
+- Study order, idle compaction and in-app drag and drop
+  (2026-11-02, the user's notes): see crates/leo-desktop/CLAUDE.md
+  (`disable_drag_drop_handler`) and crates/leo-web/CLAUDE.md (Felix study order,
   idle compaction).
 - Keeping: `leo_core::keep` (`<data>/keep.json`, beside notes, not synced):
   `trash_days` (default 30) drives `tidy_trash`; `chat_days`, `upload_days`,

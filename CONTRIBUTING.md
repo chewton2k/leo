@@ -39,7 +39,7 @@ reaching upward:
 | `crates/leo-services` | AI providers and their fallback chains, prompts, config and credentials, recording, and health checks. |
 | `crates/leo-web` | leo's pages and the engine behind them. |
 | `crates/leo-host` | Gives the engine its AI, speech, settings, recording housekeeping and import powers; the Playwright test server. |
-| `crates/leo-desktop` | The leo app: window, menu bar icon, single instance, open at login. |
+| `crates/leo-desktop` | The leo app: window, single instance, open at login. |
 | root `leo` | `leo` (opens the app), `leo uninstall`, `--version`. |
 
 A few ideas run through all of it:

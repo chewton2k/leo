@@ -17,7 +17,6 @@ mod shell_path;
 mod shortcut;
 mod shortcut_events;
 mod sign_in;
-mod tray;
 mod update_window;
 mod updates;
 
@@ -169,10 +168,9 @@ pub fn run() {
     let mut quitting = quit::Confirm::default();
     app.run(move |app, event| match event {
         RunEvent::Ready => {
-            if app
-                .get_webview_window(MAIN)
-                .is_some_and(|w| w.is_visible().unwrap_or(false))
-            {
+            if app.get_webview_window(MAIN).is_some_and(|w| {
+                w.is_visible().unwrap_or(false) && !w.is_minimized().unwrap_or(false)
+            }) {
                 show(app);
             }
         }
@@ -363,11 +361,17 @@ fn set_up(
         .traffic_light_position(tauri::LogicalPosition::new(18.0, 31.0))
         .initialization_script("window.__LEO_APP__ = 'mac';");
     let window = builder.build()?;
+    if cfg!(windows) && hidden {
+        let _ = window.minimize();
+        let _ = window.show();
+    }
     let handle = window.clone();
     window.on_window_event(move |event| {
         if let WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
-            if cfg!(target_os = "macos") && handle.is_fullscreen().unwrap_or(false) {
+            if cfg!(windows) {
+                let _ = handle.minimize();
+            } else if handle.is_fullscreen().unwrap_or(false) {
                 leave_fullscreen_then_hide(&handle);
             } else {
                 hide_window(&handle);
@@ -393,10 +397,6 @@ fn set_up(
     parts.push((
         "Quit menu",
         quit::menu(app.handle()).err().map(|e| format!("{e:#}")),
-    ));
-    parts.push((
-        "menu bar icon",
-        tray::build(app.handle()).err().map(|e| e.to_string()),
     ));
     open_at_login_once(app.handle(), config.as_deref(), &app_settings);
     app_settings.apply_startup();
@@ -732,11 +732,11 @@ mod tests {
                 Some("its plugin did not start".to_string()),
             ),
             ("Quit menu", None),
-            ("menu bar icon", Some("no icon".to_string())),
+            ("Dock menu", Some("no menu".to_string())),
         ];
         assert_eq!(
             startup_problem(&both).unwrap(),
-            "leo could not start the dictation popup (its plugin did not start) and the menu bar icon (no icon). The rest of leo works."
+            "leo could not start the dictation popup (its plugin did not start) and the Dock menu (no menu). The rest of leo works."
         );
         assert_eq!(
             startup_problem(&[("Quit menu", Some("bad".to_string()))]).unwrap(),

@@ -267,7 +267,9 @@ mod route_tests {
 
     #[test]
     fn a_counted_call_is_recorded_under_its_purpose() {
+        let home = tempfile::tempdir().unwrap();
         let usage = leo_web::usage::Usage::default();
+        usage.save_in(home.path().join("chats"));
         let answered = counted(&usage, Purpose::Import, || {
             Ok(leo_services::ai::chain::ChainOutcome {
                 value: "notes",
@@ -283,7 +285,15 @@ mod route_tests {
             anyhow::bail!("stopped")
         });
         assert!(stopped.is_err());
-        assert_eq!(usage.line(), "2 AI requests · 0 tokens");
+        let days = serde_json::to_value(usage.days()).unwrap();
+        let mut kinds: Vec<_> = days["kinds"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|kind| (kind["name"].as_str().unwrap(), kind["calls"].as_u64()))
+            .collect();
+        kinds.sort_unstable();
+        assert_eq!(kinds, [("dictation", Some(1)), ("import", Some(1))]);
         assert_eq!(
             tally(
                 &anyhow::Result::<leo_services::ai::chain::ChainOutcome<()>>::Err(anyhow::anyhow!(

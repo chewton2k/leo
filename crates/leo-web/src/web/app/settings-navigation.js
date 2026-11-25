@@ -28,7 +28,6 @@ const SETTINGS_INDEX = [
   { section: 'general', id: 'text-size', label: 'Text size', keywords: 'appearance small medium large font reading bigger smaller zoom' },
   { section: 'general', id: 'felix-lettering', label: "Felix's lettering", keywords: 'appearance font typeface serif letters notes writing felix own' },
   { section: 'general', id: 'open-at-login', label: 'Open at login', keywords: 'start startup boot launch computer' },
-  { section: 'general', id: 'menu-bar', label: 'Show in menu bar', keywords: 'system tray icon start' },
   { section: 'shortcuts', id: 'shortcut-quick', label: 'Quick Leo shortcut', keywords: 'keyboard hotkey keys bind search ask jot change' },
   { section: 'shortcuts', id: 'shortcut-new', label: 'New note shortcut', keywords: 'keyboard hotkey keys bind create change' },
   { section: 'shortcuts', id: 'shortcut-ask', label: 'Ask Felix shortcut', keywords: 'keyboard hotkey keys bind selection margin change' },

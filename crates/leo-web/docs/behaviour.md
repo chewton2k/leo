@@ -1418,8 +1418,8 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   event (`preselect` in recording.js; the meeting wording is filled only for
   call) and never presses Start. `online` is an http(s) link in the event's
   location or description. The 60 s tick first refreshes a stale cached feed
-  (`catch_up`, under the same `Busy` guard as the routes), so a leo kept in the
-  menu bar offers current meetings.
+  (`catch_up`, under the same `Busy` guard as the routes), so a leo left
+  running offers current meetings.
 
 - Standalone tasks are files: `<notes>/.leo/tasks/<id>.json`
   (`tasks::tasks_dir`), one JSON line each, written atomically. The reader
@@ -1831,8 +1831,8 @@ one card: a head sentence, problem rows with their fix and button, then ready
 checks as tiles; a passed check (and the all-passed head) is ticked with the
 task tick's pencil stroke in ink (`.pencil-tick`, 2026-11-15), while problem rows
 keep their amber or red sign. "See it larger" opens a reply's figures in the full-window
-viewer. Quit leo is gone from Settings on every platform; the tray/menu Quit
-stays.
+viewer. Settings, General has Quit leo on Windows only (2026-11-25, with the
+menu bar and tray icon gone); on a Mac the app menu quits.
 
 Settings search (2026-11-04, after T3 Code): `SETTINGS_INDEX` in
 `settings-navigation.js`, next to `SETTINGS_SECTIONS`, is plain data of

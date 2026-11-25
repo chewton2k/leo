@@ -163,7 +163,7 @@ file instead of using the microphone.
 
 Never run against GitHub in CI. The app itself is tried by hand with
 `pnpm --dir crates/leo-desktop tauri dev` (a throwaway `LEO_HOME` keeps your
-notes out of it): the window opens signed in, closing leaves the menu bar icon,
+notes out of it): the window opens signed in, closing hides it and the Dock icon brings it back (Windows: it minimizes),
 a second launch focuses the first, Felix answers, Quit exits within seconds.
 
 ## Pitfalls learned the hard way

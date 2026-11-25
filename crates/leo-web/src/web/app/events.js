@@ -393,18 +393,22 @@ document.addEventListener('paste', (e) => {
   uploadSheet(pastedFiles(files));
 });
 
-// The menu bar icon (leo-desktop tray.rs) calls this after showing the window.
-// Record starts a lecture (microphone) or a call right away, like pressing
-// Start on the Record page; one already running is just shown.
-const APP_SETTINGS = ['general', 'updates'];
 const QUIT_TEXT = 'Press ⌘Q again or choose Quit again within 3 seconds to quit Leo.';
-async function quitText() {
+async function quitLoss() {
   try {
     const { job } = await Promise.race([api('/api/record'), new Promise((_, no) => setTimeout(no, 300))]);
-    if (job && ['starting', 'recording', 'paused'].includes(job.state)) return 'Press ⌘Q again to quit. The recording stops and you can recover it from Record next time.';
-    if (job && job.state === 'writing') return 'Press ⌘Q again to quit. A note is still being written; you can recover it from Record next time.';
+    if (job && ['starting', 'recording', 'paused'].includes(job.state)) return 'The recording stops and you can recover it from Record next time.';
+    if (job && job.state === 'writing') return 'A note is still being written; you can recover it from Record next time.';
   } catch (e) {}
-  return QUIT_TEXT;
+  return '';
+}
+async function quitText() {
+  const loss = await quitLoss();
+  return loss ? `Press ⌘Q again to quit. ${loss}` : QUIT_TEXT;
+}
+async function confirmQuit() {
+  const loss = await quitLoss();
+  confirmSheet({ title: 'Quit leo?', text: loss || 'Dictation and reminders stop until you open leo again.', yes: 'Quit leo', action: 'app-command', data: ' data-app-action="quit"', danger: Boolean(loss) });
 }
 async function warnUnsaved() {
   try {
@@ -426,18 +430,8 @@ window.leoFromApp = async (what, which) => {
     saveWebsiteWork();
     return toast(await quitText());
   }
-  if (what === 'settings') return go(`#/settings/${APP_SETTINGS.includes(which) ? which : 'general'}`);
   if (what === 'event') {
     const [kind, ...uid] = String(which).split(':');
     return go(`#/record?event=${encodeURIComponent(uid.join(':'))}&kind=${kind === 'microphone' ? 'microphone' : 'call'}`);
   }
-  if (what !== 'record' || !['microphone', 'call'].includes(which)) return;
-  if (recorder.active()) return go('#/record');
-  if (state.view !== 'record') go('#/record');
-  const until = Date.now() + 8000;
-  let kind = null;
-  while (Date.now() < until && !(kind = $(`#rec-box input[name="rec-kind"][value="${which}"]`))) await new Promise((r) => setTimeout(r, 100));
-  if (!kind || kind.disabled || recorder.active()) return;
-  kind.checked = true;
-  recorder.begin().catch(fail);
 };

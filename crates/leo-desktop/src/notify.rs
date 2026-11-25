@@ -1,9 +1,15 @@
-use std::time::{Duration, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+#[cfg(target_os = "macos")]
+use std::time::UNIX_EPOCH;
 
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tauri_plugin_notification::NotificationExt;
 
+#[cfg(target_os = "macos")]
 const OFFER_FOR: Duration = Duration::from_secs(10 * 60);
+const ASK_TRIES: u32 = 10;
+const ASK_GAP: Duration = Duration::from_millis(500);
 
 pub fn listen(app: &AppHandle) {
     if cfg!(target_os = "macos") {
@@ -19,7 +25,7 @@ pub fn listen(app: &AppHandle) {
         };
         if let (Some(uid), Some(kind), "tap") = (extra("uid"), extra("kind"), performed.action_id())
         {
-            crate::tray::page(&handle, "event", &format!("{kind}:{uid}"));
+            open(&handle, &format!("{kind}:{uid}"));
         }
     });
 }
@@ -27,12 +33,12 @@ pub fn listen(app: &AppHandle) {
 pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
     let kind = if event.online { "call" } else { "microphone" };
     let title = format!("{} is starting", event.title);
-    let page = format!("{kind}:{}", event.uid);
-    let until = UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64) + OFFER_FOR;
     #[cfg(target_os = "macos")]
     {
         let app = app.clone();
-        let page = page.clone();
+        let page = format!("{kind}:{}", event.uid);
+        let until =
+            UNIX_EPOCH + Duration::from_secs(event.start.timestamp().max(0) as u64) + OFFER_FOR;
         std::thread::spawn(move || post(&app, title, &page, until));
     }
     #[cfg(not(target_os = "macos"))]
@@ -44,7 +50,35 @@ pub fn starting(app: &AppHandle, event: leo_web::app_settings::EventStarting) {
         .extra("uid", &event.uid)
         .extra("kind", kind)
         .show();
-    crate::tray::offer(app, page, event.title, until);
+}
+
+fn open(app: &AppHandle, event: &str) {
+    static CLICKS: AtomicU64 = AtomicU64::new(0);
+    if !crate::update_window::may_open(leo_core::activity::global()) {
+        return;
+    }
+    crate::show(app);
+    let click = CLICKS.fetch_add(1, Ordering::Relaxed);
+    let app = app.clone();
+    let event = serde_json::to_string(event).unwrap_or_default();
+    let script = format!(
+        "(() => {{ const done = window.__leoAsked = window.__leoAsked || {{}}; \
+         if (done[{click}] || !window.leoFromApp) return; done[{click}] = true; \
+         window.leoFromApp('event', {event}); }})()"
+    );
+    let _ = std::thread::Builder::new()
+        .name("leo-event-page".into())
+        .spawn(move || {
+            for _ in 0..ASK_TRIES {
+                if !crate::update_window::may_open(leo_core::activity::global()) {
+                    return;
+                }
+                if let Some(window) = app.get_webview_window(crate::MAIN) {
+                    let _ = window.eval(&script);
+                }
+                std::thread::sleep(ASK_GAP);
+            }
+        });
 }
 
 const BODY: &str = "Click to open Record, ready to record it.";
@@ -52,7 +86,7 @@ const BODY: &str = "Click to open Record, ready to record it.";
 #[cfg(target_os = "macos")]
 fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime) {
     use mac_usernotifications::{block_on, blocking, Notification};
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
     static ASKING: AtomicBool = AtomicBool::new(false);
     if crate::permissions::notifications() == Some("denied") || ASKING.swap(true, Ordering::AcqRel)
     {
@@ -75,7 +109,7 @@ fn post(app: &AppHandle, title: String, page: &str, until: std::time::SystemTime
     );
     if let Ok(shown) = sent {
         if block_on(shown.response()).is_ok_and(|response| response.is_default_action()) {
-            crate::tray::page(app, "event", page);
+            open(app, page);
         }
     }
 }
