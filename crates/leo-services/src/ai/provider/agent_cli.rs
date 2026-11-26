@@ -900,10 +900,12 @@ impl ClaudeSession {
                 Ok(super::mcp::Incoming::Ended)
                 | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                     self.child.stop();
-                    return Err(ProviderError::Retryable(format!(
-                        "{}: claude ended the session",
-                        self.name
-                    )));
+                    let why = if watch.stalled.load(Ordering::Relaxed) {
+                        "claude stopped answering and was stopped"
+                    } else {
+                        "claude ended the session"
+                    };
+                    return Err(ProviderError::Retryable(format!("{}: {why}", self.name)));
                 }
             }
         }
@@ -1514,8 +1516,8 @@ fn auth_probe(agent: Agent, bin: &str) -> Option<(bool, String)> {
 
 fn signed_out(said: &str) -> bool {
     let said = said.to_lowercase();
-    said.split_whitespace()
-        .any(|word| word.trim_matches(|c: char| !c.is_alphanumeric()) == "401")
+    said.split(|c: char| !(c.is_alphanumeric() || c == ',' || c == '.'))
+        .any(|word| word.trim_matches(['.', ',']) == "401")
         || [
             "not logged in",
             "not signed in",
@@ -3286,6 +3288,7 @@ mod sign_in_tests {
             "Could not parse your authentication token. Please try signing in again.",
             "Failed to authenticate. API Error: 401 OAuth access token is invalid.",
             "Not logged in · Please run /login",
+            "request failed with status:401",
         ] {
             let text = with_sign_in(Agent::Codex, bin, said);
             let end = " If it is not signed in, choose Codex in Writing AI and press Sign in.";

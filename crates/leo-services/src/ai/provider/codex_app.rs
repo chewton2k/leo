@@ -192,6 +192,7 @@ impl CodexThread {
         &mut self,
         until: Instant,
         stopped: &dyn Fn() -> bool,
+        stalled: &std::sync::atomic::AtomicBool,
     ) -> ProviderResult<Value> {
         let idle = Instant::now();
         loop {
@@ -231,10 +232,12 @@ impl CodexThread {
                     )));
                 }
                 Err(RecvTimeoutError::Disconnected) => {
-                    return Err(ProviderError::Retryable(format!(
-                        "{}: codex ended",
-                        self.name
-                    )))
+                    let why = if stalled.load(std::sync::atomic::Ordering::Relaxed) {
+                        "codex stopped answering and was stopped"
+                    } else {
+                        "codex ended"
+                    };
+                    return Err(ProviderError::Retryable(format!("{}: {why}", self.name)));
                 }
             }
         }
@@ -248,7 +251,7 @@ impl CodexThread {
         let until = Instant::now() + self.total_limit;
         let mut bytes = 0usize;
         loop {
-            let message = self.next_message(until, &|| false)?;
+            let message = self.next_message(until, &|| false, &watch.stalled)?;
             watch.touch();
             bytes = bytes.saturating_add(message.to_string().len());
             if bytes > MOST_OUTPUT {
@@ -330,7 +333,7 @@ impl CodexThread {
         let mut calls = 0usize;
         let mut limited = false;
         loop {
-            let message = self.next_message(until, stopped)?;
+            let message = self.next_message(until, stopped, &watch.stalled)?;
             watch.touch();
             bytes = bytes.saturating_add(message.to_string().len());
             if bytes > MOST_OUTPUT {
