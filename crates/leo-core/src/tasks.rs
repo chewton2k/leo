@@ -181,7 +181,7 @@ fn time_at(list: &[Word], i: usize) -> Option<(NaiveTime, usize)> {
         .map(|t| (t, i))
 }
 
-pub fn due_in(text: &str) -> Option<Due> {
+fn due_plain(text: &str) -> Option<Due> {
     let list = words(text);
     let mut found: Vec<Due> = Vec::new();
     let mut vague = false;
@@ -269,7 +269,42 @@ pub struct Redated {
     pub exact: bool,
 }
 
+pub fn due_in(text: &str) -> Option<Due> {
+    let Some(at) = own_due_tail(text) else {
+        return due_plain(text);
+    };
+    let last = text[at..]
+        .rfind(" — due ")
+        .map(|i| at + i + " — due ".len())?;
+    let part = text[last..].trim_end().trim_end_matches('.');
+    due_plain(part).map(|due| Due {
+        start: last + due.start,
+        end: last + due.end,
+        ..due
+    })
+}
+
+fn own_due_tail(text: &str) -> Option<usize> {
+    const MARK: &str = " — due ";
+    text.match_indices(MARK).map(|(at, _)| at).find(|&at| {
+        text[at..].split(MARK).skip(1).all(|part| {
+            let part = part.trim_end().trim_end_matches('.');
+            due_plain(part).is_some_and(|due| due.start == 0 && due.end == part.len())
+        })
+    })
+}
+
 pub fn with_due(text: &str, date: Option<NaiveDate>, time: Option<NaiveTime>) -> Redated {
+    if let Some(at) = own_due_tail(text) {
+        let base = &text[..at];
+        return Redated {
+            text: match date {
+                Some(date) => format!("{base} — due {}.", date_phrase(date, time)),
+                None => format!("{}.", base.trim_end_matches('.')),
+            },
+            exact: true,
+        };
+    }
     let has_vague = due_in(text).is_none()
         && words(text).windows(2).any(|w| {
             (month_of(w[0].text).is_some() && day_of(w[1].text).is_some())
@@ -492,6 +527,89 @@ mod tests {
         ] {
             assert_eq!(due_in(text), None, "{text}");
         }
+    }
+
+    #[test]
+    fn a_task_with_leos_own_due_phrase_is_dated_even_beside_a_date_it_cannot_read() {
+        let text = "Book the study room for Dec 2 — due Thursday, November 26, 2026 at 9:00 am.";
+        let due = due_in(text).expect("leo's phrase dates the task");
+        assert_eq!(
+            (due.date, due.time),
+            (day(2026, 11, 26), NaiveTime::from_hms_opt(9, 0, 0))
+        );
+        assert_eq!(
+            &text[due.start..due.end],
+            "Thursday, November 26, 2026 at 9:00 am"
+        );
+        let piled = "Book the study room for Dec 2 — due Thursday, November 26, 2026 at 9:00 am — due Thursday, November 26, 2026 at 7:45 am.";
+        assert_eq!(
+            due_in(piled).map(|d| d.time),
+            Some(NaiveTime::from_hms_opt(7, 45, 0)),
+            "the newest phrase wins"
+        );
+        assert!(
+            due_in("Book the study room for Dec 2").is_none(),
+            "a date without a year still dates nothing"
+        );
+    }
+
+    #[test]
+    fn leos_own_due_phrase_is_replaced_even_beside_a_date_it_cannot_read() {
+        let nine = NaiveTime::from_hms_opt(9, 0, 0);
+        let first = with_due(
+            "Book the study room for Dec 2",
+            Some(day(2026, 11, 26)),
+            nine,
+        );
+        assert!(
+            !first.exact,
+            "the first date still asks, since Dec 2 has no year"
+        );
+        assert_eq!(
+            with_due(
+                &first.text,
+                Some(day(2026, 11, 27)),
+                NaiveTime::from_hms_opt(10, 0, 0)
+            ),
+            Redated {
+                text: "Book the study room for Dec 2 — due Friday, November 27, 2026 at 10:00 am."
+                    .into(),
+                exact: true
+            },
+            "moving it again replaces leo's phrase without asking"
+        );
+        let piled = "Book the study room for Dec 2 — due Thursday, November 26, 2026 at 9:00 am — due Thursday, November 26, 2026 at 9:00 am — due Thursday, November 26, 2026 at 8:15 am — due Thursday, November 26, 2026 at 7:45 am.";
+        assert_eq!(
+            with_due(
+                piled,
+                Some(day(2026, 11, 26)),
+                NaiveTime::from_hms_opt(10, 0, 0)
+            ),
+            Redated {
+                text:
+                    "Book the study room for Dec 2 — due Thursday, November 26, 2026 at 10:00 am."
+                        .into(),
+                exact: true
+            },
+            "phrases piled up by the old bug collapse into one"
+        );
+        assert_eq!(
+            with_due(piled, None, None),
+            Redated {
+                text: "Book the study room for Dec 2.".into(),
+                exact: true
+            }
+        );
+        assert_eq!(
+            with_due(
+                "Meet Sam — due later this week",
+                Some(day(2026, 11, 26)),
+                None
+            )
+            .text,
+            "Meet Sam — due later this week — due Thursday, November 26, 2026.",
+            "words after a dash that are not a date are never taken for leo's phrase"
+        );
     }
 
     #[test]
