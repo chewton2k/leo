@@ -2078,6 +2078,7 @@ test.describe('pictures', () => {
     expect(both.text).toBe('Before the picture.');
     expect(both.html).toMatch(/^<div data-leo="Before the picture\.\n\n!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)"/);
     expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
+    expect(both.html).toContain('style="color:inherit"');
     expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
     const plain = await page.evaluate(() => {
       getSelection().selectAllChildren(document.querySelector('#doc .blk:first-child'));
@@ -2157,6 +2158,31 @@ test.describe('pictures', () => {
     await copied('#doc');
     release();
     await expect.poll(html).toMatch(/Before the picture\.[\s\S]*<img src="data:image\/png;base64,/);
+  });
+
+  test('a picture that fails to load while it is copied still leaves the text on the clipboard', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const note = await (await page.request.post('/api/notes', { data: { title: `Failed ${test.info().project.name}`, body: 'Before the picture.' } })).json();
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toContainText('Before the picture.');
+    await pastePicture(page, '#doc');
+    await expect.poll(async () => (await (await page.request.get(`/api/notes/${note.id}`)).json()).body).toContain('![Pasted picture]');
+    let release;
+    const held = new Promise((done) => { release = done; });
+    await page.route('**/api/image**', async (route) => {
+      await held;
+      await route.abort();
+    });
+    await page.reload();
+    await expect(page.locator('#doc img.note-img')).toHaveCount(1);
+    await page.evaluate(() => navigator.clipboard.writeText('old'));
+    await page.evaluate(() => {
+      getSelection().selectAllChildren(document.querySelector('#doc'));
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: new DataTransfer(), bubbles: true, cancelable: true }));
+    });
+    release();
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('Before the picture.');
+    await expect(page.locator('#code-said'), 'no Could not copy').toHaveCount(0);
   });
 
   test('a paste that only looks like leo is not taken as one', async ({ page }) => {

@@ -597,6 +597,10 @@ test('leoCopied recognises leo\'s own copy by its html marker and text, and noth
   assert.equal(ed.leoCopied(html('![x](https://example.com/a.png)', ''), ''), null, 'a picture outside leo');
   assert.equal(ed.leoCopied('<div><p>plain</p></div>', 'plain'), null);
   assert.equal(ed.leoCopied('', ''), null);
+  const clip = (h, t) => ({ getData: (type) => (type === 'text/html' ? h : t) });
+  assert.equal(ed.ownTextCopy(clip(html(source, 'work'), 'Before the picture.')), true, 'text with a picture skips the files');
+  assert.equal(ed.ownTextCopy(clip(html('![Box](attachments/a.png)', ''), '')), false, 'a picture alone keeps them');
+  assert.equal(ed.ownTextCopy(clip('', '')), false);
 });
 
 setImmediate(() => {

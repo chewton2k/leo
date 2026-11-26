@@ -1258,8 +1258,8 @@
       const shown = [...container.querySelectorAll('img')].filter((img) => range.intersectsNode(img));
       const able = e.type === 'copy' && root.ClipboardItem && root.navigator.clipboard?.write;
       if (able && shown.length === 1 && ed.onlyPictures(source) && drawn(shown[0])) {
-        const drawn = pictureDrawn(shown[0], source);
-        putCopy({ 'image/png': drawn.then(({ png }) => png), 'text/html': drawn.then(({ html }) => html) }, shown[0]);
+        const made = pictureDrawn(shown[0], source);
+        putCopy({ 'image/png': made.then(({ png }) => png), 'text/html': made.then(({ html }) => html) }, shown[0]);
         return;
       }
       const html = md.selectionCopy && md.selectionCopy(range);
@@ -1321,7 +1321,9 @@
     }
 
     function putCopy(parts, img) {
-      root.navigator.clipboard.write([new root.ClipboardItem(parts)]).catch(() => {
+      const write = (kept) => root.navigator.clipboard.write([new root.ClipboardItem(kept)]);
+      const { 'image/png': png, ...text } = parts;
+      write(parts).catch((error) => (png && text['text/plain'] ? write(text) : Promise.reject(error))).catch(() => {
         copySaid(document).textContent = 'Could not copy';
         if (!img || !img.isConnected) return;
         frame(img);
@@ -2402,7 +2404,7 @@
     const pictures = (list) => [...(list || [])].filter((f) => /^image\//.test(f.type));
     function onPaste(e) {
       const found = pictures(e.clipboardData && e.clipboardData.files);
-      if (!onPictures || !found.length || ed.leoCopied(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'))?.alone === false) return;
+      if (!onPictures || !found.length || ed.ownTextCopy(e.clipboardData)) return;
       e.preventDefault();
       onPictures(found);
     }

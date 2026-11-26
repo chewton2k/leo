@@ -556,6 +556,8 @@
     return source && ownCopy(source, text) ? { source, from: unescapeHtml(from), alone: onlyPictures(source) } : null;
   }
 
+  const ownTextCopy = (data) => leoCopied(data.getData('text/html'), data.getData('text/plain'))?.alone === false;
+
   const SLASH = [
     { text: 'Heading', mark: '# ' }, { text: 'Subheading', mark: '## ' }, { text: 'Small heading', mark: '### ' },
     { text: 'Bullet', mark: '- ' }, { text: 'Numbered list', mark: '1. ' }, { text: 'Checkbox', mark: '- [ ] ' },
@@ -580,7 +582,7 @@
     return { lines: [lead + mark + text], line: 0, caret: lead.length + mark.length + caret };
   }
 
-  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, pictureSpans, withoutPictures, onlyPictures, stored, ownCopy, leoCopied, splitBlocks, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
+  const api = { SLASH, slash, restyle, stylePair, cellEnd, nextCell, addRow, listPrefix, listPrefixAt, itemHead, listed, listLevels, renumber, closeList, stepBack, headingTree, headings, setPictureWidth, removePicture, pictureSource, pictureSpans, withoutPictures, onlyPictures, stored, ownCopy, leoCopied, ownTextCopy, splitBlocks, continueLine, toggleBox, indent, outdent, rawOffset, isBox, snapshotOf, lineAtOffset, MOST_PASSAGE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.leoEditing = api;
 })(typeof window !== 'undefined' ? window : globalThis);
