@@ -61,10 +61,7 @@ const actions = {
   },
   'cal-prev': () => calStep(-1),
   'cal-next': () => calStep(1),
-  'cal-today': () => {
-    cal.selected = S.dayKey(new Date());
-    calGo();
-  },
+  'cal-today': () => calToday(),
   'cal-view': (el) => calSetView(el.dataset.view),
   'cal-mini': (el) => {
     const at = S.fromKey(cal.selected);

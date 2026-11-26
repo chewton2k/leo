@@ -528,6 +528,11 @@ function calStep(step) {
   calGo();
 }
 
+function calToday() {
+  cal.selected = S.dayKey(new Date());
+  calGo();
+}
+
 function calGo() {
   cal.more = '';
   drawCalendar();
@@ -594,6 +599,12 @@ const calHM = (t) => (t ? String(t).slice(0, 5) : null);
 function calMinutesIn(col, y) {
   const rect = col.getBoundingClientRect();
   return ((y - rect.top) / CAL_HOUR_PX) * 60;
+}
+
+function calSlotAt(col, y) {
+  const raw = calMinutesIn(col, y);
+  const slack = raw % 60 >= 58 ? 2 : 0;
+  return Math.min(24 * 60 - CAL_SNAP, Math.floor((raw + slack) / CAL_SNAP) * CAL_SNAP);
 }
 
 function calColumnAt(x, y) {
@@ -946,9 +957,7 @@ document.addEventListener('pointerdown', (e) => {
     d = { mode: grip ? 'resize' : item.classList.contains('cal-tray-row') ? 'tray' : 'move', id: task.id, on: task.on || null, task, source: item, col, day: item.dataset.day || null, start: span ? span.start : 0, length: Math.max(CAL_SNAP, length), offset: span ? calMinutesIn(col, e.clientY) - span.start : 0 };
   } else if (e.target.classList.contains('cal-col')) {
     const col = e.target;
-    const raw = calMinutesIn(col, e.clientY);
-    const slack = raw % 60 >= 58 ? 2 : 0;
-    d = { mode: 'create', col, day: col.dataset.day, start: Math.min(24 * 60 - CAL_SNAP, Math.floor((raw + slack) / CAL_SNAP) * CAL_SNAP) };
+    d = { mode: 'create', col, day: col.dataset.day, start: calSlotAt(col, e.clientY) };
   } else if (e.target.classList.contains('cal-cell') || e.target.classList.contains('cal-allday-cell')) {
     d = { mode: 'cell', day: e.target.dataset.day };
   } else if (e.target.closest('#cal-main, #cal-side:not(.peek)')) d = { mode: 'press' };
@@ -982,13 +991,51 @@ document.addEventListener('pointerup', (e) => {
   calRelease();
   if (d.mode === 'resize') return calOpenPeek('task', d.id, d.on);
   if (d.mode !== 'create' && d.mode !== 'cell') return;
+  calNewTask(d.day, d.mode === 'create' ? d.start : null);
+});
+
+function calNewTask(day, start) {
   if (cal.more) {
     cal.more = '';
     drawCalendar();
   }
   calClosePeek();
-  if (d.mode === 'create') calCompose(d.day, d.start, Math.min(24 * 60, d.start + 60));
-  else calCompose(d.day, null, null);
+  calCompose(day, start, start === null ? null : Math.min(24 * 60, start + 60));
+}
+
+function calMenu(target, point = null) {
+  const item = target.closest('.cal-item, .cal-tray-row');
+  const spot = target.closest('.cal-col, .cal-cell, .cal-allday-cell');
+  if (!item && !spot) return;
+  let rows;
+  if (item) {
+    const { id, kind, on = null } = item.dataset;
+    const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
+    const task = kind === 'task' && calFind(id);
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    else if (task) {
+      const done = taskDoneOn(task, on);
+      rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
+    } else return;
+  } else {
+    const day = spot.dataset.day;
+    const start = spot.classList.contains('cal-col') ? calSlotAt(spot, point.y) : null;
+    const text = start === null ? `New task on ${S.fromKey(day).toLocaleDateString(calLocale(), { weekday: 'short', month: 'short', day: 'numeric' })}` : `New task at ${calTime(start)}`;
+    rows = [{ text, icon: ICON.plus, run: () => calNewTask(day, start) }, { text: 'Go to today', icon: ICON.calendar, run: calToday }, { line: true }, ...CAL_VIEWS.map(([view, label]) => ({ text: label, checked: view === cal.view, run: () => calSetView(view) }))];
+  }
+  popupMenu(target, { label: 'Calendar options', point, rows });
+}
+
+document.addEventListener('contextmenu', (e) => {
+  if (state.view !== 'calendar' || e.target.closest('.cal-compose') || !e.target.closest('.cal-item, .cal-tray-row, .cal-col, .cal-cell, .cal-allday-cell')) return;
+  e.preventDefault();
+  if (!cal.drag) calMenu(e.target, { x: e.clientX, y: e.clientY });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (state.view !== 'calendar' || !(e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) || !e.target.closest('.cal-item, .cal-tray-row, .cal-cell')) return;
+  e.preventDefault();
+  calMenu(e.target);
 });
 
 document.addEventListener('pointercancel', (e) => {

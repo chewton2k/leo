@@ -1487,7 +1487,11 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   repeating tasks ask Only this one / Every time (Every time shifts `date` and
   the weekdays by the day moved). Polls that land mid-drag or mid-compose wait
   (`cal.stale`), and so does every redraw while the pointer is down or a new task is being typed
-  (`cal.redraw`). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
+  (`cal.redraw`). A right click, Shift+F10 or the menu key opens a `popupMenu` (`calMenu`, skipped
+  during a drag): empty time (New task at its time, Go to today, Day, Week, Month), a month or
+  all-day cell (New task on that date and the same rows), a task wherever it shows (grid, All day row,
+  month, tray: Open, Mark done or Mark not done, Delete task with its Undo) and an event (Details,
+  and Record this event until it has ended). Clicking anywhere on an item but its checkbox opens a side peek in the tray's place
   (`#cal-side.peek`, 340 px): title, done, date/start/end with a This one /
   Every time scope for repeats, repeat days, type, a description that autosaves
   600 ms after typing and on blur, note, Google, .ics, Delete; events are
