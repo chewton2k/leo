@@ -409,6 +409,15 @@ test('right-clicking empty time, a day, a task or an event opens its menu, and E
     await expect(menu.getByRole('menuitemradio', { name: 'Week' })).toHaveAttribute('aria-checked', 'true');
     await page.keyboard.press('Escape');
     await expect(menu).toHaveCount(0);
+    await page.mouse.move(at.x, at.y);
+    await page.mouse.down();
+    await page.evaluate(({ x, y }) => document.elementFromPoint(x, y).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: x, clientY: y, ctrlKey: true })), at);
+    await expect(menu, 'a Control-click opens the menu').toBeVisible();
+    await page.mouse.up();
+    await expect(menu).toBeVisible();
+    await expect(page.locator('.cal-compose-input'), 'and starts no new task').toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
     await page.mouse.click(at.x, at.y, { button: 'right' });
     await menu.getByRole('menuitem', { name: 'New task at 2:00 PM' }).click();
     const input = page.locator('.cal-compose-input');
@@ -440,6 +449,9 @@ test('right-clicking empty time, a day, a task or an event opens its menu, and E
     expect(await rows()).toEqual(['Details', 'Record this event']);
     await menu.getByRole('menuitem', { name: 'Record this event' }).click();
     expect(await page.evaluate(() => window.went)).toEqual(['#/record?event=e-maya&kind=microphone']);
+    await page.locator('.cal-item[data-id="e-week"]').first().click({ button: 'right' });
+    expect(await rows(), 'nor can an all-day event').toEqual(['Details']);
+    await page.keyboard.press('Escape');
     await page.locator('.cal-item[data-id="e-lecture"]').click({ button: 'right' });
     expect(await rows(), 'an event that has ended cannot be recorded').toEqual(['Details']);
     await menu.getByRole('menuitem', { name: 'Details' }).click();

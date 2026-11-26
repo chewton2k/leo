@@ -1012,7 +1012,7 @@ function calMenu(target, point = null) {
     const { id, kind, on = null } = item.dataset;
     const event = kind === 'event' && ((cal.data && cal.data.events) || []).find((e) => e.id === id);
     const task = kind === 'task' && calFind(id);
-    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
+    if (event) rows = [{ text: 'Details', icon: ICON.note, run: () => calOpenPeek('event', id) }, ...(!event.all_day && new Date(event.end) > Date.now() ? [{ text: 'Record this event', icon: ICON.mic, run: () => go(recordHref(event)) }] : [])];
     else if (task) {
       const done = taskDoneOn(task, on);
       rows = [{ text: 'Open', icon: ICON.note, run: () => calOpenPeek('task', id, on) }, { text: done ? 'Mark not done' : 'Mark done', icon: ICON.check, run: () => setTaskDone(id, !done, on) }, { line: true }, { text: 'Delete task', icon: ICON.trash, danger: true, run: () => deleteTask(id) }];
@@ -1029,7 +1029,9 @@ function calMenu(target, point = null) {
 document.addEventListener('contextmenu', (e) => {
   if (state.view !== 'calendar' || e.target.closest('.cal-compose') || !e.target.closest('.cal-item, .cal-tray-row, .cal-col, .cal-cell, .cal-allday-cell')) return;
   e.preventDefault();
-  if (!cal.drag) calMenu(e.target, { x: e.clientX, y: e.clientY });
+  if (cal.drag?.live) return;
+  if (cal.drag) calRelease();
+  calMenu(e.target, { x: e.clientX, y: e.clientY });
 });
 
 document.addEventListener('keydown', (e) => {
