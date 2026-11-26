@@ -200,8 +200,9 @@ body.pane-resizing iframe, body.pane-resizing canvas { pointer-events: none; }
 .home-event-at { width: 64px; text-align: left; }
 .home-event .tasks-title { flex: 0 1 auto; }
 .home-event .home-recent-line { flex: 1 1 auto; }
-.home-event-rec { margin-left: auto; flex: none; text-decoration: none; }
-.home-event-rec svg { width: 14px; height: 14px; }
+.home-event-rec { margin-left: auto; flex: none; text-decoration: none; font-size: var(--fs-sm); opacity: 0; }
+.home-event:is(.soon, :hover, :focus-within) .home-event-rec { opacity: 1; }
+@media (hover: none) { .home-event-rec { opacity: 1; } }
 .home-more { display: block; margin: 4px 8px 0 34px; font-size: var(--fs-sm); color: var(--muted); text-decoration: none; }
 .home-more b { margin-right: 4px; color: var(--text); font-weight: 600; }
 .home-more:hover b { text-decoration: underline; }

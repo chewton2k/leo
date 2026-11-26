@@ -6947,6 +6947,37 @@ test.describe('round 2 redesign', () => {
     await expect(page.locator('#rec-title'), 'Record opens on the event it was pressed for').toHaveValue('Lab meeting');
   });
 
+  test("home's Today shows five rows across events and tasks, counts hidden events in more, and shows Record only on the event now", async ({ page }) => {
+    const now = new Date();
+    now.setHours(12, 0, 0, 0);
+    await page.clock.setFixedTime(now);
+    const at = (mins) => new Date(now.getTime() + mins * 60000).toISOString();
+    const day = now.toLocaleDateString('en-CA');
+    const events = [-10, 60, 120, 180, 240, 300, 360].map((mins, i) => ({ id: `feed:a:e${i}`, feed: 'feed:a', calendar: 'School', title: `Event ${i} ${tagOf()}`, start: at(mins), end: at(mins + 50), all_day: false, location: '', context: '' }));
+    const tasks = ['One', 'Two', 'Three'].map((name, i) => ({ id: `home-t${i}`, source: 'leo', title: `Task ${name} ${tagOf()}`, description: '', kind: 'other', done: false, date: day, time: null, end: null, note: null, found: true, promoted: false }));
+    await page.route('**/api/schedule?**', async (route) => {
+      const response = await route.fetch();
+      return route.fulfill({ response, json: { ...(await response.json()), events, tasks, total: tasks.length, window: [] } });
+    });
+    await page.goto('/#/');
+    await page.reload();
+    const rows = page.locator('#home-today .tasks-row');
+    await expect(rows).toHaveCount(5);
+    await expect(rows.locator('.tasks-title')).toHaveText(events.slice(0, 5).map((e) => e.title));
+    await expect(page.locator('#home-today .home-more'), 'the two hidden events and three tasks are all counted').toHaveText('5 more in Calendar');
+    const shown = () => page.locator('.home-event-rec').evaluateAll((links) => links.map((a) => getComputedStyle(a).opacity));
+    expect(await shown(), 'only the event happening now shows Record').toEqual(['1', '0', '0', '0', '0']);
+    await expect(page.locator('.home-event-rec').nth(1)).toHaveAttribute('href', '#/record?event=e1&kind=microphone');
+    await rows.nth(1).hover();
+    expect(await shown(), 'hovering a row shows its Record').toEqual(['1', '1', '0', '0', '0']);
+    await page.mouse.move(0, 0);
+    await page.locator('.home-event-rec').nth(2).focus();
+    expect(await shown(), 'so does keyboard focus').toEqual(['1', '0', '1', '0', '0']);
+    const boxes = await page.locator('.home-event-rec').evaluateAll((links) => links.map((a) => Math.round(a.getBoundingClientRect().right)));
+    expect(new Set(boxes).size, 'Record sits in one right-aligned column').toBe(1);
+    expect(await page.locator('.home-event-rec').first().evaluate((a) => getComputedStyle(a, '::after').content), 'it is underlined in pencil like a marked word').not.toBe('none');
+  });
+
   test('Quick Leo opens on recent notes, actions and Felix, and each row works from the keyboard', async ({ page }) => {
     const pinned = [];
     for (let i = 0; i < 3; i++) pinned.push(await makeNote(page, `Quick pinned ${i} ${tagOf()}`, 'x'));

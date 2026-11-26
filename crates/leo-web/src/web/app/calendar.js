@@ -1119,6 +1119,12 @@ function calEventSoon(event) {
   return !event.all_day && new Date(event.start) - Date.now() < 15 * 60000 && new Date(event.end) > Date.now();
 }
 
+function recordHref(e) {
+  const kind = /https?:\/\//.test(`${e.location || ''} ${e.context || ''}`) ? 'call' : 'microphone';
+  const uid = e.feed && e.id.startsWith(`${e.feed}:`) ? e.id.slice(e.feed.length + 1) : e.id;
+  return `#/record?event=${enc(uid)}&kind=${kind}`;
+}
+
 function calPeekEvent(side, id) {
   const event = ((cal.data && cal.data.events) || []).find((e) => e.id === id);
   if (!event) return calClosePeek();
@@ -1909,7 +1915,7 @@ function refocusTasks(host, focus) {
 
 const tasksInked = (id) => document.querySelectorAll(`.tasks-row[data-task="${CSS.escape(id)}"]`);
 
-const HOME_ROWS = 6;
+const HOME_ROWS = 5;
 const HOME_RECENT_WAIT = 20000;
 let homeMidnight = 0;
 
@@ -1921,13 +1927,15 @@ function drawHomeToday() {
   const tasks = known ? withWindow(known) : [];
   const { earlier, today } = S.homeDay(tasks, now, new Set(tasksWin.finished.keys()));
   const meets = homeEvents(now);
-  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length));
-  const day = today.slice(0, HOME_ROWS - early.length);
-  const more = earlier.length + today.length - early.length - day.length;
+  const early = earlier.slice(0, Math.max(2, HOME_ROWS - today.length - meets.length));
+  const room = HOME_ROWS - early.length;
+  const shown = meets.slice(0, room);
+  const day = today.slice(0, room - shown.length);
+  const more = earlier.length + today.length + meets.length - early.length - day.length - shown.length;
   const focus = tasksFocus(box);
   const said = `${today.filter((t) => t.done).length} of ${today.length} done`;
-  box.hidden = !early.length && !day.length && !meets.length;
-  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || meets.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${meets.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
+  box.hidden = !early.length && !day.length && !shown.length;
+  box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || shown.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${shown.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
   const root = side.notes.get('');
@@ -1950,15 +1958,12 @@ function homeEvents(now) {
   const today = S.dayKey(now);
   return (tasksWin.events || [])
     .filter((e) => !e.all_day && S.dayKey(new Date(e.start)) === today && new Date(e.end) > now)
-    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
-    .slice(0, HOME_ROWS);
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start));
 }
 
 function homeEventRow(e) {
   const at = new Date(e.start).toLocaleTimeString(calLocale(), { hour: 'numeric', minute: '2-digit' });
-  const kind = /https?:\/\//.test(`${e.location || ''} ${e.context || ''}`) ? 'call' : 'microphone';
-  const uid = e.feed && e.id.startsWith(`${e.feed}:`) ? e.id.slice(e.feed.length + 1) : e.id;
-  return `<div class="tasks-row home-event" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="btn plain sm home-event-rec" href="#/record?event=${enc(uid)}&kind=${kind}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">${ICON.mic}Record</a></div>`;
+  return `<div class="tasks-row home-event${calEventSoon(e) ? ' soon' : ''}" style="--tone: var(${toneOfEvent(e)})"><span class="tasks-when home-event-at">${esc(at)}</span><span class="tasks-title">${esc(e.title || 'Untitled event')}</span>${e.location && !/^https?:/.test(e.location) ? `<span class="home-recent-line">${esc(e.location)}</span>` : ''}<a class="home-event-rec" href="${recordHref(e)}" aria-label="${esc(`Record ${e.title || 'this event'}`)}">Record</a></div>`;
 }
 
 function homeTally(today) {

@@ -1312,7 +1312,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   after the last read, never written into `tasksWin.events`);
   a day sets only `cal.selected` and opens the Calendar in its last view) and,
   under the quick bar, Earlier and Today rows (`#home-today`, the same rows;
-  today's done rows stay until midnight; six at most, then "N more in Calendar";
+  today's done rows stay until midnight; five rows at most across Earlier (at least two), events and tasks, then "N more in Calendar" counting every row left out, events too;
   Today's done count is a pencil tally `S.tally`, "N of M done" kept as the title
   and hidden text) and Recently written (`#home-recent`: the three notes edited
   last, from the `x-total` of `/api/notes?show=pinned&limit=1` then
@@ -1608,7 +1608,7 @@ The note API preserves the preexisting version hash for ordinary notes after rem
 
 Config and data file paths use the same `leo_core::paths::own` names as uninstall.
 - Round 2 redesign (2026-11-25, the owner's approvals): home's Today rows add today's timed
-  events with a Record link (`homeEvents`, `#/record?event=<id>&kind=microphone|call`, call when
+  events with a Record link (`homeEvents`, `recordHref`: `#/record?event=<id>&kind=microphone|call`, call when
   the place or description (`context`) holds a link; the event id is the feed's uid; ended and all-day events are left out) and Recently
   written previews are plain text (`md.plain`). Quick Leo opens, before any typing, on the three
   notes edited last (`recentNotes`, home's own list), then New note, Start recording, New task and Ask Felix (`quickStart`), then

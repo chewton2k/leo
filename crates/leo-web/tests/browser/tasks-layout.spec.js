@@ -147,7 +147,7 @@ test('task completion shows its check before hiding and survives refresh, Undo a
   }
 });
 
-test('home opens on the date and one plain sentence, keeps today\'s done rows and stops at six', async ({ browser }) => {
+test('home opens on the date and one plain sentence, keeps today\'s done rows and stops at five', async ({ browser }) => {
   const web = path.resolve(__dirname, '../../src/web');
   const calendar = fs.readFileSync(path.join(web, 'app/calendar.js'), 'utf8');
   const core = fs.readFileSync(path.join(web, 'app/core.js'), 'utf8');
@@ -157,6 +157,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
   const windowed = calendar.slice(calendar.indexOf('function withWindow'), calendar.indexOf('function calMovable'));
   const action = actions.slice(actions.indexOf("  'task-done':"), actions.indexOf("  'task-date':"));
   const motion = core.slice(core.indexOf('const LEAVE_MS'), core.indexOf('function rel('));
+  const soon = calendar.slice(calendar.indexOf('function calEventSoon'), calendar.indexOf('function calPeekEvent'));
   const fixture = `const S = window.leoSchedule;
     const $ = (selector, root = document) => root.querySelector(selector);
     const app = document.querySelector('main');
@@ -193,6 +194,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     ${motion}
     ${completion}
     ${windowed}
+    ${soon}
     ${panel}
     const actions = {${action}};
     document.addEventListener('click', event => {
@@ -251,8 +253,8 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     const many = ['Lab meeting', 'Grade quiz 3', 'Rerun ablations', 'Problem set review', 'Read chapter 4', 'Call the bank', 'Book flights', 'Water plants'].map((title, i) => ({id: 'm' + i, title, date: '2026-11-15', time: i < 4 ? `${11 + i}:00` : null}));
     await page.evaluate(tasks => audit.seed(tasks), [{id: 'l1', title: 'Email', date: '2026-11-12'}, {id: 'l2', title: 'Books', date: '2026-11-14'}, ...many]);
     await expect(line).toHaveText('Eight today and two from earlier. First up is Lab meeting at 11:00 AM.');
-    await expect(list.locator('.tasks-row')).toHaveCount(6);
-    await expect(list.locator('.home-more')).toHaveText('4 more in Calendar');
+    await expect(list.locator('.tasks-row')).toHaveCount(5);
+    await expect(list.locator('.home-more')).toHaveText('5 more in Calendar');
     await expect(list.locator('.home-more')).toHaveAttribute('href', '#/calendar');
 
     await page.evaluate(() => audit.seed([{id: 'l1', title: 'Email', date: '2026-11-12'}, {id: 'l2', title: 'Books', date: '2026-11-14'}]));
@@ -261,7 +263,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     const old = Array.from({length: 8}, (_, i) => ({id: 'o' + i, title: 'Old ' + i, date: '2026-11-0' + (i + 1)}));
     await page.evaluate(tasks => audit.seed(tasks), [...old, {id: 't1', title: 'Today one', date: '2026-11-15'}, {id: 't2', title: 'Today two', date: '2026-11-15'}]);
     await expect(list.locator('.tasks-group'), 'many earlier tasks never push Today out').toHaveText(['Earlier', 'Today0 of 2 done']);
-    await expect(list.locator('.tasks-row')).toHaveCount(6);
+    await expect(list.locator('.tasks-row')).toHaveCount(5);
 
     await page.evaluate(() => audit.seed([], [], 0));
     await expect(line).toHaveText('Nothing here yet. Type in the bar to jot a note or a task.');
