@@ -6614,7 +6614,7 @@ test.describe('round 2 redesign', () => {
   });
 
   test('two sections with the same heading fold one at a time', async ({ page }) => {
-    const note = await makeNote(page, `Folding twins ${tagOf()}`, '## Notes\n\nFirst part.\n\n## Notes\n\nSecond part.\n');
+    const note = await makeNote(page, `Folding twins ${tagOf()}`, '## Notes\n\nFirst part.\n\n## Notes ##\n\nSecond part.\n');
     await page.goto(`/#/n/${note.id}`);
     await heading(page, 'Notes').first().hover();
     await heading(page, 'Notes').first().locator('.fold-btn').click();

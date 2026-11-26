@@ -2179,24 +2179,30 @@
 
     function unfoldAt(i) {
       let range;
+      let opened = false;
       while ((range = foldShown.find((r) => i > r.owner && blocks[i] && blocks[i].start < r.to))) {
         folded.delete(headings()[range.owner].key);
-        saveFolds();
         applyFolds();
-        container.dispatchEvent(new CustomEvent('leo-folds'));
+        opened = true;
       }
+      if (!opened) return;
+      saveFolds();
+      container.dispatchEvent(new CustomEvent('leo-folds'));
     }
 
     function toggleFold(button) {
       const blk = button.closest('.blk');
-      const i = rendered.findIndex((r) => r.el === blk);
+      let i = rendered.findIndex((r) => r.el === blk);
+      if (i < 0) return;
+      if (editing) {
+        const line = blocks[i].start + (i > editing.last ? editing.end - editing.originalEnd : 0);
+        stop();
+        i = blocks.findIndex((block) => block.start === line);
+      }
       const head = i >= 0 && headings()[i];
       if (!head) return;
       if (folded.has(head.key)) folded.delete(head.key);
-      else {
-        if (editing) stop();
-        folded.add(head.key);
-      }
+      else folded.add(head.key);
       saveFolds();
       applyFolds(i);
       container.dispatchEvent(new CustomEvent('leo-folds'));
@@ -2256,6 +2262,7 @@
       foldedHeading(offset) {
         if (!foldShown.length) return null;
         let line = lineOf(offset);
+        if (editing && line >= editing.start && line < editing.end) return null;
         if (editing && line >= editing.end) line -= editing.end - editing.originalEnd;
         const range = foldShown.find((r) => line >= r.from && line < r.to);
         return range ? blocks[range.owner].start : null;

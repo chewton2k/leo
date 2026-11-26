@@ -485,7 +485,7 @@ function drawCalendar() {
   if (cal.redraw) return;
   const today = S.dayKey(new Date());
   const days = calDays();
-  const plan = calPlan(days.includes(today) ? days : [...days, today].sort());
+  const plan = calPlanFor(days, today);
   const body = cal.view === 'month' ? calMonth(days, plan, today) : calTimeGrid(days, plan, today);
   const scroll = $('#cal-scroll') || $('.cal-month-grid');
   const keep = scroll ? scroll.scrollTop : null;
@@ -508,13 +508,7 @@ function drawCalendar() {
       cal.scrolled = place;
     }
   }
-  if (!cal.peek) {
-    const side = $('#cal-side');
-    if (side) {
-      side.classList.remove('peek');
-      side.innerHTML = calTray(plan, today);
-    }
-  }
+  if (!cal.peek) calShowTray(plan, today);
   if (failed) calComposeHost(cal.compose)?.appendChild(failed);
   if (typing) failed.querySelector('input').focus({ preventScroll: true });
   inkSettle((id) => app.querySelectorAll(`.cal-item[data-id="${CSS.escape(id)}"], .cal-tray-row[data-id="${CSS.escape(id)}"]`));
@@ -1055,17 +1049,21 @@ function calClosePeek() {
   panelLeave($('#cal-side'), () => {
     if (cal.peek) return;
     drawCalendar();
-    if (cal.redraw) calShowTray();
+    if (!cal.redraw) return;
+    const today = S.dayKey(new Date());
+    calShowTray(calPlanFor(calDays(), today), today);
   });
 }
 
-function calShowTray() {
+function calPlanFor(days, today) {
+  return calPlan(days.includes(today) ? days : [...days, today].sort());
+}
+
+function calShowTray(plan, today) {
   const side = $('#cal-side');
   if (!side) return;
-  const today = S.dayKey(new Date());
-  const days = calDays();
   side.classList.remove('peek');
-  side.innerHTML = calTray(calPlan(days.includes(today) ? days : [...days, today].sort()), today);
+  side.innerHTML = calTray(plan, today);
 }
 
 function calPeekRefresh(id) {

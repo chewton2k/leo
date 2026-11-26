@@ -1026,7 +1026,7 @@
       if (el.dataset.state !== s.view.state) {
         el.dataset.state = s.view.state;
         const focused = root.document.activeElement?.closest?.('#rec-float') ? root.document.activeElement.id : '';
-        el.innerHTML = recBar(s.view, '<button type="button" class="rec-float-open" data-action="record" title="Open the recording"><span class="rec-dot"></span><span class="rec-time" id="rec-time"></span></button>');
+        el.innerHTML = recBar(s.view, '<button type="button" class="rec-float-open" id="rec-float-open" data-action="record" title="Open the recording"><span class="rec-dot"></span><span class="rec-time" id="rec-time"></span></button>');
         if (focused) el.querySelector(`#${focused}`)?.focus();
       }
       el.classList.toggle('paused', s.view.state === 'paused');
