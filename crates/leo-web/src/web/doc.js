@@ -1259,10 +1259,11 @@
       const text = own ? said : source;
       const rich = (body) => (own ? leoCopy(source, body) : body);
       const late = able && html ? shown.filter((img) => !img.complete) : [];
-      if (late.length) {
+      const one = able && own && shown.length === 1 && drawn(shown[0]) ? shown[0] : null;
+      if (late.length || one) {
         const kept = range.cloneRange();
-        const loaded = Promise.allSettled(late.map(loadPicture)).then(() => textBlob(rich(md.selectionCopy(kept) || html), 'text/html'));
-        putCopy({ 'text/plain': textBlob(text, 'text/plain'), 'text/html': loaded });
+        const loaded = late.length ? Promise.allSettled(late.map(loadPicture)).then(() => textBlob(rich(md.selectionCopy(kept) || html), 'text/html')) : textBlob(rich(html), 'text/html');
+        putCopy({ 'text/plain': textBlob(text, 'text/plain'), 'text/html': loaded, ...(one && { 'image/png': pictureDrawn(one, source).then(({ png }) => png) }) });
         return;
       }
       e.clipboardData.setData('text/plain', text);
@@ -1322,12 +1323,10 @@
     function onLeoPaste(e) {
       const area = editing && document.activeElement === editing.area ? editing.area : null;
       if (!container.isConnected || !e.clipboardData || !(area || noteFocused())) return;
-      const html = e.clipboardData.getData('text/html');
-      const [, kept, from] = /\sdata-leo="([^"]*)" data-leo-from="([^"]*)"/.exec(html) || [];
-      const source = kept && md.unescapeHtml(kept);
-      if (!source || !ed.ownCopy(source, e.clipboardData.getData('text/plain'))) return;
-      const alone = ed.onlyPictures(source);
-      if (alone ? md.unescapeHtml(from) !== dir && !ed.stored(source) : !area && !framed && !selectedSpan()) return;
+      const copied = ed.leoCopied(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'));
+      if (!copied) return;
+      const { source, from, alone } = copied;
+      if (alone ? from !== dir && !ed.stored(source) : !area && !framed && !selectedSpan()) return;
       if (!area && (e.target.closest?.('#chat') || [...document.querySelectorAll('.scrim')].some((scrim) => !scrim.contains(container)))) return;
       e.preventDefault();
       e.stopImmediatePropagation();
@@ -2388,7 +2387,7 @@
     const pictures = (list) => [...(list || [])].filter((f) => /^image\//.test(f.type));
     function onPaste(e) {
       const found = pictures(e.clipboardData && e.clipboardData.files);
-      if (!onPictures || !found.length) return;
+      if (!onPictures || !found.length || ed.leoCopied(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'))?.alone === false) return;
       e.preventDefault();
       onPictures(found);
     }

@@ -588,6 +588,17 @@ test('a $$ math block is one block to edit, and a one-line $$x$$ is a line', () 
   assert.deepEqual(ed.splitBlocks(lines).map((b) => [b.start, b.end, b.kind]), [[0, 1, 'line'], [1, 4, 'math'], [4, 5, 'line'], [5, 6, 'line']]);
 });
 
+test('leoCopied recognises leo\'s own copy by its html marker and text, and nothing else', () => {
+  const source = 'Before the picture.\n\n![Pasted picture](attachments/a.png)';
+  const html = (kept, from) => `<div data-leo="${md.escape(kept)}" data-leo-from="${md.escape(from)}"><p>x</p></div>`;
+  assert.deepEqual(ed.leoCopied(html(source, 'work'), 'Before the picture.'), { source, from: 'work', alone: false });
+  assert.deepEqual(ed.leoCopied(html('![Box](attachments/a.png)', ''), ''), { source: '![Box](attachments/a.png)', from: '', alone: true });
+  assert.equal(ed.leoCopied(html(source, ''), 'Something else'), null, 'text that is not the copy\'s own');
+  assert.equal(ed.leoCopied(html('![x](https://example.com/a.png)', ''), ''), null, 'a picture outside leo');
+  assert.equal(ed.leoCopied('<div><p>plain</p></div>', 'plain'), null);
+  assert.equal(ed.leoCopied('', ''), null);
+});
+
 setImmediate(() => {
   for (const [name, fn] of cases) {
     try {

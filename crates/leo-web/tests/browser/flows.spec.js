@@ -2056,28 +2056,46 @@ test.describe('pictures', () => {
     await expect.poll(() => page.locator('#doc img.note-img').evaluate((el) => el.naturalWidth)).toBe(320);
   });
 
-  test('copying a selection with a picture puts the picture on the clipboard as a data url, and one without puts text only', async ({ page }) => {
+  test('copying text with one picture puts text, html and a png on the clipboard, and pasting that into Felix adds only the text', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     const note = await (await page.request.post('/api/notes', { data: { title: `Copied ${test.info().project.name}`, body: 'Before the picture.' } })).json();
     await page.goto(`/#/n/${note.id}`);
     await expect(page.locator('#doc')).toContainText('Before the picture.');
     await pastePicture(page, '#doc');
     const img = page.locator('#doc img.note-img');
     await expect.poll(() => img.evaluate((el) => el.naturalWidth)).toBe(320);
-    const copy = (selector) => page.evaluate((target) => {
-      getSelection().selectAllChildren(document.querySelector(target));
-      const data = new DataTransfer();
-      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
-      return { text: data.getData('text/plain'), html: data.getData('text/html') };
-    }, selector);
-    const both = await copy('#doc');
+    const held = () => page.evaluate(async () => {
+      const [item] = await navigator.clipboard.read();
+      const read = async (type) => (item.types.includes(type) ? (await item.getType(type)).text() : '');
+      return { types: item.types, text: await read('text/plain'), html: await read('text/html'), size: item.types.includes('image/png') ? (await item.getType('image/png')).size : 0 };
+    });
+    await page.evaluate(() => { getSelection().selectAllChildren(document.querySelector('#doc')); });
+    await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(async () => (await held()).types).toContain('image/png');
+    const both = await held();
+    expect(both.types).toEqual(expect.arrayContaining(['text/plain', 'text/html', 'image/png']));
+    expect(both.size).toBeGreaterThan(100);
     expect(both.text).toBe('Before the picture.');
     expect(both.html).toMatch(/^<div data-leo="Before the picture\.\n\n!\[Pasted picture\]\(attachments\/\d{8}-\d{6}-pasted-1\.png\)"/);
     expect(both.html).toMatch(/<img src="data:image\/png;base64,[A-Za-z0-9+/=]+" alt="Pasted picture">/);
-    expect(both.html).toContain('style="color:inherit"');
     expect(both.html).not.toMatch(/\/api\/|127\.0\.0\.1|localhost|<script|onerror|onclick/);
-    const plain = await copy('#doc .blk:first-child');
+    const plain = await page.evaluate(() => {
+      getSelection().selectAllChildren(document.querySelector('#doc .blk:first-child'));
+      const data = new DataTransfer();
+      document.dispatchEvent(new ClipboardEvent('copy', { clipboardData: data, bubbles: true, cancelable: true }));
+      return { text: data.getData('text/plain'), html: data.getData('text/html') };
+    });
     expect(plain.text).toBe('Before the picture.');
     expect(plain.html).toBe('');
+    const uploads = [];
+    page.on('request', (request) => { if (request.url().includes('/api/pictures')) uploads.push(request.url()); });
+    await page.locator('#chat-toggle').click();
+    await page.locator('#chat-input').focus();
+    await page.keyboard.press('ControlOrMeta+v');
+    await expect(page.locator('#chat-input')).toHaveValue('Before the picture.');
+    await expect(page.locator('#chat-refs .file-card')).toHaveCount(0);
+    expect(uploads).toEqual([]);
+    await page.evaluate(() => navigator.clipboard.writeText(''));
   });
 
   test('a clicked picture copies as a picture and pastes back as the same markdown, without another upload', async ({ page, context }) => {

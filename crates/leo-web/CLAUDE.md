@@ -199,7 +199,7 @@ Decided: one app, window only (2026-10-31).
   on a dark page. A picture alone (clicked, or the only thing selected) is copied with `navigator.clipboard.write` as
   `image/png` and that html (a JPEG there when the PNG passes 15 MB; halved in size until the PNG is under 60 MB, since
   WebKit refuses over about 100 MB), called inside the copy event and never with `clipboardData.setData`, which WebKit
-  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Cut always uses the plain path.
+  refuses together. A picture not loaded yet is loaded first the same way, alone or with text. Text with exactly one drawn picture from a copy (2026-11-26, the owner's call: pasting into T3 Code lost the picture) goes the same way with `text/plain`, `text/html` and `image/png` (the PNG built lazily inside the `ClipboardItem`); two or more pictures get no PNG. Every leo paste site (doc.js `onLeoPaste` and `onPaste`, chat.js's input, events.js, recording.js) skips the clipboard's files when `leoEditing.leoCopied(html, text)` says it is leo's own copy, so pasting one back never uploads the PNG. Cut always uses the plain path.
   A selection that names an outside picture (`https:`, `//`) keeps its markdown as the text and gets no wrapper.
   `onLeoPaste` (doc.js, capture) puts the markdown back, with no upload, only when `leoEditing.ownCopy` says
   it is leo's: its text without pictures equals `text/plain` (pictures only when there is none) and no picture is

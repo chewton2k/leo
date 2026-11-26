@@ -374,7 +374,7 @@ warnUnsaved();
 document.addEventListener('paste', (e) => {
   if (e.defaultPrevented) return;
   const files = [...((e.clipboardData && e.clipboardData.files) || [])];
-  if (!files.length) return;
+  if (!files.length || leoEditing.leoCopied(e.clipboardData.getData('text/html'), e.clipboardData.getData('text/plain'))?.alone === false) return;
   if ($('#upload-list')) {
     e.preventDefault();
     picked.push(...pastedFiles(files, picked.length));

@@ -1930,11 +1930,16 @@ test('copying pictures: a selection with a picture puts the markdown in data-leo
     const page = await context.newPage();
     const errors = await pictureNote(page, url);
     await page.evaluate(() => {
-      document.addEventListener('copy', e => { window.written = { text: e.clipboardData.getData('text/plain'), html: e.clipboardData.getData('text/html') }; });
+      Object.defineProperty(navigator.clipboard, 'write', { configurable: true, value: async ([item]) => {
+        const read = async type => (await item.getType(type)).text();
+        window.written = { types: item.types, text: await read('text/plain'), html: await read('text/html') };
+      } });
     });
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('ControlOrMeta+c');
+    await expect.poll(() => page.evaluate(() => window.written)).toBeTruthy();
     const written = await page.evaluate(() => window.written);
+    expect([...written.types].sort()).toEqual(['image/png', 'text/html', 'text/plain']);
     expect(written.text).not.toContain('![');
     expect(written.text).toContain('Before the picture');
     expect(written.html.startsWith('<div data-leo="')).toBe(true);
