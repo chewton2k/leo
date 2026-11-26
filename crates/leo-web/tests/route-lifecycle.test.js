@@ -28,6 +28,24 @@ test('late route errors cannot redirect or overwrite a newer draft', async () =>
     assert.equal(context.app.innerHTML, 'new draft', kind);
   }
 });
+test('a page keeps its body classes until the next page draws', async () => {
+  const {context} = fixture();
+  const toggled = [];
+  context.document.body.classList.toggle = (name, on) => toggled.push(name);
+  context.location.hash = '#/calendar';
+  context.showCalendar = async () => {};
+  context.showNote = () => new Promise(() => {});
+  await context.render();
+  context.location.hash = '#/n/slow';
+  context.render();
+  context.location.hash = '#/boards';
+  context.showBoards = async () => {};
+  context.render();
+  context.location.hash = '#/settings';
+  context.showSettings = async () => {};
+  await context.render();
+  assert.deepEqual(toggled.filter(name => /^on-(calendar|boards|settings)$/.test(name)), []);
+});
 test('an older visit to the same route cannot handle its late error or success', async () => {
   for (const failed of [false, true]) {
     const {context, calls} = fixture();

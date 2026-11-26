@@ -1302,7 +1302,7 @@ The nearest-notes list (`Vectors::neighbours`, which decides which pairs of note
   back over the exit share before the pill returns, none under `stillMotion()`; the card is
   focusable); nothing is saved and a click never pins it (mouse presses on it do
   not take focus). A page swap that finds it hidden with tasks loaded redraws it (the `#app` childList
-  observer), so leaving Home or the Calendar shows it at once rather than at the next poll. Home draws the date, one sentence
+  observer), so leaving Home or the Calendar shows it at once rather than at the next poll, with the page and without its own fade (`.still`). It hides by `state.view`, never the address, so it stays off the old page while a note loads; `chrome()` alone sets `on-calendar`, `on-boards` and `on-settings` (Settings, Trash, Keeping), so a page keeps its layout until the next one paints. Home draws the date, one sentence
   (`schedule.dateline`, local data only, never "overdue"), the week ribbon
   (`#home-week`, 2026-11-15, 36 px reserved from first paint: the seven days from
   `S.weekStart(calLocale())`, today in `calRing(key, true)`, the end frame that

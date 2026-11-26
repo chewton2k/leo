@@ -7075,4 +7075,71 @@ test.describe('round 2 redesign', () => {
     await expect(page.locator('#cal-side .cal-peek-title'), 'the peek is gone while the new task is typed').toHaveCount(0);
     await expect(page.locator('#cal-side .cal-mini')).toBeVisible();
   });
+
+  test('leaving the calendar or Boards for a note keeps that page and its layout until the note paints, and the Tasks card arrives with the note', async ({ page }) => {
+    test.skip(test.info().project.name !== 'desktop', 'the Tasks card is for wider screens');
+    const tag = tagOf();
+    const note = await makeNote(page, `Slow note ${tag}`, 'Body');
+    expect((await page.request.post('/api/tasks', { data: { title: `Dock task ${tag}` } })).ok()).toBe(true);
+    const board = await (await page.request.post('/api/boards', { data: { name: `Slow board ${tag}` } })).json();
+    for (const [hash, selector, shown] of [['#/calendar', '#cal-main', 'on-calendar'], [`#/boards/${board.id}`, '.kanban-cols', 'on-boards']]) {
+      await page.goto(hash);
+      await expect(page.locator(selector)).toBeVisible();
+      await expect(page.locator('body')).toHaveClass(new RegExp(shown));
+      const before = await page.locator(selector).boundingBox();
+      let reached;
+      const pending = new Promise((resolve) => { reached = resolve; });
+      let release;
+      const held = new Promise((resolve) => { release = resolve; });
+      await page.route(`**/api/notes/${note.id}`, async (route) => {
+        reached();
+        await held;
+        await route.continue();
+      });
+      await page.evaluate(() => {
+        window.leoFrames = [];
+        const look = () => {
+          if (!window.leoFrames) return;
+          const dock = document.getElementById('tasks-window');
+          window.leoFrames.push({ doc: Boolean(document.getElementById('doc')), dock: Boolean(dock && !dock.hidden), fading: dock ? dock.getAnimations().length : 0 });
+          requestAnimationFrame(look);
+        };
+        look();
+      });
+      await page.evaluate((id) => { location.hash = `#/n/${id}`; }, note.id);
+      await pending;
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      await expect(page.locator('body'), `${hash} keeps its layout while the note loads`).toHaveClass(new RegExp(shown));
+      expect(await page.locator(selector).boundingBox(), `${hash} does not move while the note loads`).toEqual(before);
+      await expect(page.locator('#tasks-window'), 'the Tasks card does not show over the old page').toBeHidden();
+      release();
+      await expect(page.locator('#doc')).toBeVisible();
+      await expect(page.locator('body')).not.toHaveClass(new RegExp(shown));
+      await expect(page.locator('#tasks-window')).toBeVisible();
+      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+      const frames = await page.evaluate(() => { const seen = window.leoFrames; window.leoFrames = null; return seen; });
+      expect(frames.filter((frame) => frame.doc !== frame.dock), 'the note and the Tasks card arrive in the same frame').toEqual([]);
+      expect(frames.filter((frame) => frame.fading), 'the card has no fade of its own').toEqual([]);
+      await page.unroute(`**/api/notes/${note.id}`);
+    }
+  });
+
+  test('a note fades in once when it is reached again through the calendar', async ({ page }) => {
+    const note = await makeNote(page, `Fade ${tagOf()}`, 'Body');
+    await page.evaluate(() => {
+      window.leoFades = 0;
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (...args) {
+        if (this.id === 'doc') window.leoFades++;
+        return animate.apply(this, args);
+      };
+    });
+    await page.goto(`/#/n/${note.id}`);
+    await expect(page.locator('#doc')).toBeVisible();
+    await page.evaluate(() => { window.leoFades = 0; location.hash = '#/calendar'; });
+    await expect(page.locator('#cal-main')).toBeVisible();
+    await page.evaluate((id) => { location.hash = `#/n/${id}`; }, note.id);
+    await expect(page.locator('#doc')).toBeVisible();
+    expect(await page.evaluate(() => window.leoFades)).toBe(1);
+  });
 });

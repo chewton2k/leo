@@ -24,7 +24,7 @@ async function boardsFixture(browser, run, { width = 1280, height = 800 } = {}) 
     class Locked extends Error {}
     class Offline extends Error {}
     let seq=0,state={view:null};
-    const chrome=()=>{}, skeleton=n=>'<div class="skeleton"></div>'.repeat(n);
+    const chrome=()=>{}, drawTasksWindow=()=>{}, skeleton=n=>'<div class="skeleton"></div>'.repeat(n);
     const empty=(icon,title,text)=>'<div class="empty">'+icon+'<h3>'+esc(title)+'</h3><p>'+esc(text)+'</p></div>';
     const stillMotion=()=>false;
     const requestId=()=>'r'+Math.random().toString(36).slice(2);

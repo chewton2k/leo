@@ -64,7 +64,8 @@ async function showCalendar() {
   cal.peek = null;
   cal.scrolled = '';
   cal.ringAt = null;
-  app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>';
+  swap('calendar', () => { app.innerHTML = '<div class="cal-page" id="cal-page"><section class="cal-main" id="cal-main" aria-label="Calendar"></section><aside class="cal-side" id="cal-side"></aside></div>'; });
+  drawTasksWindow();
   calSized.disconnect();
   calSized.observe($('#cal-main'));
   drawCalendar();
@@ -2063,15 +2064,17 @@ function drawHomeRecent() {
   if (at) box.querySelector(`[href="${CSS.escape(at)}"]`)?.focus({ preventScroll: true });
 }
 
-function drawTasksWindow() {
+function drawTasksWindow(arrived = false) {
   const tasks = tasksWin.tasks || (cal.data && cal.data.tasks) || [];
   const groups = tasksGroups(tasks, true);
   const open = groups.reduce((n, [, list]) => n + list.length, 0);
   const home = tasksAtHome();
   if (home) drawHomeToday();
   // Calendar and Home list these tasks themselves, and on Boards the panel would cover the columns.
-  const here = home || /^#\/(?:calendar|boards)(?:\/|$)/.test(location.hash);
+  const here = home || ['calendar', 'boards'].includes(state.view);
+  const hidden = tasksBox.hidden;
   tasksBox.hidden = !open || here || state.view === 'locked';
+  if (hidden) tasksBox.classList.toggle('still', arrived);
   tasksSync();
   if (tasksBox.hidden) { fitTasksWindow(); return; }
   const late = groups.find(([name]) => name === 'Overdue');
@@ -2105,7 +2108,7 @@ function fitTasksWindow() {
   if (!tasksBox.classList.contains('open')) document.body.style.setProperty('--dock-room', `${Math.ceil(innerHeight - dock().getBoundingClientRect().top + 16)}px`);
 }
 
-new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow() : fitTasksWindow())).observe(app, { childList: true });
+new MutationObserver(() => (tasksBox.hidden && tasksWin.tasks?.length ? drawTasksWindow(true) : fitTasksWindow())).observe(app, { childList: true });
 let railFit = 0;
 new MutationObserver(() => {
   if (railFit || !(app.querySelector('.outline-ticks') || tasksBox.style.getPropertyValue('--tasks-room'))) return;

@@ -301,10 +301,6 @@ async function render() {
   const generation = ++renderGeneration;
   hideAskFloat();
   clearTimeout(cal.timer);
-  // Plain groups: tests/wording.rs flags a colon right before "settings" (an old command).
-  document.body.classList.toggle('on-settings', /^#\/(settings|trash)(\/|$)/.test(location.hash));
-  document.body.classList.toggle('on-calendar', /^#\/calendar/.test(location.hash));
-  document.body.classList.toggle('on-boards', /^#\/boards(?:\/|$)/.test(location.hash));
   if (/^#\/interviews(?:\/|$)/.test(location.hash)) {
     history.replaceState(history.state, '', '#/');
     try { localStorage.setItem(LAST_PLACE_KEY, '#/'); } catch (e) {}

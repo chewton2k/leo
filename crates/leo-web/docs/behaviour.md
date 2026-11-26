@@ -626,6 +626,11 @@ save retains the editor and address. Only a draft successfully persisted in this
 browser offers an explicit Leave, draft kept action, which rechecks session and
 persistence at activation; an in-memory-only draft cannot bypass the save.
 
+Opening a note from the Calendar or Boards leaves that page and its layout exactly
+as they were until the note arrives; the note, the Tasks card and the page's own
+fade then appear together, and coming back to the same note through another page
+fades it in again.
+
 The browser draft is written at most four times a second while typing, and at
 once before a save starts, when the window hides and when leo quits. A draft up
 to 256 KB lives in localStorage; a larger one is one whole IndexedDB record
