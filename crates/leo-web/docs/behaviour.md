@@ -1418,6 +1418,10 @@ could not be read says so with Retry. New task is an outlined button (`.cal-new`
   (times and ETag / Last-Modified in leo.db); `ics::read_from` expands repeats, EXDATE and
   moved instances, all-day items are dates. GET `/api/schedule?from&to&live`
   (≤43 days); the page refreshes every 2.5 min while visible.
+  Pasting a link that passes `calendarAddressError` into Settings → Calendar connects it at once
+  (`addCalendar`, one request while Connect is checking). A Google share link (`?cid=`) is refused as
+  before, with a link to that calendar's own settings page where its secret address is
+  (`calendarSettingsLink`, an id of letters, digits, `_`, `-` and `=` only; format unverified).
 
 - Offer to record (2026-11-09, item L1): `calendar::offer_to_record`, a 60 s
   background task (stops with the engine; only when `Powers.app_settings` is

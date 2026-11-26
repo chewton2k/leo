@@ -4151,6 +4151,39 @@ test('a calendar is connected in Settings by pasting one link, and can be remove
   await expect(page.locator('.cal-card')).toContainText('Not connected');
 });
 
+test("pasting a calendar link connects it, and a Google share link offers that calendar's settings", async ({ page }) => {
+  let linked = [];
+  const posts = [];
+  await page.route('**/api/calendar', async (route) => {
+    if (route.request().method() === 'POST') {
+      posts.push(route.request().postDataJSON().link);
+      linked = [{ id: 'c1', name: 'Classes', added_at: new Date().toISOString(), problem: null }];
+    }
+    return route.fulfill({ json: { connected: linked.length > 0, calendars: linked, events: [], refreshing: false } });
+  });
+  await page.goto('/#/settings/calendar');
+  const card = page.locator('.cal-card');
+  const field = card.locator('#calendar-link');
+  const error = card.locator('#calendar-error');
+  const paste = (value, times = 1) => field.evaluate((el, [text, count]) => {
+    el.value = text;
+    for (let i = 0; i < count; i++) el.dispatchEvent(new InputEvent('input', { inputType: 'insertFromPaste', bubbles: true }));
+  }, [value, times]);
+  await paste('https://calendar.google.com/calendar/u/0?cid=YWJjQGV4YW1wbGUuY29t');
+  await expect(error).toContainText('That is the share link');
+  const link = error.locator('a');
+  await expect(link).toHaveText('Open this calendar\'s settings');
+  await expect(link).toHaveAttribute('href', 'https://calendar.google.com/calendar/u/0/r/settings/calendar/YWJjQGV4YW1wbGUuY29t');
+  await expect(link).toHaveAttribute('target', '_blank');
+  await paste('https://calendar.google.com/calendar/u/0?cid=a%22%3E%3Cb');
+  await expect(error).toContainText('That is the share link');
+  await expect(error.locator('a'), 'an odd calendar id never becomes a link').toHaveCount(0);
+  expect(posts).toEqual([]);
+  await paste('https://calendar.google.com/calendar/ical/me/private-abc/basic.ics', 2);
+  await expect(page.locator('.cal-card')).toContainText('Classes');
+  expect(posts, 'a paste connects once').toEqual(['https://calendar.google.com/calendar/ical/me/private-abc/basic.ics']);
+});
+
 test('dropping one note on another combines them in the background with progress, then shows the result first, and Undo brings both back', async ({ page }) => {
   const tag = Date.now().toString(36);
   const folder = `combine-${tag}`;

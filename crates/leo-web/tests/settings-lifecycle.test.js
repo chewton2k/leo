@@ -111,11 +111,11 @@ test('the calendar card guides each provider and checks the address before savin
   const steps = { outerHTML: '' };
   nodes['.cal-steps'] = steps;
   nodes['#calendar-link'] = field();
-  nodes['#calendar-error'] = { textContent: 'old' };
+  nodes['#calendar-error'] = { innerHTML: 'old' };
   for (const fn of listeners.change) fn({ target: { closest: () => ({ value: 'outlook' }) } });
   assert.equal(context.state.calendarProvider, 'outlook');
   assert.ok(steps.outerHTML.includes('outlook.live.com') && !steps.outerHTML.includes('google.com'));
-  assert.equal(nodes['#calendar-error'].textContent, '');
+  assert.equal(nodes['#calendar-error'].innerHTML, '');
   const share = 'That is the share link. Paste the secret address that ends in .ics.';
   const generic = 'Paste the calendar address that starts with https:// or webcal://.';
   assert.equal(context.calendarAddressError('https://calendar.google.com/calendar/u/0?cid=abc', 'google'), share);
@@ -126,9 +126,33 @@ test('the calendar card guides each provider and checks the address before savin
   context.state.calendarProvider = 'google';
   nodes['#calendar-link'].value = 'https://calendar.google.com/calendar/u/0?cid=abc';
   return context.addCalendar().then(() => {
-    assert.equal(nodes['#calendar-error'].textContent, share);
+    assert.equal(nodes['#calendar-error'].innerHTML, `${share} <a href="https://calendar.google.com/calendar/u/0/r/settings/calendar/abc" target="_blank" rel="noopener noreferrer">Open this calendar's settings</a>`);
     assert.equal(nodes['#calendar-link'].attrs['aria-invalid'], 'true');
-  });
+    nodes['#calendar-link'].value = 'https://calendar.google.com/calendar/u/0?cid=a"b';
+    return context.addCalendar();
+  }).then(() => {
+    assert.equal(nodes['#calendar-error'].innerHTML, share);
+    nodes['#calendar-link'].value = 'hello';
+    return context.addCalendar();
+  }).then(() => assert.equal(nodes['#calendar-error'].innerHTML, generic));
+});
+test('pasting into the calendar link connects it once, and typing never does', () => {
+  const listeners = {};
+  const nodes = {};
+  const sent = [];
+  const context = { app: { addEventListener() {} }, document: { addEventListener: (type, fn) => (listeners[type] = [...(listeners[type] || []), fn]) }, window: {}, ICON: new Proxy({}, { get: () => '' }), esc: text => String(text), $: sel => nodes[sel] || null, api: async (url, options) => { sent.push(options.body.link); return { calendars: [] }; }, fail: () => sent.push('failed'), state: {}, seq: 1 };
+  vm.createContext(context);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/settings.js'), 'utf8'), context);
+  const button = { disabled: false };
+  nodes['#calendar-link'] = { id: 'calendar-link', value: 'https://calendar.google.com/calendar/ical/me/private-abc/basic.ics', setAttribute() {} };
+  nodes['#calendar-error'] = { innerHTML: '' };
+  nodes['[data-action="calendar-add"]'] = button;
+  const typed = (inputType) => listeners.input.forEach((fn) => fn({ target: nodes['#calendar-link'], inputType }));
+  typed('insertText');
+  assert.deepEqual(sent, []);
+  typed('insertFromPaste');
+  typed('insertFromPaste');
+  assert.deepEqual(sent, ['https://calendar.google.com/calendar/ical/me/private-abc/basic.ics']);
 });
 test('the calendar card offers to record when an event starts, on by default once connected', async () => {
   const listeners = {};
