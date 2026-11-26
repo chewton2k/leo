@@ -920,7 +920,7 @@ impl ClaudeSession {
                 return Err(ProviderError::Retryable(format!(
                     "{}: claude stopped: {}",
                     self.name,
-                    with_sign_in(Agent::ClaudeCode, &self.bin, &last_words(said))
+                    note_sign_in(Agent::ClaudeCode, &self.bin, &last_words(said))
                 )));
             }
             Some((false, said)) if heard.answer.trim().is_empty() => said.trim().to_string(),
@@ -1432,7 +1432,7 @@ impl AgentCli {
             let said = if told.is_empty() {
                 format!("{}.", last_words(&heard.answer).trim_end_matches('.'))
             } else {
-                with_sign_in(self.agent, &self.bin, &told)
+                note_sign_in(self.agent, &self.bin, &told)
             };
             return Err(ProviderError::Retryable(format!(
                 "{}: {} stopped ({status}): {said}",
@@ -1538,7 +1538,7 @@ fn signed_out(said: &str) -> bool {
 
 static REFUSED: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-pub(super) fn with_sign_in(agent: Agent, bin: &str, said: &str) -> String {
+pub(super) fn note_sign_in(agent: Agent, bin: &str, said: &str) -> String {
     let said = said.trim().trim_end_matches('.');
     if !signed_out(said) {
         return format!("{said}.");
@@ -3268,7 +3268,7 @@ mod sign_in_tests {
 
     #[test]
     fn only_a_programs_own_sign_in_words_mark_its_login_refused() {
-        use super::{answered, refused, with_sign_in, Agent};
+        use super::{answered, note_sign_in, refused, Agent};
         let bin = "/fake/login/401/sign-in-words";
         for said in [
             "usage limit reached, 429",
@@ -3280,7 +3280,7 @@ mod sign_in_tests {
             "used 1,401 tokens",
             "",
         ] {
-            assert_eq!(with_sign_in(Agent::Codex, bin, said), format!("{said}."));
+            assert_eq!(note_sign_in(Agent::Codex, bin, said), format!("{said}."));
             assert!(!refused(bin), "{said}");
         }
         for said in [
@@ -3290,11 +3290,11 @@ mod sign_in_tests {
             "Not logged in · Please run /login",
             "request failed with status:401",
         ] {
-            let text = with_sign_in(Agent::Codex, bin, said);
+            let text = note_sign_in(Agent::Codex, bin, said);
             let end = " If it is not signed in, choose Codex in Writing AI and press Sign in.";
             assert!(text.ends_with(end) && !text.contains(".."), "{text}");
             assert!(refused(bin), "{said}");
-            with_sign_in(Agent::Codex, bin, said);
+            note_sign_in(Agent::Codex, bin, said);
             answered(bin);
             assert!(!refused(bin), "{said}");
         }

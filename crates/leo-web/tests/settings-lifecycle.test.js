@@ -296,6 +296,25 @@ test('a refused login shows Sign in until Test connection passes', async () => {
   refused = fail = false;
   await test();
   assert.match(card, />Ready</);
+  const api = context.api;
+  const button = { dataset: { task: 'writing' }, disabled: false };
+  let disabledWhileReading = null;
+  context.api = async (url) => {
+    if (url === '/api/settings') disabledWhileReading = button.disabled;
+    return api(url);
+  };
+  fail = true;
+  await context.testAi(button);
+  assert.deepEqual([disabledWhileReading, button.disabled], [true, true], 'Test connection stays off until the card is redrawn with a fresh button');
+  context.api = async (url) => {
+    if (url === '/api/settings/test') out.isConnected = false;
+    return api(url);
+  };
+  const reads = plans;
+  card = 'another provider';
+  button.disabled = false;
+  await context.testAi(button);
+  assert.deepEqual([card, plans, button.disabled], ['another provider', reads, false], 'a card switched to another provider meanwhile keeps its own result');
 });
 
 test('a sign-in check under way never turns a refused login Ready', async () => {

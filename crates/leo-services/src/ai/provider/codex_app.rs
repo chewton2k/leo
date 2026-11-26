@@ -171,7 +171,7 @@ impl CodexThread {
     }
 
     fn said(&self, text: &str) -> String {
-        super::agent_cli::with_sign_in(Agent::Codex, &self.bin, text)
+        super::agent_cli::note_sign_in(Agent::Codex, &self.bin, text)
     }
 
     fn send(&mut self, message: Value) -> ProviderResult<()> {
