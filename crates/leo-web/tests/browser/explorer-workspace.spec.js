@@ -505,6 +505,8 @@ test('focusing a folder shows only it, new notes land in it, a drop on the tree 
   const after = await edges(page.locator(`#side .side-folder[data-drop-dir="${child}"]`));
   expect(after, 'the focused folder\'s children sit at the root indentation with the same guide line').toEqual(before);
   await page.reload();
+  await page.goto('/#/');
+  await expect(page.locator('#home-line'), 'home says its sentence while a folder is focused').not.toBeEmpty();
   await openNote(page, outside);
   await expect(leave(page)).toBeVisible();
   await page.locator('#side .side-new').click();
@@ -541,6 +543,15 @@ test('a focused folder renamed in leo stays focused, and trashing it clears focu
   await expect(folderRow(page, `${dir}/Child`)).toBeVisible();
   await expect(leave(page)).toBeVisible();
   await expect(folderRow(page, other)).toHaveCount(0);
+  await expect(leave(page), 'the bar names the focused folder').toContainText(dir);
+  await options(page, leave(page), 'Rename');
+  const again = name();
+  await page.getByRole('textbox', { name: 'Folder name' }).fill(again);
+  await page.getByRole('textbox', { name: 'Folder name' }).press('Enter');
+  await expect(leave(page)).toContainText(again);
+  await expect(folderRow(page, `${again}/Child`)).toBeVisible();
+  await page.locator('.toast', { hasText: again }).getByRole('button', { name: 'Undo' }).click();
+  await expect(leave(page)).toContainText(dir);
   await page.reload();
   await expect(folderRow(page, child)).toBeVisible();
   const response = await page.request.post('/api/trash/move', { data: { notes: [], dirs: [dir] } });

@@ -1987,7 +1987,7 @@ function drawHomeToday() {
   box.innerHTML = `${early.length ? `<div class="tasks-group">Earlier</div>${early.map((t) => tasksRow(t)).join('')}` : ''}${day.length || shown.length ? `<div class="tasks-group">Today${day.length ? `<span class="home-tally" title="${said}">${homeTally(today)}<span class="home-tally-said">${said}</span></span>` : ''}</div>${shown.map(homeEventRow).join('')}${day.map((t) => tasksRow(t)).join('')}` : ''}${more ? `<a class="home-more" href="#/calendar"><b>${more} more</b> in Calendar</a>` : ''}`;
   inkSettle(tasksInked);
   if (!box.hidden) refocusTasks(box, focus);
-  const root = side.notes.get('');
+  const root = side.notes.get(side.root);
   const notes = side.loaded && root && root.loaded && !side.tasks ? root.items.length + side.folders.length : null;
   const ready = known && (notes !== null || !sideActive() || (root && !root.loading));
   const parts = ready ? S.dateline({ tasks, events: tasksWin.events || [], now, notes, locale: calLocale() }) : [];

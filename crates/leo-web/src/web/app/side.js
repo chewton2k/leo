@@ -77,9 +77,9 @@ const sideResize = window.leoPaneResize.create({
   onChange: () => window.dispatchEvent(new Event('resize')),
 });
 
-function sideRow(action, icon, label, { on = false, attrs = '', count = '', hint = label } = {}) {
+function sideRow(action, icon, label, { on = false, attrs = '', count = '', hint = label, aria = label } = {}) {
   const tail = count === '' ? '' : `<span class="side-count side-label">${esc(String(count))}</span>`;
-  return `<button class="side-row${on ? ' on' : ''}" data-action="${action}"${attrs} aria-label="${esc(label)}" title="${esc(hint)}"${on ? ' aria-current="page"' : ''}>${icon}<span class="side-label">${esc(label)}</span>${tail}</button>`;
+  return `<button class="side-row${on ? ' on' : ''}" data-action="${action}"${attrs} aria-label="${esc(aria)}" title="${esc(hint)}"${on ? ' aria-current="page"' : ''}>${icon}<span class="side-label">${esc(label)}</span>${tail}</button>`;
 }
 
 function sidePlace() {
@@ -151,7 +151,7 @@ function drawSide() {
       </nav>
     </div>
     <div class="side-explorer" id="side-explorer">
-      <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it to the top level"><button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></div>
+      <div class="side-group" data-drop-dir="" title="Drop a folder or note here to move it ${side.root ? `into ${esc(folderLabel(side.root))}` : 'to the top level'}"><button class="side-row side-new" data-action="new" data-dir="${esc(actionDir)}" aria-label="New note" aria-keyshortcuts="${shortcutAria(shortcutKeys('new'))}" title="New note${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''} (${shortcutText(shortcutKeys('new'))})">${ICON.filePlus}<span class="side-label">New note</span><kbd aria-hidden="true">${shortcutText(shortcutKeys('new'))}</kbd></button><button class="side-add" data-action="new-folder" data-parent="${esc(actionDir)}" aria-label="New folder" title="New folder${actionDir ? ` in ${esc(folderLabel(actionDir))}` : ''}">${ICON.folderPlus}</button></div>
       <div class="side-filter-row"><label class="field side-filter">${ICON.search}<input id="side-filter" type="search" placeholder="Filter" aria-label="Filter loaded notes" autocomplete="off" spellcheck="false" value="${esc(side.filter || '')}"></label><button class="side-add side-sort${side.sort !== 'title' || side.flip || side.tasks ? ' on' : ''}" data-action="side-sort" aria-label="Sort notes" title="${esc(`Sorted by ${SIDE_SORTS[side.sort].text.toLowerCase()}, ${SIDE_SORTS[side.sort].ways[side.flip ? 1 : 0].toLowerCase()}${side.tasks ? ', open tasks only' : ''}`)}" aria-haspopup="menu" aria-expanded="${Boolean(popup?.owner.matches('[data-action="side-sort"]'))}">${ICON.sort}</button></div>
       ${sideLeave()}<nav class="side-nav side-tree" aria-label="Folders" data-drop-dir="" tabindex="0">
         ${folders || '<p class="side-none">Folders you make show up here.</p>'}
@@ -207,7 +207,7 @@ function revealNoteRow(tree) {
 }
 
 function sideLeave() {
-  return side.root ? sideRow('side-unfocus', ICON.close, 'Show all notes', { hint: `Showing only ${folderLabel(side.root)}` }) : '';
+  return side.root ? sideRow('side-unfocus', ICON.close, folderLabel(side.root), { attrs: ` data-dir="${esc(side.root)}"`, aria: `${folderLabel(side.root)}: show all notes`, hint: `Showing only ${folderLabel(side.root)}. Click to show all notes` }) : '';
 }
 
 function keepFocus() {
@@ -649,6 +649,7 @@ function explorerTarget(el) {
   if (note) return { kind: 'note', id: note.dataset.id, dir: note.dataset.from || '' };
   const folder = el.closest('.side-folder');
   if (folder) return { kind: 'folder', dir: folder.dataset.dropDir };
+  if (el.closest('[data-action="side-unfocus"]')) return { kind: 'folder', dir: side.root };
   if (el.closest('.side-group')) return { kind: 'root', dir: creationDir() };
   return { kind: 'root', dir: el.closest('.side-note-status, .side-kids')?.dataset.dropDir || side.root };
 }
@@ -659,7 +660,7 @@ function explorerMenu(el, event = null) {
   if (!owner) return;
   const rows = target.kind === 'note'
     ? [['open', 'Open', ICON.note], ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], ['combine', 'Combine into…', ICON.note], null, ['trash', 'Move to trash', ICON.trash, true]]
-    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [['focus', 'Focus on this folder', ICON.search], null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
+    : [['new', target.dir ? 'New note here' : 'New note', ICON.filePlus, false, target.dir === creationDir() && !$('.scrim') ? `<kbd aria-hidden="true">${esc(shortcutText(shortcutKeys('new')))}</kbd>` : ''], ['folder', target.dir ? 'New folder here' : 'New folder', ICON.folderPlus], ...(target.kind === 'folder' && target.dir ? [...(target.dir === side.root ? [] : [['focus', 'Focus on this folder', ICON.search]]), null, ['rename', 'Rename', ICON.pen], ['move', 'Move to…', ICON.move], null, ['trash', 'Move to trash', ICON.trash, true]] : [])];
   popupMenu(owner, {
     label: target.kind === 'note' ? 'Note options' : 'Folder options',
     point: event && { x: event.clientX, y: event.clientY },
@@ -670,13 +671,13 @@ function explorerMenu(el, event = null) {
 addEventListener('focus', sideFreshCheck);
 document.addEventListener('visibilitychange', sideFreshCheck);
 document.addEventListener('contextmenu', (event) => {
-  const el = event.target.closest('.side-tree, .side-group');
+  const el = event.target.closest('.side-tree, .side-group, [data-action="side-unfocus"]');
   if (!el) return;
   event.preventDefault();
   explorerMenu(event.target, event);
 });
 document.addEventListener('keydown', (event) => {
-  if (!(event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') || !event.target.closest('.side-tree')) return;
+  if (!(event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') || !event.target.closest('.side-tree, [data-action="side-unfocus"]')) return;
   event.preventDefault();
   explorerMenu(event.target);
 });
@@ -686,7 +687,7 @@ function explorerFocus(at) {
   const rows = (selector) => [...host.querySelectorAll(selector)];
   const note = at.kind === 'note' && rows('.side-note[data-id]').find((row) => row.dataset.id === at.id);
   if (note) return note;
-  const folders = rows('.side-row[data-action="open-folder"]');
+  const folders = rows('.side-row[data-action="open-folder"], [data-action="side-unfocus"]');
   for (let dir = at.dir || ''; dir; dir = parentOf(dir)) {
     const row = folders.find((el) => el.dataset.dir === dir);
     if (row) return row;

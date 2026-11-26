@@ -177,7 +177,7 @@ test('home opens on the date and one plain sentence, keeps today\'s done rows an
     const loadSchedule = () => {};
     const calFind = id => cal.data.tasks.find(task => task.id === id);
     const toast = () => {};
-    const side = {loaded: true, folders: [], notes: new Map([['', {loaded: true, loading: false, items: [{id: 'n1'}]}]])};
+    const side = {root: '', loaded: true, folders: [], notes: new Map([['', {loaded: true, loading: false, items: [{id: 'n1'}]}]])};
     const sideActive = () => true;
     let rows = [];
     let events = [];
@@ -303,7 +303,7 @@ test('home shows the week as a ribbon, the last three notes written and today\'s
     const toast = () => {};
     const noteHash = id => '#/n/' + encodeURIComponent(id);
     const go = hash => { window.went = hash; };
-    const side = {loaded: true, folders: [], notes: new Map([['', {loaded: true, loading: false, items: [{id: 'n1'}]}]])};
+    const side = {root: '', loaded: true, folders: [], notes: new Map([['', {loaded: true, loading: false, items: [{id: 'n1'}]}]])};
     const sideActive = () => true;
     let rows = [];
     let events = [];

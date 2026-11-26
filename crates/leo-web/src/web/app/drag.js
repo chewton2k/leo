@@ -32,7 +32,7 @@ function accepts(e, target) {
 function marksOf(target) {
   const tree = target.closest('.side-tree');
   const dir = dirOf(target);
-  if (target.closest('.side-explorer, #folders-sheet') && !dir) return { row: target.closest('.side-explorer, #folders-sheet')?.querySelector('.side-group') || target, kids: null };
+  if (target.closest('.side-explorer, #folders-sheet') && (!dir || dir === side.root)) return { row: target.closest('.side-explorer, #folders-sheet')?.querySelector('.side-group') || target, kids: null };
   if (!tree || !dir) return { row: target, kids: null };
   const row = [...tree.querySelectorAll('.side-folder[data-drop-dir]')].find((el) => el.dataset.dropDir === dir) || target;
   return { row, kids: sideKids(dir) };

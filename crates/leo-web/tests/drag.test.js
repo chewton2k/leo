@@ -199,3 +199,16 @@ test('opening a combine that is still working shows its part and offers Stop', a
   assert.match(sheets.at(-1), /Part 3 of 7/);
   assert.match(sheets.at(-1), /\[Keep going\|Stop combining\]/);
 });
+
+test('while a folder is focused, its top level marks the New note row, as the whole library does unfocused', () => {
+  for (const root of ['', 'Work']) {
+    const group = {};
+    const tree = {querySelectorAll: () => []};
+    const explorer = {querySelector: (selector) => (selector === '.side-group' ? group : null)};
+    const context = {side: {root}, sideKids: () => null, felix: {}, document: {addEventListener() {}}};
+    vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../src/web/app/drag.js'), 'utf8'), context);
+    const background = {dataset: {dropDir: ''}, closest: (selector) => (selector === '.side-tree' ? tree : selector.startsWith('.side-explorer') ? explorer : null)};
+    assert.equal(context.marksOf(background).row, group, root || 'unfocused');
+  }
+});
